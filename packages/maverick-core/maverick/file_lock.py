@@ -518,29 +518,38 @@ def atomic_read_bytes(
 
 
 @contextmanager
-def cross_process_lock(target: str | Path):
+def cross_process_lock(target: str | Path, *, strict: bool = False):
     """Advisory exclusive lock serializing a read-modify-write of ``target``.
 
     Keyed on a stable ``<name>.lock`` sidecar next to the file — never the file
     itself, since ``os.replace`` swaps the target's inode out from under any
     handle held on it. Lock creation/acquisition failures propagate instead of
-    silently disabling serialization.
+    silently disabling serialization. ``strict=True`` additionally refuses to
+    degrade to a process-local lock on filesystems without a working OS lock.
     """
     target = Path(target)
     lock_path = target.parent / (target.name + ".lock")
     canonical = _canonical_lock_path(lock_path)
     with _local_lock_for(lock_path):
-        held: dict[str, int] = getattr(_THREAD_LOCK_STATE, "held", {})
+        held: dict[str, tuple[int, bool]] = getattr(
+            _THREAD_LOCK_STATE, "held", {},
+        )
         _THREAD_LOCK_STATE.held = held
-        if held.get(canonical, 0):
+        if canonical in held:
             # msvcrt byte-range locks are not re-entrant, even from the same
             # thread. The outer scope already owns both the local stripe and
-            # OS lock, so only maintain the recursion count here.
-            held[canonical] += 1
+            # OS lock, so only maintain the recursion count here. A strict
+            # nested caller must not inherit a degraded process-local lock.
+            count, process_safe = held[canonical]
+            if strict and not process_safe:
+                raise RuntimeError(
+                    "cross-process lock backend is unavailable for strict state"
+                )
+            held[canonical] = (count + 1, process_safe)
             try:
                 yield
             finally:
-                held[canonical] -= 1
+                held[canonical] = (count, process_safe)
             return
 
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -569,6 +578,10 @@ def cross_process_lock(target: str | Path):
                     # propagates -- only acquisition on an already-open fd
                     # degrades, so ``test_cross_process_lock_fails_closed_when_
                     # dir_unwritable`` stays fail-closed.
+                    if strict:
+                        raise RuntimeError(
+                            "cross-process lock backend is unavailable for strict state"
+                        ) from exc
                     log.debug(
                         "cross_process_lock: flock unavailable for %s (%s); "
                         "relying on the in-process lock only", lock_path, exc,
@@ -587,7 +600,7 @@ def cross_process_lock(target: str | Path):
                     "no cross-process lock backend is available"
                 ) from None
             harden_path_permissions(lock_path)
-            held[canonical] = 1
+            held[canonical] = (1, backend is not None)
             try:
                 yield
             finally:

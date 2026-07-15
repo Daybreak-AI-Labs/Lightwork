@@ -289,6 +289,23 @@ def test_run_cli_requires_enable(_home, monkeypatch):
     assert r.exit_code != 0 and "self-harness is off" in r.output
 
 
+def test_run_cli_halt_is_generic_and_nonzero(_home, monkeypatch):
+    from maverick import learning_guard
+
+    monkeypatch.setattr(
+        learning_guard,
+        "check_learning_halt",
+        lambda *_: (_ for _ in ()).throw(
+            learning_guard.Halted("secret operator text", "test")),
+    )
+    result = CliRunner().invoke(
+        main, ["self-harness", "run", "--model", "m"])
+
+    assert result.exit_code != 0
+    assert "global learning HALT is active" in result.output
+    assert "secret operator text" not in result.output
+
+
 def test_run_cli_dry_pass(_home, monkeypatch):
     from maverick import reflexion
     from maverick import self_improvement as si

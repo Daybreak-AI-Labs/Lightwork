@@ -49,7 +49,7 @@ import secrets
 import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from pathlib import Path
@@ -63,6 +63,7 @@ from .file_lock import (
     ensure_private_directory,
     ensure_private_file,
 )
+from .learning_guard import check_learning_halt
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -213,12 +214,12 @@ def _validated_learned(
     )
 
 
-def record(
+def _record_impl(
     need: str, kind: str, name: str, *,
     source: str = "", outcome: str = "acquired",
     path: Path | None = None,
+    before_write: Callable[[], None] | None = None,
 ) -> bool:
-    """Atomically append a validated, redacted learned-capability entry."""
     path = path if path is not None else learned_path()
     entry = _validated_learned(
         ts=time.time(), need=need, kind=kind, name=name,
@@ -237,6 +238,8 @@ def record(
                 previous = atomic_read_text(path) if path.exists() else ""
                 if previous and not previous.endswith("\n"):
                     previous += "\n"
+                if before_write is not None:
+                    before_write()
                 atomic_write_text(
                     path,
                     previous + json.dumps(entry.to_dict(), sort_keys=True) + "\n",
@@ -246,6 +249,41 @@ def record(
         except (OSError, RuntimeError, ValueError) as e:
             log.warning("self_learning: ledger write failed: %s", e)
             return False
+
+
+def record(
+    need: str, kind: str, name: str, *,
+    source: str = "", outcome: str = "acquired",
+    path: Path | None = None,
+) -> bool:
+    """Atomically append a validated, redacted learned-capability entry."""
+    check_learning_halt("self_learning", "record_start")
+    return _record_impl(
+        need,
+        kind,
+        name,
+        source=source,
+        outcome=outcome,
+        path=path,
+        before_write=lambda: check_learning_halt(
+            "self_learning", "record_persistence",
+        ),
+    )
+
+
+def _record_committed(
+    need: str, kind: str, name: str, *, source: str = "", outcome: str = "acquired",
+) -> bool:
+    """Finish bookkeeping for authority that is already durably committed.
+
+    Like a promotion COMMIT, this tail must not turn a completed installation
+    into a reported failure merely because HALT arrived after publication.  It
+    grants no new authority and remains best-effort; new standalone records
+    always go through the guarded public :func:`record` boundary.
+    """
+    return _record_impl(
+        need, kind, name, source=source, outcome=outcome,
+    )
 
 
 def history(*, limit: int = 50, path: Path | None = None) -> list[Learned]:
@@ -423,8 +461,15 @@ def acquire_skill(name: str, *, need: str = "") -> str:
     """
     from .skills import install_from_catalog
 
-    skill = install_from_catalog(name, require_signature=True)
-    record(need or name, "skill", skill.name, source=str(skill.path))
+    check_learning_halt("self_learning", "skill_acquisition_start")
+    skill = install_from_catalog(
+        name,
+        require_signature=True,
+        before_save=lambda: check_learning_halt(
+            "self_learning", "skill_persistence",
+        ),
+    )
+    _record_committed(need or name, "skill", skill.name, source=str(skill.path))
     return skill.body
 
 
@@ -448,6 +493,8 @@ def add_mcp_server(
     name: str, command: str, *,
     args: list[str] | None = None, env: dict[str, str] | None = None,
     pin_sha256: str | None = None, need: str = "",
+    path: Path | None = None,
+    authority_check: Callable[[], None] | None = None,
 ) -> Any:
     """Validate + persist an ``[mcp_servers.<name>]`` block to config.toml.
 
@@ -468,6 +515,7 @@ def add_mcp_server(
     from .file_lock import atomic_write_text, cross_process_lock, ensure_private_file
     from .mcp_client import MCPServerSpec
 
+    check_learning_halt("self_learning", "mcp_config_start")
     if not _NAME_RE.match(name):
         raise ValueError(
             f"mcp server name {name!r} must be lowercase id (a-z0-9_), "
@@ -479,12 +527,14 @@ def add_mcp_server(
         pin_sha256=pin_sha256 or None,
     )  # __post_init__ runs the CVE-2026-30615 input validation.
 
-    path = config_path()
+    path = path if path is not None else config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     # Serialize the complete read/validate/write transaction.  Without this,
     # concurrent capability acquisitions can both read the same predecessor and
     # silently discard one another's server block.
     with cross_process_lock(path):
+        if authority_check is not None:
+            authority_check()
         if path.exists():
             # Config can contain provider credentials.  ``chmod`` is not an ACL
             # boundary on Windows, so tighten legacy files before reading them.
@@ -507,15 +557,19 @@ def add_mcp_server(
         # Unique private staging + handle-bound atomic publication.  This keeps
         # credential bytes out of a predictable temp path and leaves the live
         # TOML either wholly old or wholly new on any failure.
+        check_learning_halt("self_learning", "mcp_config_persistence")
+        if authority_check is not None:
+            authority_check()
         atomic_write_text(path, existing + body, mode=0o600)
-    record(need or name, "mcp", name, source=command)
+    _record_committed(need or name, "mcp", name, source=command)
     return spec
 
 
-# Maximum command tokens we'll accept from a catalog ``source``. A pinned
-# MCP launch line is short (``npx -y @scope/pkg`` etc.); a huge token list
-# signals a malformed/abusive entry.
+# Maximum command tokens we'll accept from a catalog ``source``. A directly
+# pinnable MCP launch line should be short; a huge token list signals a
+# malformed/abusive entry.
 _MCP_SOURCE_MAX_TOKENS = 32
+_MCP_CATALOG_PIN_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def mcp_acquisition_enabled() -> bool:
@@ -536,7 +590,7 @@ def _parse_catalog_mcp_source(source: str) -> tuple[str, list[str]]:
 
     Convention (this module is the only consumer; catalog.py stays
     read-only): the ``source`` field of an ``mcp`` CatalogEntry is the
-    launch command line, e.g. ``"npx -y @scope/server"``. We shlex-split
+    launch command line, e.g. ``"weather-mcp --stdio"``. We shlex-split
     it — argv[0] is the command, the rest are args. The result is fed to
     MCPServerSpec, whose __post_init__ runs the full shell-meta / NUL /
     newline validation, so nothing here weakens those defenses.
@@ -554,6 +608,23 @@ def _parse_catalog_mcp_source(source: str) -> tuple[str, list[str]]:
     return tokens[0], tokens[1:]
 
 
+def _canonical_mcp_spec_digest(spec: Any) -> str:
+    """Digest the exact validated runtime authority shown to the operator."""
+    payload = {
+        "schema": "maverick.catalog-mcp-consent.v1",
+        "name": spec.name,
+        "spec": spec.to_dict(),
+    }
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _mcp_consent_scope(tenant: str, name: str, spec_digest: str) -> str:
+    return f"{tenant}:{name}:{spec_digest}"
+
+
 def acquire_mcp_server(name: str, *, need: str = "") -> Any:
     """Catalog-pinned, consent-gated MCP-server acquisition (#422).
 
@@ -563,22 +634,25 @@ def acquire_mcp_server(name: str, *, need: str = "") -> Any:
       1. Resolve ``name`` against the curated ``mcp`` catalog index
          (read-only ``catalog.resolve``). A name with no catalog entry is
          rejected — there is NO free-text ``command``/``args`` input.
-      2. The command/args come from the entry's pinned ``source``; its
-         ``sha256`` becomes ``pin_sha256`` so the binary is hash-verified
-         on launch (CVE-2026-30615). MCPServerSpec validation (shell-meta
-         / NUL / newline rejection) runs before anything is persisted.
-      3. Require explicit operator approval through the existing consent
-         queue (``require_consent(raise_on_deny=True)``). Denied / uncertain
-         (auto-deny, non-tty, dashboard timeout-then-non-tty) → ConsentDenied
-         and nothing is persisted or started.
+      2. Require a canonical lowercase 64-hex executable pin and reject
+         package launchers whose argv[0] hash says nothing about downloaded
+         package bytes. MCPServerSpec validation runs before consent.
+      3. Bind approval to the active tenant and canonical validated runtime
+         spec digest. Denied / uncertain approval, tenant drift, or a changed
+         command/args/pin leaves configuration untouched.
 
     Returns the validated ``MCPServerSpec`` (persisted to config). The
     caller hot-starts the client via the normal validated launch path.
     Raises ValueError (no/invalid catalog entry) or ConsentDenied.
     """
     from . import catalog as _catalog
-    from .safety.consent import require_consent
+    from .config import config_path, tenant_config_path
+    from .mcp_client import MCPServerSpec
+    from .mcp_registry import is_indirect_stdio_command
+    from .paths import current_tenant_id
+    from .safety.consent import ConsentDenied, require_consent
 
+    check_learning_halt("self_learning", "mcp_acquisition_start")
     if not _NAME_RE.match(name):
         raise ValueError(
             f"mcp server name {name!r} must be lowercase id (a-z0-9_), "
@@ -591,22 +665,66 @@ def acquire_mcp_server(name: str, *, need: str = "") -> Any:
             "acquisition only installs curated, hash-pinned catalog entries "
             "(a free-text command is not accepted)."
         )
+    pin = str(entry.sha256 or "")
+    if not _MCP_CATALOG_PIN_RE.fullmatch(pin):
+        raise ValueError(
+            f"catalog mcp entry {name!r} requires a canonical lowercase "
+            "64-hex sha256 executable pin"
+        )
     command, args = _parse_catalog_mcp_source(entry.source)
+    if is_indirect_stdio_command(command):
+        raise ValueError(
+            f"catalog mcp entry {name!r} uses an indirect interpreter or launcher; "
+            "pin_sha256 authenticates argv[0], not the downloaded package bytes, "
+            "script, module, image, or remote workload, so autonomous acquisition "
+            "requires a directly pinnable executable"
+        )
+    # Validate the complete subprocess authority before presenting consent. A
+    # malformed catalog row must never create an approval artifact that looks
+    # reusable for a different valid spec.
+    spec = MCPServerSpec(
+        name=name, command=command, args=args, pin_sha256=pin,
+    )
+    tenant = current_tenant_id() or "shared"
+    spec_digest = _canonical_mcp_spec_digest(spec)
+    consent_scope = _mcp_consent_scope(tenant, name, spec_digest)
 
     # Operator gate BEFORE any persistence/launch. The detail surfaces the
-    # exact pinned command + digest so the approver sees what will run.
+    # exact pinned command + digest so the approver sees what will run. The
+    # durable grant is bound to both the active tenant and canonical spec bytes,
+    # so changing argv or pin forces a fresh decision.
     detail = (
-        f"Add MCP server {name!r} from catalog: {command} {' '.join(args)} "
-        f"(sha256={entry.sha256 or 'unpinned'}; source={entry.source})"
+        f"Add MCP server {name!r} for tenant {tenant!r} from catalog: "
+        f"{command} {' '.join(args)} (executable_sha256={pin}; "
+        f"spec_sha256={spec_digest})"
     )
-    require_consent(
-        "add-mcp-server", risk="high", scope=name, detail=detail,
+    decision = require_consent(
+        "add-mcp-server", risk="high", scope=consent_scope, detail=detail,
+        provenance=(
+            f"self-learning:{tenant}:mcp:{name}:spec-sha256={spec_digest}"
+        ),
         raise_on_deny=True, allow_auto_approve=False,
     )
+    if not getattr(decision, "granted", False):
+        raise ConsentDenied("add-mcp-server")
+    if (current_tenant_id() or "shared") != tenant:
+        raise ValueError("active tenant changed during MCP acquisition consent")
+
+    def tenant_authority_check() -> None:
+        if (current_tenant_id() or "shared") != tenant:
+            raise ValueError("active tenant changed during MCP persistence")
+
+    # Existing config loading already merges this highest-precedence tenant
+    # overlay. Use it rather than granting a tenant-scoped approval that mutates
+    # deployment-global config authority. Shared/single-tenant mode retains the
+    # historical global config target.
+    target_path = tenant_config_path() or config_path()
 
     return add_mcp_server(
-        name, command, args=args, pin_sha256=entry.sha256 or None,
+        name, command, args=args, pin_sha256=pin,
         need=need or name,
+        path=target_path,
+        authority_check=tenant_authority_check,
     )
 
 
@@ -1291,6 +1409,7 @@ def write_generated_tool(
         require_consent,
     )
 
+    check_learning_halt("self_learning", "generated_tool_start")
     if not _NAME_RE.match(name):
         raise ValueError(
             f"tool name {name!r} must be lowercase id (a-z0-9_), 3-42 chars"
@@ -1344,10 +1463,12 @@ def write_generated_tool(
             raise ValueError(
                 f"generated tool {name!r} already exists; refusing to overwrite it"
             )
+        check_learning_halt("self_learning", "generated_tool_persistence")
         atomic_write_text(target, source, mode=0o600)
         try:
             # A later process must be able to distinguish these approved bytes
             # from an AST-safe file swapped in after registration.
+            check_learning_halt("self_learning", "generated_tool_consent_persistence")
             grant_persistent("register-generated-tool", scope=scope)
             if not _generated_consent_granted(
                 tenant=tenant, name=name, digest=digest,
@@ -1363,7 +1484,7 @@ def write_generated_tool(
         tenant=tenant,
         digest=digest,
     )
-    record(need or name, "tool", name, source=str(target))
+    _record_committed(need or name, "tool", name, source=str(target))
     return tool
 
 
@@ -1592,6 +1713,7 @@ async def preflight(
     """
     from .llm import model_for_role
 
+    check_learning_halt("self_learning", "preflight_start")
     acquired: list[str] = []
     try:
         resp = await llm.complete_async(

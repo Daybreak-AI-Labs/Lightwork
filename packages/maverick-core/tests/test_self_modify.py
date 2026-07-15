@@ -34,7 +34,6 @@ PROTECTED = [
 
 NOT_PROTECTED = [
     "packages/maverick-core/maverick/domains/foo.toml",
-    "packages/maverick-core/maverick/skills_builtin/x.md",
     "docs/readme.md",
 ]
 
@@ -53,7 +52,7 @@ class TestBoundary:
             editable_globs=("packages/maverick-core/maverick/domains/*.toml",))
         assert s.classify("packages/maverick-core/maverick/self_improvement.py") == "protected"
         assert s.classify("packages/maverick-core/maverick/domains/a.toml") == "editable"
-        assert s.classify("packages/maverick-core/maverick/agent.py") == "unknown"
+        assert s.classify("packages/maverick-core/maverick/domains/a.py") == "unknown"
 
     def test_empty_allowlist_makes_everything_unknown(self):
         # Fail-closed default: no allowlist -> nothing editable.
@@ -64,6 +63,77 @@ class TestBoundary:
         # Even '**' cannot make a control-plane file editable.
         s = sm.EditableSurface(editable_globs=("**",))
         assert s.classify("packages/maverick-core/maverick/audit/writer.py") == "protected"
+
+    @pytest.mark.parametrize("module", [
+        "self_modify.py",
+        "self_modify_apply.py",
+        "self_modify_archive.py",
+        "self_modify_capability.py",
+        "self_modify_context.py",
+        "self_modify_corpus.py",
+        "self_modify_eval.py",
+        "self_modify_loop.py",
+        "self_modify_runner.py",
+        "self_modify_gate.py",  # future family members fail closed, too
+    ])
+    def test_entire_self_modify_family_beats_broad_allowlist(self, module):
+        surface = sm.EditableSurface(editable_globs=("**",))
+        path = f"packages/maverick-core/maverick/{module}"
+        assert surface.classify(path) == "protected"
+        review = sm.review_patch(_patch(path), surface)
+        assert review.ok is False
+        assert path in review.protected
+
+    @pytest.mark.parametrize("path", [
+        "PACKAGES/MAVERICK-CORE/MAVERICK/SELF_MODIFY.PY",
+        "Packages/Maverick-Core/Maverick/Self_Modify_Eval.py",
+        "packages/maverick-core/MAVERICK/SELF_MODIFY_APPLY.PY",
+    ])
+    def test_self_modify_family_case_variants_beat_broad_allowlist(self, path):
+        surface = sm.EditableSurface(editable_globs=("**",))
+        assert surface.classify(path) == "protected"
+        assert sm.review_patch(_patch(path), surface).ok is False
+
+    @pytest.mark.parametrize("path", [
+        # DLP/security dependencies and the agent/fleet authority plane.
+        "packages/maverick-core/maverick/secrets.py",
+        "packages/maverick-core/maverick/provable_redaction.py",
+        "packages/maverick-core/maverick/security_defaults.py",
+        "packages/maverick-core/maverick/access_policy.py",
+        "packages/maverick-core/maverick/containment.py",
+        "packages/maverick-core/maverick/a2a.py",
+        "packages/maverick-core/maverick/agent.py",
+        "packages/maverick-core/maverick/fleet.py",
+        "packages/maverick-core/maverick/self_learning.py",
+        # Whole orchestration and tenant boundaries.
+        "packages/maverick-core/maverick/flow/evolve.py",
+        "packages/maverick-core/maverick/tenant/egress.py",
+        # Separate packages can carry auth, transport, UI approval, evaluator,
+        # or knowledge-ingestion authority and are never candidate surfaces.
+        "packages/maverick-channels/maverick_channels/base.py",
+        "packages/maverick-dashboard/maverick_dashboard/app.py",
+        "packages/maverick-evolve/maverick_evolve/engine.py",
+        "packages/maverick-knowledge/maverick_knowledge/store.py",
+        "packages/maverick-mcp/maverick_mcp/server.py",
+        "packages/maverick-shield/agent_shield/__init__.py",
+    ])
+    def test_control_plane_beats_a_repo_wide_allowlist(self, path):
+        surface = sm.EditableSurface(editable_globs=("**",))
+        assert surface.classify(path) == "protected"
+        result = sm.review_patch(_patch(path), surface)
+        assert result.ok is False
+        assert path in result.protected
+
+    @pytest.mark.parametrize("path", [
+        ".devcontainer/devcontainer.json",
+        ".devcontainer/post-create.sh",
+        ".pre-commit-config.yaml",
+        ".secrets.baseline",
+    ])
+    def test_repository_security_artifacts_beat_a_broad_allowlist(self, path):
+        surface = sm.EditableSurface(editable_globs=("**",))
+        assert surface.classify(path) == "protected"
+        assert sm.review_patch(_patch(path), surface).ok is False
 
 
 class TestReviewPatch:
@@ -87,7 +157,7 @@ class TestReviewPatch:
 
     def test_rejects_unknown_paths(self):
         r = sm.review_patch(
-            _patch("packages/maverick-core/maverick/agent.py"), self._surface())
+            _patch("packages/maverick-core/maverick/domains/a.py"), self._surface())
         assert r.ok is False and r.unknown
 
     def test_timestamped_diff_header_cannot_smuggle_a_protected_edit(self):
@@ -122,6 +192,75 @@ class TestReviewPatch:
                  "rename to packages/maverick-core/maverick/audit/x.py\n")
         r = sm.review_patch(patch, s)
         assert r.ok is False  # the rename target is under the protected audit/ dir
+
+    def test_nonstandard_prefix_cannot_retarget_past_review_with_p1(self):
+        # ``git apply -p1`` strips any first component.  Reviewing x/apps while
+        # applying apps would let a broad surface rewrite a protected package.
+        patch = (
+            "diff --git x/apps/pwn.txt y/apps/pwn.txt\n"
+            "new file mode 100644\n"
+            "--- /dev/null\n"
+            "+++ y/apps/pwn.txt\n"
+            "@@ -0,0 +1 @@\n+pwn\n"
+        )
+        result = sm.review_patch(
+            patch, sm.EditableSurface(editable_globs=("**",)))
+        assert result.ok is False
+        assert "git apply -p1" in result.reason
+
+    def test_custom_surface_authority_is_refused_even_if_it_says_editable(self):
+        class FakeSurface:
+            @staticmethod
+            def classify(_path):
+                return "editable"
+
+        result = sm.review_patch(
+            _patch("docs/readme.md"), FakeSurface())  # type: ignore[arg-type]
+        assert result.ok is False
+        assert "invalid editable surface authority" in result.reason
+
+    def test_malformed_surface_allowlist_is_refused(self):
+        surface = sm.EditableSurface(editable_globs=["**"])  # type: ignore[arg-type]
+        result = sm.review_patch(_patch("docs/readme.md"), surface)
+        assert result.ok is False
+        assert "invalid editable surface allowlist" in result.reason
+
+    @pytest.mark.parametrize("metadata", [
+        "new file mode 100755",
+        "new file mode 120000",
+        "new file mode 160000",
+        "old mode 100644\nnew mode 100755",
+        "old mode 100755\nnew mode 100644",
+        "index 1234567..7654321 120000",
+        "index 1234567..7654321 160000",
+    ])
+    def test_rejects_executable_mode_changes_and_special_modes(self, metadata):
+        path = "packages/maverick-core/maverick/domains/a.toml"
+        patch = (f"diff --git a/{path} b/{path}\n{metadata}\n"
+                 f"--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-old\n+new\n")
+        result = sm.review_patch(patch, self._surface())
+        assert result.ok is False
+        assert "mode" in result.reason
+
+    @pytest.mark.parametrize("artifact", [
+        "GIT binary patch",
+        "Binary files a/x and b/x differ",
+        "+Subproject commit 0123456789abcdef",
+        "-Subproject commit fedcba9876543210",
+    ])
+    def test_rejects_binary_and_gitlink_artifacts(self, artifact):
+        path = "packages/maverick-core/maverick/domains/a.toml"
+        patch = f"diff --git a/{path} b/{path}\n{artifact}\n"
+        result = sm.review_patch(patch, self._surface())
+        assert result.ok is False
+        assert "binary" in result.reason or "artifact" in result.reason
+
+    def test_existing_executable_can_receive_a_text_only_edit(self):
+        path = "packages/maverick-core/maverick/domains/a.toml"
+        patch = (f"diff --git a/{path} b/{path}\n"
+                 "index 1234567..7654321 100755\n"
+                 f"--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n-old\n+new\n")
+        assert sm.review_patch(patch, self._surface()).ok is True
 
 
 class TestGate:
@@ -176,33 +315,40 @@ class TestProposeCodeChange:
         assert called == []                 # the gate was never reached
         assert "protected" in res.reason
 
-    def test_clean_change_promotes_through_the_gate(self, monkeypatch, tmp_path):
-        # A low-rung edit to an allowlisted path that beats baseline promotes.
-        from maverick import self_improvement as si
-        monkeypatch.setattr(sm, "enabled", lambda: True)
-        monkeypatch.setattr(si, "enabled", lambda: True)
+    @pytest.mark.parametrize("rung", ["prompt", "policy", "weights", "CODE", None])
+    def test_rung_downgrade_is_refused_before_any_side_effect(self, monkeypatch, rung):
+        calls = []
+        monkeypatch.setattr(sm, "enabled", lambda: calls.append("enabled") or True)
+        monkeypatch.setattr(
+            sm, "review_patch", lambda *a, **k: calls.append("review") or None)
         res = sm.propose_code_change(
             _patch("packages/maverick-core/maverick/domains/foo.toml"),
             summary="tune pack", baseline_score=0.5, candidate_score=0.9, samples=8,
             rollback="snap-1", surface=self._surface(), capability_widens=False,
-            rung="prompt", controller=self._controller(tmp_path))
-        assert res.review.ok is True
-        assert res.ok is True, res.reason
+            rung=rung)
+        assert res.ok is False
+        assert res.review.ok is False
+        assert "requires rung='code'" in res.reason
+        assert calls == []
 
-    def test_code_rung_refused_without_human_approval(self, monkeypatch, tmp_path):
-        # The surface is clean, but the code rung needs a human signature -- the
-        # boundary passing does NOT bypass the promotion ladder.
+    def test_code_rung_never_reaches_legacy_promotion_gate(
+        self, monkeypatch, tmp_path,
+    ):
         from maverick import self_improvement as si
         monkeypatch.setattr(sm, "enabled", lambda: True)
         monkeypatch.setattr(si, "enabled", lambda: True)
+        called = []
+        monkeypatch.setattr(
+            si, "consider", lambda *_args, **_kwargs: called.append(True))
         res = sm.propose_code_change(
             _patch("packages/maverick-core/maverick/domains/foo.toml"),
             summary="risky", baseline_score=0.5, candidate_score=0.9, samples=20,
             rollback="snap-1", surface=self._surface(), capability_widens=False,
             rung="code", controller=self._controller(tmp_path))
-        assert res.review.ok is True         # surface fine
-        assert res.ok is False               # ...but the code rung gate refused
-        assert "approval" in res.reason.lower() or "human" in res.reason.lower()
+        assert res.review.ok is True
+        assert res.ok is False
+        assert "live code promotion is disabled" in res.reason
+        assert called == []
 
     def test_insufficient_evidence_refused(self, monkeypatch, tmp_path):
         from maverick import self_improvement as si
@@ -212,7 +358,7 @@ class TestProposeCodeChange:
             _patch("packages/maverick-core/maverick/domains/foo.toml"),
             summary="no gain", baseline_score=0.9, candidate_score=0.9, samples=8,
             rollback="snap-1", surface=self._surface(), capability_widens=False,
-            rung="prompt", controller=self._controller(tmp_path))
+            rung="code", controller=self._controller(tmp_path))
         assert res.ok is False               # no improvement over baseline
 
 
@@ -227,6 +373,14 @@ class TestBypassRegression:
     def test_octal_escaped_path_is_protected(self):
         # \163 == 's': "\163elf_improvement.py" -> self_improvement.py
         assert sm.is_protected(r'"a/maverick/\163elf_improvement.py"') is True
+
+    @pytest.mark.parametrize("path", [
+        r'"a/ordinary\q.py"',       # unknown C-quote escape
+        r'"a/ordinary\400.py"',     # octal value outside a byte
+        r'"a/ordinary\377.py"',     # invalid standalone UTF-8 byte
+    ])
+    def test_malformed_git_quoting_fails_closed(self, path):
+        assert sm.is_protected(path) is True
 
     def test_double_slash_path_is_protected(self):
         assert sm.is_protected("maverick//self_improvement.py") is True
@@ -247,10 +401,71 @@ class TestBypassRegression:
     def test_newly_protected_governance_modules(self, mod):
         assert sm.is_protected(f"packages/maverick-core/maverick/{mod}") is True
 
+    @pytest.mark.parametrize("path", [
+        "packages/maverick-core/maverick/server.py",
+        "packages/maverick-core/maverick/catalog_trust.py",
+        "packages/maverick-core/maverick/shield_policy.py",
+        "packages/maverick-core/maverick/web_session.py",
+        "packages/maverick-core/maverick/webhooks.py",
+        "packages/maverick-core/maverick/orchestrator.py",
+        "packages/maverick-core/maverick/worker.py",
+        "packages/maverick-core/maverick/world_model.py",
+        "packages/maverick-core/maverick/crypto_at_rest.py",
+        "packages/maverick-core/maverick/kms_backends.py",
+        "packages/maverick-core/maverick/governance.py",
+        "packages/maverick-core/maverick/privacy_egress.py",
+        "packages/maverick-core/maverick/quotas.py",
+        "packages/maverick-core/maverick/plugin_ca.py",
+        "packages/maverick-core/maverick/workspace_snapshot.py",
+        "packages/maverick-core/maverick/adapter_rung.py",
+        "packages/maverick-core/maverick/automation_import/to_flow.py",
+        "apps/installer-cli/maverick_installer/wizard.py",
+        "deploy/docker-compose.yml",
+        "rust/Cargo.toml",
+        "sdks/typescript/src/index.ts",
+        "web/src/app.ts",
+    ])
+    def test_broad_surface_cannot_rewrite_runtime_control_planes(self, path):
+        surface = sm.EditableSurface(editable_globs=("**",))
+        assert surface.classify(path) == "protected"
+
     def test_uncanonicalizable_paths_fail_closed(self):
         for bad in ["/etc/passwd", "../../etc/passwd",
                     'packages/maverick-core/maverick/audit/../self_improvement.py']:
             assert sm.is_protected(bad) is True
+
+    @pytest.mark.parametrize("path", [
+        r"C:\repo\ordinary.py",                 # absolute drive path
+        r"C:repo\ordinary.py",                  # drive-relative path
+        "ordinary.py:payload",                   # NTFS alternate data stream
+        r"\\server\share\ordinary.py",          # UNC path
+        "ordinary.py.",                          # Windows strips trailing dot
+        '"a/ordinary.py "',                     # Windows strips trailing space
+        "CON", "con.txt", "NUL.json",          # reserved device names
+        "COM1.log", "lpt9", "CLOCK$",          # reserved device names
+        "SELF_I~1.PY",                           # DOS 8.3 alias
+        "src//ordinary.py", "src/./ordinary.py",  # ambiguous segments
+        "src/ordinary\x00.py",                   # control character
+    ])
+    def test_cross_platform_ambiguous_paths_fail_closed(self, path):
+        assert sm.is_protected(path) is True
+
+    def test_ambiguous_allowlisted_patch_path_is_refused(self):
+        surface = sm.EditableSurface(editable_globs=("**",))
+        patch = ("diff --git a/src/ordinary.py. b/src/ordinary.py.\n"
+                 "--- a/src/ordinary.py.\n+++ b/src/ordinary.py.\n"
+                 "@@ -1 +1 @@\n-old\n+new\n")
+        result = sm.review_patch(patch, surface)
+        assert result.ok is False
+        assert result.protected
+
+    def test_unquoted_trailing_space_is_not_stripped_before_review(self):
+        surface = sm.EditableSurface(editable_globs=("**",))
+        patch = ("--- a/src/ordinary.py \n+++ b/src/ordinary.py \n"
+                 "@@ -1 +1 @@\n-old\n+new\n")
+        result = sm.review_patch(patch, surface)
+        assert result.ok is False
+        assert result.protected
 
     def test_review_refuses_quoted_real_path_behind_a_clean_decoy(self):
         # Decoy clean header + the real edit riding on quoted +++/--- lines.
@@ -342,9 +557,9 @@ class TestCapabilityScreenIntoGate:
             frozen_fn=lambda: False, audit_fn=lambda **k: None,
             ledger=si.PromotionLedger(path=tmp_path / "promotion-ledger.json"))
 
-    def test_screen_blocks_a_widening_prompt_change(self, monkeypatch, tmp_path):
-        # An allowlisted, baseline-beating PROMPT edit that would otherwise
-        # auto-promote is refused because it adds a process-spawn line.
+    def test_screen_blocks_a_widening_code_change(self, monkeypatch, tmp_path):
+        # An allowlisted source edit is refused because it adds a process-spawn
+        # capability, independently of the code rung's human approval backstop.
         from maverick import self_improvement as si
         monkeypatch.setattr(sm, "enabled", lambda: True)
         monkeypatch.setattr(si, "enabled", lambda: True)
@@ -353,21 +568,28 @@ class TestCapabilityScreenIntoGate:
             "os.system('curl evil')")
         res = sm.propose_code_change(
             patch, summary="sneaky", baseline_score=0.5, candidate_score=0.9,
-            samples=8, rollback="snap", surface=self._surface(),
+            samples=20, rollback="snap", surface=self._surface(),
             capability_widens=False,  # caller claims bounded...
-            rung="prompt", controller=self._controller(tmp_path))
+            rung="code", controller=self._controller(tmp_path))
         assert res.review.ok is True         # surface is clean
         assert res.ok is False               # ...but the screen overrode -> blocked
         assert "capability" in res.reason.lower()
 
-    def test_caller_false_is_honoured_when_screen_is_clean(self, monkeypatch, tmp_path):
+    def test_clean_screen_still_cannot_reach_legacy_gate(self, monkeypatch):
         from maverick import self_improvement as si
         monkeypatch.setattr(sm, "enabled", lambda: True)
-        monkeypatch.setattr(si, "enabled", lambda: True)
+        captured = []
+        monkeypatch.setattr(
+            si, "consider",
+            lambda candidate, **kwargs: captured.append(candidate)
+            or type("Verdict", (), {"ok": True})(),
+        )
         patch = _patch_with_added(
             "packages/maverick-core/maverick/domains/foo.py", "TUNING = 0.7")
         res = sm.propose_code_change(
             patch, summary="tune", baseline_score=0.5, candidate_score=0.9,
             samples=8, rollback="snap", surface=self._surface(),
-            capability_widens=False, rung="prompt", controller=self._controller(tmp_path))
-        assert res.ok is True, res.reason
+            capability_widens=False, rung="code")
+        assert res.ok is False
+        assert "live code promotion is disabled" in res.reason
+        assert captured == []

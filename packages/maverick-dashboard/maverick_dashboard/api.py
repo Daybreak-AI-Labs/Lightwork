@@ -3828,6 +3828,7 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
         raise HTTPException(
             status_code=400, detail="set exactly one of 'template' or 'flow'")
     target_flow = None
+    target_template = None
     if payload.flow:
         # A flow target: the flow engine must be on and the flow must exist, so
         # a trigger can't be armed against a missing graph.
@@ -3844,7 +3845,8 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
         # template.
         from maverick.templates import load_template
         try:
-            load_template(payload.template).render(**(payload.params or {}))
+            target_template = load_template(payload.template)
+            target_template.render(**(payload.params or {}))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except FileNotFoundError as e:
@@ -3874,6 +3876,11 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
             tenant=current_tenant_id() or "",
             flow_owner=(target_flow.owner if target_flow is not None else ""),
             flow_revision=(target_flow.revision if target_flow is not None else ""),
+            template_snapshot=(
+                triggers_store.snapshot_from_template(target_template)
+                if target_template is not None
+                else None
+            ),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -3979,6 +3986,7 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
         raise HTTPException(status_code=400,
                             detail="set exactly one of 'template' or 'flow'")
     target_flow = None
+    target_template = None
     if flow:
         from maverick import flow as flow_mod
         from maverick.flow import store as flow_store
@@ -3998,7 +4006,7 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
         # the declared params at fire time.
         from maverick.templates import load_template
         try:
-            load_template(template)
+            target_template = load_template(template)
         except FileNotFoundError as e:
             raise HTTPException(
                 status_code=404, detail=f"template not found: {template!r}") from e
@@ -4024,6 +4032,11 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
             owner=durable_automation_owner(request), flow=flow,
             flow_owner=(target_flow.owner if target_flow is not None else ""),
             flow_revision=(target_flow.revision if target_flow is not None else ""),
+            template_snapshot=(
+                event_triggers_store.snapshot_from_template(target_template)
+                if target_template is not None
+                else None
+            ),
             interval_seconds=payload.interval_seconds,
             tenant=tenant)   # bind OAuth vault reads to this tenant
     except ValueError as e:
@@ -4232,6 +4245,7 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
         queue = JobQueue()
 
     from maverick.config import get_features
+    from maverick.paths import current_tenant_id
     triggers_on = get_features().get("triggers", True)
     from maverick_dashboard import triggers_store
     # Prefer the authenticated request principal explicitly, then use the
@@ -4275,8 +4289,10 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
             if not isinstance(sug_params, dict):
                 sug_params = {}
             from maverick.templates import load_template
+            imported_template = None
             try:
-                load_template(res.template_name).render(**sug_params)
+                imported_template = load_template(res.template_name)
+                imported_template.render(**sug_params)
             except (ValueError, FileNotFoundError) as e:
                 res.notes.append(
                     f"webhook trigger not created: template needs param values "
@@ -4284,7 +4300,15 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
             else:
                 try:
                     rec = triggers_store.set_trigger(
-                        res.template_name, res.template_name, sug_params, owner=owner)
+                        res.template_name,
+                        res.template_name,
+                        sug_params,
+                        owner=owner,
+                        tenant=current_tenant_id() or "",
+                        template_snapshot=triggers_store.snapshot_from_template(
+                            imported_template
+                        ),
+                    )
                     webhook_trigger = rec["name"]
                 except ValueError as e:
                     res.notes.append(f"could not create webhook trigger: {e}")
@@ -4468,7 +4492,10 @@ async def delete_agent_override(request: Request, name: str) -> dict:
     """Drop a tenant override, reverting the agent to its built-in pack."""
     _require_pack_editing(request)
     from maverick.domain_edit import remove_override, resolved_view
-    removed = remove_override(name)
+    try:
+        removed = remove_override(name)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     view = resolved_view(name)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
@@ -4490,13 +4517,21 @@ def _require_jd_hiring() -> None:
 
 
 def _scoped_jd_matches(request: Request, jd_text: str, k: int) -> dict:
+    from maverick.domain import available_domains, suite_for
     from maverick.jd_hiring import match_jd
-    matches = match_jd(jd_text, k=k)
     # Job-function scoping, mirroring /agents: a department-scoped caller only
-    # sees their departments' specialists plus generic (suite-less) packs.
+    # ranks their departments' specialists plus generic (suite-less) packs.
+    # Filter before routing so unauthorized profile text never enters the
+    # lexical/embedding index and cannot crowd allowed hits out of top-k.
     allowed = caller_suites(request)
+    domains = available_domains()
     if allowed is not None:
-        matches = [m for m in matches if m.suite is None or m.suite in allowed]
+        domains = {
+            name: profile
+            for name, profile in domains.items()
+            if (suite := suite_for(name)) is None or suite in allowed
+        }
+    matches = match_jd(jd_text, k=k, domains=domains)
     return {"matches": [m.to_dict() for m in matches]}
 
 
@@ -4552,6 +4587,8 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
     _require_jd_hiring()
     # Same gate as the editor this feeds: drafting reveals pack-editing surface.
     _require_pack_editing(request)
+    from maverick_dashboard.app import check_goal_rate_limit
+    check_goal_rate_limit(request, source="agent-factory-draft")
     from maverick.jd_hiring import draft_from_jd
 
     llm = None
@@ -4568,9 +4605,12 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
         except Exception:  # provider misconfig -> deterministic draft, not a 500
             llm = None
             budget = None
-    profile = await run_in_threadpool(
-        lambda: draft_from_jd(payload.role_title, payload.jd_text,
-                              industry=payload.industry, llm=llm, budget=budget))
+    try:
+        profile = await run_in_threadpool(
+            lambda: draft_from_jd(payload.role_title, payload.jd_text,
+                                  industry=payload.industry, llm=llm, budget=budget))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "draft": {
             "name": profile.name,

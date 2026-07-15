@@ -519,9 +519,12 @@ def test_local_backend_strips_gitlab_token(monkeypatch, tmp_path):
     from maverick.sandbox.local import LocalBackend
     monkeypatch.setenv("GITLAB_TOKEN", "glpat_test_secret")
     sb = LocalBackend(workdir=tmp_path)
-    out = sb.exec("printf %s \"${GITLAB_TOKEN:-missing}\"")
+    out = sb.exec(
+        f'"{sys.executable}" -c "import os; '
+        "print(os.environ.get('GITLAB_TOKEN', 'missing'))\""
+    )
     assert out.exit_code == 0
-    assert out.stdout == "missing"
+    assert out.stdout.strip() == "missing"
 
 
 def test_cost_router_respects_routing_provider_allowlist(monkeypatch):

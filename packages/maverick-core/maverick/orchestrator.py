@@ -939,7 +939,45 @@ async def _build_orchestrator_brief(
     return brief, _planning_mode
 
 
-async def run_goal(  # noqa: C901  -- core goal-execution loop
+class _QuotaUsageSettlement:
+    """Idempotently settle one run's usage and tenant reservation."""
+
+    def __init__(self, *, principal: str, budget: Budget, domain: str | None) -> None:
+        self.principal = principal
+        self.budget = budget
+        self.domain = domain
+        self.goal: Any | None = None
+        self.recorded = False
+
+    def record(self) -> None:
+        """Charge current spend and release the run's reservation exactly once."""
+        if self.recorded:
+            return
+        self.recorded = True
+        try:
+            from . import quotas
+            quotas.record_usage(
+                self.principal,
+                self.budget.dollars,
+                self.budget.input_tokens,
+                self.budget.output_tokens,
+                reservation_id=getattr(self.budget, "_tenant_reservation_id", None),
+            )
+        except Exception:  # pragma: no cover -- ledger is fully fail-soft
+            log.debug("usage ledger record skipped for %s", self.principal)
+        # Feed the self-tuning budget learner only for a real goal. Missing-goal
+        # and preflight refusals still settle their tenant reservation above.
+        if self.goal is not None:
+            try:
+                from .self_tuning_budget import record_run_cost
+                record_run_cost(
+                    _budget_task_class(self.goal, self.domain), self.budget.dollars,
+                )
+            except Exception:  # pragma: no cover -- learner never blocks a run
+                pass
+
+
+async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
     llm: LLM,
     world: WorldModel,
     budget: Budget,
@@ -955,9 +993,16 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
     resume_episode_id: int | None = None,
     domain: str | None = None,
     allowed_suites: frozenset[str] | None = None,
+    *,
+    _quota_settlement: _QuotaUsageSettlement,
 ) -> str:
+    _record_quota_usage = _quota_settlement.record
+    principal = _quota_settlement.principal
     goal = world.get_goal(goal_id)
+    _quota_settlement.goal = goal
+
     if not goal:
+        _record_quota_usage()
         return f"no such goal: {goal_id}"
 
     # Department attribution: persist the domain this run executes as so
@@ -971,6 +1016,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             pass
     elif getattr(goal, "domain", ""):
         domain = goal.domain
+    _quota_settlement.domain = domain
 
     # Emergency stop: if a HALT file is present, refuse to start the goal with a
     # clear message + the right next step. Otherwise the agent loop trips the
@@ -980,6 +1026,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
         from . import killswitch
         killswitch.check()
     except killswitch.Halted:
+        _record_quota_usage()
         world.set_goal_status(goal_id, "blocked", result="halted")
         return (
             "Stopped: Lightwork is halted (a HALT file is present).\n"
@@ -992,13 +1039,13 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
     # refuse BEFORE the expensive agent run -- mirror the killswitch handler
     # above (mark blocked, return the human-readable reason). The principal
     # convention matches agent.py's capability resolution.
-    principal = f"user:{user_id or 'local'}"
     try:
         from . import quotas
         _quota_reason = quotas.over_quota(principal) if quotas.quotas_enforced() else None
     except Exception as exc:
         _quota_reason = f"principal quota policy unavailable: {exc}"
     if _quota_reason:
+        _record_quota_usage()
         world.set_goal_status(goal_id, "blocked", result=f"over quota: {_quota_reason}")
         log.warning("goal #%s refused: %s", goal_id, _quota_reason)
         return _quota_reason
@@ -1018,40 +1065,10 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
     except Exception as exc:
         _tenant_reason = f"tenant policy unavailable or inactive: {exc}"
     if _tenant_reason:
+        _record_quota_usage()
         world.set_goal_status(goal_id, "blocked", result=f"over quota: {_tenant_reason}")
         log.warning("goal #%s refused: %s", goal_id, _tenant_reason)
         return _tenant_reason
-
-    _quota_usage_recorded = False
-
-    def _record_quota_usage() -> None:
-        # Charge this run's current spend to the principal's daily usage ledger
-        # (P2 cost governance). Always safe to call -- recording is how the
-        # ledger accrues chargeback data even when enforcement is off -- and
-        # fail-soft, so a ledger error never affects the goal result. The guard
-        # prevents double-charging when multiple cleanup paths run.
-        nonlocal _quota_usage_recorded
-        if _quota_usage_recorded:
-            return
-        _quota_usage_recorded = True
-        try:
-            from . import quotas
-            quotas.record_usage(
-                principal, budget.dollars, budget.input_tokens, budget.output_tokens,
-                # Release this run's in-flight tenant dollar hold now that its
-                # actual spend is on the ledger, so it isn't double-counted
-                # against the tenant cap for the rest of its TTL (finding #2).
-                reservation_id=getattr(budget, "_tenant_reservation_id", None),
-            )
-        except Exception:  # pragma: no cover -- ledger is fully fail-soft
-            log.debug("usage ledger record skipped for %s", principal)
-        # Feed the self-tuning budget learner (opt-in, no-op when off): this
-        # goal's class is what its next sibling will size its default cap from.
-        try:
-            from .self_tuning_budget import record_run_cost
-            record_run_cost(_budget_task_class(goal, domain), budget.dollars)
-        except Exception:  # pragma: no cover -- learner never blocks a run
-            pass
 
     # Bind trace context so every log line emitted in this task is
     # automatically tagged with goal_id (+ conversation_id when set). Capture
@@ -1138,6 +1155,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
         except Exception:  # pragma: no cover
             pass
         log.warning("goal #%s input blocked by Shield: %s", goal_id, reason)
+        _record_quota_usage()
         return f"BLOCKED: goal input rejected by Shield ({reason})"
 
     # UserPromptSubmit hooks: let operators gate or annotate the incoming
@@ -1155,6 +1173,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
         except Exception:  # pragma: no cover
             pass
         log.warning("goal #%s blocked by UserPromptSubmit hook", goal_id)
+        _record_quota_usage()
         return "BLOCKED: goal input rejected by a UserPromptSubmit hook"
 
     _fire_webhook("goal_created", {"goal_id": goal_id, "title": goal.title})
@@ -1704,6 +1723,11 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             return summary
         return f"DONE.\n\n{summary}{skill_note}\n\n[{budget.summary()}]"
     finally:
+        # The idempotent settlement covers every in-run return/exception,
+        # including brief preflight refusals that do not reach an explicit
+        # completion branch. It also releases the tenant hold before cleanup
+        # code can fail independently.
+        _record_quota_usage()
         if mcp_clients:
             await stop_mcp_clients(mcp_clients)
         # A namespace is a per-run routing capability, so its queued traffic
@@ -1727,6 +1751,52 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             reset_goal_context(_ctx_tokens)
         except Exception:  # pragma: no cover
             pass
+
+
+async def run_goal(
+    llm: LLM,
+    world: WorldModel,
+    budget: Budget,
+    goal_id: int,
+    sandbox: Any | None = None,
+    max_depth: int = 3,
+    conversation_id: int | None = None,
+    channel: str | None = None,
+    user_id: str | None = None,
+    capability: Any | None = None,
+    orchestrator_model_override: str | None = None,
+    resume: bool = False,
+    resume_episode_id: int | None = None,
+    domain: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
+) -> str:
+    """Run a goal and settle its quota reservation on every exit path."""
+    settlement = _QuotaUsageSettlement(
+        principal=f"user:{user_id or 'local'}", budget=budget, domain=domain,
+    )
+    try:
+        return await _run_goal_impl(
+            llm=llm,
+            world=world,
+            budget=budget,
+            goal_id=goal_id,
+            sandbox=sandbox,
+            max_depth=max_depth,
+            conversation_id=conversation_id,
+            channel=channel,
+            user_id=user_id,
+            capability=capability,
+            orchestrator_model_override=orchestrator_model_override,
+            resume=resume,
+            resume_episode_id=resume_episode_id,
+            domain=domain,
+            allowed_suites=allowed_suites,
+            _quota_settlement=settlement,
+        )
+    finally:
+        # This wrapper begins before get_goal and every preflight/setup step,
+        # unlike the MCP cleanup try/finally inside the implementation.
+        settlement.record()
 
 
 def run_goal_sync(*args, **kwargs) -> str:

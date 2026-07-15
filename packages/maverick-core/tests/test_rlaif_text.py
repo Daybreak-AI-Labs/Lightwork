@@ -8,6 +8,7 @@ All torch-free: the GPU train() loop itself is operator-side and untested.
 from __future__ import annotations
 
 import json
+import sys
 
 from maverick.training import rlaif
 
@@ -125,7 +126,12 @@ def test_main_require_real_text_refuses_without_sidecar(tmp_path, capsys):
     assert not (tmp_path / "out").exists()
 
 
-def test_main_with_sidecar_passes_data_path_then_needs_torch(tmp_path, capsys):
+def test_main_with_sidecar_passes_data_path_then_needs_torch(
+    tmp_path, capsys, monkeypatch,
+):
+    # Keep this optional-dependency test deterministic when the developer
+    # environment happens to have the training extra installed.
+    monkeypatch.setitem(sys.modules, "torch", None)
     data = _klear(tmp_path)
     side = tmp_path / "texts.jsonl"
     side.write_text(

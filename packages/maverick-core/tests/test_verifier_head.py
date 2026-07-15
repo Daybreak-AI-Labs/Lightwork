@@ -720,6 +720,45 @@ def test_activation_failure_returns_rejection_and_rolls_back_receipt(
     assert transaction is not None and transaction.state == "aborted"
 
 
+def test_halt_after_prepare_aborts_before_verifier_activation(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
+    from maverick import learning_guard
+    from maverick.verifier_head import (
+        VerifierActivation,
+        VerifierArtifactDeployment,
+        train_and_propose,
+    )
+
+    activated = []
+
+    def refuse_after_prepare(_job, phase):
+        if phase == "before-activation":
+            raise learning_guard.Halted("operator stop", "test")
+
+    monkeypatch.setattr(learning_guard, "check_learning_halt", refuse_after_prepare)
+    monkeypatch.setattr(
+        VerifierActivation,
+        "_activate_locked",
+        lambda *args, **kwargs: activated.append(True),
+    )
+    active = tmp_path / "active.json"
+    deployment = VerifierArtifactDeployment(tmp_path / "artifacts", active)
+    controller = _ctrl(tmp_path, max_auto_rung="evaluator")
+
+    verdict = train_and_propose(
+        _Store(200), controller=controller, deployment=deployment,
+        trusted_outcome_sources=frozenset({"tests"}),
+    )
+
+    assert verdict is not None and not verdict.ok
+    assert "learning safety check" in verdict.blocking_reason
+    assert activated == [] and not active.exists()
+    transaction = controller.ledger.transaction(f"promotion:{verdict.candidate_id}")
+    assert transaction is not None and transaction.state == "aborted"
+
+
 def test_restart_recovery_aborts_prepare_when_crash_precedes_activation(
     tmp_path, monkeypatch,
 ):

@@ -170,6 +170,39 @@ def test_poll_baselines_then_fires_then_dedupes(monkeypatch, tmp_path, _no_real_
     assert c.post("/api/v1/event-triggers/poll").json()["triggers"][0]["new_events"] == 0
 
 
+def test_poll_uses_creation_time_template_snapshot(monkeypatch, tmp_path, _no_real_run):
+    _isolate(monkeypatch, tmp_path)
+    box = [{"items": [{"id": "1", "title": "first"}]}]
+    _feed(monkeypatch, box)
+    c = _client()
+    response = c.post("/api/v1/event-triggers", json={
+        "template": "triage",
+        "source": "http_json",
+        "config": {"url": "http://x/feed", "items_path": "items", "id_field": "id"},
+    })
+    assert response.status_code == 201, response.text
+    c.post("/api/v1/event-triggers/poll")  # establish baseline
+
+    import maverick.templates as tpl
+    (tpl.USER_TEMPLATES / "triage.md").write_text(
+        "---\ntitle: Replaced {{title}}\nparams:\n  - title\n---\n"
+        "Run a different workflow for {{title}}.\n",
+        encoding="utf-8",
+    )
+    box[0] = {
+        "items": [
+            {"id": "2", "title": "second"},
+            {"id": "1", "title": "first"},
+        ]
+    }
+    result = c.post("/api/v1/event-triggers/poll").json()["triggers"][0]
+    from maverick.world_model import DEFAULT_DB, WorldModel
+
+    goal = WorldModel(DEFAULT_DB).get_goal(result["fired"][0])
+    assert goal.title == "Triage second"
+    assert goal.description == "Handle second."
+
+
 def test_poll_reports_source_error_without_crashing(monkeypatch, tmp_path, _no_real_run):
     _isolate(monkeypatch, tmp_path)
     import maverick.automation_events as ev

@@ -35,6 +35,11 @@ _MAX_PARAMS = 12
 _MAX_STEPS = 20
 _MAX_TOOLS = 40
 _MAX_DOC_CHARS = 12_000
+_MAX_BRIEF_CHARS = 12_000
+_MAX_INSTRUCTION_CHARS = 4_000
+_MAX_SYSTEM_CHARS = 32_000
+_MAX_USER_CONTENT_CHARS = 20_000
+_MAX_MODEL_OUTPUT_CHARS = 64_000
 _AUTO_TOOLS = object()
 
 # Playbook gates and risk levels mirror maverick.domain (_VALID_GATES /
@@ -91,13 +96,31 @@ _PLAYBOOK_GATE_NOTE = (
 
 _SLUG = re.compile(r"[^a-z0-9-]+")
 _IDENT = re.compile(r"^[A-Za-z_]\w*$")
+_TOOL_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+
+
+def _provider_safe_text(value: object, *, label: str, maximum: int) -> str:
+    """Bound provider-bound text and fail closed on credential-shaped data."""
+    text = str(value or "")
+    if len(text) > maximum:
+        raise ValueError(f"{label} is too long")
+    from maverick.safety.secret_detector import scan
+
+    if scan(text):
+        raise ValueError(
+            f"{label} contains a credential; replace it with a secure vault reference"
+        )
+    return text
 
 
 def build_prompt(brief: str, source_text: str = "", *, produce: str = "the workflow JSON") -> str:
     """Compose the user-turn prompt from the brief and optional document text."""
-    brief = (brief or "").strip()
+    brief = _provider_safe_text(
+        brief, label="brief", maximum=_MAX_BRIEF_CHARS,
+    ).strip()
     parts = [f"BRIEF:\n{brief or '(none provided)'}"]
-    doc = (source_text or "").strip()
+    doc = str(source_text or "").strip()[:_MAX_DOC_CHARS]
+    _provider_safe_text(doc, label="document", maximum=_MAX_DOC_CHARS)
     if doc:
         parts.append("DOCUMENT (extract the workflow from this):\n" + doc[:_MAX_DOC_CHARS])
     parts.append(f"Produce {produce}.")
@@ -114,12 +137,18 @@ def build_refine_prompt(current: dict[str, Any], instruction: str) -> str:
     current_json = json.dumps(current or {}, ensure_ascii=False)
     if len(current_json) > _MAX_DOC_CHARS:
         current_json = current_json[:_MAX_DOC_CHARS] + "\u2026[truncated]"
+    _provider_safe_text(
+        current_json, label="current draft", maximum=_MAX_DOC_CHARS + 20,
+    )
+    instruction = _provider_safe_text(
+        instruction, label="instruction", maximum=_MAX_INSTRUCTION_CHARS,
+    ).strip()
     return (
         "Here is the current draft as JSON:\n"
         + current_json
         + "\n\nApply this change and return the COMPLETE revised draft in the "
         "same JSON shape (not a diff, not only the changed fields):\n"
-        + (instruction or "").strip()
+        + instruction
     )
 
 
@@ -147,7 +176,7 @@ def _clean_tools(raw: object) -> list[str]:
         # Tool identifiers are metadata, never free-form model prose. Collapse
         # controls/newlines and cap each item before it reaches notes/UI/prompts.
         t = " ".join(str(t).split())[:128]
-        if t and t not in out:
+        if _TOOL_NAME.fullmatch(t) and t not in out:
             out.append(t)
         if len(out) >= _MAX_TOOLS:
             break
@@ -175,7 +204,10 @@ def _available_tool_names() -> frozenset[str]:
 def _resolve_available_tools(value) -> frozenset[str]:
     if value is _AUTO_TOOLS:
         return _available_tool_names()
-    return frozenset(str(name) for name in (value or ()) if str(name))
+    return frozenset(
+        str(name) for name in (value or ())
+        if _TOOL_NAME.fullmatch(str(name))
+    )
 
 
 def _factory_guided(system: str) -> str:
@@ -257,6 +289,9 @@ def parse_workflow(raw: str) -> dict[str, Any]:
     the budget, keeps only identifier-like params, and renders the steps into a
     numbered markdown body. Raises ``ValueError`` only when there's nothing
     usable (non-JSON, or no steps)."""
+    raw = _provider_safe_text(
+        raw, label="model output", maximum=_MAX_MODEL_OUTPUT_CHARS,
+    )
     raw = _strip_fence(raw)
     try:
         data = json.loads(raw)
@@ -310,6 +345,13 @@ def _run_completion(
     a hard-coded model (kernel rule 2). Returns the raw reply text."""
     from maverick.budget import Budget
 
+    system = _provider_safe_text(
+        system, label="system prompt", maximum=_MAX_SYSTEM_CHARS,
+    )
+    user_content = _provider_safe_text(
+        user_content, label="workflow request", maximum=_MAX_USER_CONTENT_CHARS,
+    )
+
     if complete is None:
         from maverick.llm import LLM, model_for_role
         complete = LLM(model=model_for_role("orchestrator")).complete
@@ -322,7 +364,11 @@ def _run_completion(
         max_tokens=max_tokens,
         model=None,
     )
-    return getattr(resp, "text", "") or ""
+    return _provider_safe_text(
+        getattr(resp, "text", "") or "",
+        label="model output",
+        maximum=_MAX_MODEL_OUTPUT_CHARS,
+    )
 
 
 def draft_workflow(
@@ -367,6 +413,9 @@ def parse_playbook(raw: str) -> dict[str, Any]:
     no steps). The returned dict matches the shape the ``/agents/<name>/override``
     save path (``AgentOverrideIn``) accepts — ``workflow`` is the editable
     playbook, each step ``{name, instruction, tools, gate}``."""
+    raw = _provider_safe_text(
+        raw, label="model output", maximum=_MAX_MODEL_OUTPUT_CHARS,
+    )
     raw = _strip_fence(raw)
     try:
         data = json.loads(raw)

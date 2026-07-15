@@ -18,12 +18,38 @@ def test_detects_replay():
     assert federation._replay_seen("sig-a", now=1001.0) is True  # replay
 
 
+def test_replay_claim_survives_process_memory_reset():
+    assert federation._replay_seen("durable-sig", now=1000.0) is False
+    federation._seen_sigs.clear()  # simulate a fresh worker/restarted process
+
+    assert federation._replay_seen("durable-sig", now=1001.0) is True
+
+
+def test_replay_fast_path_is_partitioned_by_scope_and_state(tmp_path):
+    first_state = federation._FederationState(tmp_path / "a.sqlite3")
+    second_state = federation._FederationState(tmp_path / "b.sqlite3")
+
+    assert not federation._replay_seen(
+        "same-sig", now=1000.0, scope="delegation:local:peer-a", state=first_state,
+    )
+    assert not federation._replay_seen(
+        "same-sig", now=1000.0, scope="delegation:local:peer-b", state=first_state,
+    )
+    assert not federation._replay_seen(
+        "same-sig", now=1000.0, scope="delegation:local:peer-a", state=second_state,
+    )
+    assert federation._replay_seen(
+        "same-sig", now=1001.0, scope="delegation:local:peer-a", state=first_state,
+    )
+
+
 def test_old_entries_pruned_by_age():
     w = federation._SIGN_FRESHNESS_S
     federation._replay_seen("old", now=1000.0)
     # Far past the freshness window: "old" is pruned, so it's no longer "seen".
     assert federation._replay_seen("new", now=1000.0 + w + 10) is False
-    assert "old" not in federation._seen_sigs
+    old_hash = federation.hashlib.sha256(b"old").hexdigest()
+    assert all(key[2] != old_hash for key in federation._seen_sigs)
 
 
 def test_fresh_nonces_survive_high_volume():
@@ -61,7 +87,8 @@ def test_future_dated_signature_retained_until_envelope_expires():
     # Once the envelope can no longer pass freshness, the cache may prune it.
     assert federation._fresh(created_at, now=created_at + w + 1) is False
     assert federation._replay_seen("replacement", now=created_at + w + 1) is False
-    assert "future" not in federation._seen_sigs
+    future_hash = federation.hashlib.sha256(b"future").hexdigest()
+    assert all(key[2] != future_hash for key in federation._seen_sigs)
 
 
 def test_concurrent_same_sig_admits_exactly_one():

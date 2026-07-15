@@ -217,14 +217,19 @@ def _save(records: dict[str, TenantRecord]) -> None:
     )
 
 
-def _locked():
-    """Serialize a roster load-modify-save in-process AND cross-process."""
+def _locked(*, strict: bool = False):
+    """Serialize a roster load-modify-save in-process AND cross-process.
+
+    ``strict=True`` is used when a roster read participates in an admission
+    transaction.  On a filesystem without a real process lock, admission must
+    fail closed instead of racing a control-plane cap change.
+    """
     from contextlib import ExitStack
     ensure_private_directory(maverick_home())
     ensure_private_directory(_registry_path().parent)
     stack = ExitStack()
     stack.enter_context(_REGISTRY_LOCK)
-    stack.enter_context(cross_process_lock(_registry_path()))
+    stack.enter_context(cross_process_lock(_registry_path(), strict=strict))
     return stack
 
 
@@ -607,10 +612,84 @@ def reserve_tenant_dollars(tenant_id: str | None, amount: float,
         raise ValueError("reservation amount and TTL must be finite and positive")
     now = time.time()
     path = _reservations_path(tid)
-    with _RESERVE_LOCK, cross_process_lock(path):
+    with _RESERVE_LOCK, cross_process_lock(path, strict=True):
         data = _live_reservations(_load_reservations(tid), now)
+        if str(reservation_id) in data:
+            raise TenantRegistryError(
+                f"tenant reservation already exists: {reservation_id!r}"
+            )
         data[str(reservation_id)] = {"dollars": amt, "expires_at": now + ttl}
         atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
+
+
+def reserve_tenant_budget(
+    tenant_id: str | None,
+    requested_amount: float,
+    ttl_seconds: float,
+    reservation_id: str,
+) -> float | None:
+    """Atomically clamp and reserve one run against a tenant's daily cap.
+
+    ``None`` means the tenant has no aggregate cap and the caller should keep
+    its own per-run ceiling.  Otherwise the return value is the amount granted
+    (possibly ``0.0`` when the daily allowance is exhausted).
+
+    The cap/spend/reservation calculation and reservation write share the
+    registry lock followed by the strict reservation lock. Consequently two
+    starts cannot both observe the same unreserved remainder, and a concurrent
+    ``set_quota``/``set_plan`` cannot publish a changed ceiling between this
+    transaction's cap read and hold write. Usage settlement records spend
+    *before* releasing its hold, so a concurrent allocator sees either the old
+    spend plus the hold, the new spend plus the hold, or the new spend after
+    release -- never neither.
+    """
+    tid = (tenant_id or "").strip()
+    if not tid:
+        return None
+    if not reservation_id or reservation_id != reservation_id.strip():
+        raise ValueError("reservation id must be a non-blank trimmed string")
+    try:
+        requested = float(requested_amount)
+        ttl = float(ttl_seconds)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError("reservation amount and TTL must be finite numbers") from exc
+    if not math.isfinite(requested) or requested < 0:
+        raise ValueError("requested reservation amount must be finite and non-negative")
+    if not math.isfinite(ttl) or ttl <= 0:
+        raise ValueError("reservation TTL must be finite and positive")
+
+    # Avoid creating a tenant data tree merely to discover that a provisioned
+    # tenant is unlimited.  The cap is read again under the allocation lock;
+    # this first read is only a side-effect-free fast path.
+    if _tenant_daily_cap(tid) <= 0:
+        return None
+
+    now = time.time()
+    path = _reservations_path(tid)
+    # Global lock order is roster -> reservation thread lock -> reservation
+    # sidecar. Roster mutators take only the first; direct hold/release paths
+    # take only the latter two. Keeping this order prevents lock inversion while
+    # making the cap read and hold publication one control-plane transaction.
+    with _locked(strict=True):
+        with _RESERVE_LOCK, cross_process_lock(path, strict=True):
+            cap = _tenant_daily_cap(tid)
+            if cap <= 0:
+                return None
+            data = _live_reservations(_load_reservations(tid), now)
+            if reservation_id in data:
+                raise TenantRegistryError(
+                    f"tenant reservation already exists: {reservation_id!r}"
+                )
+            outstanding = sum(value["dollars"] for value in data.values())
+            remaining = max(0.0, cap - tenant_spend_today(tid) - outstanding)
+            granted = min(requested, remaining)
+            if granted > 0:
+                data[reservation_id] = {
+                    "dollars": granted,
+                    "expires_at": now + ttl,
+                }
+                atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
+            return granted
 
 
 def release_tenant_reservation(tenant_id: str | None, reservation_id: str) -> bool:
@@ -623,7 +702,7 @@ def release_tenant_reservation(tenant_id: str | None, reservation_id: str) -> bo
         return False
     now = time.time()
     path = _reservations_path(tid)
-    with _RESERVE_LOCK, cross_process_lock(path):
+    with _RESERVE_LOCK, cross_process_lock(path, strict=True):
         data = _load_reservations(tid)
         existed = str(reservation_id) in data
         data.pop(str(reservation_id), None)
@@ -662,5 +741,6 @@ __all__ = [
     "resume_tenant", "delete_tenant", "set_quota", "set_plan",
     "is_active", "assert_tenant_active", "tenant_spend_today",
     "tenant_over_quota", "tenant_remaining_today",
-    "reserve_tenant_dollars", "release_tenant_reservation",
+    "reserve_tenant_dollars", "reserve_tenant_budget",
+    "release_tenant_reservation",
 ]

@@ -6,12 +6,36 @@ __init__ so the @main.group decorators fire on package import.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 import click
 
 from ..world_model import open_world
 from . import _strip_terminal_control, harness, main
+
+_T = TypeVar("_T")
+
+
+def _ensure_dreaming_allowed() -> None:
+    """Translate the strict learning stop into a stable CLI refusal."""
+    from ..learning_guard import Halted, check_learning_halt
+    try:
+        check_learning_halt("dreaming", "cli_start")
+    except Halted as exc:
+        raise click.ClickException(
+            "dreaming refused: global learning HALT is active") from exc
+
+
+def _run_dreaming_guarded(operation: Callable[[], _T]) -> _T:
+    """Run one dream operation while keeping ``Halted`` out of tracebacks."""
+    from ..learning_guard import Halted
+    try:
+        return operation()
+    except Halted as exc:
+        raise click.ClickException(
+            "dreaming refused: global learning HALT is active") from exc
 
 
 @main.group("finance")
@@ -174,10 +198,15 @@ def dream(ctx, max_goals: int, rehearse: bool, rehearse_budget: float,
             "dreaming is disabled. Set MAVERICK_DREAMING=1 or add\n"
             "  [dreaming]\n  enable = true\nto ~/.maverick/config.toml."
         )
+    # Keep snapshot creation and provider initialization behind the same strict
+    # stop as the cycle. Rollback/listing returned above and remain available.
+    _ensure_dreaming_allowed()
     world = open_world(ctx.obj["db"])
     if dry_run:
-        report = dreaming.dream_cycle_dry(
-            world, max_goals=max_goals, donations_dir=donations_dir,
+        report = _run_dreaming_guarded(
+            lambda: dreaming.dream_cycle_dry(
+                world, max_goals=max_goals, donations_dir=donations_dir,
+            ),
         )
         click.echo("(dry run -- nothing written) " + report.summary())
         return
@@ -207,9 +236,11 @@ def dream(ctx, max_goals: int, rehearse: bool, rehearse_budget: float,
             dream_shield = Shield.from_config()
         except Exception:  # pragma: no cover -- kernel runs without the shield
             dream_shield = None
-    report = dreaming.dream_cycle(
-        world, max_goals=max_goals, donations_dir=donations_dir,
-        llm=dream_llm, budget=dream_budget, shield=dream_shield,
+    report = _run_dreaming_guarded(
+        lambda: dreaming.dream_cycle(
+            world, max_goals=max_goals, donations_dir=donations_dir,
+            llm=dream_llm, budget=dream_budget, shield=dream_shield,
+        ),
     )
     click.echo(report.summary())
     # Cognitive Data Engine: turn the flywheel as part of the nightly cycle --
@@ -267,7 +298,9 @@ def dream(ctx, max_goals: int, rehearse: bool, rehearse_budget: float,
         return float(getattr(v, "confidence", 0.0) or 0.0)
 
     try:
-        passed, total = asyncio.run(dreaming.rehearse(_practice, scorer=_score))
+        passed, total = _run_dreaming_guarded(
+            lambda: asyncio.run(dreaming.rehearse(_practice, scorer=_score)),
+        )
     except dreaming.RehearsalFrozen as e:
         raise click.ClickException(str(e)) from e
     click.echo(f"Rehearsal: {passed}/{total} previously-failing pattern(s) "

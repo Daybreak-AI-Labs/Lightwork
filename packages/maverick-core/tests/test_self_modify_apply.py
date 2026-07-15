@@ -1,13 +1,16 @@
-"""Real apply + rollback for a promoted change (Gap 3).
+"""Low-level apply + rollback hardening.
 
 Pins that the reversibility handle is a real workspace snapshot: an applied
-change can be mechanically reverted, a failed apply auto-reverts, and applying
-without a rollback point is refused (fail closed).
+change can be mechanically reverted, unsafe artifacts are rejected, a failed
+apply auto-reverts, and missing authorization context fails closed.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+import pytest
+from maverick import self_modify as sm
 from maverick import self_modify_apply as ap
 
 
@@ -29,6 +32,10 @@ def _store(root: Path) -> Path:
     return s
 
 
+def _surface(*globs: str) -> sm.EditableSurface:
+    return sm.EditableSurface(globs or ("pkg/*.py",))
+
+
 class TestRollbackPoint:
     def test_creates_a_snapshot_id(self, tmp_path):
         snap = ap.create_rollback_point(_tree(tmp_path), store=_store(tmp_path))
@@ -38,7 +45,8 @@ class TestRollbackPoint:
 class TestApplyChange:
     def test_applies_and_returns_real_rollback(self, tmp_path):
         tree, store = _tree(tmp_path), _store(tmp_path)
-        res = ap.apply_change(_patch(), tree=tree, store=store)
+        res = ap.apply_change(
+            _patch(), tree=tree, store=store, surface=_surface())
         assert res.ok is True
         assert (tree / "pkg" / "a.py").read_text() == "VALUE = 99\n"
         assert res.rollback is not None
@@ -46,25 +54,54 @@ class TestApplyChange:
         assert res.rollback.revert() is True
         assert (tree / "pkg" / "a.py").read_text() == "VALUE = 1\n"
 
-    def test_reuses_a_preexisting_snapshot_handle(self, tmp_path):
+    def test_refuses_a_caller_supplied_snapshot_handle(self, tmp_path):
         tree, store = _tree(tmp_path), _store(tmp_path)
-        snap = ap.create_rollback_point(tree, store=store)   # taken for the gate
-        res = ap.apply_change(_patch(), tree=tree, snapshot_id=snap, store=store)
-        assert res.ok and res.snapshot_id == snap
+        snap = ap.create_rollback_point(tree, store=store)
+        res = ap.apply_change(
+            _patch(), tree=tree, snapshot_id=snap, store=store,
+            surface=_surface(),
+        )
+        assert res.ok is False
+        assert "fresh pre-apply snapshot" in res.reason
+        assert (tree / "pkg" / "a.py").read_text() == "VALUE = 1\n"
 
     def test_failed_apply_auto_reverts(self, tmp_path):
         tree, store = _tree(tmp_path), _store(tmp_path)
         bad = ("diff --git a/pkg/a.py b/pkg/a.py\n--- a/pkg/a.py\n+++ b/pkg/a.py\n"
                "@@ -1 +1 @@\n-DOES_NOT_MATCH\n+x\n")
-        res = ap.apply_change(bad, tree=tree, store=store)
+        res = ap.apply_change(bad, tree=tree, store=store, surface=_surface())
         assert res.ok is False
         assert (tree / "pkg" / "a.py").read_text() == "VALUE = 1\n"   # untouched
 
     def test_apply_refused_without_a_rollback_point(self, tmp_path, monkeypatch):
         tree, store = _tree(tmp_path), _store(tmp_path)
         monkeypatch.setattr(ap, "create_rollback_point", lambda *a, **k: None)
-        res = ap.apply_change(_patch(), tree=tree, store=store)
+        res = ap.apply_change(
+            _patch(), tree=tree, store=store, surface=_surface())
         assert res.ok is False and "no rollback point" in res.reason
+        assert (tree / "pkg" / "a.py").read_text() == "VALUE = 1\n"
+
+    def test_refuses_an_omitted_editable_surface(self, tmp_path):
+        tree, store = _tree(tmp_path), _store(tmp_path)
+        res = ap.apply_change(_patch(), tree=tree, store=store)
+        assert res.ok is False
+        assert "explicit editable surface" in res.reason
+        assert (tree / "pkg" / "a.py").read_text() == "VALUE = 1\n"
+
+    def test_refuses_a_forged_editable_surface(self, tmp_path):
+        class FakeSurface:
+            @staticmethod
+            def classify(_path):
+                return "editable"
+
+        tree, store = _tree(tmp_path), _store(tmp_path)
+        res = ap.apply_change(
+            _patch(), tree=tree, store=store,
+            surface=FakeSurface(),  # type: ignore[arg-type]
+        )
+        assert res.ok is False
+        assert "invalid editable surface authority" in res.reason
+        assert list(store.iterdir()) == []
         assert (tree / "pkg" / "a.py").read_text() == "VALUE = 1\n"
 
 
@@ -91,5 +128,63 @@ class TestBoundaryReCheck:
               "--- a/packages/maverick-core/maverick/verifier.py\n"
               "+++ b/packages/maverick-core/maverick/verifier.py\n"
               "@@ -1 +1 @@\n-x\n+y\n")
-        res = ap.apply_change(cp, tree=tree, store=store)
+        res = ap.apply_change(cp, tree=tree, store=store, surface=_surface("**"))
         assert res.ok is False and "protected" in res.reason
+
+    @pytest.mark.parametrize(
+        "patch",
+        [
+            (
+                "diff --git a/pkg/link.py b/pkg/link.py\n"
+                "new file mode 120000\n--- /dev/null\n+++ b/pkg/link.py\n"
+                "@@ -0,0 +1 @@\n+../../outside.py\n"
+            ),
+            (
+                "diff --git a/pkg/submodule b/pkg/submodule\n"
+                "new file mode 160000\n--- /dev/null\n+++ b/pkg/submodule\n"
+                "@@ -0,0 +1 @@\n+Subproject commit " + ("a" * 40) + "\n"
+            ),
+            (
+                "diff --git a/pkg/blob.bin b/pkg/blob.bin\n"
+                "new file mode 100644\n"
+                "GIT binary patch\nliteral 1\nIc${MZ000310RR91\n"
+            ),
+        ],
+    )
+    def test_refuses_unsafe_diff_artifacts_before_snapshot(self, tmp_path, patch):
+        tree, store = _tree(tmp_path), _store(tmp_path)
+        res = ap.apply_change(
+            patch, tree=tree, store=store, surface=_surface("pkg/**"))
+        assert res.ok is False
+        assert list(store.iterdir()) == []
+
+    def test_refuses_existing_symlink_target(self, tmp_path):
+        tree, store = _tree(tmp_path), _store(tmp_path)
+        outside = tmp_path / "outside.py"
+        outside.write_text("VALUE = 1\n", encoding="utf-8")
+        target = tree / "pkg" / "alias.py"
+        try:
+            target.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable")
+        patch = (
+            "diff --git a/pkg/alias.py b/pkg/alias.py\n"
+            "--- a/pkg/alias.py\n+++ b/pkg/alias.py\n"
+            "@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 2\n"
+        )
+        res = ap.apply_change(
+            patch, tree=tree, store=store, surface=_surface())
+        assert res.ok is False and "filesystem alias" in res.reason
+        assert outside.read_text(encoding="utf-8") == "VALUE = 1\n"
+
+    def test_refuses_hard_linked_target(self, tmp_path):
+        tree, store = _tree(tmp_path), _store(tmp_path)
+        outside = tmp_path / "outside.py"
+        try:
+            os.link(tree / "pkg" / "a.py", outside)
+        except OSError:
+            pytest.skip("hard links unavailable")
+        res = ap.apply_change(
+            _patch(), tree=tree, store=store, surface=_surface())
+        assert res.ok is False and "hard-linked" in res.reason
+        assert outside.read_text(encoding="utf-8") == "VALUE = 1\n"

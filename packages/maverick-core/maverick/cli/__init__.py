@@ -911,6 +911,28 @@ def learn_demo(ctx: click.Context, demo_file, name, industry, source, no_llm, ye
     _apply_capability_plan(profile, plan, llm)
 
 
+def _learning_cli_preflight(job: str) -> None:
+    """Translate the strict learning stop into a stable automation failure."""
+    from ..learning_guard import Halted, check_learning_halt
+
+    try:
+        check_learning_halt(job, "cli-start")
+    except Halted as exc:
+        raise click.ClickException(
+            f"{job} refused: global learning HALT is active") from exc
+
+
+def _run_learning_cli(job: str, operation):
+    """Run a learning operation without exposing HALT-file contents."""
+    from ..learning_guard import Halted
+
+    try:
+        return operation()
+    except Halted as exc:
+        raise click.ClickException(
+            f"{job} refused: global learning HALT is active") from exc
+
+
 @main.command("factory-learn")
 @click.option("--min-support", default=3, show_default=True,
               help="Distinct packs that must exhibit a gap before it's a correction.")
@@ -936,11 +958,15 @@ def factory_learn(min_support, dry_run, evidence_path) -> None:
     """
     from .. import factory_learning
 
+    _learning_cli_preflight("factory-learning")
     if not factory_learning.enabled():
         click.echo("Factory learning is OFF. Enable [self_improvement] or set "
                    "MAVERICK_FACTORY_LEARNING=1 to mine and promote corrections.")
         return
-    corrections = factory_learning.mine_corrections(min_support=min_support)
+    corrections = _run_learning_cli(
+        "factory-learning",
+        lambda: factory_learning.mine_corrections(min_support=min_support),
+    )
     if not corrections:
         click.echo("No recurring factory gaps meet the support threshold yet.")
         return
@@ -960,8 +986,11 @@ def factory_learn(min_support, dry_run, evidence_path) -> None:
         scorer = factory_learning.load_measured_evidence(evidence_path)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
-    promoted = factory_learning.review_and_promote(
-        min_support=min_support, scorer=scorer)
+    promoted = _run_learning_cli(
+        "factory-learning",
+        lambda: factory_learning.review_and_promote(
+            min_support=min_support, scorer=scorer),
+    )
     if promoted:
         click.echo(click.style(f"\nPromoted {len(promoted)} correction(s) through "
                                "the self-improvement gate.", fg="green"))
@@ -1451,6 +1480,7 @@ def harness_run(model: str | None, all_models: bool, system_prompt_file: Path | 
     """
     from .. import self_harness
     from .. import self_improvement_runner as runner
+    _learning_cli_preflight("self-harness")
     if not self_harness.enabled():
         raise click.ClickException(
             "self-harness is off. Set [self_harness] enable = true or "
@@ -1472,18 +1502,24 @@ def harness_run(model: str | None, all_models: bool, system_prompt_file: Path | 
             raise click.ClickException(
                 f"cannot read deployed system prompt: {exc}") from exc
     if all_models:
-        results = runner.run_self_harness_all_models(limit=limit, retire=retire,
-                                                     canary=stage,
-                                                     evaluation_system=evaluation_system)
+        results = _run_learning_cli(
+            "self-harness",
+            lambda: runner.run_self_harness_all_models(
+                limit=limit, retire=retire, canary=stage,
+                evaluation_system=evaluation_system),
+        )
         if not results:
             click.echo("no configured role models to run.")
             return
         for _mid, (report, retired) in sorted(results.items()):
             _echo_harness_cycle(report, retired)
         return
-    report, retired = runner.run_self_harness_cycle(model_id=model, limit=limit,
-                                                    retire=retire, canary=stage,
-                                                    evaluation_system=evaluation_system)
+    report, retired = _run_learning_cli(
+        "self-harness",
+        lambda: runner.run_self_harness_cycle(
+            model_id=model, limit=limit, retire=retire, canary=stage,
+            evaluation_system=evaluation_system),
+    )
     _echo_harness_cycle(report, retired)
 
 
@@ -1851,20 +1887,24 @@ def self_modify() -> None:
 
 @self_modify.command("status")
 def self_modify_status() -> None:
-    """Show the self-modify posture: enabled?, the editable surface the signed
-    track record currently entitles, and the DGM archive size. Read-only."""
+    """Show both required gates, the earned research surface, and archive size."""
+    from .. import self_improvement as si
     from .. import self_modify as sm
     from ..self_modify_loop import earned_surface
     from ..self_modify_runner import build_policy, load_archive
-    enabled = sm.enabled()
-    click.echo(f"self-modify: {'ON' if enabled else 'OFF'} "
-               f"([self_modify] enable={'true' if enabled else 'false'})")
+    modify_enabled = sm.enabled()
+    improvement_enabled = si.enabled()
+    enabled = modify_enabled and improvement_enabled
+    click.echo(f"self-modify research: {'ON' if enabled else 'OFF'}")
+    click.echo("  required gates: "
+               f"[self_modify] enable={'true' if modify_enabled else 'false'}, "
+               "[self_improvement] enable="
+               f"{'true' if improvement_enabled else 'false'}")
     if not enabled:
-        click.echo("  (OFF: the loop proposes/evaluates/applies nothing.)")
+        click.echo("  (OFF: the loop proposes, evaluates, and archives nothing.)")
     policy = build_policy()
     archive = load_archive()
     try:
-        from .. import self_improvement as si
         ledger = getattr(si.shared(), "ledger", None)
     except Exception:
         ledger = None
@@ -1872,40 +1912,60 @@ def self_modify_status() -> None:
     click.echo(f"earned tier: {tier.name!r}")
     click.echo("editable surface: " + (", ".join(surface.editable_globs) or "(none)"))
     click.echo(f"archive: {len(archive.candidates)} candidate(s), "
-               f"{sum(1 for c in archive.candidates if c.promoted)} promoted")
+               f"{sum(1 for c in archive.candidates if c.promoted)} "
+               "legacy promotion marker(s)")
 
 
 @self_modify.command("run")
-@click.option("--cycles", type=int, default=1, show_default=True,
+@click.option("--cycles", type=click.IntRange(min=1, max=100), default=1,
+              show_default=True,
               help="Number of governed DGM cycles to run.")
 @click.option("--tree", default=None,
               help="Repo tree to evaluate against (default: cwd).")
-def self_modify_run(cycles: int, tree: str | None) -> None:
-    """Run governed DGM cycles: propose → boundary → isolated eval → gate →
-    archive. A no-op while self-modify is OFF. Promotion at the code rung still
-    requires a human signature — this searches and archives, it does not
-    self-promote code."""
+@click.option("--objective", required=True,
+              help="Explicit improvement objective supplied to the grounded proposer.")
+@click.option("--max-dollars", type=click.FloatRange(min=0.0), default=None,
+              help="Override the configured dollar cap for this DGM run.")
+@click.option("--max-wall-seconds", type=click.FloatRange(min=0.001), default=None,
+              help="Override the configured wall-clock cap for this DGM run.")
+@click.option("--max-tool-calls", type=click.IntRange(min=1), default=None,
+              help="Override the configured sandbox/tool-call cap for this DGM run.")
+def self_modify_run(cycles: int, tree: str | None, objective: str,
+                    max_dollars: float | None,
+                    max_wall_seconds: float | None,
+                    max_tool_calls: int | None) -> None:
+    """Run research DGM cycles: ground, review, isolate, evaluate, and archive.
+
+    This command never adopts code. Live adoption remains disabled until an
+    external one-shot evaluator and PREPARE/CAS/COMMIT integration exist.
+    """
+    from ..budget import budget_from_config
     from ..self_modify_runner import run
-    summary = run(cycles=cycles, tree=Path(tree) if tree else None)
+    budget = budget_from_config(
+        task_class="self_modify", max_dollars=max_dollars,
+        max_wall_seconds=max_wall_seconds, max_tool_calls=max_tool_calls)
+    summary = run(
+        cycles=cycles, tree=Path(tree) if tree else None,
+        objective=objective, budget=budget)
     if not summary.ran:
-        click.echo(f"did not run: {summary.reason}")
-        return
+        raise click.ClickException(f"self-modify did not run: {summary.reason}")
     click.echo(f"ran {len(summary.reports)} cycle(s): "
-               f"{summary.evaluated} evaluated, {summary.promoted} promoted.")
+               f"{summary.evaluated} evaluated, "
+               f"{summary.promoted} legacy promotion marker(s).")
+    click.echo(f"budget used: {budget.summary()}")
     for i, r in enumerate(summary.reports):
-        note = r.reason or ("promoted" if r.promoted else "")
+        note = r.reason or ("legacy promotion marker" if r.promoted else "")
         click.echo(f"  #{i} tier={r.tier or '-'} proposed={r.proposed} "
                    f"eval={r.evaluated} promoted={r.promoted}"
                    + (f" — {note}" if note else ""))
 
 
 @self_modify.command("archive")
-@click.option("--limit", type=int, default=20, show_default=True,
+@click.option("--limit", type=click.IntRange(min=1), default=20, show_default=True,
               help="Most recent candidates to show.")
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
 def self_modify_archive(limit: int, as_json: bool) -> None:
-    """Show the DGM lineage archive — the diverse population of proposed changes
-    (promoted and the informative worse ancestors). Read-only."""
+    """Show bounded research candidates and lineage metadata. Read-only."""
     import json as _json
 
     from ..self_modify_runner import load_archive
@@ -1920,7 +1980,7 @@ def self_modify_archive(limit: int, as_json: bool) -> None:
     for c in cands:
         flags = []
         if c.promoted:
-            flags.append("promoted")
+            flags.append("legacy-promotion-marker")
         if c.rolled_back:
             flags.append("rolled-back")
         if c.capability_widens:

@@ -31,8 +31,8 @@ _PLUGIN = textwrap.dedent("""
         raise RuntimeError("plugin exploded")
 
     def segfault(args):
-        import ctypes
-        ctypes.string_at(0)  # hard crash, not an exception
+        import os
+        os.abort()  # hard crash, not an exception (portable across platforms)
 
     def not_a_string(args):
         return {"structured": True}

@@ -32,6 +32,7 @@ import unicodedata
 import uuid
 from collections.abc import Callable, Mapping
 
+from .learning_guard import Halted
 from .si_producers import ToolOutcomeTracker, propose_policy, propose_prompt, propose_tool
 
 log = logging.getLogger(__name__)
@@ -296,7 +297,7 @@ def _risk_calibration_boundary(
     return None, _authorize_promotion
 
 
-def run_self_harness_pass(
+def run_self_harness_pass(  # noqa: C901 - fail-closed orchestration boundary
     reflexions=None, *, model_id: str | None = None,
     held_in=None, held_out=None,
     score_with=None, score_without=None, propose_fn=None, controller=None,
@@ -329,7 +330,8 @@ def run_self_harness_pass(
     clustering; otherwise ``semantic_mining`` selects the deterministic built-in. ``score_with``/``score_without`` are the LIVE held-in/held-out A/B
     over the candidate prompt -- injected by the caller because a real evaluation
     needs a real model; without them the pass is a dry inspection that writes
-    nothing. Never raises -- a learning pass must not perturb anything.
+    nothing. Operational failures return an inert report; :class:`Halted` is
+    re-raised so the operator interlock remains distinguishable.
     """
     try:
         from . import self_harness
@@ -435,6 +437,8 @@ def run_self_harness_pass(
             holdout_authorize=holdout_authorize,
             eval_for_context=eval_for_context,
             promotion_authorize=promotion_authorize)
+    except Halted:
+        raise
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness
@@ -899,8 +903,9 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
     retirement still runs -- so the cycle keeps guidance fresh either way.
     Retirement uses
     ``retire_after_days`` (arg overrides ``[self_harness]`` config; 0/None = off)
-    and is scoped to the pass's resolved model. Never raises -- a maintenance
-    cycle must not perturb anything."""
+    and is scoped to the pass's resolved model. Operational failures return an
+    inert result; :class:`Halted` is re-raised so schedulers cannot report an
+    interlocked cycle as successful."""
     try:
         from . import self_harness
         st = self_harness.settings() if self_harness.enabled() else None
@@ -1117,6 +1122,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
                 retired = self_harness.retire_stale(
                     older_than_days=float(days), model_id=resolved)
         return report, retired
+    except Halted:
+        raise
     except Exception:  # pragma: no cover -- a maintenance cycle never perturbs a run
         log.debug("self-harness cycle failed", exc_info=True)
         from . import self_harness
@@ -1515,7 +1522,8 @@ def run_self_harness_all_models(*, limit: int = 500, retire: bool = True, **cycl
     worker's lesson never bleeds into the orchestrator's. Without injected
     scorers it is a fleet-wide DRY inspection + stale-line retirement; live
     per-model A/B scoring is the operator's to wire (a real evaluation needs a
-    real model). Never raises."""
+    real model). Operational failures are isolated per sweep; :class:`Halted`
+    is re-raised for the caller."""
     out: dict[str, tuple] = {}
     try:
         from . import self_harness
@@ -1524,6 +1532,8 @@ def run_self_harness_all_models(*, limit: int = 500, retire: bool = True, **cycl
         for m in harness_fleet_models():
             out[m] = run_self_harness_cycle(
                 model_id=m, limit=limit, retire=retire, **cycle_kwargs)
+    except Halted:
+        raise
     except Exception:  # pragma: no cover -- a fleet sweep never perturbs a run
         log.debug("self-harness all-models cycle failed", exc_info=True)
     return out

@@ -222,6 +222,15 @@ class Capability:
 _DENY_ALL = "\x00"
 
 
+def deny_all_capability(principal: str) -> Capability:
+    """Return an explicit fail-closed grant for a policy-resolution failure."""
+    return Capability(
+        principal=principal,
+        allow_tools=frozenset({_DENY_ALL}),
+        max_risk="low",
+    )
+
+
 def _attenuated_ancestors(cap: Capability, principal: str | None) -> tuple[str, ...]:
     """Return lineage for a grant re-bound from ``cap`` to ``principal``.
 
@@ -497,6 +506,7 @@ __all__ = [
     "verify_capability",
     "capability_enforced",
     "capability_from_config",
+    "deny_all_capability",
     "capability_for_role",
     "configured_roles",
     "role_exists",

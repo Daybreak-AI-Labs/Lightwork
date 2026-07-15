@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from maverick.domain import DomainProfile, available_domains
 from maverick.jd_hiring import (
     JDMatch,
@@ -109,6 +110,33 @@ def test_draft_without_bullets_falls_back_to_default_workflow():
     assert prof.workflow, "default workflow must be present"
 
 
+@pytest.mark.parametrize("field", ["role_title", "jd_text", "industry"])
+def test_llm_draft_rejects_credentials_before_provider_call(field):
+    values = {
+        "role_title": "Accounts Payable Specialist",
+        "jd_text": FINANCE_JD,
+        "industry": "manufacturing",
+    }
+    values[field] = "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz123456"
+
+    with pytest.raises(ValueError, match="contains a credential"):
+        draft_from_jd(
+            values["role_title"], values["jd_text"],
+            industry=values["industry"], llm=object(),
+        )
+
+
+def test_llm_draft_fails_closed_when_dlp_scanner_fails(monkeypatch):
+    from maverick.safety import secret_detector
+
+    def scanner_failure(_text):
+        raise RuntimeError("scanner unavailable")
+
+    monkeypatch.setattr(secret_detector, "scan", scanner_failure)
+    with pytest.raises(ValueError, match="could not be safely screened"):
+        draft_from_jd("AP Specialist", FINANCE_JD, llm=object())
+
+
 # ---- add_pack_to_fleet -------------------------------------------------------
 
 def test_add_pack_to_fleet_roundtrip(tmp_path, monkeypatch):
@@ -144,3 +172,24 @@ def test_jd_hiring_enabled_default_and_off(tmp_path, monkeypatch):
     assert jd_hiring_enabled() is True  # no config -> default on
     cfg.write_text("[agent_factory]\njd_hiring = false\n", encoding="utf-8")
     assert jd_hiring_enabled() is False
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        'agent_factory = "yes"\n',
+        '[agent_factory]\njd_hiring = "yes"\n',
+        '[agent_factory\njd_hiring = true\n',
+    ],
+)
+def test_jd_hiring_gate_fails_closed_on_invalid_config(tmp_path, monkeypatch, content):
+    import maverick.config as config
+
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(content, encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
+    config.reset_config_cache()
+    try:
+        assert jd_hiring_enabled() is False
+    finally:
+        config.reset_config_cache()

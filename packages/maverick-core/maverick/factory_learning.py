@@ -51,6 +51,7 @@ from .file_lock import (
     cross_process_lock,
     ensure_private_file,
 )
+from .learning_guard import Halted, check_learning_halt
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -1075,6 +1076,7 @@ def _promote_one_locked(
     candidate = _factory_candidate(
         correction, evidence, before_revision=before_revision,
         after_revision=after_revision, si=si)
+    check_learning_halt("factory_learning", "promotion")
     preparation = controller.prepare_promotion(
         candidate, before=before_revision, after=after_revision)
     if not preparation.ok:
@@ -1087,7 +1089,21 @@ def _promote_one_locked(
     if not preparation.needs_apply:
         return state, "stop"
     try:
+        check_learning_halt("factory_learning", "apply")
         observed = _cas_install_locked(path, before=before, after=after)
+    except Halted:
+        # PREPARE is durable, so a HALT that lands at the final apply boundary
+        # must close that transaction while the exact before revision is still
+        # provably live.  Never translate the operator interlock into an
+        # ordinary skipped candidate: callers need to distinguish HALT.
+        recovered = _abort_failed_apply_locked(
+            controller, preparation, path, before=before, after=after)
+        if not recovered:
+            log.warning(
+                "factory_learning: HALT left correction transaction in doubt for %s",
+                correction.key(),
+            )
+        raise
     except Exception as exc:
         log.warning(
             "factory_learning: correction artifact apply failed for %s: %s",
@@ -1121,6 +1137,7 @@ def review_and_promote(
     """
     if not enabled():
         return []
+    check_learning_halt("factory_learning", "start")
     promoted_path = promoted_path if promoted_path is not None else corrections_path()
     corrections = mine_corrections(min_support=min_support)
     if not corrections:
@@ -1135,6 +1152,8 @@ def review_and_promote(
         from . import self_improvement as si
         if controller is None:
             controller = si.shared()
+    except Halted:
+        raise
     except Exception as e:  # pragma: no cover -- can't build the gate -> fail closed
         log.debug("factory_learning: controller unavailable: %s", e)
         return []
@@ -1162,6 +1181,7 @@ def review_and_promote(
                     if correction.key() in state.entries:
                         continue
                     try:
+                        check_learning_halt("factory_learning", "evaluation")
                         evidence = scorer(correction)
                     except (TypeError, ValueError) as exc:
                         log.warning(
@@ -1181,6 +1201,8 @@ def review_and_promote(
                         promoted.append(correction)
                     elif disposition == "stop":
                         return promoted
+        except Halted:
+            raise
         except Exception as exc:
             log.warning("factory_learning: governed promotion failed closed: %s", exc)
             return promoted

@@ -72,7 +72,7 @@ def test_outdir_honored(tmp_path, have_lo):
     t = office_convert(sandbox=sb)
     out = t.fn({"op": "convert", "input_path": "report.docx",
                 "to": "pdf", "outdir": "out"})
-    assert "/out" in sb.commands[0]
+    assert "/out" in sb.commands[0].replace("\\", "/")
     assert "out/report.pdf" in out.replace("\\", "/")
 
 

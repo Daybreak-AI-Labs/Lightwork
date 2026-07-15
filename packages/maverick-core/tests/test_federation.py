@@ -113,6 +113,19 @@ def test_load_peers_forgiving_on_malformed():
     assert load_peers({}) == []
 
 
+def test_duplicate_peer_tokens_are_ambiguous_and_cannot_authenticate():
+    peers = load_peers({"federation": {"peers": [
+        {"name": "a", "target": "a:1", "token": "shared"},
+        {"name": "b", "target": "b:1", "token": "shared"},
+    ]}})
+
+    assert [peer.token for peer in peers] == ["", ""]
+    assert federation._match_token(
+        [Peer("a", "a:1", "shared"), Peer("b", "b:1", "shared")],
+        "shared",
+    ) is None
+
+
 def test_disabled_by_default_and_env_opt_in(monkeypatch):
     monkeypatch.delenv("MAVERICK_FEDERATION_ENABLED", raising=False)
     assert federation.federation_enabled() is False

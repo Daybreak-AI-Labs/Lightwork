@@ -377,130 +377,37 @@ capture consent decision — the same four moves the council said convert the
 platform into a $50M asset. The deterministic half of every rung is now built,
 tested (~130 self-improvement tests total), and off by default.
 
-### Build log — update 4 (the governed DGM code rung, Phases 1–4)
+### Current audited DGM posture (2026-07-15)
 
-The Phase-5 code self-mod stub above is now a full, standalone Darwin-Gödel
-pipeline (DGM, arXiv:2505.22954) — **empirical validation instead of proof, run
-under a reference monitor** — across four modules, each OFF by default,
-fail-closed, live-model/sandbox parts injected as seams with deterministic
-offline defaults:
+The older update-4/update-5 notes overstated the production posture and are
+superseded by this section. The stock `[self_modify]` path is a **research-only
+code-evolution harness**. It can ground a proposal in a bounded source snapshot,
+review a unified diff through a fail-closed reference monitor, evaluate baseline
+and candidate in separately bound no-egress/non-root sandboxes, and persist
+bounded lineage telemetry. It does not apply or promote code.
 
-- **Phase 1 — the editable-surface boundary (`self_modify.py`).** The
-  load-bearing primitive: a proposed patch is *structurally refused* if it
-  touches ANY control-plane path (the promotion gate, verifier, calibration,
-  capability algebra, approval signing, audit, sandbox, config, or the boundary
-  itself), before and independently of the promotion gate. Paths are
-  canonicalized exactly as `git apply` resolves them (un-quote C-escapes, collapse
-  `//`, drop `.`, reject `..`/absolute→fail-closed) and matched case-insensitively,
-  so a quoted/octal/re-cased spelling can't dodge it (every bypass a security
-  review found is now a regression test). The allowlist is EMPTY by default →
-  everything is `unknown` → refused.
-- **Phase 3 — capability screen + DGM archive.** `capability_diff` is a
-  one-directional non-escalation SIGNAL: a syntactic hit (process spawn, network,
-  dynamic code, filesystem mutation, an explicit tool/entitlement grant on an
-  ADDED line) FORCES `capability_widens=True` so the gate refuses; a clean scan
-  never asserts "bounded" (the code rung still demands the real capability proof).
-  `self_modify_archive.CodeArchive` is the DGM population — bounded,
-  diversity-aware (Jaccard patch distance), lineage-tracking, keeping the *worse*
-  ancestors to branch from (the plateau escape), persisted 0600 like the ledger.
-- **Phase 2 — the sandbox eval harness (`self_modify_eval.py`).** The empirical
-  measurement: a patch is scored on a THROWAWAY copy, never the live tree.
-  `git apply --check` gates before the real apply (routed through `sandbox.exec`,
-  kernel rule 4); baseline vs candidate are scored via an injected `score_fn`
-  (`pytest_score` runs the suite in the sandbox and scores by pass rate). Any
-  failure (copy, non-applying patch, scorer error) → non-`ok` result whose scores
-  can't clear the gate.
-- **Phase 4 — the loop + proof-gated surface widening (`self_modify_loop.py`).**
-  propose → boundary → evaluate → gate → archive, one governed cycle. The editable
-  surface is not fixed: it starts empty and WIDENS one tier at a time, and a tier
-  unlocks only after a track record of promoted, non-rolled-back changes — a
-  single rollback freezes widening (trust earned by record, forfeited by
-  regression). The agent can never widen its own surface (the widening policy
-  lives outside the editable surface; the boundary refuses any patch touching
-  `self_modify`/`config`). Autonomous search, human-gated promotion at the code
-  rung: the loop proposes/evaluates/archives freely but cannot self-promote code
-  without an Ed25519 human signature.
+The production runner deliberately refuses `apply=True`, inline approval,
+persistent archive-parent branching, host-visible or fixed-root evaluation, an
+empty/non-discriminating challenge corpus, and any non-code rung. The challenge
+tests and their argv are visible to candidate code, so they are a development
+corpus—not a sealed holdout and never deployment authorization. Archive records
+are research evidence, not promotion receipts.
 
-120 new deterministic tests across the four modules; ruff + vulture clean.
-Everything off by default; no new config section (the whole capability rides the
-existing `[self_modify]` knob + its wizard step).
+The reference monitor protects the control plane and repository trust roots,
+normalizes paths according to the exact `git apply -p1` semantics, and allows
+only a positive mutable zone. DLP checks bound proposal context, provider prompts,
+diffs, feedback, and persisted lineage. HALT is checked at learning start and
+again around expensive evaluation and durable writes. These controls reduce
+risk; none is described as a proof that arbitrary self-modification is safe.
 
-### Build log — update 5 (closing the DGM gaps: from scaffolding to operable)
-
-Update 4 shipped the governance skeleton; a candid gap audit found the parts that
-make it *actually self-improve code* were still seams or unwired. This update
-closes seven of them — the engine it governs is now real (still OFF by default,
-fail-closed, live/sandbox parts as offline-testable seams):
-
-- **Real capability proof, not a heuristic** (`self_modify_capability.py`). The
-  syntactic screen was a signal that couldn't *prove* non-escalation. Now a patch
-  is mapped to capability *classes* (process/network/dynamic-code/fs-write/…) and
-  the **real capability algebra** (`Capability.permits`) decides escalation as a
-  *differential* — a class the *after* grant permits that the baseline did not.
-  Editing a module that already opens sockets no longer false-flags; the gate gets
-  a genuine non-escalation proof (`capability_before`/`after`/`probe_tools`), and
-  a missing baseline can only over-report (fail-closed).
-- **Isolation is a machine, not a directory** (`self_modify_eval`, Gap 4). Running
-  a candidate's tests is arbitrary code execution; under
-  require-container/enterprise the harness now **refuses host exec** and fails
-  closed rather than running an untrusted patch on the host, plus a budget/timeout
-  bound.
-- **A discriminating eval** (`self_modify_corpus.py`, Gap 2). Whole-suite pass rate
-  can't tell a one-fix change from noise. A targeted corpus is split into held-in
-  and an **unseen held-out** set (reusing the self-harness split), promotion is
-  judged on held-out generalization, and a candidate that gains only on held-in is
-  flagged **overfit** and refused — per-copy execution so baseline and candidate
-  run in their own trees.
-- **Real apply + rollback** (`self_modify_apply.py`, Gap 3). The loop passed a
-  string as its "rollback". Now the reversibility handle is a real workspace
-  snapshot taken *before* the gate (so "reversible" is backed by an actual restore
-  point); an approved patch lands on the live tree via `sandbox.exec`, and a failed
-  apply auto-reverts.
-- **The generative heart** (`self_modify_loop.llm_proposer`, Gap 1). A
-  model-agnostic proposer (coding role, kernel rule 2) turns a sampled parent +
-  lineage into a unified diff, fail-open to no-proposal. The boundary + gate are
-  what make a *bad* proposal safe, so the proposer only has to produce candidates.
-- **Widening bound to the signed ledger** (Gap 6). Proof-gated surface widening
-  read the DGM archive's self-attested booleans — a mutable sidecar an attacker
-  could forge. It now derives the track record from the **signed promotion
-  ledger** (controller-owned, 0600), and freezes (fail-closed) if that record
-  can't be read.
-- **Operable** (`self_modify_runner.py` + `maverick self-modify` CLI, Gap 7).
-  Nothing invoked the loop; now a runner builds archive/proposer/eval/policy/ledger
-  from config and runs governed cycles (persisting lineage 0600), and
-  `self-modify status | run | archive` drive and inspect it. Still human-signed at
-  the code rung: it searches and archives autonomously, never self-promotes code.
-
-+107 new deterministic tests (240 across the self-modify suite); ruff + vulture
-clean; all custom gates green. Gap 8 (real-container/real-model end-to-end +
-adversarial-containment tests) is mapped for next.
-
-**Follow-up (post-review wiring).** Three residual items from the review were
-closed: (1) `apply_change` is now WIRED into the loop — with a `tree`, `run_cycle`
-snapshots it before the gate (a real rollback handle, not the candidate-id token)
-and lands a promoted change on the live tree, opt-in via `runner.run(apply=True)`
-and dormant on an autonomous search since the code rung needs a signature; (2)
-one shared `run_git_apply` primitive backs both the isolated eval and the
-live-tree deploy, so the staging/`-p1`/cleanup can't drift; (3) the runner's
-corpus eval resolves a backend PER COPY via `build_sandbox`, so a docker/gvisor
-deployment runs the baseline and candidate arms in their own trees under enforced
-policy instead of sharing one fixed-root sandbox.
-
-**Depth pass (everything outside Gap 8).** The three deferred "architectural"
-items are now done: (1) **AST capability analysis** — `classes_in_source` adds a
-structural `ast` walk (union with the regex, so strictly stricter) that catches
-import-aliasing (`from os import system as s; s()`), `getattr`/`__builtins__`
-obfuscation, and attribute calls the line regex missed; the differential and the
-screen both route through it. (2) **Audit-chain-bound widening** — the widening
-track record now prefers the SIGNED audit chain (`_audit_track_record` over
-`audit.reader.iter_events`) above the 0600 ledger and the forgeable archive, so
-"earned trust" reads from the tamper-evident WORM log; it defers to the ledger
-only when the chain carries no relevant events (fresh/offline). (3) **Baseline
-caching** — `evaluate_patch` takes a precomputed `baseline` Score and the runner
-computes the whole-suite baseline once per run (the tree is invariant on an
-autonomous search), turning N cycles' N baseline suites into one; disabled when
-`apply=True` invalidates the tree. Only Gap 8 (real-container/real-model
-end-to-end + adversarial-containment tests) remains.
+Production code adoption stays disabled until all of the following exist and
+are independently exercised: an external one-shot evaluator whose hidden cases
+cannot be observed or influenced by the candidate; a manifest binding exact
+source/evaluator/container bytes, tenant, surface, expiry, nonce, and approval;
+a cross-process PREPARE/CAS/COMMIT apply transaction with recovery; and adversarial
+containment tests on the deployment backend. A human signature alone is not
+sufficient. Until then, the defensible claim is “governed self-improvement
+research,” not “recursive self-improvement running in production.”
 
 ## Bet 5 — Consequence-Proven Autonomy → "Earned Autonomy" (the breakthrough)
 

@@ -14,6 +14,37 @@ The implementation objective in this pass was therefore twofold:
 The production-oriented paths fail closed. Compatibility paths remain opt-in
 development tools and must not be presented as independent evaluation.
 
+## 2026-07-15 implementation addendum
+
+The stock code-rung runner is now explicitly a research-only search path. It
+cannot promote or apply code, and persistent archive-parent branching remains
+disabled until development and confirmation provenance are durably separated.
+Before a coding-model proposal, it materializes one bounded Git-tracked source
+capture and binds both the proposal context and evaluator to that same capture;
+any later capture change aborts the run. Concurrent archive writers merge under
+a strict cross-process transaction, and corrupt existing lineage evidence is
+never silently replaced.
+
+Candidate execution now requires a non-host, no-egress, non-root sandbox that
+also attests bounded output capture and authenticated structured test results.
+No bundled backend currently satisfies that complete contract, so the stock
+runner deliberately refuses before provider or candidate execution. This is a
+closed security boundary, not a claim that autonomous code evolution is live.
+
+The broader learning/runtime pass also propagates global HALT through proposal,
+evaluation, persistence, rollout, factory-learning, and skill-distillation
+boundaries; requires proof-bearing rollout/rollback receipts; hardens tenant
+budget reservation settlement; and treats agent/fleet exchange as an untrusted
+signed boundary with durable replay and idempotency state. Workflow generation
+and the JD agent factory now screen provider inputs/outputs, bind tool names,
+enforce caller scope before ranking, and pin triggered templates to an immutable
+tenant-bound revision.
+
+These changes improve the protocol and its failure behavior. They still do not
+establish comparative performance, seal the development corpus from the
+candidate, provide an externally anchored evaluation broker, or justify a
+frontier/superiority claim.
+
 ## Threat model
 
 An adaptive agent can overfit task wording, evaluator quirks, model-judge

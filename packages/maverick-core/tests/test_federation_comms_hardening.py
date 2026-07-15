@@ -19,13 +19,14 @@ class _Goals:
         return self.started
 
 
-def _service(goals: _Goals | None = None) -> FederationService:
+def _service(goals: _Goals | None = None, *, state_path=None) -> FederationService:
     return FederationService(
         node="b",
         peers=[Peer("a", "a:1", "tok")],
         local_grant=None,
         goal_service=goals or _Goals(),
         record=lambda *args, **kwargs: None,
+        state_path=state_path,
     )
 
 
@@ -63,6 +64,48 @@ def test_token_mode_correlation_retry_returns_original_goal(monkeypatch):
     assert first == retry == {"accepted": True, "goal_id": 1, "reason": ""}
     assert goals.started == 1
     assert len(fed._fed_rate_hits["peer:a"]) == 1
+
+
+def test_correlation_result_survives_service_restart(monkeypatch, tmp_path):
+    monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {}))
+    goals = _Goals()
+    state_path = tmp_path / "federation.sqlite3"
+
+    first = _service(goals, state_path=state_path).delegate_goal(_payload())
+    restarted = _service(goals, state_path=state_path)
+    retry = restarted.delegate_goal(dict(_payload()))
+    changed = restarted.delegate_goal(_payload(title="changed"))
+
+    assert retry == first == {"accepted": True, "goal_id": 1, "reason": ""}
+    assert not changed["accepted"]
+    assert "different delegation content" in changed["reason"]
+    assert goals.started == 1
+
+
+def test_corrupt_correlation_store_fails_closed(monkeypatch, tmp_path):
+    monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {}))
+    goals = _Goals()
+    state_path = tmp_path / "federation.sqlite3"
+    state_path.write_bytes(b"not a sqlite database")
+
+    result = _service(goals, state_path=state_path).delegate_goal(_payload())
+
+    assert not result["accepted"]
+    assert "ledger is unavailable" in result["reason"]
+    assert goals.started == 0
+
+
+def test_sqlite_connection_cache_reopens_after_pid_change(monkeypatch, tmp_path):
+    state = fed._FederationState(tmp_path / "federation.sqlite3")
+    first = state._connect()
+    real_pid = fed.os.getpid()
+    monkeypatch.setattr(fed.os, "getpid", lambda: real_pid + 1)
+
+    second = state._connect()
+
+    assert second is not first
+    with pytest.raises(fed.sqlite3.ProgrammingError):
+        first.execute("SELECT 1")
 
 
 def test_correlation_reuse_with_changed_content_is_refused(monkeypatch):
@@ -167,6 +210,56 @@ def test_signed_mode_new_signature_same_correlation_is_idempotent(monkeypatch):
 
     assert first == retry == {"accepted": True, "goal_id": 1, "reason": ""}
     assert goals.started == 1
+
+
+def test_receiver_requires_signature_even_when_trust_plane_is_disengaged(monkeypatch):
+    monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {}))
+    monkeypatch.setattr(fed, "require_signed", lambda: True)
+    goals = _Goals()
+
+    result = _service(goals).delegate_goal(_payload("unsigned"))
+
+    assert not result["accepted"]
+    assert "signed delegation required" in result["reason"]
+    assert goals.started == 0
+
+
+def test_signature_policy_read_failure_requires_signatures(monkeypatch):
+    import maverick.config as config
+
+    monkeypatch.delenv("MAVERICK_FEDERATION_REQUIRE_SIGNED", raising=False)
+    monkeypatch.setattr(
+        config, "load_config",
+        lambda: (_ for _ in ()).throw(RuntimeError("config down")),
+    )
+
+    assert fed.require_signed() is True
+
+
+def test_capability_policy_load_failure_is_deny_all(monkeypatch):
+    import maverick.capability as capability
+
+    monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {}))
+    monkeypatch.setattr(
+        capability,
+        "capability_from_config",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("config down")),
+    )
+    goals = _Goals()
+    payload = _payload("policy-down")
+    payload["requested_tools"] = ["read_file"]
+    service = FederationService(
+        node="b",
+        peers=[Peer("a", "a:1", "tok")],
+        goal_service=goals,
+        record=lambda *args, **kwargs: None,
+    )
+
+    result = service.delegate_goal(payload)
+
+    assert not result["accepted"]
+    assert "required capabilities not granted" in result["reason"]
+    assert goals.started == 0
 
 
 @pytest.mark.parametrize("signed", [{}, {"sig": "partial-signature"}])
@@ -330,3 +423,21 @@ def test_correlation_cache_is_bounded(monkeypatch):
     # Capacity pressure must not evict a still-live idempotency record and
     # thereby reopen it to duplicate goal creation.
     assert service.delegate_goal(_payload("corr-0")) == first
+
+
+def test_rate_limited_unique_id_does_not_consume_correlation_capacity(monkeypatch):
+    monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {}))
+    monkeypatch.setenv("MAVERICK_FEDERATION_RATE_LIMIT", "1")
+    goals = _Goals()
+    service = _service(goals)
+
+    assert service.delegate_goal(_payload("allowed"))["accepted"]
+    limited = service.delegate_goal(_payload("retry-later"))
+    assert not limited["accepted"] and "rate limit" in limited["reason"]
+    assert ("a", "retry-later") not in service._correlations
+
+    # Raising the operator cap lets the same side-effect-free request claim and
+    # run; the rate refusal did not leave a 24-hour correlation tombstone.
+    monkeypatch.setenv("MAVERICK_FEDERATION_RATE_LIMIT", "600")
+    assert service.delegate_goal(_payload("retry-later"))["accepted"]
+    assert goals.started == 2

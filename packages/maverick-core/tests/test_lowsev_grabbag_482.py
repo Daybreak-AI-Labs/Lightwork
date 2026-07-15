@@ -20,9 +20,9 @@ from maverick.scheduler import CronError, next_run
 def test_cron_feb29_resolves_across_skipped_century():
     # 2100 is NOT a leap year (Gregorian century rule), so the next Feb 29 after
     # 2097 is 2104 — ~7 years out, past the old 4-year (1464-day) horizon.
-    base = dt.datetime(2097, 3, 1, 0, 0).timestamp()
+    base = dt.datetime(2097, 3, 1, 0, 0, tzinfo=dt.timezone.utc).timestamp()
     ts = next_run("0 0 29 2 *", after=base)
-    got = dt.datetime.fromtimestamp(ts)
+    got = dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc)
     assert (got.month, got.day) == (2, 29)
     assert got.year == 2104
 

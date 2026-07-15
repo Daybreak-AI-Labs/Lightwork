@@ -22,7 +22,12 @@ from maverick import config
 
 # Reuse the webhook store's slug (identical charset/length rules) so the two
 # can't drift.
-from .triggers_store import slugify
+from .triggers_store import (
+    slugify,
+    snapshot_from_template,
+    snapshot_revision,
+    validated_template_snapshot,
+)
 
 _LOCK = threading.Lock()
 
@@ -36,7 +41,7 @@ def _locked():
     from maverick.file_lock import cross_process_lock
     stack = ExitStack()
     stack.enter_context(_LOCK)
-    stack.enter_context(cross_process_lock(_path()))
+    stack.enter_context(cross_process_lock(_path(), strict=True))
     return stack
 
 
@@ -102,6 +107,10 @@ def list_triggers() -> list[dict]:
     for table_key, t in (raw.get("trigger") or {}).items():
         if not isinstance(t, dict):
             continue
+        try:
+            template_snapshot = json.loads(t.get("template_snapshot") or "null")
+        except (TypeError, ValueError):
+            template_snapshot = None
         out.append({
             # Old files used the public name as the table key. New files keep
             # the public name explicitly because the table key also namespaces
@@ -111,6 +120,10 @@ def list_triggers() -> list[dict]:
             "flow": str(t.get("flow") or ""),
             "flow_owner": str(t.get("flow_owner") or ""),
             "flow_revision": str(t.get("flow_revision") or ""),
+            "template_snapshot": (
+                template_snapshot if isinstance(template_snapshot, dict) else None
+            ),
+            "template_revision": str(t.get("template_revision") or ""),
             "source": str(t.get("source") or ""),
             "config": _decode_obj(t.get("config")),
             "params": {str(k): str(v) for k, v in _decode_obj(t.get("params")).items()},
@@ -142,6 +155,13 @@ def _dump(triggers: list[dict]) -> str:
         lines.append(f"flow = {json.dumps(str(t.get('flow') or ''))}")
         lines.append(f"flow_owner = {json.dumps(str(t.get('flow_owner') or ''))}")
         lines.append(f"flow_revision = {json.dumps(str(t.get('flow_revision') or ''))}")
+        lines.append(
+            "template_snapshot = "
+            + json.dumps(json.dumps(t.get("template_snapshot"), sort_keys=True))
+        )
+        lines.append(
+            f"template_revision = {json.dumps(str(t.get('template_revision') or ''))}"
+        )
         lines.append(f"source = {json.dumps(str(t.get('source') or ''))}")
         lines.append(f"config = {json.dumps(json.dumps(t.get('config') or {}, sort_keys=True))}")
         lines.append(f"params = {json.dumps(json.dumps(t.get('params') or {}, sort_keys=True))}")
@@ -162,7 +182,8 @@ def _write(triggers: list[dict]) -> None:
 def set_trigger(name: str, template: str, source: str, *, config: dict | None = None,
                 params: dict | None = None, owner: str = "", cursor: str = "",
                 interval_seconds: int = 0, tenant: str = "", flow: str = "",
-                flow_owner: str = "", flow_revision: str = "") -> dict:
+                flow_owner: str = "", flow_revision: str = "",
+                template_snapshot: dict | None = None) -> dict:
     """Create or replace an event trigger (by slugified name). Raises ValueError
     on an un-sluggable name. Preserves the existing cursor on replace unless one
     is passed, so re-saving a trigger doesn't replay its whole backlog.
@@ -173,6 +194,29 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
     slug = slugify(name)
     if not _NAME_RE.match(slug):
         raise ValueError("trigger name must contain a letter or digit (a-z, 0-9, -)")
+    if flow and template_snapshot is not None:
+        raise ValueError("flow triggers cannot include a template snapshot")
+    # Direct store callers get the same creation-time pinning as the REST API
+    # whenever their target exists. A missing target remains a legacy/unbound
+    # row and is refused by the fire path until it is re-saved safely.
+    if template and template_snapshot is None:
+        from maverick.paths import reset_tenant, set_tenant
+        from maverick.templates import load_template
+
+        token = set_tenant(str(tenant) or None)
+        try:
+            template_snapshot = snapshot_from_template(load_template(template))
+        except (FileNotFoundError, ValueError):
+            template_snapshot = None
+        finally:
+            reset_tenant(token)
+    normalised_snapshot = None
+    template_rev = ""
+    if template_snapshot is not None:
+        normalised_snapshot = validated_template_snapshot(template_snapshot)
+        if normalised_snapshot["name"] != str(template):
+            raise ValueError("template snapshot does not match the trigger target")
+        template_rev = snapshot_revision(normalised_snapshot)
     with _locked():
         existing = list_triggers()
         tenant = str(tenant)
@@ -193,6 +237,8 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             "flow": str(flow),
             "flow_owner": str(flow_owner),
             "flow_revision": str(flow_revision),
+            "template_snapshot": normalised_snapshot,
+            "template_revision": template_rev,
             "source": str(source),
             "config": dict(config or {}),
             "params": {str(k): str(v) for k, v in (params or {}).items()},

@@ -191,6 +191,22 @@ class TestLedger:
         assert private_path_is_restricted(path, 0o600)
         assert not list(path.parent.glob(f".{path.name}-*.tmp"))
 
+    def test_halt_at_final_record_boundary_leaves_no_ledger(
+        self, monkeypatch, tmp_path,
+    ):
+        from maverick.killswitch import Halted
+
+        path = tmp_path / "learned.ndjson"
+
+        def guard(_job: str, phase: str) -> None:
+            if phase == "record_persistence":
+                raise Halted("operator stop", "test")
+
+        monkeypatch.setattr(self_learning, "check_learning_halt", guard)
+        with pytest.raises(Halted):
+            self_learning.record("send sms", "skill", "twilio-sms", path=path)
+        assert not path.exists()
+
     def test_history_empty_when_no_file(self, tmp_path):
         assert self_learning.history(path=tmp_path / "nope.ndjson") == []
 
@@ -401,7 +417,55 @@ class TestCatalogSearch:
 
         monkeypatch.setattr(skills, "install_from_catalog", fake_install)
         assert self_learning.acquire_skill("signed-skill") == "# trusted steps"
+        before_save = observed.pop("before_save")
         assert observed == {"require_signature": True}
+        assert callable(before_save)
+        before_save()
+
+    def test_agent_skill_acquisition_halts_at_catalog_save_boundary(
+        self, monkeypatch,
+    ):
+        from maverick import skills
+        from maverick.killswitch import Halted
+
+        def fake_install(_name, **kwargs):
+            kwargs["before_save"]()
+            raise AssertionError("HALT callback must not return")
+
+        def guard(_job: str, phase: str) -> None:
+            if phase == "skill_persistence":
+                raise Halted("operator stop", "test")
+
+        monkeypatch.setattr(skills, "install_from_catalog", fake_install)
+        monkeypatch.setattr(self_learning, "check_learning_halt", guard)
+        with pytest.raises(Halted):
+            self_learning.acquire_skill("signed-skill")
+
+    def test_halt_after_skill_commit_does_not_report_false_failure(
+        self, monkeypatch, tmp_path,
+    ):
+        from maverick import skills
+        from maverick.killswitch import Halted
+
+        state = {"committed": False}
+
+        def fake_install(name, **kwargs):
+            kwargs["before_save"]()
+            state["committed"] = True
+            return SimpleNamespace(
+                name=name,
+                path=tmp_path / f"{name}.md",
+                body="# trusted steps",
+            )
+
+        def guard(_job: str, _phase: str) -> None:
+            if state["committed"]:
+                raise Halted("operator stop", "test")
+
+        monkeypatch.setattr(skills, "install_from_catalog", fake_install)
+        monkeypatch.setattr(self_learning, "check_learning_halt", guard)
+        assert self_learning.acquire_skill("signed-skill") == "# trusted steps"
+        assert [row.name for row in self_learning.history()] == ["signed-skill"]
 
     def test_installed_skill_path_follows_active_tenant(self, monkeypatch, tmp_path):
         from maverick import skills
@@ -529,6 +593,23 @@ class TestAddMcpServer:
         assert "[mcp_servers.weathermcp]" in text
         assert 'command = "node"' in text
         assert 'args = ["server.js"]' in text
+
+    def test_halt_at_config_write_boundary_leaves_config_unchanged(
+        self, monkeypatch, tmp_path,
+    ):
+        from maverick.killswitch import Halted
+
+        cfg = tmp_path / "config.toml"
+        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+
+        def guard(_job: str, phase: str) -> None:
+            if phase == "mcp_config_persistence":
+                raise Halted("operator stop", "test")
+
+        monkeypatch.setattr(self_learning, "check_learning_halt", guard)
+        with pytest.raises(Halted):
+            self_learning.add_mcp_server("test_server", "node")
+        assert not cfg.exists()
 
     def test_atomic_write_preserves_existing_and_leaves_no_temp(self, monkeypatch, tmp_path):
         # The block is written via unique private staging, not appended to the live
@@ -672,11 +753,21 @@ class TestAddMcpServer:
 class TestAcquireMcpServer:
     """Catalog-pinned + consent-gated acquisition (#422)."""
 
-    def _entry(self, source="node weather-server.js", sha256=""):
+    def _entry(self, source="weather-mcp --stdio", sha256="ab" * 32):
         return CatalogEntry(
             name="weather", version="1.0.0", kind="mcp",
             summary="weather", source=source, sha256=sha256, verified=True,
         )
+
+    def _consent_scope(self, source, sha256, *, tenant="shared"):
+        from maverick.mcp_client import MCPServerSpec
+
+        command, args = self_learning._parse_catalog_mcp_source(source)
+        spec = MCPServerSpec(
+            name="weather", command=command, args=args, pin_sha256=sha256,
+        )
+        digest = self_learning._canonical_mcp_spec_digest(spec)
+        return self_learning._mcp_consent_scope(tenant, "weather", digest)
 
     def test_rejects_unknown_catalog_name(self, monkeypatch, tmp_path):
         monkeypatch.setattr("maverick.config.config_path", lambda: tmp_path / "c.toml")
@@ -707,20 +798,147 @@ class TestAcquireMcpServer:
     def test_approved_persists_with_pin(self, monkeypatch, tmp_path):
         from maverick.safety import consent
         cfg = tmp_path / "config.toml"
+        source = "weather-mcp --stdio"
+        pin = "cd" * 32
         monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
         monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
         monkeypatch.setattr(
             "maverick.catalog.resolve",
-            lambda *a, **k: self._entry(source="npx -y @scope/weather", sha256="cd" * 32))
+            lambda *a, **k: self._entry(source=source, sha256=pin))
         monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
-        consent.grant_persistent("add-mcp-server", scope="weather")
+        consent.grant_persistent(
+            "add-mcp-server", scope=self._consent_scope(source, pin))
         spec = self_learning.acquire_mcp_server("weather")
-        assert spec.command == "npx"
-        assert spec.args == ["-y", "@scope/weather"]
-        assert spec.pin_sha256 == "cd" * 32
+        assert spec.command == "weather-mcp"
+        assert spec.args == ["--stdio"]
+        assert spec.pin_sha256 == pin
         text = cfg.read_text()
-        assert 'command = "npx"' in text
-        assert f'pin_sha256 = "{"cd" * 32}"' in text
+        assert 'command = "weather-mcp"' in text
+        assert f'pin_sha256 = "{pin}"' in text
+
+    @pytest.mark.parametrize(
+        "pin",
+        ["", "AB" * 32, "gg" * 32, "ab" * 31, "ab" * 33],
+    )
+    def test_rejects_missing_or_noncanonical_pin(
+        self, monkeypatch, tmp_path, pin,
+    ):
+        cfg = tmp_path / "config.toml"
+        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr(
+            "maverick.catalog.resolve",
+            lambda *a, **k: self._entry(sha256=pin),
+        )
+
+        with pytest.raises(ValueError, match="canonical lowercase 64-hex"):
+            self_learning.acquire_mcp_server("weather")
+
+        assert not cfg.exists()
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "npx -y @scope/weather", "npm exec weather", "pnpm dlx weather",
+            "yarn dlx weather", "bunx weather", "uvx weather", "pipx run weather",
+            "/usr/bin/npx --yes weather", "NPX.EXE --yes weather",
+            "python server.py", "python3.12 server.py", "node server.js",
+            "sh server.sh", "env python server.py", "busybox sh server.sh",
+            "powershell -File server.ps1", "cmd.exe /c server.cmd",
+            "java -jar server.jar", "dotnet server.dll", "docker run mcp:latest",
+            "ssh mcp.example server",
+        ],
+    )
+    def test_rejects_package_launchers_whose_package_bytes_are_not_pinned(
+        self, monkeypatch, tmp_path, source,
+    ):
+        cfg = tmp_path / "config.toml"
+        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr(
+            "maverick.catalog.resolve",
+            lambda *a, **k: self._entry(source=source),
+        )
+
+        with pytest.raises(ValueError, match="not the downloaded package bytes"):
+            self_learning.acquire_mcp_server("weather")
+
+        assert not cfg.exists()
+
+    def test_consent_scope_binds_tenant_and_canonical_spec(
+        self, monkeypatch, tmp_path,
+    ):
+        from maverick.safety import consent
+
+        cfg = tmp_path / "config.toml"
+        source = "weather-mcp --stdio"
+        pin = "cd" * 32
+        scopes = []
+        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr(
+            "maverick.catalog.resolve",
+            lambda *a, **k: self._entry(source=source, sha256=pin),
+        )
+
+        def approve(_action, **kwargs):
+            scopes.append(kwargs["scope"])
+            return SimpleNamespace(granted=True)
+
+        monkeypatch.setattr(consent, "require_consent", approve)
+        with tenant_scope(tenant="acme"):
+            self_learning.acquire_mcp_server("weather")
+
+        assert scopes == [self._consent_scope(source, pin, tenant="acme")]
+        assert scopes[0].startswith("acme:weather:")
+
+    def test_tenant_change_during_consent_refuses_persistence(
+        self, monkeypatch, tmp_path,
+    ):
+        from maverick import paths
+        from maverick.safety import consent
+
+        cfg = tmp_path / "config.toml"
+        tenants = iter(("acme", "globex"))
+        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr(
+            "maverick.catalog.resolve", lambda *a, **k: self._entry())
+        monkeypatch.setattr(paths, "current_tenant_id", lambda: next(tenants))
+        monkeypatch.setattr(
+            consent, "require_consent",
+            lambda *_args, **_kwargs: SimpleNamespace(granted=True),
+        )
+
+        with pytest.raises(ValueError, match="active tenant changed"):
+            self_learning.acquire_mcp_server("weather")
+
+        assert not cfg.exists()
+
+    def test_tenant_overlay_does_not_leak_mcp_authority_cross_tenant(
+        self, monkeypatch, tmp_path,
+    ):
+        from maverick import config
+        from maverick.safety import consent
+
+        global_config = tmp_path / "global-config.toml"
+        monkeypatch.setattr(config, "config_path", lambda: global_config)
+        monkeypatch.setattr(
+            "maverick.catalog.resolve", lambda *a, **k: self._entry())
+        monkeypatch.setattr(
+            consent, "require_consent",
+            lambda *_args, **_kwargs: SimpleNamespace(granted=True),
+        )
+
+        with tenant_scope(tenant="acme"):
+            self_learning.acquire_mcp_server("weather")
+            acme_path = config.tenant_config_path()
+            assert acme_path is not None and acme_path.exists()
+            assert "weather" in (config.load_config().get("mcp_servers") or {})
+
+        with tenant_scope(tenant="globex"):
+            assert "weather" not in (config.load_config().get("mcp_servers") or {})
+            globex_path = config.tenant_config_path()
+            assert globex_path is not None and not globex_path.exists()
+
+        assert "weather" not in (config.load_config().get("mcp_servers") or {})
+        assert not global_config.exists()
 
     def test_catalog_shell_meta_command_still_rejected(self, monkeypatch, tmp_path):
         # Even a (compromised) catalog entry whose command carries a shell
@@ -731,10 +949,6 @@ class TestAcquireMcpServer:
         monkeypatch.setattr(
             "maverick.catalog.resolve",
             lambda *a, **k: self._entry(source="node;rm"))
-        from maverick.safety import consent
-        monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
-        monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
-        consent.grant_persistent("add-mcp-server", scope="weather")
         with pytest.raises(ValueError):
             self_learning.acquire_mcp_server("weather")
         assert not cfg.exists()
@@ -761,6 +975,24 @@ class TestGeneratedTools:
         assert any(t.name == "greet_gen" for t in loaded)
         loaded_tool = next(t for t in loaded if t.name == "greet_gen")
         assert loaded_tool.fn({"who": "Grace"}) == "hi Grace"
+
+    def test_halt_at_generated_tool_write_boundary_leaves_no_source(
+        self, monkeypatch,
+    ):
+        from maverick.killswitch import Halted
+
+        def guard(_job: str, phase: str) -> None:
+            if phase == "generated_tool_persistence":
+                raise Halted("operator stop", "test")
+
+        monkeypatch.setattr(self_learning, "check_learning_halt", guard)
+        with pytest.raises(Halted):
+            self_learning.write_generated_tool(
+                "halted_tool",
+                good_tool_source("halted_tool"),
+                sandbox=SecureSandbox(),
+            )
+        assert not (self_learning.GENERATED_TOOLS_DIR / "halted_tool.py").exists()
 
     def test_load_with_no_safe_sandbox_returns_no_tools(self):
         self_learning.write_generated_tool(
@@ -1470,8 +1702,8 @@ class TestLearnTool:
         monkeypatch.setenv("MAVERICK_ALLOW_MCP_ACQUISITION", "1")
         entry = CatalogEntry(
             name="weather", version="1.0.0", kind="mcp",
-            summary="weather mcp", source="node weather-server.js",
-            sha256="", author="curator", verified=True,
+            summary="weather mcp", source="weather-mcp --stdio",
+            sha256="ef" * 32, author="curator", verified=True,
         )
         monkeypatch.setattr(
             "maverick.catalog.resolve", lambda name, kind, **kw: entry)
@@ -1495,10 +1727,21 @@ class TestLearnTool:
         # Explicitly approved -> persisted to config (start will fail on the fake cmd).
         from maverick.safety import consent
         monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
-        consent.grant_persistent("add-mcp-server", scope="weather")
+        command, args = self_learning._parse_catalog_mcp_source(entry.source)
+        from maverick.mcp_client import MCPServerSpec
+        mcp_spec = MCPServerSpec(
+            name="weather", command=command, args=args,
+            pin_sha256=entry.sha256,
+        )
+        spec_digest = self_learning._canonical_mcp_spec_digest(mcp_spec)
+        consent.grant_persistent(
+            "add-mcp-server",
+            scope=self_learning._mcp_consent_scope(
+                "shared", "weather", spec_digest),
+        )
         out = await tool.fn({"op": "add_mcp_server", "name": "weather"})
         assert "[mcp_servers.weather]" in cfg.read_text()
-        assert 'command = "node"' in cfg.read_text()
+        assert 'command = "weather-mcp"' in cfg.read_text()
 
     def test_add_mcp_server_advertised_in_schema(self, stub_agent):
         from maverick.tools.learn import learn_capability

@@ -28,17 +28,16 @@ import logging
 import os
 import re
 import time
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 from .config import env_flag
-from .paths import data_dir
 
 log = logging.getLogger(__name__)
 
-_LEGACY_DIR = data_dir("fleet-memory")
 _MAX_TEXT = 2000
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 KINDS = ("success", "failure", "lesson")
@@ -95,8 +94,8 @@ def _authorize_claim(agent_id: str) -> str | None:
     try:
         from . import agent_trust
         enforced, _ = agent_trust.load_trust_state()
-    except Exception:  # pragma: no cover - config read never breaks the plane
-        enforced = False
+    except Exception:
+        return "agent trust state is unavailable"
     if enforced:
         return ("shared-token caller cannot act as a specific fleet agent while "
                 "the agent trust plane is engaged; use a per-caller mcp_token")
@@ -104,13 +103,13 @@ def _authorize_claim(agent_id: str) -> str | None:
 
 
 def _dir() -> Path:
-    try:
-        from .paths import current_tenant, data_dir
-        if current_tenant():
-            return data_dir("fleet-memory")
-    except Exception:  # pragma: no cover
-        pass
-    return _LEGACY_DIR
+    from .paths import current_tenant_id, data_dir
+
+    # ``data_dir`` resolves the active tenant dynamically. When no tenant is
+    # active, force the legacy shared path explicitly; never pin whichever
+    # tenant happened to import this module first.
+    tenant = current_tenant_id()
+    return data_dir("fleet-memory", tenant=tenant or None)
 
 
 def inbox_dir() -> Path:
@@ -148,8 +147,8 @@ def _sanitize(text: str, *, shield: Any | None) -> str | None:
     try:
         from .safety.secret_detector import redact as _redact
         safe, _ = _redact(safe)
-    except Exception:  # pragma: no cover
-        pass
+    except Exception:
+        return None
     # Fleet records are EXTERNAL-trust, third-party input that later rides into
     # orchestrator prompts via dream/reflexion recall. Apply the same injection
     # tripwire memory_guard uses for EXTERNAL writes (it documents this list as
@@ -159,8 +158,8 @@ def _sanitize(text: str, *, shield: Any | None) -> str | None:
         from .memory_guard import injection_markers
         if injection_markers(safe):
             return None
-    except Exception:  # pragma: no cover -- screening failure must not crash ingest
-        pass
+    except Exception:
+        return None
     if shield is not None:
         try:
             verdict = shield.scan_input(safe)
@@ -231,6 +230,8 @@ def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
     """
     if not enabled():
         return False, "fleet memory is disabled ([fleet_memory] enable = true)"
+    if not isinstance(record, dict):
+        return False, "record must be an object"
     agent_id = str(record.get("agent_id", "") or "")
     vendor = str(record.get("vendor", "") or "")
     # Re-validate the identifiers up front: ingest later builds an inbox
@@ -258,8 +259,19 @@ def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
         return False, "record blocked by Shield"
     if not goal_text.strip():
         return False, "goal_text is required"
-    tools = [str(t)[:80] for t in (record.get("tools_used") or [])[:16]]
-    domain = str(record.get("domain", "") or "") or None
+    raw_tools = record.get("tools_used") or []
+    if not isinstance(raw_tools, list):
+        return False, "tools_used must be a list"
+    tools: list[str] = []
+    for raw_tool in raw_tools[:16]:
+        safe_tool = _sanitize(raw_tool, shield=shield)
+        if safe_tool is None:
+            return False, "record blocked by safety screening"
+        tools.append(safe_tool[:80])
+    raw_domain = str(record.get("domain", "") or "")
+    domain = _sanitize(raw_domain, shield=shield) if raw_domain else None
+    if raw_domain and domain is None:
+        return False, "record blocked by safety screening"
 
     # Trust-plane gate on the WRITE path (memory-poisoning defense): when
     # engaged, an external agent may only deposit into a data scope its
@@ -276,8 +288,9 @@ def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
                 agent_trust.record_denied(agent_id, d, direction="inbound")
                 _audit("ingest_blocked", source=source, reason=d.rule)
                 return False, f"ingest refused by agent trust plane: {d.reason}"
-    except Exception:  # pragma: no cover - trust read never breaks the default path
-        pass
+    except Exception:
+        _audit("ingest_blocked", source=source, reason="trust_state_unavailable")
+        return False, "ingest refused: agent trust state is unavailable"
 
     if kind == "lesson":
         from . import reflexion
@@ -297,13 +310,15 @@ def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
         "task_brief_text": goal_text,
         "outcome": "success" if kind == "success" else "failure",
         "tools_used": tools, "verifier_critique": reflection or "",
-        "source": source, "vendor": vendor,
+        "source": source, "vendor": vendor, "domain": domain,
     }
     try:
         inbox = inbox_dir()
-        inbox.mkdir(parents=True, exist_ok=True)
-        name = f"{int(time.time() * 1000)}-{vendor}-{agent_id}.json"
-        (inbox / name).write_text(json.dumps(row), encoding="utf-8")
+        from .file_lock import atomic_write_text, ensure_private_directory
+
+        ensure_private_directory(inbox)
+        name = f"{int(time.time() * 1000)}-{uuid.uuid4().hex}-{vendor}-{agent_id}.json"
+        atomic_write_text(inbox / name, json.dumps(row, sort_keys=True))
     except OSError as e:
         log.warning("fleet_memory: ingest write failed: %s", e)
         return False, "write failed"
@@ -323,6 +338,8 @@ def recall(
     """
     if not enabled():
         return "", "fleet memory is disabled ([fleet_memory] enable = true)"
+    if not (_ID_RE.match(agent_id or "") and _ID_RE.match(vendor or "")):
+        return "", "invalid agent_id or vendor"
     source = f"{vendor}:{agent_id}"
     if not any(r.get("source") == source for r in roster()):
         return "", f"unregistered fleet agent {source!r}"
@@ -346,8 +363,9 @@ def recall(
             if d.denied:
                 agent_trust.record_denied(agent_id, d, direction="inbound")
                 return "", d.reason
-    except Exception:  # pragma: no cover - trust read never breaks the default path
-        enforced = False
+    except Exception:
+        _audit("recall_blocked", source=source, reason="trust_state_unavailable")
+        return "", "recall refused: agent trust state is unavailable"
     safe_query = _sanitize(query, shield=shield)
     if safe_query is None or not safe_query.strip():
         return "", "query blocked or empty"

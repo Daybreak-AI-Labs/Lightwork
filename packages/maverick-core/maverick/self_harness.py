@@ -43,6 +43,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .learning_guard import Halted, check_learning_halt
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -1246,9 +1247,12 @@ def propose_addendum(sig: FailureSignature, *, propose_fn: ProposeFn | None = No
     'why this should help') is carried as METADATA into the audit + provenance,
     never into the prompt. Returns ``None`` if the proposal is empty or too long
     to be 'minimal'."""
+    check_learning_halt("self_harness", "proposal")
     fn = propose_fn or _default_propose
     try:
         line, hypothesis = _proposal_parts(fn(sig))
+    except Halted:
+        raise
     except Exception as e:  # pragma: no cover -- a bad proposer can't crash the loop
         log.warning("self_harness: proposer failed for %s (%s)", sig.signature, e)
         return None
@@ -1452,6 +1456,7 @@ def _structured_evidence(v: object, fallback: int) -> tuple[int, int, tuple | No
 
 def _call_score(fn: ScoreFn, add: str, cases: list[str]) -> tuple[object, bool]:
     """Call one arm and snapshot its cleanliness before the next arm overwrites it."""
+    check_learning_halt("self_harness", "evaluation")
     value = fn(add, cases)
     clean = bool(getattr(fn, "last_clean", True))
     if isinstance(value, Mapping) and "clean" in value:
@@ -1499,12 +1504,16 @@ def _metamorphic_failure(
                 holdout_authorize("metamorphic", signature, list(held_out)))
             if not math.isfinite(metamorphic_z) or metamorphic_z <= 0:
                 raise ValueError("invalid holdout critical value")
+        except Halted:
+            raise
         except Exception:
             return ValidationResult(
                 False, in_delta, out_delta,
                 "sealed holdout authorization failed", **result_base)
     try:
         mcases = [str(c) for c in (metamorphic_fn(list(held_out)) or [])]
+    except Halted:
+        raise
     except Exception:
         return ValidationResult(False, in_delta, out_delta,
                                 _INDETERMINATE_REASON, **result_base)
@@ -1529,6 +1538,8 @@ def _metamorphic_failure(
             score_without=score_without,
             candidate_first=(holdout_authorize is None or digest[0] % 2 == 0),
         )
+    except Halted:
+        raise
     except Exception:
         return ValidationResult(False, in_delta, out_delta,
                                 _INDETERMINATE_REASON, **result_base)
@@ -1709,6 +1720,8 @@ def validate_proposal(  # noqa: C901 - gate remains one fail-closed evidence bou
             if not math.isfinite(permit_z) or permit_z <= 0:
                 raise ValueError("invalid holdout critical value")
             confidence_z = max(confidence_z, permit_z)
+        except Halted:
+            raise
         except Exception:
             return ValidationResult(
                 False, 0.0, 0.0, "sealed holdout authorization failed",
@@ -1731,6 +1744,8 @@ def validate_proposal(  # noqa: C901 - gate remains one fail-closed evidence bou
             add=add, cases=held_out, score_with=score_with,
             score_without=score_without,
             candidate_first=(not in_candidate_first if sealed_ab else True))
+    except Halted:
+        raise
     except Exception:
         return ValidationResult(
             False, 0.0, 0.0, _INDETERMINATE_REASON,
@@ -2741,7 +2756,7 @@ def _best_validated_candidate(
     return selected, confirmed
 
 
-def run_self_harness(
+def run_self_harness(  # noqa: C901 - fail-closed orchestration boundary
     reflexions: list[dict], *, model_id: str,
     held_in: list[str] | None = None, held_out: list[str] | None = None,
     score_with: ScoreFn | None = None, score_without: ScoreFn | None = None,
@@ -2788,8 +2803,9 @@ def run_self_harness(
     after validation and immediately before the governed apply transaction. It
     lets risk-limited callers bind a just-completed evaluation to a fresh judge
     calibration window; default ``None`` preserves historical behavior.
-    Returns a :class:`SelfHarnessReport`. Never raises -- a learning pass must
-    not perturb anything."""
+    Returns a :class:`SelfHarnessReport`. Operational failures are captured in
+    the report, but :class:`Halted` is deliberately re-raised so an operator
+    interlock cannot be mistaken for an ordinary no-change pass."""
     report = SelfHarnessReport(model_id=str(model_id))
     if not enabled():
         report.skipped.append("disabled")
@@ -2798,6 +2814,7 @@ def run_self_harness(
     # (verifier-drift freeze armed / promotion gate off), not just observed.
     report.frozen, report.gate_enabled = _governance_readiness()
     try:
+        check_learning_halt("self_harness", "start")
         sim_fn = similarity_fn or (semantic_similarity if semantic_mining else None)
         sigs = mine_failures(reflexions, model_id=model_id, min_support=min_support,
                              min_support_by_class=min_support_by_class,
@@ -2834,6 +2851,8 @@ def run_self_harness(
             if eval_for_context is not None and sig.context:
                 try:
                     quad = eval_for_context(sig.context)
+                except Halted:
+                    raise
                 except Exception:  # a bad seam keeps the defaults, never crashes
                     log.debug("self_harness: eval_for_context failed", exc_info=True)
                     quad = None
@@ -2912,17 +2931,20 @@ def run_self_harness(
                 log.warning("self_harness: learned line may conflict with existing "
                             "guidance for %s: %r vs %r", model_id,
                             proposal.addendum_line, c)
+    except Halted:
+        raise
     except Exception as e:  # pragma: no cover -- learning never perturbs a run
         log.warning("self_harness: pass failed (%s)", e)
         report.skipped.append(f"error: {e}")
     return report
 
 
-def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
-                    controller=None, path: Path | None = None,
-                    canary: bool = False,
-                    promotion_authorize: Callable[[], bool] | None = None,
-                    ) -> tuple[bool, str]:
+def _gate_and_apply(  # noqa: C901 - durable promotion transaction boundary
+    proposal: HarnessProposal, vr: ValidationResult, *,
+    controller=None, path: Path | None = None,
+    canary: bool = False,
+    promotion_authorize: Callable[[], bool] | None = None,
+) -> tuple[bool, str]:
     """Prepare, CAS-apply, and commit one governed prompt promotion.
 
     The durable ledger never claims promotion before the exact intended addenda
@@ -2933,10 +2955,13 @@ def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
     from . import self_improvement as si
     from .file_lock import cross_process_lock
 
+    check_learning_halt("self_harness", "promotion")
     if promotion_authorize is not None:
         try:
             if promotion_authorize() is not True:
                 return False, "fresh evaluator-bound calibration receipt unavailable"
+        except Halted:
+            raise
         except Exception:
             log.debug(
                 "self_harness: promotion evidence authorization failed",
@@ -2976,6 +3001,8 @@ def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
             after_store[store_key] = _compose_addendum(
                 store_key, before_store.get(store_key, ""), proposal.addendum_line)
             after_revision = _addenda_artifact_revision(p, after_store)
+        except Halted:
+            raise
         except Exception as exc:
             log.warning(
                 "self_harness: cannot establish addenda transaction baseline: %s", exc)
@@ -3006,6 +3033,10 @@ def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
             provenance={"source": "self_harness", "signature": proposal.signature,
                         "hypothesis": proposal.hypothesis or None},
         )
+        # Close the validation-to-apply race: a HALT that lands while the
+        # evaluator or authorization receipt is running must refuse the
+        # privileged transition before PREPARE or artifact mutation.
+        check_learning_halt("self_harness", "promotion")
         preparation = si.prepare_promotion(
             cand, before=before_revision, after=after_revision,
             controller=active)
@@ -3018,11 +3049,32 @@ def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
                 return False, "committed promotion artifact is not deployed"
         elif preparation.needs_apply:
             try:
+                check_learning_halt("self_harness", "apply")
                 written = _apply_addendum_locked(
                     proposal, p, before_store, provenance=apply_prov)
                 observed = _addenda_artifact_revision(p, _load_addenda_strict(p))
                 if written != after_store or observed != after_revision:
                     raise RuntimeError("addenda CAS readback differs from prepared intent")
+            except Halted:
+                # HALT is not an evaluation rejection.  Close the durable
+                # PREPARE when the exact before artifact remains live, retain
+                # it for recovery otherwise, and always propagate the distinct
+                # interlock signal to the scheduler.
+                try:
+                    observed = _addenda_artifact_revision(
+                        p, _load_addenda_strict(p))
+                    aborted = si.abort_prepared(
+                        preparation, artifact=observed,
+                        reason="HALT before addenda artifact application",
+                        controller=active)
+                    if "in doubt" in (aborted.blocking_reason or "").lower():
+                        log.warning(
+                            "self_harness: HALT left addenda transaction in doubt")
+                except Exception:
+                    log.warning(
+                        "self_harness: HALT transaction cleanup failed; recovery required",
+                        exc_info=True)
+                raise
             except Exception as exc:
                 log.warning("self_harness: addenda transaction apply failed: %s", exc)
                 try:

@@ -36,7 +36,9 @@ def _default_halt_file() -> Path:
     ``Path.home()`` per call keeps the killswitch trustworthy — the one
     place we can least afford a stale path.
     """
-    return data_dir("HALT")
+    # One local operator stop must cover every tenant/fleet in the process.
+    # Tenant-scoping this path lets a tenant silently watch a different file.
+    return data_dir("HALT", tenant=None)
 
 
 class Halted(Exception):
@@ -92,26 +94,50 @@ def clear() -> None:
         _in_process_halt = None
 
 
-def _file_halt_active(min_interval: float = 1.0) -> bool:
+def _file_halt_active(
+    min_interval: float = 1.0, *, fail_closed: bool = False,
+) -> bool:
     """Check the HALT file at most once per ``min_interval`` seconds.
 
     Avoids stat-ing the filesystem on every tool call. The 1s cache is
     invisible to humans triggering halts but cheap enough to not matter.
     """
     global _last_file_check_ts, _last_file_present
-    now = time.time()
-    if now - _last_file_check_ts < min_interval:
+    now = time.monotonic()
+    elapsed = now - _last_file_check_ts
+    # ``0.0`` is the explicit cache-reset sentinel used by tests and process
+    # startup.  Also refuse to reuse a cache entry if a patched/platform clock
+    # ever moves backwards.  ``monotonic`` avoids ordinary wall-clock jumps.
+    if _last_file_check_ts > 0.0 and 0.0 <= elapsed < min_interval:
         return _last_file_present
     _last_file_check_ts = now
+    path = _halt_file_path()
     try:
-        _last_file_present = _halt_file_path().exists()
-    except OSError:
+        path.stat()
+        _last_file_present = True
+    except FileNotFoundError:
+        # An explicitly configured authority whose parent/mount is absent is
+        # not equivalent to an absent HALT file. Privileged learning callers
+        # must refuse because the configured stop channel cannot be observed.
+        if fail_closed and os.environ.get("MAVERICK_HALT_FILE"):
+            try:
+                path.parent.stat()
+            except OSError as parent_exc:
+                raise Halted(
+                    "HALT file authority unavailable", "file-error",
+                ) from parent_exc
+        _last_file_present = False
+    except (OSError, ValueError) as exc:
+        if fail_closed:
+            raise Halted("HALT file authority unavailable", "file-error") from exc
         _last_file_present = False
     return _last_file_present
 
 
-def _shared_halt_active(min_interval: float = 2.0) -> tuple[str, str] | None:
-    """The cluster-wide halt from the shared world store, throttled + fail-open.
+def _shared_halt_active(
+    min_interval: float = 2.0, *, fail_closed: bool = False,
+) -> tuple[str, str] | None:
+    """Read the cluster-wide halt with caller-selected outage posture.
 
     Only engaged on a shared backend (Postgres): the SQLite single-host path is
     already covered by the local HALT file, and querying a per-host SQLite world
@@ -119,14 +145,28 @@ def _shared_halt_active(min_interval: float = 2.0) -> tuple[str, str] | None:
     ``(reason, source)`` when armed, else ``None``. Any error -> keep the last
     known state and drop the cached handle so the next check reconnects -- the
     killswitch must never wedge a run on a shared-store hiccup, but a transient
-    read error must not silently drop a real halt either.
+    read error must not silently drop a real halt either. Privileged callers
+    set ``fail_closed`` and receive ``Halted(source="shared-error")`` instead.
     """
     global _last_shared_check_ts, _last_shared_halt, _shared_world
-    now = time.time()
-    if now - _last_shared_check_ts < min_interval:
+    now = time.monotonic()
+    elapsed = now - _last_shared_check_ts
+    if _last_shared_check_ts > 0.0 and 0.0 <= elapsed < min_interval:
         return _last_shared_halt
     _last_shared_check_ts = now
     try:
+        if fail_closed:
+            # ``is_postgres_configured`` deliberately fails soft when config is
+            # unreadable. That is appropriate for ordinary availability-first
+            # callers, but privileged learning transitions must not interpret
+            # a malformed backend policy as "SQLite, so no shared HALT exists".
+            # Force all active sources to be read, then inspect the config
+            # health seam before deciding whether the cluster authority applies.
+            from .config import config_source_errors, load_config
+
+            load_config()
+            if config_source_errors():
+                raise RuntimeError("shared HALT backend configuration unreadable")
         from .world_model_backends import is_postgres_configured
         if not is_postgres_configured():
             _last_shared_halt = None
@@ -139,20 +179,40 @@ def _shared_halt_active(min_interval: float = 2.0) -> tuple[str, str] | None:
             (state.get("reason") or "cluster halt", state.get("source") or "shared")
             if state else None
         )
-    except Exception:  # pragma: no cover -- fail-open; reconnect next time
+    except Exception as exc:  # reconnect next time; posture is caller-selected
         _shared_world = None
+        if fail_closed:
+            raise Halted(
+                "cluster HALT authority unavailable", "shared-error",
+            ) from exc
     return _last_shared_halt
 
 
-def check() -> None:
-    """Raise ``Halted`` if any halt source is active."""
+def check(*, force_refresh: bool = False, fail_closed: bool = False) -> None:
+    """Raise ``Halted`` if any halt source is active.
+
+    Hot agent boundaries use the normal one/two-second file/shared caches.
+    Privileged, comparatively infrequent transitions such as learning
+    promotions pass ``force_refresh=True`` so a HALT that lands during an
+    evaluation cannot hide behind a stale negative cache entry.  Learning and
+    other privileged mutations additionally pass ``fail_closed=True``: an
+    unreadable configured HALT authority then refuses work rather than being
+    mistaken for an inactive stop.  The ordinary agent hot path keeps its
+    historical availability-first behavior by leaving this flag false.
+    """
     with _state_lock:
         ip = _in_process_halt
     if ip is not None:
         raise Halted(ip[0], ip[1])
-    if _file_halt_active():
+    file_interval = 0.0 if force_refresh else 1.0
+    shared_interval = 0.0 if force_refresh else 2.0
+    if _file_halt_active(
+        min_interval=file_interval, fail_closed=fail_closed,
+    ):
         raise Halted(f"HALT file present at {_halt_file_path()}", "file")
-    shared = _shared_halt_active()
+    shared = _shared_halt_active(
+        min_interval=shared_interval, fail_closed=fail_closed,
+    )
     if shared is not None:
         raise Halted(shared[0], shared[1])
 

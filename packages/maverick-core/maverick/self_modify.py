@@ -3,10 +3,9 @@
 This is Phase 1 of a governed Darwin-Gödel-Machine-style capability (DGM,
 arXiv:2505.22954): a system that proposes changes to *its own code* and validates
 them empirically. The DGM insight is empirical validation instead of proof; we
-run it **under a reference monitor** — the deployable, regulated form is not
-unsupervised in-production self-rewrite but "the agent proposes evidenced,
-sandbox-tested, capability-bounded, human-signed, reversible changes to a
-*constrained* surface, all recorded in a signed audit."
+run it **under a reference monitor**. The current operable posture is research:
+the agent may propose, sandbox-test, and archive a constrained patch, but cannot
+promote or apply live code.
 
 The load-bearing safety primitive is the **editable-surface boundary**, and it
 lives here. The reference-monitor principle: the control plane must live outside
@@ -14,28 +13,23 @@ the surface the agent can rewrite. So a proposed patch is **structurally
 refused** if it touches ANY protected path — the self-improvement gate, the
 approval verifier, the calibration interlock, the FINAL verifier, the capability
 algebra, the sandbox, the audit chain, the config loader, or THIS module. That
-refusal happens *before* and *independently of* the promotion gate, so even a
-compromised gate cannot let a control-plane edit through.
+refusal happens before any evaluation or deployment integration.
 
-A candidate that clears the boundary is then routed through the existing governed
-promotion ladder (:func:`maverick.self_improvement.consider`), which independently
-enforces: it beats its baseline on held-out evidence, it does not widen the
-capability envelope, a human cryptographically approved it (code/weights rung),
-the verifier is calibrated (not drifting/gamed), and it is reversible. Every
-promotion is signed into the audit chain.
+A candidate that clears the boundary is still not authorized for deployment.
+The legacy code approval payload omits evaluator evidence, base revision,
+surface/policy, tenant, nonce, and expiry, so this module never forwards code to
+that promotion gate.
 
 Posture: **OFF by default and fail-closed.** The engine is a no-op unless
 ``[self_modify] enable`` is set, the editable allowlist is EMPTY by default (so
-every path is ``unknown`` → refused), and a traversal/absolute path is treated as
-protected. This module never *applies* a patch — it evidences and gates; the
-caller applies the diff to the editable surface only when the verdict is ``ok``.
-Sandbox evaluation (running the candidate to produce baseline/candidate scores)
-is an injected seam, Phase 2.
+every path is ``unknown`` → refused), and malformed or ambiguous paths are
+treated as protected. This module never applies or promotes a patch.
 """
 from __future__ import annotations
 
 import fnmatch
 import logging
+import re
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -47,31 +41,110 @@ log = logging.getLogger(__name__)
 # monitor. Editing any of these is the one move that could unravel the whole
 # governance stack, so it is refused structurally regardless of evidence.
 _PROTECTED_FILES = frozenset({
+    "__init__.py",              # package import surface
     "self_modify.py",            # this boundary itself
     "self_improvement.py",       # the promotion gate
     "self_improvement_runner.py",
+    "killswitch.py",             # global emergency stop
+    "learning_guard.py",         # learning-job emergency-stop boundary
+    "learning_rollout.py",       # canary promotion/rollback orchestration
+    "learning_proof.py",         # proof/evidence authority
+    "factory_learning.py",       # factory promotion/evidence consumer
     "approval_signing.py",       # cryptographic human approval
     "approval_delegation.py",    # approval routing / quorum
     "calibration.py",            # the drift / reward-laundering interlock
     "verifier.py",               # the FINAL correctness gate
+    "verifier_head.py",
     "capability.py",             # the capability algebra (non-escalation proof)
+    "capability_boot.py",
     "budget.py",                 # cost caps (kernel rule 3)
     "entitlements.py",           # the license gate on the promotion engine
     "promotion_effect.py",       # the evidence gate's causal input
     "evaluator_evolution.py",    # anchor-gated judge promotion
     "migration_governance.py",   # released-migration immutability gate
     "llm.py",                    # ROLE_MODELS / model routing
+    "secret_provider.py",        # provider-secret custody
+    "tool_token.py",             # delegated tool authority
+    "governed_tools.py",         # governed tool dispatch
+    "mcp_tools.py",              # MCP authority bridge
     "config.py",                 # resolves every gate's settings
     "migrate.py",                # the config-section registry
     "sigstore_signing.py",       # signing primitives
     "erasure_verify.py",
+    # Agent/fleet identity, routing, and authenticated handoff control plane.
+    "agent_bus.py", "bus_handoff.py", "agent_trust.py", "handoff.py",
+    "swarm.py", "federation.py", "federation_envelope.py",
+    "channel_federation.py", "emergent_protocol.py", "grpc_tls.py",
+    "grpc_dispatcher.py", "grpc_plugin_host.py", "proxy_auth.py",
+    "oauth_vault.py", "browser_auth_vault.py", "mcp_oauth.py",
+    "workflow.py",
+    # Secret/DLP, transport, isolation, and agent/fleet authorities.  The
+    # boundary must protect the helpers it relies on as well as the boundary
+    # itself; otherwise a candidate can first weaken the detector or identity
+    # plane and then submit an apparently clean follow-up patch.
+    "secrets.py", "provable_redaction.py", "security_defaults.py",
+    "access_policy.py", "containment.py", "a2a.py", "a2a_tasks.py",
+    "agent.py", "agent_autonomy.py", "agent_framework_adapters.py",
+    "fleet.py", "fleet_memory.py", "self_learning.py",
+    "server.py", "catalog_trust.py", "shield_policy.py", "web_session.py",
+    "webhooks.py",
 })
 # Whole packages under ``maverick`` that are off-limits (any file within).
-_PROTECTED_DIRS = frozenset({"audit", "sandbox"})
+_PROTECTED_DIRS = frozenset({
+    "audit", "automation_import", "cli", "evaluator_anchors", "flow",
+    "grpc_api", "providers", "safety", "sandbox", "tenant", "tools",
+    "training",
+})
 # Case-folded copies: the boundary must hold on case-insensitive filesystems
 # (macOS/Windows), where ``Self_Improvement.py`` IS ``self_improvement.py``.
 _PROTECTED_FILES_CF = frozenset(f.casefold() for f in _PROTECTED_FILES)
 _PROTECTED_DIRS_CF = frozenset(d.casefold() for d in _PROTECTED_DIRS)
+# Every ``self_modify*`` module is part of the reference monitor: boundary,
+# proposer/runner, evaluator, corpus, archive, apply/rollback, and any future
+# helper added to that family.  Keep this as a prefix rule instead of an
+# enumerated list so adding a new control-plane module cannot silently make it
+# editable under a broad ``**`` surface.
+_PROTECTED_FILE_PREFIXES_CF = (
+    "approval_", "self_harness", "self_improvement", "self_modify",
+)
+# Authority-bearing outer packages (channels, operator UI, evaluator, knowledge
+# ingestion, MCP transport, and Shield) remain outside the editable universe
+# even though their import package is not named exactly ``maverick``.
+_PROTECTED_REPO_PREFIXES_CF = (
+    ".devcontainer/",
+    "apps/",
+    "deploy/",
+    "extensions/",
+    "go/",
+    "packages/maverick-channels/",
+    "packages/maverick-dashboard/",
+    "packages/maverick-evolve/",
+    "packages/maverick-knowledge/",
+    "packages/maverick-mcp/",
+    "packages/maverick-shield/",
+    "rust/",
+    "scripts/",
+    "sdks/",
+    "web/",
+)
+# Candidate-controlled tests/proofs can launder a score without improving the
+# product.  These artifacts must be mounted read-only by an external evaluator,
+# never edited as part of the candidate.
+_PROTECTED_PATH_COMPONENTS_CF = frozenset({
+    ".codex", ".git", ".github", "benchmarks", "proof", "test", "tests",
+})
+_PROTECTED_BASENAMES_CF = frozenset({
+    ".coveragerc", ".pre-commit-config.yaml", ".secrets.baseline",
+    "agents.md", "conftest.py", "pyproject.toml", "pytest.ini", "ruff.toml",
+    "tox.ini",
+})
+_WINDOWS_RESERVED_STEMS_CF = frozenset({
+    "aux", "clock$", "con", "conin$", "conout$", "nul", "prn",
+})
+_WINDOWS_DEVICE_DIGITS = frozenset({
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "¹", "²", "³",
+})
+_MAX_REVIEW_PATCH_CHARS = 512 * 1024
 
 # git C-style single-char escapes inside a quoted path (see quote_c_style).
 _C_ESCAPES = {
@@ -106,28 +179,35 @@ def _unquote_git(path: str) -> str | None:
                 j = 0
                 while j < 3 and i + 1 + j < len(body) and body[i + 1 + j] in "01234567":
                     j += 1
-                out.append(int(body[i + 1:i + 1 + j], 8) & 0xFF)
+                value = int(body[i + 1:i + 1 + j], 8)
+                if value > 0xFF:
+                    return None
+                out.append(value)
                 i += 1 + j
             elif nxt in _C_ESCAPES:
                 out.extend(_C_ESCAPES[nxt].encode("utf-8"))
                 i += 2
             else:
-                out.append(ord(nxt) & 0xFF)
-                i += 2
-        return out.decode("utf-8", errors="replace")
-    except (ValueError, IndexError):
+                return None
+        return out.decode("utf-8", errors="strict")
+    except (UnicodeDecodeError, ValueError, IndexError):
         return None
 
 
 def _canonical(raw: str) -> str | None:
-    """Canonicalize a patch path EXACTLY as ``git apply`` would resolve it, so
-    the boundary classifies the real target: un-quote git C-escapes, drop an
-    ``a/``/``b/`` diff prefix, normalize ``\\`` to ``/``, collapse ``//`` and
-    ``.`` segments. Returns None (uncanonicalizable -> the caller fails closed)
-    for an absolute path, any ``..`` traversal, malformed quoting, or an empty
-    result."""
-    s = str(raw).strip()
-    if not s:
+    """Return one unambiguous, repo-relative spelling of a patch path.
+
+    Besides traversal and absolute paths, reject filesystem spellings that can
+    alias a different target on Windows: drive/ADS colons, device names, 8.3
+    aliases, trailing dots/spaces, control characters, and empty/dot segments.
+    The reference monitor is cross-platform, so a path unsafe on any supported
+    filesystem fails closed even when the current evaluator runs on POSIX.
+    """
+    try:
+        s = str(raw)
+    except Exception:
+        return None
+    if not s or s != s.strip():
         return None
     if s.startswith('"'):
         s = _unquote_git(s)
@@ -136,22 +216,46 @@ def _canonical(raw: str) -> str | None:
     s = s.replace("\\", "/")
     if s.startswith(("a/", "b/")):
         s = s[2:]
-    if s.startswith("/"):
-        return None  # absolute -> reaches outside the repo tree
-    parts = [p for p in s.split("/") if p not in ("", ".")]
-    if any(p == ".." for p in parts):
+    if not s or s.startswith("/"):
+        return None  # absolute/UNC -> reaches outside the repo tree
+
+    parts = s.split("/")
+    if any(part in ("", ".", "..") for part in parts):
         return None
-    return "/".join(parts) or None
+    for part in parts:
+        # NTFS strips a terminal dot/space and interprets ':' as an alternate
+        # data stream.  The other characters and controls are likewise invalid
+        # or device-path syntax on Windows and therefore ambiguous here.
+        if (part.endswith((".", " "))
+                or any(ord(ch) < 32 for ch in part)
+                or any(ch in '<>:"|?*' for ch in part)):
+            return None
+        stem = part.split(".", 1)[0].casefold()
+        is_numbered_device = (
+            stem[:3] in {"com", "lpt"}
+            and stem[3:] in _WINDOWS_DEVICE_DIGITS
+        )
+        if stem in _WINDOWS_RESERVED_STEMS_CF or is_numbered_device:
+            return None
+        # DOS short names can resolve to a protected long filename without the
+        # protected spelling appearing in the patch (e.g. ``SELF_I~1.PY``).
+        if re.search(r"~[1-9][0-9]*(?:\.|$)", part, flags=re.IGNORECASE):
+            return None
+    return "/".join(parts)
 
 
-def _maverick_tail(parts: list[str]) -> list[str] | None:
-    """Components after the LAST ``maverick`` package dir, or None if the path
-    isn't inside a maverick package (e.g. ``packages/maverick-core/maverick/x`` ->
-    ``[x]``; the ``maverick-core`` component is not the package)."""
-    idxs = [i for i, p in enumerate(parts) if p == "maverick"]
-    if not idxs:
-        return None
-    return parts[idxs[-1] + 1:]
+def _maverick_tails(parts: list[str]) -> list[list[str]]:
+    """Components after EVERY case-folded ``maverick`` package occurrence.
+
+    Inspecting only the last occurrence lets a path such as
+    ``maverick/audit/maverick/writer.py`` hide the protected ``audit`` component
+    behind a nested directory named ``maverick``.
+    """
+    # Package components are case-insensitive on Windows/macOS.  Matching only
+    # the literal lower-case spelling lets ``MAVERICK/SELF_MODIFY.PY`` evade the
+    # reference monitor and then match a permissive ``**`` allowlist.
+    idxs = [i for i, p in enumerate(parts) if p.casefold() == "maverick"]
+    return [parts[i + 1:] for i in idxs]
 
 
 def is_protected(path: str) -> bool:
@@ -165,12 +269,37 @@ def is_protected(path: str) -> bool:
     c = _canonical(path)
     if c is None:
         return True
-    tail = _maverick_tail(c.split("/"))
-    if tail is None:
-        return False  # not a maverick source file; the allowlist decides
-    if tail and tail[0].casefold() in _PROTECTED_DIRS_CF:
+    c_cf = c.casefold()
+    if any(c_cf.startswith(prefix) for prefix in _PROTECTED_REPO_PREFIXES_CF):
         return True
-    return len(tail) == 1 and tail[0].casefold() in _PROTECTED_FILES_CF
+    parts = c.split("/")
+    parts_cf = [part.casefold() for part in parts]
+    if any(part in _PROTECTED_PATH_COMPONENTS_CF for part in parts_cf):
+        return True
+    basename = parts_cf[-1] if parts_cf else ""
+    if (basename in _PROTECTED_BASENAMES_CF
+            or basename.startswith("requirements")
+            or basename.startswith("test_")
+            or basename.endswith("_test.py")):
+        return True
+
+    for tail in _maverick_tails(parts):
+        if not tail:
+            continue
+        tail_cf = [part.casefold() for part in tail]
+        head = tail_cf[0]
+        # Positive mutable zone: only domain assets live inside the code
+        # package's candidate-editable surface. Enumerating every future
+        # orchestrator/security module is not a sustainable reference monitor.
+        if head != "domains":
+            return True
+        if head in _PROTECTED_DIRS_CF:
+            return True
+        if any(head.startswith(prefix) for prefix in _PROTECTED_FILE_PREFIXES_CF):
+            return True
+        if len(tail_cf) == 1 and head in _PROTECTED_FILES_CF:
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -228,7 +357,11 @@ def _diff_paths(patch: str) -> list[str]:
         # a TAB; git apply ignores everything from the tab on. Mirror that, or a
         # "--- a/config.py\t2024-..." header parses as a different path than the
         # one actually patched and slips past the protected-path classifier.
-        p = raw.split("\t", 1)[0].strip()
+        # Preserve spaces: on Windows a terminal space aliases the spelling
+        # without it, and :func:`_canonical` must see and reject that ambiguity.
+        # Git timestamps are delimited by a TAB, so removing only that suffix is
+        # sufficient and does not rewrite the filename being classified.
+        p = raw.split("\t", 1)[0]
         if p.startswith(("a/", "b/")):
             p = p[2:]
         if not p or p == "/dev/null":
@@ -251,6 +384,122 @@ def _diff_paths(patch: str) -> list[str]:
     return paths
 
 
+def _split_diff_git_paths(line: str) -> tuple[str, str] | None:
+    """Return the two raw path tokens from one ``diff --git`` header.
+
+    Git C-quotes paths containing whitespace, so a plain ``str.split`` cannot
+    distinguish the two operands safely.  Keep the tokens quoted here; the
+    existing canonicalizer is the single authority that decodes them.
+    """
+    prefix = "diff --git "
+    if not line.startswith(prefix):
+        return None
+    text = line[len(prefix):]
+    tokens: list[str] = []
+    i = 0
+    while i < len(text):
+        while i < len(text) and text[i].isspace():
+            i += 1
+        if i >= len(text):
+            break
+        start = i
+        if text[i] == '"':
+            i += 1
+            closed = False
+            while i < len(text):
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == '"':
+                    i += 1
+                    closed = True
+                    break
+                i += 1
+            if not closed:
+                return None
+        else:
+            while i < len(text) and not text[i].isspace():
+                i += 1
+        tokens.append(text[start:i])
+        if len(tokens) > 2:
+            return None
+    if len(tokens) != 2:
+        return None
+    return tokens[0], tokens[1]
+
+
+def _unsafe_apply_prefix(patch: str) -> str | None:
+    """Reject a patch whose reviewed paths differ from ``git apply -p1`` paths.
+
+    ``-p1`` strips *any* first path component, not only the conventional ``a``
+    and ``b`` components.  Accepting ``x/apps/...`` during review would therefore
+    classify that spelling while git later writes ``apps/...``.  Require the
+    standard prefixes on every file header so review and mutation address the
+    exact same repository-relative target.  Rename/copy metadata is already
+    repository-relative and is classified separately by :func:`_diff_paths`.
+    """
+    for line in (patch or "").splitlines():
+        if line.startswith("diff --git "):
+            pair = _split_diff_git_paths(line)
+            if pair is None:
+                return "malformed diff --git path header"
+            decoded = tuple(_unquote_git(raw) for raw in pair)
+            if (decoded[0] is None or decoded[1] is None
+                    or not decoded[0].startswith("a/")
+                    or not decoded[1].startswith("b/")
+                    or len(decoded[0]) <= 2 or len(decoded[1]) <= 2):
+                return "non-standard diff path prefix is unsafe with git apply -p1"
+        elif line.startswith(("--- ", "+++ ")):
+            marker = line[:3]
+            raw = line[4:].split("\t", 1)[0]
+            decoded = _unquote_git(raw)
+            expected = "a/" if marker == "---" else "b/"
+            if decoded == "/dev/null":
+                continue
+            if (decoded is None or not decoded.startswith(expected)
+                    or len(decoded) <= 2):
+                return "non-standard file-header prefix is unsafe with git apply -p1"
+    return None
+
+
+def _unsafe_diff_artifact(patch: str) -> str | None:
+    """Return the first unsafe diff artifact kind, if any.
+
+    Self-modification is text-source only. Git symlink (120000), gitlink
+    (160000), device/special modes, and binary patches can make an apparently
+    allowlisted path resolve or execute outside the reviewed source artifact.
+    """
+    regular_modes = {"100644", "100755"}
+    for raw in (patch or "").splitlines():
+        line = raw.strip()
+        # A text patch may edit an existing regular executable, but it may not
+        # create one or change mode bits.  Executability is a capability change
+        # that source review alone does not capture.
+        if line.startswith(("old mode ", "new mode ")):
+            return "unsafe git file mode change"
+        new_file_mode = re.match(r"^new file mode\s+(\d{6})$", line)
+        if new_file_mode and new_file_mode.group(1) != "100644":
+            return f"unsafe new git file mode {new_file_mode.group(1)}"
+        deleted_file_mode = re.match(r"^deleted file mode\s+(\d{6})$", line)
+        if deleted_file_mode and deleted_file_mode.group(1) not in regular_modes:
+            return f"unsafe git file mode {deleted_file_mode.group(1)}"
+        if (line.startswith(("new file mode ", "deleted file mode "))
+                and not (new_file_mode or deleted_file_mode)):
+            return "unsafe malformed git file mode"
+        index_mode = re.match(r"^index\s+\S+\.\.\S+\s+(\d{6})$", line)
+        if index_mode and index_mode.group(1) not in regular_modes:
+            return f"unsafe git index mode {index_mode.group(1)}"
+        if line.startswith("index ") and not re.match(
+                r"^index\s+\S+\.\.\S+(?:\s+\d{6})?$", line):
+            return "unsafe malformed git index metadata"
+        content = line[1:] if line.startswith(("+", "-")) else line
+        if line == "GIT binary patch" or content.startswith("Subproject commit "):
+            return f"unsafe diff artifact {content!r}"
+        if line.startswith("Binary files ") and line.endswith(" differ"):
+            return "unsafe binary diff"
+    return None
+
+
 def review_patch(patch: str, surface: EditableSurface | None = None) -> PatchReview:
     """Classify every path a patch touches against the surface. ``ok`` iff at
     least one path was found and ALL touched paths are ``editable``.
@@ -258,17 +507,39 @@ def review_patch(patch: str, surface: EditableSurface | None = None) -> PatchRev
     This is the structural refusal: it runs before the promotion gate and does
     not depend on it, so a control-plane edit is rejected even if every other
     gate were somehow satisfied."""
-    surface = surface or EditableSurface()
+    if type(patch) is not str:
+        return PatchReview(False, reason="patch must be text")
+    if surface is None:
+        surface = EditableSurface()
+    elif type(surface) is not EditableSurface:
+        return PatchReview(False, reason="invalid editable surface authority")
+    if (type(surface.editable_globs) is not tuple
+            or any(type(glob) is not str for glob in surface.editable_globs)):
+        return PatchReview(False, reason="invalid editable surface allowlist")
+    if len(patch) > _MAX_REVIEW_PATCH_CHARS:
+        return PatchReview(False, reason="patch exceeds review size limit")
+    prefix_error = _unsafe_apply_prefix(patch)
+    if prefix_error:
+        return PatchReview(False, reason=prefix_error)
+    from .safety.self_modify_dlp import contains_secret_material
+    if contains_secret_material(patch or "", unified_diff=True):
+        return PatchReview(False, reason="patch contains detected secret material")
+    unsafe = _unsafe_diff_artifact(patch or "")
+    if unsafe:
+        return PatchReview(False, reason=unsafe)
     paths = _diff_paths(patch or "")
     if not paths:
         return PatchReview(False, reason="no file paths found in patch")
     protected: list[str] = []
     unknown: list[str] = []
     for p in paths:
-        c = surface.classify(p)
+        try:
+            c = surface.classify(p)
+        except Exception:
+            return PatchReview(False, reason="editable surface classification failed")
         if c == "protected":
             protected.append(p)
-        elif c == "unknown":
+        elif c != "editable":
             unknown.append(p)
     if protected:
         reason = f"patch touches protected control-plane paths: {sorted(protected)}"
@@ -348,9 +619,10 @@ def default_surface() -> EditableSurface:
 
 @dataclass
 class CodeChangeResult:
-    """Outcome of proposing a code change: the boundary review + the promotion
-    verdict. The caller applies the patch to the editable surface only when
-    :attr:`ok`."""
+    """Outcome of reviewing a proposed code change at the deployment boundary.
+
+    ``ok`` stays false while live code promotion is disabled. ``verdict`` is
+    retained for API compatibility but is not populated by this module."""
 
     review: PatchReview
     verdict: object | None = None      # maverick.self_improvement.Verdict | None
@@ -375,23 +647,30 @@ def propose_code_change(
     baseline_files: dict[str, str] | None = None,
     approval_signature: str | None = None,
     payload_sha256: str | None = None,
+    candidate_id: str | None = None,
     controller: object | None = None,
     rung: str = "code",
 ) -> CodeChangeResult:
-    """Propose a code change and decide whether it may be promoted.
+    """Review a code-rung change without promoting or applying it.
 
     Two independent gates must BOTH pass, in order:
       1. **Editable-surface boundary** (:func:`review_patch`) — the patch touches
          only allowlisted paths, never the control plane. Refused structurally
          here, before the promotion gate is even consulted.
-      2. **Governed promotion ladder** (:func:`maverick.self_improvement.consider`)
-         — beats baseline on evidence, no capability escalation, human signature
-         at the code/weights rung, calibration healthy, reversible; signed.
+      2. **Capability screen** — any potential widening is refused.
 
-    Never applies the patch; the caller does that only when ``result.ok``. Never
-    raises — any error yields a non-promoting result (fail-closed). ``samples``
-    is the evidence count; ``baseline_score``/``candidate_score`` come from a
-    sandbox evaluation the caller injects (Phase 2 wires a real one)."""
+    The legacy code approval gate is intentionally unreachable because its
+    payload is not bound to the evaluation evidence, base revision, editable
+    policy, tenant, nonce, and expiry. This function never applies or promotes a
+    patch; errors yield a refusal.
+
+    This API is code-specific.  A caller cannot label a source patch as the
+    lower ``prompt``/``policy`` rung to bypass code approval requirements; a
+    non-code rung is rejected before configuration, boundary, or gate work.
+    """
+    if type(rung) is not str or rung != "code":
+        reason = "code self-modification requires rung='code'"
+        return CodeChangeResult(PatchReview(False, reason=reason), reason=reason)
     if not enabled():
         return CodeChangeResult(
             PatchReview(False, reason="self-modification disabled"),
@@ -414,38 +693,22 @@ def propose_code_change(
                 log.info("self-modify: capability screen overrode "
                          "capability_widens=False: %s", widen_reasons)
             capability_widens = True
+        if capability_widens:
+            return CodeChangeResult(
+                review,
+                reason="code patch may widen a capability; refusing",
+            )
 
-        # Real non-escalation PROOF via the capability algebra (Gap 5): a
-        # differential over a fixed class universe, so the gate can compute
-        # escalation ("a class the *after* grant permits that *before* did not")
-        # instead of only trusting a boolean. When the caller declared
-        # ``capability_widens`` (incl. the heuristic's forced True) that wins;
-        # otherwise the algebra decides, and unlike a bare None it is a genuine
-        # proof the code rung can pass on. Best-effort: a delta error leaves the
-        # proof unset so the code rung falls back to demanding one (fail-closed).
-        cap_before = cap_after = None
-        probe: tuple[str, ...] = ()
-        try:
-            from .self_modify_capability import capability_delta
-            cap_before, cap_after, probe = capability_delta(
-                patch, baseline_files=baseline_files)
-        except Exception:  # pragma: no cover -- proof is best-effort
-            log.debug("self-modify: capability_delta failed", exc_info=True)
-
-        from .self_improvement import Candidate, consider
-        cand = Candidate(
-            rung=rung, summary=summary,
-            baseline_score=baseline_score, candidate_score=candidate_score,
-            samples=samples, payload=patch, payload_sha256=payload_sha256,
-            capability_widens=capability_widens,
-            capability_before=cap_before, capability_after=cap_after,
-            probe_tools=probe,
-            approval_signature=approval_signature, rollback=rollback,
+        # The legacy approval object binds too little state to authorize a code
+        # deployment: it omits evaluator evidence, base revision, editable
+        # surface/policy, tenant, nonce, and expiry.  Never forward a code patch
+        # to that gate. A future integration must use an external one-shot
+        # evaluator plus the durable PREPARE/CAS/COMMIT transaction API.
+        return CodeChangeResult(
+            review,
+            reason="live code promotion is disabled until a nonce-bound "
+                   "transactional approval manifest is available",
         )
-        verdict = consider(cand, controller=controller)
-        reason = "" if getattr(verdict, "ok", False) else getattr(
-            verdict, "blocking_reason", "promotion refused")
-        return CodeChangeResult(review, verdict=verdict, reason=reason)
     except Exception:  # pragma: no cover -- a privileged path must never crash a run
         log.warning("self-modify: propose_code_change errored; refusing", exc_info=True)
         return CodeChangeResult(

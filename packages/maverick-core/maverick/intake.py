@@ -88,18 +88,35 @@ _MAX_WORKFLOW_INSTRUCTION_CHARS = 600
 
 
 def _shield_allows_generated_prompt(text: str) -> bool:
-    """Return whether optional Shield accepts generated prompt text.
+    """Screen generated prompt text before it becomes system instruction.
 
-    Generated personas and workflow steps are untrusted model output that become
-    system-prompt instructions. Shield remains optional for kernel deployments,
-    so scanner import/configuration/runtime failures fail open.
+    The in-kernel injection tripwire is mandatory and fail-closed. Optional
+    Shield adds a second opinion; when it is absent or unavailable, a clean
+    deterministic verdict preserves the kernel's no-Shield deployment mode.
     """
+    try:
+        from .memory_guard import injection_markers
+
+        if injection_markers(text):
+            return False
+    except Exception:
+        log.exception("intake: deterministic generated-prompt screen failed")
+        return False
+
     try:
         shield_mod = importlib.import_module("maverick_shield")
         shield = shield_mod.Shield.from_config(warn_if_missing=False)
         verdict = shield.scan_output(text)
-        return bool(getattr(verdict, "allowed", True))
-    except Exception:  # shield optional -> fail-open
+        allowed = getattr(verdict, "allowed", None)
+        return allowed is True
+    except (ImportError, ModuleNotFoundError):
+        return True
+    except Exception:
+        log.warning(
+            "intake: optional Shield generated-prompt scan failed; "
+            "using deterministic verdict",
+            exc_info=True,
+        )
         return True
 
 

@@ -1288,7 +1288,10 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   `parse_remote_card` normalization that refuses a non-conformant card before
   anything delegates against it) proven both ways by interop tests: Lightwork's
   own card passes its own validator, and third-party-shaped fixture cards
-  (rich + minimal) parse correctly.
+  (rich + minimal) parse correctly. The mounted task engine claims every
+  `messageId` in a tenant-and-principal-scoped SQLite ledger before execution,
+  replays terminal results across workers/restarts, and refuses crash-left
+  indeterminate claims rather than risking duplicate side effects.
 - **Swarm federation** (`federation.py` + `grpc_api/federation.proto`,
   protocol `maverick-federation/1`, opt-in `[federation] enabled` + `peers`):
   delegate goals across *sovereign* swarms (each with its own world DB —

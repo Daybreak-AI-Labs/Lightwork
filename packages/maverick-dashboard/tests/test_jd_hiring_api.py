@@ -72,6 +72,40 @@ def test_jd_match_disabled_by_config_knob(monkeypatch, tmp_path):
     assert "jd_hiring" in resp.json()["detail"]
 
 
+def test_department_scope_filters_catalog_before_ranking(monkeypatch):
+    import maverick.domain as domain
+    import maverick.jd_hiring as jd_hiring
+    import maverick_dashboard.api as api
+
+    profiles = {
+        "finance_ap": object(),
+        "legal_privacy": object(),
+        "generic_helper": object(),
+    }
+    suites = {
+        "finance_ap": "finance",
+        "legal_privacy": "legal",
+        "generic_helper": None,
+    }
+    seen = {}
+
+    monkeypatch.setattr(api, "caller_suites", lambda _request: {"finance"})
+    monkeypatch.setattr(domain, "available_domains", lambda: profiles)
+    monkeypatch.setattr(domain, "suite_for", suites.get)
+
+    def fake_match(_text, *, k, domains):
+        seen["k"] = k
+        seen["domains"] = domains
+        return []
+
+    monkeypatch.setattr(jd_hiring, "match_jd", fake_match)
+
+    assert api._scoped_jd_matches(object(), "accounts payable", 2) == {"matches": []}
+    assert seen["k"] == 2
+    assert set(seen["domains"]) == {"finance_ap", "generic_helper"}
+    assert "legal_privacy" not in seen["domains"]
+
+
 # ---- /agents/jd/draft -----------------------------------------------------------
 
 def test_jd_draft_keyless_is_clamped(monkeypatch):
@@ -94,6 +128,21 @@ def test_jd_draft_keyless_is_clamped(monkeypatch):
     # Editor-prefill shape: workflow rows carry the editor's field names.
     assert draft["workflow"] and {"name", "instruction", "tools", "gate"} <= set(
         draft["workflow"][0])
+
+
+def test_jd_draft_is_rate_limited(monkeypatch):
+    import maverick_dashboard.app as dashboard_app
+    from fastapi import HTTPException
+
+    def reject(*_args, **_kwargs):
+        raise HTTPException(status_code=429, detail="rate limited")
+
+    monkeypatch.setattr(dashboard_app, "check_goal_rate_limit", reject)
+    resp = client.post("/api/v1/agents/jd/draft", json={
+        "role_title": "Accounts Payable Specialist",
+        "jd_text": FINANCE_JD,
+    })
+    assert resp.status_code == 429
 
 
 # ---- /fleets/{name}/agents -------------------------------------------------------

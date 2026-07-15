@@ -100,7 +100,11 @@ def test_rollout_aborts_when_snapshot_raises(monkeypatch):
         constraint_calls.append(fraction)
         return True, "ok"
 
-    res = lr.promote_skill_live("skill-x", [_constraint])
+    res = lr.promote_skill_live(
+        "skill-x", [_constraint],
+        deploy_backend=lambda c, f: lr.DeploymentReceipt(c, f, "rev-1"),
+        rollback_backend=lambda _c: True,
+    )
     assert res.completed is False
     assert "aborted" in res.reason
     assert res.stages == []          # never reached the staged rollout

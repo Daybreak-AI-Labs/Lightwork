@@ -12,21 +12,24 @@ What is stored is a **lineage record**, never applied state: each entry is a
 proposed patch's metadata plus the patch text (bounded), the scores it earned in
 sandbox evaluation, its parent, its generation, and whether it was promoted or
 rolled back. The archive is inert data — it is never executed, and *sampling a
-parent to branch from does not promote anything*: a re-derived child still runs
-the full editable-surface boundary + governed promotion ladder before it can
-take effect. The archive only shapes *which* parent the loop mutates next.
+parent to branch from does not promote anything*. The operable runner currently
+disables persisted-parent branching until evaluator provenance is durably
+partitioned; dedicated development harnesses may use an isolated archive.
 
 Posture: this module is a passive datastore with no side effects beyond the file
 it is told to persist to. It does not read config, does not gate, and is a no-op
 unless the Phase-4 loop (which IS off by default) constructs and feeds it. The
-store lives under the maverick data dir (0600) like the promotion ledger.
+store lives under the maverick data dir with owner-only permissions.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
+import math
+import os
 import random
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -36,15 +39,117 @@ log = logging.getLogger(__name__)
 # beyond this the text is dropped (the metadata + digest are still kept, so the
 # lineage is intact and the candidate is simply not re-derivable from the archive).
 _MAX_PATCH_BYTES = 256 * 1024
+_MAX_SUMMARY_CHARS = 4_000
+_MAX_REASON_CHARS = 2_000
+_MAX_REASONS = 64
+_MAX_LINEAGE_ID_CHARS = 128
+_MAX_EVIDENCE_SCOPE_CHARS = 128
+_MAX_ARCHIVE_CAPACITY = 10_000
+_MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+_REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
+class ArchivePersistenceError(RuntimeError):
+    """Raised when research lineage cannot be durably persisted."""
+
+
+def _archive_file_identity(info) -> tuple:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        getattr(info, "st_mtime_ns", None),
+    )
+
+
+def _read_archive_json(path: Path):
+    """Read one bounded archive without following filesystem aliases."""
+    before = path.lstat()
+    if (
+        stat.S_ISLNK(before.st_mode)
+        or bool(getattr(before, "st_file_attributes", 0) & _REPARSE_ATTRIBUTE)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+    ):
+        raise ValueError("code archive must be a private regular file")
+    if before.st_size > _MAX_ARCHIVE_BYTES:
+        raise ValueError("code archive exceeds the file-size limit")
+    expected = _archive_file_identity(before)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or _archive_file_identity(opened) != expected
+        ):
+            raise ValueError("code archive changed during open")
+        chunks: list[bytes] = []
+        total = 0
+        while total <= _MAX_ARCHIVE_BYTES:
+            chunk = os.read(fd, min(1024 * 1024, _MAX_ARCHIVE_BYTES + 1 - total))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        if total > _MAX_ARCHIVE_BYTES:
+            raise ValueError("code archive exceeds the file-size limit")
+        if _archive_file_identity(os.fstat(fd)) != expected:
+            raise ValueError("code archive changed during read")
+    finally:
+        os.close(fd)
+    return json.loads(b"".join(chunks).decode("utf-8", errors="strict"))
+
+
+def _patch_digest_and_size(patch: str) -> tuple[str, int]:
+    """Hash UTF-8 patch bytes without allocating a second full patch copy."""
+    digest = hashlib.sha256()
+    size = 0
+    for offset in range(0, len(patch), 16 * 1024):
+        chunk = patch[offset:offset + 16 * 1024].encode("utf-8")
+        digest.update(chunk)
+        size += len(chunk)
+    return digest.hexdigest(), size
 
 
 def _patch_sha256(patch: str) -> str:
-    return hashlib.sha256((patch or "").encode("utf-8")).hexdigest()
+    return _patch_digest_and_size(patch or "")[0]
 
 
-def _short_id(patch: str, summary: str) -> str:
-    blob = f"{summary}\0{_patch_sha256(patch)}"
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+def _short_id_from_digest(
+    patch_sha256: str, summary: str, evidence_scope: str = "",
+) -> str:
+    blob = f"{summary}\0{patch_sha256}"
+    if evidence_scope:
+        blob += f"\0{evidence_scope}"
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:32]
+
+
+def _short_id(patch: str, summary: str, evidence_scope: str = "") -> str:
+    return _short_id_from_digest(_patch_sha256(patch), summary, evidence_scope)
+
+
+def _is_lower_hex(value: str, length: int) -> bool:
+    return len(value) == length and all(ch in "0123456789abcdef" for ch in value)
+
+
+def _scan_serialized_strings(value) -> None:
+    """DLP-scan every string that can cross the archive persistence boundary."""
+    from .safety.self_modify_dlp import contains_secret_material
+
+    if isinstance(value, str):
+        if contains_secret_material(value):
+            raise ValueError("code candidate contains detected secret material")
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            _scan_serialized_strings(key)
+            _scan_serialized_strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _scan_serialized_strings(item)
 
 
 def _added_line_tokens(patch: str) -> frozenset[str]:
@@ -86,24 +191,165 @@ class CodeCandidate:
     capability_widens: bool | None = None
     reasons: tuple[str, ...] = ()
     created_at: float = 0.0
+    evidence_scope: str = ""
     id: str = ""
 
     def __post_init__(self) -> None:
-        if not self.patch_sha256:
-            self.patch_sha256 = _patch_sha256(self.patch)
-        if not self.id:
-            self.id = _short_id(self.patch, self.summary)
-        if self.patch and len(self.patch.encode("utf-8")) > _MAX_PATCH_BYTES:
+        """Canonicalise and validate identity before retaining caller data.
+
+        Oversized patch bodies are discarded *before* DLP scanning.  They never
+        cross the archive/provider boundary, while their incrementally computed
+        digest still pins lineage identity.  Bounded bodies and every other
+        serialized string are scanned fail closed below.
+        """
+        if (type(self.samples) is not int or type(self.generation) is not int
+                or type(self.promoted) is not bool
+                or type(self.rolled_back) is not bool
+                or (self.capability_widens is not None
+                    and type(self.capability_widens) is not bool)
+                or isinstance(self.score, bool)
+                or isinstance(self.baseline_score, bool)
+                or isinstance(self.created_at, bool)):
+            raise ValueError("invalid code candidate record")
+        try:
+            self.summary = str(self.summary or "")
+            self.patch = str(self.patch or "")
+            self.patch_sha256 = str(self.patch_sha256 or "")
+            self.id = str(self.id or "")
+            self.parent_id = None if self.parent_id in (None, "") else str(self.parent_id)
+            if isinstance(self.reasons, (str, bytes)):
+                raise ValueError("invalid reasons")
+            self.reasons = tuple(str(reason) for reason in (self.reasons or ()))
+            self.score = float(self.score)
+            self.baseline_score = float(self.baseline_score)
+            self.samples = int(self.samples)
+            self.generation = int(self.generation)
+            self.created_at = float(self.created_at)
+            self.evidence_scope = str(self.evidence_scope or "")
+        except Exception as exc:
+            raise ValueError("invalid code candidate record") from exc
+
+        if len(self.summary) > _MAX_SUMMARY_CHARS:
+            raise ValueError("invalid code candidate record")
+        if len(self.reasons) > _MAX_REASONS or any(
+                len(reason) > _MAX_REASON_CHARS for reason in self.reasons):
+            raise ValueError("invalid code candidate record")
+        if self.parent_id is not None and len(self.parent_id) > _MAX_LINEAGE_ID_CHARS:
+            raise ValueError("invalid code candidate record")
+        if len(self.evidence_scope) > _MAX_EVIDENCE_SCOPE_CHARS:
+            raise ValueError("invalid code candidate record")
+        if not all(math.isfinite(value) for value in (
+                self.score, self.baseline_score, self.created_at)):
+            raise ValueError("invalid code candidate record")
+        if self.samples < 0 or self.generation < 0:
+            raise ValueError("invalid code candidate record")
+        if (self.capability_widens is not None
+                and type(self.capability_widens) is not bool):
+            raise ValueError("invalid code candidate record")
+
+        actual_digest, patch_bytes = _patch_digest_and_size(self.patch)
+        if self.patch and self.patch_sha256 and self.patch_sha256 != actual_digest:
+            # A body that is present must always match its claimed digest.
+            raise ValueError("code candidate identity mismatch")
+        self.patch_sha256 = self.patch_sha256 or actual_digest
+        expected_id = _short_id_from_digest(
+            self.patch_sha256, self.summary, self.evidence_scope)
+        legacy_id = expected_id[:12] if not self.evidence_scope else ""
+        if self.id and self.id not in {expected_id, legacy_id}:
+            raise ValueError("code candidate identity mismatch")
+        self.id = self.id or expected_id
+
+        if patch_bytes > _MAX_PATCH_BYTES:
             # Keep the lineage node, drop the oversized body (digest still pins it).
             log.info("code archive: dropping oversized patch body for %s", self.id)
             self.patch = ""
+
+        # This also validates digest/id shape for a persisted digest-only node
+        # whose intentionally omitted body cannot be recomputed on load.
+        self._validated_payload()
 
     @property
     def improvement(self) -> float:
         return self.score - self.baseline_score
 
     def to_dict(self) -> dict:
-        return {
+        return self._validated_payload()
+
+    def _validated_payload(self) -> dict:
+        """Return a canonical, fully rescanned persistence payload.
+
+        ``CodeCandidate`` remains mutable for archive bookkeeping.  Therefore
+        construction-time checks are insufficient: callers holding a reference
+        could change a field after insertion.  Every serialization revalidates
+        identity and scans all strings, so contaminated state cannot be saved or
+        handed to another subsystem.
+        """
+        if not isinstance(self.summary, str) or len(self.summary) > _MAX_SUMMARY_CHARS:
+            raise ValueError("invalid code candidate record")
+        if not isinstance(self.patch, str):
+            raise ValueError("invalid code candidate record")
+        actual_digest, patch_bytes = _patch_digest_and_size(self.patch)
+        if patch_bytes > _MAX_PATCH_BYTES:
+            # Mutating an already-retained record to an oversized body is not a
+            # legitimate omission transition; refuse rather than silently alter
+            # forensic state during serialization.
+            raise ValueError("invalid code candidate record")
+        _scan_serialized_strings({
+            "summary": self.summary,
+            "patch_sha256": self.patch_sha256,
+            "parent_id": self.parent_id,
+            "evidence_scope": self.evidence_scope,
+            "reasons": self.reasons,
+            "id": self.id,
+        })
+        from .safety.self_modify_dlp import contains_secret_material
+        if contains_secret_material(self.patch, unified_diff=True):
+            raise ValueError("code candidate contains detected secret material")
+        if not isinstance(self.patch_sha256, str) or not _is_lower_hex(
+                self.patch_sha256, 64):
+            raise ValueError("invalid code candidate record")
+        if (not isinstance(self.evidence_scope, str)
+                or len(self.evidence_scope) > _MAX_EVIDENCE_SCOPE_CHARS):
+            raise ValueError("invalid code candidate record")
+        if self.patch and self.patch_sha256 != actual_digest:
+            raise ValueError("code candidate identity mismatch")
+        if (not isinstance(self.id, str)
+                or not (_is_lower_hex(self.id, 32) or _is_lower_hex(self.id, 12))):
+            raise ValueError("invalid code candidate record")
+        expected_id = _short_id_from_digest(
+            self.patch_sha256, self.summary, self.evidence_scope)
+        if self.id not in {
+            expected_id,
+            expected_id[:12] if not self.evidence_scope else "",
+        }:
+            raise ValueError("code candidate identity mismatch")
+        if self.parent_id is not None and (
+                not isinstance(self.parent_id, str)
+                or len(self.parent_id) > _MAX_LINEAGE_ID_CHARS):
+            raise ValueError("invalid code candidate record")
+        if not isinstance(self.reasons, (tuple, list)) or len(self.reasons) > _MAX_REASONS:
+            raise ValueError("invalid code candidate record")
+        if any(not isinstance(reason, str) or len(reason) > _MAX_REASON_CHARS
+               for reason in self.reasons):
+            raise ValueError("invalid code candidate record")
+        if any(isinstance(value, bool) for value in (
+                self.score, self.baseline_score, self.created_at)):
+            raise ValueError("invalid code candidate record")
+        try:
+            finite = all(math.isfinite(float(value)) for value in (
+                self.score, self.baseline_score, self.created_at))
+        except (TypeError, ValueError):
+            finite = False
+        if not finite or type(self.samples) is not int or self.samples < 0:
+            raise ValueError("invalid code candidate record")
+        if type(self.generation) is not int or self.generation < 0:
+            raise ValueError("invalid code candidate record")
+        if (type(self.promoted) is not bool or type(self.rolled_back) is not bool
+                or (self.capability_widens is not None
+                    and type(self.capability_widens) is not bool)):
+            raise ValueError("invalid code candidate record")
+
+        payload = {
             "id": self.id, "summary": self.summary, "patch": self.patch,
             "patch_sha256": self.patch_sha256, "score": self.score,
             "baseline_score": self.baseline_score, "samples": self.samples,
@@ -111,23 +357,47 @@ class CodeCandidate:
             "promoted": self.promoted, "rolled_back": self.rolled_back,
             "capability_widens": self.capability_widens,
             "reasons": list(self.reasons), "created_at": self.created_at,
+            "evidence_scope": self.evidence_scope,
         }
+        _scan_serialized_strings(payload)
+        return payload
 
     @classmethod
     def from_dict(cls, d: dict) -> CodeCandidate:
+        if not isinstance(d, dict):
+            raise ValueError("invalid code candidate record")
+        reasons = d.get("reasons") or ()
+        if not isinstance(reasons, (list, tuple)):
+            raise ValueError("invalid code candidate record")
+        samples = d.get("samples", 0)
+        generation = d.get("generation", 0)
+        promoted = d.get("promoted", False)
+        rolled_back = d.get("rolled_back", False)
+        capability_widens = d.get("capability_widens")
+        score = d.get("score", 0.0)
+        baseline_score = d.get("baseline_score", 0.0)
+        created_at = d.get("created_at", 0.0)
+        if (type(samples) is not int or type(generation) is not int
+                or type(promoted) is not bool or type(rolled_back) is not bool
+                or (capability_widens is not None
+                    and type(capability_widens) is not bool)
+                or any(isinstance(value, bool) for value in (
+                    score, baseline_score, created_at))):
+            raise ValueError("invalid code candidate record")
         return cls(
             summary=str(d.get("summary", "")), patch=str(d.get("patch", "")),
             patch_sha256=str(d.get("patch_sha256", "")),
-            score=float(d.get("score", 0.0)),
-            baseline_score=float(d.get("baseline_score", 0.0)),
-            samples=int(d.get("samples", 0)),
+            score=float(score),
+            baseline_score=float(baseline_score),
+            samples=samples,
             parent_id=(d.get("parent_id") or None),
-            generation=int(d.get("generation", 0)),
-            promoted=bool(d.get("promoted", False)),
-            rolled_back=bool(d.get("rolled_back", False)),
-            capability_widens=d.get("capability_widens"),
-            reasons=tuple(d.get("reasons") or ()),
-            created_at=float(d.get("created_at", 0.0)),
+            generation=generation,
+            promoted=promoted,
+            rolled_back=rolled_back,
+            capability_widens=capability_widens,
+            reasons=tuple(reasons),
+            created_at=float(created_at),
+            evidence_scope=str(d.get("evidence_scope", "")),
             id=str(d.get("id", "")),
         )
 
@@ -146,19 +416,46 @@ class CodeArchive:
     capacity: int = 100
     candidates: list[CodeCandidate] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        try:
+            self.capacity = int(self.capacity)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid code archive capacity") from exc
+        if self.capacity <= 0 or self.capacity > _MAX_ARCHIVE_CAPACITY:
+            raise ValueError("invalid code archive capacity")
+
     def add(self, cand: CodeCandidate) -> CodeCandidate:
-        """Insert, or update in place if the same id arrives with a better score."""
+        """Insert a canonical copy, or update the same id's score in place.
+
+        The caller's mutable object is never retained.  This closes the
+        mutate-after-add alias where clean data passed the initial scan and was
+        changed to secret-bearing metadata before persistence.
+        """
+        if not isinstance(cand, CodeCandidate):
+            raise ValueError("invalid code candidate record")
+        # Rescan every existing record before changing archive state.  A caller
+        # may have obtained an internal bookkeeping object through ``get`` or
+        # ``sample`` and mutated it since the previous operation.
         for existing in self.candidates:
-            if existing.id == cand.id:
-                if cand.score > existing.score:
-                    existing.score = cand.score
-                    existing.samples = max(existing.samples, cand.samples)
-                existing.promoted = existing.promoted or cand.promoted
-                existing.rolled_back = existing.rolled_back or cand.rolled_back
+            existing.to_dict()
+        canonical = CodeCandidate.from_dict(cand.to_dict())
+        for existing in self.candidates:
+            if existing.id == canonical.id:
+                if canonical.score > existing.score:
+                    # Evidence is one atomic comparison tuple. Never combine a
+                    # new score with an older baseline/sample count.
+                    existing.score = canonical.score
+                    existing.baseline_score = canonical.baseline_score
+                    existing.samples = canonical.samples
+                    existing.reasons = canonical.reasons
+                    existing.capability_widens = canonical.capability_widens
+                    existing.created_at = canonical.created_at
+                existing.promoted = existing.promoted or canonical.promoted
+                existing.rolled_back = existing.rolled_back or canonical.rolled_back
                 return existing
-        self.candidates.append(cand)
+        self.candidates.append(canonical)
         self._evict_if_needed()
-        return cand
+        return canonical
 
     def get(self, cand_id: str) -> CodeCandidate | None:
         return next((c for c in self.candidates if c.id == cand_id), None)
@@ -241,39 +538,98 @@ class CodeArchive:
 
     # -- persistence ------------------------------------------------------
     def to_dict(self) -> dict:
-        return {"capacity": self.capacity,
-                "candidates": [c.to_dict() for c in self.candidates]}
+        if (not isinstance(self.capacity, int) or isinstance(self.capacity, bool)
+                or not 0 < self.capacity <= _MAX_ARCHIVE_CAPACITY
+                or any(not isinstance(c, CodeCandidate) for c in self.candidates)):
+            raise ValueError("invalid code archive record")
+        payload = {"capacity": self.capacity,
+                   "candidates": [c.to_dict() for c in self.candidates]}
+        _scan_serialized_strings(payload)
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict) -> CodeArchive:
+        if not isinstance(data, dict):
+            raise ValueError("invalid code archive record")
         arch = cls(capacity=int(data.get("capacity", 100)))
-        for c in data.get("candidates", []):
+        candidates = data.get("candidates", [])
+        if not isinstance(candidates, list):
+            raise ValueError("invalid code archive record")
+        for c in candidates:
             if isinstance(c, dict) and c.get("summary") is not None:
                 try:
-                    arch.candidates.append(CodeCandidate.from_dict(c))
+                    arch.add(CodeCandidate.from_dict(c))
                 except (TypeError, ValueError):
                     continue
         return arch
 
     def save(self, path: str | Path) -> None:
-        """Atomically persist (0600). Best-effort: a persistence failure must not
-        crash a learning pass."""
+        """Merge and atomically persist with owner-only permissions.
+
+        A caller must never report a successful learning pass when its lineage
+        record was lost. The typed, generic exception lets privileged runners
+        fail closed without echoing candidate metadata or filesystem details.
+        The strict cross-process transaction prevents concurrent research runs
+        from silently overwriting one another's lineage on shared state.
+        """
         try:
-            from .file_lock import atomic_write_text  # writes 0600 atomically
-            atomic_write_text(path, json.dumps(self.to_dict(), indent=2, sort_keys=True))
-        except Exception:  # pragma: no cover -- persistence is best-effort
-            log.debug("code archive save failed", exc_info=True)
+            from .file_lock import atomic_write_text, cross_process_lock
+
+            p = Path(path)
+            # Validate caller-owned mutable state before entering the file
+            # transaction. No contaminated record may influence merge state.
+            self_payload = self.to_dict()
+            with cross_process_lock(p, strict=True):
+                try:
+                    raw = _read_archive_json(p)
+                except FileNotFoundError:
+                    raw = None
+                existing = None
+                if raw is not None:
+                    existing = CodeArchive.from_dict(raw)
+                    raw_candidates = raw.get("candidates") if isinstance(raw, dict) else None
+                    if (
+                        not isinstance(raw_candidates, list)
+                        or len(existing.candidates) != len(raw_candidates)
+                    ):
+                        raise ValueError("existing code archive is invalid")
+                merged = CodeArchive(capacity=max(
+                    self.capacity,
+                    existing.capacity if existing is not None else self.capacity,
+                ))
+                if existing is not None:
+                    for candidate in existing.candidates:
+                        merged.add(candidate)
+                incoming = CodeArchive.from_dict(self_payload)
+                if len(incoming.candidates) != len(self.candidates):
+                    raise ValueError("incoming code archive is invalid")
+                for candidate in incoming.candidates:
+                    merged.add(candidate)
+                encoded = json.dumps(merged.to_dict(), indent=2, sort_keys=True)
+                if len(encoded.encode("utf-8")) > _MAX_ARCHIVE_BYTES:
+                    raise ValueError("code archive exceeds the file-size limit")
+                atomic_write_text(p, encoded)  # writes 0600 atomically
+        except Exception as exc:
+            # Never echo candidate metadata or tenant-bearing paths here.
+            log.warning("code archive persistence failed closed")
+            raise ArchivePersistenceError(
+                "code archive could not be durably persisted") from exc
 
     @classmethod
     def load(cls, path: str | Path) -> CodeArchive:
         """Load a persisted archive, or a fresh one if absent/corrupt."""
         p = Path(path)
-        if not p.exists():
-            return cls()
         try:
-            return cls.from_dict(json.loads(p.read_text(encoding="utf-8")))
-        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            return cls.from_dict(_read_archive_json(p))
+        except (
+            FileNotFoundError,
+            json.JSONDecodeError,
+            OSError,
+            TypeError,
+            UnicodeDecodeError,
+            ValueError,
+        ):
             return cls()
 
 
-__all__ = ["CodeCandidate", "CodeArchive"]
+__all__ = ["ArchivePersistenceError", "CodeCandidate", "CodeArchive"]

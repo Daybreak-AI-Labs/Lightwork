@@ -1,33 +1,20 @@
-"""Real apply + rollback for a promoted code change (Gap 3).
+"""Low-level live-tree apply and mechanical rollback primitives.
 
-The governed gate proves a change is *safe to land*; this module actually lands
-it — and, crucially, makes it **mechanically reversible**, which the earlier loop
-only asserted (it passed ``rollback=cand.id``, a string, satisfying the gate's
-truthiness check without any real undo).
+The operable self-modification runner does not call this module: live code
+adoption is disabled until a nonce/evidence/base-revision-bound approval
+manifest drives the durable PREPARE/CAS/COMMIT transaction API. This primitive
+therefore supplies mechanism, not authorization.
 
-The reversibility handle is a real workspace snapshot. The ordering matters:
-
-1. **Snapshot the live tree first** (:func:`create_rollback_point`) — cheap,
-   read-only w.r.t. the tree, and produces a real revert handle *before* the gate
-   runs. That snapshot id is what the caller passes as the gate's ``rollback``
-   handle, so "reversible" is now backed by an actual restore point, not a token.
-2. The caller runs the governed gate (evidence, capability, human signature,
-   calibration) with that handle.
-3. **Only on approval** does :func:`apply_change` mutate the live tree.
-4. :func:`revert_change` (or the returned :class:`RollbackHandle`) restores the
-   snapshot — invoked on a post-apply failure, or later if monitoring flags a
-   regression.
-
-Applying an already-gated, human-signed patch to the live tree is a *deployment*
-step, so it runs on the host tree by design (via ``sandbox.exec`` per kernel rule
-4) — distinct from the untrusted-candidate *evaluation*, which
-``self_modify_eval`` pins inside a container. This module never proposes or
-gates; it is the hands that land what the gate already approved, and it fails
-closed (a failed apply auto-reverts).
+Every apply requires an explicit reviewed editable surface, rejects protected or
+aliased targets, takes a fresh snapshot of the current tree, rechecks the global
+learning HALT immediately before mutation, and restores the snapshot after a
+failed apply. Caller-supplied snapshot handles are refused because they cannot
+prove they represent the current pre-state.
 """
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -60,9 +47,10 @@ class AppliedChange:
 
 def create_rollback_point(tree: Path, *, store: Path | None = None,
                           label: str = "self-modify") -> str | None:
-    """Snapshot ``tree`` and return the snapshot id — the reversibility handle to
-    pass to the gate BEFORE applying. Returns ``None`` on failure (the caller
-    then has no revert point and must refuse to apply — fail closed)."""
+    """Create a standalone recovery snapshot and return its id.
+
+    ``apply_change`` takes its own fresh pre-apply snapshot and does not accept
+    this id. Returns ``None`` on failure."""
     store = store or store_dir()
     try:
         man = create_snapshot(Path(tree), Path(store), label)
@@ -86,33 +74,84 @@ def _host_git_apply(patch: str, tree: Path) -> tuple[bool, str]:
 
 def apply_change(
     patch: str, *, tree: Path, snapshot_id: str | None = None,
-    store: Path | None = None, label: str = "self-modify",
+    store: Path | None = None, label: str = "self-modify", surface=None,
 ) -> AppliedChange:
     """Land ``patch`` on the live ``tree`` with a real rollback point.
 
-    If ``snapshot_id`` is given (the handle already created for the gate) it is
-    reused; otherwise a snapshot is taken now. WITHOUT a snapshot the apply is
-    REFUSED (no revert point → not reversible → fail closed). On a failed apply
-    the tree is reverted to the snapshot so a half-applied change never persists.
-    Never raises.
+    Caller-provided ``snapshot_id`` values are refused. A fresh snapshot is
+    taken after boundary and alias checks; without it the apply is refused. On a
+    failed apply the tree is restored so a half-applied change never persists.
+    This function supplies no deployment authorization and never raises.
 
-    Defence in depth: this live-tree write RE-RUNS the editable-surface boundary
+    Defence in depth: this live-tree write REQUIRES and re-runs the exact
+    editable-surface boundary
     (:func:`maverick.self_modify.review_patch`) and refuses any patch that touches
     a control-plane path — so even a mis-wired caller that skipped the gate can
     never land a change on a protected file through this primitive."""
-    tree = Path(tree)
+    try:
+        tree = Path(tree).resolve(strict=True)
+    except (OSError, ValueError) as exc:
+        return AppliedChange(False, reason=f"repository tree unavailable: {exc}")
+    if not tree.is_dir():
+        return AppliedChange(False, reason="repository tree must be a directory")
     store = store or store_dir()
+    if snapshot_id is not None:
+        return AppliedChange(
+            False,
+            reason="pre-existing rollback handles are not accepted; a fresh "
+                   "pre-apply snapshot is required",
+        )
 
     # Boundary re-check: refuse a patch that touches the reference monitor,
     # independent of whatever gating the caller claims to have done.
-    from .self_modify import _diff_paths, is_protected
+    from .self_modify import _canonical, _diff_paths, is_protected, review_patch
+    if surface is None:
+        return AppliedChange(
+            False, reason="refusing to apply without an explicit editable surface")
+    review = review_patch(patch, surface)
+    if not review.ok:
+        return AppliedChange(False, reason=f"refusing to apply: {review.reason}")
     protected = [p for p in _diff_paths(patch) if is_protected(p)]
     if protected:
         return AppliedChange(
             False, reason=f"refusing to apply: patch touches protected "
             f"control-plane paths {sorted(protected)}")
 
-    snap = snapshot_id or create_rollback_point(tree, store=store, label=label)
+    # Never follow a candidate-controlled alias out of the reviewed tree.  This
+    # check is repeated immediately before the write. Live self-modification is
+    # disabled until its caller additionally serializes and CAS-checks a durable
+    # promotion transaction.
+    for raw_path in _diff_paths(patch):
+        relative = _canonical(raw_path)
+        if relative is None:
+            return AppliedChange(False, reason=f"unsafe patch path {raw_path!r}")
+        current = tree
+        parts = relative.split("/")
+        for part in parts:
+            current = current / part
+            is_junction = getattr(current, "is_junction", None)
+            if current.is_symlink() or (callable(is_junction) and is_junction()):
+                return AppliedChange(
+                    False, reason=f"refusing to apply through filesystem alias {relative!r}")
+            if current.exists():
+                try:
+                    current.resolve(strict=True).relative_to(tree)
+                except (OSError, ValueError):
+                    return AppliedChange(
+                        False, reason=f"patch path escapes repository tree: {relative!r}")
+        target = tree.joinpath(*parts)
+        if target.exists() and target.is_file():
+            try:
+                if os.stat(target, follow_symlinks=False).st_nlink > 1:
+                    return AppliedChange(
+                        False,
+                        reason=f"refusing to modify hard-linked file {relative!r}",
+                    )
+            except OSError as exc:
+                return AppliedChange(
+                    False, reason=f"cannot verify patch target {relative!r}: {exc}")
+
+    snap = create_rollback_point(tree, store=store, label=label)
     if not snap:
         return AppliedChange(False, reason="no rollback point; refusing to apply")
 

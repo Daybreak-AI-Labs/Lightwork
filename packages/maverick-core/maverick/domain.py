@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import functools
 import os
+import re
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,6 +41,77 @@ _FIELDS = frozenset({
     "knowledge_sources", "authoring", "extends", "workflow", "output", "effort",
     "refuse", "autonomy",
 })
+
+_MAX_DOMAIN_FILE_BYTES = 256 * 1024
+_DOMAIN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
+_REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
+def _unsafe_domain_alias(info) -> bool:
+    return stat.S_ISLNK(info.st_mode) or bool(
+        getattr(info, "st_file_attributes", 0) & _REPARSE_ATTRIBUTE
+    )
+
+
+def _domain_file_identity(info) -> tuple:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        getattr(info, "st_mtime_ns", None),
+    )
+
+
+def _load_domain_toml(path: Path) -> dict:
+    """Bounded, no-follow read of one identity-bound domain TOML file."""
+    path = Path(path)
+    before = path.lstat()
+    if (
+        _unsafe_domain_alias(before)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+    ):
+        raise ValueError("domain pack must be a private regular file")
+    if before.st_size > _MAX_DOMAIN_FILE_BYTES:
+        raise ValueError("domain pack exceeds the file-size limit")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        expected = _domain_file_identity(before)
+        if (
+            _unsafe_domain_alias(opened)
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or _domain_file_identity(opened) != expected
+        ):
+            raise ValueError("domain pack changed during open")
+        chunks: list[bytes] = []
+        remaining = _MAX_DOMAIN_FILE_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if sum(len(chunk) for chunk in chunks) > _MAX_DOMAIN_FILE_BYTES:
+            raise ValueError("domain pack exceeds the file-size limit")
+        if _domain_file_identity(os.fstat(fd)) != expected:
+            raise ValueError("domain pack changed during read")
+    finally:
+        os.close(fd)
+    try:
+        data = tomllib.loads(b"".join(chunks).decode("utf-8", errors="strict"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("domain pack is not valid UTF-8") from exc
+    if not isinstance(data, dict):
+        raise ValueError("domain pack must contain a TOML table")
+    name = data.get("name", path.stem)
+    if not isinstance(name, str) or not _DOMAIN_ID_RE.fullmatch(name):
+        raise ValueError("domain pack has an invalid identity")
+    return data
 
 
 @dataclass
@@ -181,8 +254,7 @@ def _coerce(name: str, data: dict) -> DomainProfile:
 def load_domain(path: str | Path) -> DomainProfile:
     """Parse a single domain pack from TOML."""
     path = Path(path)
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
+    data = _load_domain_toml(path)
     return _coerce(data.get("name") or path.stem, data)
 
 
@@ -254,8 +326,7 @@ def _load_raw_domains(directory: str | Path) -> dict[str, dict]:
         return out
     for p in sorted(directory.glob("*.toml")):
         try:
-            with open(p, "rb") as f:
-                data = tomllib.load(f)
+            data = _load_domain_toml(p)
         except Exception:
             continue
         out[str(data.get("name") or p.stem)] = data

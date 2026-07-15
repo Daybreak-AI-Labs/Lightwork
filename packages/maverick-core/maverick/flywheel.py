@@ -34,6 +34,7 @@ from . import (
     procedural_memory,
 )
 from .data_engine import _terminal_outcome
+from .learning_guard import Halted, check_learning_halt
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,8 @@ def grounded_outcome_fn():
 def run_once(steps, *, guardrails=None, memory=None, world_model=None, start_states=None,
              failure_threshold: float = 0.5, min_support: int = 8,
              top_k: int = 10) -> FlywheelReport:
-    """One grounded turn of the flywheel (pure -- always computes)."""
+    """One grounded, HALT-governed turn of the flywheel."""
+    check_learning_halt("flywheel", "start")
     steps = list(steps)
     n_eps = len({(s.goal_id, s.episode_id) for s in steps})
     outcome_fn = grounded_outcome_fn()
@@ -80,12 +82,15 @@ def run_once(steps, *, guardrails=None, memory=None, world_model=None, start_sta
         top_k=top_k, outcome_fn=outcome_fn)
 
     rails = negative_knowledge.mine(classes)
-    (guardrails or negative_knowledge.shared()).update(rails)
+    guard_store = guardrails or negative_knowledge.shared()
+    check_learning_halt("flywheel", "guardrail_persistence")
+    guard_store.update(rails)
 
     mem_store = memory or procedural_memory.shared()
     mems = procedural_memory.consolidate(
         steps, prior=mem_store.recall(top_k=128), min_support=min_support,
         outcome_fn=outcome_fn)
+    check_learning_halt("flywheel", "procedural_memory_persistence")
     mem_store.update(mems)
 
     hyps = operations_scientist.propose(classes, mems, top_k=top_k)
@@ -106,6 +111,7 @@ def maybe_run() -> FlywheelReport:
     if not data_engine.enabled():
         return FlywheelReport(n_episodes=0)
     try:
+        check_learning_halt("flywheel", "start")
         from .config import get_data_engine
         from .trajectory_store import shared as traj_shared
 
@@ -117,6 +123,8 @@ def maybe_run() -> FlywheelReport:
             min_support=int(cfg.get("min_support", 8)),
             top_k=int(cfg.get("top_k", 10)),
         )
+    except Halted:
+        raise
     except Exception:  # pragma: no cover -- a maintenance loop must never crash a run
         return FlywheelReport(n_episodes=0)
 

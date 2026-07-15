@@ -41,7 +41,7 @@ from .paths import data_dir
 log = logging.getLogger(__name__)
 
 
-DEFAULT_PATH = data_dir("reflexions.ndjson")
+DEFAULT_PATH = data_dir("reflexions.ndjson", tenant=None)
 
 def default_path() -> Path:
     """The active scope's reflexion log (tenant-isolated when one is active)."""
@@ -52,12 +52,11 @@ def _tenant_path(name: str, legacy):
     """Item-30 isolation: with an ACTIVE tenant, this store lives under the
     tenant's data dir (one tenant's learned memory can never feed another's
     runs); single-tenant resolution keeps the legacy location unchanged."""
-    try:
-        from .paths import current_tenant, data_dir
-        if current_tenant():
-            return data_dir(*name.split("/"))
-    except Exception:  # pragma: no cover -- isolation never blocks resolution
-        pass
+    from .paths import current_tenant_id, data_dir
+
+    tenant = current_tenant_id()
+    if tenant:
+        return data_dir(*name.split("/"), tenant=tenant)
     return legacy
 
 

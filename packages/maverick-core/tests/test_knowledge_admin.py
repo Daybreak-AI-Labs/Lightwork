@@ -3,6 +3,8 @@ is off, and the seed corpus. Plus the erase-verify integration that folds the
 knowledge residual into the right-to-erasure verdict."""
 from __future__ import annotations
 
+import json
+
 from maverick import knowledge_admin
 from maverick.knowledge_seed import available_corpora, seed_corpora
 
@@ -28,7 +30,7 @@ def test_admin_erase_and_count_when_enabled(tmp_path, monkeypatch):
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         "[knowledge]\nenable = true\nembedder = \"deterministic\"\nstore = \"sqlite\"\n"
-        f'path = "{tmp_path / "knowledge.db"}"\n',
+        f'path = {json.dumps(str(tmp_path / "knowledge.db"))}\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
@@ -84,7 +86,7 @@ def test_erase_verify_includes_knowledge_residual(tmp_path, monkeypatch):
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         "[knowledge]\nenable = true\nembedder = \"deterministic\"\nstore = \"sqlite\"\n"
-        f'path = "{tmp_path / "knowledge.db"}"\n',
+        f'path = {json.dumps(str(tmp_path / "knowledge.db"))}\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))

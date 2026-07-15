@@ -2,6 +2,14 @@
 
 **Date:** 2026-07-10, updated 2026-07-11 · **Operator:** Day AI Labs · **Agent:** Lightwork coding agent (llm proposer) · **Harness:** `benchmarks/swebench_governed.py`
 
+> **Scope clarification (2026-07-15):** This is a historical evidence record for
+> the dedicated, operator-run `swebench_governed.py` benchmark harness. It is not
+> evidence that the stock `maverick self-modify` runner autonomously adopts code.
+> The stock runner is research-only and deliberately has no live-apply path. The
+> benchmark's operator approval, evaluator environment, and ledger claims must be
+> assessed on their own terms and must not be generalized into a production DGM
+> claim.
+
 ## The claim this evidence supports — and its limits
 
 **Supported:** Lightwork's coding agent resolves real SWE-bench Verified issues

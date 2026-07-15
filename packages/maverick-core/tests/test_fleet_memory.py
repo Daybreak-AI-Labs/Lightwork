@@ -8,7 +8,7 @@ from maverick import dreaming, fleet_memory, reflexion
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
-    monkeypatch.setattr(fleet_memory, "_dir", lambda: tmp_path / "fleet")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setattr(reflexion, "default_path",
                         lambda: tmp_path / "reflexions.ndjson")
     monkeypatch.setattr(dreaming, "insights_path",
@@ -169,3 +169,85 @@ def test_ingest_rejects_path_injection_identifiers():
     ):
         ok, reason = fleet_memory.ingest({**bad, "kind": "lesson", "goal_text": "x"})
         assert not ok and "invalid" in reason, bad
+
+
+def test_external_safety_dependencies_fail_closed(monkeypatch):
+    _register()
+    from maverick import memory_guard
+    from maverick.safety import secret_detector
+
+    record = {
+        "agent_id": "order-bot", "vendor": "agentforce",
+        "kind": "success", "goal_text": "safe-looking",
+    }
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            secret_detector, "redact",
+            lambda text: (_ for _ in ()).throw(RuntimeError("scanner down")),
+        )
+        ok, reason = fleet_memory.ingest(record)
+    assert not ok and "Shield" in reason
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            memory_guard, "injection_markers",
+            lambda text: (_ for _ in ()).throw(RuntimeError("screen down")),
+        )
+        ok, reason = fleet_memory.ingest(record)
+    assert not ok and "Shield" in reason
+
+
+def test_trust_state_failure_denies_ingest_recall_and_shared_identity(monkeypatch):
+    _register()
+    from maverick import agent_trust
+
+    monkeypatch.setattr(
+        agent_trust, "load_trust_state",
+        lambda: (_ for _ in ()).throw(RuntimeError("trust config unreadable")),
+    )
+    record = {
+        "agent_id": "order-bot", "vendor": "agentforce",
+        "kind": "lesson", "goal_text": "do not persist",
+    }
+
+    ok, reason = fleet_memory.ingest(record)
+    assert not ok and "trust state is unavailable" in reason
+    context, reason = fleet_memory.recall(
+        "anything", agent_id="order-bot", vendor="agentforce", domain="finance",
+    )
+    assert context == "" and "trust state is unavailable" in reason
+    with fleet_memory.bind_caller(""):
+        ok, reason = fleet_memory.ingest(record)
+    assert not ok and "trust state is unavailable" in reason
+
+
+def test_inbox_names_are_collision_safe_and_private(monkeypatch):
+    _register()
+    monkeypatch.setattr(fleet_memory.time, "time", lambda: 1234.5)
+    record = {
+        "agent_id": "order-bot", "vendor": "agentforce",
+        "kind": "success", "goal_text": "close books",
+    }
+
+    assert fleet_memory.ingest(record)[0]
+    assert fleet_memory.ingest(record)[0]
+
+    files = list(fleet_memory.inbox_dir().glob("*.json"))
+    assert len(files) == 2
+    from maverick.file_lock import private_path_is_restricted
+    assert all(private_path_is_restricted(path, 0o600) for path in files)
+
+
+def test_fleet_memory_path_follows_tenant_context_dynamically(tmp_path, monkeypatch):
+    from maverick.paths import tenant_scope
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    shared = fleet_memory.inbox_dir()
+    with tenant_scope(tenant="tenant:a"):
+        tenant_a = fleet_memory.inbox_dir()
+    with tenant_scope(tenant="tenant-b"):
+        tenant_b = fleet_memory.inbox_dir()
+
+    assert shared == tmp_path / "fleet-memory" / "inbox"
+    assert tenant_a == tmp_path / "tenants" / "tenant%3Aa" / "fleet-memory" / "inbox"
+    assert tenant_b == tmp_path / "tenants" / "tenant-b" / "fleet-memory" / "inbox"

@@ -258,6 +258,53 @@ def test_webhook_run_fires_registered_template(monkeypatch, tmp_path, _no_real_r
     assert g is not None and g.title == "Weekly rivals report"   # rendered defaults
 
 
+def test_webhook_run_uses_immutable_template_revision(monkeypatch, tmp_path, _no_real_run):
+    """Editing a shared-name template cannot rewrite an already-armed trigger."""
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    c = _client()
+    name = _register(c)
+
+    import maverick.templates as tpl
+    (tpl.USER_TEMPLATES / "weekly-report.md").write_text(
+        "---\ntitle: Replaced {{topic}} workflow\nparams:\n  - topic\n---\n"
+        "Run a materially different workflow for {{topic}}.\n",
+        encoding="utf-8",
+    )
+
+    body = json.dumps({"trigger": name}).encode()
+    response = c.post("/webhook/run", content=body, headers=_sign_headers(body))
+    assert response.status_code == 201, response.text
+    from maverick.world_model import DEFAULT_DB, WorldModel
+
+    goal = WorldModel(DEFAULT_DB).get_goal(response.json()["goal_id"])
+    assert goal is not None
+    assert goal.title == "Weekly rivals report"
+    assert goal.description == "Research rivals and email the team."
+
+    # Listings identify the pinned revision but never disclose its prompt body.
+    listed = c.get("/api/v1/triggers").json()["triggers"][0]
+    assert len(listed["template_revision"]) == 64
+    assert "template_snapshot" not in listed
+
+
+def test_webhook_run_refuses_legacy_name_only_binding(monkeypatch, tmp_path, _no_real_run):
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    from maverick_dashboard import triggers_store
+
+    triggers_store.set_trigger(
+        "legacy", "weekly-report", {"topic": "rivals"}
+    )
+    body = json.dumps({"trigger": "legacy"}).encode()
+    response = _client().post(
+        "/webhook/run", content=body, headers=_sign_headers(body)
+    )
+    assert response.status_code == 409
+    assert "binding" in response.json()["detail"]
+    assert _no_real_run == []
+
+
 def test_webhook_run_records_trigger_provenance(monkeypatch, tmp_path, _no_real_run):
     # v2: firing a trigger stamps goal_origins, so /automation-runs (same _world)
     # surfaces the spawned goal for the Automations run-history view.

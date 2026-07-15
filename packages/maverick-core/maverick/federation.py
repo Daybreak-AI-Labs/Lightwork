@@ -58,6 +58,7 @@ import hmac
 import json
 import logging
 import os
+import sqlite3
 import threading
 import time
 import uuid
@@ -85,7 +86,7 @@ _SIGN_FRESHNESS_S = 300.0  # accept a signature within ±5 min of now (replay wi
 # oldest-first, so a captured valid delegation can't be replayed within the
 # freshness window. Pruned by AGE (see _replay_seen), so a still-fresh nonce is
 # never evicted early.
-_seen_sigs: OrderedDict[str, float] = OrderedDict()
+_seen_sigs: OrderedDict[tuple[str, str, str], float] = OrderedDict()
 # Guards every read/mutate of _seen_sigs. The federation gRPC server runs a
 # ThreadPoolExecutor, so concurrent DelegateGoal RPCs hit _replay_seen at once.
 # Without this lock the check-then-insert is not atomic (two threads could both
@@ -106,12 +107,14 @@ _seen_sigs_lock = threading.Lock()
 _fed_rate_hits: dict[str, deque[float]] = {}
 _fed_rate_lock = threading.Lock()
 _FED_RATE_MAX_KEYS = 8192
+_FED_STATE_CONNECTION = threading.local()
 
 _DEFAULT_ADDR = "127.0.0.1:50061"  # one port up from the goal API (50051)
 _DEFAULT_RPC_TIMEOUT_S = 10.0
 _MAX_CORRELATION_ID_BYTES = 256
-_CORRELATION_CACHE_MAX = 8192
-_CORRELATION_TTL_S = 24 * 60 * 60.0
+_CORRELATION_CACHE_MAX = 250_000
+_CORRELATION_PER_PEER_MAX = 50_000
+_CORRELATION_TTL_S = 60 * 60.0
 _CORRELATION_WAIT_S = 30.0
 
 # Sentinel: "no grant injected" (build from config) vs an explicit None
@@ -132,7 +135,243 @@ class _CorrelationEntry:
     digest: str
     created_at: float
     event: threading.Event
+    owner_token: str = ""
     result: dict[str, Any] | None = None
+
+
+class _FederationState:
+    """Tenant-scoped durable replay, rate, and correlation authority."""
+
+    def __init__(self, path: Path | None = None):
+        if path is None:
+            from .paths import data_dir
+
+            path = data_dir("federation", "inbound_state.sqlite3")
+        self.path = Path(path)
+
+    def _connect(self) -> sqlite3.Connection:
+        from .file_lock import (
+            ensure_private_directory,
+            ensure_private_file,
+            harden_path_permissions,
+        )
+
+        canonical = str(self.path.resolve())
+        current_pid = os.getpid()
+        cached_path = getattr(_FED_STATE_CONNECTION, "path", None)
+        cached_conn = getattr(_FED_STATE_CONNECTION, "conn", None)
+        cached_pid = getattr(_FED_STATE_CONNECTION, "pid", None)
+        if (
+            cached_path == canonical
+            and cached_conn is not None
+            and cached_pid == current_pid
+        ):
+            return cached_conn
+        if cached_conn is not None:
+            cached_conn.close()
+            _FED_STATE_CONNECTION.conn = None
+            _FED_STATE_CONNECTION.path = None
+            _FED_STATE_CONNECTION.pid = None
+
+        ensure_private_directory(self.path.parent)
+        existed = self.path.exists()
+        if existed:
+            ensure_private_file(self.path)
+        conn = sqlite3.connect(
+            str(self.path), timeout=10.0, isolation_level=None,
+        )
+        try:
+            if not existed:
+                harden_path_permissions(self.path, 0o600)
+            conn.execute("PRAGMA synchronous=FULL")
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS replay_claims (
+                    scope TEXT NOT NULL,
+                    signature_hash TEXT NOT NULL,
+                    expires_at REAL NOT NULL,
+                    PRIMARY KEY (scope, signature_hash)
+                );
+                CREATE TABLE IF NOT EXISTS rate_hits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    peer_key TEXT NOT NULL,
+                    seen_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS rate_hits_peer_time
+                    ON rate_hits(peer_key, seen_at);
+                CREATE INDEX IF NOT EXISTS rate_hits_seen_at
+                    ON rate_hits(seen_at);
+                CREATE TABLE IF NOT EXISTS correlations (
+                    peer TEXT NOT NULL,
+                    correlation_id TEXT NOT NULL,
+                    digest TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    owner_token TEXT NOT NULL,
+                    result_json TEXT,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY (peer, correlation_id)
+                );
+            """)
+            _FED_STATE_CONNECTION.path = canonical
+            _FED_STATE_CONNECTION.conn = conn
+            _FED_STATE_CONNECTION.pid = current_pid
+            return conn
+        except BaseException:
+            conn.close()
+            raise
+
+    def claim_replay(
+        self, scope: str, sig: str, *, expires_at: float, now: float,
+    ) -> bool:
+        signature_hash = hashlib.sha256(sig.encode("utf-8")).hexdigest()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM replay_claims WHERE scope = ? AND expires_at < ?",
+                (scope, now),
+            )
+            row = conn.execute(
+                "SELECT 1 FROM replay_claims "
+                "WHERE scope = ? AND signature_hash = ?",
+                (scope, signature_hash),
+            ).fetchone()
+            if row is not None:
+                return True
+            count = int(conn.execute(
+                "SELECT COUNT(*) FROM replay_claims WHERE scope = ?",
+                (scope,),
+            ).fetchone()[0])
+            if count >= 10_000:
+                raise ValueError("federation replay ledger capacity reached")
+            conn.execute(
+                "INSERT INTO replay_claims(scope, signature_hash, expires_at) "
+                "VALUES (?, ?, ?)",
+                (scope, signature_hash, expires_at),
+            )
+            return False
+
+    def rate_ok(self, key: str, *, now: float, limit: int) -> bool:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cutoff = now - 60.0
+            conn.execute("DELETE FROM rate_hits WHERE seen_at < ?", (cutoff,))
+            count = int(conn.execute(
+                "SELECT COUNT(*) FROM rate_hits "
+                "WHERE peer_key = ? AND seen_at >= ?",
+                (key, cutoff),
+            ).fetchone()[0])
+            if count >= limit:
+                return False
+            conn.execute(
+                "INSERT INTO rate_hits(peer_key, seen_at) VALUES (?, ?)",
+                (key, now),
+            )
+            return True
+
+    def claim_correlation(
+        self, peer: str, corr: str, digest: str, *, now: float,
+    ) -> tuple[str, dict[str, Any] | None, str]:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM correlations "
+                "WHERE status = 'complete' AND created_at < ?",
+                (now - _CORRELATION_TTL_S,),
+            )
+            row = conn.execute(
+                "SELECT digest, status, result_json FROM correlations "
+                "WHERE peer = ? AND correlation_id = ?",
+                (peer, corr),
+            ).fetchone()
+            if row is not None:
+                existing_digest, status, result_json = row
+                if not hmac.compare_digest(str(existing_digest), digest):
+                    return "conflict", None, ""
+                if status == "complete":
+                    result = json.loads(str(result_json or "{}"))
+                    if not isinstance(result, dict):
+                        raise ValueError("invalid federation correlation result")
+                    return "cached", result, ""
+                if status != "in_progress":
+                    raise ValueError("invalid federation correlation status")
+                return "busy", None, ""
+            total_count = int(conn.execute(
+                "SELECT COUNT(*) FROM correlations",
+            ).fetchone()[0])
+            peer_count = int(conn.execute(
+                "SELECT COUNT(*) FROM correlations WHERE peer = ?",
+                (peer,),
+            ).fetchone()[0])
+            peer_limit = min(_CORRELATION_PER_PEER_MAX, _CORRELATION_CACHE_MAX)
+            if total_count >= _CORRELATION_CACHE_MAX or peer_count >= peer_limit:
+                return "capacity", None, ""
+            owner_token = uuid.uuid4().hex
+            conn.execute(
+                "INSERT INTO correlations("
+                "peer, correlation_id, digest, status, owner_token, result_json, created_at"
+                ") VALUES (?, ?, ?, 'in_progress', ?, NULL, ?)",
+                (peer, corr, digest, owner_token, now),
+            )
+            return "owner", None, owner_token
+
+    def correlation_result(
+        self, peer: str, corr: str, digest: str,
+    ) -> tuple[str, dict[str, Any] | None]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT digest, status, result_json FROM correlations "
+                "WHERE peer = ? AND correlation_id = ?",
+                (peer, corr),
+            ).fetchone()
+        if row is None:
+            return "missing", None
+        existing_digest, status, result_json = row
+        if not hmac.compare_digest(str(existing_digest), digest):
+            return "conflict", None
+        if status != "complete":
+            return "busy", None
+        result = json.loads(str(result_json or "{}"))
+        if not isinstance(result, dict):
+            raise ValueError("invalid federation correlation result")
+        return "cached", result
+
+    def finish_correlation(
+        self,
+        peer: str,
+        corr: str,
+        digest: str,
+        owner_token: str,
+        result: dict[str, Any],
+    ) -> None:
+        encoded = json.dumps(
+            result, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        )
+        if len(encoded.encode("utf-8")) > 16_384:
+            raise ValueError("federation correlation result is too large")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute(
+                "UPDATE correlations SET status = 'complete', result_json = ? "
+                "WHERE peer = ? AND correlation_id = ? AND digest = ? "
+                "AND owner_token = ? AND status = 'in_progress'",
+                (encoded, peer, corr, digest, owner_token),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("federation correlation ownership changed")
+
+    def release_correlation(
+        self, peer: str, corr: str, digest: str, owner_token: str,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "DELETE FROM correlations WHERE peer = ? AND correlation_id = ? "
+                "AND digest = ? AND owner_token = ? AND status = 'in_progress'",
+                (peer, corr, digest, owner_token),
+            )
+
+
+def _federation_state(path: Path | None = None) -> _FederationState:
+    return _FederationState(path)
 
 
 # -- config ----------------------------------------------------------------
@@ -200,7 +439,18 @@ def load_peers(cfg: dict | None = None) -> list[Peer]:
         seen.add(name)
         peers.append(Peer(name=name, target=target,
                           token=str(entry.get("token") or "")))
-    return peers
+    token_counts: dict[str, int] = {}
+    for peer in peers:
+        if peer.token:
+            token_counts[peer.token] = token_counts.get(peer.token, 0) + 1
+    return [
+        Peer(
+            name=peer.name,
+            target=peer.target,
+            token=peer.token if token_counts.get(peer.token, 0) == 1 else "",
+        )
+        for peer in peers
+    ]
 
 
 def _match_token(peers: Iterable[Peer], token: str) -> Peer | None:
@@ -211,10 +461,13 @@ def _match_token(peers: Iterable[Peer], token: str) -> Peer | None:
     """
     presented = (token or "").encode()
     matched: Peer | None = None
+    matches = 0
     for p in peers:
         if p.token and hmac.compare_digest(p.token.encode(), presented):
-            matched = matched or p
-    return matched
+            matches += 1
+            if matched is None:
+                matched = p
+    return matched if matches == 1 else None
 
 
 def _to_int(value: Any) -> int:
@@ -270,12 +523,33 @@ def require_signed() -> bool:
     refuses peers that have *no* pinned key (closing the shared-token-only path)."""
     env = os.environ.get("MAVERICK_FEDERATION_REQUIRE_SIGNED")
     if env is not None and env.strip() != "":
-        return env.strip().lower() in {"1", "true", "yes", "on"}
+        value = env.strip().lower()
+        if value in {"1", "true", "yes", "on"}:
+            return True
+        if value in {"0", "false", "no", "off"}:
+            return False
+        return True
     try:
-        from .config import load_config
-        return bool((load_config() or {}).get("agent_trust", {}).get("require_signed"))
+        from .config import config_source_errors, load_config
+
+        loaded = load_config() or {}
+        if config_source_errors():
+            return True
+        section = loaded.get("agent_trust") or {}
+        if not isinstance(section, dict):
+            return True
+        value = section.get("require_signed", False)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+        return True
     except Exception:
-        return False
+        return True
 
 
 def _delegate_envelope(
@@ -312,7 +586,12 @@ def _fresh(created_at: float, *, now: float | None = None) -> bool:
 
 
 def _replay_seen(
-    sig: str, *, created_at: float | None = None, now: float | None = None,
+    sig: str,
+    *,
+    created_at: float | None = None,
+    now: float | None = None,
+    scope: str = "delegation",
+    state: _FederationState | None = None,
 ) -> bool:
     """Check-and-remember a verified signature; True if already seen (replay).
 
@@ -328,25 +607,41 @@ def _replay_seen(
     retain_until = (
         created_at if created_at and created_at > 0 else now
     ) + _SIGN_FRESHNESS_S
+    state = state or _federation_state()
+    cache_key = (
+        str(state.path.resolve()),
+        scope,
+        hashlib.sha256(sig.encode("utf-8")).hexdigest(),
+    )
     with _seen_sigs_lock:
         while _seen_sigs:
             _oldest, expires_at = next(iter(_seen_sigs.items()))
             if expires_at >= now:
                 break
             _seen_sigs.popitem(last=False)
-        if sig in _seen_sigs:
+        if cache_key in _seen_sigs:
             return True
-        _seen_sigs[sig] = retain_until
+    try:
+        replayed = state.claim_replay(
+            scope, sig, expires_at=retain_until, now=now,
+        )
+    except (OSError, sqlite3.Error, ValueError):
+        log.error("federation: durable signature replay protection unavailable")
+        return True
+    with _seen_sigs_lock:
+        if replayed:
+            return True
+        _seen_sigs[cache_key] = retain_until
         return False
 
 
 def _fed_rate_limit_per_min() -> int:
-    """Inbound delegations/minute per peer. Default 600; 0 disables. Mirrors
+    """Inbound delegations/minute per peer. Default 60; 0 disables. Mirrors
     ``MAVERICK_GRPC_RATE_LIMIT`` on the sibling gRPC API."""
     try:
-        return max(0, int(os.environ.get("MAVERICK_FEDERATION_RATE_LIMIT", "600")))
+        return max(0, int(os.environ.get("MAVERICK_FEDERATION_RATE_LIMIT", "60")))
     except ValueError:
-        return 600
+        return 60
 
 
 def _fed_rate_ok(key: str, *, now: float | None = None) -> bool:
@@ -358,7 +653,14 @@ def _fed_rate_ok(key: str, *, now: float | None = None) -> bool:
     limit = _fed_rate_limit_per_min()
     if limit <= 0:
         return True
-    now = time.monotonic() if now is None else now
+    now = time.time() if now is None else now
+    try:
+        durable_allowed = _federation_state().rate_ok(key, now=now, limit=limit)
+    except (OSError, sqlite3.Error, ValueError):
+        log.error("federation: durable inbound rate limiter unavailable")
+        return False
+    if not durable_allowed:
+        return False
     with _fed_rate_lock:
         cutoff = now - 60.0
         dq = _fed_rate_hits.setdefault(key, deque())
@@ -368,10 +670,26 @@ def _fed_rate_ok(key: str, *, now: float | None = None) -> bool:
             for k in [k for k, d in _fed_rate_hits.items()
                       if k != key and (not d or d[-1] < cutoff)]:
                 del _fed_rate_hits[k]
-        if len(dq) >= limit:
-            return False
+        # This process-local mirror exists for diagnostics/backward-compatible
+        # tests; the SQLite transaction above is the cross-worker authority.
         dq.append(now)
         return True
+
+
+def _fed_auth_rate_ok(peer: str, *, now: float | None = None) -> bool:
+    """Cheap token-authenticated abuse gate before signature/state work."""
+    configured = _fed_rate_limit_per_min()
+    if configured <= 0:
+        return True
+    limit = max(60, configured * 10)
+    timestamp = time.time() if now is None else now
+    try:
+        return _federation_state().rate_ok(
+            f"authenticated:{peer}", now=timestamp, limit=limit,
+        )
+    except (OSError, sqlite3.Error, ValueError):
+        log.error("federation: durable authentication rate limiter unavailable")
+        return False
 
 
 def _sign_delegation(
@@ -660,12 +978,14 @@ class FederationService:
         local_grant: Any = _UNSET,
         goal_service: Any | None = None,
         record: Any | None = None,
+        state_path: Path | None = None,
     ):
         self.node = (node or node_name()).strip()
         self._peers = load_peers() if peers is None else list(peers)
         self._grant = local_grant
         self._goal_service = goal_service
         self._record = record or _default_record
+        self._state = _federation_state(state_path)
         # Per-peer correlation ids are the idempotency namespace for goal
         # creation. The cache is service-local, bounded, and concurrency-safe;
         # an identical in-flight retry waits for the original outcome.
@@ -709,47 +1029,53 @@ class FederationService:
     def _claim_correlation(
         self, peer: Peer, corr: str, digest: str,
     ) -> tuple[str, tuple[str, str], dict[str, Any] | None]:
-        """Claim one delegation id, wait for an identical owner, or refuse."""
+        """Durably claim one delegation id, wait for its owner, or refuse."""
         key = (peer.name, corr)
-        now = time.monotonic()
-        wait_for: threading.Event | None = None
-        with self._correlation_lock:
-            for old_key, entry in list(self._correlations.items()):
-                if (
-                    entry.result is not None
-                    and now - entry.created_at > _CORRELATION_TTL_S
-                ):
-                    self._correlations.pop(old_key, None)
-
-            existing = self._correlations.get(key)
-            if existing is not None:
-                if not hmac.compare_digest(existing.digest, digest):
-                    return "conflict", key, None
-                self._correlations.move_to_end(key)
-                if existing.result is not None:
-                    return "cached", key, dict(existing.result)
-                wait_for = existing.event
-            else:
-                if len(self._correlations) >= _CORRELATION_CACHE_MAX:
-                    # Never evict an unexpired completed claim: doing so would
-                    # reopen its correlation id to replay under cache churn.
-                    return "capacity", key, None
+        now = time.time()
+        try:
+            claim, cached, owner_token = self._state.claim_correlation(
+                peer.name, corr, digest, now=now,
+            )
+        except (OSError, sqlite3.Error, ValueError):
+            log.error("federation: durable correlation ledger unavailable")
+            return "unavailable", key, None
+        if claim == "owner":
+            with self._correlation_lock:
                 self._correlations[key] = _CorrelationEntry(
                     digest=digest,
                     created_at=now,
                     event=threading.Event(),
+                    owner_token=owner_token,
                 )
-                return "owner", key, None
+            return "owner", key, None
+        if claim in {"cached", "conflict", "capacity"}:
+            return claim, key, dict(cached) if cached is not None else None
 
-        # Do not hold the cache lock while the first call creates a goal.
-        assert wait_for is not None
-        if not wait_for.wait(_CORRELATION_WAIT_S):
-            return "busy", key, None
-        with self._correlation_lock:
-            completed = self._correlations.get(key)
-            if completed is None or completed.result is None:
-                return "busy", key, None
-            return "cached", key, dict(completed.result)
+        # Another process/thread owns the in-progress claim. Poll the durable
+        # row rather than relying on a process-local Event, so a second worker
+        # returns the exact original result without starting another goal.
+        deadline = time.monotonic() + _CORRELATION_WAIT_S
+        while time.monotonic() < deadline:
+            with self._correlation_lock:
+                local = self._correlations.get(key)
+            if local is not None:
+                local.event.wait(min(0.05, max(0.0, deadline - time.monotonic())))
+            else:
+                time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+            try:
+                status, completed = self._state.correlation_result(
+                    peer.name, corr, digest,
+                )
+            except (OSError, sqlite3.Error, ValueError):
+                return "unavailable", key, None
+            if status == "cached":
+                assert completed is not None
+                return "cached", key, dict(completed)
+            if status == "conflict":
+                return "conflict", key, None
+            if status == "missing":
+                return "unavailable", key, None
+        return "busy", key, None
 
     def _finish_correlation(
         self, key: tuple[str, str], result: dict[str, Any],
@@ -758,9 +1084,33 @@ class FederationService:
             entry = self._correlations.get(key)
             if entry is None:
                 return
+            try:
+                self._state.finish_correlation(
+                    key[0], key[1], entry.digest, entry.owner_token, result,
+                )
+            except (OSError, sqlite3.Error, ValueError):
+                # Leave the durable row in-progress: retries then fail closed
+                # instead of risking duplicate goal creation after a restart.
+                log.error("federation: failed to persist correlation result")
             entry.result = dict(result)
             entry.event.set()
             self._correlations.move_to_end(key)
+
+    def _release_correlation(self, key: tuple[str, str]) -> None:
+        """Release a side-effect-free owner claim (for example, rate refusal)."""
+        with self._correlation_lock:
+            entry = self._correlations.get(key)
+            if entry is None:
+                return
+            try:
+                self._state.release_correlation(
+                    key[0], key[1], entry.digest, entry.owner_token,
+                )
+            except (OSError, sqlite3.Error, ValueError):
+                log.error("federation: failed to release correlation claim")
+                return
+            self._correlations.pop(key, None)
+            entry.event.set()
 
     # Lazy so constructing the service never touches config/world unless used.
     def _local_grant(self) -> Any:
@@ -768,8 +1118,11 @@ class FederationService:
             try:
                 from .capability import capability_from_config
                 self._grant = capability_from_config(f"federation:{self.node}")
-            except Exception:  # fail-open on the read; auth still gates entry
-                self._grant = None
+            except Exception:
+                from .capability import deny_all_capability
+
+                log.error("federation: capability policy unavailable; denying tools")
+                self._grant = deny_all_capability(f"federation:{self.node}")
         return self._grant
 
     def _goals(self) -> Any:
@@ -793,11 +1146,17 @@ class FederationService:
         is allowed through on the shared token alone unless ``require_signed`` —
         the migration path. Freshness + replay-cache guard captured signatures.
         """
+        signed_required = require_signed()
         if not enforced or agent is None:
+            if signed_required:
+                return (
+                    "signed delegation required but no enforced trust record "
+                    f"with a pinned key is available for peer {peer.name!r}"
+                )
             return None
         pinned = bool(getattr(agent, "pubkey", ""))
         if not pinned:
-            if require_signed():
+            if signed_required:
                 return ("signed delegation required but no pinned key is "
                         f"configured for peer {peer.name!r}")
             return None  # migration: shared-token-only peer
@@ -824,7 +1183,12 @@ class FederationService:
             peer.name, env, expected_schema=DELEGATE_SCHEMA, registry=registry)
         if not ok:
             return f"delegation signature rejected: {reason}"
-        if _replay_seen(sig, created_at=created_at):
+        if _replay_seen(
+            sig,
+            created_at=created_at,
+            scope=f"delegation:{self.node}:{peer.name}",
+            state=self._state,
+        ):
             return "replayed delegation signature"
         return None
 
@@ -871,7 +1235,7 @@ class FederationService:
             "agent_card_json": json.dumps(build_agent_card()),
         }
 
-    def delegate_goal(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def delegate_goal(self, payload: dict[str, Any]) -> dict[str, Any]:  # noqa: C901
         corr, correlation_error = self._validated_correlation(payload)
         peer = self._authenticate(payload)
         if peer is None:
@@ -884,8 +1248,13 @@ class FederationService:
                 accepted=False, reason="unauthorized",
             )
             return self._refuse("unauthorized: missing or invalid token")
+        if not _fed_auth_rate_ok(peer.name):
+            return self._refuse_recorded(
+                peer, corr, "authenticated federation rate limit exceeded",
+            )
         if correlation_error:
-            # Do not copy an attacker-sized identifier into retained audit data.
+            # Authenticate and charge malformed requests before recording them,
+            # while still refusing to retain an attacker-sized identifier.
             return self._refuse_recorded(peer, corr, correlation_error)
 
         requested = {str(t) for t in (payload.get("requested_tools") or [])
@@ -980,11 +1349,15 @@ class FederationService:
                 peer, corr,
                 "correlation_id was already used with different delegation content",
             )
-        if claim in {"busy", "capacity"}:
+        if claim in {"busy", "capacity", "unavailable"}:
             reason = (
                 "correlation_id is already in progress"
                 if claim == "busy"
-                else "correlation replay ledger capacity is full"
+                else (
+                    "correlation replay ledger capacity is full"
+                    if claim == "capacity"
+                    else "correlation replay ledger is unavailable"
+                )
             )
             return self._refuse_recorded(peer, corr, reason)
 
@@ -997,7 +1370,8 @@ class FederationService:
         # identity checks succeed. Token-only/invalid signatures must not be
         # able to consume the legitimate signed delegation quota.
         if not _fed_rate_ok(f"peer:{peer.name}"):
-            return finish(self._refuse_recorded(peer, corr, "rate limit exceeded"))
+            self._release_correlation(correlation_key)
+            return self._refuse_recorded(peer, corr, "rate limit exceeded")
 
         deadline_ms = _to_int(payload.get("deadline_ms"))
         # Clamp the run's budget to the peer's registry ceiling (down only):

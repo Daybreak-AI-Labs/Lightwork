@@ -13,7 +13,9 @@ import json
 import logging
 import os
 import re
+import stat
 import urllib.error
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -620,7 +622,8 @@ def _verify_skill_signature(parsed: Skill, *, require_signature: bool = False) -
 
 
 def _validate_and_write(
-    content: str, skills_dir: Path, *, require_signature: bool = False
+    content: str, skills_dir: Path, *, require_signature: bool = False,
+    before_save: Callable[[], None] | None = None,
 ) -> Skill:
     """Parse + shield-scan skill content, then write it. Shared by
     ``install_skill`` (free-text source) and ``install_from_catalog``
@@ -632,7 +635,15 @@ def _validate_and_write(
     # CRITICAL: parse + validate BEFORE writing to disk. Old behavior wrote
     # the file first and parsed second -- an attacker passing /etc/passwd
     # would still leave its contents on disk even though install errored.
-    skills_dir.mkdir(parents=True, exist_ok=True)
+    from .file_lock import (
+        atomic_read_text,
+        atomic_write_text,
+        cross_process_lock,
+        ensure_private_directory,
+        ensure_private_file,
+    )
+
+    ensure_private_directory(skills_dir)
     tmp_path = skills_dir / ".validating"
     parsed = Skill.parse(content, tmp_path)
 
@@ -664,22 +675,48 @@ def _validate_and_write(
 
     name = _safe_name(parsed.name) if parsed.name else "imported-skill"
     target = skills_dir / f"{name}.md"
-    if target.exists():
-        # Two DIFFERENT source names can sanitize to the same filename (e.g.
-        # "..." and "...."  both -> "skill"); silently overwriting would lose the
-        # earlier skill (user-testing finding). Refuse a colliding install while
-        # still allowing a same-name re-install (an update).
+    with cross_process_lock(target):
         try:
-            existing_name = Skill.parse(target.read_text(encoding="utf-8"), target).name
-        except Exception:
-            existing_name = None
-        if existing_name is not None and existing_name != parsed.name:
-            raise ValueError(
-                f"a different skill already occupies {target.name!r} (installed as "
-                f"{existing_name!r}); remove it with `maverick skill remove {name}` "
-                "or rename your skill before installing."
+            info = target.lstat()
+        except FileNotFoundError:
+            info = None
+        if info is not None:
+            reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+            is_reparse = bool(
+                getattr(info, "st_file_attributes", 0) & reparse
             )
-    target.write_text(content, encoding="utf-8")
+            if (
+                stat.S_ISLNK(info.st_mode)
+                or is_reparse
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+            ):
+                raise ValueError(
+                    f"installed skill target is an alias or special file: {target}"
+                )
+            ensure_private_file(target, 0o600)
+            # Two DIFFERENT source names can sanitize to the same filename (e.g.
+            # "..." and "...." both -> "skill"); silently overwriting would
+            # lose the earlier skill. Same-name reinstall remains an update.
+            try:
+                existing_name = Skill.parse(
+                    atomic_read_text(target), target,
+                ).name
+            except Exception:
+                existing_name = None
+            if existing_name is not None and existing_name != parsed.name:
+                raise ValueError(
+                    f"a different skill already occupies {target.name!r} "
+                    f"(installed as {existing_name!r}); remove it with "
+                    f"`maverick skill remove {name}` or rename your skill "
+                    "before installing."
+                )
+        # Autonomous acquisition can spend seconds fetching, verifying, and
+        # scanning a catalog item. Give that caller a final privileged-transition
+        # checkpoint after all expensive work and immediately before persistence.
+        if before_save is not None:
+            before_save()
+        atomic_write_text(target, content, mode=0o600)
     result = Skill.parse(content, target)
     result.verified = verified
     return result
@@ -700,6 +737,7 @@ def install_from_catalog(
     *,
     indexes: list[str] | None = None,
     require_signature: bool = False,
+    before_save: Callable[[], None] | None = None,
 ) -> Skill:
     """Install a skill by name from the federated catalog.
 
@@ -751,7 +789,12 @@ def install_from_catalog(
         or bool(cfg.get("trusted_pubkeys"))
     )
     target_dir = _resolved_skills_dir(skills_dir)
-    return _validate_and_write(content, target_dir, require_signature=require_sig)
+    return _validate_and_write(
+        content,
+        target_dir,
+        require_signature=require_sig,
+        before_save=before_save,
+    )
 
 
 def _fetch_url_bytes(url: str) -> bytes:

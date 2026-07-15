@@ -12,7 +12,9 @@ import time
 import pytest
 from maverick.budget import budget_from_config
 from maverick.quotas import record_usage
+from maverick.sandbox import LocalBackend
 from maverick.tenant import registry
+from maverick.world_model import WorldModel
 
 
 @pytest.fixture(autouse=True)
@@ -162,3 +164,134 @@ def test_corrupt_reservations_clamp_budget_to_zero(monkeypatch):
 def test_nonfinite_or_invalid_reservation_is_rejected(amount, ttl):
     with pytest.raises(ValueError):
         registry.reserve_tenant_dollars("acme", amount, ttl, "rid")
+
+
+def _reserved_run_budget(monkeypatch):
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    registry.create_tenant("acme", plan="free")
+    registry.set_quota("acme", 10.0)
+    budget = budget_from_config(max_dollars=4.0)
+    assert registry.tenant_remaining_today("acme") == pytest.approx(6.0)
+    return budget
+
+
+@pytest.mark.asyncio
+async def test_run_goal_halt_settles_tenant_reservation_once(
+    monkeypatch, tmp_path, fake_llm,
+):
+    from maverick import killswitch, quotas
+    from maverick.orchestrator import run_goal
+
+    budget = _reserved_run_budget(monkeypatch)
+    reservation_id = budget._tenant_reservation_id
+    recorded = []
+    real_record = quotas.record_usage
+
+    def record_once(*args, **kwargs):
+        recorded.append((args, kwargs))
+        return real_record(*args, **kwargs)
+
+    monkeypatch.setattr(quotas, "record_usage", record_once)
+    monkeypatch.setattr(
+        killswitch,
+        "check",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            killswitch.Halted("operator stop", "test")),
+    )
+    world = WorldModel(path=tmp_path / "world.db")
+    goal_id = world.create_goal("halted run", "must not start")
+
+    result = await run_goal(
+        llm=fake_llm, world=world, budget=budget, goal_id=goal_id,
+        sandbox=LocalBackend(workdir=tmp_path),
+    )
+
+    assert "Lightwork is halted" in result
+    assert fake_llm.calls == []
+    assert len(recorded) == 1
+    assert recorded[0][1]["reservation_id"] == reservation_id
+    assert registry.tenant_remaining_today("acme") == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
+async def test_run_goal_setup_exception_settles_tenant_reservation_once(
+    monkeypatch, tmp_path, fake_llm,
+):
+    """Exceptions before the MCP cleanup try still settle the run reservation."""
+    from maverick import quotas
+    from maverick.orchestrator import run_goal
+
+    budget = _reserved_run_budget(monkeypatch)
+    reservation_id = budget._tenant_reservation_id
+    recorded = []
+    real_record = quotas.record_usage
+
+    def record_once(*args, **kwargs):
+        recorded.append((args, kwargs))
+        return real_record(*args, **kwargs)
+
+    monkeypatch.setattr(quotas, "record_usage", record_once)
+    world = WorldModel(path=tmp_path / "world.db")
+    goal_id = world.create_goal("setup failure", "must release its reservation")
+
+    def fail_start_episode(_goal_id):
+        raise RuntimeError("pre-main-try boom")
+
+    monkeypatch.setattr(world, "start_episode", fail_start_episode)
+
+    with pytest.raises(RuntimeError, match="^pre-main-try boom$"):
+        await run_goal(
+            llm=fake_llm, world=world, budget=budget, goal_id=goal_id,
+            sandbox=LocalBackend(workdir=tmp_path),
+        )
+
+    assert fake_llm.calls == []
+    assert len(recorded) == 1
+    assert recorded[0][1]["reservation_id"] == reservation_id
+    assert registry.tenant_remaining_today("acme") == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
+async def test_missing_goal_releases_tenant_reservation(
+    monkeypatch, tmp_path, fake_llm,
+):
+    from maverick.orchestrator import run_goal
+
+    budget = _reserved_run_budget(monkeypatch)
+    world = WorldModel(path=tmp_path / "world.db")
+
+    result = await run_goal(
+        llm=fake_llm, world=world, budget=budget, goal_id=99999,
+        sandbox=LocalBackend(workdir=tmp_path),
+    )
+
+    assert result == "no such goal: 99999"
+    assert registry.tenant_remaining_today("acme") == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
+async def test_shield_preflight_refusal_releases_tenant_reservation(
+    monkeypatch, tmp_path, fake_llm,
+):
+    from types import SimpleNamespace
+
+    from maverick.orchestrator import run_goal
+
+    class BlockingShield:
+        def scan_input(self, _text):
+            return SimpleNamespace(allowed=False, reasons=["blocked-test"])
+
+    budget = _reserved_run_budget(monkeypatch)
+    monkeypatch.setattr(
+        "maverick.orchestrator._build_shield", lambda: BlockingShield())
+    world = WorldModel(path=tmp_path / "world.db")
+    goal_id = world.create_goal("blocked input", "must not start")
+
+    result = await run_goal(
+        llm=fake_llm, world=world, budget=budget, goal_id=goal_id,
+        sandbox=LocalBackend(workdir=tmp_path),
+    )
+
+    assert "input rejected by Shield" in result
+    assert fake_llm.calls == []
+    assert registry.tenant_remaining_today("acme") == pytest.approx(10.0)

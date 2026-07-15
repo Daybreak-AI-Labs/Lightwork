@@ -308,7 +308,7 @@ def test_tenant_world_cache_evicts_lru_not_raises(monkeypatch, tmp_path):
     assert world_model.world_for_tenant("a") is w_a
     world_model.world_for_tenant("d")          # over cap -> evict LRU ("b")
 
-    keys = list(world_model._tenant_worlds)
+    keys = [key.replace("\\", "/") for key in world_model._tenant_worlds]
     assert len(world_model._tenant_worlds) == 3
     assert not any(k.endswith("b/world.db") for k in keys)   # b evicted
     assert any(k.endswith("a/world.db") for k in keys)       # a kept (recently used)

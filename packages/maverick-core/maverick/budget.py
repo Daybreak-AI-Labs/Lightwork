@@ -575,51 +575,43 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
     tenant cap. No active tenant / no cap -> untouched (the default single-tenant
     install is unchanged). Never *raises* a cap, only lowers it.
 
-    Concurrency (finding #2, fixed): the remaining allowance now subtracts BOTH
-    recorded ledger spend AND outstanding in-flight reservations, and this run
-    reserves its clamped cap before returning. So N runs that START for one
-    tenant before any records spend each see the prior starts' holds, and their
-    per-run caps sum to <= the tenant's daily ceiling instead of each clamping to
-    the full remainder (an up-to-N x overshoot). The reservation carries a TTL
-    backstop derived from the wall cap, so a crashed run that never records spend
-    only dents the cap until the hold expires; the hold is released when the run
-    records actual spend (``quotas.record_usage(..., reservation_id=...)``).
-    Residual: the remaining-read and the reserve are not one critical section,
-    so a sub-millisecond race between two simultaneous starts on the same host
-    can still briefly double-reserve -- but the window shrank from a whole run to
-    that gap, and an over-hold only ever LOWERS remaining (conservative), never
-    raises it.
+    Concurrency (finding #2, fixed): the remaining-allowance calculation and
+    reservation write are one strict cross-process-locked operation. So N runs
+    that START for one tenant before any records spend receive caps whose sum is
+    no greater than the tenant's remaining daily allowance. The reservation
+    carries a TTL backstop derived from the wall cap, so a crashed run that never
+    records spend only dents the cap until the hold expires; the hold is released
+    after the run's actual spend is durably recorded.
     """
     try:
-        from .paths import current_tenant
-        from .tenant.registry import tenant_remaining_today
-        tenant = current_tenant()
-        remaining = tenant_remaining_today(tenant)
+        from .paths import current_tenant_id
+        tenant = current_tenant_id()
     except Exception as exc:
-        # An unreadable tenant registry/ledger/reservation store may be hiding a
-        # cap or an existing hold. Zero the run allowance rather than treating
-        # that policy outage as "unlimited".
+        # An unreadable tenant identity may hide a cap. Zero the run allowance
+        # rather than treating that policy outage as "unlimited".
         log.error("tenant budget policy unavailable; clamping run to zero: %s", exc)
         kwargs["max_dollars"] = 0.0
         return None
-    if remaining is None:
+    if not tenant:
         return None
-    # The clamp must only ever LOWER the effective cap. When no max_dollars was
-    # set, the effective cap is Budget's own default (not "unbounded"), so clamp
-    # against that -- otherwise a tenant with a large remainder would silently
-    # RAISE an unset per-run cap above the default, contradicting the invariant.
+
+    # When no max_dollars was set, the requested amount is Budget's own default
+    # (not "unbounded"). The atomic allocator can therefore only lower it.
     current = kwargs.get("max_dollars")
     if current is None:
         current = Budget.__dataclass_fields__["max_dollars"].default
-    clamped = min(float(current), remaining)
-    kwargs["max_dollars"] = clamped
-    if clamped <= 0:
-        return None
-    # Reserve the clamped per-run cap so a concurrent start for this tenant sees
-    # our in-flight hold. Best-effort: reservation bookkeeping must never raise
-    # into the run path (mirrors the try/except above).
     try:
-        from .tenant.registry import reserve_tenant_dollars
+        requested = float(current)
+    except (TypeError, ValueError, OverflowError) as exc:
+        log.error("tenant budget request is invalid; clamping run to zero: %s", exc)
+        kwargs["max_dollars"] = 0.0
+        return None
+    if not math.isfinite(requested) or requested <= 0:
+        kwargs["max_dollars"] = 0.0
+        return None
+
+    try:
+        from .tenant.registry import reserve_tenant_budget
         # A run cannot spend past its wall cap, so the wall cap is a tight, safe
         # TTL backstop; bound it so a crashed run can't dent the cap for long.
         wall = kwargs.get("max_wall_seconds")
@@ -631,7 +623,12 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
             wall = float(Budget.__dataclass_fields__["max_wall_seconds"].default)
         ttl = min(max(wall, 300.0), 6 * 3600.0)
         reservation_id = uuid.uuid4().hex
-        reserve_tenant_dollars(tenant, clamped, ttl, reservation_id)
+        granted = reserve_tenant_budget(tenant, requested, ttl, reservation_id)
+        if granted is None:
+            return None
+        kwargs["max_dollars"] = granted
+        if granted <= 0:
+            return None
         return reservation_id
     except Exception as exc:
         # Running after a failed reservation reopens the concurrent overspend

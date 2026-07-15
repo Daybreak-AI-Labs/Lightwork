@@ -347,7 +347,10 @@ def _mount_task_endpoint(app: Any) -> None:
 
     from .a2a_tasks import STREAM_METHODS, TaskEngine, _RpcError
 
-    engine = TaskEngine()
+    # The externally reachable service always claims messageId values in the
+    # tenant-scoped durable ledger before it can spend provider budget. Direct
+    # TaskEngine users may still opt into the historical in-memory-only mode.
+    engine = TaskEngine(durable=True)
 
     def _sse(obj: dict[str, Any]) -> str:
         return f"data: {_json.dumps(obj)}\n\n"
@@ -409,9 +412,18 @@ def _mount_task_endpoint(app: Any) -> None:
         principal = engine.principal_for(authorization)
 
         if method in STREAM_METHODS:
+            # Capture before returning StreamingResponse. Its iterator may run
+            # after request middleware has reset the tenant ContextVar.
+            try:
+                stream_tenant = engine._tenant_key()
+            except _RpcError as e:
+                return JSONResponse(_rpc_error(req_id, e.code, e.message))
+
             async def _gen():
                 try:
-                    async for event in engine.stream(params, principal):
+                    async for event in engine.stream(
+                        params, principal, tenant=stream_tenant,
+                    ):
                         yield _sse(_rpc_result(req_id, event))
                 except _RpcError as e:
                     yield _sse(_rpc_error(req_id, e.code, e.message))
