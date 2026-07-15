@@ -69,12 +69,12 @@ _SENSITIVE_MATERIAL_SUFFIXES = (
     ".jks", ".kdbx", ".key", ".keystore", ".p12", ".pem", ".pfx",
 )
 _PRIVATE_KEY_MARKERS = (
-    b"-----BEGIN PRIVATE KEY-----",
-    b"-----BEGIN ENCRYPTED PRIVATE KEY-----",
-    b"-----BEGIN RSA PRIVATE KEY-----",
-    b"-----BEGIN DSA PRIVATE KEY-----",
-    b"-----BEGIN EC PRIVATE KEY-----",
-    b"-----BEGIN OPENSSH PRIVATE KEY-----",
+    b"-----BEGIN PRIVATE KEY-----",  # pragma: allowlist secret
+    b"-----BEGIN ENCRYPTED PRIVATE KEY-----",  # pragma: allowlist secret
+    b"-----BEGIN RSA PRIVATE KEY-----",  # pragma: allowlist secret
+    b"-----BEGIN DSA PRIVATE KEY-----",  # pragma: allowlist secret
+    b"-----BEGIN EC PRIVATE KEY-----",  # pragma: allowlist secret
+    b"-----BEGIN OPENSSH PRIVATE KEY-----",  # pragma: allowlist secret
 )
 
 

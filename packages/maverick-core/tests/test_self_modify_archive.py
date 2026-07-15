@@ -97,13 +97,13 @@ class TestArchiveCore:
         assert a.get(c.id) is c
 
     def test_constructor_refuses_secret_bearing_candidate(self):
-        secret = "sk-" + ("E" * 24)
+        secret = "sk-" + ("E" * 24)  # pragma: allowlist secret
         with pytest.raises(ValueError, match="detected secret material"):
             _cand("s", "+" + secret, 1.0)
 
     def test_add_rescans_mutated_candidate_before_persistence(self):
         candidate = _cand("s", "+clean", 1.0)
-        candidate.patch = "sk-" + ("F" * 24)
+        candidate.patch = "sk-" + ("F" * 24)  # pragma: allowlist secret
         archive = CodeArchive()
         with pytest.raises(ValueError, match="detected secret material"):
             archive.add(candidate)
@@ -114,7 +114,7 @@ class TestArchiveCore:
         archive = CodeArchive()
 
         stored = archive.add(candidate)
-        candidate.summary = "sk-" + ("G" * 24)
+        candidate.summary = "sk-" + ("G" * 24)  # pragma: allowlist secret
         candidate.patch = "+changed"
 
         assert stored is not candidate
@@ -123,7 +123,7 @@ class TestArchiveCore:
 
     @pytest.mark.parametrize("field", ["summary", "parent_id", "reasons"])
     def test_serialization_rescans_all_mutable_string_metadata(self, field):
-        secret = "sk-" + ("H" * 24)
+        secret = "sk-" + ("H" * 24)  # pragma: allowlist secret
         archive = CodeArchive()
         stored = archive.add(_cand("clean", "+clean", 1.0))
         setattr(stored, field, (secret,) if field == "reasons" else secret)
@@ -401,7 +401,7 @@ class TestPersistence:
         archive.save(path)
         clean_bytes = path.read_bytes()
 
-        secret = "sk-" + ("I" * 24)
+        secret = "sk-" + ("I" * 24)  # pragma: allowlist secret
         stored.reasons = (secret,)
         with pytest.raises(ArchivePersistenceError):
             archive.save(path)

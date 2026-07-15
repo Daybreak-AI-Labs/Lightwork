@@ -92,8 +92,8 @@ async def test_post_callable_exception_stays_fail_open():
 @pytest.mark.asyncio
 async def test_hook_env_omits_secrets(tmp_path, monkeypatch):
     # A hook must not receive the kernel's provider keys / tokens.
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-leak")
-    monkeypatch.setenv("SOME_API_TOKEN", "tok-should-not-leak")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-leak")  # pragma: allowlist secret
+    monkeypatch.setenv("SOME_API_TOKEN", "tok-should-not-leak")  # pragma: allowlist secret
     monkeypatch.setenv("PLAIN_SETTING", "keep-me")
     out = tmp_path / "env.txt"
     script = tmp_path / "dump_env.py"
@@ -111,8 +111,8 @@ async def test_hook_env_omits_secrets(tmp_path, monkeypatch):
     hooks.register(HookEvent.POST_TOOL_USE, command, matcher="*", timeout_ms=5000)
     await _dispatch(HookEvent.POST_TOOL_USE, tool_name="x")
     dumped = out.read_text(encoding="utf-8")
-    assert "sk-ant-should-not-leak" not in dumped
-    assert "tok-should-not-leak" not in dumped
+    assert "sk-ant-should-not-leak" not in dumped  # pragma: allowlist secret
+    assert "tok-should-not-leak" not in dumped  # pragma: allowlist secret
     # Non-secret vars + the hook metadata still pass through.
     assert "keep-me" in dumped
     assert "MAVERICK_HOOK_EVENT=PostToolUse" in dumped

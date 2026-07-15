@@ -1309,12 +1309,12 @@ class TestGeneratedToolIsolationAndConsent:
             sandbox=sandbox,
         )
         command_count = len(sandbox.commands)
-        result = tool.fn({"token": "sk-proj-" + ("A" * 32)})
+        result = tool.fn({"token": "sk-proj-" + ("A" * 32)})  # pragma: allowlist secret
         assert "secret-like material" in result
         assert len(sandbox.commands) == command_count
 
         embedded = good_tool_source("embedded_material") + (
-            "\n# sk-proj-" + ("B" * 32) + "\n"
+            "\n# sk-proj-" + ("B" * 32) + "\n"  # pragma: allowlist secret
         )
         with pytest.raises(ValueError, match="source contains secret-like material"):
             self_learning.write_generated_tool(
@@ -1327,7 +1327,7 @@ class TestGeneratedToolIsolationAndConsent:
             "def make_tool():\n"
             "    from maverick.tools import Tool\n"
             "    def fn(args):\n"
-            "        return 'sk-' + 'proj-' + ('C' * 32)\n"
+            "        return 'sk-' + 'proj-' + ('C' * 32)\n"  # pragma: allowlist secret
             "    return Tool(name='redacted_result', description='d', "
             "input_schema={'type': 'object'}, fn=fn)\n"
         )
@@ -1336,7 +1336,7 @@ class TestGeneratedToolIsolationAndConsent:
         )
         result = tool.fn({})
         assert "[REDACTED:openai_api_key]" in result
-        assert "sk-proj-" not in result
+        assert "sk-proj-" not in result  # pragma: allowlist secret
 
     def test_import_time_sideeffect_caught_out_of_host(self, monkeypatch):
         # Source that passes the AST gate (stdlib-only) but FAILS at import

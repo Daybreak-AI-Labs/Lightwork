@@ -81,10 +81,10 @@ def test_workflow_provider_boundary_refuses_raw_credentials_and_large_briefs():
 
     with pytest.raises(ValueError, match="credential"):
         workflow_ai.build_prompt(
-            "use sk-proj-abcdefghijklmnopqrstuvwx", "")
+            "use sk-proj-abcdefghijklmnopqrstuvwx", "")  # pragma: allowlist secret
     with pytest.raises(ValueError, match="credential"):
         workflow_ai.build_prompt(
-            "summarize this", "API_TOKEN=sk-proj-abcdefghijklmnopqrstuvwx")
+            "summarize this", "API_TOKEN=sk-proj-abcdefghijklmnopqrstuvwx")  # pragma: allowlist secret
     with pytest.raises(ValueError, match="too long"):
         workflow_ai.build_prompt("x" * (workflow_ai._MAX_BRIEF_CHARS + 1), "")
 
@@ -227,7 +227,7 @@ def test_refine_boundary_refuses_credentials_and_large_instructions():
 
     with pytest.raises(ValueError, match="credential"):
         workflow_ai.build_refine_prompt(
-            {"persona": "sk-proj-abcdefghijklmnopqrstuvwx"}, "make it safer")
+            {"persona": "sk-proj-abcdefghijklmnopqrstuvwx"}, "make it safer")  # pragma: allowlist secret
     with pytest.raises(ValueError, match="too long"):
         workflow_ai.build_refine_prompt(
             {"name": "safe"}, "x" * (workflow_ai._MAX_INSTRUCTION_CHARS + 1))
@@ -238,10 +238,10 @@ def test_parsers_refuse_model_output_that_contains_raw_credentials():
 
     with pytest.raises(ValueError, match="credential"):
         parse_workflow(
-            '{"name":"x","steps":["use sk-proj-abcdefghijklmnopqrstuvwx"]}')
+            '{"name":"x","steps":["use sk-proj-abcdefghijklmnopqrstuvwx"]}')  # pragma: allowlist secret
     with pytest.raises(ValueError, match="credential"):
         parse_playbook(
-            '{"name":"x","steps":[{"name":"sk-proj-abcdefghijklmnopqrstuvwx"}]}')
+            '{"name":"x","steps":[{"name":"sk-proj-abcdefghijklmnopqrstuvwx"}]}')  # pragma: allowlist secret
 
 
 def test_refine_workflow_revises_under_cap():

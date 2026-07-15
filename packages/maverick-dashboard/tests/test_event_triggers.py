@@ -91,7 +91,7 @@ def test_history_is_tenant_scoped_and_scrubs_notes(monkeypatch, tmp_path):
             "feed",
             "user:alice",
             tes.POLL_ERROR,
-            note="Authorization: Bearer sk-proj-abcdefghijklmnopqrstuvwxyz123456",
+            note="Authorization: Bearer sk-proj-abcdefghijklmnopqrstuvwxyz123456",  # pragma: allowlist secret
         )
     finally:
         reset_tenant(token)
@@ -105,7 +105,7 @@ def test_history_is_tenant_scoped_and_scrubs_notes(monkeypatch, tmp_path):
     globex = tes.history(owner="user:alice", tenant="globex")
     assert [row["kind"] for row in acme] == [tes.POLL_ERROR]
     assert [row["kind"] for row in globex] == [tes.FIRED]
-    assert "sk-proj-" not in acme[0]["note"]
+    assert "sk-proj-" not in acme[0]["note"]  # pragma: allowlist secret
 
 
 # ---- management API ---------------------------------------------------------

@@ -45,10 +45,10 @@ _SENSITIVE_NAMES = frozenset({
     "secrets.toml", "service-account.json", "service_account.json",
 })
 _PRIVATE_KEY_MARKERS = (
-    b"-----BEGIN PRIVATE KEY-----",
-    b"-----BEGIN OPENSSH PRIVATE KEY-----",
-    b"-----BEGIN RSA PRIVATE KEY-----",
-    b"-----BEGIN EC PRIVATE KEY-----",
+    b"-----BEGIN PRIVATE KEY-----",  # pragma: allowlist secret
+    b"-----BEGIN OPENSSH PRIVATE KEY-----",  # pragma: allowlist secret
+    b"-----BEGIN RSA PRIVATE KEY-----",  # pragma: allowlist secret
+    b"-----BEGIN EC PRIVATE KEY-----",  # pragma: allowlist secret
 )
 
 

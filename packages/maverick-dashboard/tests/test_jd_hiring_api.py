@@ -172,7 +172,7 @@ def test_add_unknown_pack_400():
 
 def test_create_goal_with_domain_stamps_goal_row(monkeypatch, tmp_path):
     from maverick import world_model
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")  # pragma: allowlist secret
 
     # Don't actually run the swarm: capture the background dispatch.
     import maverick.runner as runner
@@ -192,7 +192,7 @@ def test_create_goal_with_domain_stamps_goal_row(monkeypatch, tmp_path):
 
 
 def test_create_goal_with_unknown_domain_400(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")  # pragma: allowlist secret
     resp = client.post("/api/v1/goals", json={
         "title": "x", "domain": "no_such_pack_xyz",
     })

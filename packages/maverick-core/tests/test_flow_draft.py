@@ -106,7 +106,7 @@ def test_provider_boundary_rejects_oversized_or_secret_descriptions():
         draft_flow("x" * 12_001, complete=complete)
     with pytest.raises(ValueError, match="credential"):
         draft_flow(
-            "use sk-proj-abcdefghijklmnopqrstuvwx to send it",
+            "use sk-proj-abcdefghijklmnopqrstuvwx to send it",  # pragma: allowlist secret
             complete=complete,
         )
     assert called == []

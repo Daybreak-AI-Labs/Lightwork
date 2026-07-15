@@ -724,7 +724,7 @@ def test_llm_proposer_fails_open_to_deterministic():
 
 
 def test_llm_proposer_output_is_sanitized():
-    secret = "sk-ant-" + "abcdefghij1234567890XYZ"
+    secret = "sk-ant-" + "abcdefghij1234567890XYZ"  # pragma: allowlist secret
     fn = sh.llm_proposer(_FakeLLM(text=f"leak {secret} and ctrl\x00\x1b chars"))
     p = sh.propose_addendum(_sig("timeout"), propose_fn=fn)
     assert p is not None
@@ -1993,7 +1993,7 @@ def test_propose_addendum_carries_hypothesis():
 def test_propose_addendum_sanitizes_hypothesis():
     # The hypothesis rides into the audit + provenance a human reads, so it gets
     # the same scrub as the line: secrets + control chars stripped, length bounded.
-    secret = "sk-ant-" + "abcdefghij1234567890XYZ"
+    secret = "sk-ant-" + "abcdefghij1234567890XYZ"  # pragma: allowlist secret
     fn = lambda s: {"line": "Verify the window first.",                   # noqa: E731
                     "hypothesis": f"leak {secret} ctrl\x00\x1b\n" + "x" * 400}
     p = sh.propose_addendum(_sig("timeout"), propose_fn=fn)

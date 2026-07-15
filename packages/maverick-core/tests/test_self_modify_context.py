@@ -96,7 +96,7 @@ def test_patch_boundary_rejects_binary_patch_artifacts():
 
 
 def test_patch_boundary_rejects_secret_material_after_diff_prefix_normalization():
-    secret = "not-a-real-password-" + ("x" * 24)
+    secret = "not-a-real-password-" + ("x" * 24)  # pragma: allowlist secret
     patch = (
         "diff --git a/pkg/feature.py b/pkg/feature.py\n"
         "--- a/pkg/feature.py\n+++ b/pkg/feature.py\n"
@@ -128,7 +128,7 @@ def test_requires_explicit_objective(tmp_path):
 
 @pytest.mark.parametrize("field", ["objective", "feedback"])
 def test_rejects_secret_bearing_operator_context(tmp_path, field):
-    secret = "sk-" + ("A" * 24)
+    secret = "sk-" + ("A" * 24)  # pragma: allowlist secret
     kwargs = {"objective": "Fix the feature", "feedback": ""}
     kwargs[field] = secret
     with pytest.raises(ValueError, match="detected secret material"):
@@ -136,7 +136,7 @@ def test_rejects_secret_bearing_operator_context(tmp_path, field):
 
 
 def test_rejects_secret_in_ordinary_editable_source(tmp_path):
-    secret = "sk-" + ("B" * 24)
+    secret = "sk-" + ("B" * 24)  # pragma: allowlist secret
     (tmp_path / "feature.py").write_text(
         f'TOKEN = "{secret}"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="detected secret material"):
@@ -145,7 +145,7 @@ def test_rejects_secret_in_ordinary_editable_source(tmp_path):
 
 
 def test_rejects_secret_bearing_relative_filename(tmp_path):
-    secret_name = "sk-" + ("J" * 24) + ".py"
+    secret_name = "sk-" + ("J" * 24) + ".py"  # pragma: allowlist secret
     (tmp_path / secret_name).write_text("SAFE = True\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="path contains detected secret material"):
@@ -248,7 +248,9 @@ def test_skips_credential_containers_and_binary_files(tmp_path):
 
 def test_rejects_private_key_in_ordinary_editable_file(tmp_path):
     (tmp_path / "private.txt").write_text(
-        "-----BEGIN PRIVATE KEY-----\nplaintext\n", encoding="utf-8")
+        "-----BEGIN PRIVATE KEY-----\nplaintext\n",  # pragma: allowlist secret
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError, match="detected secret material"):
         build_proposal_context(tmp_path, _surface("**"), objective="Improve source")
 
@@ -337,7 +339,7 @@ def test_feedback_is_marked_untrusted_and_bounded(tmp_path):
 
 
 def test_oversized_feedback_is_rejected_instead_of_truncated(tmp_path):
-    secret_after_cap = "sk-" + ("K" * 24)
+    secret_after_cap = "sk-" + ("K" * 24)  # pragma: allowlist secret
     with pytest.raises(ValueError, match="feedback exceeds"):
         build_proposal_context(
             tmp_path,
@@ -397,7 +399,7 @@ def test_live_proposer_refuses_empty_or_failed_context(tmp_path):
 
 
 def test_live_proposer_rescans_forged_context_before_provider_call():
-    secret = "sk-" + ("C" * 24)
+    secret = "sk-" + ("C" * 24)  # pragma: allowlist secret
     forged = ProposalContext(
         objective="Fix feature",
         base_revision="0" * 40,
@@ -419,7 +421,7 @@ def test_live_proposer_rescans_tampered_archive_parent_before_provider_call(tmp_
     context = build_proposal_context(
         tmp_path, surface, objective="Fix feature")
     parent = CodeCandidate(summary="clean", patch="+clean", score=1.0)
-    parent.patch = "sk-" + ("D" * 24)
+    parent.patch = "sk-" + ("D" * 24)  # pragma: allowlist secret
     llm = _LLM(_DIFF)
 
     proposal = llm_proposer(llm, context_factory=lambda _: context)(parent, surface)

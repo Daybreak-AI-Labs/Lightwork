@@ -80,7 +80,7 @@ def test_save_refuses_raw_credentials_without_mutating_current_or_history(
     store.save_flow(_flow("safe"))
 
     with pytest.raises(ValueError, match="raw credentials"):
-        store.save_flow(_flow("API_TOKEN=sk-proj-abcdefghijklmnopqrstuvwx"))
+        store.save_flow(_flow("API_TOKEN=sk-proj-abcdefghijklmnopqrstuvwx"))  # pragma: allowlist secret
 
     assert store.load_flow("f").nodes["a"].brief == "safe"
     assert [version.version for version in store.list_versions("f")] == [1]

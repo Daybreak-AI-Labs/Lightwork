@@ -187,9 +187,12 @@ class TestEvaluateOnCorpus:
         self, tmp_path,
     ):
         src = _seed(tmp_path)
-        (src / ".env").write_text("OPENAI_API_KEY=do-not-copy\n", encoding="utf-8")
+        (src / ".env").write_text(
+            "OPENAI_API_KEY=do-not-copy\n",  # pragma: allowlist secret
+            encoding="utf-8",
+        )
         (src / "private.pem").write_text(
-            "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----\n",
+            "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----\n",  # pragma: allowlist secret
             encoding="utf-8",
         )
         subprocess.run(["git", "init", "-q"], cwd=src, check=True)
@@ -211,7 +214,7 @@ class TestEvaluateOnCorpus:
     ):
         src = _seed(tmp_path)
         (src / "pkg" / "notes.txt").write_text(
-            "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n",
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n",  # pragma: allowlist secret
             encoding="utf-8",
         )
         subprocess.run(["git", "init", "-q"], cwd=src, check=True)
@@ -316,7 +319,7 @@ class TestEvaluateOnCorpus:
         src = _seed(tmp_path)
 
         def materialize_with_secret(_src, _dest):
-            raise RuntimeError("sk-proj-secret-must-not-escape")
+            raise RuntimeError("sk-proj-secret-must-not-escape")  # pragma: allowlist secret
 
         result = evaluate_on_corpus(
             _patch(), src=src, workroot=tmp_path / "w",
@@ -324,7 +327,7 @@ class TestEvaluateOnCorpus:
             materialize=materialize_with_secret,
         )
         assert result.ok is False
-        assert "sk-proj-secret-must-not-escape" not in result.reason
+        assert "sk-proj-secret-must-not-escape" not in result.reason  # pragma: allowlist secret
 
     def test_planted_binding_symlink_cannot_clobber_host_file(self, tmp_path):
         src = _seed(tmp_path)

@@ -117,7 +117,7 @@ def test_llm_draft_rejects_credentials_before_provider_call(field):
         "jd_text": FINANCE_JD,
         "industry": "manufacturing",
     }
-    values[field] = "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz123456"
+    values[field] = "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz123456"  # pragma: allowlist secret
 
     with pytest.raises(ValueError, match="contains a credential"):
         draft_from_jd(

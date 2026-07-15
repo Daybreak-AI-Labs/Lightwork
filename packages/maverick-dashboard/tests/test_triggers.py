@@ -66,7 +66,7 @@ def _no_real_run(monkeypatch):
 
 def _configured(monkeypatch):
     monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", SECRET)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")  # pragma: allowlist secret
 
 
 def _register(c, **kw):
@@ -358,7 +358,7 @@ def test_webhook_run_bad_signature_403(monkeypatch, tmp_path, _no_real_run):
 
 def test_webhook_run_no_secret_fails_closed(monkeypatch, tmp_path, _no_real_run):
     _isolate(monkeypatch, tmp_path)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")    # but NO webhook secret
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")  # pragma: allowlist secret; no webhook secret
     import maverick.webhooks as wh
     monkeypatch.setattr(wh, "_load_config_outbound", lambda: ([], None))
     c = _client()

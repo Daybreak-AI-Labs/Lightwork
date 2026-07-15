@@ -148,7 +148,7 @@ class TestRunCycle:
         archive.add(CodeCandidate(
             summary="seed", patch="+a", score=1.0, promoted=True))
         evaluated = []
-        secret = "not-a-real-password-" + ("z" * 24)
+        secret = "not-a-real-password-" + ("z" * 24)  # pragma: allowlist secret
         patch = _patch(added=f'DB_PASSWORD="{secret}"')
 
         rep = run_cycle(
