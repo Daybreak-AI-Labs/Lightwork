@@ -1006,6 +1006,8 @@
     out.timezone = ((document.getElementById('fd-tz') || {}).value || '').trim();
     out.max_concurrent = parseInt((document.getElementById('fd-maxconc') || {}).value, 10) || 0;
     out.inputs = flowInputs.filter(function (i) { return (i.key || '').trim(); });
+    out.version = parseInt(rootFlow.version, 10) || 0;
+    out.revision = String(rootFlow.revision || '');
     return out;
   }
   function fromApiFlow(f) {
@@ -1014,7 +1016,9 @@
     signals = { nodes: {}, trigger: null };
     var sigEl = document.getElementById('fd-signal'); if (sigEl) sigEl.hidden = true;
     var lg = document.getElementById('fd-legend'); if (lg) lg.classList.remove('on');
-    flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [], max_seconds: f.max_seconds || 0 };
+    flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [],
+      max_seconds: f.max_seconds || 0, version: parseInt(f.version, 10) || 0,
+      revision: String(f.revision || '') };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
     var msEl = document.getElementById('fd-maxsec'); if (msEl) msEl.value = f.max_seconds || '';
     var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
@@ -1067,7 +1071,10 @@
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (!res.ok) { say(res.j.detail || 'Save failed', true); return; }
-        rootFlow.id = body.id; say('Saved ✓'); if (cb) cb();
+        rootFlow.id = body.id;
+        rootFlow.version = parseInt(res.j.version, 10) || rootFlow.version || 1;
+        rootFlow.revision = String(res.j.revision || rootFlow.revision || '');
+        say('Saved ✓'); if (cb) cb();
       }).catch(function () { say('Save failed', true); });
   }
   function inputFields() {
@@ -1129,6 +1136,10 @@
     render(); if (selected) renderProps();
     if (run.status === 'paused_approval') { sayWithRunLink('⏸ waiting for approval —', runId); return true; }
     if (run.status === 'paused_event') { sayWithRunLink('📥 waiting for an external event —', runId); return true; }
+    if (run.status === 'indeterminate') {
+      sayWithRunLink('⚠️ effect state is indeterminate; reconcile the external system before retrying —', runId);
+      return true;
+    }
     if (run.status === 'failed') {
       sayWithRunLink(runSummary(run) + ' ·', runId);
       offerFixIt(runId);
@@ -1275,7 +1286,11 @@
       say('Give this step a Tool first, then Apply (an action needs one).', true); return;
     }
     save(function () {
-      var body = { node_id: n.id, to_kind: prop.to_kind, tool: tool, brief: n.brief || n.label || '' };
+      var body = {
+        node_id: n.id, to_kind: prop.to_kind, tool: tool,
+        brief: n.brief || n.label || '',
+        version: rootFlow.version, revision: rootFlow.revision
+      };
       apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/apply', { method: 'POST', body: JSON.stringify(body) })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
@@ -1307,7 +1322,14 @@
       }).catch(function () { say('Could not load history', true); });
   }
   function rollback(version) {
-    apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/rollback', { method: 'POST', body: JSON.stringify({ version: version }) })
+    apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/rollback', {
+      method: 'POST',
+      body: JSON.stringify({
+        version: version,
+        current_version: rootFlow.version,
+        revision: rootFlow.revision
+      })
+    })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (!res.ok) { say(res.j.detail || 'Rollback failed', true); return; }
@@ -1616,10 +1638,22 @@
   loadGallery();
   loadTools();
   var editId = canvas.getAttribute('data-flow-id');
+  var handoff = null;
+  try {
+    handoff = JSON.parse(sessionStorage.getItem('lightwork.authoring-handoff') || 'null');
+    if (!handoff || handoff.kind !== 'flow' || !handoff.brief
+        || Date.now() - Number(handoff.created_at || 0) > 10 * 60 * 1000) handoff = null;
+    if (handoff) sessionStorage.removeItem('lightwork.authoring-handoff');
+  } catch (e) { handoff = null; }
   var seedEl = document.getElementById('fd-seed');
   var seed = null;
   if (seedEl) { try { seed = JSON.parse(seedEl.textContent); } catch (e) { seed = null; } }
   if (editId) load(editId);
+  else if (handoff) {
+    render(); renderProps();
+    document.getElementById('fd-nl').value = String(handoff.brief).slice(0, 8000);
+    draft();
+  }
   else if (seed && seed.nodes) {   // ?from_template= -> the template as a 1-node flow
     fromApiFlow(seed);
     say('Loaded the template as a flow — add branches, approvals, or loops around it.');

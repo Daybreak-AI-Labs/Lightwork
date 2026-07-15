@@ -50,11 +50,16 @@ class WorkflowStep:
     by :func:`render_workflow_prompt`), deliberately distinct from
     :class:`maverick.workflow.Workflow`, which *executes* a tool DAG. A client
     edits these steps to tailor how an agent works; the LLM follows them.
+
+    A ``gate`` on an intermediate step is therefore a *prompt declaration*,
+    not an executable pause point.  A gate on the terminal step is special:
+    the goal release layer promotes it to the durable deliverable sign-off
+    enforced by :func:`enforced_gate`.
     """
     name: str
     instruction: str = ""          # what the agent does at this step
     tools: list[str] = field(default_factory=list)  # optional tool hints
-    gate: str | None = None        # optional human gate: "approval" | "review"
+    gate: str | None = None        # prompt-declared gate: "approval" | "review"
 
 
 @dataclass
@@ -565,6 +570,42 @@ _MIN_PERSONA_CHARS = 200
 _READONLY_DENY_FLOOR = ("shell", "write_file")
 
 
+def _strongest_gate(gates) -> str | None:
+    """Return the strongest valid gate in ``gates`` (approval > review)."""
+    valid = [gate for gate in gates if gate in _VALID_GATES]
+    return max(valid, key=lambda gate: _GATE_RANK[gate], default=None)
+
+
+def declared_prompt_gate(profile: DomainProfile) -> str | None:
+    """Strongest gate written in the prompt-only workflow playbook.
+
+    This deliberately says nothing about enforcement.  Use
+    :func:`enforced_gate` for release decisions and governance claims.
+    """
+    return _strongest_gate(step.gate for step in profile.workflow)
+
+
+def enforced_gate(profile: DomainProfile) -> str | None:
+    """The persisted sign-off gate protecting terminal deliverable release.
+
+    ``output.gate`` has always described the deliverable sign-off.  A terminal
+    workflow gate is also safe to enforce at this goal-level boundary, so it is
+    promoted here.  Intermediate playbook gates cannot honestly be promoted:
+    the prompt playbook has no executable step cursor or pause/resume point.
+    """
+    terminal = profile.workflow[-1].gate if profile.workflow else None
+    return _strongest_gate((profile.output.gate, terminal))
+
+
+def deliverable_release_allowed(
+    profile: DomainProfile, signoff: dict | None,
+) -> bool:
+    """Whether a terminal deliverable may cross an external release boundary."""
+    return enforced_gate(profile) is None or bool(
+        signoff and signoff.get("decision") == "approved"
+    )
+
+
 def _lint_output(out: OutputContract) -> list[str]:
     """Quality-gate a pack's output contract. Returns warnings only -- a
     misdeclared deliverable degrades the consumption surface (it renders as
@@ -601,6 +642,12 @@ def _lint_workflow(profile: DomainProfile) -> tuple[list[str], list[str]]:
         if step.gate and step.gate not in _VALID_GATES:
             warnings.append(f"workflow step {name or i!r}: unknown gate "
                             f"{step.gate!r} (expected {sorted(_VALID_GATES)})")
+        elif step.gate and i < len(profile.workflow):
+            warnings.append(
+                f"workflow step {name or i!r}: gate {step.gate!r} is "
+                "prompt-declared only; intermediate playbook steps have no "
+                "durable pause/resume checkpoint"
+            )
         stray = [t for t in step.tools if profile.allow_tools and t not in profile.allow_tools]
         if stray:
             warnings.append(f"workflow step {name or i!r} names tools not in "
@@ -659,15 +706,18 @@ def lint_profile(profile: DomainProfile) -> tuple[list[str], list[str]]:
     wf_errors, wf_warnings = _lint_workflow(profile)
     errors.extend(wf_errors)
     warnings.extend(wf_warnings)
-    # The deliverable's sign-off must not be lighter than the human-handoff its
-    # own playbook ends on -- otherwise the contract under-states the gate.
+    # The runtime promotes a terminal playbook gate into the persisted
+    # deliverable sign-off even when output.gate is missing.  Keep warning on a
+    # mismatched declaration so pack authors and exported contracts remain
+    # self-explanatory, without pretending the lighter contract weakens runtime.
     if profile.output.deliverable and profile.workflow:
         final_gate = profile.workflow[-1].gate
         if _GATE_RANK.get(final_gate, 0) > _GATE_RANK.get(profile.output.gate, 0):
             warnings.append(
                 f"output.gate {profile.output.gate!r} is lighter than the final "
-                f"workflow step's gate {final_gate!r}: raise output.gate so the "
-                "deliverable's sign-off matches its playbook")
+                f"workflow step's gate {final_gate!r}: runtime enforces "
+                f"{final_gate!r}, but raise output.gate so the deliverable "
+                "contract matches its playbook")
     return errors, warnings
 
 

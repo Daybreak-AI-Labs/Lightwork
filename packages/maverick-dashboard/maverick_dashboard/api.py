@@ -111,6 +111,7 @@ from .auth import (
     caller_principal,
     caller_suites,
     can_access_goal,
+    durable_automation_owner,
     execution_user_id_from_request,
     goal_owner_filter,
     has_permission,
@@ -118,6 +119,7 @@ from .auth import (
     require_global_permission,
     require_permission,
     require_suite,
+    stored_automation_identity,
 )
 
 log = logging.getLogger(__name__)
@@ -1375,73 +1377,176 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
     prior = store.load_flow(flow.id)
     if prior is not None:
         _assert_flow_access(request, prior)
+        # Updates are compare-and-swap against what the editor actually loaded,
+        # not a fresh server read performed moments before the write. Requiring
+        # both the monotonic version and non-reused generation token closes stale
+        # tab overwrites and delete+recreate ABA/ownership races.
+        if "version" not in payload.flow or "revision" not in payload.flow:
+            raise HTTPException(
+                status_code=409,
+                detail="flow changed or this editor is stale; reload before saving",
+            )
     flow.owner = prior.owner if (prior and prior.owner) else (caller_principal(request) or "")
-    store.save_flow(flow)
-    return {"id": flow.id, "nodes": len(flow.nodes)}
+    try:
+        store.save_flow(
+            flow,
+            expected_version=(payload.flow.get("version") if prior is not None else 0),
+            expected_revision=(payload.flow.get("revision") if prior is not None else ""),
+        )
+    except store.FlowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "id": flow.id,
+        "nodes": len(flow.nodes),
+        "version": flow.version,
+        "revision": flow.revision,
+    }
 
 
 # Common connector tools to bias the NL drafter toward real action nodes; the
 # operator edits the result in the designer, and unknown tools fail gracefully.
 _FLOW_DRAFT_TOOLS = (
-    "slack_bot", "discord_bot", "teams_tool", "email_tool", "gmail_tool",
-    "twilio_tool", "github_issues", "github_actions", "jira", "linear",
-    "gitlab_issues", "salesforce_tool", "hubspot_tool", "stripe_tool",
-    "shopify_tool", "servicenow_tool", "zendesk_tool", "notion", "confluence_tool",
-    "asana_tool", "trello_tool", "clickup_tool", "airtable_tool", "calendar_tool",
-    "gdrive_tool", "dropbox_tool", "s3_tool", "http_fetch", "sql_query",
+    "slack_bot", "discord_bot", "teams", "email", "gmail", "twilio",
+    "github_issues", "github_actions", "jira", "linear", "gitlab_issues",
+    "salesforce", "hubspot", "stripe", "shopify", "servicenow", "zendesk",
+    "notion", "confluence", "trello", "calendar", "dropbox", "s3", "http_fetch",
 )
 
 
 _TOOL_INDEX_CACHE: list[dict] | None = None
+_TOOL_SCHEMA_CACHE: dict[str, dict] | None = None
+_TOOL_CATALOG_CACHE: dict[str, tuple[float, list[dict], dict[str, dict]]] = {}
+_TOOL_CATALOG_TTL_SECONDS = 30.0
 _TOOL_INDEX_LOCK = threading.Lock()
 
 
-def _live_tool_index() -> list[dict]:
-    """The full flattened tool list ({name, description, params}) built ONCE and
-    memoized. The registry (built-ins + every enabled connector) is process-
-    stable config, so rebuilding hundreds of tool objects on every picker
-    request -- once per debounced keystroke on the search path -- was wasted
-    work. Both the curated catalog and the ?q= search read this cache. Cleared
-    only by a process restart, which is also when connector config changes."""
-    global _TOOL_INDEX_CACHE
+def _tool_catalog_scope(
+    *, channel: str | None = None, user_id: str | None = None,
+) -> str:
+    """Tenant/home + execution-identity namespace for authoring metadata."""
+    from maverick.paths import data_dir
+    return "\0".join((
+        str(data_dir().resolve(strict=False)),
+        str(channel or ""),
+        str(user_id or ""),
+    ))
+
+
+def _live_tool_index(
+    *, channel: str | None = None, user_id: str | None = None,
+) -> list[dict]:
+    """Tenant-scoped, short-lived flattened registry metadata.
+
+    Connector config, learned skills, and ACL-derived registries can differ by
+    tenant and can change while the dashboard remains up. A process-global
+    forever cache leaks one tenant's tool names/contracts to another and makes
+    newly learned capabilities invisible. The brief TTL still avoids rebuilding
+    hundreds of tool objects for every debounced search request.
+
+    ``_TOOL_INDEX_CACHE`` remains an explicit test/embedding override; normal
+    production requests use ``_TOOL_CATALOG_CACHE``.
+    """
     if _TOOL_INDEX_CACHE is not None:
         return _TOOL_INDEX_CACHE
+    scope = _tool_catalog_scope(channel=channel, user_id=user_id)
+    now = time.monotonic()
+    with _TOOL_INDEX_LOCK:
+        cached = _TOOL_CATALOG_CACHE.get(scope)
+        if cached is not None and now - cached[0] <= _TOOL_CATALOG_TTL_SECONDS:
+            return cached[1]
     try:
-        from maverick.sandbox import LocalBackend
+        from maverick.sandbox import build_sandbox
         from maverick.tools import base_registry
-        live = base_registry(_world(), LocalBackend(), goal_id=None).all()
+        live = base_registry(
+            _world(),
+            build_sandbox(),
+            goal_id=None,
+            channel=channel,
+            user_id=user_id,
+        ).all()
     except Exception:  # pragma: no cover -- registry build varies by env
         live = []
+    from maverick.flow.ir import action_tool_policy_error
+
     from .tool_categories import categorize
+
     idx = []
+    schemas: dict[str, dict] = {}
     for t in live:
+        if action_tool_policy_error(t.name):
+            continue
         params = []
         if isinstance(t.input_schema, dict):
             params = list((t.input_schema.get("properties") or {}).keys())[:12]
+            schemas[t.name] = dict(t.input_schema)
         desc = (t.description or "")[:200]
         idx.append({"name": t.name, "description": desc, "params": params,
                     "category": categorize(t.name, desc)})
     with _TOOL_INDEX_LOCK:
-        if _TOOL_INDEX_CACHE is None:
-            _TOOL_INDEX_CACHE = idx
-    return _TOOL_INDEX_CACHE
+        _TOOL_CATALOG_CACHE[scope] = (time.monotonic(), idx, schemas)
+    return idx
 
 
-def _flow_tool_catalog() -> list[dict]:
+def _live_tool_schemas(
+    *, channel: str | None = None, user_id: str | None = None,
+) -> dict[str, dict]:
+    """Full input contracts, kept out of the public picker response."""
+    if _TOOL_SCHEMA_CACHE is not None:
+        return _TOOL_SCHEMA_CACHE
+    scope = _tool_catalog_scope(channel=channel, user_id=user_id)
+    _live_tool_index(channel=channel, user_id=user_id)
+    with _TOOL_INDEX_LOCK:
+        cached = _TOOL_CATALOG_CACHE.get(scope)
+        return cached[2] if cached is not None else {}
+
+
+def _flow_tool_catalog(
+    *, channel: str | None = None, user_id: str | None = None,
+) -> list[dict]:
     """The curated connector catalog for the designer's action picker + the NL
     drafter's grounding: each tool's name, one-line description, and param names
     (from its input schema). Best-effort -- a tool absent from the live registry
     still appears by name so the picker/drafter can offer it."""
-    from .tool_categories import categorize
-    by_name = {t["name"]: t for t in _live_tool_index()}
+    by_name = {
+        t["name"]: t
+        for t in _live_tool_index(channel=channel, user_id=user_id)
+    }
     out = []
     for name in _FLOW_DRAFT_TOOLS:
         t = by_name.get(name)
-        desc = t["description"] if t is not None else ""
-        out.append({"name": name, "description": desc,
-                    "params": (t["params"] if t is not None else []),
-                    "category": (t["category"] if t is not None else categorize(name, desc))})
+        if t is not None:
+            out.append(dict(t))
     return out
+
+
+def _flow_authoring_catalog(
+    query: str,
+    *,
+    include_tools=(),
+    channel: str | None = None,
+    user_id: str | None = None,
+) -> list[dict]:
+    """Intent-ranked tools from the FULL live registry for one draft/chat turn.
+
+    Existing action tools are appended only when they still exist in the live
+    registry, so a harmless edit can retain a valid current binding while a
+    stale/hallucinated legacy action remains fail-closed.
+    """
+    from maverick.flow.draft import rank_tool_catalog
+    live = _live_tool_index(channel=channel, user_id=user_id)
+    ranked = rank_tool_catalog(query, live, limit=24)
+    by_name = {t["name"]: t for t in live}
+    present = {t["name"] for t in ranked}
+    for name in sorted({str(n) for n in include_tools if str(n)}):
+        item = by_name.get(name)
+        if item is not None and name not in present:
+            ranked.append(item)
+            present.add(name)
+    schemas = _live_tool_schemas(channel=channel, user_id=user_id)
+    return [
+        {**item, "input_schema": dict(schemas.get(item["name"]) or {})}
+        for item in ranked
+    ]
 
 
 @router.post("/flows/draft")
@@ -1454,13 +1559,24 @@ async def draft_flow_endpoint(request: Request, payload: FlowDraftIn) -> dict:
     _require_flows()
     from maverick_dashboard._shared import require_provider_or_400
     require_provider_or_400()
+    from maverick_dashboard.app import check_goal_rate_limit
+    check_goal_rate_limit(request, source="flow-authoring")
     from maverick.flow.draft import draft_flow
+    user_id = execution_user_id_from_request(request)
+    channel = "api" if user_id else None
 
     def _draft():
-        catalog = _flow_tool_catalog()
+        catalog = _flow_authoring_catalog(
+            payload.description, channel=channel, user_id=user_id)
         tool_docs = {t["name"]: t["description"] for t in catalog if t["description"]}
-        return draft_flow(payload.description, tools=_FLOW_DRAFT_TOOLS,
-                          tool_docs=tool_docs, flow_id=payload.flow_id)
+        tool_schemas = {t["name"]: t["input_schema"] for t in catalog}
+        return draft_flow(
+            payload.description,
+            tools=tuple(t["name"] for t in catalog),
+            tool_docs=tool_docs,
+            tool_schemas=tool_schemas,
+            flow_id=payload.flow_id,
+        )
     flow, notes = await run_in_threadpool(_draft)
     return {"flow": flow.to_dict(), "notes": notes}
 
@@ -1476,19 +1592,31 @@ async def flow_chat_endpoint(request: Request, payload: FlowChatIn) -> dict:
     _require_flows()
     from maverick_dashboard._shared import require_provider_or_400
     require_provider_or_400()
+    from maverick_dashboard.app import check_goal_rate_limit
+    check_goal_rate_limit(request, source="flow-authoring")
     from maverick.flow import Flow
     from maverick.flow.chat import chat_flow
+    from maverick.flow.draft import action_tool_names
     try:
         current = Flow.from_dict(payload.flow) if payload.flow else None
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid flow: {e}") from e
     run = _run_out(_load_owned_run(request, payload.run_id)) if payload.run_id else None
+    user_id = execution_user_id_from_request(request)
+    channel = "api" if user_id else None
 
     def _turn():
-        catalog = _flow_tool_catalog()
+        catalog = _flow_authoring_catalog(
+            payload.message,
+            include_tools=action_tool_names(current) if current is not None else (),
+            channel=channel,
+            user_id=user_id,
+        )
         tool_docs = {t["name"]: t["description"] for t in catalog if t["description"]}
+        tool_schemas = {t["name"]: t["input_schema"] for t in catalog}
         return chat_flow(payload.message, flow=current, history=payload.history,
-                         run=run, tools=_FLOW_DRAFT_TOOLS, tool_docs=tool_docs)
+                         run=run, tools=tuple(t["name"] for t in catalog),
+                         tool_docs=tool_docs, tool_schemas=tool_schemas)
     res = await run_in_threadpool(_turn)
     return {
         "reply": res.reply,
@@ -1521,6 +1649,10 @@ async def flow_schema_endpoint(request: Request, flow_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
+    flow = store.load_flow(flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, flow)
     return {"schema": store.load_flow_schema(flow_id)}
 
 
@@ -1531,6 +1663,12 @@ def _run_out(run) -> dict:
     d = run.to_dict()
     d["data"] = redact(d.get("data") or {})
     d["input_data"] = redact(d.get("input_data") or {})
+    # Execution snapshots are private durability state, not an API surface.
+    # Definitions may contain literal connector parameters from older/user-made
+    # flows, so never echo the pinned graph through run polling or SSE.
+    d.pop("definition_digest", None)
+    d.pop("definition_version", None)
+    d.pop("subflow_digests", None)
     return d
 
 
@@ -1581,7 +1719,10 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
     # completed/failed/rejected are final; a run parked on a human or an
     # external event won't change until someone acts -- close the stream and
     # let the page's actions (approve / resume) drive the next one.
-    end_states = ("completed", "failed", "rejected", "paused_approval", "paused_event")
+    end_states = (
+        "completed", "failed", "rejected", "indeterminate",
+        "paused_approval", "paused_event",
+    )
     poll, max_poll, max_seconds, heartbeat_every = 0.5, 5.0, 300.0, 30.0
 
     async def generate():
@@ -1669,13 +1810,23 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
     # paused_event) must not be retried-from-scratch -- that would spawn a
     # duplicate run alongside the live one. from_failure below is the only path
     # that acts on a failed run.
-    from maverick.flow.runner import ACTIVE_STATUSES
+    from maverick.flow.runner import ACTIVE_STATUSES, QUARANTINED_STATUSES
     if run.status in ACTIVE_STATUSES:
         raise HTTPException(status_code=409,
                             detail=f"run is still active (status {run.status}); nothing to retry")
+    if run.status in QUARANTINED_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "run has an indeterminate external-effect boundary; reconcile the "
+                "target system before creating any replacement run"
+            ),
+        )
     from maverick.flow import store
-    if store.load_flow(run.flow_id) is None:
+    current_flow = store.load_flow(run.flow_id)
+    if current_flow is None:
         raise HTTPException(status_code=404, detail="flow no longer exists")
+    _assert_flow_access(request, current_flow)
     from maverick_dashboard import automation_queue as aq
     if from_failure:
         if run.status != "failed" or not run.cursor:
@@ -1688,8 +1839,37 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
         retry_payload.update(aq._job_tenant_payload())
         aq.queue().enqueue(aq.FLOW_RESUME_KIND, retry_payload)
         return {"run_id": run_id, "status": "resuming", "from_node": run.cursor}
-    new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner,
-                                 origin=f"retry:{run_id}")
+    # Runs written before immutable definition snapshots have no pin fields at
+    # all.  A user-requested retry is explicitly a fresh run against the current
+    # definition, so migrate that narrow legacy shape by letting the ordinary
+    # enqueue path take a new snapshot.  Partially pinned/tampered rows and
+    # modern runs from another definition generation still fail closed.
+    legacy_unpinned = (
+        not run.definition_digest
+        and run.definition_version == 0
+        and not run.definition_revision
+        and not run.subflow_digests
+    )
+    if not legacy_unpinned and current_flow.revision != run.definition_revision:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "the flow definition has changed since this run; start a new "
+                "run from the current flow instead"
+            ),
+        )
+    new_id = aq.enqueue_flow_run(
+        run.flow_id,
+        dict(run.input_data or {}),
+        run.owner,
+        origin=f"retry:{run_id}",
+        dry_run=bool(run.dry_run),
+        channel=run.execution_channel or None,
+        user_id=run.execution_user_id or None,
+        allowed_suites=(
+            frozenset(run.allowed_suites) if run.allowed_suites is not None else None
+        ),
+    )
     return {"run_id": new_id, "status": "queued", "retried_from": run_id}
 
 
@@ -1714,13 +1894,16 @@ async def flow_tools_endpoint(request: Request, q: str = "", category: str = "")
     q = q.strip().lower()[:80]
     category = category.strip()[:40]
     cats = _cat_names()
+    user_id = execution_user_id_from_request(request)
+    channel = "api" if user_id else None
 
     if not q and not category:
-        return {"tools": await run_in_threadpool(_flow_tool_catalog),
+        return {"tools": await run_in_threadpool(
+                    lambda: _flow_tool_catalog(channel=channel, user_id=user_id)),
                 "categories": cats}
 
     def _filter():
-        out = _live_tool_index()
+        out = _live_tool_index(channel=channel, user_id=user_id)
         if category:
             out = [t for t in out if t.get("category") == category]
         if q:
@@ -1744,7 +1927,7 @@ _FLOW_GALLERY: tuple[dict, ...] = (
         "description": "Summarize a new issue, escalate urgent ones, ask before posting.",
         "nodes": [
             {"id": "n0", "kind": "agent", "brief": "Summarize this issue and rate its urgency high/normal: {{title}} — {{body}}", "output": "summary", "next": "n1"},
-            {"id": "n1", "kind": "branch", "condition": "urgency == high", "if_true": "n2", "if_false": "n3"},
+            {"id": "n1", "kind": "branch", "condition": "urgency == high", "if_true": "n2"},
             {"id": "n2", "kind": "approval", "prompt": "Escalate this to the on-call channel?", "next": "n3"},
             {"id": "n3", "kind": "action", "tool": "slack_bot", "params": {"text": "{{summary}}"}},
         ],
@@ -1754,8 +1937,9 @@ _FLOW_GALLERY: tuple[dict, ...] = (
         "description": "On a schedule, gather updates and email a one-paragraph digest.",
         "schedule": "0 9 * * *",
         "nodes": [
-            {"id": "n0", "kind": "agent", "brief": "Gather yesterday's notable updates and write a one-paragraph digest.", "output": "digest", "next": "n1"},
-            {"id": "n1", "kind": "action", "tool": "email_tool", "params": {"body": "{{digest}}"}},
+            {"id": "n0", "kind": "agent", "brief": "Gather yesterday's notable updates and write a one-paragraph digest.", "output": "digest", "next": "n1_gate"},
+            {"id": "n1_gate", "kind": "approval", "prompt": "Send this daily digest?", "next": "n1"},
+            {"id": "n1", "kind": "action", "tool": "email", "params": {"body": "{{digest}}"}},
         ],
     },
     {
@@ -1819,6 +2003,8 @@ async def flow_insights_endpoint(request: Request) -> dict:
     flows_out = []
     proposal_count = 0
     for f in store.list_flows():
+        if not _can_access_flow(request, f):
+            continue
         proposals = [p.to_dict() for p in evolve.maybe_propose(f)]
         changes = []
         for node_id in f.nodes:
@@ -1857,7 +2043,16 @@ async def delete_flow_endpoint(request: Request, flow_id: str) -> None:
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
     _assert_flow_access(request, f)
-    store.delete_flow(flow_id)
+    try:
+        deleted = store.delete_flow(
+            flow_id,
+            expected_version=f.version,
+            expected_revision=f.revision,
+        )
+    except store.FlowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=409, detail="flow changed while it was being deleted")
 
 
 @router.post("/flows/{flow_id}/run")
@@ -1882,20 +2077,24 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
     # Idempotency: a caller-supplied key dedups a repeat submit (double-click, retry)
     # to the same run instead of firing a second one.
     idem = (payload.idempotency_key or "").strip()
-    if idem and not payload.dry_run:
-        existing = store.find_run_by_idem(flow_id, idem)
-        if existing is not None:
-            return {"run_id": existing.run_id, "status": existing.status,
-                    "dry_run": False, "deduplicated": True}
-    run_id = store.new_run_id()
-    store.save_run(store.FlowRun(run_id=run_id, flow_id=flow_id, status="queued",
-                                 owner=owner, data=dict(data), input_data=dict(data),
-                                 idem_key=idem))
     from maverick_dashboard import automation_queue as aq
-    aq.queue().enqueue(aq.FLOW_RUN_KIND, {
-        "flow_id": flow_id, "run_id": run_id, "data": data, "owner": owner,
-        "dry_run": bool(payload.dry_run)})
-    return {"run_id": run_id, "status": "queued", "dry_run": bool(payload.dry_run)}
+    try:
+        run_id, deduplicated = aq.enqueue_flow_run_once(
+            flow_id, data, owner, "" if payload.dry_run else idem,
+            origin="manual", dry_run=bool(payload.dry_run),
+            channel="api" if execution_user_id_from_request(request) else None,
+            user_id=execution_user_id_from_request(request),
+            allowed_suites=caller_suites(request))
+    except store.FlowSnapshotError as exc:
+        # Snapshot internals may include object paths/digests. The caller only
+        # needs to know that the definition changed or cannot be pinned safely.
+        raise HTTPException(
+            status_code=409,
+            detail="flow changed or its immutable execution plan is unavailable",
+        ) from exc
+    run = store.load_run(run_id)
+    return {"run_id": run_id, "status": run.status if run else "queued",
+            "dry_run": bool(payload.dry_run), "deduplicated": deduplicated}
 
 
 @router.get("/flows/{flow_id}/proposals")
@@ -1909,6 +2108,7 @@ async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, f)
     return {"proposals": [p.to_dict() for p in evolve.maybe_propose(f)]}
 
 
@@ -1952,6 +2152,12 @@ async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, f)
+    if payload.version is None or not payload.revision:
+        raise HTTPException(
+            status_code=409,
+            detail="flow changed or this editor is stale; reload before applying",
+        )
     node = f.nodes.get(payload.node_id)
     if node is None:
         raise HTTPException(status_code=404, detail="no such node")
@@ -1968,7 +2174,14 @@ async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
     if errs:
         raise HTTPException(status_code=400,
                             detail="resulting flow invalid: " + "; ".join(errs[:5]))
-    saved = store.save_flow(new_flow)
+    try:
+        saved = store.save_flow(
+            new_flow,
+            expected_version=payload.version,
+            expected_revision=payload.revision,
+        )
+    except store.FlowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     evolution_log.record_apply(flow_id, payload.node_id, from_kind,
                                payload.to_kind, saved.version, source="manual")
     return {"id": flow_id, "version": saved.version, "node_id": payload.node_id,
@@ -1982,8 +2195,10 @@ async def flow_versions_endpoint(request: Request, flow_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
-    if store.load_flow(flow_id) is None:
+    current = store.load_flow(flow_id)
+    if current is None:
         raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, current)
 
     def _kinds(f) -> dict:
         c: dict[str, int] = {}
@@ -2004,9 +2219,24 @@ async def rollback_flow_endpoint(request: Request, flow_id: str,
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
-    if store.load_flow(flow_id) is None:
+    current = store.load_flow(flow_id)
+    if current is None:
         raise HTTPException(status_code=404, detail="no such flow")
-    restored = store.rollback_flow(flow_id, payload.version)
+    _assert_flow_access(request, current)
+    if payload.current_version is None or not payload.revision:
+        raise HTTPException(
+            status_code=409,
+            detail="flow changed or this editor is stale; reload before rolling back",
+        )
+    try:
+        restored = store.rollback_flow(
+            flow_id,
+            payload.version,
+            expected_version=payload.current_version,
+            expected_revision=payload.revision,
+        )
+    except store.FlowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if restored is None:
         raise HTTPException(status_code=404, detail="no such version to roll back to")
     return {"id": flow_id, "version": restored.version}
@@ -2023,6 +2253,7 @@ async def flow_node_impact_endpoint(request: Request, flow_id: str,
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, f)
     if node_id not in f.nodes:
         raise HTTPException(status_code=404, detail="no such node")
     last = evolution_log.last_apply(flow_id, node_id)
@@ -2969,16 +3200,29 @@ async def goal_open_questions(request: Request, goal_id: int) -> dict:
 
 
 def _goal_gate(domain: str) -> str | None:
-    """The sign-off gate the goal's pack declares ('review'/'approval'), or
-    ``None`` (no gate, or the factory layer is unavailable)."""
+    """The persisted release gate for a goal's pack, or ``None``.
+
+    A terminal playbook gate is promoted here even when an AI-generated pack
+    omitted ``output.gate``. Intermediate prompt gates remain non-executable.
+    """
     if not domain:
         return None
     try:
-        from maverick.domain import available_domains
+        from maverick.domain import available_domains, enforced_gate
         prof = available_domains().get(domain)
-        return prof.output.gate if prof else None
-    except Exception:  # pragma: no cover -- factory layer unavailable
-        return None
+    except Exception as exc:  # pragma: no cover -- factory layer unavailable
+        # A policy-read failure is not evidence that a deliverable is ungated.
+        # Release callers all funnel through this helper, so fail closed.
+        raise HTTPException(
+            status_code=503,
+            detail="deliverable release policy is temporarily unavailable",
+        ) from exc
+    if prof is None:
+        raise HTTPException(
+            status_code=409,
+            detail="the goal's domain policy is no longer available",
+        )
+    return enforced_gate(prof)
 
 
 def _goal_shape(domain: str) -> str:
@@ -3002,7 +3246,11 @@ async def get_signoff(request: Request, goal_id: int) -> dict:
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    return {"gate": _goal_gate(g.domain), "signoff": w.signoff_for(goal_id)}
+    return {
+        "gate": _goal_gate(g.domain),
+        "deliverable_updated_at": g.updated_at,
+        "signoff": w.signoff_for(goal_id),
+    }
 
 
 @router.post("/goals/{goal_id}/signoff")
@@ -3018,18 +3266,40 @@ async def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> di
     assert_goal_access(request, g)
     if _goal_gate(g.domain) is None:
         raise HTTPException(status_code=400, detail="this deliverable has no sign-off gate")
+    if g.status != "done":
+        raise HTTPException(
+            status_code=409,
+            detail="the deliverable must be finished before it can be signed off",
+        )
     who = _supervisor(request)
-    w.record_signoff(goal_id, payload.decision, decided_by=who, note=payload.note)
+    try:
+        changed = w.record_signoff(
+            goal_id,
+            payload.decision,
+            decided_by=who,
+            note=payload.note,
+            expected_updated_at=payload.expected_updated_at,
+        )
+    except ValueError as exc:
+        # Optimistic version binding: a concurrent edit/rerun means the human
+        # reviewed stale bytes. Reload and require a fresh decision.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     # Feed the human's certify/reject verdict back into the learning loop as a
     # GROUNDED outcome: a person judging the actual deliverable is the cleanest
     # ground-truth signal in the system, and it lands as exactly the
     # (goal_id, episode_id, value) tuple the Consequence Engine / data-engine
     # already consume. Both verdicts are signal -- an approval is a 1.0 reward,
     # a rejection a 0.0. Best-effort and gated: no-op unless [consequence] is on.
-    _record_signoff_outcome(w, goal_id, payload.decision)
-    if payload.decision == "approved":
-        _handoff_approved_deliverable(g, who)
-    return {"gate": _goal_gate(g.domain), "signoff": w.signoff_for(goal_id)}
+    if changed:
+        _record_signoff_outcome(w, goal_id, payload.decision)
+        if payload.decision == "approved":
+            _handoff_approved_deliverable(g, who)
+    return {
+        "gate": _goal_gate(g.domain),
+        "deliverable_updated_at": g.updated_at,
+        "changed": changed,
+        "signoff": w.signoff_for(goal_id),
+    }
 
 
 def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> None:
@@ -3237,6 +3507,20 @@ async def create_goal_share(request: Request, goal_id: int) -> dict:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     require_permission(request, "operate")
+    if g.status != "done":
+        raise HTTPException(
+            status_code=409,
+            detail="only a finished deliverable can be shared",
+        )
+    gate = _goal_gate(g.domain)
+    signoff = w.signoff_for(goal_id)
+    if gate is not None and (
+        signoff is None or signoff.get("decision") != "approved"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=f"{gate} sign-off is required before sharing this deliverable",
+        )
     link_id, token = w.create_share_link(
         goal_id, created_by=caller_principal(request) or "", ttl_seconds=_SHARE_TTL_SECONDS)
     url = str(request.base_url).rstrip("/") + "/share/" + token
@@ -3543,14 +3827,17 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
     if bool(payload.template) == bool(payload.flow):
         raise HTTPException(
             status_code=400, detail="set exactly one of 'template' or 'flow'")
+    target_flow = None
     if payload.flow:
         # A flow target: the flow engine must be on and the flow must exist, so
         # a trigger can't be armed against a missing graph.
         _require_flows()
         from maverick.flow import store as flow_store
-        if flow_store.load_flow(payload.flow) is None:
+        target_flow = flow_store.load_flow(payload.flow)
+        if target_flow is None:
             raise HTTPException(
                 status_code=404, detail=f"flow not found: {payload.flow!r}")
+        _assert_flow_access(request, target_flow)
     else:
         # Validate now: the template must exist and render with the given
         # defaults, so a trigger can't be armed against a missing/incompatible
@@ -3579,9 +3866,15 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
             raise HTTPException(
                 status_code=409, detail="a trigger with that name already exists")
     try:
+        from maverick.paths import current_tenant_id
+
         rec = triggers_store.set_trigger(
             default_name, payload.template, payload.params or {},
-            owner=caller_principal(request) or "", flow=payload.flow)
+            owner=durable_automation_owner(request), flow=payload.flow,
+            tenant=current_tenant_id() or "",
+            flow_owner=(target_flow.owner if target_flow is not None else ""),
+            flow_revision=(target_flow.revision if target_flow is not None else ""),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return TriggerOut(
@@ -3635,8 +3928,13 @@ def _event_trigger_out(rec: dict) -> EventTriggerOut:
 def _owned_event_triggers(request: Request) -> list[dict]:
     """Event triggers visible to the caller: their own when auth is on, all of
     them for auth-off/admin (``goal_owner_filter`` returns None)."""
+    from maverick.paths import current_tenant_id
+
     from maverick_dashboard import event_triggers_store
+
+    tenant = current_tenant_id() or ""
     triggers = event_triggers_store.list_triggers()
+    triggers = [t for t in triggers if t.get("tenant", "") == tenant]
     owner = goal_owner_filter(request)
     if owner is not None:
         triggers = [t for t in triggers if t.get("owner", "") == owner]
@@ -3680,6 +3978,7 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
     if bool(template) == bool(flow):
         raise HTTPException(status_code=400,
                             detail="set exactly one of 'template' or 'flow'")
+    target_flow = None
     if flow:
         from maverick import flow as flow_mod
         from maverick.flow import store as flow_store
@@ -3689,8 +3988,10 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
                 detail=("Flows aren't enabled on this server yet — an "
                         "administrator can switch on the flow engine ([flows] "
                         "in the server configuration, or MAVERICK_FLOWS=1)."))
-        if flow_store.load_flow(flow) is None:
+        target_flow = flow_store.load_flow(flow)
+        if target_flow is None:
             raise HTTPException(status_code=404, detail=f"flow not found: {flow!r}")
+        _assert_flow_access(request, target_flow)
     else:
         # The template must EXIST, but -- unlike a webhook trigger -- we don't
         # require it to render with the current defaults: each polled event fills
@@ -3703,23 +4004,28 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
                 status_code=404, detail=f"template not found: {template!r}") from e
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
+    from maverick.paths import current_tenant_id
+
     from maverick_dashboard import event_triggers_store
+
     default_name = payload.name or template or flow
+    tenant = current_tenant_id() or ""
     owner_filter = goal_owner_filter(request)
     if owner_filter is not None:
         existing = event_triggers_store.get_trigger(
-            event_triggers_store.slugify(default_name))
+            event_triggers_store.slugify(default_name), tenant=tenant)
         if existing is not None and existing.get("owner", "") != owner_filter:
             raise HTTPException(
                 status_code=409, detail="an event trigger with that name already exists")
     try:
-        from maverick.paths import current_tenant_id
         rec = event_triggers_store.set_trigger(
             default_name, template, payload.source,
             config=payload.config or {}, params=payload.params or {},
-            owner=caller_principal(request) or "", flow=flow,
+            owner=durable_automation_owner(request), flow=flow,
+            flow_owner=(target_flow.owner if target_flow is not None else ""),
+            flow_revision=(target_flow.revision if target_flow is not None else ""),
             interval_seconds=payload.interval_seconds,
-            tenant=current_tenant_id() or "")   # bind OAuth vault reads to this tenant
+            tenant=tenant)   # bind OAuth vault reads to this tenant
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _event_trigger_out(rec)
@@ -3729,8 +4035,15 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
 async def delete_event_trigger_endpoint(request: Request, name: str) -> dict:
     require_permission(request, "operate")
     _require_event_triggers()
+    from maverick.paths import current_tenant_id
+
     from maverick_dashboard import event_triggers_store
-    if not event_triggers_store.delete_trigger(name, owner=goal_owner_filter(request)):
+
+    if not event_triggers_store.delete_trigger(
+        name,
+        owner=goal_owner_filter(request),
+        tenant=current_tenant_id() or "",
+    ):
         raise HTTPException(status_code=404, detail="no event trigger with that name")
     return {"deleted": name}
 
@@ -3747,26 +4060,31 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     when the feature is on."""
     require_permission(request, "operate")
     _require_event_triggers()
-    from maverick.runner import run_goal_in_background_async
+    from maverick.paths import current_tenant_id
 
     from maverick_dashboard import event_poll
+    from maverick_dashboard.app import _run_trigger_goal_in_tenant
 
     principal = caller_principal(request) or ""
-    user_id = execution_user_id_from_request(request)
+    tenant = current_tenant_id() or ""
     triggers = _owned_event_triggers(request)
     if name:
         triggers = [t for t in triggers if t["name"] == name]
 
     def _fire(goal_id: int) -> None:
-        if user_id:
-            bg.add_task(
-                run_goal_in_background_async,
-                goal_id,
-                channel="api",
-                user_id=user_id,
-            )
-        else:
-            bg.add_task(run_goal_in_background_async, goal_id)
+        goal = _world().get_goal(goal_id)
+        if goal is None:
+            raise RuntimeError("event-created goal is unavailable")
+        owner, user_id, allowed_suites = stored_automation_identity(goal.owner)
+        bg.add_task(
+            _run_trigger_goal_in_tenant,
+            goal_id,
+            None,
+            None,
+            tenant=tenant,
+            owner=owner,
+            allowed_suites=allowed_suites,
+        )
 
     def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "",
                    origin: str = "manual") -> str:
@@ -3774,10 +4092,21 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         # so a flow run gets retry + a trackable run id even on the on-demand path.
         # The idempotency key dedups a re-delivered event; origin records the trigger.
         from maverick_dashboard import automation_queue
-        return automation_queue.enqueue_flow_run(flow_id, data, owner, idem_key, origin)
+        identity_owner, user_id, allowed_suites = stored_automation_identity(owner)
+
+        return automation_queue.enqueue_flow_run(
+            flow_id,
+            data,
+            identity_owner,
+            idem_key,
+            origin,
+            channel="api" if user_id else None,
+            user_id=user_id,
+            allowed_suites=allowed_suites,
+        )
 
     results = await run_in_threadpool(
-        lambda: event_poll.poll_and_fire(_world(), triggers, principal=principal,
+        lambda: event_poll.poll_and_fire(_world, triggers, principal=principal,
                                          fire=_fire, fire_flow=_fire_flow))
     return {"polled": len(results), "triggers": results}
 
@@ -3789,10 +4118,17 @@ async def event_trigger_history(request: Request, name: str = "", limit: int = 5
     with the no-goal outcomes: poll failures, missing templates, skipped events."""
     require_permission(request, "operate")
     _require_event_triggers()
+    from maverick.paths import current_tenant_id
+
     from maverick_dashboard import trigger_events_store
+
     owner = goal_owner_filter(request)
     rows = trigger_events_store.history(
-        name=name or None, owner=owner, limit=max(1, min(1000, limit)))
+        name=name or None,
+        owner=owner,
+        tenant=current_tenant_id() or "",
+        limit=max(1, min(1000, limit)),
+    )
     return {"history": rows}
 
 
@@ -3844,7 +4180,9 @@ async def import_sources_endpoint() -> dict:
 
 
 @router.post("/import/run", response_model=ImportRunOut)
-async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportRunOut:
+async def import_run_endpoint(  # noqa: C901 - staged importer intentionally explicit
+    request: Request, payload: ImportRunIn
+) -> ImportRunOut:
     require_permission(request, "operate")
     _require_automation_import()
     from maverick.automation_import import ImporterError, get_importer, materialize, translate_all
@@ -3896,7 +4234,12 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
     from maverick.config import get_features
     triggers_on = get_features().get("triggers", True)
     from maverick_dashboard import triggers_store
-    owner = caller_principal(request) or ""
+    # Prefer the authenticated request principal explicitly, then use the
+    # durable fallback for auth modes (for example a static dashboard token)
+    # that intentionally have no end-user subject.  Keeping the request-bound
+    # lookup here also ensures imported schedules retain the same identity as
+    # schedules authored through the regular dashboard endpoint.
+    owner = caller_principal(request) or durable_automation_owner(request)
     user_id = execution_user_id_from_request(request)
     channel = "api" if user_id else None
 
@@ -3954,9 +4297,26 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
             from maverick.automation_import.to_flow import to_flow_with_report
             from maverick.flow import store as flow_store
             flow_graph, fidelity = to_flow_with_report(a)
-            if not payload.dry_run:
-                flow_store.save_flow(flow_graph)
+            if owner:
+                flow_graph.owner = owner
             flow_id = flow_graph.id
+            flow_errors = flow_graph.validate()
+            if flow_errors:
+                res.notes.append(
+                    "flow preview was not saved: " + "; ".join(flow_errors[:5]))
+                if not payload.dry_run:
+                    flow_id = None
+            elif not payload.dry_run:
+                try:
+                    # Imports are creates, not implicit replacements. A repeated
+                    # source name must never overwrite a graph a human may have
+                    # edited since the first import.
+                    flow_store.save_flow(flow_graph, expected_version=0)
+                except flow_store.FlowVersionConflict:
+                    res.notes.append(
+                        f"flow {flow_graph.id!r} already exists; left it unchanged"
+                    )
+                    flow_id = None
         results.append({
             "source": a.source, "name": a.name, "template": res.template_name,
             "created": res.created_template, "trigger": a.trigger.kind,
@@ -5523,11 +5883,50 @@ def _drafter_for(form: str):
     return draft_playbook if form == "playbook" else draft_workflow
 
 
+def _workflow_form(form: str) -> str:
+    """Validate the public authoring discriminator instead of defaulting typos."""
+    form = str(form or "").strip().lower()
+    if form not in {"template", "playbook"}:
+        raise HTTPException(
+            status_code=400,
+            detail="form must be 'template' or 'playbook'",
+        )
+    return form
+
+
+def _workflow_authoring_identity(request: Request) -> tuple[str | None, str | None]:
+    user_id = execution_user_id_from_request(request)
+    return ("api" if user_id else None), user_id
+
+
+def _playbook_available_tools(
+    *, channel: str | None, user_id: str | None,
+) -> frozenset[str]:
+    """Caller/tenant-scoped live names used to ground one Agent Factory draft."""
+    return frozenset(
+        str(item["name"])
+        for item in _live_tool_index(channel=channel, user_id=user_id)
+        if item.get("name")
+    )
+
+
+def _safe_workflow_drafting_error(exc: BaseException) -> str:
+    """Bound and scrub upstream/provider text before returning it over HTTP."""
+    try:
+        from maverick.secrets import scrub
+
+        detail = scrub(str(exc)).strip()[:500]
+    except Exception:
+        detail = ""
+    return detail or "upstream drafting failed"
+
+
 @router.post("/workflows/draft")
 async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) -> dict:
     """Chat path: a natural-language brief -> a drafted workflow or playbook
     (per ``form``; not saved)."""
     require_permission(request, "operate")
+    form = _workflow_form(payload.form)
     _require_provider_for_drafting()
     # Drafting is a paid LLM call; throttle it under the same ceiling as goal
     # creation so it can't be spammed into a cost amplifier.
@@ -5536,16 +5935,29 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
     brief = (payload.description or "").strip()
     if not brief:
         raise HTTPException(status_code=400, detail="describe the workflow you want")
+    channel, user_id = _workflow_authoring_identity(request)
     try:
         # The drafter makes a synchronous LLM call; offload it so the single
         # event loop isn't frozen for the multi-second round-trip (which would
         # stall every other user's requests, SSE and health probes).
-        return await run_in_threadpool(_drafter_for(payload.form), brief)
+        def _draft():
+            drafter = _drafter_for(form)
+            if form == "playbook":
+                return drafter(
+                    brief,
+                    available_tools=_playbook_available_tools(
+                        channel=channel, user_id=user_id),
+                )
+            return drafter(brief)
+
+        return await run_in_threadpool(_draft)
     except Exception as e:
         # ValueError is a parse failure; BudgetExceeded / provider / network
         # errors are NOT ValueError -- surface any of them as an upstream 502
         # rather than an unhandled 500.
-        raise HTTPException(status_code=502, detail=f"workflow drafting failed: {e}") from e
+        detail = _safe_workflow_drafting_error(e)
+        raise HTTPException(
+            status_code=502, detail=f"workflow drafting failed: {detail}") from e
 
 
 @router.post("/workflows/draft-from-file")
@@ -5558,6 +5970,7 @@ async def draft_workflow_from_upload(
     text / markdown / JSON document — or a PDF / Word / OpenDocument file
     when the maverick-knowledge parsers are installed."""
     require_permission(request, "operate")
+    form = _workflow_form(form)
     _require_provider_for_drafting()
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request, source="workflow-draft")
@@ -5581,12 +5994,25 @@ async def draft_workflow_from_upload(
             ) from None
     if not text.strip():
         raise HTTPException(status_code=400, detail="the uploaded file was empty")
+    channel, user_id = _workflow_authoring_identity(request)
     try:
         drafter = _drafter_for(form)
-        return await run_in_threadpool(lambda: drafter("", source_text=text))
+        def _draft():
+            if form == "playbook":
+                return drafter(
+                    "",
+                    source_text=text,
+                    available_tools=_playbook_available_tools(
+                        channel=channel, user_id=user_id),
+                )
+            return drafter("", source_text=text)
+
+        return await run_in_threadpool(_draft)
     except Exception as e:
         # See draft_workflow_from_brief: non-ValueError LLM/budget errors -> 502.
-        raise HTTPException(status_code=502, detail=f"workflow drafting failed: {e}") from e
+        detail = _safe_workflow_drafting_error(e)
+        raise HTTPException(
+            status_code=502, detail=f"workflow drafting failed: {detail}") from e
 
 
 @router.post("/workflows/refine")
@@ -5594,19 +6020,41 @@ async def refine_workflow_draft(request: Request, payload: WorkflowRefineIn) -> 
     """Revise the current draft (template or playbook, per ``form``) with a
     natural-language follow-up — the iterative loop in the builder."""
     require_permission(request, "operate")
+    form = _workflow_form(payload.form)
     _require_provider_for_drafting()
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request, source="workflow-draft")
     instruction = (payload.instruction or "").strip()
     if not instruction:
         raise HTTPException(status_code=400, detail="describe the change you want")
-    from .workflow_ai import refine_playbook, refine_workflow
-    refiner = refine_playbook if payload.form == "playbook" else refine_workflow
     try:
-        return await run_in_threadpool(refiner, payload.current or {}, instruction)
+        current_size = len(json.dumps(
+            payload.current or {}, ensure_ascii=False, allow_nan=False,
+        ).encode("utf-8"))
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise HTTPException(status_code=400, detail="current draft is invalid") from exc
+    if current_size > 50_000:
+        raise HTTPException(status_code=400, detail="current draft is too large to refine")
+    from .workflow_ai import refine_playbook, refine_workflow
+    refiner = refine_playbook if form == "playbook" else refine_workflow
+    channel, user_id = _workflow_authoring_identity(request)
+    try:
+        def _refine():
+            if form == "playbook":
+                return refiner(
+                    payload.current or {},
+                    instruction,
+                    available_tools=_playbook_available_tools(
+                        channel=channel, user_id=user_id),
+                )
+            return refiner(payload.current or {}, instruction)
+
+        return await run_in_threadpool(_refine)
     except Exception as e:
         # See draft_workflow_from_brief: non-ValueError LLM/budget errors -> 502.
-        raise HTTPException(status_code=502, detail=f"refining the draft failed: {e}") from e
+        detail = _safe_workflow_drafting_error(e)
+        raise HTTPException(
+            status_code=502, detail=f"refining the draft failed: {detail}") from e
 
 
 @router.post("/workflows", status_code=201)

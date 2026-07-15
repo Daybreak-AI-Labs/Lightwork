@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from maverick.flow import Flow, FlowNode
-from maverick.flow.runner import STATUS_COMPLETED, run_flow
+from maverick.flow.runner import (
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    STATUS_INDETERMINATE,
+    run_flow,
+)
 
 
 def _flow(nodes, start="a"):
@@ -17,13 +22,13 @@ class TestRetryAndOnError:
         def action(node, params, data):
             calls["n"] += 1
             return ("ok", 1.0) if calls["n"] >= 3 else ("ERROR", 0.0)
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=3, output="r")])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=3, output="r")])
         res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
         assert res.status == STATUS_COMPLETED and calls["n"] == 3 and res.data["r"] == "ok"
 
     def test_exhausted_retries_route_to_on_error(self):
         f = _flow([
-            FlowNode(id="a", kind="action", tool="t", retries=1, on_error="b", next="c"),
+            FlowNode(id="a", kind="action", tool="web_search", retries=1, on_error="b", next="c"),
             FlowNode(id="b", kind="agent", brief="handle", output="handled"),
             FlowNode(id="c", kind="agent", brief="normal", output="normal")])
         seen = []
@@ -35,12 +40,50 @@ class TestRetryAndOnError:
         assert "handled" in res.data and "normal" not in res.data     # took the error arm
         assert seen == ["b"]
 
-    def test_no_on_error_continues_to_next(self):
+    def test_no_on_error_fails_closed_before_next(self):
         f = _flow([
-            FlowNode(id="a", kind="action", tool="t", next="b"),
+            FlowNode(id="a", kind="action", tool="web_search", next="b"),
             FlowNode(id="b", kind="agent", brief="x", output="done")])
         res = run_flow(f, agent_fn=lambda *a: ("x", 1.0), action_fn=lambda *a: ("ERROR", 0.0))
-        assert res.data.get("done") == "x"                            # legacy march-on kept
+        assert res.status == STATUS_FAILED and res.cursor == "a"
+        assert "done" not in res.data
+
+    def test_high_risk_action_is_not_retried_after_ambiguous_failure(self):
+        calls = {"n": 0}
+
+        def action(node, params, data):
+            calls["n"] += 1
+            return ("ERROR: upstream response lost", 0.0)
+
+        f = _flow([FlowNode(id="a", kind="action", tool="stripe", retries=5)])
+        res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
+        assert res.status == STATUS_INDETERMINATE and res.cursor == "a"
+        assert calls["n"] == 1
+
+    def test_agent_retry_is_runtime_clamped_after_possible_side_effect(self):
+        calls = {"n": 0}
+
+        def agent(node, brief, data):
+            calls["n"] += 1
+            return ("goal failed after using tools", 0.0)
+
+        f = _flow([FlowNode(id="a", kind="agent", brief="mutate", retries=5)])
+        res = run_flow(f, agent_fn=agent, action_fn=lambda *a: ("", None))
+        assert res.status == STATUS_INDETERMINATE and res.cursor == "a"
+        assert calls["n"] == 1
+
+    def test_raising_high_risk_action_is_quarantined_without_error_route(self):
+        f = _flow([
+            FlowNode(id="a", kind="action", tool="stripe", on_error="recover"),
+            FlowNode(id="recover", kind="agent", brief="must not run", output="recovered"),
+        ])
+
+        def ambiguous(*_args):
+            raise ConnectionError("response lost after commit")
+
+        res = run_flow(f, agent_fn=lambda *a: ("bad", 1.0), action_fn=ambiguous)
+        assert res.status == STATUS_INDETERMINATE and res.cursor == "a"
+        assert "recovered" not in res.data
 
     def test_a_raising_executor_is_retried_not_instantly_fatal(self):
         # Before: a hard exception bypassed retries and killed the run at attempt 1.
@@ -51,7 +94,7 @@ class TestRetryAndOnError:
             if calls["n"] < 3:
                 raise RuntimeError("transient boom")
             return ("ok", 1.0)
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=3, output="r")])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=3, output="r")])
         res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
         assert res.status == STATUS_COMPLETED and calls["n"] == 3 and res.data["r"] == "ok"
 
@@ -61,7 +104,7 @@ class TestRetryAndOnError:
         def action(node, params, data):
             calls["n"] += 1
             raise RuntimeError("always boom")
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=2)])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=2)])
         res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
         assert res.status == "failed" and res.cursor == "a"           # still records WHERE
         assert calls["n"] == 3                                        # 1 + 2 retries
@@ -74,7 +117,7 @@ class TestRetryAndOnError:
         def action(node, params, data):
             calls["n"] += 1
             return ("ok", 1.0) if calls["n"] >= 3 else ("ERROR", 0.0)
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=3,
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=3,
                             retry_backoff=2.0, output="r")])
         res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
         assert res.status == STATUS_COMPLETED
@@ -83,16 +126,16 @@ class TestRetryAndOnError:
     def test_no_backoff_never_sleeps(self, monkeypatch):
         slept = []
         monkeypatch.setattr("maverick.flow.runner.time.sleep", lambda s: slept.append(s))
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=2, output="r")])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=2, output="r")])
         run_flow(f, agent_fn=lambda *a: ("", None), action_fn=lambda *a: ("ERROR", 0.0))
         assert slept == []                # backoff 0 -> tight loop, no added latency
 
     def test_validation_rejects_excessive_retries(self):
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=11)])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=11)])
         assert "node 'a': retries must be <= 10" in f.validate()
 
     def test_validation_rejects_excessive_retry_backoff_total(self):
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=10, retry_backoff=30.0)])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=10, retry_backoff=30.0)])
         assert "node 'a': retry backoff total must be <= 120s" in f.validate()
 
     def test_runner_caps_unvalidated_retry_count(self, monkeypatch):
@@ -102,14 +145,14 @@ class TestRetryAndOnError:
         def action(node, params, data):
             calls["n"] += 1
             return ("ERROR", 0.0)
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=999)])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=999)])
         run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
         assert calls["n"] == 11
 
     def test_retry_backoff_honours_flow_deadline(self, monkeypatch):
         slept = []
         monkeypatch.setattr("maverick.flow.runner.time.sleep", lambda s: slept.append(s))
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=3, retry_backoff=2.0)])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=3, retry_backoff=2.0)])
         f.max_seconds = 0.5
         res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=lambda *a: ("ERROR", 0.0),
                        now=lambda: 100.0)
@@ -124,9 +167,9 @@ class TestRetryAndOnError:
         def action(node, params, data):
             calls["n"] += 1
             return ("ERROR", 0.0)
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=100)])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=100)])
         res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
-        assert res.status == STATUS_COMPLETED
+        assert res.status == STATUS_FAILED
         assert calls["n"] == 3   # initial attempt + capped two retries
 
 
@@ -160,6 +203,16 @@ class TestSubflow:
                        action_fn=lambda *a: ("", None), resolve_flow=lambda ref: None)
         assert "recovered" in res.data and "normal" not in res.data
 
+    def test_missing_subflow_without_error_route_fails_closed(self):
+        parent = _flow([
+            FlowNode(id="a", kind="subflow", flow_ref="ghost", next="b"),
+            FlowNode(id="b", kind="agent", brief="must not run", output="normal"),
+        ])
+        res = run_flow(parent, agent_fn=lambda n, b, d: ("y", 1.0),
+                       action_fn=lambda *a: ("", None), resolve_flow=lambda ref: None)
+        assert res.status == STATUS_FAILED and res.cursor == "a"
+        assert "normal" not in res.data
+
     def test_cyclic_subflow_is_blocked_not_infinite(self):
         loop = Flow(id="loop", name="loop", start="a", nodes={
             "a": FlowNode(id="a", kind="subflow", flow_ref="loop", next="b"),
@@ -167,7 +220,8 @@ class TestSubflow:
         res = run_flow(loop, agent_fn=lambda n, bf, d: ("z", 1.0),
                        action_fn=lambda *a: ("", None),
                        resolve_flow=lambda ref: loop if ref == "loop" else None)
-        assert res.status == STATUS_COMPLETED and res.data.get("end") == "z"   # cycle skipped
+        assert res.status == STATUS_FAILED and res.cursor == "a"
+        assert "end" not in res.data
 
 
 class TestValidation:
@@ -180,9 +234,13 @@ class TestValidation:
 
     def test_retries_cannot_exceed_configured_cap(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_FLOW_MAX_NODE_RETRIES", "3")
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=4)])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=4)])
         assert any("retries 4 exceeds max_node_retries 3" in e for e in f.validate())
 
     def test_negative_retries_are_rejected(self):
-        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=-1)])
+        f = _flow([FlowNode(id="a", kind="action", tool="web_search", retries=-1)])
         assert any("retries must be >= 0" in e for e in f.validate())
+
+    def test_agent_retries_are_rejected(self):
+        f = _flow([FlowNode(id="a", kind="agent", brief="do it", retries=1)])
+        assert any("cannot be automatically retried" in e for e in f.validate())

@@ -716,8 +716,13 @@ def test_share_links_lifecycle(world):
 def test_signoffs_round_trip_and_batch(world):
     g1 = world.create_goal("deliverable 1")
     g2 = world.create_goal("deliverable 2")
+    world.set_goal_status(g1, "done", result="draft 1")
+    world.set_goal_status(g2, "done", result="draft 2")
     assert world.signoff_for(g1) is None
-    world.record_signoff(g1, "approved", decided_by="al", note="ok")
+    assert world.record_signoff(
+        g1, "approved", decided_by="al", note="ok",
+    ) is True
+    assert world.record_signoff(g1, "approved", decided_by="al") is False
     s = world.signoff_for(g1)
     assert s["decision"] == "approved" and s["decided_by"] == "al" and s["note"] == "ok"
     # a later decision replaces the earlier one (one row per goal)
@@ -1047,6 +1052,7 @@ def test_fk_readers_are_tenant_scoped(world, monkeypatch):
 
     monkeypatch.setattr(pg, "_active_tenant", lambda: "fkA")
     ga = world.create_goal("a")
+    world.set_goal_status(ga, "done", result="draft")
     world.add_artifact(ga, "text", "rep", "secretA")
     world.create_share_link(ga, created_by="a")
     world.record_signoff(ga, "approved", decided_by="a")
@@ -1080,6 +1086,7 @@ def test_erase_conversations_deletes_all_goal_child_rows(world):
     world.append_turn(conv.id, "user", "please remember this", goal_id=gid)
     world.add_artifact(gid, "text", "report", "secret content")
     world.create_share_link(gid, created_by="x")
+    world.set_goal_status(gid, "done", result="draft")
     world.record_signoff(gid, "approved", decided_by="x")
     world.record_goal_origin(gid, "webhook", "ext-ref")
 

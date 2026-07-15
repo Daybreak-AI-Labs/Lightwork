@@ -6,7 +6,22 @@ from __future__ import annotations
 
 from maverick.automation_import import n8n, power_automate
 from maverick.automation_import.to_flow import to_flow, to_flow_with_report
-from maverick.flow.ir import NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_FOREACH, NODE_PARALLEL
+from maverick.flow.ir import (
+    NODE_ACTION,
+    NODE_AGENT,
+    NODE_APPROVAL,
+    NODE_BRANCH,
+    NODE_FOREACH,
+    NODE_PARALLEL,
+    partition_draft_validation_errors,
+)
+
+
+def _assert_preview_valid(flow):
+    """Imported drafts may await tool classification, but nothing else."""
+    blocking, unclassified = partition_draft_validation_errors(flow.validate())
+    assert blocking == [], blocking
+    return unclassified
 
 _IF_WF = {
     "id": "7", "name": "Route by amount", "active": True,
@@ -28,11 +43,18 @@ _IF_WF = {
 
 def test_if_node_becomes_a_branch_with_wired_arms():
     f = to_flow(n8n.translate(_IF_WF))
-    assert f.validate() == []
+    unclassified = _assert_preview_valid(f)
+    assert unclassified == []
     branch = next(n for n in f.nodes.values() if n.kind == NODE_BRANCH)
     assert branch.condition == "{{amount}} gt 100".replace("gt", ">")   # operator mapped
-    # the true arm goes to the slack action, the false arm to the no-op agent
-    assert f.nodes[branch.if_true].kind == NODE_ACTION
+    # The supported Slack post contract binds to the classified Lightwork tool
+    # behind a human gate; the false arm remains the no-op agent approximation.
+    true_gate = f.nodes[branch.if_true]
+    assert true_gate.kind == NODE_APPROVAL
+    true_action = f.nodes[true_gate.next]
+    assert true_action.kind == NODE_ACTION
+    assert true_action.tool == "slack_bot"
+    assert true_action.params["op"] == "post"
     assert f.nodes[branch.if_false].kind == NODE_AGENT
     assert f.start == branch.id                          # trigger -> the IF first
 
@@ -51,7 +73,7 @@ def test_linear_workflow_still_lowers_linearly():
         },
     }
     f = to_flow(n8n.translate(wf))
-    assert f.validate() == []
+    _assert_preview_valid(f)
     assert not any(n.kind == NODE_BRANCH for n in f.nodes.values())
     assert f.nodes[f.start].next is not None            # chained
 
@@ -62,7 +84,8 @@ def test_graphless_import_falls_back_to_linear():
     a = iir.ImportedAutomation("make", "9", "x", iir.ImportedTrigger(kind=iir.TRIGGER_WEBHOOK),
                                steps=[iir.ImportedStep(name="s1"), iir.ImportedStep(name="s2")])
     f = to_flow(a)
-    assert f.validate() == [] and len(f.nodes) == 2
+    _assert_preview_valid(f)
+    assert len(f.nodes) == 2
 
 
 # ---- Power Automate (WDL) structural capture ---------------------------------
@@ -105,17 +128,23 @@ _PA_WF = {
 
 def test_power_automate_if_becomes_branch_with_rejoining_arms():
     f, report = to_flow_with_report(power_automate.translate(_PA_WF))
-    assert f.validate() == []
+    assert _assert_preview_valid(f) == []
+    assert not any("risk-classify" in entry["note"] for entry in report)
     branch = next(n for n in f.nodes.values() if n.kind == NODE_BRANCH)
     assert branch.condition == "status == blocked"       # WDL equals -> ==
     assert f.start == branch.id
-    then_node = f.nodes[branch.if_true]
+    then_gate = f.nodes[branch.if_true]
+    then_node = f.nodes[then_gate.next]
     else_node = f.nodes[branch.if_false]
-    assert then_node.kind == NODE_ACTION and then_node.tool == "slack"
+    assert then_gate.kind == NODE_APPROVAL
+    assert then_node.kind == NODE_ACTION and then_node.tool == "slack_bot"
+    assert then_node.params["op"] == "post"
     assert else_node.kind == NODE_AGENT                  # Compose -> agent approximation
-    # both arms REJOIN at the action after the If (WDL's implicit join)
+    # Both arms rejoin at a mandatory human gate before the high-risk action.
     wrap = next(n for n in f.nodes.values() if n.tool == "teams")
-    assert then_node.next == wrap.id and else_node.next == wrap.id
+    gate = f.nodes[then_node.next]
+    assert gate.kind == NODE_APPROVAL and gate.next == wrap.id
+    assert else_node.next == gate.id
     fidelity = {r["step"]: r["fidelity"] for r in report}
     assert fidelity["Check_status"] == "preserved"
     assert fidelity["Post_alert"] == "preserved"
@@ -135,7 +164,7 @@ def test_power_automate_foreach_becomes_a_loop_with_a_body():
         }},
     }
     f, report = to_flow_with_report(power_automate.translate(wf))
-    assert f.validate() == []
+    _assert_preview_valid(f)
     loop = next(n for n in f.nodes.values() if n.kind == NODE_FOREACH)
     assert loop.items == "rows"
     assert loop.body is not None and len(loop.body.nodes) == 1
@@ -153,7 +182,7 @@ def test_power_automate_switch_approximates_with_report():
         }},
     }
     f, report = to_flow_with_report(power_automate.translate(wf))
-    assert f.validate() == []
+    _assert_preview_valid(f)
     only = next(iter(f.nodes.values()))
     assert only.kind == NODE_AGENT                       # runs, but approximated
     r = next(r for r in report if r["step"] == "Route_by_type")
@@ -186,15 +215,19 @@ def test_power_automate_switch_with_cases_becomes_switch_node():
     }
     from maverick.flow.ir import NODE_SWITCH
     f, report = to_flow_with_report(power_automate.translate(wf))
-    assert f.validate() == []
+    _assert_preview_valid(f)
     sw = next(n for n in f.nodes.values() if n.kind == NODE_SWITCH)
     assert sw.condition == "tier"
     values = {c["value"] for c in sw.cases}
     assert values == {"gold", "free"}
-    # the gold arm holds the slack action and rejoins the step after the switch
+    # The gold arm gates the classified Slack action, then rejoins after it.
     gold_to = next(c["to"] for c in sw.cases if c["value"] == "gold")
     done = next(n for n in f.nodes.values() if (n.label or "") == "Done")
-    assert f.nodes[gold_to].tool == "slack" and f.nodes[gold_to].next == done.id
+    gold_gate = f.nodes[gold_to]
+    gold_action = f.nodes[gold_gate.next]
+    assert gold_gate.kind == NODE_APPROVAL
+    assert gold_action.tool == "slack_bot" and gold_action.next == done.id
+    assert gold_action.params["op"] == "post"
     # an empty case arm falls straight through to the join
     free_to = next(c["to"] for c in sw.cases if c["value"] == "free")
     assert free_to == done.id
@@ -218,7 +251,7 @@ def test_power_automate_until_becomes_while_with_negated_exit():
     }
     from maverick.flow.ir import NODE_WHILE
     f, report = to_flow_with_report(power_automate.translate(wf))
-    assert f.validate() == []
+    _assert_preview_valid(f)
     loop = next(n for n in f.nodes.values() if n.kind == NODE_WHILE)
     assert loop.condition == "status != done"       # exit condition negated
     assert loop.limit == 12 and loop.body is not None
@@ -237,7 +270,7 @@ def test_power_automate_scope_becomes_scope_node():
     }
     from maverick.flow.ir import NODE_SCOPE
     f, report = to_flow_with_report(power_automate.translate(wf))
-    assert f.validate() == []
+    _assert_preview_valid(f)
     sc = next(n for n in f.nodes.values() if n.kind == NODE_SCOPE)
     assert sc.body is not None and len(sc.body.nodes) == 1
     assert next(r for r in report if r["step"] == "Try_block")["fidelity"] == "preserved"
@@ -272,28 +305,34 @@ def test_workato_if_and_repeat_are_captured_structurally():
         }),
     }
     f, report = to_flow_with_report(workato.translate(recipe))
-    assert f.validate() == []
+    _assert_preview_valid(f)
     branch = next(n for n in f.nodes.values() if n.kind == NODE_BRANCH)
     assert branch.condition == "amount > 10000"
-    then_node = f.nodes[branch.if_true]
+    then_gate = f.nodes[branch.if_true]
+    then_node = f.nodes[then_gate.next]
     loop = next(n for n in f.nodes.values() if n.kind == NODE_FOREACH)
-    assert then_node.tool == "slack"
-    assert then_node.next == loop.id          # then-arm rejoins the chain
-    assert branch.if_false == loop.id         # no-match falls through
+    assert then_gate.kind == NODE_APPROVAL
+    assert then_node.tool == "slack_bot"
+    assert then_node.params["op"] == "post"
+    gate = f.nodes[then_node.next]
+    assert gate.kind == NODE_APPROVAL and gate.next == loop.id
+    assert branch.if_false == gate.id         # no-match falls through to gate
     assert loop.items == "line_items" and loop.body is not None
+    assert all(n.kind != NODE_APPROVAL for n in loop.body.nodes.values())
     fidelity = {r["step"]: r["fidelity"] for r in report}
     assert fidelity["Big deal?"] == "preserved"
     assert fidelity["Per line item"] == "preserved"
 
 
-def test_uipath_release_stays_a_single_step():
-    # A UiPath Release has no exposed graph -> the correct one-step lowering.
+def test_uipath_release_stays_one_imported_step_behind_a_gate():
+    # A UiPath Release has no exposed graph: one process action plus governance.
     from maverick.automation_import import uipath
     rel = {"Name": "Invoice bot", "ProcessKey": "InvoiceBot", "Key": "k1"}
     f, report = to_flow_with_report(uipath.translate(rel))
-    assert f.validate() == [] and len(f.nodes) == 1
-    only = next(iter(f.nodes.values()))
-    assert only.tool == "uipath"
+    _assert_preview_valid(f)
+    assert len(f.nodes) == 2
+    gate = f.nodes[f.start]
+    assert gate.kind == NODE_APPROVAL and f.nodes[gate.next].tool == "uipath"
 
 
 def test_uipath_exported_activity_tree_is_captured_structurally():
@@ -321,7 +360,7 @@ def test_uipath_exported_activity_tree_is_captured_structurally():
                                iir.ImportedTrigger(kind=iir.TRIGGER_MANUAL),
                                steps=[iir.ImportedStep(name="x")], raw=raw)
     f, report = to_flow_with_report(a)
-    assert f.validate() == []
+    _assert_preview_valid(f)
     kinds = {n.kind for n in f.nodes.values()}
     assert NODE_BRANCH in kinds and NODE_FOREACH in kinds
     assert NODE_WHILE in kinds and NODE_SCOPE in kinds
@@ -348,7 +387,7 @@ def test_uipath_trycatch_wrapping_a_loop_keeps_the_loop_node():
                                iir.ImportedTrigger(kind=iir.TRIGGER_MANUAL),
                                steps=[iir.ImportedStep(name="x")], raw=raw)
     f, _report = to_flow_with_report(a)
-    assert f.validate() == []
+    _assert_preview_valid(f)
     scope = next(n for n in f.nodes.values() if n.kind == NODE_SCOPE)
     assert scope.body is not None
     body_kinds = {n.kind for n in scope.body.nodes.values()}
@@ -387,7 +426,7 @@ _MAKE_ROUTER = {
 def test_make_router_becomes_parallel_fan_out():
     from maverick.automation_import import make
     f, report = to_flow_with_report(make.translate(_MAKE_ROUTER))
-    assert f.validate() == []
+    _assert_preview_valid(f)
     router = next(n for n in f.nodes.values() if n.kind == NODE_PARALLEL)
     assert len(router.branches) == 2
     guarded = router.branches[0]
@@ -395,8 +434,15 @@ def test_make_router_becomes_parallel_fan_out():
     assert branch.condition.endswith("> 80")             # filter operator mapped
     assert guarded.nodes[branch.if_true].kind == NODE_ACTION
     assert router.branches[1].nodes[router.branches[1].start].kind == NODE_ACTION
-    # the pre-router action runs first, then the fan-out router.
-    assert f.nodes[f.start].kind == NODE_ACTION and f.nodes[f.start].next == router.id
+    # The pre-router connector and the risky parallel container each have a
+    # durable root gate; no unresumable gate is placed inside either branch.
+    first_gate = f.nodes[f.start]
+    first = f.nodes[first_gate.next]
+    router_gate = f.nodes[first.next]
+    assert first_gate.kind == NODE_APPROVAL and first.kind == NODE_ACTION
+    assert router_gate.kind == NODE_APPROVAL and router_gate.next == router.id
+    assert all(all(n.kind != NODE_APPROVAL for n in b.nodes.values())
+               for b in router.branches)
     assert any(e["kind"] == NODE_PARALLEL and e["fidelity"] == "preserved" for e in report)
 
 
@@ -419,10 +465,11 @@ def test_make_router_runs_all_matching_routes():
         f,
         agent_fn=lambda node, brief, data: (brief, None),
         action_fn=lambda node, params, data: seen.append(node.tool) or ({"ok": True}, None),
+        approve_fn=lambda node, data: "approved",
         data={"amount": 200},
     )
     assert result.status == STATUS_COMPLETED
-    assert seen == ["audit", "approval"]
+    assert sorted(seen) == ["approval", "audit"]
 
 
 def test_make_without_a_router_still_lowers_linearly():
@@ -433,7 +480,7 @@ def test_make_without_a_router_still_lowers_linearly():
         {"id": 3, "module": "hubspot:createContact", "mapper": {}},
     ]}
     f = to_flow(make.translate(bp))
-    assert f.validate() == []
+    _assert_preview_valid(f)
     assert not any(n.kind == NODE_BRANCH for n in f.nodes.values())
 
 
@@ -443,7 +490,9 @@ def test_uipath_invocation_is_reported_approximated():
     # so the report must say "approximated", not falsely claim the branches survived.
     from maverick.automation_import import uipath
     f, report = to_flow_with_report(uipath.translate({"Name": "Invoice bot", "Key": "k1"}))
-    assert f.validate() == []
-    assert len(report) == 1 and report[0]["kind"] == NODE_ACTION
-    assert report[0]["fidelity"] == "approximated"
-    assert "Orchestrator" in report[0]["note"]
+    _assert_preview_valid(f)
+    action_entry = next(e for e in report if e["kind"] == NODE_ACTION)
+    gate_entry = next(e for e in report if e["kind"] == NODE_APPROVAL)
+    assert action_entry["fidelity"] == "approximated"
+    assert "Orchestrator" in action_entry["note"]
+    assert "approval gate" in gate_entry["note"]

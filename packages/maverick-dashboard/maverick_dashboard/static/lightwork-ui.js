@@ -252,6 +252,32 @@
       form.addEventListener('submit', async function(ev) {
         ev.preventDefault();
         errBox.style.display = 'none';
+        const kindEl = form.querySelector('[name="authoring_kind"]');
+        const kind = kindEl ? kindEl.value : 'goal';
+        const files = form.querySelector('input[type="file"]');
+        // An explicit create-artifact choice stages an UNSAVED first pass in the
+        // dedicated editor.  Attachments continue through the ordinary goal path
+        // until authoring endpoints support their full evidence/security model.
+        if ((kind === 'flow' || kind === 'agent') && !(files && files.files.length)) {
+          const title = (form.querySelector('[name="title"]') || {}).value || '';
+          const details = (form.querySelector('[name="description"]') || {}).value || '';
+          const brief = (title.trim() + (details.trim() ? '\n\n' + details.trim() : '')).slice(0, 8000);
+          if (!brief) {
+            errBox.textContent = 'Describe what you want Lightwork to draft.';
+            errBox.style.display = 'block';
+            return;
+          }
+          try {
+            sessionStorage.setItem('lightwork.authoring-handoff', JSON.stringify({
+              kind: kind, brief: brief, created_at: Date.now()
+            }));
+            window.location.href = kind === 'flow' ? '/flows/designer' : '/workflow-builder';
+          } catch (e) {
+            errBox.textContent = 'Could not stage the draft in this browser session.';
+            errBox.style.display = 'block';
+          }
+          return;
+        }
         if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); }
         try {
           const resp = await fetch(form.action, { method: 'POST', body: new FormData(form) });

@@ -5,7 +5,7 @@ from __future__ import annotations
 from maverick.automation_import import ir as iir
 from maverick.automation_import.to_flow import to_flow
 from maverick.flow import evolve, execution, node_outcomes
-from maverick.flow.ir import NODE_ACTION, NODE_AGENT, Flow, FlowNode
+from maverick.flow.ir import NODE_ACTION, NODE_AGENT, NODE_APPROVAL, Flow, FlowNode
 
 
 def _patch_home(tmp_path, monkeypatch):
@@ -75,7 +75,7 @@ class TestExecution:
             "a": FlowNode(id="a", kind=NODE_ACTION, tool="shell",
                           params={"args": {"cmd": "id"}}, output="o")})
 
-        assert "unsafe tool 'shell'" in "; ".join(f.validate())
+        assert "unsafe direct action tool 'shell'" in "; ".join(f.validate())
 
     def test_default_action_runner_blocks_unsafe_shell_tool(self):
         run = execution.default_action_runner(world=None)
@@ -83,7 +83,7 @@ class TestExecution:
         result, outcome = run("shell", {"args": {"cmd": "id"}}, {})
 
         assert outcome == 0.0
-        assert result == "ERROR: unsafe flow action tool 'shell'"
+        assert result == "ERROR: unsafe direct action tool 'shell'"
 
     def test_flow_max_dollars_caps_agent_fan_out(self, tmp_path, monkeypatch):
         # Three chained agent nodes at the default $5 per-node reservation; a $12
@@ -147,7 +147,7 @@ class TestExecution:
         _patch_home(tmp_path, monkeypatch)
         f = Flow(id="fT", name="f", start="a", nodes={
             "a": FlowNode(id="a", kind=NODE_AGENT, brief="ok step", next="b"),
-            "b": FlowNode(id="b", kind=NODE_ACTION, tool="t", next=None)})
+            "b": FlowNode(id="b", kind=NODE_ACTION, tool="web_search", next=None)})
         run = execution.execute(
             f, agent_runner=lambda brief, d: ("ok", 1.0),
             action_runner=lambda t, p, d: ("ERROR: boom", 0.0))
@@ -239,10 +239,13 @@ class TestExecution:
         # NOT ground outcomes -- mock successes would skew the self-rewrite signal.
         _patch_home(tmp_path, monkeypatch)
         f = Flow(id="dry", name="f", start="a", nodes={
-            "a": FlowNode(id="a", kind=NODE_AGENT, brief="do {{x}}", next="b"),
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="do {{x}}", next="gate"),
+            "gate": FlowNode(id="gate", kind=NODE_APPROVAL,
+                             prompt="approve sandboxed post?", next="b"),
             "b": FlowNode(id="b", kind=NODE_ACTION, tool="slack_bot")})
         ag, act = execution.sandbox_runners()
         run = execution.execute(f, agent_runner=ag, action_runner=act,
+                                approve_fn=lambda *_: "approved",
                                 data={"x": "1"}, record_outcomes=False)
         assert run.status == "completed"
         assert run.nodes["a"]["outcome"] == 1.0 and run.nodes["b"]["outcome"] == 1.0
@@ -294,7 +297,7 @@ class TestRetryFromFailure:
     def _flow(self):
         return Flow(id="fr", name="f", start="a", nodes={
             "a": FlowNode(id="a", kind=NODE_AGENT, brief="prep", output="r1", next="b"),
-            "b": FlowNode(id="b", kind=NODE_ACTION, tool="t", output="r2", next="c"),
+            "b": FlowNode(id="b", kind=NODE_ACTION, tool="web_search", output="r2", next="c"),
             "c": FlowNode(id="c", kind=NODE_AGENT, brief="wrap", output="r3")})
 
     def test_failed_run_records_cursor_and_resumes_at_failed_node(self, tmp_path, monkeypatch):

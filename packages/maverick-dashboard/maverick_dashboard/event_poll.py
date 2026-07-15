@@ -13,6 +13,14 @@ from collections.abc import Callable
 from typing import Any
 
 
+def _safe_error(exc: BaseException, *, fallback: str = "operation failed") -> str:
+    """Return a bounded, secret-scrubbed error safe for API notes/history."""
+    from maverick.secrets import scrub
+
+    message = scrub(str(exc)).strip()[:500]
+    return message or fallback
+
+
 def _fire_template(world, trig, tpl, events, owner, fire, summary) -> None:
     """Render the bound template per event (event fields fill DECLARED params)
     and fire a goal. Mutates ``summary``."""
@@ -27,8 +35,14 @@ def _fire_template(world, trig, tpl, events, owner, fire, summary) -> None:
         try:
             title, description = tpl.render(**params)
         except ValueError as e:         # a required param the event didn't supply
-            summary["notes"].append(f"skipped an event: {e}")
-            trigger_events_store.record(name, owner, trigger_events_store.EVENT_SKIPPED, note=str(e))
+            detail = _safe_error(e, fallback="template parameters are invalid")
+            summary["notes"].append(f"skipped an event: {detail}")
+            trigger_events_store.record(
+                name,
+                owner,
+                trigger_events_store.EVENT_SKIPPED,
+                note=detail,
+            )
             continue
         goal_id = world.create_goal(title[:200], description[:8000], owner=owner)
         world.record_goal_origin(goal_id, "event", name)
@@ -76,13 +90,34 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
 
     from maverick_dashboard import event_triggers_store, trigger_events_store
     name = trig["name"]
+    tenant = str(trig.get("tenant") or "")
     if trig.get("flow"):
         from maverick.flow import store as flow_store
-        if flow_store.load_flow(trig["flow"]) is None:
-            summary["notes"].append(f"flow unavailable: {trig['flow']}")
-            event_triggers_store.set_cursor(name, res.cursor)   # don't wedge on backlog
-            trigger_events_store.record(name, owner, trigger_events_store.TEMPLATE_UNAVAILABLE,
-                                        note=f"flow {trig['flow']} not found")
+
+        from maverick_dashboard.auth import auth_genuinely_off
+
+        flow = flow_store.load_flow(trig["flow"])
+        expected_owner = str(trig.get("flow_owner") or "")
+        expected_revision = str(trig.get("flow_revision") or "")
+        stale = flow is None or (
+            not expected_revision and not auth_genuinely_off()
+        )
+        if flow is not None and expected_revision:
+            stale = stale or (
+                flow.owner != expected_owner or flow.revision != expected_revision
+            )
+        if stale:
+            summary["notes"].append("flow unavailable: binding is stale")
+            # A deleted/recreated target is not the target that was approved at
+            # trigger creation. Advance past this batch so an ABA replacement
+            # cannot accumulate an unbounded replay backlog.
+            event_triggers_store.set_cursor(name, res.cursor, tenant=tenant)
+            trigger_events_store.record(
+                name,
+                owner,
+                trigger_events_store.TEMPLATE_UNAVAILABLE,
+                note="flow binding is unavailable",
+            )
             return False
         if fire_flow is None:
             # No flow dispatcher in this context (e.g. a caller that only wires
@@ -95,9 +130,15 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
     try:
         tpl = load_template(trig["template"])
     except (ValueError, FileNotFoundError) as e:
-        summary["notes"].append(f"template unavailable: {e}")
-        event_triggers_store.set_cursor(name, res.cursor)
-        trigger_events_store.record(name, owner, trigger_events_store.TEMPLATE_UNAVAILABLE, note=str(e))
+        detail = _safe_error(e, fallback="template unavailable")
+        summary["notes"].append(f"template unavailable: {detail}")
+        event_triggers_store.set_cursor(name, res.cursor, tenant=tenant)
+        trigger_events_store.record(
+            name,
+            owner,
+            trigger_events_store.TEMPLATE_UNAVAILABLE,
+            note=detail,
+        )
         return False
     _fire_template(world, trig, tpl, res.events, owner, fire, summary)
     return True
@@ -113,8 +154,14 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
     continues. ``fire_flow(flow_id, data, owner) -> run_id`` starts a flow run."""
     from maverick.automation_events import EventSourceError, poll_source
     from maverick.paths import reset_tenant, set_tenant
+    from maverick.tenant.registry import assert_tenant_active
 
     from maverick_dashboard import event_triggers_store, trigger_events_store
+    from maverick_dashboard.auth import (
+        AutomationAuthorizationError,
+        auth_genuinely_off,
+        stored_automation_identity,
+    )
 
     results: list[dict] = []
     for trig in triggers:
@@ -122,7 +169,9 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
         # background tick (which has no request principal and drains every
         # owner's triggers) doesn't create unowned goals. On the on-demand path
         # the trigger's owner is the caller, so this matches ``principal``.
-        owner = trig.get("owner") or principal
+        owner = str(trig.get("owner") or "").strip()
+        if not owner and auth_genuinely_off():
+            owner = principal
         name = trig["name"]
         summary: dict = {"name": name, "new_events": 0, "fired": [], "fired_flows": [],
                          "notes": [], "poll_error": False}
@@ -130,32 +179,64 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
         # Bind the poll (incl. any OAuth vault read) to the tenant that created
         # the trigger, so a polled source never reads a cross-tenant token.
         # Single-tenant deployments store "" and run under the active tenant.
-        tok = set_tenant(trig["tenant"]) if trig.get("tenant") else None
+        tenant = str(trig.get("tenant") or "")
+        tok = set_tenant(tenant) if tenant else None
         try:
             try:
+                if tenant:
+                    assert_tenant_active(tenant)
+                stored_automation_identity(owner)
+                # A world/model store is tenant-scoped. Resolve a factory only
+                # after the durable trigger tenant has been restored.
+                active_world = world() if callable(world) else world
                 res = poll_source(trig["source"], trig["config"], trig["cursor"])
             except EventSourceError as e:
+                detail = _safe_error(e, fallback="event source unavailable")
                 summary["poll_error"] = True
-                summary["notes"].append(f"poll failed: {e}")
-                trigger_events_store.record(name, owner, trigger_events_store.POLL_ERROR, note=str(e))
+                summary["notes"].append(f"poll failed: {detail}")
+                trigger_events_store.record(
+                    name,
+                    owner,
+                    trigger_events_store.POLL_ERROR,
+                    note=detail,
+                )
+                continue
+            except AutomationAuthorizationError:
+                summary["poll_error"] = True
+                summary["notes"].append("trigger authorization unavailable")
+                trigger_events_store.record(
+                    name,
+                    owner,
+                    trigger_events_store.POLL_ERROR,
+                    note="trigger authorization unavailable",
+                )
                 continue
             summary["new_events"] = len(res.events)
-            if not _deliver(world, trig, res, owner, fire, fire_flow, summary):
+            if not _deliver(
+                active_world, trig, res, owner, fire, fire_flow, summary
+            ):
                 continue
             # Only touch the store when the cursor actually moved -- an idle poll
             # (no new items) shouldn't rewrite the whole trigger file every tick.
             if res.cursor != trig["cursor"]:
-                event_triggers_store.set_cursor(name, res.cursor)
+                event_triggers_store.set_cursor(name, res.cursor, tenant=tenant)
             if summary["fired"] or summary["fired_flows"]:
                 trigger_events_store.record(name, owner, trigger_events_store.FIRED,
                                             new_events=summary["new_events"],
                                             fired=summary["fired"],
                                             fired_flows=summary["fired_flows"])
         except Exception as e:  # one trigger's unexpected error must not abort the batch
+            detail = _safe_error(e)
             summary["poll_error"] = True
-            summary["notes"].append(f"trigger error: {type(e).__name__}: {e}")
-            trigger_events_store.record(name, owner, trigger_events_store.POLL_ERROR,
-                                        note=f"{type(e).__name__}: {e}")
+            summary["notes"].append(
+                f"trigger error: {type(e).__name__}: {detail}"
+            )
+            trigger_events_store.record(
+                name,
+                owner,
+                trigger_events_store.POLL_ERROR,
+                note=f"{type(e).__name__}: {detail}"[:500],
+            )
         finally:
             if tok is not None:
                 reset_tenant(tok)

@@ -25,18 +25,30 @@ def _forecast_goal(w):
     return gid
 
 
+def _decision(w, gid, decision, *, note=None, expected_updated_at=None):
+    """API decision bound to the exact deliverable version the client saw."""
+    if expected_updated_at is None:
+        expected_updated_at = w.get_goal(gid).updated_at
+    return {
+        "decision": decision,
+        "expected_updated_at": expected_updated_at,
+        "note": note,
+    }
+
+
 class TestSignoffApi:
     def test_record_then_read_signoff(self, tmp_path, monkeypatch):
         w = _world(tmp_path, monkeypatch)
         gid = _forecast_goal(w)
         r = client.post(f"/api/v1/goals/{gid}/signoff",
-                        json={"decision": "approved", "note": "ties out"})
+                        json=_decision(w, gid, "approved", note="ties out"))
         assert r.status_code == 200
         body = r.json()
         assert body["signoff"]["decision"] == "approved"
         assert body["gate"] == "review"
         # persisted + readable
         got = client.get(f"/api/v1/goals/{gid}/signoff").json()
+        assert got["deliverable_updated_at"] == w.get_goal(gid).updated_at
         assert got["signoff"]["decision"] == "approved"
         assert got["signoff"]["note"] == "ties out"
 
@@ -44,33 +56,138 @@ class TestSignoffApi:
         w = _world(tmp_path, monkeypatch)
         gid = w.create_goal("generic", "")  # no domain -> no gate
         w.set_goal_status(gid, "done", result="just prose")
-        r = client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "approved"})
+        r = client.post(
+            f"/api/v1/goals/{gid}/signoff",
+            json=_decision(w, gid, "approved"),
+        )
         assert r.status_code == 400
+
+    def test_signoff_before_deliverable_is_finished_is_rejected(self, tmp_path, monkeypatch):
+        w = _world(tmp_path, monkeypatch)
+        gid = w.create_goal("forecast", "", domain="finance_cash13w")
+        r = client.post(
+            f"/api/v1/goals/{gid}/signoff",
+            json=_decision(w, gid, "approved"),
+        )
+        assert r.status_code == 409
+        assert w.signoff_for(gid) is None
+
+    def test_terminal_workflow_gate_is_enforced_without_output_gate(
+        self, tmp_path, monkeypatch,
+    ):
+        domains = tmp_path / "domains"
+        domains.mkdir()
+        (domains / "generated_gate.toml").write_text(
+            'name = "generated_gate"\n'
+            'description = "Generated approval-gated specialist"\n'
+            f'persona = "{"x" * 240}"\n'
+            'allow_tools = ["read_file"]\n'
+            'deny_tools = ["shell", "write_file"]\n'
+            'max_risk = "low"\n'
+            '[output]\n'
+            'shape = "table"\n'
+            'deliverable = "generated forecast"\n'
+            'consumers = ["reviewer"]\n'
+            '[[workflow]]\n'
+            'name = "Draft"\n'
+            '[[workflow]]\n'
+            'name = "Approve"\n'
+            'gate = "approval"\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(domains))
+        w = _world(tmp_path, monkeypatch)
+        gid = w.create_goal("generated", "", domain="generated_gate")
+        w.set_goal_status(gid, "done", result=_TABLE)
+
+        state = client.get(f"/api/v1/goals/{gid}/signoff")
+        assert state.status_code == 200
+        assert state.json()["gate"] == "approval"
+        assert client.get(f"/api/v1/goals/{gid}/deliverable.csv").status_code == 403
+
+        signed = client.post(
+            f"/api/v1/goals/{gid}/signoff",
+            json=_decision(w, gid, "approved"),
+        )
+        assert signed.status_code == 200
+        assert signed.json()["signoff"]["decision"] == "approved"
+        assert client.get(f"/api/v1/goals/{gid}/deliverable.csv").status_code == 200
 
     def test_bad_decision_is_422(self, tmp_path, monkeypatch):
         w = _world(tmp_path, monkeypatch)
         gid = _forecast_goal(w)
-        r = client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "maybe"})
+        r = client.post(
+            f"/api/v1/goals/{gid}/signoff",
+            json=_decision(w, gid, "maybe"),
+        )
         assert r.status_code == 422
+
+    def test_missing_client_seen_version_is_422(self, tmp_path, monkeypatch):
+        w = _world(tmp_path, monkeypatch)
+        gid = _forecast_goal(w)
+        r = client.post(
+            f"/api/v1/goals/{gid}/signoff",
+            json={"decision": "approved"},
+        )
+        assert r.status_code == 422
+
+    def test_stale_page_cannot_approve_replacement_deliverable(
+        self, tmp_path, monkeypatch,
+    ):
+        w = _world(tmp_path, monkeypatch)
+        gid = _forecast_goal(w)
+        reviewed_version = client.get(
+            f"/api/v1/goals/{gid}/signoff"
+        ).json()["deliverable_updated_at"]
+        w.set_goal_status(gid, "done", result="replacement the reviewer never saw")
+
+        r = client.post(
+            f"/api/v1/goals/{gid}/signoff",
+            json=_decision(
+                w,
+                gid,
+                "approved",
+                expected_updated_at=reviewed_version,
+            ),
+        )
+
+        assert r.status_code == 409
+        assert w.signoff_for(gid) is None
 
     def test_approval_fires_handoff_rejection_does_not(self, tmp_path, monkeypatch):
         import maverick.webhooks as webhooks
+        import maverick_dashboard.api as dashboard_api
         w = _world(tmp_path, monkeypatch)
         calls = []
+        outcomes = []
         monkeypatch.setattr(webhooks, "fire_deliverable_handoff",
                             lambda payload: calls.append(payload) or 1)
+        monkeypatch.setattr(
+            dashboard_api,
+            "_record_signoff_outcome",
+            lambda _world, goal_id, decision: outcomes.append((goal_id, decision)),
+        )
 
         gid = _forecast_goal(w)
-        client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "approved"})
+        payload = _decision(w, gid, "approved")
+        first = client.post(f"/api/v1/goals/{gid}/signoff", json=payload)
+        retry = client.post(f"/api/v1/goals/{gid}/signoff", json=payload)
+        assert first.json()["changed"] is True
+        assert retry.json()["changed"] is False
         assert len(calls) == 1
+        assert outcomes == [(gid, "approved")]
         assert calls[0]["goal_id"] == gid
         assert calls[0]["domain"] == "finance_cash13w"
         assert calls[0]["table"]["headers"] == ["Week", "Net"]  # parsed deliverable rides along
         assert calls[0]["result"] == ""  # no raw table text outside the reviewed artifact
 
         gid2 = _forecast_goal(w)
-        client.post(f"/api/v1/goals/{gid2}/signoff", json={"decision": "rejected"})
+        client.post(
+            f"/api/v1/goals/{gid2}/signoff",
+            json=_decision(w, gid2, "rejected"),
+        )
         assert len(calls) == 1  # rejection does not hand off downstream
+        assert outcomes == [(gid, "approved"), (gid2, "rejected")]
 
     def test_handoff_omits_unreviewed_raw_text_for_table(self, tmp_path, monkeypatch):
         import maverick.webhooks as webhooks
@@ -83,7 +200,10 @@ class TestSignoffApi:
         gid = w.create_goal("Refresh the cash forecast", "", domain="finance_cash13w")
         w.set_goal_status(gid, "done", result=raw)
 
-        r = client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "approved"})
+        r = client.post(
+            f"/api/v1/goals/{gid}/signoff",
+            json=_decision(w, gid, "approved"),
+        )
 
         assert r.status_code == 200
         assert len(calls) == 1
@@ -113,7 +233,10 @@ class TestSignoffGroundsLearning:
         w = _world(tmp_path, monkeypatch)
         gid = _forecast_goal(w)
         eid = w.start_episode(gid)
-        r = client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "approved"})
+        r = client.post(
+            f"/api/v1/goals/{gid}/signoff",
+            json=_decision(w, gid, "approved"),
+        )
         assert r.status_code == 200
         assert consequence.resolve(gid, eid) == 1.0   # approval -> reward 1.0
 
@@ -123,7 +246,10 @@ class TestSignoffGroundsLearning:
         w = _world(tmp_path, monkeypatch)
         gid = _forecast_goal(w)
         eid = w.start_episode(gid)
-        r = client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "rejected"})
+        r = client.post(
+            f"/api/v1/goals/{gid}/signoff",
+            json=_decision(w, gid, "rejected"),
+        )
         assert r.status_code == 200
         assert consequence.resolve(gid, eid) == 0.0   # rejection is signal too
 
@@ -133,7 +259,10 @@ class TestSignoffGroundsLearning:
         w = _world(tmp_path, monkeypatch)
         gid = _forecast_goal(w)
         eid = w.start_episode(gid)
-        r = client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "approved"})
+        r = client.post(
+            f"/api/v1/goals/{gid}/signoff",
+            json=_decision(w, gid, "approved"),
+        )
         assert r.status_code == 200
         # kernel stays stateless by default: nothing written when the knob is off
         assert consequence.resolve(gid, eid) is None
@@ -241,6 +370,38 @@ class TestSignoffUi:
         t = client.get(f"/chat/goal/{gid}").text
         assert 'id="signoff-approve"' in t
         assert 'id="signoff-reject"' in t
+        assert "expected_updated_at" in t
+
+    def test_terminal_gated_prose_playbook_has_review_controls(
+        self, tmp_path, monkeypatch,
+    ):
+        domains = tmp_path / "domains"
+        domains.mkdir()
+        (domains / "generated_prose.toml").write_text(
+            'name = "generated_prose"\n'
+            'description = "Generated prose specialist"\n'
+            f'persona = "{"x" * 240}"\n'
+            'allow_tools = ["read_file"]\n'
+            'deny_tools = ["shell", "write_file"]\n'
+            'max_risk = "low"\n'
+            '[[workflow]]\n'
+            'name = "Draft"\n'
+            '[[workflow]]\n'
+            'name = "Approve"\n'
+            'gate = "approval"\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(domains))
+        w = _world(tmp_path, monkeypatch)
+        gid = w.create_goal("generated", "", domain="generated_prose")
+        w.set_goal_status(gid, "done", result="first-pass prose")
+
+        page = client.get(f"/chat/goal/{gid}")
+
+        assert page.status_code == 200
+        assert "first-pass prose" in page.text
+        assert 'id="signoff-approve"' in page.text
+        assert 'id="signoff-reject"' in page.text
 
     def test_signed_off_goal_shows_decision_and_handoff(self, tmp_path, monkeypatch):
         w = _world(tmp_path, monkeypatch)

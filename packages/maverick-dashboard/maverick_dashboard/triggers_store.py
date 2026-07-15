@@ -89,6 +89,12 @@ def list_triggers() -> list[dict]:
             # Owner principal that registered the trigger ("" for admin/auth-off
             # or triggers armed before owner tracking); used to scope the list.
             "owner": str(t.get("owner") or ""),
+            # Durable namespace + flow-generation binding. Older rows decode to
+            # empty values and are admitted only by the auth-off compatibility
+            # rule at fire time.
+            "tenant": str(t.get("tenant") or ""),
+            "flow_owner": str(t.get("flow_owner") or ""),
+            "flow_revision": str(t.get("flow_revision") or ""),
         })
     out.sort(key=lambda t: (t["created"], t["name"]))
     return out
@@ -115,6 +121,9 @@ def _dump(triggers: list[dict]) -> str:
         lines.append(f"params = {json.dumps(params_json)}")
         lines.append(f"created = {float(t.get('created') or 0.0)}")
         lines.append(f"owner = {json.dumps(str(t.get('owner') or ''))}")
+        lines.append(f"tenant = {json.dumps(str(t.get('tenant') or ''))}")
+        lines.append(f"flow_owner = {json.dumps(str(t.get('flow_owner') or ''))}")
+        lines.append(f"flow_revision = {json.dumps(str(t.get('flow_revision') or ''))}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -128,7 +137,8 @@ def _write(triggers: list[dict]) -> None:
 
 def set_trigger(
     name: str, template: str, params: dict | None = None, owner: str = "",
-    flow: str = "",
+    flow: str = "", tenant: str = "", flow_owner: str = "",
+    flow_revision: str = "",
 ) -> dict:
     """Create or replace a trigger (by slugified name). Raises ValueError on a
     name that can't be made into a valid slug. ``owner`` records the principal
@@ -144,6 +154,9 @@ def set_trigger(
         "params": {str(k): str(v) for k, v in (params or {}).items()},
         "created": time.time(),
         "owner": str(owner or ""),
+        "tenant": str(tenant or ""),
+        "flow_owner": str(flow_owner or ""),
+        "flow_revision": str(flow_revision or ""),
     }
     with _locked():
         kept = [t for t in list_triggers() if t["name"] != slug]

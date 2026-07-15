@@ -168,10 +168,10 @@ def _installed_skill_names() -> set[str]:
 
 
 def _generated_tool_names() -> set[str]:
-    """Names of tools previously synthesized into the durable store."""
+    """Names of consented tools in the durable store, without executing them."""
     try:
-        from .self_learning import load_generated_tools
-        return {t.name for t in load_generated_tools()}
+        from .self_learning import generated_tool_names
+        return generated_tool_names()
     except Exception:  # pragma: no cover
         return set()
 

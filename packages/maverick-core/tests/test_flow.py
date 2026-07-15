@@ -163,9 +163,9 @@ class TestRunner:
         assert r.status == STATUS_COMPLETED
         assert r.data["left"] == "l" and r.data["right"] == "r"
 
-    def test_parallel_branch_error_propagates(self):
-        # A raising branch must fail the whole run, not be silently swallowed
-        # (and not leak the other branch's thread).
+    def test_parallel_agent_ambiguity_propagates(self):
+        # A raising agent branch may already have used mutating tools. Quarantine
+        # the whole run rather than swallowing it or replaying the trajectory.
         def maybe_boom(node, brief, data):
             if brief == "boom":
                 raise RuntimeError("branch blew up")
@@ -176,12 +176,14 @@ class TestRunner:
             _flow([FlowNode(id="y", kind="agent", brief="boom", output="right")], start="y"),
         ])])
         r = run_flow(f, agent_fn=maybe_boom, action_fn=_action, data={})
-        assert r.status == "failed" and "branch blew up" in r.error
+        assert r.status == "indeterminate" and "branch blew up" in r.error
 
     def test_parallel_branch_cycle_detection_is_per_branch(self):
         # Both branches run the SAME subflow. With a shared flow_stack the second
         # branch would falsely trip cycle detection; per-branch stacks let both run.
-        sub = _flow([FlowNode(id="s", kind="agent", brief="{{who}}", output="r")], start="s")
+        sub = Flow(id="shared", name="shared", start="s", nodes={
+            "s": FlowNode(id="s", kind="agent", brief="{{who}}", output="r"),
+        })
         f = _flow([FlowNode(id="a", kind="parallel", branches=[
             _flow([FlowNode(id="x", kind="subflow", flow_ref="shared", output="l")], start="x"),
             _flow([FlowNode(id="y", kind="subflow", flow_ref="shared", output="r")], start="y"),
@@ -264,12 +266,12 @@ class TestRunner:
         assert ("a", "done", 0.9) in seen
         assert ("b", "true", None) in seen
 
-    def test_failed_node_surfaces_not_raises(self):
+    def test_ambiguous_agent_node_surfaces_not_raises(self):
         def boom(node, brief, data):
             raise RuntimeError("kaboom")
         f = _flow([FlowNode(id="a", kind="agent", brief="x")])
         r = run_flow(f, agent_fn=boom, action_fn=_action, data={})
-        assert r.status == "failed" and "kaboom" in r.error
+        assert r.status == "indeterminate" and "kaboom" in r.error
 
 
 # ---- store ------------------------------------------------------------------

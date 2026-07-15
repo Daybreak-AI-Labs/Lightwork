@@ -28,6 +28,8 @@ from .domain import (
     _load_raw_domains,
     available_domains,
     builtin_dir,
+    declared_prompt_gate,
+    enforced_gate,
     lint_profile,
     load_domains,
     overlay_profile,
@@ -235,6 +237,11 @@ def resolved_view(name: str, directory: str | Path | None = None) -> dict | None
         "models": dict(prof.models),
         "workflow": [_step_dict(s) for s in prof.workflow],
         "output": _output_dict(prof.output),
+        # Keep prompt declarations separate from controls the release layer
+        # actually enforces.  Consumers must never infer enforcement merely
+        # because a gate-shaped string appeared in the LLM's instructions.
+        "declared_prompt_gate": declared_prompt_gate(prof),
+        "enforced_gate": enforced_gate(prof),
         "is_override": bool(raw),
         "overridden": sorted(overridden_fields(raw)),
         "errors": errors,

@@ -181,6 +181,44 @@ def caller_principal(request: Request) -> str | None:
     return name or None
 
 
+def auth_genuinely_off() -> bool:
+    """Whether the dashboard has no configured authentication mechanism.
+
+    This is deliberately stricter than ``caller_principal(...) is None``:
+    HMAC webhook requests are exempt from browser/OIDC authentication, and a
+    static dashboard token authenticates the request without establishing an
+    end-user principal. Legacy ownerless automations are safe only on a truly
+    unauthenticated local deployment. Any unreadable auth configuration denies
+    that legacy exception.
+    """
+    if os.environ.get("MAVERICK_DASHBOARD_TOKEN") or _dashboard_require_auth_enabled():
+        return False
+    probes = []
+    try:
+        probes.extend((oidc_enabled(), proxy_auth_enabled()))
+        from .invites import invites_enabled
+        from .saml import saml_enabled
+
+        probes.extend((invites_enabled(), saml_enabled()))
+    except Exception:
+        return False
+    return not any(probes)
+
+
+def durable_automation_owner(request: Request) -> str:
+    """Stable owner for a trigger/import that will execute without a request.
+
+    Principal-bearing auth uses that exact principal. Auth-off preserves the
+    historical ownerless local mode. A configured static dashboard token has
+    no user subject, so bind it to the explicit local execution identity rather
+    than persisting an ownerless row that would later bypass revocation checks.
+    """
+    principal = caller_principal(request)
+    if principal:
+        return principal
+    return "" if auth_genuinely_off() else "user:local"
+
+
 def _pin_tenant_from_principal(request: Request, principal: VerifiedPrincipal) -> None:
     """Pin per-user tenant state once the verified principal is known.
 
@@ -349,6 +387,47 @@ def caller_suites(request: Request) -> frozenset[str] | None:
         return None
     from . import suite_grants
     return suite_grants.granted_suites(principal)
+
+
+class AutomationAuthorizationError(RuntimeError):
+    """A request-less automation owner no longer has execution authority."""
+
+
+def stored_automation_identity(
+    owner: str,
+) -> tuple[str, str | None, frozenset[str] | None]:
+    """Revalidate a durable trigger owner and return its current run identity.
+
+    Trigger possession is not a perpetual grant. Every request-less fire checks
+    SCIM lifecycle, current RBAC ``operate`` permission, and the current suite
+    floor. Legacy ownerless rows execute only in genuinely auth-off local mode.
+    """
+    owner = str(owner or "").strip()
+    if not owner:
+        if auth_genuinely_off():
+            return "", None, None
+        raise AutomationAuthorizationError("automation owner is unavailable")
+    try:
+        from .scim_groups import active_for_principal
+
+        if active_for_principal(owner) is False:
+            raise AutomationAuthorizationError("automation owner is unavailable")
+        from .rbac import permissions_for
+
+        if "operate" not in permissions_for(role_for_principal(owner)):
+            raise AutomationAuthorizationError("automation owner is unavailable")
+        suites = None
+        if not is_dashboard_admin(owner):
+            from .suite_grants import granted_suites
+
+            suites = granted_suites(owner)
+    except AutomationAuthorizationError:
+        raise
+    except Exception as exc:
+        raise AutomationAuthorizationError(
+            "automation authorization policy is unavailable") from exc
+    user_id = owner[len("user:"):] if owner.startswith("user:") else ""
+    return owner, (user_id or None), suites
 
 
 def suite_allowed(request: Request, suite: str | None) -> bool:
@@ -599,6 +678,21 @@ def require_principal(
     request.state.principal = principal
     _pin_tenant_from_principal(request, principal)
     return principal
+
+
+async def require_principal_in_request_context(
+    request: Request = None,  # type: ignore[assignment]
+    websocket: WebSocket = None,  # type: ignore[assignment,name-defined]
+) -> VerifiedPrincipal | None:
+    """Run authentication in the request task so tenant ContextVars propagate.
+
+    FastAPI executes synchronous dependencies in a worker thread. Calling
+    :func:`set_tenant` there records a pin, but that worker's ContextVar value
+    is not visible to the async route or its child worker calls. The app-level
+    dependency therefore uses this async adapter; direct and WebSocket callers
+    can continue using the synchronous implementation above.
+    """
+    return require_principal(request=request, websocket=websocket)
 
 
 def websocket_caller_principal(principal: VerifiedPrincipal | None) -> str | None:

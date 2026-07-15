@@ -14,9 +14,11 @@ def _world(tmp_path, monkeypatch):
     return world_model.WorldModel(tmp_path / "world.db")
 
 
-def _make_goal(w):
+def _make_goal(w, *, approve=True):
     gid = w.create_goal("Refresh forecast", "", domain="finance_cash13w")
     w.set_goal_status(gid, "done", result="| Week | Net |\n| --- | --- |\n| W1 | 300 |")
+    if approve:
+        w.record_signoff(gid, "approved", decided_by="reviewer")
     return gid
 
 
@@ -47,6 +49,39 @@ def test_create_and_view_then_revoke(tmp_path, monkeypatch):
 def test_bad_token_404(tmp_path, monkeypatch):
     _world(tmp_path, monkeypatch)
     assert TestClient(app).get("/share/not-a-real-token").status_code == 404
+
+
+def test_existing_token_fails_closed_when_domain_policy_is_missing(
+    tmp_path, monkeypatch,
+):
+    w = _world(tmp_path, monkeypatch)
+    gid = w.create_goal("orphaned", "", domain="removed_pack")
+    w.set_goal_status(gid, "done", result="must stay private")
+    _, token = w.create_share_link(gid, created_by="operator")
+
+    page = TestClient(app).get(f"/share/{token}")
+
+    assert page.status_code == 404
+    assert "must stay private" not in page.text
+
+
+def test_gated_share_requires_current_approval(tmp_path, monkeypatch):
+    w = _world(tmp_path, monkeypatch)
+    gid = _make_goal(w, approve=False)
+    assert client.post(f"/api/v1/goals/{gid}/share").status_code == 403
+
+    w.record_signoff(gid, "approved", decided_by="reviewer")
+    created = client.post(f"/api/v1/goals/{gid}/share")
+    assert created.status_code == 201
+    token = created.json()["url"].split("/share/")[1]
+    assert TestClient(app).get(f"/share/{token}").status_code == 200
+
+    # A later edit atomically revokes the approval. Existing copied tokens are
+    # checked again at view time, so they cannot expose the replacement bytes.
+    w.set_goal_status(gid, "done", result="replacement")
+    assert w.signoff_for(gid) is None
+    assert TestClient(app).get(f"/share/{token}").status_code == 404
+    assert client.post(f"/api/v1/goals/{gid}/share").status_code == 403
 
 
 def test_share_section_on_goal_page(tmp_path, monkeypatch):

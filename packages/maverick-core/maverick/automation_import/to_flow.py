@@ -4,8 +4,8 @@ The prose ``render()`` collapses a workflow into one agentic goal; this instead
 preserves each step as its own typed node, chained in order:
 
 * a step that maps cleanly to a single tool becomes a deterministic ``action``
-  node (auditable, replayable, subject to that tool's own confirm gate) with its
-  params carried through;
+  node (auditable and replayable) with its params carried through; high-risk
+  actions are additionally protected by an explicit human approval gate;
 * every other step becomes an ``agent`` node whose brief is the step's
   instruction (the "figure it out" node).
 
@@ -38,6 +38,7 @@ import re
 from ..flow.ir import (
     NODE_ACTION,
     NODE_AGENT,
+    NODE_APPROVAL,
     NODE_BRANCH,
     NODE_FOREACH,
     NODE_PARALLEL,
@@ -46,8 +47,58 @@ from ..flow.ir import (
     NODE_WHILE,
     Flow,
     FlowNode,
+    ensure_high_risk_approvals,
+    partition_draft_validation_errors,
 )
 from .ir import ImportedAutomation, ImportedStep, _safe_line, safe_params
+
+
+def _has_blocking_draft_errors(
+    flow: Flow, *, inherited_approval: bool = False,
+) -> bool:
+    errors = flow.validate(_inherited_approval=inherited_approval)
+    blocking, _ = partition_draft_validation_errors(errors)
+    return bool(blocking)
+
+
+def _append_classification_notes(flow: Flow, report: list[dict]) -> None:
+    _, unclassified = partition_draft_validation_errors(flow.validate())
+    for error in unclassified:
+        report.append({
+            "step": "tool classification required",
+            "node": "",
+            "kind": NODE_ACTION,
+            "fidelity": "preserved",
+            "note": (
+                "preview only; install and risk-classify before save or "
+                f"execution: {error}"
+            ),
+        })
+
+
+def _govern_imported(flow: Flow, report: list[dict] | None = None) -> Flow:
+    """Apply the mandatory generated-graph safety boundary.
+
+    Imported connector metadata (including a static ``confirm`` parameter) is
+    not human authorization. Insert durable top-level approval gates before
+    high-risk work, including a coarse gate before containers whose nested
+    flows cannot safely pause on their own.
+    """
+    prior_ids = set(flow.nodes)
+    governed = ensure_high_risk_approvals(flow)
+    if report is not None:
+        for node in governed.nodes.values():
+            if node.id in prior_ids or node.kind != NODE_APPROVAL:
+                continue
+            report.append({
+                "step": node.label or node.id,
+                "node": node.id,
+                "kind": NODE_APPROVAL,
+                "fidelity": "approximated",
+                "note": "human approval gate inserted before high-risk imported work",
+            })
+        _append_classification_notes(governed, report)
+    return governed
 
 
 def _node_for_step(step: ImportedStep, node_id: str, nxt: str | None) -> FlowNode:
@@ -56,8 +107,21 @@ def _node_for_step(step: ImportedStep, node_id: str, nxt: str | None) -> FlowNod
     if tool and step.operation:
         # A clean single-tool mapping -> a deterministic action node. Params are
         # the (secret-redacted) step inputs, so they aren't dumped raw.
+        params = safe_params(step.params)
+        # External platforms identify Slack with the provider slug ``slack``;
+        # Lightwork's installed, risk-classified direct-action contract is
+        # ``slack_bot``.  Bind only the operation whose semantics are exact.
+        # Unknown Slack operations deliberately remain unclassified previews
+        # instead of being guessed into an executable tool call.
+        slack_op = re.sub(r"[^a-z]", "", str(step.operation).lower())
+        if tool == "slack" and slack_op in {
+            "post", "postmessage", "createmessage", "sendmessage",
+        }:
+            tool = "slack_bot"
+            params.pop("operation", None)
+            params["op"] = "post"
         return FlowNode(id=node_id, kind=NODE_ACTION, tool=tool,
-                        params=safe_params(step.params), next=nxt,
+                        params=params, next=nxt,
                         output=f"{node_id}_out", label=label)
     brief_bits = [step.name or step.operation or "Carry out this step"]
     if step.description and step.description != step.name:
@@ -147,7 +211,8 @@ def _n8n_to_flow(automation: ImportedAutomation) -> Flow | None:
         start = _n8n_targets(connections, trigger_node["name"], idmap)[0]
     start = start or idmap[action_names[0]]
     flow = Flow(id=automation.template_name(), name=automation.name, start=start, nodes=fnodes)
-    return flow if not flow.validate() else None
+    flow = _govern_imported(flow)
+    return flow if not _has_blocking_draft_errors(flow) else None
 
 
 # ---- Power Automate (WDL) graph capture --------------------------------------
@@ -348,7 +413,8 @@ def _pa_to_flow(automation: ImportedAutomation,
         return None
     flow = Flow(id=automation.template_name(), name=automation.name,
                 start=start, nodes=nodes)
-    if flow.validate():
+    flow = _govern_imported(flow, report)
+    if _has_blocking_draft_errors(flow):
         report.clear()
         return None
     return flow
@@ -455,7 +521,8 @@ def _wk_to_flow(automation: ImportedAutomation,
         return None
     flow = Flow(id=automation.template_name(), name=automation.name,
                 start=start, nodes=nodes)
-    if flow.validate():
+    flow = _govern_imported(flow, report)
+    if _has_blocking_draft_errors(flow):
         report.clear()
         return None
     return flow
@@ -608,7 +675,8 @@ def _uipath_to_flow(automation: ImportedAutomation, report: list[dict]) -> Flow 
     if not nodes or not start:
         return None
     flow = Flow(id=automation.template_name(), name=automation.name, start=start, nodes=nodes)
-    if flow.validate():
+    flow = _govern_imported(flow, report)
+    if _has_blocking_draft_errors(flow):
         return None   # the dispatcher clears the report on a None fallback
     return flow
 
@@ -617,6 +685,7 @@ def _n8n_structural(automation: ImportedAutomation, report: list[dict]) -> Flow 
     graph = _n8n_to_flow(automation)
     if graph is not None:
         _linear_report(graph, report)
+        _append_classification_notes(graph, report)
     return graph
 
 
@@ -711,7 +780,12 @@ def _make_route_flow(route: dict, idx: int, report: list[dict]) -> Flow | None:
         return None
     flow = Flow(id=f"make_route_{idx}", name=f"Make router route {idx + 1}",
                 start=body, nodes=nodes)
-    return None if flow.validate() else flow
+    # This is a nested parallel branch. Its nearest durable parent inserts one
+    # coarse approval before the parallel container, so validate this fragment
+    # under inherited authorization without putting an unresumable approval in
+    # the branch itself.
+    return None if _has_blocking_draft_errors(
+        flow, inherited_approval=True) else flow
 
 
 def _make_router(routes: list, nodes: dict, ctr: dict, report: list[dict],
@@ -761,7 +835,8 @@ def _make_to_flow(automation: ImportedAutomation, report: list[dict]) -> Flow | 
         return None
     flow = Flow(id=automation.template_name(), name=automation.name,
                 start=start, nodes=nodes)
-    if flow.validate():
+    flow = _govern_imported(flow, report)
+    if _has_blocking_draft_errors(flow):
         report.clear()
         return None
     return flow
@@ -783,6 +858,9 @@ def _linear_report(flow: Flow, report: list[dict], source: str = "") -> None:
                      "If/Switch/While/ForEach isn't visible from Orchestrator metadata")
         elif n.kind == NODE_BRANCH:
             entry = ("preserved", "source IF -> branch (arms wired)")
+        elif n.kind == NODE_APPROVAL:
+            entry = ("approximated",
+                     "human approval gate inserted before high-risk imported work")
         elif n.kind == NODE_ACTION:
             entry = ("preserved", "connector call -> action node")
         else:
@@ -833,7 +911,9 @@ def to_flow_with_report(automation: ImportedAutomation) -> tuple[Flow, list[dict
         nodes[node_id] = _node_for_step(step, node_id, nxt)
     flow = Flow(id=automation.template_name(), name=automation.name,
                 start="n0", nodes=nodes)
+    flow = _govern_imported(flow)
     _linear_report(flow, report, source=automation.source)
+    _append_classification_notes(flow, report)
     return flow, report
 
 

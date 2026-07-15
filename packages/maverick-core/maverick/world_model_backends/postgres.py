@@ -1047,6 +1047,11 @@ class PostgresWorldModel:
             params += fparams
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
+            # Approval is bound to one terminal payload.  Invalidate it in the
+            # same transaction on every rerun/non-terminal transition or result
+            # mutation, after tenant-scoped UPDATE proves this goal is ours.
+            if cur.rowcount == 1 and (status != "done" or result is not None):
+                cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
 
     def claim_goal_for_run(
         self, goal_id: int, *, expected_owner: str | None = None,
@@ -1429,6 +1434,16 @@ class PostgresWorldModel:
                      version, time.time()),
                 )
             row = cur.fetchone()
+            if row is not None:
+                # Keep goal.updated_at as the optimistic version for the whole
+                # release payload, including its artifact set.
+                cur.execute(
+                    "UPDATE goals SET updated_at=%s WHERE id=%s",
+                    (time.time(), int(goal_id)),
+                )
+                # Public release includes artifacts; adding a version changes
+                # the reviewed payload and atomically revokes prior approval.
+                cur.execute("DELETE FROM signoffs WHERE goal_id=%s", (int(goal_id),))
         if row is None:
             raise ValueError(f"unknown goal_id {goal_id!r} for the active tenant")
         return int(row[0])
@@ -1575,37 +1590,59 @@ class PostgresWorldModel:
 
     def record_signoff(
         self, goal_id: int, decision: str, *, decided_by: str = "",
-        note: str | None = None,
-    ) -> None:
+        note: str | None = None, expected_updated_at: float | None = None,
+    ) -> bool:
         """Record a human's certify/reject decision on a deliverable. One row per
         goal (a later decision replaces an earlier one).
 
-        Gated on the parent goal being in the active tenant (see start_episode):
-        a tenant must not forge a sign-off (``decided_by``) on another tenant's
-        goal. Single-tenant (empty frag) keeps the direct insert."""
+        Gated on the parent goal being finished and in the active tenant.  The
+        optional ``expected_updated_at`` binds the decision to the exact
+        deliverable version the reviewer loaded. ``FOR UPDATE`` makes the
+        check + upsert atomic with result/artifact invalidation writes. Returns
+        ``True`` for a real decision transition and ``False`` for an identical,
+        idempotent retry."""
+        if decision not in {"approved", "rejected"}:
+            raise ValueError("decision must be 'approved' or 'rejected'")
         frag, fparams = _tenant_scope()
         with self._tx() as cur:
+            check_sql = (
+                "SELECT status, updated_at FROM goals WHERE id=%s"
+            )
+            check_params: list = [int(goal_id)]
             if frag:
-                cur.execute(
-                    "INSERT INTO signoffs(goal_id, decision, decided_by, note, "
-                    "created_at) SELECT %s, %s, %s, %s, %s WHERE EXISTS "
-                    "(SELECT 1 FROM goals WHERE id=%s AND " + frag + ") "
-                    "ON CONFLICT (goal_id) DO UPDATE SET decision=EXCLUDED.decision, "
-                    "decided_by=EXCLUDED.decided_by, note=EXCLUDED.note, "
-                    "created_at=EXCLUDED.created_at",
-                    (int(goal_id), str(decision), str(decided_by or ""), _seal(note),
-                     time.time(), int(goal_id), *fparams),
+                check_sql += " AND " + frag
+                check_params += fparams
+            check_sql += " FOR UPDATE"
+            cur.execute(check_sql, tuple(check_params))
+            row = cur.fetchone()
+            if (
+                row is None
+                or row[0] != "done"
+                or (
+                    expected_updated_at is not None
+                    and float(row[1]) != float(expected_updated_at)
                 )
-            else:
-                cur.execute(
-                    "INSERT INTO signoffs(goal_id, decision, decided_by, note, "
-                    "created_at) VALUES(%s, %s, %s, %s, %s) "
-                    "ON CONFLICT (goal_id) DO UPDATE SET decision=EXCLUDED.decision, "
-                    "decided_by=EXCLUDED.decided_by, note=EXCLUDED.note, "
-                    "created_at=EXCLUDED.created_at",
-                    (int(goal_id), str(decision), str(decided_by or ""), _seal(note),
-                     time.time()),
+            ):
+                raise ValueError(
+                    "goal is not finished or the deliverable changed before sign-off"
                 )
+            cur.execute(
+                "SELECT decision FROM signoffs WHERE goal_id=%s",
+                (int(goal_id),),
+            )
+            current = cur.fetchone()
+            if current is not None and current[0] == decision:
+                return False
+            cur.execute(
+                "INSERT INTO signoffs(goal_id, decision, decided_by, note, "
+                "created_at) VALUES(%s, %s, %s, %s, %s) "
+                "ON CONFLICT (goal_id) DO UPDATE SET decision=EXCLUDED.decision, "
+                "decided_by=EXCLUDED.decided_by, note=EXCLUDED.note, "
+                "created_at=EXCLUDED.created_at",
+                (int(goal_id), str(decision), str(decided_by or ""), _seal(note),
+                 time.time()),
+            )
+            return True
 
     def signoff_for(self, goal_id: int) -> dict | None:
         """The current sign-off on a goal's deliverable, or None if unreviewed."""

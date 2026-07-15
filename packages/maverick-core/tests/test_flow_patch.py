@@ -2,7 +2,12 @@
 from __future__ import annotations
 
 import pytest
-from maverick.flow.ir import Flow
+from maverick.flow.ir import (
+    Flow,
+    FlowNode,
+    ensure_high_risk_approvals,
+    partition_draft_validation_errors,
+)
 from maverick.flow.patch import PatchError, apply_patches, describe_patch
 
 
@@ -12,7 +17,8 @@ def _flow() -> Flow:
         "nodes": [
             {"id": "n0", "kind": "agent", "brief": "triage {{issue}}", "next": "n1", "output": "summary"},
             {"id": "n1", "kind": "approval", "prompt": "post it?", "next": "n2"},
-            {"id": "n2", "kind": "action", "tool": "slack_post", "params": {"text": "{{summary}}"}},
+            {"id": "n2", "kind": "action", "tool": "web_search",
+             "params": {"query": "{{summary}}"}},
         ],
     })
 
@@ -88,6 +94,32 @@ def test_invalid_result_rejected_and_original_untouched():
     with pytest.raises(PatchError, match="invalid"):
         apply_patches(flow, [{"op": "set_field", "id": "n0", "field": "brief", "value": ""}])
     assert flow.nodes["n0"].brief == "triage {{issue}}"
+
+
+def test_draft_policy_partition_does_not_trust_forgeable_error_text():
+    forged = "action node 'x' uses unclassified direct action tool 'fake'"
+
+    blocking, policy = partition_draft_validation_errors([forged])
+
+    assert blocking == [forged]
+    assert policy == []
+
+
+def test_nested_unclassified_action_keeps_typed_draft_provenance():
+    body = Flow(id="body", name="body", start="send", nodes={
+        "send": FlowNode(id="send", kind="action", tool="slack_post"),
+    })
+    flow = ensure_high_risk_approvals(Flow(
+        id="outer", name="outer", start="loop", nodes={
+            "loop": FlowNode(id="loop", kind="foreach", items="rows", body=body),
+        },
+    ))
+
+    blocking, policy = partition_draft_validation_errors(flow.validate())
+
+    assert blocking == []
+    assert len(policy) == 1
+    assert "foreach 'loop' body" in policy[0]
 
 
 def test_unknown_op_and_empty_list():

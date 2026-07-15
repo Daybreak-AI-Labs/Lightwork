@@ -178,7 +178,11 @@ def domains_audit(json_out: str | None, suite: str | None) -> None:
                f"{s['builders']} builder(s)")
     click.echo(f"  drafting agents that can reach a state-mutator: "
                f"{s['drafting_agents_reaching_a_mutator']}  (must be 0)")
-    click.echo(f"  with a human sign-off gate:   {s['packs_with_human_gate']}")
+    click.echo(f"  with enforced persisted sign-off: {s['packs_with_human_gate']}")
+    click.echo(
+        "  with prompt-only unenforced gate:  "
+        f"{s['packs_with_unenforced_prompt_gate']}"
+    )
     click.echo(f"  with suite/pack refusals:     {s['packs_with_refusals_beyond_universal']}")
     click.echo(f"  with a declared deliverable:  {s['packs_with_deliverable']}")
     click.echo(f"  with a reasoning-effort tier: {s['packs_with_effort_tier']}")

@@ -21,17 +21,24 @@ class TestApplyProposal:
 
     def test_harden_agent_to_action(self):
         f = _flow()
-        new = evolve.apply_proposal(f, "a", "action", tool="summarize_tool")
+        new = evolve.apply_proposal(f, "a", "action", tool="web_search")
         assert new.nodes["a"].kind == "action"
-        assert new.nodes["a"].tool == "summarize_tool" and new.nodes["a"].brief == ""
+        assert new.nodes["a"].tool == "web_search" and new.nodes["a"].brief == ""
         assert new.validate() == []
         assert f.nodes["a"].kind == "agent"                 # original untouched (copy)
+
+    def test_harden_with_unclassified_tool_remains_unsaveable(self):
+        new = evolve.apply_proposal(
+            _flow(), "a", "action", tool="unreviewed_connector")
+
+        assert any("unclassified direct action tool" in error
+                   for error in new.validate())
 
     def test_harden_agent_to_action_clears_stale_params(self):
         f = _flow()
         f.nodes["a"].params = {"path": "/tmp/hidden", "content": "stale"}
 
-        new = evolve.apply_proposal(f, "a", "action", tool="summarize_tool")
+        new = evolve.apply_proposal(f, "a", "action", tool="web_search")
 
         assert new.nodes["a"].params == {}
         assert f.nodes["a"].params == {"path": "/tmp/hidden", "content": "stale"}

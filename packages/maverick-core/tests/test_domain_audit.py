@@ -48,7 +48,31 @@ def test_human_gate_prefers_approval_over_review():
         output=OutputContract(deliverable="d", consumers=["o"], gate="review"),
         workflow=[WorkflowStep("commit", gate="approval")],
     )
-    assert audit_profile(p).human_gate == "approval"
+    audit = audit_profile(p)
+    assert audit.human_gate == "approval"
+    assert audit.declared_prompt_gate == "approval"
+    assert audit.enforced_gate == "approval"
+
+
+def test_intermediate_prompt_gate_is_not_reported_as_enforced():
+    from maverick.domain import WorkflowStep
+    p = DomainProfile(
+        name="x", allow_tools=["read_file"], deny_tools=["shell", "write_file"],
+        max_risk="low",
+        workflow=[
+            WorkflowStep("approval", gate="approval"),
+            WorkflowStep("finish"),
+        ],
+    )
+
+    audit = audit_profile(p)
+
+    assert audit.declared_prompt_gate == "approval"
+    assert audit.enforced_gate is None
+    assert audit.human_gate is None
+    summary = summarize([audit])
+    assert summary["packs_with_human_gate"] == 0
+    assert summary["packs_with_unenforced_prompt_gate"] == 1
 
 
 def test_builder_is_flagged_as_builder_not_dangerous():
@@ -101,7 +125,8 @@ def test_json_export_is_well_formed():
     assert len(doc["packs"]) == len(_BUILTIN)
     row = doc["packs"][0]
     for key in ("name", "suite", "compartment", "max_risk", "reachable_dangerous",
-                "n_refusals", "human_gate", "deliverable"):
+                "n_refusals", "human_gate", "declared_prompt_gate",
+                "enforced_gate", "deliverable"):
         assert key in row
 
 

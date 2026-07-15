@@ -4,8 +4,10 @@ The visual designer's "✨ Draft" button and ``POST /flows/draft`` call this: an
 operator types "when a new GitHub issue is opened, summarize it and post to
 Slack, but ask me before posting" and gets a first-pass flow graph to edit. The
 model output is strict JSON in the flow schema, parsed forgivingly and validated;
-anything unusable degrades to a single agent node running the description (so the
-user always gets *something* runnable to refine).
+anything malformed degrades to a single agent node. A structurally sound draft
+that references an installed but not yet risk-classified tool is returned only
+as an explicit preview: save and execution remain fail-closed until an operator
+classifies that tool.
 
 The ``complete`` callable is injected (the ``maverick.llm.LLM.complete`` seam),
 so this is unit-testable with a fake and never hard-codes a model.
@@ -13,20 +15,57 @@ so this is unit-testable with a fake and never hard-codes a model.
 from __future__ import annotations
 
 import json
+import math
 import re
+from collections.abc import Iterable, Mapping
+from typing import Any
 
-from .ir import Flow, single_agent_flow
+from .ir import (
+    Flow,
+    ensure_high_risk_approvals,
+    partition_draft_validation_errors,
+    single_agent_flow,
+)
 
 _DRAFT_MAX_DOLLARS = 0.50
 _DRAFT_MAX_TOKENS = 2500
+_MAX_DRAFT_INPUTS = 32
+_MAX_DRAFT_DEPTH = 8
+_MAX_DRAFT_SECONDS = 86_400.0
+_MAX_DRAFT_RUN_DOLLARS = 100.0
+_MAX_DRAFT_CONCURRENCY = 32
+_INPUT_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+# Deterministic lexical concepts keep authoring useful without turning tool
+# retrieval into another unbounded model call.  Each group is deliberately
+# small: it bridges common user paraphrases while exact names/descriptions still
+# dominate the score.
+_TOOL_CONCEPTS = (
+    frozenset({"send", "post", "message", "notify", "notification", "chat"}),
+    frozenset({"email", "mail", "gmail", "inbox"}),
+    frozenset({"issue", "ticket", "case", "incident"}),
+    frozenset({"schedule", "calendar", "event", "meeting"}),
+    frozenset({"pay", "payment", "charge", "billing", "invoice"}),
+    frozenset({"customer", "client", "lead", "contact", "crm"}),
+    frozenset({"repo", "repository", "code", "source"}),
+    frozenset({"file", "document", "doc", "drive", "storage"}),
+    frozenset({"page", "pager", "oncall", "alert", "incident"}),
+)
+_TOOL_STOPWORDS = frozenset({
+    "a", "an", "and", "as", "at", "automation", "build", "by", "create",
+    "design", "do", "flow", "for", "from", "i", "in", "into", "it", "make",
+    "me", "my", "of", "on", "please", "the", "then", "to", "tool", "use",
+    "want", "when", "with", "workflow",
+})
 
 # The node-kind catalog + expression reference, shared verbatim by the drafter
 # AND the chat copilot (chat.py imports this constant), so a schema change lands
 # in both prompts at once -- no prose-splitting one prompt out of the other.
 FLOW_SCHEMA_BLOCK = """A flow is a graph of typed nodes:
-{"id": "<slug>", "name": "<title>", "start": "<node id>", "nodes": [ ...nodes ], "inputs": [ {"key": "<data key>", "type": "text|number|bool|date", "label": "<prompt>", "required": true} ]}
+{"id": "<slug>", "name": "<title>", "start": "<node id>", "nodes": [ ...nodes ], "inputs": [ {"key": "<data key>", "type": "text|number|bool|date", "label": "<prompt>", "required": true} ], "max_seconds": 3600, "max_dollars": 5, "max_concurrent": 1, "schedule": "<optional cron>", "timezone": "<optional IANA zone>"}
 
 "inputs" (optional) declares the values a human supplies to run this flow manually -- they become the initial flow data (referenced with {{key}}) and are validated/coerced on run. Add them when the flow needs specific inputs from the person starting it.
+The optional operational limits bound one run: max_seconds <= 86400, max_dollars <= 100, max_concurrent <= 32. Omit a limit instead of inventing one. A schedule is optional and is not active until the human saves the draft.
 
 Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"agent","brief":"<instruction for an AI agent>","next":"<id|null>"}
@@ -89,9 +128,83 @@ def _extract_json(text: str) -> dict | None:
         return None
 
 
-def _sanitize(raw: dict, description: str) -> dict:
+def _bounded_float(value: Any, maximum: float) -> float:
+    try:
+        out = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(out):
+        return 0.0
+    return min(maximum, max(0.0, out))
+
+
+def _bounded_int(value: Any, maximum: int) -> int:
+    try:
+        out = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return min(maximum, max(0, out))
+
+
+def _safe_input_default(value: Any, typ: str) -> Any:
+    """A bounded default compatible with ``coerce_inputs``; ``None`` means drop."""
+    if typ == "text":
+        return str(value)[:4000] if isinstance(value, (str, int, float, bool)) else None
+    if typ == "number":
+        if isinstance(value, bool):
+            return None
+        try:
+            out = float(value)
+        except (TypeError, ValueError):
+            return None
+        return out if math.isfinite(out) else None
+    if typ == "bool":
+        return value if isinstance(value, bool) else None
+    if typ == "date" and isinstance(value, str):
+        import datetime as _dt
+        try:
+            return _dt.date.fromisoformat(value[:10]).isoformat()
+        except ValueError:
+            return None
+    return None
+
+
+def _sanitize_inputs(raw: Any) -> list[dict]:
+    clean: list[dict] = []
+    seen: set[str] = set()
+    if not isinstance(raw, list):
+        return clean
+    for item in raw[:_MAX_DRAFT_INPUTS]:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()
+        typ = str(item.get("type") or "text").strip().lower()
+        if not _INPUT_KEY_RE.fullmatch(key) or key in seen:
+            continue
+        if typ not in {"text", "number", "bool", "date"}:
+            continue
+        spec = {
+            "key": key,
+            "type": typ,
+            "label": str(item.get("label") or key)[:200],
+            "required": bool(item.get("required", False)),
+        }
+        if "default" in item:
+            default = _safe_input_default(item.get("default"), typ)
+            if default is not None:
+                spec["default"] = default
+        clean.append(spec)
+        seen.add(key)
+    return clean
+
+
+def _sanitize(raw: dict, description: str, *, _depth: int = 0) -> dict:
     """Coerce a model's flow dict into a valid shape: ensure node ids, a real
-    start, and that routing only points at existing nodes."""
+    start, bounded inputs/operational limits, and real routing. Model-controlled
+    owner/version fields are intentionally never copied. Nested flow bodies are
+    sanitized recursively so an inner action cannot evade later validation."""
+    if _depth > _MAX_DRAFT_DEPTH:
+        raise ValueError("flow nesting is too deep")
     nodes = raw.get("nodes")
     if not isinstance(nodes, list) or not nodes:
         raise ValueError("no nodes")
@@ -105,6 +218,15 @@ def _sanitize(raw: dict, description: str) -> dict:
         while nid in used:      # keep every node on an id collision (rename, don't drop)
             nid = f"{nid}_{i}"
         n["id"] = nid
+        body = n.get("body")
+        if isinstance(body, dict):
+            n["body"] = _sanitize(body, f"{description} body", _depth=_depth + 1)
+        branches = n.get("branches")
+        if isinstance(branches, list):
+            n["branches"] = [
+                _sanitize(b, f"{description} branch", _depth=_depth + 1)
+                for b in branches[:32] if isinstance(b, dict)
+            ]
         used.add(nid)
         clean.append(n)
     if not clean:
@@ -125,30 +247,192 @@ def _sanitize(raw: dict, description: str) -> dict:
     start = str(raw.get("start") or "")
     if start not in ids:
         start = clean[0]["id"]
-    return {
+    out = {
         "id": str(raw.get("id") or "").strip(),
         "name": str(raw.get("name") or description[:60]).strip() or "Imported flow",
         "start": start,
         "nodes": clean,
+        "inputs": _sanitize_inputs(raw.get("inputs")),
+        "max_seconds": _bounded_float(raw.get("max_seconds"), _MAX_DRAFT_SECONDS),
+        "max_dollars": _bounded_float(raw.get("max_dollars"), _MAX_DRAFT_RUN_DOLLARS),
+        "max_concurrent": _bounded_int(raw.get("max_concurrent"), _MAX_DRAFT_CONCURRENCY),
     }
+    if isinstance(raw.get("notify"), bool):
+        out["notify"] = raw["notify"]
+    if isinstance(raw.get("schedule"), str):
+        out["schedule"] = raw["schedule"].strip()[:120]
+    if isinstance(raw.get("timezone"), str):
+        out["timezone"] = raw["timezone"].strip()[:80]
+    return out
 
 
-def _tool_hint(tools, tool_docs) -> str:
+def _stem_tool_token(token: str) -> str:
+    if token.endswith("ies") and len(token) > 4:
+        return token[:-3] + "y"
+    if token.endswith("ing") and len(token) > 5:
+        base = token[:-3]
+        return base[:-1] if base.endswith(("nn", "pp", "tt")) else base
+    if token.endswith("es") and len(token) > 4:
+        return token[:-2]
+    if token.endswith("s") and len(token) > 3:
+        return token[:-1]
+    return token
+
+
+def _tool_terms(value: Any) -> set[str]:
+    raw = re.findall(r"[a-z0-9]+", str(value or "").lower().replace("_", " "))
+    original = {t for t in raw if t not in _TOOL_STOPWORDS}
+    terms = original | {_stem_tool_token(t) for t in original}
+    expanded = set(terms)
+    for group in _TOOL_CONCEPTS:
+        if terms & group:
+            expanded.update(group)
+    return expanded
+
+
+def rank_tool_catalog(query: str, catalog: Iterable[Mapping[str, Any]], *,
+                      limit: int = 24) -> list[dict]:
+    """Deterministically rank a full live tool catalog for one authoring turn.
+
+    Exact tool-name matches dominate, then name tokens, description tokens, and
+    parameter tokens. Zero-relevance tools are omitted instead of padding the
+    prompt with arbitrary capabilities. Ties are stable by tool name.
+    """
+    q_text = str(query or "").strip().lower().replace("_", " ")
+    q_terms = _tool_terms(q_text)
+    if not q_terms:
+        return []
+    scored: list[tuple[float, str, dict]] = []
+    seen: set[str] = set()
+    for item in catalog:
+        name = str(item.get("name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        name_text = name.lower().replace("_", " ")
+        name_terms = _tool_terms(name_text)
+        desc_terms = _tool_terms(item.get("description"))
+        params = item.get("params") or []
+        param_terms = _tool_terms(" ".join(str(p) for p in params))
+        exact = 1.0 if name_text in q_text or name.lower() in str(query or "").lower() else 0.0
+        score = (
+            exact * 100.0
+            + len(q_terms & name_terms) * 12.0
+            + len(q_terms & desc_terms) * 4.0
+            + len(q_terms & param_terms) * 1.5
+        )
+        if score <= 0:
+            continue
+        scored.append((score, name, dict(item)))
+    scored.sort(key=lambda row: (-row[0], row[1]))
+    return [item for _, _, item in scored[:max(1, min(int(limit), 60))]]
+
+
+def action_tool_names(flow: Flow) -> set[str]:
+    """Every action-tool reference in ``flow``, including nested bodies."""
+    out: set[str] = set()
+    for node in flow.nodes.values():
+        if node.kind == "action" and node.tool:
+            out.add(node.tool)
+        if node.body is not None:
+            out.update(action_tool_names(node.body))
+        for branch in node.branches:
+            out.update(action_tool_names(branch))
+    return out
+
+
+def validate_action_bindings(
+    flow: Flow,
+    tools: Iterable[str],
+    tool_schemas: Mapping[str, Mapping[str, Any]] | None = None,
+    *,
+    _path: str = "flow",
+) -> list[str]:
+    """Fail-closed validation for action nodes against the supplied catalog.
+
+    Structural validation alone cannot distinguish a real connector from a
+    hallucinated name. This check recursively binds every action to a retrieved
+    tool and, when JSON schemas are supplied, diagnoses missing required params.
+    It never invokes a connector.
+    """
+    allowed = {str(name) for name in tools if str(name)}
+    schemas = tool_schemas or {}
+    errors: list[str] = []
+    for node in flow.nodes.values():
+        here = f"{_path}.{node.id}"
+        if node.kind == "action":
+            if node.tool not in allowed:
+                errors.append(
+                    f"action node {here!r} uses unavailable tool {node.tool!r}"
+                )
+            else:
+                schema = schemas.get(node.tool)
+                required = schema.get("required", []) if isinstance(schema, Mapping) else []
+                if isinstance(required, list):
+                    missing = [
+                        str(key) for key in required
+                        if isinstance(key, str) and key not in node.params
+                    ]
+                    if missing:
+                        errors.append(
+                            f"action node {here!r} tool {node.tool!r} is missing required "
+                            f"params: {', '.join(missing)}"
+                        )
+        if node.body is not None:
+            errors.extend(validate_action_bindings(
+                node.body, allowed, schemas, _path=f"{here}.body"))
+        for index, branch in enumerate(node.branches):
+            errors.extend(validate_action_bindings(
+                branch, allowed, schemas, _path=f"{here}.branches[{index}]"))
+    return errors
+
+
+def _tool_hint(tools, tool_docs, tool_schemas=None) -> str:
     """Ground the model in the ACTION tools it may reference. With ``tool_docs``
     (name -> one-line description) it lists 'name: what it does' so the draft
     picks a real connector for the right step; else just the names."""
-    if tool_docs:
-        lines = [f"- {n}: {str(d)[:100]}" for n, d in list(tool_docs.items())[:60]]
-        return "\nAvailable action tools (use the exact name):\n" + "\n".join(lines)
-    if tools:
-        return "\nAvailable action tools (use exact names): " + ", ".join(sorted(tools)[:60])
-    return ""
+    docs = tool_docs or {}
+    schemas = tool_schemas or {}
+    names = list(dict.fromkeys(
+        [str(name) for name in (tools or ()) if str(name)]
+        + [str(name) for name in docs if str(name)]
+    ))[:60]
+    if not names:
+        return ""
+    lines = []
+    for name in names:
+        description = str(docs.get(name) or "")[:100]
+        suffix = ""
+        schema = schemas.get(name)
+        if isinstance(schema, Mapping):
+            props = list((schema.get("properties") or {}).keys())[:12]
+            required = [
+                str(key) for key in (schema.get("required") or [])
+                if isinstance(key, str)
+            ]
+            if props:
+                suffix += f" Params: {', '.join(props)}."
+            if required:
+                suffix += f" Required: {', '.join(required[:12])}."
+        detail = f": {description}" if description else ""
+        lines.append(f"- {name}{detail}{suffix}")
+    return "\nAvailable action tools (use the exact name):\n" + "\n".join(lines)
 
 
-def _run(complete, tools, description: str, tool_docs=None) -> str:
+def _factory_guided(system: str) -> str:
+    """Apply only promoted factory guidance; validation below stays authoritative."""
+    try:
+        from ..factory_learning import augment_system_prompt
+        return augment_system_prompt(system)
+    except Exception:  # guidance must never take authoring down
+        return system
+
+
+def _run(complete, tools, description: str, tool_docs=None, tool_schemas=None) -> str:
     from ..budget import Budget
     resp = complete(
-        system=FLOW_DRAFT_SYSTEM + _tool_hint(tools, tool_docs),
+        system=_factory_guided(FLOW_DRAFT_SYSTEM) + _tool_hint(
+            tools, tool_docs, tool_schemas),
         messages=[{"role": "user", "content": f"Design a flow for: {description}"}],
         budget=Budget(max_dollars=_DRAFT_MAX_DOLLARS),
         max_tokens=_DRAFT_MAX_TOKENS,
@@ -156,7 +440,7 @@ def _run(complete, tools, description: str, tool_docs=None) -> str:
     return getattr(resp, "text", "") or ""
 
 
-def draft_flow(description: str, *, tools=(), tool_docs=None, complete=None,
+def draft_flow(description: str, *, tools=None, tool_docs=None, tool_schemas=None, complete=None,
                flow_id: str = "") -> tuple[Flow, list[str]]:
     """Draft a flow from ``description``. Returns ``(flow, notes)``. Falls back to
     a single agent node (never fails to return something runnable). ``complete``
@@ -165,21 +449,41 @@ def draft_flow(description: str, *, tools=(), tool_docs=None, complete=None,
     description = (description or "").strip()
     if not description:
         raise ValueError("a description is required")
+    tool_names = None if tools is None else tuple(
+        str(name) for name in tools if str(name))
     notes: list[str] = []
     if complete is None:  # pragma: no cover -- exercised via the real endpoint
         from ..llm import LLM, model_for_role
         complete = LLM(model=model_for_role("orchestrator")).complete
     try:
-        raw = _extract_json(_run(complete, tools, description, tool_docs))
+        raw = _extract_json(_run(
+            complete, tool_names or (), description, tool_docs, tool_schemas))
         if raw is None:
             raise ValueError("model did not return JSON")
         flow = Flow.from_dict(_sanitize(raw, description))
         if flow_id:
             flow.id = flow_id
-        errs = flow.validate()
-        if errs:
-            notes.append("draft had structural issues: " + "; ".join(errs[:3]))
+        # Bind model-named actions before generic structural policy checks so a
+        # hallucinated connector produces the actionable unavailable-tool error,
+        # not merely an unclassified-tool publication error.
+        if tool_names is not None or tool_schemas is not None:
+            binding_errs = validate_action_bindings(
+                flow, tool_names or (), tool_schemas)
+            if binding_errs:
+                notes.append("draft had action binding issues: " + "; ".join(binding_errs[:3]))
+                raise ValueError("unbound action tool")
+        # A model-supplied static connector confirmation is not authorization.
+        # Keep the first pass useful by inserting deterministic, unsaved human
+        # gates before every direct high-risk action.
+        flow = ensure_high_risk_approvals(flow)
+        blocking, unclassified = partition_draft_validation_errors(flow.validate())
+        if blocking:
+            notes.append("draft had structural issues: " + "; ".join(blocking[:3]))
             raise ValueError("invalid draft")
+        if unclassified:
+            notes.append(
+                "preview only; install and risk-classify each action tool before "
+                "save or execution: " + "; ".join(unclassified[:3]))
         return flow, notes
     except Exception as e:
         notes.append(f"couldn't build a full graph ({type(e).__name__}); "
@@ -188,4 +492,7 @@ def draft_flow(description: str, *, tools=(), tool_docs=None, complete=None,
         return fallback, notes
 
 
-__all__ = ["draft_flow", "FLOW_DRAFT_SYSTEM", "FLOW_SCHEMA_BLOCK"]
+__all__ = [
+    "draft_flow", "rank_tool_catalog", "validate_action_bindings",
+    "action_tool_names", "FLOW_DRAFT_SYSTEM", "FLOW_SCHEMA_BLOCK",
+]

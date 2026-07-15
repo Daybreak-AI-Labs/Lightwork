@@ -7,8 +7,12 @@ from __future__ import annotations
 from maverick.domain import (
     DomainProfile,
     OutputContract,
+    WorkflowStep,
     _coerce_output,
     available_domains,
+    declared_prompt_gate,
+    deliverable_release_allowed,
+    enforced_gate,
     lint_profile,
     load_domain,
     overlay_profile,
@@ -115,6 +119,51 @@ class TestLintOutput:
         p = self._ok_base(output=OutputContract(deliverable="a report"))
         _, warnings = lint_profile(p)
         assert any("no consumers" in w for w in warnings)
+
+    def test_intermediate_gate_is_labeled_prompt_only(self):
+        p = self._ok_base(
+            workflow=[
+                WorkflowStep("approve inputs", gate="approval"),
+                WorkflowStep("draft output"),
+            ],
+        )
+        _, warnings = lint_profile(p)
+        assert any("prompt-declared only" in warning for warning in warnings)
+
+
+class TestEffectiveReleaseGate:
+    def test_terminal_playbook_gate_is_enforced_without_output_gate(self):
+        p = DomainProfile(
+            name="generated",
+            allow_tools=["read_file"],
+            max_risk="low",
+            workflow=[
+                WorkflowStep("draft"),
+                WorkflowStep("human approval", gate="approval"),
+            ],
+            output=OutputContract(deliverable="forecast", consumers=["cfo"]),
+        )
+
+        assert declared_prompt_gate(p) == "approval"
+        assert enforced_gate(p) == "approval"
+        assert deliverable_release_allowed(p, None) is False
+        assert deliverable_release_allowed(p, {"decision": "rejected"}) is False
+        assert deliverable_release_allowed(p, {"decision": "approved"}) is True
+
+    def test_intermediate_gate_is_not_misreported_as_enforced(self):
+        p = DomainProfile(
+            name="generated",
+            allow_tools=["read_file"],
+            max_risk="low",
+            workflow=[
+                WorkflowStep("human approval", gate="approval"),
+                WorkflowStep("draft"),
+            ],
+        )
+
+        assert declared_prompt_gate(p) == "approval"
+        assert enforced_gate(p) is None
+        assert deliverable_release_allowed(p, None) is True
 
 
 class TestBuiltinContract:

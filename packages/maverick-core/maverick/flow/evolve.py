@@ -18,7 +18,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import node_outcomes
-from .ir import NODE_ACTION, NODE_AGENT, Flow, FlowNode
+from .ir import (
+    NODE_ACTION,
+    NODE_AGENT,
+    Flow,
+    FlowNode,
+    ensure_high_risk_approvals,
+)
 
 _DEFAULT_MIN_SUPPORT = 10
 _HARDEN_THRESHOLD = 0.9     # agent this reliable -> propose hardening to an action
@@ -126,6 +132,10 @@ def apply_proposal(flow: Flow, node_id: str, to_kind: str, *,
     new = flow.copy()
     n: FlowNode = new.nodes[node_id]
     n.kind = to_kind
+    # A node-kind rewrite never inherits an automatic replay policy from the old
+    # implementation. Agent attempts and high-risk actions may already have
+    # produced side effects before reporting failure.
+    n.retries = 0
     if to_kind == NODE_ACTION:
         n.tool = (tool or n.tool).strip()
         n.brief = ""
@@ -138,7 +148,7 @@ def apply_proposal(flow: Flow, node_id: str, to_kind: str, *,
         n.params = {}
         if not n.brief:
             raise ValueError("softening to an agent needs a brief")
-    return new
+    return ensure_high_risk_approvals(new)
 
 
 # ---- measure: did the applied change help? -----------------------------------

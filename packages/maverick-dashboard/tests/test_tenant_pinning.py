@@ -51,6 +51,26 @@ def test_pins_tenant_from_real_proxy_principal_when_by_user_enabled(monkeypatch)
     assert paths.current_tenant_id() is None
 
 
+def test_authenticated_route_executes_inside_the_pinned_tenant(monkeypatch):
+    monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
+    _enable_proxy_auth(monkeypatch)
+    import maverick.paths as paths
+    import maverick_dashboard.api as api
+
+    seen = []
+
+    class _World:
+        def get_facts(self):
+            seen.append(paths.current_tenant_id())
+            return {}
+
+    monkeypatch.setattr(api, "_world", lambda: _World())
+    r = client.get("/api/v1/facts", headers={"X-Forwarded-User": "alice"})
+    assert r.status_code == 200
+    assert seen == ["api:user:alice"]
+    assert paths.current_tenant_id() is None
+
+
 def test_no_pin_when_by_user_disabled(monkeypatch):
     monkeypatch.delenv("MAVERICK_TENANT_BY_USER", raising=False)
     _enable_proxy_auth(monkeypatch)

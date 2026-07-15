@@ -56,7 +56,8 @@ def agent_surface(name: str) -> dict[str, Any] | None:
     if v is None:
         return None
     steps = v.get("workflow") or []
-    gated = any((s or {}).get("gate") in ("approval", "review") for s in steps)
+    declared = v.get("declared_prompt_gate")
+    enforced = v.get("enforced_gate")
     return {
         "kind": "agent",
         "subject": name,
@@ -68,7 +69,10 @@ def agent_surface(name: str) -> dict[str, Any] | None:
         "allow_hosts": sorted(v.get("allow_hosts") or []),
         "mcp_servers": sorted(v.get("mcp_servers") or []),
         "knowledge_sources": sorted(v.get("knowledge_sources") or []),
-        "has_human_gate": gated,
+        "declared_prompt_gate": declared,
+        "enforced_gate": enforced,
+        # Backward-compatible surface field, narrowed to an actual control.
+        "has_human_gate": bool(enforced),
         "steps": len(steps),
     }
 
@@ -111,6 +115,10 @@ def flow_surface(flow_id: str) -> dict[str, Any] | None:
         "max_risk": "medium" if tools else "low",
         "allow_paths": [], "allow_hosts": [], "mcp_servers": [],
         "knowledge_sources": [],
+        # Flow approval nodes are executable, persisted pause points, so their
+        # declaration and enforcement are the same unlike prompt playbooks.
+        "declared_prompt_gate": "approval" if gated else None,
+        "enforced_gate": "approval" if gated else None,
         "has_human_gate": gated,
         "steps": len(nodes),
     }
@@ -125,7 +133,8 @@ def _hash_surface(surface: dict[str, Any]) -> str:
     tools / data / risk / gating is detectable as drift."""
     keyed = {k: surface.get(k) for k in (
         "allow_tools", "deny_tools", "max_risk", "allow_paths", "allow_hosts",
-        "mcp_servers", "knowledge_sources", "has_human_gate")}
+        "mcp_servers", "knowledge_sources", "declared_prompt_gate",
+        "enforced_gate", "has_human_gate")}
     blob = json.dumps(keyed, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
@@ -202,14 +211,37 @@ def _security_findings(s: dict) -> list[dict]:
 def _ai_risk_findings(s: dict) -> list[dict]:
     out: list[dict] = []
     risky = _SEVERITY_RANK.get(s["max_risk"], 0) >= 1
-    if risky and not s["has_human_gate"]:
+    enforced = s.get("enforced_gate")
+    # Legacy/custom callers may provide only has_human_gate.  Preserve that
+    # behavior without treating a declared_prompt_gate as enforcement.
+    if enforced is None and "enforced_gate" not in s and s.get("has_human_gate"):
+        enforced = "approval"
+    declared = s.get("declared_prompt_gate")
+    gate_rank = {None: 0, "review": 1, "approval": 2}
+    prompt_gap = gate_rank.get(declared, 0) > gate_rank.get(enforced, 0)
+    if prompt_gap:
+        note = (
+            f"Declares a prompt-only {declared} gate, but terminal release is "
+            f"protected by only {enforced or 'no persisted checkpoint'}."
+        )
+        mitigation = (
+            "Move the gate to the terminal playbook step or output contract, "
+            "or compile the playbook into an executable approval flow."
+        )
         out.append(_finding("ai_risk", "Human oversight", "high",
-            "Acts at medium/high risk with no approval or review gate in its playbook.",
-            "Add an approval/review gate before consequential actions."))
-    elif s["has_human_gate"]:
+            note, mitigation))
+    elif risky and not enforced:
+        note = (
+            "Acts at medium/high risk with no persisted approval or review "
+            "gate protecting terminal release."
+        )
+        mitigation = "Add an enforced approval/review gate before release."
+        out.append(_finding("ai_risk", "Human oversight", "high",
+            note, mitigation))
+    elif enforced:
         out.append(_finding("ai_risk", "Human oversight", "low",
-            "A human approval/review gate is present.",
-            "Keep the gate on the consequential step; review gate placement periodically."))
+            f"A persisted {enforced} sign-off protects terminal deliverable release.",
+            "Keep the release guard bound to the reviewed deliverable version."))
     else:
         out.append(_finding("ai_risk", "Human oversight", "low",
             "Low-risk ceiling; autonomous operation is proportionate.",

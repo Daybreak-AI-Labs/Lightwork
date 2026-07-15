@@ -56,7 +56,7 @@ def test_while_loops_until_condition_flips_and_respects_cap():
                    "limit": 50, "output": "passes",
                    "body": {"id": "", "name": "b", "start": "step",
                             "nodes": [{"id": "step", "kind": "action",
-                                       "tool": "tick", "output": "n"}]}}],
+                                       "tool": "web_search", "output": "n"}]}}],
     }
     ticks = []
 
@@ -108,7 +108,8 @@ def test_scope_catches_a_body_failure_and_routes_on_error():
         "nodes": [
             {"id": "s", "kind": "scope", "on_error": "h", "next": "ok",
              "body": {"id": "", "name": "b", "start": "boom",
-                      "nodes": [{"id": "boom", "kind": "action", "tool": "t"}]}},
+                      "nodes": [{"id": "boom", "kind": "action",
+                                 "tool": "web_search"}]}},
             {"id": "h", "kind": "agent", "brief": "recover from {{_error}}", "output": "r"},
             {"id": "ok", "kind": "agent", "brief": "all good", "output": "r"},
         ],
@@ -257,7 +258,8 @@ def test_scope_without_catch_still_fails_the_run():
         "id": "sc2", "name": "sc", "start": "s",
         "nodes": [{"id": "s", "kind": "scope",
                    "body": {"id": "", "name": "b", "start": "boom",
-                            "nodes": [{"id": "boom", "kind": "action", "tool": "t"}]}}],
+                            "nodes": [{"id": "boom", "kind": "action",
+                                       "tool": "web_search"}]}}],
     }
 
     def broken(node, params, d):

@@ -77,8 +77,10 @@ class AssessmentEvidenceIn(BaseModel):
 
 class SignoffIn(BaseModel):
     """A human's sign-off on a finished, gated deliverable -- the certify/reject
-    decision the pack's output gate calls for, with an optional review note."""
+    decision the pack's output gate calls for, bound to the version the client
+    actually rendered, with an optional review note."""
     decision: str = Field(..., pattern="^(approved|rejected)$")
+    expected_updated_at: float = Field(..., gt=0)
     note: str | None = Field(default=None, max_length=2000)
 
 
@@ -418,11 +420,15 @@ class FlowApplyIn(BaseModel):
     to_kind: str = Field(..., pattern="^(agent|action)$")
     tool: str = Field(default="", max_length=120)
     brief: str = Field(default="", max_length=4000)
+    version: int | None = Field(default=None, ge=1)
+    revision: str = Field(default="", max_length=128)
 
 
 class FlowRollbackIn(BaseModel):
     """Roll a flow back to a prior version (default: the immediately previous)."""
     version: int | None = Field(default=None, ge=1)
+    current_version: int | None = Field(default=None, ge=1)
+    revision: str = Field(default="", max_length=128)
 
 
 class AnswerIn(BaseModel):

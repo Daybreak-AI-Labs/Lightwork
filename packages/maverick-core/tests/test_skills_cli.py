@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import pytest
 from click.testing import CliRunner
+from maverick import skills
 from maverick.cli import main
 from maverick.skill import stats as skill_stats
-from maverick.skills import SKILLS_DIR
 
 SKILL_MD = (
     "---\n"
@@ -26,10 +26,15 @@ def _skills_and_stats(tmp_path, monkeypatch):
     # The autouse home-isolation fixture points Path.home() at tmp, but
     # skill_stats.DEFAULT_PATH was bound at import; repoint it explicitly.
     monkeypatch.setattr(skill_stats, "DEFAULT_PATH", tmp_path / "stats.json")
-    SKILLS_DIR.mkdir(parents=True, exist_ok=True)
-    (SKILLS_DIR / "good.md").write_text(SKILL_MD.format(name="good"), encoding="utf-8")
-    (SKILLS_DIR / "bad.md").write_text(SKILL_MD.format(name="bad"), encoding="utf-8")
-    return tmp_path
+    skills_path = skills.skills_dir()
+    skills_path.mkdir(parents=True, exist_ok=True)
+    (skills_path / "good.md").write_text(
+        SKILL_MD.format(name="good"), encoding="utf-8",
+    )
+    (skills_path / "bad.md").write_text(
+        SKILL_MD.format(name="bad"), encoding="utf-8",
+    )
+    return skills_path
 
 
 def test_bare_skills_lists(_skills_and_stats):
@@ -57,7 +62,7 @@ def test_skills_evict_dry_run_lists_without_removing(_skills_and_stats):
     assert "candidate: bad" in result.output
     assert "dry-run" in result.output
     # Nothing deleted on a dry run.
-    assert (SKILLS_DIR / "bad.md").exists()
+    assert (_skills_and_stats / "bad.md").exists()
 
 
 def test_skills_evict_apply_removes(_skills_and_stats):
@@ -67,8 +72,8 @@ def test_skills_evict_apply_removes(_skills_and_stats):
     result = CliRunner().invoke(main, ["skills", "evict", "--apply"])
     assert result.exit_code == 0
     assert "removed: bad" in result.output
-    assert not (SKILLS_DIR / "bad.md").exists()
-    assert (SKILLS_DIR / "good.md").exists()
+    assert not (_skills_and_stats / "bad.md").exists()
+    assert (_skills_and_stats / "good.md").exists()
 
 
 def test_skills_evict_no_candidates(_skills_and_stats):

@@ -17,7 +17,8 @@ def test_mint_verify_roundtrip():
     assert tok
     claim = approvals.verify_token(tok)
     assert claim == {"run_id": "run-1", "decision": "approved",
-                     "cursor": "a", "prompt": "ok?", "updated": 123.0}
+                     "cursor": "a", "prompt": "ok?", "updated": 123.0,
+                     "tenant": ""}
 
 
 def test_reject_token_carries_its_decision():
@@ -68,3 +69,23 @@ def test_approval_links_build_both_urls():
     rtok = links["reject"].split("token=")[1]
     assert approvals.verify_token(atok)["decision"] == "approved"
     assert approvals.verify_token(rtok)["decision"] == "rejected"
+
+
+def test_tenant_claim_selects_same_tenant_secret_during_public_verify(monkeypatch):
+    from maverick.paths import current_tenant_id
+
+    secrets = {"": "root-secret", "acme": "acme-secret", "globex": "globex-secret"}
+    monkeypatch.setattr(
+        approvals,
+        "_secret",
+        lambda: secrets.get(current_tenant_id() or ""),
+    )
+    token = approvals.mint_token(
+        "run-acme", "approved", cursor="gate", prompt="ship?",
+        updated=12.0, tenant="acme",
+    )
+    assert token
+    # Verification begins in the unscoped public app context but must select
+    # the signed tenant's key before authenticating and returning the claim.
+    claim = approvals.verify_token(token)
+    assert claim and claim["tenant"] == "acme" and claim["run_id"] == "run-acme"

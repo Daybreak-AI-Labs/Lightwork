@@ -238,33 +238,33 @@
         <p id="deliverable-stale" class="muted" style="display: none; margin-top: var(--space-3);">
           Deliverable updated — <a href="/chat/goal/{{ goal.id }}">reload to view it</a>.
         </p>
-        {% if deliverable.gate %}
-          <div class="signoff">
-            {% if signoff %}
-              <div class="signoff__head">
-                <span class="badge {{ 'success' if signoff.decision == 'approved' else 'failure' }}">{{ signoff.decision }}</span>
-                <span class="muted">by {{ signoff.decided_by or 'operator' }} · <span data-when="{{ signoff.created_at }}"></span></span>
-              </div>
-              {% if signoff.note %}<p class="signoff__note muted">{{ signoff.note }}</p>{% endif %}
-              {% if signoff.decision == 'approved' and rendered.table %}
-                <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/deliverable.csv">Download for hand-off (CSV)</a>
-              {% endif %}
-            {% elif goal.status == 'done' %}
-              <p class="signoff__prompt">Needs <strong>{{ deliverable.gate }}</strong> sign-off before it's acted on.</p>
-              <textarea id="signoff-note" class="input" rows="2" placeholder="Optional review note…" aria-label="Review note"></textarea>
-              <div class="signoff__actions">
-                <button id="signoff-approve" class="btn btn--primary" type="button" data-decision="approved">Approve</button>
-                <button id="signoff-reject" class="btn btn--ghost" type="button" data-decision="rejected">Reject</button>
-              </div>
-              <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
-            {% else %}
-              <p class="signoff__prompt muted">Sign-off ({{ deliverable.gate }}) opens when the deliverable is finished.</p>
-            {% endif %}
-          </div>
-        {% endif %}
       {% else %}
         <pre id="result" tabindex="0" aria-label="Goal result"
              style="white-space: pre-wrap; margin: 0;">{{ goal.result or '' }}</pre>
+      {% endif %}
+      {% if deliverable and deliverable.gate %}
+        <div class="signoff">
+          {% if signoff %}
+            <div class="signoff__head">
+              <span class="badge {{ 'success' if signoff.decision == 'approved' else 'failure' }}">{{ signoff.decision }}</span>
+              <span class="muted">by {{ signoff.decided_by or 'operator' }} · <span data-when="{{ signoff.created_at }}"></span></span>
+            </div>
+            {% if signoff.note %}<p class="signoff__note muted">{{ signoff.note }}</p>{% endif %}
+            {% if signoff.decision == 'approved' and rendered.table %}
+              <a class="btn btn--ghost" href="/api/v1/goals/{{ goal.id }}/deliverable.csv">Download for hand-off (CSV)</a>
+            {% endif %}
+          {% elif goal.status == 'done' %}
+            <p class="signoff__prompt">Needs <strong>{{ deliverable.gate }}</strong> sign-off before it's acted on.</p>
+            <textarea id="signoff-note" class="input" rows="2" placeholder="Optional review note…" aria-label="Review note"></textarea>
+            <div class="signoff__actions">
+              <button id="signoff-approve" class="btn btn--primary" type="button" data-decision="approved">Approve</button>
+              <button id="signoff-reject" class="btn btn--ghost" type="button" data-decision="rejected">Reject</button>
+            </div>
+            <p id="signoff-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin: var(--space-2) 0 0;"></p>
+          {% else %}
+            <p class="signoff__prompt muted">Sign-off ({{ deliverable.gate }}) opens when the deliverable is finished.</p>
+          {% endif %}
+        </div>
       {% endif %}
       {% if goal.status in ('done', 'blocked', 'failed') %}
         {# Always-available thumbs up/down (unlike the gated sign-off above): any
@@ -702,6 +702,9 @@
       var note = document.getElementById('signoff-note');
       var msg = document.getElementById('signoff-msg');
       var goalId = {{ goal.id }};
+      // Bind the decision to the exact deliverable this page rendered. The
+      // server rejects this version if a result or artifact changed meanwhile.
+      var reviewedUpdatedAt = {{ goal.updated_at }};
       var btns = [approve, reject];
       function submit(decision) {
         btns.forEach(function (b) { if (b) b.disabled = true; });
@@ -709,7 +712,11 @@
         msg.textContent = 'Recording…';
         fetch('/api/v1/goals/' + goalId + '/signoff', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({decision: decision, note: (note && note.value.trim()) || null}),
+          body: JSON.stringify({
+            decision: decision,
+            expected_updated_at: reviewedUpdatedAt,
+            note: (note && note.value.trim()) || null,
+          }),
         }).then(function (r) {
           if (r.ok) { location.reload(); return; }
           return r.json().catch(function () { return {}; }).then(function (j) {

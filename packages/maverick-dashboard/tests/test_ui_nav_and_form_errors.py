@@ -77,6 +77,20 @@ def test_chat_form_submits_via_fetch(monkeypatch, tmp_path):
     assert "Retry-After" in ui
 
 
+def test_chat_can_handoff_an_unsaved_flow_or_agent_draft(monkeypatch, tmp_path):
+    """Authoring choices stay browser-local until the user explicitly saves."""
+    _prep(monkeypatch, tmp_path)
+    page = _client().get("/chat").text
+    assert 'name="authoring_kind"' in page
+    assert '<option value="flow">Draft a workflow</option>' in page
+    assert '<option value="agent">Draft an agent</option>' in page
+
+    ui = _client().get("/static/lightwork-ui.js").text
+    assert "lightwork.authoring-handoff" in ui
+    assert "sessionStorage.setItem" in ui
+    assert "kind === 'flow' ? '/flows/designer' : '/workflow-builder'" in ui
+
+
 def test_overview_first_run_form_has_inline_error_region(monkeypatch, tmp_path):
     """The landing-page first-goal form gets the same graceful errors."""
     _prep(monkeypatch, tmp_path)

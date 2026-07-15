@@ -20,13 +20,25 @@ _MAX_KEYS = 500           # cap the breadth of a single dict
 
 
 def redact(value: Any) -> Any:
-    """A deep copy with secret-looking keys masked. Structure is preserved so the
-    UI still shows the shape of the data, just not the secret."""
+    """A deep copy with secret keys and secret-bearing strings masked.
+
+    Key-name checks catch structured credentials. The shared detector also
+    scrubs tokens, authorization headers, private keys, and credentialed URLs
+    stored under innocuous keys such as ``result`` or inside a list.
+    """
     if isinstance(value, dict):
         return {k: (_MASK if isinstance(k, str) and _SECRET_KEY.search(k) else redact(v))
                 for k, v in value.items()}
     if isinstance(value, list):
         return [redact(v) for v in value]
+    if isinstance(value, str):
+        try:
+            from ..safety.secret_detector import redact as redact_text
+            return redact_text(value)[0]
+        except Exception:
+            # A redaction subsystem failure must not turn an API/persistence
+            # boundary into a credential exfiltration path.
+            return _MASK
     return value
 
 

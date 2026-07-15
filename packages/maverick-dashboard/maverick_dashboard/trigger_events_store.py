@@ -36,19 +36,24 @@ def _path():
 
 def record(name: str, owner: str, kind: str, *, new_events: int = 0,
            fired: list | None = None, fired_flows: list | None = None,
-           note: str = "") -> None:
+           note: str = "", tenant: str | None = None) -> None:
     """Append one firing/err row. Best-effort: never raises. ``fired`` holds
     integer goal ids (template fires); ``fired_flows`` holds string flow run ids
     (flow fires) -- a trigger fires one or the other, never both."""
+    from maverick.paths import current_tenant_id
+    from maverick.secrets import scrub
+
+    tenant_id = current_tenant_id() if tenant is None else tenant
     row = {
         "ts": time.time(),
         "name": str(name),
         "owner": str(owner or ""),
+        "tenant": str(tenant_id or ""),
         "kind": str(kind),
         "new_events": int(new_events),
         "fired": [int(g) for g in (fired or [])],
         "fired_flows": [str(r) for r in (fired_flows or [])],
-        "note": str(note)[:500],
+        "note": scrub(str(note)).strip()[:500],
     }
     try:
         p = _path()
@@ -81,13 +86,17 @@ def _read_rows() -> list[dict]:
 
 
 def history(*, name: str | None = None, owner: str | None = None,
-            limit: int = 50) -> list[dict]:
+            tenant: str | None = None, limit: int = 50) -> list[dict]:
     """Recent firing/error rows, newest first. ``owner=None`` (admin/auth-off)
     sees all; a specific owner sees only its own. ``name`` filters to one
     trigger."""
     rows = _read_rows()
     if owner is not None:
         rows = [r for r in rows if r.get("owner", "") == owner]
+    if tenant is not None:
+        # Legacy rows had no tenant field and belong only to the shared floor;
+        # never blend them into a named tenant with the same owner/name.
+        rows = [r for r in rows if r.get("tenant", "") == tenant]
     if name is not None:
         rows = [r for r in rows if r.get("name", "") == name]
     rows.reverse()  # newest first

@@ -727,6 +727,48 @@ def _dec_field(text: str | None) -> str | None:
     return text
 
 
+def _dec_fields(texts: list[str | None]) -> list[str | None]:
+    """Decrypt a result set with one policy and key lookup per query."""
+    from .crypto_at_rest import (
+        at_rest_enabled,
+        is_sealed_str,
+        strict_at_rest,
+        unseal_many_from_str,
+    )
+
+    if not at_rest_enabled():
+        return list(texts)
+    present = [text for text in texts if text is not None]
+    decoded_present = unseal_many_from_str(present)
+    strict = (
+        strict_at_rest()
+        if any(not is_sealed_str(text) for text in present)
+        else False
+    )
+    decoded_iter = iter(decoded_present)
+    out: list[str | None] = []
+    for text in texts:
+        if text is None:
+            out.append(None)
+            continue
+        decoded = next(decoded_iter)
+        if not is_sealed_str(text):
+            if strict:
+                log.error(
+                    "at-rest strict: withholding an unsealed value in a sealed "
+                    "column (run 'maverick encryption migrate'; tampering if "
+                    "already migrated)"
+                )
+                decoded = _UNSEALED_WITHHELD
+            else:
+                log.warning(
+                    "at-rest: unsealed value in a sealed column (pre-migration "
+                    "legacy or tampering); run 'maverick encryption migrate'"
+                )
+        out.append(decoded)
+    return out
+
+
 def _row_for(cls, d: dict) -> dict:
     """Keep only the keys that ``cls`` (a dataclass) declares.
 
@@ -763,6 +805,17 @@ def _goal_event_from_row(row) -> GoalEvent:
     d = dict(row)
     d["content"] = _dec_field(d.get("content"))
     return GoalEvent(**_row_for(GoalEvent, d))
+
+
+def _goal_events_from_rows(rows: list) -> list[GoalEvent]:
+    """Build goal events while resolving encryption policy and keys once."""
+    decoded = _dec_fields([row["content"] for row in rows])
+    events: list[GoalEvent] = []
+    for row, content in zip(rows, decoded, strict=True):
+        d = dict(row)
+        d["content"] = content
+        events.append(GoalEvent(**_row_for(GoalEvent, d)))
+    return events
 
 
 def _episode_spend_from_row(row) -> EpisodeSpend:
@@ -1313,18 +1366,73 @@ class WorldModel:
         return {r["status"]: int(r["n"]) for r in rows}
 
     def record_signoff(self, goal_id: int, decision: str, *,
-                       decided_by: str = "", note: str | None = None) -> None:
+                       decided_by: str = "", note: str | None = None,
+                       expected_updated_at: float | None = None) -> bool:
         """Record a human's certify/reject decision on a finished deliverable --
         the sign-off a pack's output gate calls for. One authoritative row per
         goal (a later decision replaces an earlier one); the note is encrypted
-        at rest. ``decision`` is 'approved' or 'rejected'."""
+        at rest. ``decision`` is 'approved' or 'rejected'.
+
+        The insert is conditional on the goal still being ``done`` and, when
+        supplied, the exact ``expected_updated_at`` the reviewer saw.  This
+        closes pre-approval and edit-vs-sign races at the durable boundary.
+        Later result/artifact mutations invalidate the row in their own write
+        transaction. Returns ``True`` only when the authoritative decision
+        transitions (including the first decision); an identical retry is an
+        atomic no-op and returns ``False`` so downstream effects stay exactly
+        once.
+        """
+        if decision not in {"approved", "rejected"}:
+            raise ValueError("decision must be 'approved' or 'rejected'")
         with self._writing() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO signoffs(goal_id, decision, decided_by, "
-                "note, created_at) VALUES(?, ?, ?, ?, ?)",
-                (int(goal_id), str(decision), str(decided_by or ""),
-                 _enc_field(note), time.time()),
+            sql = (
+                "INSERT INTO signoffs(goal_id, decision, decided_by, "
+                "note, created_at) SELECT id, ?, ?, ?, ? FROM goals "
+                "WHERE id = ? AND status = 'done'"
             )
+            params: list[Any] = [
+                str(decision), str(decided_by or ""), _enc_field(note),
+                time.time(), int(goal_id),
+            ]
+            if expected_updated_at is not None:
+                sql += " AND updated_at = ?"
+                params.append(float(expected_updated_at))
+            sql += (
+                " ON CONFLICT(goal_id) DO UPDATE SET "
+                "decision=excluded.decision, decided_by=excluded.decided_by, "
+                "note=excluded.note, created_at=excluded.created_at "
+                "WHERE signoffs.decision <> excluded.decision"
+            )
+            cur = conn.execute(sql, tuple(params))
+            if cur.rowcount == 1:
+                return True
+            # Zero rows is either an invalid/stale expected version or an
+            # identical retry. Distinguish them while this write transaction
+            # still owns the database lock; never call a retry idempotent when
+            # the client actually reviewed stale bytes.
+            goal = conn.execute(
+                "SELECT status, updated_at FROM goals WHERE id = ?",
+                (int(goal_id),),
+            ).fetchone()
+            valid_goal = bool(
+                goal
+                and goal["status"] == "done"
+                and (
+                    expected_updated_at is None
+                    or float(goal["updated_at"]) == float(expected_updated_at)
+                )
+            )
+            if not valid_goal:
+                raise ValueError(
+                    "goal is not finished or the deliverable changed before sign-off"
+                )
+            current = conn.execute(
+                "SELECT decision FROM signoffs WHERE goal_id = ?",
+                (int(goal_id),),
+            ).fetchone()
+            if current and current["decision"] == decision:
+                return False
+            raise RuntimeError("sign-off transition failed")
 
     def signoff_for(self, goal_id: int) -> dict | None:
         """The current sign-off on a goal's deliverable, or ``None`` if it
@@ -1374,6 +1482,17 @@ class WorldModel:
                 (int(goal_id), str(kind or "text"), title or "", _enc_field(content),
                  int(goal_id), title or "", now),
             )
+            # The goal timestamp is the optimistic release version used by
+            # sign-off. Include artifact mutations in that version, not just
+            # goal.result edits, so a concurrent attachment cannot be approved
+            # by a reviewer who never saw it.
+            conn.execute(
+                "UPDATE goals SET updated_at = ? WHERE id = ?",
+                (now, int(goal_id)),
+            )
+            # Approval covers the complete reviewed release payload.  A new
+            # artifact version changes that payload and must be reviewed again.
+            conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
             return int(cur.lastrowid)
 
     def artifacts_for_goal(self, goal_id: int) -> list[dict]:
@@ -1577,10 +1696,15 @@ class WorldModel:
 
     def set_goal_status(self, goal_id: int, status: str, result: str | None = None) -> None:
         with self._writing() as conn:
-            conn.execute(
+            cur = conn.execute(
                 "UPDATE goals SET status = ?, updated_at = ?, result = COALESCE(?, result) WHERE id = ?",
                 (status, time.time(), _enc_field(result), goal_id),
             )
+            # A sign-off is authority over one immutable terminal payload, not
+            # over a goal id forever.  Reruns, failures, and any result rewrite
+            # revoke it atomically so old approval cannot authorize new bytes.
+            if cur.rowcount == 1 and (status != "done" or result is not None):
+                conn.execute("DELETE FROM signoffs WHERE goal_id = ?", (int(goal_id),))
 
     def claim_goal_for_run(
         self, goal_id: int, *, expected_owner: str | None = None,
@@ -1909,7 +2033,7 @@ class WorldModel:
             "WHERE goal_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
             (goal_id, since_id, limit),
         )
-        return [_goal_event_from_row(r) for r in rows]
+        return _goal_events_from_rows(rows)
 
     def recent_goal_events(self, goal_id: int, limit: int = 200) -> list[GoalEvent]:
         """Return the latest goal events, preserving chronological order."""
@@ -1920,14 +2044,18 @@ class WorldModel:
             ") ORDER BY id ASC",
             (goal_id, limit),
         )
-        return [_goal_event_from_row(r) for r in rows]
+        return _goal_events_from_rows(rows)
 
     def recent_event_contents(self, limit: int = 5000) -> list[str]:
         """Coordination-message bodies across all goals (newest first), the corpus
         the emergent-protocol codebook learns from. Read-only."""
         rows = self._read_all(
             "SELECT content FROM goal_events ORDER BY id DESC LIMIT ?", (int(limit),))
-        return [_dec_field(r[0]) for r in rows if r and r[0]]
+        return [
+            value
+            for value in _dec_fields([r[0] for r in rows if r and r[0]])
+            if value is not None
+        ]
 
     def prune_goal_events(self, older_than_seconds: float = 30 * 24 * 3600) -> int:
         """Delete goal_events rows older than N seconds. Returns rows removed."""

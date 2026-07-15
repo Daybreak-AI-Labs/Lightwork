@@ -105,3 +105,54 @@ def test_handle_flow_cron_noops_on_stale_schedule(monkeypatch, tmp_path):
     job = types.SimpleNamespace(payload={"flow_id": "digest", "__cron__": "0 9 * * *"})
     aq._handle_flow_cron(job)
     assert aq._pending(aq.FLOW_RUN_KIND) == []
+
+
+def test_named_tenant_cron_is_reconciled_and_fires_in_same_tenant(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick.tenant import registry
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    registry.create_tenant("acme")
+    tenant_token = set_tenant("acme")
+    try:
+        _save_flow("digest", "0 9 * * *")
+    finally:
+        reset_tenant(tenant_token)
+
+    aq._reconcile_flow_crons()
+    crons = aq._pending(aq.FLOW_CRON_KIND)
+    assert len(crons) == 1 and crons[0].payload["tenant"] == "acme"
+
+    aq._handle_flow_cron(types.SimpleNamespace(payload=crons[0].payload))
+    runs = aq._pending(aq.FLOW_RUN_KIND)
+    assert len(runs) == 1
+    assert runs[0].payload["tenant"] == "acme"
+    assert runs[0].payload["flow_id"] == "digest"
+
+
+def test_reconcile_clears_ambient_tenant_before_shared_collection(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr("maverick.client.client_id", lambda: None)
+    from maverick.paths import current_tenant_id, reset_tenant, set_tenant
+    from maverick.tenant import registry
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    registry.create_tenant("acme")
+    _save_flow("shared", "0 8 * * *")
+    token = set_tenant("acme")
+    try:
+        _save_flow("private", "0 9 * * *")
+        aq._reconcile_flow_crons()
+        assert current_tenant_id() == "acme"
+    finally:
+        reset_tenant(token)
+
+    payloads = {job.payload["flow_id"]: job.payload for job in aq._pending(aq.FLOW_CRON_KIND)}
+    assert "tenant" not in payloads["shared"]
+    assert payloads["private"]["tenant"] == "acme"

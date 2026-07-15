@@ -11,7 +11,8 @@ Users configure a list of webhook endpoints in ``~/.maverick/config.toml``:
 
 When set, the kernel fires:
   - goal_created       (goal_id, title)
-  - goal_finished      (goal_id, status, result)
+  - goal_finished      (goal_id, status, result), or for a gated unapproved
+                       deliverable (goal_id, status, gate, release_status)
   - episode_finished   (goal_id, episode_id, outcome, cost_dollars)
   - final_emitted      (goal_id, patch_size_bytes)
 

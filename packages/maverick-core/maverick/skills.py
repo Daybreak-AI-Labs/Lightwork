@@ -24,7 +24,27 @@ from .paths import data_dir
 
 log = logging.getLogger(__name__)
 
-SKILLS_DIR = data_dir("skills")
+def skills_dir() -> Path:
+    """The active tenant's installed-skill directory.
+
+    Resolve at operation time: long-lived dashboard/worker processes serve
+    multiple tenant contexts after this module has already been imported.  An
+    explicit module attribute is still honored as a compatibility/test override.
+    """
+    override = globals().get("SKILLS_DIR")
+    return Path(override) if override is not None else data_dir("skills")
+
+
+def __getattr__(name: str) -> Path:
+    if name == "SKILLS_DIR":
+        return skills_dir()
+    raise AttributeError(name)
+
+
+def _resolved_skills_dir(value: Path | None = None) -> Path:
+    return Path(value) if value is not None else skills_dir()
+
+
 # First-party skills shipped INSIDE the package (vs. user-installed skills under
 # SKILLS_DIR). Resolved via __file__ so it works from an installed wheel too.
 BUILTIN_SKILLS_DIR = Path(__file__).parent / "skills_builtin"
@@ -221,11 +241,12 @@ def validate_skill_file(path: Path) -> SkillValidation:
     return SkillValidation(ok=not errors, errors=errors, warnings=warnings)
 
 
-def load_skills(skills_dir: Path = SKILLS_DIR) -> list[Skill]:
-    if not skills_dir.exists():
+def load_skills(skills_dir: Path | None = None) -> list[Skill]:
+    target_dir = _resolved_skills_dir(skills_dir)
+    if not target_dir.exists():
         return []
     out = []
-    for p in skills_dir.glob("*.md"):
+    for p in target_dir.glob("*.md"):
         try:
             out.append(Skill.parse(p.read_text(encoding="utf-8"), p))
         except Exception:
@@ -262,7 +283,7 @@ def _builtin_skills_enabled() -> bool:
         return True
 
 
-def available_skills(skills_dir: Path = SKILLS_DIR) -> list[Skill]:
+def available_skills(skills_dir: Path | None = None) -> list[Skill]:
     """Every skill an agent may recall: the shipped library (unless disabled)
     plus user-installed skills, with a user skill of the same name overriding
     the built-in. Mirrors ``domain.available_domains`` (builtin + user overlay).
@@ -415,7 +436,7 @@ def _safe_name(raw: str) -> str:
 
 def install_skill(
     source: str,
-    skills_dir: Path = SKILLS_DIR,
+    skills_dir: Path | None = None,
     trusted_local: bool = True,
 ) -> Skill:
     """Install a skill from a URL, ``gh:org/repo[:path]``, or local path.
@@ -432,6 +453,7 @@ def install_skill(
     Raises ValueError if the source can't be fetched or parsed. The file is
     only written to disk AFTER frontmatter validation succeeds.
     """
+    target_dir = _resolved_skills_dir(skills_dir)
     if source.startswith("gh:"):
         rest = source[3:]
         if not _GH_PATTERN.match(rest):
@@ -465,7 +487,7 @@ def install_skill(
             raise ValueError(f"local file {source!r} does not exist")
         content = p.read_text(encoding="utf-8")
 
-    return _validate_and_write(content, skills_dir)
+    return _validate_and_write(content, target_dir)
 
 
 def _clean_items(items) -> list[str]:
@@ -515,7 +537,7 @@ def create_skill(
         raise ValueError("a skill needs at least one trigger phrase (that's how it activates)")
     if not (body or "").strip():
         raise ValueError("a skill needs instructions (a non-empty body)")
-    target_dir = Path(skills_dir).expanduser() if skills_dir is not None else SKILLS_DIR
+    target_dir = _resolved_skills_dir(skills_dir).expanduser()
     return _validate_and_write(build_skill_md(name, triggers, tools_needed, body), target_dir)
 
 
@@ -674,9 +696,10 @@ def _fetch_skill_source(source: str) -> str:
 
 def install_from_catalog(
     name: str,
-    skills_dir: Path = SKILLS_DIR,
+    skills_dir: Path | None = None,
     *,
     indexes: list[str] | None = None,
+    require_signature: bool = False,
 ) -> Skill:
     """Install a skill by name from the federated catalog.
 
@@ -693,7 +716,10 @@ def install_from_catalog(
 
     ``[skills].require_signed_catalog`` (or ``MAVERICK_REQUIRE_SIGNED_CATALOG``)
     forces a verified signature for ANY catalog install regardless of
-    ``trusted_pubkeys``. Default off. A missing/mismatched hash is a hard error.
+    ``trusted_pubkeys``. ``require_signature=True`` lets an autonomous caller
+    force that same fail-closed posture even when the operator keeps manual
+    catalog installs in compatibility/TOFU mode. A missing/mismatched hash is a
+    hard error.
     """
     from . import catalog as _catalog
     from . import config as _config
@@ -719,8 +745,13 @@ def install_from_catalog(
     # unauthenticated index host is no longer accepted. require_signed_catalog
     # forces this even with an empty anchor. With neither configured, today's
     # sha256-TOFU behavior is preserved (non-breaking).
-    require_sig = cfg["require_signed_catalog"] or bool(cfg["trusted_pubkeys"])
-    return _validate_and_write(content, skills_dir, require_signature=require_sig)
+    require_sig = (
+        require_signature
+        or bool(cfg.get("require_signed_catalog"))
+        or bool(cfg.get("trusted_pubkeys"))
+    )
+    target_dir = _resolved_skills_dir(skills_dir)
+    return _validate_and_write(content, target_dir, require_signature=require_sig)
 
 
 def _fetch_url_bytes(url: str) -> bytes:
@@ -777,8 +808,9 @@ def _fetch_skill_source_bytes(source: str) -> bytes:
     )
 
 
-def remove_skill(name: str, skills_dir: Path = SKILLS_DIR) -> bool:
-    target = skills_dir / f"{_safe_name(name)}.md"
+def remove_skill(name: str, skills_dir: Path | None = None) -> bool:
+    target_dir = _resolved_skills_dir(skills_dir)
+    target = target_dir / f"{_safe_name(name)}.md"
     if target.exists():
         target.unlink()
         return True
@@ -791,9 +823,10 @@ def distill(
     blackboard: Blackboard,
     llm: LLM,
     budget: Budget | None = None,
-    skills_dir: Path = SKILLS_DIR,
+    skills_dir: Path | None = None,
 ) -> Skill | None:
-    skills_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = _resolved_skills_dir(skills_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
     trajectory = blackboard.render(200)
     prompt = (
         f"Goal: {goal}\n\n"
@@ -822,7 +855,7 @@ def distill(
         # render_for_prompt -- so it must be frontmatter-validated and
         # shield-scanned, and (unlike the old raw write_text) must NOT land
         # on disk if it fails. _validate_and_write parses before writing.
-        return _validate_and_write(text, skills_dir)
+        return _validate_and_write(text, target_dir)
     except Exception as e:
         log.warning("distilled skill rejected (not written): %s", e)
         return None

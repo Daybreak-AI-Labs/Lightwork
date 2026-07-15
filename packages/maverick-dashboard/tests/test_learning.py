@@ -68,7 +68,13 @@ def test_signoff_shows_up_as_a_grounded_outcome(tmp_path, monkeypatch):
     w.set_goal_status(gid, "done", result=_TABLE)
     w.start_episode(gid)
     assert client.get("/api/v1/learning").json()["accumulated"]["grounded_outcomes"] == 0
-    r = client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "approved"})
+    r = client.post(
+        f"/api/v1/goals/{gid}/signoff",
+        json={
+            "decision": "approved",
+            "expected_updated_at": w.get_goal(gid).updated_at,
+        },
+    )
     assert r.status_code == 200
     assert client.get("/api/v1/learning").json()["accumulated"]["grounded_outcomes"] == 1
 

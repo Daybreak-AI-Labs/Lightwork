@@ -26,7 +26,7 @@ def test_no_deadline_when_unset():
     assert res.status == "completed"
 
 
-def test_node_timeout_returns_error_outcome_and_moves_on():
+def test_node_timeout_preserves_eventual_success_before_downstream_work():
     def slow_action(node, params, data):
         time.sleep(0.3)
         return ("done", 1.0)
@@ -35,8 +35,8 @@ def test_node_timeout_returns_error_outcome_and_moves_on():
         "b": FlowNode(id="b", kind="agent", brief="after", output="done")})
     res = run_flow(f, agent_fn=lambda n, br, d: ("ok", 1.0), action_fn=slow_action)
     assert res.status == "completed"
-    assert "timed out" in str(res.data["r"])       # the slow node timed out...
-    assert res.data["done"] == "ok"                # ...and the flow continued
+    assert res.data["r"] == "done"
+    assert res.data["done"] == "ok"
 
 
 def test_fast_node_under_timeout_succeeds():
@@ -47,7 +47,7 @@ def test_fast_node_under_timeout_succeeds():
     assert res.status == "completed" and res.data["r"] == "quick"
 
 
-def test_timed_out_retries_do_not_overlap_abandoned_work():
+def test_timed_out_success_is_not_retried_or_abandoned():
     active = 0
     max_active = 0
     calls = 0
@@ -68,7 +68,7 @@ def test_timed_out_retries_do_not_overlap_abandoned_work():
     res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=slow_action)
 
     assert res.status == "completed"
-    assert calls == 4
+    assert res.data["r"] == "done"
+    assert calls == 1
     assert max_active == 1
     assert active == 0
-    assert "timed out" in str(res.data["r"])

@@ -30,6 +30,15 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(tpl, "USER_TEMPLATES", tmp_path / ".maverick" / "templates")
 
 
+def _enable_proxy_auth(monkeypatch):
+    import maverick_dashboard.auth as auth
+
+    monkeypatch.setattr(auth, "proxy_auth_enabled", lambda: True)
+    monkeypatch.setattr(auth, "proxy_trusts", lambda _host: True)
+    monkeypatch.setattr(auth, "proxy_header_name", lambda: "X-Forwarded-User")
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+
+
 # --- pure parsing / prompt building (no LLM) --------------------------------
 
 def test_parse_workflow_normalizes():
@@ -147,6 +156,41 @@ def test_draft_playbook_uses_injected_complete_under_cap():
     assert "AGENT PLAYBOOKS" in seen["system"]
 
 
+def test_draft_playbook_uses_factory_guidance_and_drops_unavailable_tools(monkeypatch):
+    from maverick import factory_learning
+    from maverick_dashboard import workflow_ai
+
+    seen = {}
+
+    class _Resp:
+        text = (
+            '{"name":"mailer","allow_tools":["email_tool","invented_sender"],'
+            '"max_risk":"medium","steps":[{"name":"Send","tools":'
+            '["email_tool","invented_sender"],"gate":"approval"}]}'
+        )
+
+    monkeypatch.setattr(
+        factory_learning, "augment_system_prompt",
+        lambda system, **kwargs: system + "\nPROMOTED FACTORY CORRECTION",
+    )
+
+    def fake_complete(*, system, messages, budget, max_tokens, model):
+        seen["system"] = system
+        return _Resp()
+
+    draft = workflow_ai.draft_playbook(
+        "email an approved report", complete=fake_complete,
+        available_tools={"email_tool"},
+    )
+
+    assert "PROMOTED FACTORY CORRECTION" in seen["system"]
+    assert "email_tool" in seen["system"]
+    assert draft["allow_tools"] == ["email_tool"]
+    assert draft["workflow"][0]["tools"] == ["email_tool"]
+    assert any("invented_sender" in note for note in draft["notes"])
+    assert any("not runtime-enforced pauses" in note for note in draft["notes"])
+
+
 # --- refine (iterate on an existing draft) ----------------------------------
 
 def test_build_refine_prompt_includes_current_and_instruction():
@@ -154,6 +198,15 @@ def test_build_refine_prompt_includes_current_and_instruction():
     p = build_refine_prompt({"title": "Weekly report", "params": ["topic"]}, "make it daily")
     assert "Weekly report" in p and "make it daily" in p
     assert "COMPLETE" in p  # asks for a full revision, not a diff
+
+
+def test_build_refine_prompt_bounds_untrusted_current_draft():
+    from maverick_dashboard import workflow_ai
+
+    prompt = workflow_ai.build_refine_prompt(
+        {"persona": "x" * (workflow_ai._MAX_DOC_CHARS * 2)}, "make it safer")
+    assert len(prompt) < workflow_ai._MAX_DOC_CHARS + 500
+    assert "[truncated]" in prompt
 
 
 def test_refine_workflow_revises_under_cap():
@@ -231,6 +284,28 @@ def _provider(monkeypatch, present):
     monkeypatch.setattr(api, "_any_provider_key_set", lambda: present)
 
 
+def _post_builder_form(client, path, form, user):
+    headers = {"X-Forwarded-User": user}
+    if path.endswith("draft-from-file"):
+        return client.post(
+            path,
+            headers=headers,
+            files={"file": ("brief.md", b"Build an accounts workflow", "text/markdown")},
+            data={"form": form},
+        )
+    if path.endswith("refine"):
+        return client.post(
+            path,
+            headers=headers,
+            json={"form": form, "instruction": "make it safer", "current": {}},
+        )
+    return client.post(
+        path,
+        headers=headers,
+        json={"form": form, "description": "build an accounts workflow"},
+    )
+
+
 def test_draft_endpoint_returns_draft(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _provider(monkeypatch, True)
@@ -254,6 +329,38 @@ def test_draft_endpoint_requires_a_brief(monkeypatch, tmp_path):
     _provider(monkeypatch, True)
     r = _client().post("/api/v1/workflows/draft", json={"description": "   "})
     assert r.status_code == 400
+
+
+def test_authoring_endpoints_reject_unknown_form(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _provider(monkeypatch, True)
+    r = _client().post(
+        "/api/v1/workflows/draft",
+        json={"description": "x", "form": "playbok"},
+    )
+    assert r.status_code == 400
+    assert "template" in r.json()["detail"]
+
+
+def test_refine_endpoint_bounds_current_draft_before_provider_call(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _provider(monkeypatch, True)
+    from maverick_dashboard import workflow_ai
+
+    called = []
+    monkeypatch.setattr(
+        workflow_ai, "refine_playbook", lambda *a, **k: called.append(True))
+    r = _client().post(
+        "/api/v1/workflows/refine",
+        json={
+            "form": "playbook",
+            "instruction": "make it safer",
+            "current": {"persona": "x" * 60_000},
+        },
+    )
+    assert r.status_code == 400
+    assert "too large" in r.json()["detail"]
+    assert called == []
 
 
 def test_draft_from_file_feeds_text(monkeypatch, tmp_path):
@@ -348,23 +455,25 @@ def test_draft_endpoint_wraps_llm_error_as_502(monkeypatch, tmp_path):
     from maverick_dashboard import workflow_ai
 
     def boom(*a, **k):
-        raise BudgetExceeded("drafting cap hit")
+        raise BudgetExceeded("drafting cap hit sk-abcdefghijklmnopqrstuvwxyz123456")
 
     monkeypatch.setattr(workflow_ai, "draft_workflow", boom)
     r = _client().post("/api/v1/workflows/draft", json={"description": "x"})
     assert r.status_code == 502
+    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in r.text
 
 
-def test_builder_page_disables_playbook_when_pack_editing_off(monkeypatch, tmp_path):
-    # When pack editing is off, the builder disables playbook mode up front
-    # rather than leading a non-admin to a 403 at Save.
+def test_builder_allows_unsaved_playbook_draft_when_pack_editing_off(monkeypatch, tmp_path):
+    # Draft/refine remains useful to an operator; only validate/save is disabled.
     _isolate(monkeypatch, tmp_path)
     import maverick.config as cfg
     real = cfg.get_features
     monkeypatch.setattr(cfg, "get_features", lambda: {**real(), "pack_editing": False})
     html = _client().get("/workflow-builder").text
     assert "var PACK_EDITING = false" in html
-    assert "requires a dashboard admin" in html
+    assert "draft now; admin validates and saves" in html
+    assert 'id="pb-save-btn" class="btn btn--primary" disabled' in html
+    assert "do not create a runtime pause" in html
 
 
 def _stub_playbook(monkeypatch, draft):
@@ -465,13 +574,122 @@ def test_refine_endpoint_routes_by_form(monkeypatch, tmp_path):
     monkeypatch.setattr(workflow_ai, "refine_workflow",
                         lambda cur, instr: {"name": "t", "title": "T", "params": [],
                                             "steps": ["s"], "body": "b", "budget_dollars": 5.0})
-    monkeypatch.setattr(workflow_ai, "refine_playbook", lambda cur, instr: _PB_DRAFT)
+    monkeypatch.setattr(
+        workflow_ai, "refine_playbook", lambda cur, instr, **k: _PB_DRAFT)
     rt = _client().post("/api/v1/workflows/refine",
                         json={"form": "template", "instruction": "make it weekly", "current": {}})
     assert rt.status_code == 200 and rt.json()["name"] == "t"
     rp = _client().post("/api/v1/workflows/refine",
                         json={"form": "playbook", "instruction": "require approval", "current": {}})
     assert rp.status_code == 200 and rp.json()["form"] == "playbook"
+
+
+def test_operators_can_draft_playbooks_but_only_admins_can_validate_or_save(
+    monkeypatch, tmp_path
+):
+    """Generating an unsaved first pass cannot cross the pack mutation gate."""
+    _isolate(monkeypatch, tmp_path)
+    _enable_proxy_auth(monkeypatch)
+    _provider(monkeypatch, True)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:admin")
+
+    from maverick_dashboard import app as app_mod
+    from maverick_dashboard import rbac, workflow_ai
+
+    rbac.set_role("user:operator", "operator")
+    monkeypatch.setattr(app_mod, "check_goal_rate_limit", lambda *a, **k: None)
+    template = {
+        "name": "safe-template", "title": "Safe template", "params": [],
+        "steps": ["do work"], "body": "## Steps\n1. do work", "budget_dollars": 5.0,
+    }
+    monkeypatch.setattr(workflow_ai, "draft_workflow", lambda *a, **k: template)
+    monkeypatch.setattr(workflow_ai, "refine_workflow", lambda *a, **k: template)
+    monkeypatch.setattr(workflow_ai, "draft_playbook", lambda *a, **k: _PB_DRAFT)
+    monkeypatch.setattr(workflow_ai, "refine_playbook", lambda *a, **k: _PB_DRAFT)
+
+    paths = (
+        "/api/v1/workflows/draft",
+        "/api/v1/workflows/draft-from-file",
+        "/api/v1/workflows/refine",
+    )
+    client = _client()
+    for path in paths:
+        operator_draft = _post_builder_form(client, path, "playbook", "operator")
+        assert operator_draft.status_code == 200, (path, operator_draft.text)
+        assert operator_draft.json()["form"] == "playbook"
+
+        template_ok = _post_builder_form(client, path, "template", "operator")
+        assert template_ok.status_code == 200, (path, template_ok.text)
+
+        admin_ok = _post_builder_form(client, path, "playbook", "admin")
+        assert admin_ok.status_code == 200, (path, admin_ok.text)
+
+    pack = {
+        key: value for key, value in _PB_DRAFT.items()
+        if key not in {"form", "name", "notes"}
+    }
+    denied_validate = client.post(
+        "/api/v1/agents/ap-bot/validate",
+        headers={"X-Forwarded-User": "operator"},
+        json=pack,
+    )
+    denied_save = client.post(
+        "/api/v1/agents/ap-bot/override",
+        headers={"X-Forwarded-User": "operator"},
+        json=pack,
+    )
+    assert denied_validate.status_code == 403
+    assert denied_save.status_code == 403
+
+
+def test_playbook_draft_tool_grounding_is_tenant_scoped_through_api(monkeypatch, tmp_path):
+    """One tenant's tool catalog must never ground another tenant's playbook."""
+    _isolate(monkeypatch, tmp_path)
+    _enable_proxy_auth(monkeypatch)
+    _provider(monkeypatch, True)
+    monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:alice,user:bob")
+
+    from maverick.paths import current_tenant_id
+    from maverick_dashboard import api, workflow_ai
+    from maverick_dashboard import app as app_mod
+
+    monkeypatch.setattr(app_mod, "check_goal_rate_limit", lambda *a, **k: None)
+    catalog_calls = []
+
+    def tenant_tools(**_kwargs):
+        tenant = current_tenant_id()
+        catalog_calls.append(tenant)
+        return [{
+            "name": f"{tenant.replace(':', '_')}_private_tool",
+            "description": "tenant-private",
+            "params": [],
+            "category": "Other",
+        }]
+
+    model_reply = (
+        '{"name":"tenant-agent","description":"tenant work",'
+        '"allow_tools":["api_user_alice_private_tool","api_user_bob_private_tool"],'
+        '"max_risk":"low","steps":[{"name":"Act","instruction":"act",'
+        '"tools":["api_user_alice_private_tool","api_user_bob_private_tool"],'
+        '"gate":null}]}'
+    )
+    monkeypatch.setattr(api, "_live_tool_index", tenant_tools)
+    monkeypatch.setattr(workflow_ai, "_run_completion", lambda *a, **k: model_reply)
+
+    client = _client()
+    alice = _post_builder_form(
+        client, "/api/v1/workflows/draft", "playbook", "alice"
+    )
+    bob = _post_builder_form(client, "/api/v1/workflows/draft", "playbook", "bob")
+
+    assert alice.status_code == 200, alice.text
+    assert bob.status_code == 200, bob.text
+    assert alice.json()["allow_tools"] == ["api_user_alice_private_tool"]
+    assert bob.json()["allow_tools"] == ["api_user_bob_private_tool"]
+    assert alice.json()["workflow"][0]["tools"] == ["api_user_alice_private_tool"]
+    assert bob.json()["workflow"][0]["tools"] == ["api_user_bob_private_tool"]
+    assert catalog_calls == ["api:user:alice", "api:user:bob"]
 
 
 def test_refine_endpoint_requires_an_instruction(monkeypatch, tmp_path):
@@ -534,6 +752,11 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     # Reachable from the primary nav (Operate group): the redesigned Flows
     # builder is the sidebar entry; the workflow builder is linked in-page from it.
     assert '<span class="nav-label">Flows</span>' in r.text
+    # A Copilot handoff is short-lived, consumed once, and drafts without saving.
+    assert "lightwork.authoring-handoff" in r.text
+    assert "AUTHOR_HANDOFF.kind !== 'agent'" in r.text
+    assert "10 * 60 * 1000" in r.text
+    assert "sessionStorage.removeItem" in r.text
 
 
 def test_p1_builder_refinements(monkeypatch, tmp_path):
@@ -574,6 +797,28 @@ def test_builder_edit_agent_rehydrates_playbook(monkeypatch, tmp_path):
     # an unknown agent yields no prefill
     monkeypatch.setattr(de, "resolved_view", lambda name: None)
     assert "PB_EDIT = null" in _client().get("/workflow-builder?edit_agent=nope").text
+
+
+def test_non_admin_edit_agent_deeplink_withholds_existing_pack(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _enable_proxy_auth(monkeypatch)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:admin")
+    from maverick_dashboard import rbac
+
+    rbac.set_role("user:operator", "operator")
+    import maverick.domain_edit as de
+
+    def must_not_read(_name):
+        raise AssertionError("non-admin route read an existing pack")
+
+    monkeypatch.setattr(de, "resolved_view", must_not_read)
+    html = _client().get(
+        "/workflow-builder?edit_agent=invoice-clerk",
+        headers={"X-Forwarded-User": "operator"},
+    ).text
+    assert "PB_EDIT = null" in html
+    assert 'PB_EDIT_DENIED = "invoice-clerk"' in html
+    assert "draft a new unsaved first pass" in html
 
 
 def test_builder_edit_deeplink_rehydrates_editor(monkeypatch, tmp_path):

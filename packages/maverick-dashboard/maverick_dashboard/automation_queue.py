@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import threading
 import time
 
@@ -91,6 +90,17 @@ def _poll_marker(name: str):
     return config.dashboard_overrides_path().parent / "automation-poll" / name
 
 
+def _trigger_poll_key(trigger: dict) -> str:
+    """Namespace a cadence marker without placing a tenant id in its path."""
+    import hashlib
+
+    tenant = str(trigger.get("tenant") or "")
+    if not tenant:
+        return str(trigger["name"])
+    digest = hashlib.sha256(tenant.encode("utf-8")).hexdigest()[:32]
+    return f"{trigger['name']}--{digest}"
+
+
 def _default_interval() -> int:
     v = _cfg_int("automation", "default_interval_seconds")
     return max(_MIN_INTERVAL, v) if v else _DEFAULT_INTERVAL
@@ -127,33 +137,16 @@ def _mark_polled(name: str) -> None:
 
 @contextlib.contextmanager
 def _poll_guard():
-    """Non-blocking cross-process lock around the poll body. Yields True when
-    acquired (this process polls), False when another process is already polling
-    (skip). JobQueue.claim dedupes the tick JOB; this dedupes the poll/cursor
-    read-modify-write it performs, so overlapping ticks can't double-fire."""
-    try:
-        import fcntl
-    except Exception:  # pragma: no cover -- non-POSIX: no cross-process guard
-        yield True
-        return
+    """Portable cross-process lock around the poll/cursor transaction.
+
+    A second worker may wait briefly, then re-check due markers under the lock;
+    correctness is more important than the old POSIX-only non-blocking shortcut,
+    which silently provided no serialization on Windows.
+    """
+    from maverick.file_lock import cross_process_lock
     p = config.dashboard_overrides_path().parent / "automation-poll.lock"
-    fd = None
-    try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(p), os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            yield False
-            return
+    with cross_process_lock(p):
         yield True
-    finally:
-        if fd is not None:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            except Exception:  # pragma: no cover
-                pass
-            os.close(fd)
 
 
 # ---- handlers ---------------------------------------------------------------
@@ -181,6 +174,8 @@ def _run_in_payload_tenant(payload: dict, fn) -> None:
     if not tenant:
         fn()
         return
+    from maverick.tenant.registry import assert_tenant_active
+    assert_tenant_active(str(tenant))
     from maverick.paths import reset_tenant, set_tenant
     token = set_tenant(str(tenant))
     try:
@@ -189,8 +184,119 @@ def _run_in_payload_tenant(payload: dict, fn) -> None:
         reset_tenant(token)
 
 
-def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = "",
-                     origin: str = "manual") -> str:
+def _configured_tenant_floor() -> str:
+    """The deployment's explicit tenant floor, ignoring ambient ContextVars.
+
+    Recurring workers must not inherit whichever request/job tenant happened to
+    invoke them.  A deployment-wide ``MAVERICK_TENANT`` or client binding is a
+    real namespace floor, however, and remains the base namespace instead of an
+    unreachable shared root.
+    """
+    import os
+
+    tenant = os.environ.get("MAVERICK_TENANT", "").strip()
+    if tenant:
+        return tenant
+    try:
+        from maverick.client import client_id
+
+        return str(client_id() or "").strip()
+    except Exception:  # pragma: no cover -- a client lookup never blocks maintenance
+        return ""
+
+
+def _run_for_active_tenants(operation: str, fn) -> bool:
+    """Run tenant-scoped maintenance in the base + every active namespace.
+
+    The automation queue is process-global while learning/flow stores live under
+    :func:`maverick.paths.data_dir`.  One unscoped cron therefore cannot rely on
+    a worker thread's ambient ContextVar.  Each namespace is pinned explicitly,
+    restored in ``finally``, and isolated so one tenant's failure cannot starve
+    the remaining tenants until the next cron.
+    """
+    from maverick.paths import reset_tenant, set_tenant
+
+    base_tenant = _configured_tenant_floor()
+
+    def _run_one(tenant: str, *, require_active: bool) -> bool:
+        token = None
+        try:
+            if require_active:
+                from maverick.tenant.registry import assert_tenant_active
+
+                assert_tenant_active(tenant)
+            token = set_tenant(tenant or None)
+            fn()
+            return True
+        except Exception:
+            log.exception("%s failed for tenant %s", operation, tenant or "<shared>")
+            return False
+        finally:
+            if token is not None:
+                reset_tenant(token)
+
+    try:
+        from maverick.tenant.registry import list_tenants
+
+        tenants = list(list_tenants())
+    except Exception:
+        log.exception("%s could not enumerate active tenants", operation)
+        return False
+    registered = {
+        str(getattr(rec, "id", "") or "").strip(): rec for rec in tenants
+    }
+    # Explicitly pin even the shared/client-floor pass. This clears a stale
+    # request/job ContextVar instead of accidentally learning in that namespace.
+    # Provisioned floors must pass the same suspension check as every other
+    # tenant; only an unregistered legacy single-tenant floor bypasses it.
+    complete = _run_one(base_tenant, require_active=base_tenant in registered)
+
+    seen = {base_tenant} if base_tenant else set()
+    for rec in tenants:
+        tenant = str(getattr(rec, "id", "") or "").strip()
+        if not tenant or not getattr(rec, "active", False) or tenant in seen:
+            continue
+        seen.add(tenant)
+        complete = _run_one(tenant, require_active=True) and complete
+    return complete
+
+
+_SUITES_UNSET = object()
+
+
+def _initial_flow_identity(
+    owner: str,
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
+    allowed_suites=_SUITES_UNSET,
+) -> tuple[str, str, list[str] | None]:
+    """Capture the authenticated execution identity in the durable run row."""
+    uid = str(user_id or _user_id_from_owner(owner) or "").strip()
+    run_channel = str(channel or ("api" if uid else "")).strip()
+    suites = allowed_suites
+    if suites is _SUITES_UNSET:
+        suites = None
+        if uid and owner.startswith("user:"):
+            from maverick.suite_grants import granted_suites
+
+            suites = granted_suites(owner)
+    normalized = None if suites is None else sorted({str(s) for s in suites if str(s)})
+    return run_channel, uid, normalized
+
+
+def enqueue_flow_run_once(
+    flow_id: str,
+    data: dict,
+    owner: str = "",
+    idem_key: str = "",
+    origin: str = "manual",
+    *,
+    dry_run: bool = False,
+    channel: str | None = None,
+    user_id: str | None = None,
+    allowed_suites=_SUITES_UNSET,
+) -> tuple[str, bool]:
     """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
     Shared by the background tick and the on-demand poll so a flow-target trigger
     fires the same way on both paths. ``idem_key`` (flow_id + a stable event id)
@@ -199,19 +305,176 @@ def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = 
     for attribution + trigger-outcome learning. The original inputs are kept so
     the run can be retried."""
     from maverick.flow import store as flow_store
-    if idem_key:
-        existing = flow_store.find_run_by_idem(flow_id, idem_key)
+    # The claim lock spans lookup, run reservation, queue insert, and durable
+    # claim publication.  Two processes can no longer both observe "missing".
+    lock = (
+        flow_store.idempotency_lock(flow_id, idem_key)
+        if idem_key else contextlib.nullcontext()
+    )
+    with lock:
+        # Pin the current generation before consulting the idempotency index.
+        # Delete/recreate intentionally starts a new key space even when the
+        # replacement reuses the same flow id and external event id.
+        definition_digest, definition_version, subflow_digests = (
+            flow_store.snapshot_current_flow_bundle(flow_id)
+        )
+        snapshotted_flow = flow_store.load_flow_snapshot(definition_digest)
+        existing = (
+            flow_store.find_run_by_idem(
+                flow_id, idem_key, revision=snapshotted_flow.revision)
+            if idem_key else None
+        )
         if existing is not None:
-            return existing.run_id            # already fired for this event -> dedup
-    run_id = flow_store.new_run_id()
-    flow_store.save_run(flow_store.FlowRun(
-        run_id=run_id, flow_id=flow_id, status="queued", owner=owner,
-        data=dict(data), input_data=dict(data), idem_key=idem_key, origin=origin))
-    payload = {"flow_id": flow_id, "run_id": run_id, "data": data, "owner": owner,
-              "origin": origin}
-    payload.update(_job_tenant_payload())
-    queue().enqueue(FLOW_RUN_KIND, payload)
-    return run_id
+            if existing.status == "queued":
+                _ensure_queued_flow_job(existing, tenant=str(
+                    _job_tenant_payload().get("tenant") or ""))
+            return existing.run_id, True
+        run_id = flow_store.new_run_id()
+        run_channel, run_user_id, run_suites = _initial_flow_identity(
+            owner,
+            channel=channel,
+            user_id=user_id,
+            allowed_suites=allowed_suites,
+        )
+        flow_store.save_run(flow_store.FlowRun(
+            run_id=run_id, flow_id=flow_id, status="queued", owner=owner,
+            data=dict(data), input_data=dict(data), idem_key=idem_key, origin=origin,
+            dry_run=bool(dry_run),
+            definition_digest=definition_digest,
+            definition_version=definition_version,
+            definition_revision=snapshotted_flow.revision,
+            subflow_digests=subflow_digests,
+            execution_channel=run_channel,
+            execution_user_id=run_user_id,
+            allowed_suites=run_suites))
+        # Publish the durable first-writer claim before crossing into the SQLite
+        # outbox.  A crash after this point deduplicates back to the queued JSON
+        # reservation, whose missing job is repaired below/on startup.  A stale
+        # claim left by an ordinary enqueue exception is harmless because lookup
+        # verifies the referenced run before accepting it.
+        if idem_key:
+            flow_store.save_idempotency_claim(flow_id, idem_key, run_id)
+        payload = {"flow_id": flow_id, "run_id": run_id, "data": data, "owner": owner,
+                   "origin": origin, "dry_run": bool(dry_run)}
+        payload.update(_job_tenant_payload())
+        try:
+            queue().enqueue(FLOW_RUN_KIND, payload)
+        except Exception:
+            # The exception boundary is ambiguous: SQLite may have committed
+            # before a wrapper/driver raised. Keep the JSON outbox reservation
+            # and idempotency claim. A caller retry or startup reconciliation
+            # detects an existing job or publishes the missing one, but never
+            # creates a second run against a possibly committed delivery.
+            raise
+        return run_id, False
+
+
+def enqueue_flow_run(
+    flow_id: str,
+    data: dict,
+    owner: str = "",
+    idem_key: str = "",
+    origin: str = "manual",
+    *,
+    dry_run: bool = False,
+    channel: str | None = None,
+    user_id: str | None = None,
+    allowed_suites=_SUITES_UNSET,
+) -> str:
+    return enqueue_flow_run_once(
+        flow_id,
+        data,
+        owner,
+        idem_key,
+        origin,
+        dry_run=dry_run,
+        channel=channel,
+        user_id=user_id,
+        allowed_suites=allowed_suites,
+    )[0]
+
+
+def _flow_job_for_run(run_id: str):
+    """Find any durable queue row for ``run_id`` (pending through terminal)."""
+    q = queue()
+    total = sum(q.counts().values())
+    # Queue history is normally purged; cap a corrupt/unbounded database scan.
+    for job in q.list(limit=min(max(1, total), 100_000)):
+        if (job.kind == FLOW_RUN_KIND
+                and str((job.payload or {}).get("run_id") or "") == run_id):
+            return job
+    return None
+
+
+def _ensure_queued_flow_job(run, *, tenant: str = "") -> None:
+    """Repair the JSON-reservation -> SQLite-job crash gap without replaying.
+
+    The run row is the durable outbox record. If a process died after reserving
+    it but before inserting the queue job, startup or an idempotent retry safely
+    publishes the missing job. A terminal job is never re-published.
+    """
+    from maverick.flow import store
+
+    with store.run_lock(run.run_id):
+        current = store.load_run(run.run_id)
+        if current is None or current.status != "queued":
+            return
+        if not current.definition_digest:
+            current.status = "failed"
+            current.error = (
+                "immutable execution plan was not captured; create a replacement run"
+            )
+            store.save_run(current)
+            return
+        job = _flow_job_for_run(current.run_id)
+        if job is not None:
+            if job.status in {"done", "failed"}:
+                current.status = "failed"
+                current.error = "queue delivery ended before execution began"
+                store.save_run(current)
+            return
+        payload = {
+            "flow_id": current.flow_id,
+            "run_id": current.run_id,
+            "data": dict(current.input_data or current.data or {}),
+            "owner": current.owner,
+            "origin": current.origin,
+            "dry_run": bool(current.dry_run),
+        }
+        if tenant:
+            payload["tenant"] = tenant
+        queue().enqueue(FLOW_RUN_KIND, payload)
+
+
+def _repair_queued_flow_outbox() -> None:
+    """Recover missing flow jobs across shared and active tenant namespaces."""
+    from maverick.flow import store
+    from maverick.paths import current_tenant_id
+
+    def _repair() -> None:
+        tenant = current_tenant_id() or ""
+        runs = store.list_runs(limit=None)  # newest first
+        # One bounded startup pass indexes pre-claim legacy runs. Afterwards a
+        # random idempotency key never forces an attacker-amplifiable full scan.
+        for run in runs:
+            if run.idem_key:
+                with store.idempotency_lock(run.flow_id, run.idem_key):
+                    store.save_idempotency_claim(
+                        run.flow_id, run.idem_key, run.run_id, overwrite=False)
+        for run in runs:
+            if run.status == "queued":
+                _ensure_queued_flow_job(run, tenant=tenant)
+
+    # A reconcile invoked inside a tenant-pinned request must not republish that
+    # reservation as a tenantless job before the global sweep clears ambient
+    # request state. Visit it explicitly, then sweep the configured/active set.
+    ambient = current_tenant_id() or ""
+    if ambient:
+        try:
+            _run_in_payload_tenant({"tenant": ambient}, _repair)
+        except Exception:
+            log.exception("could not repair ambient tenant flow-run outbox")
+    _run_for_active_tenants("queued flow-run outbox repair", _repair)
 
 
 def _user_id_from_owner(owner: str) -> str:
@@ -225,7 +488,11 @@ def _user_id_from_owner(owner: str) -> str:
 
 def _poll_due_triggers() -> None:
     from maverick_dashboard import event_poll, event_triggers_store
-    due = [t for t in event_triggers_store.list_triggers() if _due(t["name"], _interval(t))]
+    due = [
+        t
+        for t in event_triggers_store.list_triggers()
+        if _due(_trigger_poll_key(t), _interval(t))
+    ]
     if not due:
         return
     q = queue()
@@ -239,27 +506,41 @@ def _poll_due_triggers() -> None:
     for t in due:
         groups.setdefault(t.get("owner") or "", []).append(t)
 
-    results: list[dict] = []
+    errored: set[str] = set()
     for owner, triggers in groups.items():
-        user_id = _user_id_from_owner(owner)
+        def _fire(goal_id: int, owner: str = owner) -> None:
+            from maverick_dashboard.auth import stored_automation_identity
 
-        def _fire(goal_id: int, user_id: str = user_id) -> None:
+            identity_owner, user_id, suites = stored_automation_identity(owner)
             payload: dict = {"goal_id": int(goal_id)}
+            payload.update(_job_tenant_payload())
             if user_id:
                 payload["user_id"] = user_id
                 payload["channel"] = "api"
+            if identity_owner:
+                payload["concurrency_principal"] = identity_owner
+            if suites is not None:
+                payload["allowed_suites"] = sorted(suites)
             q.enqueue("run_goal", payload)   # durable: retry + dead-letter
 
-        results.extend(event_poll.poll_and_fire(
-            _world(), triggers, principal=owner, fire=_fire, fire_flow=enqueue_flow_run))
+        group_results = event_poll.poll_and_fire(
+            _world,
+            triggers,
+            principal=owner,
+            fire=_fire,
+            fire_flow=enqueue_flow_run,
+        )
+        for trigger, result in zip(triggers, group_results, strict=True):
+            if result.get("poll_error"):
+                errored.add(_trigger_poll_key(trigger))
 
     # Advance the due-marker only for triggers that actually polled; a trigger
     # whose source errored is left un-marked so it retries on the next tick
     # rather than going dark for a full interval.
-    errored = {r["name"] for r in results if r.get("poll_error")}
     for t in due:
-        if t["name"] not in errored:
-            _mark_polled(t["name"])
+        key = _trigger_poll_key(t)
+        if key not in errored:
+            _mark_polled(key)
 
 
 def _handle_tick(_job=None) -> None:
@@ -279,25 +560,27 @@ def _handle_tick(_job=None) -> None:
 
 def _handle_dream(_job=None) -> None:
     """Fail-open: swallow errors so a partial dream isn't re-applied by the
-    worker's retry (dream_cycle is not transactional); the next cron runs it."""
+    worker's retry (dream_cycle is not transactional); the next cron runs it.
+    Learning stores are tenant-scoped, so the one process-global cron explicitly
+    visits the shared/client floor and every active tenant."""
     from maverick import dreaming
-    if not dreaming.enabled():
-        return
-    try:
-        dreaming.dream_cycle(_world())
-    except Exception:  # pragma: no cover -- fail-open
-        log.exception("scheduled dream cycle failed")
+
+    def _cycle() -> None:
+        # Enablement can be overridden per tenant; check it inside the pin.
+        if dreaming.enabled():
+            dreaming.dream_cycle(_world())
+
+    _run_for_active_tenants("scheduled dream cycle", _cycle)
 
 
 def _handle_assess_sweep(_job=None) -> None:
     """Re-assess every governance subject on a cadence, so drift flips accepted
     reviews back to needs-review and overdue re-reviews surface without a human
-    remembering to click. Fail-open like the other cron handlers."""
-    try:
-        from maverick import assessments
-        assessments.sweep_due()
-    except Exception:  # pragma: no cover -- fail-open
-        log.exception("scheduled assessment sweep failed")
+    remembering to click. Assessment registers are tenant-scoped, so the global
+    cron visits each active namespace explicitly and fails open per tenant."""
+    from maverick import assessments
+
+    _run_for_active_tenants("scheduled assessment sweep", assessments.sweep_due)
 
 
 def _handle_flywheel(_job=None) -> None:
@@ -306,19 +589,75 @@ def _handle_flywheel(_job=None) -> None:
     (failures, sign-offs, feedback, real system-of-record results) land
     continuously, but nothing consolidated them into guardrails/habits without a
     manual `maverick flywheel`. Gated (`maybe_run` is a no-op unless
-    ``[data_engine]`` is on) and fail-open like the dream cycle."""
+    ``[data_engine]`` is on), tenant-explicit, and fail-open like the dream
+    cycle."""
     from maverick import flywheel
+
+    _run_for_active_tenants("scheduled flywheel cycle", flywheel.maybe_run)
+
+
+def _flow_execution_identity(run) -> tuple[str | None, str | None, frozenset[str] | None]:
+    """Resolve a run's identity and apply the current suite grant as a floor.
+
+    A queued grant may narrow but never widen while waiting: if either the
+    enqueue-time or current grant is restricted, dispatch uses their
+    intersection.  This preserves revocations and prevents deleting a grant
+    from silently broadening an already-authorized queued run.
+    """
+    user_id = str(run.execution_user_id or _user_id_from_owner(run.owner) or "").strip()
+    if not user_id:
+        return None, None, None
+    channel = str(run.execution_channel or "api").strip() or "api"
+    initial = (
+        None if run.allowed_suites is None else frozenset(str(s) for s in run.allowed_suites)
+    )
+    from maverick.suite_grants import granted_suites
+
+    current = granted_suites(run.owner) if run.owner.startswith("user:") else None
+    if initial is None:
+        allowed = current
+    elif current is None:
+        allowed = initial
+    else:
+        allowed = initial & current
+    return channel, user_id, allowed
+
+
+def _flow_execution_authorized(run) -> bool:
+    """Apply current lifecycle + RBAC policy as a dispatch-time floor."""
     try:
-        flywheel.maybe_run()
-    except Exception:  # pragma: no cover -- fail-open
-        log.exception("scheduled flywheel cycle failed")
+        from maverick_dashboard.auth import stored_automation_identity
+
+        stored_automation_identity(str(run.owner or ""))
+        return True
+    except Exception:
+        # Lifecycle/RBAC policy is a security boundary. An unreadable policy
+        # store is not a reason to run an already-queued external side effect.
+        return False
 
 
-def _flow_runners(owner: str):
+def _flow_runners(run):
     from maverick.flow import execution
+    from maverick.sandbox import build_sandbox
     w = _world()
-    return (execution.default_agent_runner(w, owner=owner),
-            execution.default_action_runner(w))
+    sandbox = build_sandbox()
+    channel, user_id, allowed_suites = _flow_execution_identity(run)
+    return (
+        execution.default_agent_runner(
+            w,
+            owner=run.owner,
+            channel=channel,
+            user_id=user_id,
+            allowed_suites=allowed_suites,
+            concurrency_principal=run.owner or user_id,
+        ),
+        execution.default_action_runner(
+            w,
+            sandbox=sandbox,
+            channel=channel,
+            user_id=user_id,
+        ),
+    )
 
 
 def _public_base_url() -> str:
@@ -337,11 +676,14 @@ def _public_base_url() -> str:
     return url
 
 
-def enqueue_flow_resume(flow_id: str, run_id: str, decision: str, owner: str = "") -> None:
+def enqueue_flow_resume(flow_id: str, run_id: str, decision: str, owner: str = "",
+                        *, tenant: str = "") -> None:
     """Enqueue a durable resume of a paused flow run with a human decision. Shared
     by the API resume endpoint and the signed-link approval endpoint."""
-    queue().enqueue(FLOW_RESUME_KIND, {
-        "flow_id": flow_id, "run_id": run_id, "decision": decision, "owner": owner})
+    payload = {
+        "flow_id": flow_id, "run_id": run_id, "decision": decision, "owner": owner}
+    payload.update({"tenant": tenant} if tenant else _job_tenant_payload())
+    queue().enqueue(FLOW_RESUME_KIND, payload)
 
 
 def _approval_body(name: str, run) -> str:
@@ -367,7 +709,12 @@ def _notify_flow(flow, run) -> None:
     pause carries actionable approve/reject links when a public URL is set."""
     if flow is None or not getattr(flow, "notify", False):
         return
-    from maverick.flow.runner import STATUS_COMPLETED, STATUS_FAILED, STATUS_PAUSED_APPROVAL
+    from maverick.flow.runner import (
+        STATUS_COMPLETED,
+        STATUS_FAILED,
+        STATUS_INDETERMINATE,
+        STATUS_PAUSED_APPROVAL,
+    )
     name = flow.name or flow.id
     if run.status == STATUS_PAUSED_APPROVAL:
         body, prio = _approval_body(name, run), "high"
@@ -375,6 +722,12 @@ def _notify_flow(flow, run) -> None:
         body, prio = f"“{name}” finished.", "default"
     elif run.status == STATUS_FAILED:
         body, prio = f"“{name}” failed: {run.error or 'see the run'}", "high"
+    elif run.status == STATUS_INDETERMINATE:
+        body = (
+            f"“{name}” stopped with an indeterminate external effect. "
+            "Reconcile the target system before retrying."
+        )
+        prio = "high"
     else:
         return
     try:
@@ -384,41 +737,43 @@ def _notify_flow(flow, run) -> None:
         log.debug("flow notify failed", exc_info=True)
 
 
-_ACTIVE_RUN_STATUSES = ("running", "paused_approval", "paused_delay")
+def _schedule_paused_resume(run, source_payload: dict) -> None:
+    """Persist the tenant-aware delayed continuation when a run parks.
+
+    This is the primary delay/approval-expiry driver.  The periodic sweep remains
+    only as recovery for legacy runs; it cannot safely discover every tenant's
+    private run directory from an unscoped worker.
+    """
+    if not run.resume_at:
+        return
+    from maverick.flow.runner import STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY
+    if run.status not in {STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY}:
+        return
+    payload = {"flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner}
+    if run.status == STATUS_PAUSED_APPROVAL:
+        payload["expired"] = True
+    tenant = source_payload.get("tenant")
+    if tenant:
+        payload["tenant"] = tenant
+    queue().enqueue(FLOW_RESUME_KIND, payload, run_at=float(run.resume_at))
+
+
 _SINGLETON_DEFER_SECONDS = 30.0   # how long to wait before re-checking a busy singleton
 _SINGLETON_MAX_DEFERS = 40        # ~20 min of deferral before giving up (avoid infinite requeue)
 
 
 @contextlib.contextmanager
 def _flow_slot_guard(flow_id: str):
-    """Non-blocking per-flow lock around the max_concurrent check+claim, so two
-    workers pulling two runs of the SAME flow at once can't both count 0 in-flight
-    and both start. Yields True when held (this worker decides), False when another
-    worker holds it (defer and let it decide). Mirrors _poll_guard's flock."""
-    try:
-        import fcntl
-    except Exception:  # pragma: no cover -- non-POSIX: no cross-process guard
-        yield True
-        return
+    """Portable per-flow lock around the max_concurrent check + claim."""
+    from maverick.file_lock import cross_process_lock
     from maverick.flow.store import _safe_id
-    p = config.dashboard_overrides_path().parent / f"flow-slot-{_safe_id(flow_id)}.lock"
-    fd = None
-    try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(p), os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            yield False
-            return
+    from maverick.paths import data_dir
+
+    # Tenant-scoped placement prevents a tenant that reuses a flow id from
+    # contending on another tenant's singleton lock.
+    p = data_dir("flows", "slots", _safe_id(flow_id))
+    with cross_process_lock(p):
         yield True
-    finally:
-        if fd is not None:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            except Exception:  # pragma: no cover
-                pass
-            os.close(fd)
 
 
 def _active_run_count(flow_id: str, exclude_run_id: str) -> int:
@@ -426,8 +781,10 @@ def _active_run_count(flow_id: str, exclude_run_id: str) -> int:
     don't count -- they're exactly what the slot guard gates -- else two queued
     events would each see the other and defer forever."""
     from maverick.flow import store
+    from maverick.flow.runner import ACTIVE_STATUSES
+    occupying = ACTIVE_STATUSES - {"queued"}
     return sum(1 for r in store.list_runs(flow_id=flow_id, limit=None)
-               if r.run_id != exclude_run_id and r.status in _ACTIVE_RUN_STATUSES)
+               if r.run_id != exclude_run_id and r.status in occupying)
 
 
 def _defer_for_slot(payload: dict) -> bool:
@@ -445,13 +802,18 @@ def _defer_for_slot(payload: dict) -> bool:
 
 
 def _claim_run_slot(run_id: str) -> None:
-    """Flip a queued run to 'running' (preserving its inputs) while the slot lock is
-    held, so a concurrent sibling's _active_run_count sees it and defers. execute()
-    re-writes 'running' from the same placeholder, so this is just an early claim."""
+    """Claim a queued concurrency slot without impersonating execution.
+
+    ``running`` means an executor crossed the possible-effect boundary; a stale
+    delivery that finds it must quarantine rather than replay. ``claimed`` is a
+    distinct pre-execution state that the first delivery may safely consume.
+    """
     from maverick.flow import store
+    from maverick.flow.runner import STATUS_CLAIMED
+
     run = store.load_run(run_id)
     if run is not None and run.status == "queued":
-        run.status = "running"
+        run.status = STATUS_CLAIMED
         store.save_run(run)
 
 
@@ -465,6 +827,18 @@ def _skip_run_at_cap(run_id: str) -> None:
         store.save_run(run)
 
 
+def _mark_flow_run_failed(run_id: str, message: str) -> None:
+    """Publish a bounded, non-secret terminal failure for a known-safe preflight."""
+    from maverick.flow import store
+
+    run = store.load_run(run_id)
+    if run is None:
+        return
+    run.status = "failed"
+    run.error = str(message)[:500]
+    store.save_run(run)
+
+
 def _handle_flow_run(job=None) -> None:
     """Run a stored flow to its next pause/finish (durable one-shot job). An
     agent node becomes a real goal, an action node a tool call; the run state is
@@ -476,13 +850,46 @@ def _handle_flow_run(job=None) -> None:
     try:
         def _run() -> None:
             from maverick.flow import execution, store
-            flow = store.load_flow(flow_id)
+            run_id = str(payload.get("run_id") or "")
+            placeholder = store.load_run(run_id) if run_id else None
+            if placeholder is None:
+                log.warning("flow_run: no durable reservation for %s", run_id)
+                return
+            if placeholder.flow_id != flow_id:
+                _mark_flow_run_failed(run_id, "queue reservation does not match flow")
+                return
+            if not placeholder.definition_digest:
+                _mark_flow_run_failed(
+                    run_id,
+                    "immutable execution plan was not captured; create a replacement run",
+                )
+                return
+            try:
+                flow = store.load_flow_snapshot(placeholder.definition_digest)
+            except store.FlowSnapshotError:
+                _mark_flow_run_failed(run_id, "immutable execution plan is unavailable")
+                return
             if flow is None:
                 log.warning("flow_run: no such flow %s", flow_id)
+                _mark_flow_run_failed(run_id, "flow definition is unavailable")
                 return
-            owner = str(payload.get("owner") or "")
-            dry_run = bool(payload.get("dry_run"))
-            run_id = str(payload.get("run_id") or "")
+            if flow.id != placeholder.flow_id:
+                _mark_flow_run_failed(run_id, "immutable execution plan identity mismatch")
+                return
+            try:
+                store.validate_snapshot_bundle_owners(
+                    flow, placeholder.subflow_digests)
+            except store.FlowSnapshotError:
+                _mark_flow_run_failed(run_id, "immutable execution plan is unavailable")
+                return
+            # The persisted reservation is authoritative. Queue rows are a
+            # delivery mechanism and must not be able to upgrade a dry run,
+            # swap its owner/inputs, or change learning attribution.
+            owner = placeholder.owner
+            dry_run = bool(placeholder.dry_run)
+            if not dry_run and not _flow_execution_authorized(placeholder):
+                _mark_flow_run_failed(run_id, "flow execution authorization was revoked")
+                return
             # Per-flow concurrency cap: a singleton/limited flow (e.g. "drain the queue"
             # / "sync record X") must not run overlapping instances -- that double-fires
             # side effects and races the shared world. Under a per-flow lock, count
@@ -508,16 +915,19 @@ def _handle_flow_run(job=None) -> None:
             # A dry run exercises the graph with mock executors and records no grounded
             # outcome -- so "Test" can't hit production or skew the learning signal.
             agent_runner, action_runner = (execution.sandbox_runners() if dry_run
-                                           else _flow_runners(owner))
+                                           else _flow_runners(placeholder))
             run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                                    owner=owner, data=dict(payload.get("data") or {}),
+                                    owner=owner, data=dict(
+                                        placeholder.input_data or placeholder.data or {}),
                                     run_id=payload.get("run_id"), record_outcomes=not dry_run,
-                                    origin=str(payload.get("origin") or "manual"))
+                                    origin=placeholder.origin)
+            _schedule_paused_resume(run, payload)
             if not dry_run:
                 _notify_flow(flow, run)
         _run_in_payload_tenant(payload, _run)
-    except Exception:  # pragma: no cover -- fail-open
+    except Exception:
         log.exception("flow run failed for %s", flow_id)
+        raise
 
 
 def _handle_flow_resume(job=None) -> None:
@@ -533,23 +943,58 @@ def _handle_flow_resume(job=None) -> None:
     try:
         def _resume() -> None:
             from maverick.flow import store
-            flow = store.load_flow(flow_id)
-            if flow is None:
+            prior = store.load_run(run_id)
+            if prior is None:
                 return
-            owner = str(payload.get("owner") or "")
-            agent_runner, action_runner = _flow_runners(owner)
+            if prior.flow_id != flow_id:
+                _mark_flow_run_failed(run_id, "queue reservation does not match flow")
+                return
+            if not prior.definition_digest:
+                _mark_flow_run_failed(
+                    run_id,
+                    "immutable execution plan was not captured; create a replacement run",
+                )
+                return
+            try:
+                flow = store.load_flow_snapshot(prior.definition_digest)
+            except store.FlowSnapshotError:
+                _mark_flow_run_failed(run_id, "immutable execution plan is unavailable")
+                return
+            if flow is None:
+                _mark_flow_run_failed(run_id, "flow definition is unavailable")
+                return
+            if flow.id != prior.flow_id:
+                _mark_flow_run_failed(run_id, "immutable execution plan identity mismatch")
+                return
+            try:
+                store.validate_snapshot_bundle_owners(flow, prior.subflow_digests)
+            except store.FlowSnapshotError:
+                _mark_flow_run_failed(run_id, "immutable execution plan is unavailable")
+                return
+            owner = prior.owner
+            dry_run = bool(prior.dry_run)
+            if not dry_run and not _flow_execution_authorized(prior):
+                _mark_flow_run_failed(run_id, "flow execution authorization was revoked")
+                return
+            agent_runner, action_runner = (
+                execution.sandbox_runners() if dry_run else _flow_runners(prior)
+            )
             run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
                                     owner=owner, resume_run_id=run_id,
                                     decision=str(payload.get("decision") or "approved"),
                                     expired=bool(payload.get("expired")),
                                     from_failure=bool(payload.get("from_failure")),
-                                    inputs=dict(payload.get("inputs") or {}))
-            _notify_flow(flow, run)
+                                    inputs=dict(payload.get("inputs") or {}),
+                                    record_outcomes=not dry_run)
+            _schedule_paused_resume(run, payload)
+            if not dry_run:
+                _notify_flow(flow, run)
         _run_in_payload_tenant(payload, _resume)
     except execution.FlowNotResumable:
         return  # already resumed/finished -- benign
-    except Exception:  # pragma: no cover -- fail-open
+    except Exception:
         log.exception("flow resume failed for %s", run_id)
+        raise
 
 
 def _handle_flow_sweep(_job=None) -> None:
@@ -560,8 +1005,10 @@ def _handle_flow_sweep(_job=None) -> None:
     from maverick import flow
     if not flow.enabled():
         return
-    try:
+
+    def _sweep_current_tenant() -> None:
         from maverick.flow import runner, store
+
         now = time.time()
         for run in store.list_runs(owner=None, limit=1000):
             if not (run.resume_at and run.resume_at <= now):
@@ -583,8 +1030,8 @@ def _handle_flow_sweep(_job=None) -> None:
                 sweep_payload.update(_job_tenant_payload())
                 queue().enqueue(FLOW_RESUME_KIND, sweep_payload)
             # paused_event runs are NEVER swept -- only their event resumes them.
-    except Exception:  # pragma: no cover -- fail-open
-        log.exception("flow delay sweep failed")
+
+    _run_for_active_tenants("flow delay sweep", _sweep_current_tenant)
     # Also re-sync per-flow cron schedules from the store, so a flow scheduled
     # (or unscheduled) after boot is armed/disarmed within a minute -- no restart.
     try:
@@ -598,40 +1045,56 @@ def _handle_flow_evolve(_job=None) -> None:
     grounded outcomes before vs. after the change and REVERT it if it clearly
     regressed -- the arrow that lets the loop undo its own mistakes. Gated on
     ``[flows] auto_evolve`` (off by default); fail-open and idempotent (once a
-    node is reverted its newest apply is the revert, so it's skipped next pass)."""
+    node is reverted its newest apply is the revert, so it's skipped next pass).
+    The durable cron is process-global but definitions/evidence are tenant-scoped,
+    therefore every pass is explicitly pinned to one namespace at a time."""
+
+    _run_for_active_tenants("flow evolve pass", _evolve_current_tenant)
+
+
+def _evolve_current_tenant() -> None:
+    """Run one evolve/revert/auto-apply pass in the already-pinned namespace."""
     from maverick import flow as flow_mod
+
     if not flow_mod.auto_evolve_enabled():
         return
-    try:
-        from maverick.flow import evolution_log, evolve, store
-        for f in store.list_flows():
-            for node_id in list(f.nodes):
-                last = evolution_log.last_apply(f.id, node_id)
-                if not last or last.get("source") == "auto-revert":
-                    continue  # never applied, or already auto-reverted -> settled
-                impact = evolve.measure(f.id, node_id, float(last.get("ts") or 0.0))
-                if not evolve.regressed(impact):
-                    continue
-                apply_version = int(last.get("version") or 0)
-                if int(f.version or 0) != apply_version:
-                    continue  # stale apply boundary; a newer save may be human work
-                prior = store.load_version(f.id, apply_version - 1)
-                if prior is None or node_id not in prior.nodes:
-                    continue
-                reverted = evolve.revert_node(f, node_id, prior.nodes[node_id])
-                if reverted.validate():
-                    continue  # never save a structurally broken flow
-                applied_kind = f.nodes[node_id].kind
-                saved = store.save_flow(reverted)
-                evolution_log.record_apply(f.id, node_id, applied_kind,
-                                           prior.nodes[node_id].kind, saved.version,
-                                           source="auto-revert")
-                log.info("auto-reverted regressed rewrite: flow=%s node=%s (delta %.2f)",
-                         f.id, node_id, impact.get("delta") or 0.0)
-        if flow_mod.auto_apply_enabled():
-            _auto_apply_proposals()
-    except Exception:  # pragma: no cover -- fail-open
-        log.exception("flow evolve pass failed")
+    from maverick.flow import evolution_log, evolve, store
+
+    for f in store.list_flows():
+        for node_id in list(f.nodes):
+            last = evolution_log.last_apply(f.id, node_id)
+            if not last or last.get("source") == "auto-revert":
+                continue  # never applied, or already auto-reverted -> settled
+            impact = evolve.measure(f.id, node_id, float(last.get("ts") or 0.0))
+            if not evolve.regressed(impact):
+                continue
+            apply_version = int(last.get("version") or 0)
+            if int(f.version or 0) != apply_version:
+                continue  # stale apply boundary; a newer save may be human work
+            prior = store.load_version(f.id, apply_version - 1)
+            if prior is None or node_id not in prior.nodes:
+                continue
+            reverted = evolve.revert_node(f, node_id, prior.nodes[node_id])
+            if reverted.validate():
+                continue  # never save a structurally broken flow
+            applied_kind = f.nodes[node_id].kind
+            try:
+                saved = store.save_flow(
+                    reverted,
+                    expected_version=f.version,
+                    expected_revision=f.revision,
+                )
+            except store.FlowVersionConflict:
+                # A human or another learner won the race. Never overwrite
+                # that newer definition with a stale measurement snapshot.
+                continue
+            evolution_log.record_apply(f.id, node_id, applied_kind,
+                                       prior.nodes[node_id].kind, saved.version,
+                                       source="auto-revert")
+            log.info("auto-reverted regressed rewrite: flow=%s node=%s (delta %.2f)",
+                     f.id, node_id, impact.get("delta") or 0.0)
+    if flow_mod.auto_apply_enabled():
+        _auto_apply_proposals()
 
 
 def _auto_apply_proposals() -> None:
@@ -666,7 +1129,14 @@ def _auto_apply_proposals() -> None:
                 continue
             if changed.validate():
                 continue                            # never save a structurally broken flow
-            saved = store.save_flow(changed)
+            try:
+                saved = store.save_flow(
+                    changed,
+                    expected_version=f.version,
+                    expected_revision=f.revision,
+                )
+            except store.FlowVersionConflict:
+                continue
             evolution_log.record_apply(f.id, prop.node_id, prop.from_kind, prop.to_kind,
                                        saved.version, source="auto-apply")
             log.info("auto-applied rewrite: flow=%s node=%s %s->%s (%.0f%% over %d)%s",
@@ -686,16 +1156,19 @@ def _handle_flow_cron(job=None) -> None:
     if not flow_id:
         return
     try:
-        from maverick import flow as flow_mod
-        if not flow_mod.enabled():
-            return
-        from maverick.flow import store
-        flow = store.load_flow(flow_id)
-        if flow is None or flow.schedule.strip() != str(payload.get("__cron__") or "").strip():
-            return  # deleted, or the schedule changed out from under this cron
-        # Attribute the scheduled run to the flow's owner (loaded here, so the cron
-        # payload needn't carry it) and stamp its origin for the run history.
-        enqueue_flow_run(flow_id, {}, owner=flow.owner, origin=f"cron:{flow_id}")
+        def _fire() -> None:
+            from maverick import flow as flow_mod
+            if not flow_mod.enabled():
+                return
+            from maverick.flow import store
+            flow = store.load_flow(flow_id)
+            if (flow is None
+                    or flow.schedule.strip() != str(payload.get("__cron__") or "").strip()):
+                return  # deleted, or schedule changed out from under this cron
+            # enqueue_flow_run captures the tenant restored from this payload.
+            enqueue_flow_run(flow_id, {}, owner=flow.owner, origin=f"cron:{flow_id}")
+
+        _run_in_payload_tenant(payload, _fire)
     except Exception:  # pragma: no cover -- fail-open
         log.exception("scheduled flow run failed for %s", flow_id)
 
@@ -730,32 +1203,52 @@ def _reconcile_flow_crons() -> None:
     live cron gets one seeded. Idempotent -- safe to run on every reconcile."""
     from maverick.flow import store
     from maverick.scheduler import CronError, next_run, schedule_cron
-    want: dict[str, tuple[str, str]] = {}
-    for f in store.list_flows():
-        expr = f.schedule.strip()
-        if not expr:
-            continue
-        tz = f.timezone.strip()
-        try:
-            next_run(expr, tz=tz)     # only arm schedules with a future occurrence
-        except CronError:
-            continue
-        want[f.id] = (expr, tz)
+    want: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def _collect_current_tenant() -> None:
+        from maverick.paths import current_tenant_id
+
+        tenant = current_tenant_id() or ""
+        for f in store.list_flows():
+            expr = f.schedule.strip()
+            if not expr:
+                continue
+            tz = f.timezone.strip()
+            try:
+                next_run(expr, tz=tz)  # only schedules with a future occurrence
+            except CronError:
+                continue
+            want[(tenant, f.id)] = (expr, tz)
+
+    # Explicitly clear any ambient request/job tenant for the base pass, then
+    # enumerate active named tenants. This prevents a reconcile invoked from a
+    # tenant-scoped request from publishing that tenant's cron as tenantless.
+    if not _run_for_active_tenants(
+        "flow cron collection", _collect_current_tenant
+    ):
+        # An incomplete inventory is not authority to cancel durable schedules
+        # that may belong to the tenant/store we could not read.
+        return
     q = queue()
-    covered: set[str] = set()
+    covered: set[tuple[str, str]] = set()
     for j in _pending(FLOW_CRON_KIND):
         p = j.payload or {}
         fid = str(p.get("flow_id") or "")
+        tenant = str(p.get("tenant") or "")
+        key = (tenant, fid)
         cur = (str(p.get("__cron__") or ""), str(p.get("__tz__") or ""))
-        if want.get(fid) == cur and fid not in covered:
-            covered.add(fid)          # exactly one correct cron per flow; keep it
+        if want.get(key) == cur and key not in covered:
+            covered.add(key)          # exactly one correct cron per scoped flow
         else:
             q.cancel(j.id)            # stale (flow unscheduled, schedule/tz changed, or dup)
-    for fid, (expr, tz) in want.items():
-        if fid not in covered:
+    for (tenant, fid), (expr, tz) in want.items():
+        if (tenant, fid) not in covered:
             try:
+                payload = {"flow_id": fid, "__cron__": expr, "__tz__": tz}
+                if tenant:
+                    payload["tenant"] = tenant
                 schedule_cron(q, expr, FLOW_CRON_KIND,
-                              {"flow_id": fid, "__cron__": expr, "__tz__": tz})
+                              payload)
             except CronError:
                 continue
 
@@ -787,6 +1280,7 @@ def reconcile() -> None:
     if data_engine.enabled():
         _ensure_cron(FLYWHEEL_KIND, _flywheel_cron())
     if flow.enabled():
+        _repair_queued_flow_outbox()
         _ensure_cron(FLOW_SWEEP_KIND, _FLOW_SWEEP_CRON)
         _reconcile_flow_crons()
     if flow.auto_evolve_enabled():
@@ -863,4 +1357,5 @@ def stop() -> None:
 __all__ = ["start", "stop", "reconcile", "queue",
            "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND",
            "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND", "FLOW_EVOLVE_KIND",
-           "FLOW_CRON_KIND", "enqueue_flow_run", "enqueue_flow_resume"]
+           "FLOW_CRON_KIND", "enqueue_flow_run", "enqueue_flow_run_once",
+           "enqueue_flow_resume"]

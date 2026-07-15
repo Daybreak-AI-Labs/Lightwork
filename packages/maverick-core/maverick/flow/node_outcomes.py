@@ -24,11 +24,26 @@ def _path():
     return data_dir("flows", "node-outcomes.ndjson")
 
 
-def record(flow_id: str, node_id: str, kind: str, value: float) -> None:
+def _current_revision(flow_id: str) -> str:
+    from .store import load_flow
+
+    flow = load_flow(flow_id)
+    return str(flow.revision or "") if flow is not None else ""
+
+
+def record(
+    flow_id: str,
+    node_id: str,
+    kind: str,
+    value: float,
+    *,
+    revision: str | None = None,
+) -> None:
     """Append one node outcome. ``value`` in [0, 1]. Best-effort; never raises."""
     append_row(_path(), {
         "ts": time.time(), "flow_id": str(flow_id), "node_id": str(node_id),
         "kind": str(kind), "value": clamp01(value),
+        "revision": str(_current_revision(flow_id) if revision is None else revision),
     })
 
 
@@ -36,12 +51,17 @@ def _read_rows() -> list[dict]:
     return tail_rows(_path(), _MAX_ROWS)
 
 
-def series(flow_id: str, node_id: str) -> list[tuple[float, float]]:
+def series(
+    flow_id: str, node_id: str, *, revision: str | None = None,
+) -> list[tuple[float, float]]:
     """Time-ordered ``(ts, value)`` outcomes for one node -- the raw signal the
     measurement pass splits around an applied change to score before vs. after."""
     out: list[tuple[float, float]] = []
+    expected_revision = _current_revision(flow_id) if revision is None else str(revision)
     for r in _read_rows():
         if r.get("flow_id") != flow_id or str(r.get("node_id")) != str(node_id):
+            continue
+        if str(r.get("revision") or "") != expected_revision:
             continue
         try:
             out.append((float(r.get("ts") or 0.0), float(r.get("value"))))
@@ -51,13 +71,16 @@ def series(flow_id: str, node_id: str) -> list[tuple[float, float]]:
     return out
 
 
-def stats(flow_id: str) -> dict[str, dict]:
+def stats(flow_id: str, *, revision: str | None = None) -> dict[str, dict]:
     """Per-node aggregate for a flow: ``{node_id: {n, mean, kind}}``."""
     sums: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
     kinds: dict[str, str] = {}
+    expected_revision = _current_revision(flow_id) if revision is None else str(revision)
     for r in _read_rows():
         if r.get("flow_id") != flow_id:
+            continue
+        if str(r.get("revision") or "") != expected_revision:
             continue
         nid = str(r.get("node_id"))
         try:
@@ -72,4 +95,4 @@ def stats(flow_id: str) -> dict[str, dict]:
     }
 
 
-__all__ = ["record", "stats"]
+__all__ = ["record", "series", "stats"]

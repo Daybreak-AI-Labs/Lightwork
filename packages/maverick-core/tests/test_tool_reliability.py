@@ -31,8 +31,8 @@ class TestRunWithRetry:
                 raise _transient()
             return "ok"
 
-        # "my_lookup" is unlisted -> defaults to medium -> retry-safe.
-        out = asyncio.run(tool_reliability.run_with_retry("my_lookup", flaky))
+        # A classified read-only tool may retry a transient upstream failure.
+        out = asyncio.run(tool_reliability.run_with_retry("web_search", flaky))
         assert out == "ok"
         assert calls["n"] == 3
 
@@ -72,6 +72,7 @@ class TestRunWithRetry:
 
     def test_is_retry_safe_by_risk(self):
         assert tool_reliability.is_retry_safe("web_search") is True   # default medium
+        assert tool_reliability.is_retry_safe("unknown_plugin_mutation") is False
         assert tool_reliability.is_retry_safe("shell") is False       # high
         assert tool_reliability.is_retry_safe("email") is False       # high
         assert tool_reliability.is_retry_safe("github_issues") is False
@@ -90,10 +91,10 @@ class TestRegistryIntegration:
             return "recovered"
 
         reg = ToolRegistry()
-        reg.register(Tool(name="flaky_read", description="d",
+        reg.register(Tool(name="web_search", description="d",
                           input_schema={"type": "object", "properties": {}},
                           fn=flaky))
-        out = asyncio.run(reg.run("flaky_read", {}))
+        out = asyncio.run(reg.run("web_search", {}))
         assert out == "recovered"
         assert calls["n"] == 2
 

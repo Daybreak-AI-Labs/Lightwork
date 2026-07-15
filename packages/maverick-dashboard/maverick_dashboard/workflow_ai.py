@@ -35,6 +35,7 @@ _MAX_PARAMS = 12
 _MAX_STEPS = 20
 _MAX_TOOLS = 40
 _MAX_DOC_CHARS = 12_000
+_AUTO_TOOLS = object()
 
 # Playbook gates and risk levels mirror maverick.domain (_VALID_GATES /
 # _VALID_RISKS); kept local so this dashboard module stays self-contained and
@@ -60,7 +61,9 @@ WORKFLOW_SYSTEM = (
 PLAYBOOK_SYSTEM = (
     "You design specialist AGENT PLAYBOOKS for Lightwork: a governed domain "
     "agent with a persona, a tool allowlist, a risk ceiling, and an ordered "
-    "procedure whose steps can require a human gate. From the user's brief (and "
+    "procedure whose steps can carry a human-gate instruction. These playbook "
+    "gate fields guide the agent and reviewer; they are not executable workflow "
+    "pause nodes. From the user's brief (and "
     "any provided document) produce ONE playbook as STRICT JSON with exactly "
     "this shape:\n"
     '{"name": "<slug: lowercase letters, digits, hyphens>", '
@@ -79,6 +82,11 @@ PLAYBOOK_SYSTEM = (
     "work before it continues; otherwise gate is null. List in allow_tools only "
     "the tools the steps actually use. Set max_risk to the most sensitive "
     "action's level. Output the JSON object only — no prose, no code fence."
+)
+
+_PLAYBOOK_GATE_NOTE = (
+    "Playbook step gates are review instructions, not runtime-enforced pauses. "
+    "Use an executable Flow approval node when the system must block before an action."
 )
 
 _SLUG = re.compile(r"[^a-z0-9-]+")
@@ -100,9 +108,15 @@ def build_refine_prompt(current: dict[str, Any], instruction: str) -> str:
     """Compose the user turn for a *refinement*: the current draft plus the
     change to apply. The model returns the FULL revised draft in the same JSON
     shape (the system prompt is unchanged), so the same parser normalizes it."""
+    # The API already bounds its request, but keep the provider boundary safe for
+    # CLI/embedding callers too. A hand-crafted draft must not turn one refine
+    # call into an unbounded prompt or memory spike.
+    current_json = json.dumps(current or {}, ensure_ascii=False)
+    if len(current_json) > _MAX_DOC_CHARS:
+        current_json = current_json[:_MAX_DOC_CHARS] + "\u2026[truncated]"
     return (
         "Here is the current draft as JSON:\n"
-        + json.dumps(current or {}, ensure_ascii=False)
+        + current_json
         + "\n\nApply this change and return the COMPLETE revised draft in the "
         "same JSON shape (not a diff, not only the changed fields):\n"
         + (instruction or "").strip()
@@ -130,12 +144,110 @@ def _clean_tools(raw: object) -> list[str]:
     if not isinstance(raw, list):
         return out
     for t in raw:
-        t = str(t).strip()
+        # Tool identifiers are metadata, never free-form model prose. Collapse
+        # controls/newlines and cap each item before it reaches notes/UI/prompts.
+        t = " ".join(str(t).split())[:128]
         if t and t not in out:
             out.append(t)
         if len(out) >= _MAX_TOOLS:
             break
     return out
+
+
+def _available_tool_names() -> frozenset[str]:
+    """Best-effort, request-time registry grounding for generated playbooks.
+
+    Do not cache this process-wide: tools can vary by tenant, caller policy,
+    connector configuration, and newly promoted learned capabilities.
+
+    Failure returns an empty catalog (fail closed): a generated draft may then
+    need manual tool selection, but it cannot silently persist a hallucinated
+    capability.
+    """
+    try:
+        from maverick.tools import base_tool_names
+        return frozenset(base_tool_names() or ())
+    except Exception as e:  # pragma: no cover - registry assembly varies by extras
+        log.warning("playbook tool catalog unavailable: %s", type(e).__name__)
+        return frozenset()
+
+
+def _resolve_available_tools(value) -> frozenset[str]:
+    if value is _AUTO_TOOLS:
+        return _available_tool_names()
+    return frozenset(str(name) for name in (value or ()) if str(name))
+
+
+def _factory_guided(system: str) -> str:
+    """Add only promoted factory corrections; deterministic checks still win."""
+    try:
+        from maverick.factory_learning import augment_system_prompt
+        return augment_system_prompt(system)
+    except Exception:  # guidance is advisory and must never break drafting
+        return system
+
+
+def _playbook_tool_hint(query: str, available: frozenset[str]) -> str:
+    if not available:
+        return (
+            "\n\nNo action tools are currently verified as available. Leave "
+            "allow_tools and step tools empty; the operator can configure tools later."
+        )
+    try:
+        from maverick.flow.draft import rank_tool_catalog
+        ranked = rank_tool_catalog(
+            query,
+            ({"name": name, "description": "", "params": []} for name in available),
+            limit=40,
+        )
+        names = [item["name"] for item in ranked]
+    except Exception:  # pragma: no cover - lexical retrieval is intentionally fail-soft
+        names = []
+    if not names:
+        return (
+            "\n\nNo available tools matched this brief. Leave allow_tools and step "
+            "tools empty instead of inventing a name."
+        )
+    return (
+        "\n\nRelevant verified tool names (use exact names; do not invent others): "
+        + ", ".join(names)
+    )
+
+
+def _ground_playbook_tools(
+    draft: dict[str, Any], available: frozenset[str]
+) -> dict[str, Any]:
+    """Drop unavailable model-proposed tools and attach human-readable notes."""
+    notes = [str(n) for n in (draft.get("notes") or []) if str(n).strip()]
+    dropped: set[str] = set()
+
+    def keep(names) -> list[str]:
+        out: list[str] = []
+        for name in names or []:
+            name = str(name)
+            if name in available:
+                if name not in out:
+                    out.append(name)
+            else:
+                dropped.add(name)
+        return out
+
+    draft["allow_tools"] = keep(draft.get("allow_tools"))
+    for step in draft.get("workflow") or []:
+        if isinstance(step, dict):
+            step["tools"] = keep(step.get("tools"))
+    for name in sorted(dropped):
+        notes.append(
+            f"Dropped unavailable tool {name!r}; choose a verified connector before saving."
+        )
+    if any(
+        isinstance(step, dict) and step.get("gate")
+        for step in (draft.get("workflow") or [])
+    ) and _PLAYBOOK_GATE_NOTE not in notes:
+        notes.append(_PLAYBOOK_GATE_NOTE)
+    if notes:
+        draft["notes"] = notes
+    return draft
 
 
 def parse_workflow(raw: str) -> dict[str, Any]:
@@ -319,16 +431,21 @@ def draft_playbook(
     source_text: str = "",
     *,
     complete: Callable[..., Any] | None = None,
+    available_tools=_AUTO_TOOLS,
 ) -> dict[str, Any]:
     """Draft a specialist agent playbook from a brief and/or document text.
 
     The playbook counterpart to :func:`draft_workflow`: one LLM completion under
     the same hard ``DRAFT_MAX_DOLLARS`` cap, returning a normalized draft the
     operator edits and saves as a domain pack."""
-    return parse_playbook(_run_completion(
-        PLAYBOOK_SYSTEM, build_prompt(brief, source_text, produce="the playbook JSON"),
+    available = _resolve_available_tools(available_tools)
+    query = " ".join((brief or "", (source_text or "")[:2000]))
+    draft = parse_playbook(_run_completion(
+        _factory_guided(PLAYBOOK_SYSTEM) + _playbook_tool_hint(query, available),
+        build_prompt(brief, source_text, produce="the playbook JSON"),
         complete=complete, max_tokens=1500,
     ))
+    return _ground_playbook_tools(draft, available)
 
 
 def refine_playbook(
@@ -336,11 +453,16 @@ def refine_playbook(
     instruction: str,
     *,
     complete: Callable[..., Any] | None = None,
+    available_tools=_AUTO_TOOLS,
 ) -> dict[str, Any]:
     """Revise an existing playbook draft per a natural-language ``instruction``
     (e.g. "require approval before any payment"). Same cap and parser as
     :func:`draft_playbook`; returns the full normalized, revised draft."""
-    return parse_playbook(_run_completion(
-        PLAYBOOK_SYSTEM, build_refine_prompt(current, instruction),
+    available = _resolve_available_tools(available_tools)
+    query = f"{instruction} {json.dumps(current or {}, ensure_ascii=False)[:2000]}"
+    draft = parse_playbook(_run_completion(
+        _factory_guided(PLAYBOOK_SYSTEM) + _playbook_tool_hint(query, available),
+        build_refine_prompt(current, instruction),
         complete=complete, max_tokens=1500,
     ))
+    return _ground_playbook_tools(draft, available)
