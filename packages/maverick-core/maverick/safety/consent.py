@@ -34,9 +34,25 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..paths import current_tenant_id, data_dir
+from ..paths import TenantPolicyError, current_tenant_id, data_dir
 
 log = logging.getLogger(__name__)
+
+# Legacy single-user override.  Keep this as a real attribute so test/integration
+# patching restores ``None`` instead of materialising a tenant path returned by
+# module ``__getattr__`` and pinning later calls to that stale location.
+CONSENT_LEDGER_PATH: Path | None = None
+
+
+def _same_ledger_path(left: Path, right: Path) -> bool:
+    """Compare canonical paths, failing closed on resolution errors."""
+    try:
+        return left.expanduser().resolve(strict=False) == right.expanduser().resolve(
+            strict=False
+        )
+    except (OSError, RuntimeError):
+        return False
+
 
 def _resolve_ledger_path(path: Path | None = None) -> Path:
     """Resolve a consent ledger without crossing a tenant boundary.
@@ -48,10 +64,15 @@ def _resolve_ledger_path(path: Path | None = None) -> Path:
     in a long-lived multi-tenant worker.
     """
     if current_tenant_id() is not None:
-        return data_dir("consent.ledger")
+        active = data_dir("consent.ledger")
+        if path is not None and not _same_ledger_path(Path(path), active):
+            raise TenantPolicyError(
+                "explicit consent ledger path does not match the active tenant"
+            )
+        return active
     if path is not None:
         return Path(path)
-    override = globals().get("CONSENT_LEDGER_PATH")
+    override = CONSENT_LEDGER_PATH
     return Path(override) if override is not None else data_dir("consent.ledger")
 
 
@@ -64,12 +85,6 @@ def consent_ledger_path() -> Path:
     deliberately ignored once a tenant or client floor is active.
     """
     return _resolve_ledger_path()
-
-
-def __getattr__(name: str) -> Path:
-    if name == "CONSENT_LEDGER_PATH":
-        return consent_ledger_path()
-    raise AttributeError(name)
 
 
 class ConsentDenied(Exception):

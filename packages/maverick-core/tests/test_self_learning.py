@@ -23,7 +23,7 @@ from maverick.budget import Budget
 from maverick.catalog import CatalogEntry
 from maverick.file_lock import private_path_is_restricted
 from maverick.llm import LLMResponse
-from maverick.paths import current_tenant_id, tenant_scope
+from maverick.paths import TenantPolicyError, current_tenant_id, tenant_scope
 from maverick.tools import Tool, ToolRegistry
 
 
@@ -292,32 +292,69 @@ class TestLedger:
 
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
         shared = tmp_path / "legacy-consent.ledger"
-        monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", shared)
-        consent.grant_persistent("shared-only", scope="digest")
-        assert consent._check_ledger("shared-only", "digest")
+        with monkeypatch.context() as ledger_patch:
+            ledger_patch.setattr(consent, "CONSENT_LEDGER_PATH", shared)
+            consent.grant_persistent("shared-only", scope="digest")
+            assert consent._check_ledger("shared-only", "digest")
 
-        with tenant_scope(tenant="acme"):
-            acme = consent.consent_ledger_path()
-            assert acme != shared
-            assert not consent._check_ledger("shared-only", "digest")
-            consent.grant_persistent("tenant-test", scope="digest")
-            assert consent._check_ledger("tenant-test", "digest")
-            # The legacy explicit path escape hatch is also ignored when a
-            # tenant is active, for both writes and reads.
-            consent.grant_persistent("explicit-path", scope="digest", path=shared)
-            assert consent._check_ledger("explicit-path", "digest", path=shared)
-        with tenant_scope(tenant="globex"):
-            globex = consent.consent_ledger_path()
-            assert globex != shared
-            assert not consent._check_ledger("shared-only", "digest")
-            assert not consent._check_ledger("tenant-test", "digest")
-            assert not consent._check_ledger("explicit-path", "digest", path=shared)
+            with tenant_scope(tenant="acme"):
+                acme = consent.consent_ledger_path()
+                assert acme != shared
+                assert not consent._check_ledger("shared-only", "digest")
+                consent.grant_persistent("tenant-test", scope="digest")
+                assert consent._check_ledger("tenant-test", "digest")
+                # An explicit alternate path must fail, not silently redirect a
+                # write or revocation into the live tenant ledger.
+                with pytest.raises(TenantPolicyError):
+                    consent.grant_persistent(
+                        "explicit-path", scope="digest", path=shared,
+                    )
+                assert not consent._check_ledger("explicit-path", "digest")
+                assert ("shared-only", "digest") not in consent.list_grants()
+                assert not consent.revoke("shared-only", scope="digest")
+                with pytest.raises(TenantPolicyError):
+                    consent.list_grants(path=shared)
+                with pytest.raises(TenantPolicyError):
+                    consent.revoke("shared-only", scope="digest", path=shared)
+                consent.grant_persistent("exact-path", scope="digest", path=acme)
+                assert consent._check_ledger("exact-path", "digest", path=acme)
+            with tenant_scope(tenant="globex"):
+                globex = consent.consent_ledger_path()
+                assert globex != shared
+                assert not consent._check_ledger("shared-only", "digest")
+                assert not consent._check_ledger("tenant-test", "digest")
+                with pytest.raises(TenantPolicyError):
+                    consent._check_ledger("explicit-path", "digest", path=shared)
 
-        assert acme != globex
-        assert consent.consent_ledger_path() == shared
-        assert consent._check_ledger("shared-only", "digest")
+            assert acme != globex
+
+        # Restoring a legacy override must restore the sentinel, not freeze the
+        # path that happened to be active before the patch.
+        assert consent.CONSENT_LEDGER_PATH is None
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "new-home"))
+        assert consent.consent_ledger_path() == tmp_path / "new-home" / "consent.ledger"
+        assert consent._check_ledger("shared-only", "digest", path=shared)
         assert not consent._check_ledger("tenant-test", "digest")
-        assert not consent._check_ledger("explicit-path", "digest", path=shared)
+
+    def test_consent_ledger_enforces_configured_client_floor(
+        self, monkeypatch, tmp_path,
+    ):
+        from maverick.safety import consent
+
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+        monkeypatch.setattr("maverick.client.client_id", lambda: "client-floor")
+        shared = tmp_path / "legacy-consent.ledger"
+        monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", shared)
+
+        active = consent.consent_ledger_path()
+        assert active == (
+            tmp_path / "home" / "tenants" / "client-floor" / "consent.ledger"
+        )
+        consent.grant_persistent("client-only", scope="digest")
+        assert consent._check_ledger("client-only", "digest")
+        assert not shared.exists()
+        with pytest.raises(TenantPolicyError):
+            consent.grant_persistent("shared", scope="digest", path=shared)
 
 
 class TestCatalogSearch:
