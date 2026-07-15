@@ -575,7 +575,7 @@ def test_failed_agent_trajectory_is_quarantined_without_replay_proof(tmp_path, m
 
 def test_persisted_run_errors_are_secret_redacted(tmp_path, monkeypatch):
     _patch_home(tmp_path, monkeypatch)
-    secret = "ghp_" + "Z" * 36
+    secret = "ghp_" + "Z" * 36  # pragma: allowlist secret
     run = store.FlowRun(
         run_id="redacted", flow_id="f", status="failed",
         error=f"connector rejected Authorization: Bearer {secret}",
@@ -591,7 +591,7 @@ def test_persisted_run_errors_are_secret_redacted(tmp_path, monkeypatch):
 
 def test_secret_bearing_ordinary_data_values_are_redacted_at_rest(tmp_path, monkeypatch):
     _patch_home(tmp_path, monkeypatch)
-    secret = "ghp_" + "Q" * 36
+    secret = "ghp_" + "Q" * 36  # pragma: allowlist secret
     run = store.FlowRun(
         run_id="redacted-data", flow_id="f", status="completed",
         data={"result": f"remote said Authorization: Bearer {secret}"},

@@ -453,14 +453,15 @@ def test_draft_endpoint_wraps_llm_error_as_502(monkeypatch, tmp_path):
     _provider(monkeypatch, True)
     from maverick.budget import BudgetExceeded
     from maverick_dashboard import workflow_ai
+    fixture = "sk-abcdefghijklmnopqrstuvwxyz123456"  # pragma: allowlist secret
 
     def boom(*a, **k):
-        raise BudgetExceeded("drafting cap hit sk-abcdefghijklmnopqrstuvwxyz123456")
+        raise BudgetExceeded(f"drafting cap hit {fixture}")
 
     monkeypatch.setattr(workflow_ai, "draft_workflow", boom)
     r = _client().post("/api/v1/workflows/draft", json={"description": "x"})
     assert r.status_code == 502
-    assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in r.text
+    assert fixture not in r.text
 
 
 def test_builder_allows_unsaved_playbook_draft_when_pack_editing_off(monkeypatch, tmp_path):

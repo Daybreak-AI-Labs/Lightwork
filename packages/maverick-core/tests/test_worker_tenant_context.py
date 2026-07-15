@@ -74,7 +74,7 @@ def test_worker_scrubs_secret_from_durable_handler_error(tmp_path):
     worker = Worker(
         queue=q, idle_sleep=0.0, retry_after=0.0, max_attempts=1,
     )
-    secret = "ghp_" + "Z" * 36
+    secret = "ghp_" + "Z" * 36  # pragma: allowlist secret
 
     def fail(_job):
         raise RuntimeError(f"Authorization: Bearer {secret}")
