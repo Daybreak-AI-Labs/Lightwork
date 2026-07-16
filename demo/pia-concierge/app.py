@@ -508,7 +508,15 @@ async def intake_upload(case_id: str, file: UploadFile) -> JSONResponse:
     case = STORE.cases.get(case_id)
     if not case:
         return JSONResponse({"ok": False}, status_code=404)
-    data = await file.read()
+    # Bounded read: the intake link is unauthenticated by design, so an
+    # oversized body must fail fast instead of buffering without limit.
+    from maverick.attachments import MAX_FILE_BYTES
+    data = await file.read(MAX_FILE_BYTES + 1)
+    if len(data) > MAX_FILE_BYTES:
+        return JSONResponse(
+            {"ok": False, "error": f"file too large (limit {MAX_FILE_BYTES} "
+                                   "bytes)", "uploads": case.uploads},
+            status_code=400)
     mime = file.content_type or "application/octet-stream"
     ok, msg = await asyncio.to_thread(
         _store_evidence, case, file.filename or "upload", data, mime,
@@ -555,10 +563,14 @@ async def intake_attach_found(case_id: str, request: Request) -> JSONResponse:
     try:
         data, mime = await asyncio.to_thread(
             doc_discovery.fetch, source, doc_id, ref)
-    except Exception as exc:  # noqa: BLE001 -- surface, don't 500 the intake
+    except ValueError as exc:  # our own clean validation messages
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception:  # noqa: BLE001 -- no transport/URL detail to the caller
+        return JSONResponse({"ok": False, "error": "could not fetch that "
+                             "document from the source"}, status_code=400)
     ok, msg = await asyncio.to_thread(
-        _store_evidence, case, name, data, mime, via=f"found in {source}")
+        _store_evidence, case, name, data,
+        doc_discovery.resolve_mime(name, mime), via=f"found in {source}")
     status = 200 if ok else 400
     return JSONResponse({"ok": ok, "error": None if ok else msg,
                          "uploads": case.uploads}, status_code=status)
@@ -567,7 +579,14 @@ async def intake_attach_found(case_id: str, request: Request) -> JSONResponse:
 @app.get("/intake/{case_id}/insights")
 async def intake_insights(case_id: str) -> JSONResponse:
     """What the org already knows: similar past assessments (real
-    maverick.assessment records) + advisory per-question suggestions."""
+    maverick.assessment records) + advisory per-question suggestions.
+
+    Deliberate demo tradeoff: like the rest of the intake surface this is
+    reachable by case id, so precedent subjects/ratings/notes are visible to
+    anyone holding an intake link. The PLATFORM twin
+    (``GET /api/v1/assessment-memory/similar``) sits behind the dashboard's
+    ``view`` permission — production respondent portals should proxy through
+    that, not replicate this open endpoint."""
     case = STORE.cases.get(case_id)
     if not case:
         return JSONResponse({"ok": False}, status_code=404)

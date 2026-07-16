@@ -168,13 +168,19 @@ function renderControls() {
   controls.appendChild(wrap);
 }
 
+let answering = false;  // a double-click must not skip the next question
+
 async function answer(q, val, lbl) {
+  if (answering) return;
+  answering = true;
+  controls.querySelectorAll('button').forEach(b => { b.disabled = true; });
   bubble('me', lbl);
   const fd = new FormData();
   fd.append('question_id', q.id);
   fd.append('answer', val);
   await fetch(`/intake/${CASE}/answer`, {method:'POST', body:fd});
   idx++;
+  answering = false;
   setTimeout(ask, 250);
 }
 
@@ -226,7 +232,9 @@ function uploadOne(file) {
 function handleFiles(list) { [...list].forEach(uploadOne); }
 
 dropzone.onclick = () => fileInput.click();
-dropzone.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); };
+dropzone.onkeydown = (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+};
 fileInput.onchange = () => { handleFiles(fileInput.files); fileInput.value = ''; };
 ['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, (e) => {
   e.preventDefault(); dropzone.classList.add('drag');

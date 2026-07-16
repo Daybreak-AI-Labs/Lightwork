@@ -884,6 +884,7 @@ async def attach_from_source(
                             detail=f"fetch from {body.source} failed") from e
 
     filename = body.name.strip() or f"{body.source}-{body.doc_id[:24]}"
+    mime = doc_discovery.resolve_mime(filename, mime)
     existing = sum(a.size_bytes for a in w.list_attachments(goal_id))
     try:
         stored = store(goal_id, filename=filename, mime=mime, data=data,
@@ -908,8 +909,10 @@ async def assessment_memory_similar(
     """What the org already knows about subjects like this one: similar past
     assessments (with ratings), advisory per-question answer suggestions from
     the same template's history, and semantic lessons when the knowledge
-    plane is on. Advisory only -- nothing here answers an assessment."""
-    require_permission(request, "view")
+    plane is on. Advisory only -- nothing here answers an assessment.
+    Operate-gated: suggestions carry prior ANSWER content and reviewer notes,
+    a tier above the summary rows the assessments register shows viewers."""
+    require_permission(request, "operate")
     from maverick import assessment_memory
     subject = subject.strip()[:300]
     k = max(1, min(k, 10))

@@ -28,6 +28,18 @@ nothing (logged), and discovery never raises. Fetched bytes are capped at the
 attachment limit so discovery can't smuggle in what a direct upload couldn't.
 Gated by ``[assessments] doc_discovery`` (default on -- it only activates when
 a source is actually configured).
+
+Trust model (stated, not accidental): searches and fetches run under the
+ORG-LEVEL credential, the same model as every other platform connector
+(msgraph_tool, gdrive_tool, ...). Any dashboard principal holding
+``operate`` can therefore reach whatever that credential can read -- scope
+the token accordingly (a read-only, sites-selected Graph app registration,
+not a global-reader). Per-user delegated fetch (each caller's own OAuth
+identity) is the tightening path if per-document ACL fidelity is required.
+Client-supplied ids/refs are hardened at the transport layer: path segments
+are fully percent-encoded and a Slack ``download_url`` must live on the
+configured tenant's host, so a crafted request cannot re-point the
+credential at another URL.
 """
 from __future__ import annotations
 
@@ -121,11 +133,15 @@ def _creds(source: str) -> tuple[str, str] | None:
     return (base or _DEFAULT_BASES[source]).rstrip("/"), token
 
 
+def get_assessments_sources() -> list[str]:
+    """The operator's ordered source allowlist ([assessments] sources)."""
+    from .config import get_assessments
+    return get_assessments()["sources"]
+
+
 def configured_sources() -> list[str]:
     """Sources that currently have credentials, in stable order."""
-    from .config import get_assessments
-    wanted = get_assessments()["sources"]
-    return [s for s in wanted if _creds(s) is not None]
+    return [s for s in get_assessments_sources() if _creds(s) is not None]
 
 
 def _get(url: str, token: str, params: dict | None = None,
@@ -148,6 +164,24 @@ def _post(url: str, token: str, body: dict) -> tuple[int, object]:
         return r.status_code, r.json()
     except ValueError:
         return r.status_code, r.text[:300]
+
+
+def _download(url: str, token: str, max_bytes: int) -> tuple[bytes, str]:
+    """Stream a document body, aborting past ``max_bytes`` -- a discovered
+    file must not be able to balloon server memory before the size check."""
+    import httpx
+    buf = bytearray()
+    with httpx.stream("GET", url,
+                      headers={"Authorization": f"Bearer {token}"},
+                      timeout=_TIMEOUT, follow_redirects=True) as r:
+        r.raise_for_status()
+        mime = r.headers.get("content-type", "application/octet-stream")
+        for chunk in r.iter_bytes():
+            buf += chunk
+            if len(buf) > max_bytes:
+                raise ValueError(
+                    f"document too large: > {max_bytes} bytes")
+    return bytes(buf), mime
 
 
 # --------------------------------------------------------------------------- #
@@ -186,16 +220,17 @@ def _search_msgraph(base: str, token: str, query: str, limit: int) -> list[DocHi
     return hits
 
 
-def _fetch_msgraph(base: str, token: str, hit_ref: dict, doc_id: str):
-    import httpx
-    drive = hit_ref.get("drive_id", "")
-    path = (f"/drives/{urllib.parse.quote(drive)}/items/"
-            f"{urllib.parse.quote(doc_id)}/content" if drive
-            else f"/me/drive/items/{urllib.parse.quote(doc_id)}/content")
-    r = httpx.get(f"{base}{path}", headers={"Authorization": f"Bearer {token}"},
-                  timeout=_TIMEOUT, follow_redirects=True)
-    r.raise_for_status()
-    return r.content, r.headers.get("content-type", "application/octet-stream")
+def _fetch_msgraph(base: str, token: str, hit_ref: dict, doc_id: str,
+                   max_bytes: int):
+    # safe="": drive_id/doc_id are caller-supplied (round-tripped through the
+    # client on the attach endpoints) -- an embedded "/" or "?" must never be
+    # able to re-point the request at a different Graph path, which would turn
+    # this into an arbitrary-GET proxy carrying the org's token.
+    q = lambda s: urllib.parse.quote(s, safe="")  # noqa: E731
+    drive = str(hit_ref.get("drive_id", ""))
+    path = (f"/drives/{q(drive)}/items/{q(doc_id)}/content" if drive
+            else f"/me/drive/items/{q(doc_id)}/content")
+    return _download(f"{base}{path}", token, max_bytes)
 
 
 def _search_slack(base: str, token: str, query: str, limit: int) -> list[DocHit]:
@@ -219,15 +254,32 @@ def _search_slack(base: str, token: str, query: str, limit: int) -> list[DocHit]
     return hits
 
 
-def _fetch_slack(base: str, token: str, hit_ref: dict, doc_id: str):
-    import httpx
-    url = hit_ref.get("download_url", "")
+def _slack_url_allowed(url: str, base: str) -> bool:
+    """Only fetch download URLs that live where the configured Slack tenant
+    lives. ``download_url`` round-trips through the CLIENT on the attach
+    endpoints, so an unchecked value would let a caller point the server at
+    an arbitrary URL (SSRF) -- with the org's Slack token in the header."""
+    u = urllib.parse.urlparse(url)
+    b = urllib.parse.urlparse(base)
+    if u.scheme not in ("https", b.scheme) or not u.hostname:
+        return False
+    if u.hostname == b.hostname:
+        return True
+    # Default tenant: content is served from *.slack.com (files.slack.com).
+    base_host = b.hostname or ""
+    return (base_host.endswith("slack.com")
+            and (u.hostname == "slack.com"
+                 or u.hostname.endswith(".slack.com")))
+
+
+def _fetch_slack(base: str, token: str, hit_ref: dict, doc_id: str,
+                 max_bytes: int):
+    url = str(hit_ref.get("download_url", ""))
     if not url:
         raise ValueError("slack hit carries no download url")
-    r = httpx.get(url, headers={"Authorization": f"Bearer {token}"},
-                  timeout=_TIMEOUT, follow_redirects=True)
-    r.raise_for_status()
-    return r.content, r.headers.get("content-type", "application/octet-stream")
+    if not _slack_url_allowed(url, base):
+        raise ValueError("slack download url is outside the configured tenant")
+    return _download(url, token, max_bytes)
 
 
 def _search_gdrive(base: str, token: str, query: str, limit: int) -> list[DocHit]:
@@ -250,14 +302,12 @@ def _search_gdrive(base: str, token: str, query: str, limit: int) -> list[DocHit
     ) for f in data.get("files", [])[:limit]]
 
 
-def _fetch_gdrive(base: str, token: str, hit_ref: dict, doc_id: str):
-    import httpx
-    r = httpx.get(f"{base}/drive/v3/files/{urllib.parse.quote(doc_id)}",
-                  headers={"Authorization": f"Bearer {token}"},
-                  params={"alt": "media"}, timeout=_TIMEOUT,
-                  follow_redirects=True)
-    r.raise_for_status()
-    return r.content, r.headers.get("content-type", "application/octet-stream")
+def _fetch_gdrive(base: str, token: str, hit_ref: dict, doc_id: str,
+                  max_bytes: int):
+    # safe="" for the same reason as msgraph: doc_id is client-round-tripped.
+    doc = urllib.parse.quote(doc_id, safe="")
+    return _download(f"{base}/drive/v3/files/{doc}?alt=media", token,
+                     max_bytes)
 
 
 _SEARCHERS = {"msgraph": _search_msgraph, "slack": _search_slack,
@@ -293,12 +343,16 @@ def discover(subject: str, *, keywords: tuple[str, ...] | None = None,
     subject = (subject or "").strip()
     if not subject or not enabled():
         return []
-    use = sources if sources is not None else None
-    if use is None:
-        try:
-            use = configured_sources()
-        except Exception:  # pragma: no cover
-            use = [s for s in _SEARCHERS if _creds(s)]
+    try:
+        allowed = list(get_assessments_sources())
+    except Exception:  # pragma: no cover
+        allowed = list(_SEARCHERS)
+    if sources is None:
+        use = [s for s in allowed if _creds(s) is not None]
+    else:
+        # Caller preference filters WITHIN the operator's allowlist -- a
+        # request body must not be able to widen [assessments] sources.
+        use = [s for s in sources if s in allowed]
     kws = keywords if keywords is not None else ("sow", "contract", "dpa",
                                                  "security", "agreement")
     subject_tokens = {t.lower() for t in subject.split() if len(t) > 2}
@@ -329,13 +383,29 @@ def discover(subject: str, *, keywords: tuple[str, ...] | None = None,
     return out[:limit]
 
 
+def resolve_mime(name: str, mime: str) -> str:
+    """A usable mime for a fetched document. Sources often serve Office files
+    as ``application/octet-stream`` (Graph's /content does), which the
+    attachment allowlist rightly rejects -- infer from the filename in that
+    case so the SOW/contract the feature exists to attach is attachable. The
+    magic-byte executable/archive deny still guards the actual content."""
+    m = (mime or "").split(";")[0].strip().lower()
+    if m and m != "application/octet-stream":
+        return m
+    import mimetypes
+    guessed, _ = mimetypes.guess_type(name)
+    return guessed or m or "application/octet-stream"
+
+
 def fetch(source: str, doc_id: str, ref: dict | None = None,
           *, max_bytes: int | None = None) -> tuple[bytes, str]:
     """Download one discovered document's content: ``(bytes, mime)``.
 
-    Raises ValueError on an unknown/unconfigured source or an oversized file
-    (capped at the attachment limit so discovery can't smuggle in what a
-    direct upload couldn't)."""
+    Raises ValueError on an unknown/unconfigured source, a download URL
+    outside the configured tenant, or an oversized file -- the size cap is
+    enforced WHILE streaming (never after buffering), and defaults to the
+    attachment limit so discovery can't smuggle in what a direct upload
+    couldn't."""
     creds = _creds(source)
     fetcher = _FETCHERS.get(source)
     if creds is None or fetcher is None:
@@ -344,12 +414,8 @@ def fetch(source: str, doc_id: str, ref: dict | None = None,
         from .attachments import MAX_FILE_BYTES
         max_bytes = MAX_FILE_BYTES
     base, token = creds
-    data, mime = fetcher(base, token, ref or {}, doc_id)
-    if len(data) > max_bytes:
-        raise ValueError(f"document too large: {len(data)} bytes "
-                         f"(limit {max_bytes})")
-    return data, mime
+    return fetcher(base, token, ref or {}, doc_id, max_bytes)
 
 
 __all__ = ["DocHit", "DOC_KEYWORDS", "configured_sources", "discover",
-           "enabled", "fetch"]
+           "enabled", "fetch", "resolve_mime"]
