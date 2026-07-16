@@ -15,7 +15,10 @@ nested tables; ``list_triggers`` decodes them back to a dict.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import math
 import re
 import threading
 import time
@@ -33,12 +36,15 @@ def _locked():
     from maverick.file_lock import cross_process_lock
     stack = ExitStack()
     stack.enter_context(_TRIGGERS_LOCK)
-    stack.enter_context(cross_process_lock(_path()))
+    stack.enter_context(cross_process_lock(_path(), strict=True))
     return stack
 
 # Trigger names are URL/TOML-safe slugs: they appear in the signed webhook body
 # and as a bare TOML table key, so keep them to [a-z0-9-].
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
+_PARAM_RE = re.compile(r"^[A-Za-z_]\w{0,127}$")
+_MAX_TEMPLATE_BODY = 100_000
+_MAX_TEMPLATE_PARAMS = 128
 
 
 def _tomllib():
@@ -60,7 +66,102 @@ def slugify(name: str) -> str:
     return s[:48]
 
 
-def list_triggers() -> list[dict]:
+def _normalise_template_snapshot(snapshot: dict) -> dict:
+    """Validate and canonicalise the immutable template execution surface."""
+    if not isinstance(snapshot, dict):
+        raise ValueError("template snapshot must be an object")
+    name = str(snapshot.get("name") or "")
+    title = str(snapshot.get("title") or "")
+    body = str(snapshot.get("body") or "")
+    if not name or len(name) > 80:
+        raise ValueError("template snapshot name is invalid")
+    if not title or len(title) > 10_000:
+        raise ValueError("template snapshot title is invalid")
+    if not body or len(body) > _MAX_TEMPLATE_BODY:
+        raise ValueError("template snapshot body is invalid")
+    raw_params = snapshot.get("params") or []
+    if not isinstance(raw_params, list) or len(raw_params) > _MAX_TEMPLATE_PARAMS:
+        raise ValueError("template snapshot params are invalid")
+    params: list[str] = []
+    for raw in raw_params:
+        param = str(raw)
+        if not _PARAM_RE.fullmatch(param) or param in params:
+            raise ValueError("template snapshot params are invalid")
+        params.append(param)
+    try:
+        budget_dollars = float(snapshot.get("budget_dollars"))
+        budget_wall_seconds = float(snapshot.get("budget_wall_seconds"))
+    except (TypeError, ValueError):
+        raise ValueError("template snapshot budgets are invalid") from None
+    if not math.isfinite(budget_dollars) or not math.isfinite(budget_wall_seconds):
+        raise ValueError("template snapshot budgets are invalid")
+    return {
+        "name": name,
+        "title": title,
+        "body": body,
+        "params": params,
+        # Bind the same governed execution ceilings used by workflow saves.
+        "budget_dollars": min(max(budget_dollars, 0.5), 100.0),
+        "budget_wall_seconds": min(max(budget_wall_seconds, 1.0), 86400.0),
+    }
+
+
+def _snapshot_json(snapshot: dict) -> str:
+    return json.dumps(
+        _normalise_template_snapshot(snapshot),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _snapshot_revision(snapshot: dict) -> str:
+    return hashlib.sha256(_snapshot_json(snapshot).encode("utf-8")).hexdigest()
+
+
+def validated_template_snapshot(snapshot: dict) -> dict:
+    """Public validator shared by other durable automation bindings."""
+    return _normalise_template_snapshot(snapshot)
+
+
+def snapshot_revision(snapshot: dict) -> str:
+    """Content revision for a validated template execution snapshot."""
+    return _snapshot_revision(snapshot)
+
+
+def snapshot_from_template(template) -> dict:
+    """Capture a parsed template as an immutable, bounded execution snapshot."""
+    return _normalise_template_snapshot({
+        "name": template.name,
+        "title": template.title,
+        "body": template.body,
+        "params": list(template.params),
+        "budget_dollars": template.budget_dollars,
+        "budget_wall_seconds": template.budget_wall_seconds,
+    })
+
+
+def bound_template(trigger: dict):
+    """Rebuild and verify the exact template revision bound to ``trigger``.
+
+    Legacy/name-only or malformed rows are deliberately refused. Re-saving the
+    trigger through the dashboard captures a safe immutable revision.
+    """
+    snapshot = trigger.get("template_snapshot")
+    revision = str(trigger.get("template_revision") or "")
+    if not isinstance(snapshot, dict) or not revision:
+        raise ValueError("trigger has no immutable template binding")
+    normalised = _normalise_template_snapshot(snapshot)
+    if not hmac.compare_digest(_snapshot_revision(normalised), revision):
+        raise ValueError("trigger template binding is invalid")
+    if normalised["name"] != str(trigger.get("template") or ""):
+        raise ValueError("trigger template binding does not match its target")
+    from maverick.templates import Template
+
+    return Template(**normalised)
+
+
+def list_triggers(*, include_snapshot: bool = False) -> list[dict]:
     """Every registered trigger as ``{name, template, params, created}``."""
     p = _path()
     if not p.exists():
@@ -78,7 +179,11 @@ def list_triggers() -> list[dict]:
             params = json.loads(t.get("params") or "{}")
         except ValueError:
             params = {}
-        out.append({
+        try:
+            template_snapshot = json.loads(t.get("template_snapshot") or "null")
+        except ValueError:
+            template_snapshot = None
+        rec = {
             "name": name,
             "template": str(t.get("template") or ""),
             # Flow target: when set the webhook starts this flow instead of
@@ -95,13 +200,21 @@ def list_triggers() -> list[dict]:
             "tenant": str(t.get("tenant") or ""),
             "flow_owner": str(t.get("flow_owner") or ""),
             "flow_revision": str(t.get("flow_revision") or ""),
-        })
+            # Safe to expose: identifies the immutable revision without
+            # returning the potentially sensitive prompt body.
+            "template_revision": str(t.get("template_revision") or ""),
+        }
+        if include_snapshot:
+            rec["template_snapshot"] = (
+                template_snapshot if isinstance(template_snapshot, dict) else None
+            )
+        out.append(rec)
     out.sort(key=lambda t: (t["created"], t["name"]))
     return out
 
 
 def get_trigger(name: str) -> dict | None:
-    for t in list_triggers():
+    for t in list_triggers(include_snapshot=True):
         if t["name"] == name:
             return t
     return None
@@ -124,6 +237,10 @@ def _dump(triggers: list[dict]) -> str:
         lines.append(f"tenant = {json.dumps(str(t.get('tenant') or ''))}")
         lines.append(f"flow_owner = {json.dumps(str(t.get('flow_owner') or ''))}")
         lines.append(f"flow_revision = {json.dumps(str(t.get('flow_revision') or ''))}")
+        snapshot = t.get("template_snapshot")
+        snapshot_json = _snapshot_json(snapshot) if isinstance(snapshot, dict) else "null"
+        lines.append(f"template_snapshot = {json.dumps(snapshot_json)}")
+        lines.append(f"template_revision = {json.dumps(str(t.get('template_revision') or ''))}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -138,7 +255,7 @@ def _write(triggers: list[dict]) -> None:
 def set_trigger(
     name: str, template: str, params: dict | None = None, owner: str = "",
     flow: str = "", tenant: str = "", flow_owner: str = "",
-    flow_revision: str = "",
+    flow_revision: str = "", template_snapshot: dict | None = None,
 ) -> dict:
     """Create or replace a trigger (by slugified name). Raises ValueError on a
     name that can't be made into a valid slug. ``owner`` records the principal
@@ -147,6 +264,15 @@ def set_trigger(
     slug = slugify(name)
     if not _NAME_RE.match(slug):
         raise ValueError("trigger name must contain a letter or digit (a-z, 0-9, -)")
+    normalised_snapshot = None
+    template_revision = ""
+    if template_snapshot is not None:
+        if flow:
+            raise ValueError("flow triggers cannot include a template snapshot")
+        normalised_snapshot = _normalise_template_snapshot(template_snapshot)
+        if normalised_snapshot["name"] != str(template):
+            raise ValueError("template snapshot does not match the trigger target")
+        template_revision = _snapshot_revision(normalised_snapshot)
     rec = {
         "name": slug,
         "template": str(template),
@@ -157,9 +283,13 @@ def set_trigger(
         "tenant": str(tenant or ""),
         "flow_owner": str(flow_owner or ""),
         "flow_revision": str(flow_revision or ""),
+        "template_snapshot": normalised_snapshot,
+        "template_revision": template_revision,
     }
     with _locked():
-        kept = [t for t in list_triggers() if t["name"] != slug]
+        kept = [
+            t for t in list_triggers(include_snapshot=True) if t["name"] != slug
+        ]
         kept.append(rec)
         _write(kept)
     return rec
@@ -172,7 +302,7 @@ def delete_trigger(name: str, owner: str | None = None) -> bool:
     race and only a single file read. ``owner=None`` (admin / auth-off) deletes
     regardless of owner."""
     with _locked():
-        triggers = list_triggers()
+        triggers = list_triggers(include_snapshot=True)
         match = next((t for t in triggers if t["name"] == name), None)
         if match is None or (owner is not None and match.get("owner", "") != owner):
             return False

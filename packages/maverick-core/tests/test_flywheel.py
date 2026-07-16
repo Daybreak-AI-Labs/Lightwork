@@ -2,6 +2,7 @@
 -- every engine turning together."""
 from __future__ import annotations
 
+import pytest
 from maverick import consequence as cq
 from maverick import flywheel
 from maverick import negative_knowledge as nk
@@ -45,6 +46,40 @@ def test_run_once_turns_every_engine(tmp_path):
     assert rep.predicted_lift > 0.5
     # registries persisted
     assert rails.consult("X") is not None and mem.strength_of("Y") > 0
+
+
+def test_halt_at_guardrail_persistence_boundary_prevents_learned_write(
+    monkeypatch, tmp_path,
+):
+    from maverick.killswitch import Halted
+
+    rails = nk.GuardrailRegistry(path=tmp_path / "g.json")
+    mem = pm.MemoryStore(path=tmp_path / "m.json")
+
+    def guard(_job: str, phase: str) -> None:
+        if phase == "guardrail_persistence":
+            raise Halted("operator stop", "test")
+
+    monkeypatch.setattr(flywheel, "check_learning_halt", guard)
+    with pytest.raises(Halted):
+        flywheel.run_once(_corpus(), guardrails=rails, memory=mem)
+    assert rails.all() == []
+    assert mem.recall() == []
+    assert not (tmp_path / "g.json").exists()
+    assert not (tmp_path / "m.json").exists()
+
+
+def test_maybe_run_does_not_swallow_halt(monkeypatch):
+    from maverick.killswitch import Halted
+
+    monkeypatch.setattr(flywheel.data_engine, "enabled", lambda: True)
+
+    def halt(_job: str, _phase: str) -> None:
+        raise Halted("operator stop", "test")
+
+    monkeypatch.setattr(flywheel, "check_learning_halt", halt)
+    with pytest.raises(Halted):
+        flywheel.maybe_run()
 
 
 def test_run_once_simulates_when_world_model_supplied(tmp_path):

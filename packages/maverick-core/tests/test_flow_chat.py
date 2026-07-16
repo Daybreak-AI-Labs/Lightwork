@@ -182,6 +182,49 @@ def test_empty_message_rejected():
         chat_flow("   ", flow=_flow(), complete=complete)
 
 
+def test_provider_boundary_rejects_secret_or_oversized_messages_before_call():
+    calls, complete = _fake({"reply": "x"})
+
+    with pytest.raises(ValueError, match="credential"):
+        chat_flow(
+            "use sk-proj-abcdefghijklmnopqrstuvwx for this",  # pragma: allowlist secret
+            flow=_flow(),
+            complete=complete,
+        )
+    with pytest.raises(ValueError, match="too long"):
+        chat_flow("x" * 2001, flow=_flow(), complete=complete)
+    assert calls == []
+
+
+def test_flow_context_redacts_existing_raw_credentials():
+    calls, complete = _fake({"reply": "It runs one step.", "patches": []})
+    flow = Flow.from_dict({
+        "id": "legacy", "name": "Legacy", "start": "a",
+        "nodes": [{
+            "id": "a", "kind": "agent",
+            "brief": "use sk-proj-abcdefghijklmnopqrstuvwx",  # pragma: allowlist secret
+        }],
+    })
+
+    chat_flow("what does this do?", flow=flow, complete=complete)
+
+    assert "sk-proj-abcdefghijklmnopqrstuvwx" not in calls[0]["system"]  # pragma: allowlist secret
+    assert "[REDACTED:openai_api_key]" in calls[0]["system"]
+
+
+def test_model_output_with_raw_credential_is_not_rendered_or_applied():
+    _, complete = _fake({
+        "reply": "Use sk-proj-abcdefghijklmnopqrstuvwx",  # pragma: allowlist secret
+        "patches": [],
+    })
+
+    result = chat_flow("help me", flow=_flow(), complete=complete)
+
+    assert result.flow is None
+    assert "sk-proj" not in result.reply
+    assert any("safety check" in note for note in result.notes)
+
+
 def test_system_prompt_documents_ops_and_schema():
     for needle in ("add_node", "remove_node", "set_field", "rewire",
                    '"kind":"agent"', '"kind":"branch"'):

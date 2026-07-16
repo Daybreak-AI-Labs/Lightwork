@@ -28,15 +28,26 @@ def _edit_patch() -> str:
             "@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 99\n")
 
 
-class TestParsePytest:
-    def test_passed_and_failed(self):
-        assert ev._parse_pytest_counts("... 12 passed, 3 failed in 1s") == (12, 3)
+class TestMaterializationBoundary:
+    def test_rejects_linked_source_without_touching_target(self, tmp_path):
+        src = _seed_repo(tmp_path)
+        outside = tmp_path / "outside.txt"
+        outside.write_text("DO NOT TOUCH", encoding="utf-8")
+        try:
+            (src / "linked.txt").symlink_to(outside)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable")
+        with pytest.raises(ValueError, match="linked file"):
+            ev._default_materialize(src, tmp_path / "copy")
+        assert outside.read_text(encoding="utf-8") == "DO NOT TOUCH"
+        assert not (tmp_path / "copy").exists()
 
-    def test_errors_count_as_failures(self):
-        assert ev._parse_pytest_counts("5 passed, 2 errors") == (5, 2)
-
-    def test_no_summary_is_zero(self):
-        assert ev._parse_pytest_counts("nothing here") == (0, 0)
+    def test_rejects_source_file_over_quota(self, tmp_path, monkeypatch):
+        src = _seed_repo(tmp_path)
+        monkeypatch.setattr(ev, "_MAX_MATERIALIZE_FILE_BYTES", 4)
+        with pytest.raises(ValueError, match="size limit"):
+            ev._default_materialize(src, tmp_path / "copy")
+        assert not (tmp_path / "copy").exists()
 
 
 class TestScorers:
@@ -46,13 +57,16 @@ class TestScorers:
         assert isinstance(s, Score) and s.value == 2.0 and s.samples == 2
 
     def test_pytest_score_pass_rate(self, tmp_path):
-        # Fake sandbox returns a canned pytest summary.
+        # The controller trusts only backend-authenticated structured outcomes.
         class FakeSB:
+            authenticated_test_results = True
+
             def exec(self, cmd, timeout=None):
                 class R:
-                    stdout = "8 passed, 2 failed in 0.1s"
+                    stdout = "candidate-controlled output is irrelevant"
                     stderr = ""
                     exit_code = 0
+                    authenticated_test_counts = ev.AuthenticatedTestCounts(8, 2)
                 return R()
         score = ev.pytest_score(sandbox=FakeSB())(tmp_path)
         assert score.samples == 10
@@ -60,6 +74,8 @@ class TestScorers:
 
     def test_pytest_score_no_summary_is_zero(self, tmp_path):
         class FakeSB:
+            authenticated_test_results = True
+
             def exec(self, cmd, timeout=None):
                 class R:
                     stdout = ""
@@ -68,6 +84,159 @@ class TestScorers:
                 return R()
         score = ev.pytest_score(sandbox=FakeSB())(tmp_path)
         assert score == Score(0.0, 0)
+
+    def test_spoofed_stdout_cannot_inflate_authenticated_counts(self, tmp_path):
+        class FakeSB:
+            authenticated_test_results = True
+
+            def exec(self, _cmd, timeout=None):
+                class R:
+                    stdout = "999999 passed\n1 passed, 1 failed in 0.1s"
+                    stderr = ""
+                    exit_code = 1
+                    authenticated_test_counts = ev.AuthenticatedTestCounts(1, 1)
+                return R()
+
+        assert ev.pytest_score(sandbox=FakeSB())(tmp_path) == Score(0.5, 2)
+
+    def test_spoofed_stdout_without_backend_authentication_is_unavailable(
+        self, tmp_path,
+    ):
+        class FakeSB:
+            def exec(self, _cmd, timeout=None):
+                class R:
+                    stdout = "100 passed, 0 failed in 0.1s"
+                    stderr = ""
+                    exit_code = 0
+                return R()
+
+        assert ev.pytest_score(sandbox=FakeSB())(tmp_path) == Score(0.0, 0)
+
+    def test_nonterminal_or_malformed_authenticated_counts_are_unavailable(
+        self, tmp_path,
+    ):
+        class FakeSB:
+            authenticated_test_results = True
+
+            def exec(self, _cmd, timeout=None):
+                class R:
+                    stdout = "100 passed"
+                    stderr = ""
+                    exit_code = 0
+                    authenticated_test_counts = ev.AuthenticatedTestCounts(
+                        100, 0, terminal=False)
+                return R()
+
+        assert ev.pytest_score(sandbox=FakeSB())(tmp_path) == Score(0.0, 0)
+
+
+class TestBudgetedExec:
+    def test_clamps_requested_timeout_to_remaining_wall_budget(self):
+        class Sandbox:
+            timeout = 60.0
+
+            def __init__(self):
+                self.seen_timeout = None
+
+            def exec(self, _cmd, timeout=None):
+                self.seen_timeout = timeout
+                return object()
+
+        class Budget:
+            def record_tool_call(self):
+                pass
+
+            @staticmethod
+            def remaining_wall():
+                return 0.25
+
+        sandbox = Sandbox()
+        ev._budgeted_exec(sandbox, "true", budget=Budget(), timeout=600.0)
+        assert sandbox.seen_timeout == pytest.approx(0.25)
+
+    def test_exhausted_wall_budget_refuses_before_exec(self):
+        class Sandbox:
+            called = False
+
+            def exec(self, _cmd, timeout=None):
+                self.called = True
+
+        class Budget:
+            def record_tool_call(self):
+                pass
+
+            @staticmethod
+            def remaining_wall():
+                return 0.0
+
+        sandbox = Sandbox()
+        with pytest.raises(TimeoutError, match="wall-clock budget exhausted"):
+            ev._budgeted_exec(sandbox, "true", budget=Budget(), timeout=600.0)
+        assert sandbox.called is False
+
+
+class TestStockSandboxProfile:
+    def test_refuses_host_visible_backend(self, tmp_path):
+        from maverick.sandbox.local import LocalBackend
+
+        with pytest.raises(ev.EvalSandboxError, match="non-host"):
+            ev.require_secure_eval_sandbox(LocalBackend(tmp_path), tmp_path)
+
+    def test_refuses_egress_or_root_opt_in(self, tmp_path):
+        class Backend:
+            host_visible_fs = False
+            allow_network = True
+            allow_root = False
+
+        with pytest.raises(ev.EvalSandboxError, match="egress"):
+            ev.require_secure_eval_sandbox(Backend(), tmp_path)
+        Backend.allow_network = False
+        Backend.allow_root = True
+        with pytest.raises(ev.EvalSandboxError, match="root"):
+            ev.require_secure_eval_sandbox(Backend(), tmp_path)
+
+    def test_accepts_bounded_non_host_no_egress_backend(self, tmp_path):
+        class Backend:
+            host_visible_fs = False
+            allow_network = False
+            allow_root = False
+            pids_limit = 128
+            memory = "1g"
+            bounded_output = True
+            authenticated_test_results = True
+
+        backend = Backend()
+        assert ev.require_secure_eval_sandbox(backend, tmp_path) is backend
+
+    def test_refuses_backend_without_bounded_host_output_capture(self, tmp_path):
+        class Backend:
+            host_visible_fs = False
+            allow_network = False
+            allow_root = False
+            pids_limit = 128
+            memory = "1g"
+
+        with pytest.raises(ev.EvalSandboxError, match="bounded host-output"):
+            ev.require_secure_eval_sandbox(Backend(), tmp_path)
+
+    def test_refuses_backend_without_authenticated_test_results(self, tmp_path):
+        class Backend:
+            host_visible_fs = False
+            allow_network = False
+            allow_root = False
+            pids_limit = 128
+            memory = "1g"
+            bounded_output = True
+
+        with pytest.raises(ev.EvalSandboxError, match="authenticated test results"):
+            ev.require_secure_eval_sandbox(Backend(), tmp_path)
+
+    def test_policy_lookup_failure_requires_container(self, monkeypatch):
+        monkeypatch.setattr(
+            "maverick.sandbox.container_backend_required",
+            lambda: (_ for _ in ()).throw(RuntimeError("config unavailable")),
+        )
+        assert ev.container_required() is True
 
 
 def _strict_git_apply_check(patch: str, workdir: Path) -> int:
@@ -152,6 +321,104 @@ class TestGitApply:
     def test_empty_patch_refused(self, tmp_path):
         assert ev.git_apply("", tmp_path).ok is False
 
+    def test_candidate_planted_staging_symlink_cannot_clobber_host_file(
+        self, tmp_path,
+    ):
+        src = _seed_repo(tmp_path)
+        outside = tmp_path / "outside.txt"
+        outside.write_text("DO NOT TOUCH", encoding="utf-8")
+        planted = src / ".maverick-eval-patch.diff"
+        try:
+            planted.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable")
+
+        result = ev.git_apply(_edit_patch(), src)
+
+        assert result.ok is True
+        assert outside.read_text(encoding="utf-8") == "DO NOT TOUCH"
+
+    def test_apply_is_charged_to_shared_tool_budget(self, tmp_path):
+        class Meter:
+            tool_calls = 0
+
+            def record_tool_call(self):
+                self.tool_calls += 1
+
+        src = _seed_repo(tmp_path)
+        budget = Meter()
+        res = ev.git_apply(_edit_patch(), src, budget=budget)
+        assert res.ok is True
+        assert budget.tool_calls == 2  # --check, then the real apply
+
+    def test_fresh_halt_refuses_candidate_apply(self, tmp_path, monkeypatch):
+        from maverick.learning_guard import Halted
+
+        src = _seed_repo(tmp_path)
+        monkeypatch.setattr(
+            "maverick.learning_guard.check_learning_halt",
+            lambda *_: (_ for _ in ()).throw(Halted("operator stop", "test")))
+        res = ev.git_apply(_edit_patch(), src)
+        assert res.ok is False and "halted" in res.reason
+        assert (src / "pkg" / "a.py").read_text() == "VALUE = 1\n"
+
+    def test_halt_after_check_refuses_the_real_apply(self, tmp_path, monkeypatch):
+        from maverick.learning_guard import Halted
+
+        src = _seed_repo(tmp_path)
+        checks = 0
+
+        def halt_on_prewrite(*_args):
+            nonlocal checks
+            checks += 1
+            if checks == 2:
+                raise Halted("operator stop after check", "test")
+
+        monkeypatch.setattr(
+            "maverick.learning_guard.check_learning_halt", halt_on_prewrite)
+        res = ev.git_apply(_edit_patch(), src)
+        assert res.ok is False and "operator stop after check" in res.reason
+        assert checks == 2
+        assert (src / "pkg" / "a.py").read_text() == "VALUE = 1\n"
+
+    def test_halt_after_recount_check_refuses_the_real_apply(
+        self, tmp_path, monkeypatch,
+    ):
+        from maverick.learning_guard import Halted
+
+        checks = 0
+        commands: list[str] = []
+
+        def halt_on_prewrite(*_args):
+            nonlocal checks
+            checks += 1
+            if checks == 2:
+                raise Halted("operator stop after recount check", "test")
+
+        class Result:
+            stderr = "strict rejected"
+
+            def __init__(self, ok):
+                self.ok = ok
+
+        class RecountOnlySandbox:
+            def exec(self, command, timeout=None):
+                commands.append(command)
+                return Result("--check --recount" in command)
+
+        monkeypatch.setattr(
+            "maverick.learning_guard.check_learning_halt", halt_on_prewrite)
+        ok, reason = ev.run_git_apply(
+            _edit_patch(), tmp_path, RecountOnlySandbox())
+        assert ok is False and "operator stop after recount check" in reason
+        assert checks == 2
+        assert len(commands) == 2
+        assert commands[0].startswith(
+            "git apply --check -p1 .maverick-patch-")
+        assert commands[1].startswith(
+            "git apply --check --recount -p1 .maverick-patch-")
+        assert commands[0].split()[-1] == commands[1].split()[-1]
+
 
 class TestEvaluatePatch:
     def test_isolation_source_is_untouched(self, tmp_path):
@@ -209,6 +476,7 @@ class TestEvaluatePatch:
 class _FakeContainerSB:
     """A non-host-visible backend stand-in (like docker/gvisor)."""
     host_visible_fs = False
+    authenticated_test_results = True
 
     def __init__(self):
         self.calls = []
@@ -219,6 +487,7 @@ class _FakeContainerSB:
             stdout = "3 passed in 0.1s"
             stderr = ""
             exit_code = 0
+            authenticated_test_counts = ev.AuthenticatedTestCounts(3, 0)
         return R()
 
 

@@ -810,6 +810,12 @@ def test_write_config_emits_self_modify(tmp_path: Path, monkeypatch):
     resolved = config.get_self_modify()
     assert resolved["enable"] is True
     assert resolved["editable_paths"] == []  # allowlist stays commented -> inert
+    body = (tmp_path / "config.toml").read_text(encoding="utf-8")
+    assert "Research-only DGM cycles" in body
+    assert "runner NEVER applies or promotes code" in body
+    assert "two discriminating eval_tests" in body
+    assert "require_container=true" in body
+    assert '# eval_tests = ["path/test_feature.py::case_a",' in body
 
 
 def test_write_config_omits_self_modify_when_off(tmp_path: Path, monkeypatch):

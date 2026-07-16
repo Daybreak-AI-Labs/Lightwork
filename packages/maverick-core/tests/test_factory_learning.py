@@ -23,6 +23,7 @@ from maverick.factory_learning import (
     SIGNAL_TOOL_MISSING,
     ProposerCorrection,
 )
+from maverick.learning_guard import Halted
 from maverick.paths import tenant_scope
 
 
@@ -115,6 +116,22 @@ def test_factory_learn_help_describes_live_v2_contract():
     assert result.exit_code == 0
     assert "version-2 JSON" in result.output
     assert "v1 is dry-run only" in result.output
+
+
+def test_factory_learn_cli_halt_is_generic_and_nonzero(monkeypatch):
+    from maverick import learning_guard
+
+    monkeypatch.setattr(
+        learning_guard,
+        "check_learning_halt",
+        lambda *_: (_ for _ in ()).throw(
+            learning_guard.Halted("secret operator text", "test")),
+    )
+    result = CliRunner().invoke(main, ["factory-learn", "--dry-run"])
+
+    assert result.exit_code != 0
+    assert "global learning HALT is active" in result.output
+    assert "secret operator text" not in result.output
 
 
 def test_record_rejects_unknown_signal(on):
@@ -598,6 +615,31 @@ def test_apply_publication_failure_rolls_back_exact_bytes_and_aborts(
     monkeypatch.setattr(fl, "_cas_install_locked", real_install)
     assert len(fl.review_and_promote(controller=controller, scorer=evidence)) == 1
     assert len(controller.ledger.transactions(state="committed")) == 1
+
+
+def test_halt_after_prepare_aborts_and_propagates_without_applying(
+    on, tmp_path, monkeypatch,
+):
+    for pack in ("finance_a", "finance_b", "finance_c"):
+        fl.record_outcome(pack, SIGNAL_TOOL_MISSING, detail="web_search")
+    controller = _controller(tmp_path / "si.json")
+
+    def halt_at_apply(_job: str, phase: str) -> None:
+        if phase == "apply":
+            raise Halted("operator stop", "test")
+
+    monkeypatch.setattr(fl, "check_learning_halt", halt_at_apply)
+
+    with pytest.raises(Halted, match="source=test"):
+        fl.review_and_promote(
+            controller=controller,
+            scorer=_write_v2_evidence(tmp_path),
+        )
+
+    assert not on[1].exists()
+    aborted = controller.ledger.transactions(state="aborted")
+    assert len(aborted) == 1
+    assert controller.ledger.transactions(state="committed") == []
 
 
 # --------------------------------------------------------------------------

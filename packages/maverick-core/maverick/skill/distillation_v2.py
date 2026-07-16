@@ -21,11 +21,13 @@ continuous learning actually usable:
   precisely, or it is dropped.
 
 Pure and deterministic: the gates take plain skill dicts / signatures, tested
-without touching disk; ``distill_and_save_gated`` is the drop-in the loop calls.
+without touching disk; ``distill_and_save_gated`` is the drop-in the loop calls
+and checks the strict global learning stop immediately before its durable save.
 """
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from .distillation_local import _default_store, distill, save_skill
@@ -128,7 +130,9 @@ def distill_gated(trajectories: list[dict], *,
 def distill_and_save_gated(trajectories: list[dict], *, store: Path | str | None = None,
                            top_k: int = 3, min_examples: int = DEFAULT_MIN_EXAMPLES,
                            dedup_threshold: float = DEFAULT_DEDUP_THRESHOLD,
-                           min_signal: int = DEFAULT_MIN_SIGNAL_TOKENS) -> tuple[Path | None, str]:
+                           min_signal: int = DEFAULT_MIN_SIGNAL_TOKENS,
+                           before_save: Callable[[], None] | None = None,
+                           ) -> tuple[Path | None, str]:
     """Gate (evidence + quality + dedup) against ``store``, save only a novel,
     specific skill. Returns ``(path_or_None, reason)``."""
     existing = signatures_from_store(store)
@@ -138,6 +142,14 @@ def distill_and_save_gated(trajectories: list[dict], *, store: Path | str | None
         min_signal=min_signal)
     if skill is None:
         return None, reason
+    # This is a durable learning transition even when a caller uses the helper
+    # directly (the orchestrator does). Keep the canonical strict boundary in
+    # the primitive; ``before_save`` lets a higher-level job add its own
+    # phase-specific final check, but cannot replace the global operator stop.
+    from ..learning_guard import check_learning_halt
+    check_learning_halt("skill_distillation", "save")
+    if before_save is not None:
+        before_save()
     return save_skill(skill, store), "ok"
 
 

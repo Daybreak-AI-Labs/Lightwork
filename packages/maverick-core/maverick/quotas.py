@@ -366,15 +366,20 @@ def record_usage(
     requirement. Release is fail-soft on the same tenant scope the ledger write
     used.
     """
+    recorded = False
     try:
         UsageLedger().record(principal, dollars, in_tokens, out_tokens)
+        recorded = bool(principal)
     except Exception as e:  # pragma: no cover - ledger is fully fail-soft
         log.warning("quotas: failed to record usage for %r: %s", principal, e)
-    if reservation_id:
+    # Release only after the ledger accepted the actual spend. If recording
+    # failed, retaining the hold until its TTL is conservative and prevents an
+    # accounting outage from reopening daily allowance for unmetered work.
+    if reservation_id and recorded:
         try:
-            from .paths import current_tenant
+            from .paths import current_tenant_id
             from .tenant.registry import release_tenant_reservation
-            release_tenant_reservation(current_tenant(), reservation_id)
+            release_tenant_reservation(current_tenant_id(), reservation_id)
         except Exception as e:  # pragma: no cover -- reservation release is fail-soft
             log.warning("quotas: failed to release reservation %r: %s",
                         reservation_id, e)

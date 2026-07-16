@@ -46,6 +46,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -77,6 +78,11 @@ _MAX_BATCH = 1000
 # redelivery after a transient outage isn't dropped. Override via
 # ``[federation] channel_max_age_seconds`` / MAVERICK_FEDERATION_CHANNEL_MAX_AGE.
 DEFAULT_MAX_AGE_S = 3600.0
+_REPLAY_LEDGER_SCHEMA = "maverick-channel-replay/1"
+_RATE_LEDGER_SCHEMA = "maverick-channel-rate/1"
+_MAX_REPLAY_ENTRIES = 10_000
+_MAX_LEDGER_BYTES = 2_000_000
+_MAX_RATE_KEYS = 1000
 
 
 def pseudonymize(user_id: str, secret: str) -> str:
@@ -147,7 +153,7 @@ class OutboundQueue:
         from .file_lock import cross_process_lock
         stack = ExitStack()
         stack.enter_context(self._rmw_lock)
-        stack.enter_context(cross_process_lock(self.path))
+        stack.enter_context(cross_process_lock(self.path, strict=True))
         return stack
 
     def _load(self) -> dict:
@@ -259,16 +265,112 @@ class TokenBucket:
     def allow(self, key: str) -> bool:
         now = self.clock()
         tokens, last = self._state.get(key, (self.burst, now))
-        tokens = min(self.burst, tokens + (now - last) * self.rate)
+        effective_now = max(now, last)
+        tokens = min(self.burst, tokens + (effective_now - last) * self.rate)
         if tokens < 1.0:
-            self._state[key] = (tokens, now)
+            self._state[key] = (tokens, effective_now)
             return False
-        self._state[key] = (tokens - 1.0, now)
+        self._state[key] = (tokens - 1.0, effective_now)
         return True
 
 
-def default_limiter(clock: Callable[[], float] = time.monotonic) -> TokenBucket:
-    """A TokenBucket configured from ``[federation] channel_rate_per_min``."""
+class PersistentTokenBucket(TokenBucket):
+    """Tenant-scoped token bucket shared by every inbound worker/process."""
+
+    def __init__(
+        self,
+        rate_per_min: float = DEFAULT_RATE_PER_MIN,
+        burst: float | None = None,
+        clock: Callable[[], float] = time.time,
+        path: Path | None = None,
+    ):
+        super().__init__(rate_per_min=rate_per_min, burst=burst, clock=clock)
+        if path is None:
+            from .paths import data_dir
+
+            path = data_dir("federation", "channel_rate.json")
+        self.path = Path(path)
+
+    def _load(self) -> dict[str, tuple[float, float]]:
+        from .file_lock import atomic_read_text
+
+        try:
+            if self.path.stat().st_size > _MAX_LEDGER_BYTES:
+                raise ValueError("rate ledger exceeds its bound")
+            payload = json.loads(atomic_read_text(self.path))
+        except FileNotFoundError:
+            return {}
+        if not isinstance(payload, dict) or payload.get("schema") != _RATE_LEDGER_SCHEMA:
+            raise ValueError("invalid rate ledger")
+        raw = payload.get("buckets")
+        if not isinstance(raw, dict) or len(raw) > _MAX_RATE_KEYS:
+            raise ValueError("invalid rate ledger buckets")
+        state: dict[str, tuple[float, float]] = {}
+        for key, value in raw.items():
+            if (
+                not isinstance(key, str)
+                or not isinstance(value, list)
+                or len(value) != 2
+                or isinstance(value[0], bool)
+                or isinstance(value[1], bool)
+            ):
+                raise ValueError("invalid rate ledger entry")
+            tokens, last = float(value[0]), float(value[1])
+            if not math.isfinite(tokens) or not math.isfinite(last):
+                raise ValueError("invalid rate ledger number")
+            state[key] = (max(0.0, min(self.burst, tokens)), last)
+        return state
+
+    def _save(self, state: dict[str, tuple[float, float]]) -> None:
+        from .file_lock import atomic_write_text
+
+        atomic_write_text(
+            self.path,
+            json.dumps({
+                "schema": _RATE_LEDGER_SCHEMA,
+                "buckets": {key: list(value) for key, value in state.items()},
+            }, sort_keys=True),
+        )
+
+    def allow(self, key: str) -> bool:
+        from .file_lock import cross_process_lock
+
+        try:
+            with cross_process_lock(self.path, strict=True):
+                state = self._load()
+                now = float(self.clock())
+                if not math.isfinite(now):
+                    return False
+                full_refill_seconds = self.burst / self.rate
+                for stale_key, (_tokens, stale_last) in list(state.items()):
+                    if (
+                        stale_key != key
+                        and now >= stale_last
+                        and now - stale_last >= full_refill_seconds
+                    ):
+                        state.pop(stale_key, None)
+                if key not in state and len(state) >= _MAX_RATE_KEYS:
+                    return False
+                tokens, last = state.get(key, (self.burst, now))
+                effective_now = max(now, last)
+                tokens = min(
+                    self.burst,
+                    tokens + (effective_now - last) * self.rate,
+                )
+                allowed = tokens >= 1.0
+                state[key] = (
+                    tokens - 1.0 if allowed else tokens,
+                    effective_now,
+                )
+                self._save(state)
+                return allowed
+        except (OSError, RuntimeError, ValueError):
+            log.error("channel federation: durable rate limiter unavailable")
+            return False
+
+
+def default_limiter(clock: Callable[[], float] = time.time) -> PersistentTokenBucket:
+    """A durable tenant-scoped limiter configured from federation settings."""
     rate = DEFAULT_RATE_PER_MIN
     try:
         from .config import load_config
@@ -277,7 +379,7 @@ def default_limiter(clock: Callable[[], float] = time.monotonic) -> TokenBucket:
             rate = max(0.001, float(raw))
     except Exception:  # pragma: no cover - config never blocks the limiter
         pass
-    return TokenBucket(rate_per_min=rate, clock=clock)
+    return PersistentTokenBucket(rate_per_min=rate, clock=clock)
 
 
 # How far into the future a signed envelope's created_at may be (clock skew
@@ -335,6 +437,87 @@ class FedMessage:
     text: str
 
 
+class ReplayLedger:
+    """Atomic tenant-scoped replay claims that survive restarts and workers."""
+
+    def __init__(self, path: Path | None = None, *, max_entries: int = _MAX_REPLAY_ENTRIES):
+        if path is None:
+            from .paths import data_dir
+
+            path = data_dir("federation", "channel_replay.json")
+        self.path = Path(path)
+        self.max_entries = max(1, min(int(max_entries), _MAX_REPLAY_ENTRIES))
+
+    @staticmethod
+    def _key(sig: str) -> str:
+        return hashlib.sha256(sig.encode("utf-8")).hexdigest()
+
+    def _load(self) -> dict[str, float]:
+        from .file_lock import atomic_read_text
+
+        try:
+            if self.path.stat().st_size > _MAX_LEDGER_BYTES:
+                raise ValueError("replay ledger exceeds its bound")
+            payload = json.loads(atomic_read_text(self.path))
+        except FileNotFoundError:
+            return {}
+        if not isinstance(payload, dict) or payload.get("schema") != _REPLAY_LEDGER_SCHEMA:
+            raise ValueError("invalid replay ledger")
+        raw = payload.get("seen")
+        if not isinstance(raw, dict) or len(raw) > self.max_entries:
+            raise ValueError("invalid replay ledger entries")
+        seen: dict[str, float] = {}
+        for key, value in raw.items():
+            if (
+                not isinstance(key, str)
+                or len(key) != 64
+                or any(char not in "0123456789abcdef" for char in key)
+                or isinstance(value, bool)
+            ):
+                raise ValueError("invalid replay ledger entry")
+            timestamp = float(value)
+            if not math.isfinite(timestamp):
+                raise ValueError("invalid replay ledger timestamp")
+            seen[key] = timestamp
+        return seen
+
+    def _save(self, seen: dict[str, float]) -> None:
+        from .file_lock import atomic_write_text
+
+        atomic_write_text(
+            self.path,
+            json.dumps({"schema": _REPLAY_LEDGER_SCHEMA, "seen": seen}, sort_keys=True),
+        )
+
+    def claim(self, sig: str, *, now: float, expires_at: float) -> bool:
+        """Atomically claim ``sig``; True means another worker claimed it."""
+        from .file_lock import cross_process_lock
+
+        key = self._key(sig)
+        with cross_process_lock(self.path, strict=True):
+            seen = self._load()
+            seen = {item: expiry for item, expiry in seen.items() if expiry >= now}
+            if key in seen:
+                self._save(seen)
+                return True
+            if len(seen) >= self.max_entries:
+                raise ValueError("replay ledger capacity reached")
+            seen[key] = expires_at
+            self._save(seen)
+            return False
+
+    def release(self, sig: str) -> None:
+        """Release a failed handler claim so an at-least-once retry can run."""
+        from .file_lock import cross_process_lock
+
+        key = self._key(sig)
+        with cross_process_lock(self.path, strict=True):
+            seen = self._load()
+            if key in seen:
+                seen.pop(key, None)
+                self._save(seen)
+
+
 class InboundApplier:
     """Verify-then-apply for inbound envelopes.
 
@@ -350,14 +533,18 @@ class InboundApplier:
         *,
         peers: dict[str, dict] | None = None,
         limiter: TokenBucket | None = None,
+        ingress_limiter: TokenBucket | None = None,
         local: str | None = None,
         clock: Callable[[], float] = time.monotonic,
         max_age_seconds: float | None = None,
         wall_clock: Callable[[], float] = time.time,
+        replay_path: Path | None = None,
     ):
         self.handler = handler
         self._peers = peers
-        self.limiter = limiter or default_limiter(clock)
+        limiter_clock = wall_clock if clock is time.monotonic else clock
+        self.limiter = limiter or default_limiter(limiter_clock)
+        self.ingress_limiter = ingress_limiter or default_limiter(limiter_clock)
         self.local = local or local_origin()
         self.max_age = (_default_max_age() if max_age_seconds is None
                         else max(1.0, float(max_age_seconds)))
@@ -369,8 +556,11 @@ class InboundApplier:
         # window and lock-guarded so a threaded inbound binding stays correct.
         self._seen_sigs: OrderedDict[str, float] = OrderedDict()
         self._seen_lock = threading.Lock()
+        self._replay_ledger = ReplayLedger(replay_path)
 
-    def _replay_seen(self, sig: str, now: float) -> bool:
+    def _replay_seen(
+        self, sig: str, now: float, *, expires_at: float | None = None,
+    ) -> bool:
         """Check-and-remember a verified signature; True if already seen.
 
         Prunes by AGE: an entry older than the freshness window can never be
@@ -378,17 +568,27 @@ class InboundApplier:
         safe and the live set is bounded by legitimate in-window peer volume."""
         if not sig:
             return False
-        cutoff = now - self.max_age
+        expiry = now + self.max_age if expires_at is None else expires_at
+        replayed = self._replay_ledger.claim(
+            sig, now=now, expires_at=expiry,
+        )
         with self._seen_lock:
             while self._seen_sigs:
-                _oldest, ts = next(iter(self._seen_sigs.items()))
-                if ts >= cutoff:
+                _oldest, stored_expiry = next(iter(self._seen_sigs.items()))
+                if stored_expiry >= now:
                     break
                 self._seen_sigs.popitem(last=False)
-            if sig in self._seen_sigs:
+            if replayed:
                 return True
-            self._seen_sigs[sig] = now
+            self._seen_sigs[sig] = expiry
             return False
+
+    def _release_replay(self, sig: str) -> None:
+        if not sig:
+            return
+        with self._seen_lock:
+            self._seen_sigs.pop(sig, None)
+        self._replay_ledger.release(sig)
 
     @property
     def peers(self) -> dict[str, dict]:
@@ -438,37 +638,67 @@ class InboundApplier:
         if delta is None or delta > self.max_age or delta < -_CLOCK_SKEW_TOL:
             return {"applied": False,
                     "reason": "envelope is stale or future-dated", "result": None}
-        if not self.limiter.allow(origin):
-            return {"applied": False, "reason": f"rate limited (peer {origin})",
-                    "result": None}
+        if not self.ingress_limiter.allow(f"ingress:{origin}"):
+            return {
+                "applied": False,
+                "reason": f"ingress rate limited (peer {origin})",
+                "result": None,
+            }
         # Replay: reject a second sighting of this signature within the window.
         # The `to` check only stops cross-peer replay; this stops a captured
         # envelope being replayed at this same peer (and dedups at-least-once
-        # redeliveries — effectively-once). Checked AFTER the rate limiter and
-        # recorded only here, so a rate-limited (dropped) message isn't recorded
-        # and its legitimate retry still gets through once the bucket refills.
-        if self._replay_seen(str(envelope.get("sig") or ""), now):
+        # redeliveries without replaying ambiguous side effects). Checked AFTER
+        # the rate limiter and recorded only here, so a rate-limited message isn't
+        # recorded and its legitimate retry can run once the bucket refills.
+        try:
+            replayed = self._replay_seen(
+                str(envelope.get("sig") or ""),
+                now,
+                expires_at=float(created) + self.max_age,
+            )
+        except (OSError, RuntimeError, ValueError):
+            log.error("channel federation: durable replay protection unavailable")
+            return {
+                "applied": False,
+                "reason": "replay protection unavailable",
+                "result": None,
+            }
+        if replayed:
             return {"applied": False, "reason": "replayed envelope", "result": None}
+        if not self.limiter.allow(origin):
+            sig = str(envelope.get("sig") or "")
+            try:
+                self._release_replay(sig)
+            except (OSError, RuntimeError, ValueError):
+                log.error("channel federation: failed to release rate-refused claim")
+            return {"applied": False, "reason": f"rate limited (peer {origin})",
+                    "result": None}
         msg = FedMessage(
             channel=f"fed:{origin}",
             user_id=str(user_id)[:MAX_USER_ID_CHARS],
             text=str(text)[:MAX_TEXT_CHARS],
         )
         # The nonce was recorded in _replay_seen above so concurrent/at-least-once
-        # redeliveries dedup. But a transient handler failure (DB busy, downstream
-        # timeout, shield not ready) must stay retryable: drop the just-recorded
-        # nonce so the peer's redelivery re-runs the handler instead of being
-        # rejected as "replayed envelope" (which would silently lose the message).
+        # redeliveries dedup. This is intentionally at-most-once across a hard
+        # process crash: replaying an ambiguously completed side effect would be
+        # less safe. A caught transient handler failure (DB busy, downstream
+        # timeout, shield not ready) is retryable: drop the just-recorded nonce
+        # so the peer's redelivery re-runs the handler.
         try:
             result = self.handler(msg)
         except Exception as exc:  # noqa: BLE001 — honor the never-raises contract
             sig = str(envelope.get("sig") or "")
             if sig:
-                with self._seen_lock:
-                    self._seen_sigs.pop(sig, None)
+                try:
+                    self._release_replay(sig)
+                except (OSError, RuntimeError, ValueError):
+                    log.error(
+                        "channel federation: failed replay-claim release after %s",
+                        type(exc).__name__,
+                    )
             log.warning("channel federation: handler failed, nonce released "
-                        "for retry: %s", exc)
-            return {"applied": False, "reason": f"handler error: {exc}",
+                        "for retry: %s", type(exc).__name__)
+            return {"applied": False, "reason": "handler error",
                     "result": None}
         return {"applied": True, "reason": "ok", "result": result}
 
@@ -494,7 +724,9 @@ __all__ = [
     "enqueue",
     "flush",
     "TokenBucket",
+    "PersistentTokenBucket",
     "default_limiter",
     "FedMessage",
+    "ReplayLedger",
     "InboundApplier",
 ]

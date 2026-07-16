@@ -24,9 +24,11 @@ import re
 from dataclasses import dataclass, field
 
 from .draft import (
+    _TOOL_NAME_RE,
     FLOW_SCHEMA_BLOCK,
     _extract_json,
     _factory_guided,
+    _safe_provider_text,
     _sanitize,
     _tool_hint,
     validate_action_bindings,
@@ -42,6 +44,8 @@ _CHAT_MAX_DOLLARS = 0.50
 _CHAT_MAX_TOKENS = 2500
 _MAX_HISTORY_TURNS = 12
 _MAX_TURN_CHARS = 2000
+_MAX_FLOW_CONTEXT_CHARS = 20_000
+_MAX_MODEL_OUTPUT_CHARS = 64_000
 _INSTRUCTION_RE = re.compile(
     r"(?i)\b(ignore|override|system|developer|instruction|exfiltrat|secret|token|credential)\b"
     r"|https?://|webhook"
@@ -167,7 +171,13 @@ def _run_context(
 ) -> str:
     parts = []
     if flow is not None and flow.nodes:
-        parts.append("Current flow:\n" + json.dumps(flow.to_dict(), sort_keys=True))
+        raw_flow = json.dumps(flow.to_dict(), sort_keys=True, default=str)
+        from ..safety.secret_detector import redact
+
+        safe_flow, _ = redact(raw_flow[:_MAX_FLOW_CONTEXT_CHARS])
+        if len(raw_flow) > _MAX_FLOW_CONTEXT_CHARS:
+            safe_flow += "...[truncated]"
+        parts.append("Current flow:\n" + safe_flow)
     else:
         parts.append("Current flow: (empty canvas)")
     if run:
@@ -268,13 +278,17 @@ def _preflight_patch_action_bindings(
 
 
 def _messages(message: str, history) -> list[dict]:
+    from ..safety.secret_detector import redact
+
     msgs: list[dict] = []
     for turn in list(history or [])[-_MAX_HISTORY_TURNS:]:
         role = str(turn.get("role", ""))
         content = str(turn.get("content", ""))[:_MAX_TURN_CHARS]
+        content, _ = redact(content)
         if role in ("user", "assistant") and content:
             msgs.append({"role": role, "content": content})
-    msgs.append({"role": "user", "content": str(message)[:_MAX_TURN_CHARS]})
+    current, _ = redact(str(message)[:_MAX_TURN_CHARS])
+    msgs.append({"role": "user", "content": current})
     return msgs
 
 
@@ -385,12 +399,14 @@ def chat_flow(message: str, *, flow: Flow | None = None, history=(),
     set only when the turn produced a valid changed flow. Never raises on model
     misbehavior -- a bad patch list or unparsable output degrades to a plain
     reply with a note."""
-    message = (message or "").strip()
+    message = _safe_provider_text(
+        message, label="message", maximum=_MAX_TURN_CHARS,
+    ).strip()
     if not message:
         raise ValueError("a message is required")
     run_edit_requested = bool(run) and _explicit_edit_request(message)
     tool_names = None if tools is None else tuple(
-        str(name) for name in tools if str(name))
+        str(name) for name in tools if _TOOL_NAME_RE.fullmatch(str(name)))
     if complete is None:  # pragma: no cover -- exercised via the real endpoint
         from ..llm import LLM, model_for_role
         complete = LLM(model=model_for_role("orchestrator")).complete
@@ -406,8 +422,17 @@ def chat_flow(message: str, *, flow: Flow | None = None, history=(),
         budget=Budget(max_dollars=_CHAT_MAX_DOLLARS),
         max_tokens=_CHAT_MAX_TOKENS,
     )
-    raw = _extract_json(getattr(resp, "text", "") or "")
     out = FlowChatResult()
+    raw_text = getattr(resp, "text", "") or ""
+    try:
+        _safe_provider_text(
+            raw_text, label="model output", maximum=_MAX_MODEL_OUTPUT_CHARS,
+        )
+    except ValueError:
+        out.reply = "I couldn't produce a safe structured answer for that."
+        out.notes.append("model output failed the provider-boundary safety check")
+        return out
+    raw = _extract_json(raw_text)
     if raw is None:
         out.reply = "I couldn't produce a structured answer for that -- try rephrasing."
         out.notes.append("model did not return JSON")

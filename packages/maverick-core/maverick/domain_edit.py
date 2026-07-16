@@ -19,6 +19,7 @@ literals, so an override round-trips back through the loader.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from .domain import (
@@ -37,6 +38,7 @@ from .domain import (
     suite_for,
     user_dir,
 )
+from .file_lock import atomic_write_text, cross_process_lock, ensure_private_directory
 
 # Scalars vs arrays serialize the same way (json.dumps), but we emit them in a
 # stable, readable order; ``models`` and ``workflow`` become TOML tables.
@@ -44,6 +46,21 @@ _SCALAR_KEYS = ("name", "extends", "compartment", "description", "persona",
                 "max_risk", "effort", "authoring")
 _ARRAY_KEYS = ("allow_tools", "deny_tools", "allow_paths", "allow_hosts",
                "mcp_servers", "knowledge_sources", "refuse")
+
+# Override names become filenames. Keep this deliberately narrower than a
+# platform path component so the same identifier is safe on POSIX and Windows
+# (where a backslash is a separator) and cannot address a sibling file.
+_OVERRIDE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
+_MAX_OVERRIDE_BYTES = 256 * 1024
+
+
+def _validated_override_name(name: str) -> str:
+    name = str(name or "")
+    if not _OVERRIDE_NAME_RE.fullmatch(name):
+        raise ValueError(
+            "agent name must be 1-128 letters, numbers, underscores, or hyphens"
+        )
+    return name
 
 
 def overlay_toml(patch: dict) -> str:
@@ -152,6 +169,10 @@ def _envelope_errors(base: DomainProfile | None, merged: DomainProfile) -> list[
 def validate_override(name: str, patch: dict) -> tuple[list[str], list[str]]:
     """Lint the *merged* result of applying ``patch`` to its base. Returns
     ``(errors, warnings)`` -- the editor blocks a save on any error."""
+    try:
+        name = _validated_override_name(name)
+    except ValueError as exc:
+        return [str(exc)], []
     patch = dict(patch)
     merged = _resolve(name, patch)
     errors, warnings = lint_profile(merged)
@@ -163,15 +184,24 @@ def write_override(name: str, patch: dict, directory: str | Path | None = None) 
     """Validate then persist a tenant override for ``name``. Raises
     ``ValueError`` (with the lint errors) rather than writing an override that
     would weaken the safety envelope. Returns the path written."""
+    name = _validated_override_name(name)
     patch = {k: v for k, v in dict(patch).items() if k in _OVERLAYABLE or k in ("name", "extends")}
-    patch.setdefault("name", name)
+    # The route/argument identifier is authoritative; a caller-supplied payload
+    # name must not create an identity mismatch inside a differently named file.
+    patch["name"] = name
+    content = overlay_toml(patch)
+    if len(content.encode("utf-8")) > _MAX_OVERRIDE_BYTES:
+        raise ValueError("agent override is too large")
     errors, _ = validate_override(name, patch)
     if errors:
         raise ValueError("; ".join(errors))
-    d = Path(directory) if directory else user_dir()
-    d.mkdir(parents=True, exist_ok=True)
+    d = ensure_private_directory(Path(directory) if directory else user_dir())
     path = d / f"{name}.toml"
-    path.write_text(overlay_toml(patch), encoding="utf-8")
+    # Lock a stable sidecar, then publish a complete private file. Atomic
+    # replacement also replaces a planted final-component symlink rather than
+    # following it to an attacker-selected target.
+    with cross_process_lock(path, strict=True):
+        atomic_write_text(path, content, mode=0o600)
     # The pack's capability surface may have changed. If it already has a
     # governance assessment, re-draft it so drift flips an accepted review back
     # to needs-review (best-effort; only touches the default user dir).
@@ -187,6 +217,7 @@ def write_override(name: str, patch: dict, directory: str | Path | None = None) 
 def read_override(name: str, directory: str | Path | None = None) -> dict:
     """The raw override patch for ``name`` (``{}`` if the client hasn't
     customized this pack)."""
+    name = _validated_override_name(name)
     d = Path(directory) if directory else user_dir()
     return _load_raw_domains(d).get(name, {})
 
@@ -194,11 +225,13 @@ def read_override(name: str, directory: str | Path | None = None) -> dict:
 def remove_override(name: str, directory: str | Path | None = None) -> bool:
     """Delete a tenant override, reverting to the built-in pack. Returns whether
     a file was removed."""
+    name = _validated_override_name(name)
     d = Path(directory) if directory else user_dir()
     path = d / f"{name}.toml"
-    if path.is_file():
-        path.unlink()
-        return True
+    with cross_process_lock(path, strict=True):
+        if path.is_file():
+            path.unlink()
+            return True
     return False
 
 

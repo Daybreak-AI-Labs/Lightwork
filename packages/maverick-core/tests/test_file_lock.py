@@ -309,6 +309,32 @@ def test_cross_process_lock_is_reentrant_for_same_thread(tmp_path):
     assert p.read_text() == "nested"
 
 
+def test_strict_cross_process_lock_uses_platform_backend(tmp_path):
+    p = tmp_path / "strict.json"
+    with cross_process_lock(p, strict=True):
+        atomic_write_text(p, "strict")
+    assert p.read_text() == "strict"
+
+
+def test_strict_nested_lock_refuses_degraded_outer_scope(tmp_path):
+    import maverick.file_lock as file_lock
+
+    p = tmp_path / "degraded.json"
+    lock_path = p.parent / (p.name + ".lock")
+    canonical = file_lock._canonical_lock_path(lock_path)
+    prior = getattr(file_lock._THREAD_LOCK_STATE, "held", None)
+    file_lock._THREAD_LOCK_STATE.held = {canonical: (1, False)}
+    try:
+        with pytest.raises(RuntimeError, match="backend is unavailable"):
+            with cross_process_lock(p, strict=True):
+                pytest.fail("strict lock unexpectedly inherited a degraded scope")
+    finally:
+        if prior is None:
+            delattr(file_lock._THREAD_LOCK_STATE, "held")
+        else:
+            file_lock._THREAD_LOCK_STATE.held = prior
+
+
 def test_cross_process_lock_serializes_processes(tmp_path):
     p = tmp_path / "process-counter.json"
     atomic_write_text(p, json.dumps({"c": 0}))

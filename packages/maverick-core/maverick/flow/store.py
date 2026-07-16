@@ -16,6 +16,8 @@ from hashlib import sha256
 
 from .ir import Flow
 
+_MAX_FLOW_DEFINITION_BYTES = 1_000_000
+
 
 def _flows_dir():
     from ..paths import data_dir
@@ -97,12 +99,62 @@ def _read_json(path) -> dict | None:
 def _definitions_lock():
     """Serialize definition edits with content-addressed run snapshots."""
     from ..file_lock import cross_process_lock
-    with cross_process_lock(_flows_dir() / ".definitions"):
+    with cross_process_lock(_flows_dir() / ".definitions", strict=True):
         yield
 
 
 class FlowVersionConflict(RuntimeError):
     """A definition changed after the caller read its expected version."""
+
+
+def _assert_safe_definition(payload: dict) -> None:
+    """Refuse oversized definitions and raw credentials before persistence."""
+    remaining = _MAX_FLOW_DEFINITION_BYTES
+
+    def charge(value, *, depth: int = 0) -> None:
+        nonlocal remaining
+        if depth > 32:
+            raise ValueError("flow definition nesting is too deep")
+        remaining -= 8  # container/scalar JSON punctuation and type overhead
+        if remaining < 0:
+            raise ValueError("flow definition exceeds the storage limit")
+        if isinstance(value, str):
+            if len(value) > _MAX_FLOW_DEFINITION_BYTES:
+                raise ValueError("flow definition exceeds the storage limit")
+            remaining -= len(value.encode("utf-8"))
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                charge(str(key), depth=depth + 1)
+                charge(item, depth=depth + 1)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                charge(item, depth=depth + 1)
+        if remaining < 0:
+            raise ValueError("flow definition exceeds the storage limit")
+
+    charge(payload)
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    if len(raw.encode("utf-8")) > _MAX_FLOW_DEFINITION_BYTES:
+        raise ValueError("flow definition exceeds the storage limit")
+    from ..safety.secret_detector import scan
+
+    def contains_secret(value) -> bool:
+        if isinstance(value, str):
+            return bool(scan(value))
+        if isinstance(value, dict):
+            return any(
+                contains_secret(str(key)) or contains_secret(item)
+                for key, item in value.items()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(contains_secret(item) for item in value)
+        return False
+
+    if contains_secret(payload):
+        raise ValueError(
+            "flow definitions may not contain raw credentials; "
+            "use {{secret('NAME')}} instead"
+        )
 
 
 def save_flow(
@@ -118,6 +170,9 @@ def save_flow(
     (a brand-new flow starts at 1). Returns the saved flow with its stamped
     version. Forward-only history -- a rollback is itself a new version, so
     nothing is ever destroyed."""
+    # Reject unsafe content before any history/version side effect, then check
+    # the exact stamped payload again under the definition lock.
+    _assert_safe_definition(flow.to_dict())
     with _definitions_lock():
         prior = load_flow(flow.id)
         actual_version = int(prior.version) if prior is not None else 0
@@ -130,8 +185,6 @@ def save_flow(
             raise FlowVersionConflict(
                 f"flow {flow.id!r} was replaced or changed generation")
         if prior is not None:
-            # Snapshot the version being replaced under its own number, then advance.
-            _write_json(_history_dir(flow.id) / f"v{int(prior.version)}.json", prior.to_dict())
             flow.version = int(prior.version) + 1
             # A generation token never changes during ordinary edits/rollbacks.
             # It closes the delete+recreate ABA hole that a resettable integer
@@ -142,7 +195,15 @@ def save_flow(
             # v999 and weaken the history/CAS invariants.
             flow.version = 1
             flow.revision = _new_revision()
-        _write_json(_flows_dir() / f"{_safe_id(flow.id)}.json", flow.to_dict())
+        payload = flow.to_dict()
+        _assert_safe_definition(payload)
+        if prior is not None:
+            # Snapshot the version being replaced under its own number, then advance.
+            _write_json(
+                _history_dir(flow.id) / f"v{int(prior.version)}.json",
+                prior.to_dict(),
+            )
+        _write_json(_flows_dir() / f"{_safe_id(flow.id)}.json", payload)
     return flow
 
 
@@ -579,7 +640,9 @@ def _idempotency_claim_path(flow_id: str, idem_key: str):
 def idempotency_lock(flow_id: str, idem_key: str):
     """Serialize first-writer-wins reservation for one flow/idempotency key."""
     from ..file_lock import cross_process_lock
-    with cross_process_lock(_idempotency_claim_path(flow_id, idem_key)):
+    with cross_process_lock(
+        _idempotency_claim_path(flow_id, idem_key), strict=True,
+    ):
         yield
 
 
@@ -653,7 +716,7 @@ def run_lock(run_id: str):
     from ..file_lock import cross_process_lock
 
     target = _runs_dir() / f"{_safe_id(run_id)}.json"
-    with cross_process_lock(target):
+    with cross_process_lock(target, strict=True):
         yield
 
 

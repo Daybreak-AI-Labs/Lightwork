@@ -1466,6 +1466,21 @@ def train_and_propose(
                 reason, approver_id=preparation.verdict.approver_id,
             )
 
+        # PREPARE is durable, but no serving artifact has changed yet. A HALT
+        # armed during evaluation/approval must win immediately before the
+        # atomic activation; abort against the exact observed pre-state.
+        try:
+            from .learning_guard import check_learning_halt
+            check_learning_halt("verifier_head", "before-activation")
+        except Exception:
+            observed = activation._current_revision_locked()
+            log.warning("verifier activation refused by learning safety boundary")
+            return active_controller.abort_prepared(
+                preparation,
+                artifact=observed,
+                reason="learning safety check refused verifier activation",
+            )
+
         try:
             activation._activate_locked(expected_before=before)
         except Exception:

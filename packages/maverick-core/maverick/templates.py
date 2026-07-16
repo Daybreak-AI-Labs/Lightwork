@@ -34,7 +34,12 @@ from pathlib import Path
 
 from .paths import data_dir
 
-USER_TEMPLATES = data_dir("templates")
+# ``data_dir`` is tenant-sensitive.  Keep the historical constant as an
+# explicit test/embedding override, but never use its import-time value as the
+# production runtime path: a long-lived dashboard serves many tenant contexts
+# in one process.
+_IMPORT_USER_TEMPLATES = data_dir("templates")
+USER_TEMPLATES = _IMPORT_USER_TEMPLATES
 log = logging.getLogger(__name__)
 
 # Bundled templates ship in the repo; locate via relative path from the
@@ -44,6 +49,18 @@ _BUNDLED_CANDIDATES = [
     Path(__file__).parent.parent.parent.parent / "benchmarks" / "example-templates",
     Path.cwd() / "benchmarks" / "example-templates",
 ]
+
+
+def user_templates_dir() -> Path:
+    """Return the active tenant's user-template directory.
+
+    ``USER_TEMPLATES`` remains a supported explicit override for tests and
+    embedders.  When it still has its original import-time object, resolve the
+    path again so the current tenant and ``MAVERICK_HOME`` are honored.
+    """
+    if USER_TEMPLATES is not _IMPORT_USER_TEMPLATES:
+        return Path(USER_TEMPLATES)
+    return data_dir("templates")
 
 
 @dataclass
@@ -155,7 +172,7 @@ def _candidate_dirs() -> list[Path]:
     # "not found. Searched: [...]" error.
     out: list[Path] = []
     seen: set[Path] = set()
-    for d in [USER_TEMPLATES, *(c for c in _BUNDLED_CANDIDATES if c.exists())]:
+    for d in [user_templates_dir(), *(c for c in _BUNDLED_CANDIDATES if c.exists())]:
         rd = d.resolve()
         if rd in seen:
             continue
@@ -254,17 +271,26 @@ def save_user_template(
     bd = min(max(bd, 0.5), 100.0)
     bw = min(max(bw, 1.0), 86400.0)
 
-    USER_TEMPLATES.mkdir(parents=True, exist_ok=True)
-    dest = USER_TEMPLATES / f"{name}.md"
-    if dest.exists() and not overwrite:
-        raise FileExistsError(f"template {name!r} already exists")
-
     front = [f"title: {title}", f"budget_dollars: {bd}", f"budget_wall_seconds: {bw}"]
     if clean_params:
         front.append("params:")
         front.extend(f"  - {p}" for p in clean_params)
     content = "---\n" + "\n".join(front) + "\n---\n" + body + "\n"
-    dest.write_text(content, encoding="utf-8")
+    dest = user_templates_dir() / f"{name}.md"
+    from .file_lock import (
+        atomic_write_text,
+        cross_process_lock,
+        ensure_private_directory,
+    )
+
+    # Make the existence check and publication one serialized operation.
+    # ``atomic_write_text`` also avoids following a planted destination symlink
+    # and publishes a private, whole-file snapshot to concurrent readers.
+    ensure_private_directory(dest.parent)
+    with cross_process_lock(dest, strict=True):
+        if dest.exists() and not overwrite:
+            raise FileExistsError(f"template {name!r} already exists")
+        atomic_write_text(dest, content)
     return Template.parse(content, name, path=dest)
 
 
@@ -411,8 +437,16 @@ def install_template_from_catalog(
         f"Template title: {template.title}\n\nTemplate body:\n{template.body}",
         label="template",
     )
-    target_dir = dest if dest is not None else USER_TEMPLATES
-    target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / f"{name}.md").write_text(content, encoding="utf-8")
-    template.path = target_dir / f"{name}.md"
+    target_dir = dest if dest is not None else user_templates_dir()
+    from .file_lock import (
+        atomic_write_text,
+        cross_process_lock,
+        ensure_private_directory,
+    )
+
+    ensure_private_directory(target_dir)
+    target = target_dir / f"{name}.md"
+    with cross_process_lock(target, strict=True):
+        atomic_write_text(target, content)
+    template.path = target
     return template

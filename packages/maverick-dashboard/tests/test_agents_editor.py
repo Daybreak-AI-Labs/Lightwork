@@ -112,6 +112,22 @@ class TestOverrideLifecycle:
         assert r.status_code == 200
         assert client.get(f"/api/v1/agents/{name}").json()["is_override"] is False
 
+    @pytest.mark.parametrize("method", ["post", "delete"])
+    def test_windows_backslash_name_cannot_escape_domains_directory(
+        self, tmp_path, method,
+    ):
+        escaped = tmp_path / "config.toml"
+        escaped.write_text("sentinel", encoding="utf-8")
+        url = "/api/v1/agents/..%5Cconfig/override"
+
+        if method == "post":
+            response = client.post(url, json={"description": "overwrite"})
+        else:
+            response = client.delete(url)
+
+        assert response.status_code == 422
+        assert escaped.read_text(encoding="utf-8") == "sentinel"
+
 
 class TestPackEditingGate:
     def test_mutations_403_when_disabled(self, monkeypatch):

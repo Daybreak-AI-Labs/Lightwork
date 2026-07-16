@@ -1,6 +1,7 @@
 """Auto-skill distillation v2: evidence gate + dedup against the store."""
 from __future__ import annotations
 
+import pytest
 from maverick.skill import distillation_v2 as v2
 
 
@@ -127,4 +128,34 @@ def test_distill_and_save_gated_gate_blocks_one_off(tmp_path):
     path, reason = v2.distill_and_save_gated([_traj("one off")], store=tmp_path,
                                              min_examples=2)
     assert path is None and "too few examples" in reason
+    assert list(tmp_path.glob("*.md")) == []
+
+
+def test_distill_and_save_rechecks_immediately_before_write(tmp_path):
+    trajs = [_traj("deploy the billing service", t=2),
+             _traj("deploy the billing api", t=1)]
+
+    def refuse():
+        raise RuntimeError("operator stop")
+
+    with pytest.raises(RuntimeError, match="operator stop"):
+        v2.distill_and_save_gated(
+            trajs, store=tmp_path, min_examples=2, before_save=refuse)
+    assert list(tmp_path.glob("*.md")) == []
+
+
+def test_direct_distillation_cannot_bypass_global_learning_halt(
+    tmp_path, monkeypatch,
+):
+    from maverick.learning_guard import Halted
+
+    trajs = [_traj("deploy the billing service", t=2),
+             _traj("deploy the billing api", t=1)]
+    monkeypatch.setattr(
+        "maverick.learning_guard.check_learning_halt",
+        lambda *_: (_ for _ in ()).throw(Halted("operator stop", "test")),
+    )
+
+    with pytest.raises(Halted, match="operator stop"):
+        v2.distill_and_save_gated(trajs, store=tmp_path, min_examples=2)
     assert list(tmp_path.glob("*.md")) == []

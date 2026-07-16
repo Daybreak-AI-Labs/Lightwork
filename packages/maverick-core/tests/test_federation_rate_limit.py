@@ -54,6 +54,32 @@ def test_delegate_goal_refuses_over_cap(monkeypatch):
     assert goals.started == 2  # the throttled call never reached goal creation
 
 
+def test_authenticated_malformed_requests_hit_ingress_gate_first(monkeypatch):
+    """A token holder cannot bypass ingress limits with invalid identifiers."""
+    checked: list[str] = []
+    monkeypatch.setattr(
+        fed,
+        "_fed_auth_rate_ok",
+        lambda peer: checked.append(peer) or False,
+    )
+    goals = _Goals()
+    svc = FederationService(
+        node="B", peers=[Peer("A", "a:1", "tok")],
+        local_grant=None, goal_service=goals,
+    )
+
+    refused = svc.delegate_goal({
+        "auth_token": "tok",
+        "correlation_id": "x" * (fed._MAX_CORRELATION_ID_BYTES + 1),
+        "goal_title": "t",
+    })
+
+    assert refused["accepted"] is False
+    assert "rate limit" in refused["reason"]
+    assert checked == ["A"]
+    assert goals.started == 0
+
+
 def test_disabled_when_zero(monkeypatch):
     monkeypatch.setenv("MAVERICK_FEDERATION_RATE_LIMIT", "0")
     for _ in range(1000):
@@ -65,6 +91,14 @@ def test_blocks_over_cap(monkeypatch):
     assert fed._fed_rate_ok("peer:alpha")
     assert fed._fed_rate_ok("peer:alpha")
     assert fed._fed_rate_ok("peer:alpha") is False
+
+
+def test_rate_limit_survives_process_memory_reset(monkeypatch):
+    monkeypatch.setenv("MAVERICK_FEDERATION_RATE_LIMIT", "1")
+    assert fed._fed_rate_ok("peer:durable", now=1000.0)
+    fed._fed_rate_hits.clear()  # simulate a new worker/restarted process
+
+    assert fed._fed_rate_ok("peer:durable", now=1001.0) is False
 
 
 def test_buckets_independent(monkeypatch):

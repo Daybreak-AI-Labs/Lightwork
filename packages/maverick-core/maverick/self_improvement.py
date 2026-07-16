@@ -46,6 +46,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .learning_guard import Halted, check_learning_halt
+
 log = logging.getLogger(__name__)
 
 # Rungs ordered by blast radius. Index == risk rank. ``evaluator`` (swapping the
@@ -644,6 +646,20 @@ class SelfImprovementController:
             verdict.candidate_id, verdict.rung, False,
             (*verdict.gates, failure), reason, approver_id=verdict.approver_id)
 
+    @staticmethod
+    def _halt_reason(phase: str) -> str | None:
+        """Return the active operational-stop reason, if any.
+
+        The controller returns a normal failed gate instead of leaking the
+        control-flow exception through its public fail-closed API.  Recovery
+        and rollback intentionally bypass this check.
+        """
+        try:
+            check_learning_halt("self_improvement", phase)
+        except Halted as exc:
+            return str(exc)
+        return None
+
     def prepare_promotion(
         self, cand: Candidate, *, before: ArtifactRevision,
         after: ArtifactRevision, transaction_id: str | None = None,
@@ -662,6 +678,12 @@ class SelfImprovementController:
                 (GateResult("enabled", False, "self-improvement disabled"),),
                 "self-improvement disabled")
             return PromotionPreparation(verdict)
+        halt_reason = self._halt_reason("evaluation")
+        if halt_reason is not None:
+            verdict = Verdict(
+                cand.id, cand.rung, False,
+                (GateResult("killswitch", False, halt_reason),), halt_reason)
+            return PromotionPreparation(verdict)
         verdict = self.evaluate(cand)
         if not verdict.ok:
             self._audit(
@@ -669,6 +691,14 @@ class SelfImprovementController:
                 rung=cand.rung, candidate=cand.id, reason=verdict.blocking_reason)
             return PromotionPreparation(verdict)
         try:
+            halt_reason = self._halt_reason("promotion")
+            if halt_reason is not None:
+                failed = self._fail_verdict(
+                    verdict, gate="killswitch", reason=halt_reason)
+                self._audit(
+                    content="self_improvement_rejected", decision="reject",
+                    rung=cand.rung, candidate=cand.id, reason=halt_reason)
+                return PromotionPreparation(failed)
             if self.ledger is None:
                 raise PromotionLedgerError("promotion ledger is required")
             prepared_at = self.now()
@@ -827,6 +857,11 @@ class SelfImprovementController:
             return Verdict(cand.id, cand.rung, False,
                            (GateResult("enabled", False, "self-improvement disabled"),),
                            "self-improvement disabled")
+        halt_reason = self._halt_reason("evaluation")
+        if halt_reason is not None:
+            return Verdict(
+                cand.id, cand.rung, False,
+                (GateResult("killswitch", False, halt_reason),), halt_reason)
         verdict = self.evaluate(cand)
         if not verdict.promote:
             self._audit(content="self_improvement_rejected", decision="reject",
@@ -839,6 +874,13 @@ class SelfImprovementController:
         # recomputed). No signature (dev/community boolean path) => all None, so
         # the record is byte-for-byte what it was before this change.
         try:
+            halt_reason = self._halt_reason("promotion")
+            if halt_reason is not None:
+                failed = self._fail_verdict(
+                    verdict, gate="killswitch", reason=halt_reason)
+                self._audit(content="self_improvement_rejected", decision="reject",
+                            rung=cand.rung, candidate=cand.id, reason=halt_reason)
+                return failed
             rec = self._promotion_record(cand, verdict, at=self.now())
             if self.ledger is None:
                 raise PromotionLedgerError("promotion ledger is required")

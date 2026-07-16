@@ -1,6 +1,7 @@
 """Personalized starter templates: profile, scorer, suggest ranking."""
 from __future__ import annotations
 
+import pytest
 from maverick import starter_templates as st
 from maverick.templates import Template
 from maverick.world_model import WorldModel
@@ -87,3 +88,34 @@ def test_suggest_reads_local_template_catalog(tmp_path, monkeypatch):
     w.create_goal("plan a trip to porto", "")
     rows = st.suggest(w, k=5)
     assert rows[0]["name"] == "trip-plan" and rows[0]["score"] > 0
+
+
+def test_user_template_path_resolves_current_tenant_at_call_time(tmp_path, monkeypatch):
+    """One long-lived process must not pin tenant A's template dir at import."""
+    import maverick.templates as tpl_mod
+    from maverick.paths import reset_tenant, set_tenant
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    name = "tenant-isolation-probe-7391"
+
+    token = set_tenant("acme")
+    try:
+        tpl_mod.save_user_template(name, title="Acme", body="acme-only")
+        assert tpl_mod.load_template(name).body == "acme-only"
+    finally:
+        reset_tenant(token)
+
+    token = set_tenant("globex")
+    try:
+        with pytest.raises(FileNotFoundError):
+            tpl_mod.load_template(name)
+        tpl_mod.save_user_template(name, title="Globex", body="globex-only")
+        assert tpl_mod.load_template(name).body == "globex-only"
+    finally:
+        reset_tenant(token)
+
+    token = set_tenant("acme")
+    try:
+        assert tpl_mod.load_template(name).body == "acme-only"
+    finally:
+        reset_tenant(token)

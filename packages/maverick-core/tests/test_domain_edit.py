@@ -2,6 +2,8 @@
 merged provenance view the dashboard editor renders."""
 from __future__ import annotations
 
+import os
+
 try:
     import tomllib
 except ModuleNotFoundError:  # Python 3.10
@@ -98,6 +100,49 @@ class TestWriteOverride:
         view = resolved_view(name)
         assert [s["name"] for s in view["workflow"]] == ["intake", "answer"]
         assert "workflow" in view["overridden"]
+
+    @pytest.mark.parametrize("name", ["../escaped", r"..\escaped", "a/b", r"a\b", "."])
+    def test_path_like_names_cannot_escape_override_directory(self, tenant_dir, name):
+        escaped = tenant_dir.parent / "escaped.toml"
+        escaped.write_text("sentinel", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="agent name"):
+            write_override(name, {"description": "overwrite"})
+        with pytest.raises(ValueError, match="agent name"):
+            remove_override(name)
+
+        assert escaped.read_text(encoding="utf-8") == "sentinel"
+
+    def test_override_is_size_bounded(self, tenant_dir):
+        name, _ = _clean_builtin()
+        with pytest.raises(ValueError, match="too large"):
+            write_override(name, {"description": "x" * (300 * 1024)})
+        assert not (tenant_dir / f"{name}.toml").exists()
+
+    def test_argument_name_is_authoritative_over_payload_name(self, tenant_dir):
+        name, _ = _clean_builtin()
+        write_override(name, {"name": "different_identity", "description": "tuned"})
+        raw = tomllib.loads((tenant_dir / f"{name}.toml").read_text(encoding="utf-8"))
+        assert raw["name"] == name
+
+    def test_atomic_write_replaces_symlink_without_touching_target(self, tenant_dir):
+        name, _ = _clean_builtin()
+        target = tenant_dir.parent / "target.toml"
+        original = 'name = "target"\ndescription = "sentinel"\n'
+        target.write_text(original, encoding="utf-8")
+        link = tenant_dir / f"{name}.toml"
+        try:
+            link.symlink_to(target)
+        except (NotImplementedError, OSError):
+            pytest.skip("symlink creation is not available")
+
+        write_override(name, {"description": "safe replacement"})
+
+        assert target.read_text(encoding="utf-8") == original
+        assert not link.is_symlink()
+        assert "safe replacement" in link.read_text(encoding="utf-8")
+        if os.name != "nt":
+            assert link.stat().st_mode & 0o777 == 0o600
 
 
 class TestResolvedView:

@@ -5,6 +5,7 @@ import json
 import struct
 from types import SimpleNamespace
 
+import pytest
 from maverick.tools.model3d_inspect import model3d_inspect
 from maverick.tools.synthetic_data import synthetic_data
 
@@ -79,7 +80,10 @@ def test_inspect_rejects_symlink_escape(tmp_path):
     outside = tmp_path.parent / "outside_symlink.obj"
     outside.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
     link = tmp_path / "linked.obj"
-    link.symlink_to(outside)
+    try:
+        link.symlink_to(outside)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlinks unavailable on this host: {exc}")
     tool = model3d_inspect(SimpleNamespace(workdir=tmp_path))
 
     assert "path escapes workspace" in tool.fn({"op": "inspect", "path": link.name})

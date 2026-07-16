@@ -36,10 +36,13 @@ import hmac
 import json
 import logging
 import os
+import sqlite3
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextvars import ContextVar
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import Lock, RLock
 from typing import Any
 
@@ -142,6 +145,10 @@ _MAX_ARTIFACT_NAME_BYTES = 256
 _MAX_PUSH_URL_BYTES = 4096
 _MAX_PUSH_TOKEN_BYTES = 4096
 _PUSH_CONFIG_FIELDS = frozenset({"url", "token"})
+_MAX_DURABLE_CLAIMS = 100_000
+_MAX_DURABLE_SNAPSHOT_BYTES = 256 * 1024
+_MAX_DURABLE_STORED_SNAPSHOT_BYTES = 384 * 1024
+_MAX_DURABLE_RETAINED_BYTES = 64 * 1024 * 1024
 
 
 def _now_iso() -> str:
@@ -150,6 +157,21 @@ def _now_iso() -> str:
 
 def _new_id() -> str:
     return str(uuid.uuid4())
+
+
+@contextlib.contextmanager
+def _task_tenant_scope(tenant: str):
+    """Pin a captured task tenant while its async execution is active."""
+    if not tenant:
+        yield
+        return
+    from .paths import reset_tenant, set_tenant
+
+    token = set_tenant(tenant)
+    try:
+        yield
+    finally:
+        reset_tenant(token)
 
 
 def _text_parts(text: str) -> list[dict]:
@@ -392,9 +414,14 @@ def _default_runner(
 
 
 class _Task:
-    """In-memory task record with status + state-transition history."""
+    """Task record with status + state-transition history.
 
-    def __init__(self, context_id: str, user_message: dict):
+    The live object remains in memory for the low-latency single-process path.
+    A mounted A2A service additionally serializes a bounded copy through
+    :class:`_DurableTaskStore` before execution and after each transition.
+    """
+
+    def __init__(self, context_id: str, user_message: dict, *, tenant: str = ""):
         self.id = _new_id()
         self.context_id = context_id or _new_id()
         self.created_at = _now_iso()
@@ -409,12 +436,16 @@ class _Task:
         # Principal that created the task; get/cancel/push-config are scoped to
         # it so one A2A caller can't read/cancel/redirect another's task.
         self.principal: str = ""
+        # Raw tenant id captured at admission. Never re-resolve this while a
+        # task is running: an async context may later be reset or reused.
+        self.tenant: str = tenant
         # Client-requested budget captured at creation, clamped to the operator
         # ceiling at run time (see TaskEngine._limits).
         self.budget_request: dict = {}
         # Present only for caller-supplied messageId values. Used to remove the
         # dedupe index entry when this task is eventually evicted.
-        self.idempotency_key: tuple[str, str] | None = None
+        self.idempotency_key: tuple[str, str, str] | None = None
+        self.request_digest: str = ""
         # Exact retained request/artifact bytes charged to the engine-wide
         # ceiling. Push configuration has its own strict field bounds.
         self.retained_bytes = 0
@@ -452,21 +483,509 @@ class _Task:
             "metadata": {"statusHistory": list(self.status_history)},
         }
 
+    def durable_snapshot(self) -> str:
+        """Return the bounded, secret-minimal durable representation.
+
+        Push-notification bearer tokens intentionally remain process-local.
+        Persisting them in a general task database would turn a task-history
+        feature into a credential vault without the vault's sealing contract.
+        """
+        payload = {
+            "version": 1,
+            "id": self.id,
+            "context_id": self.context_id,
+            "created_at": self.created_at,
+            "state": self.state,
+            "status_history": self.status_history,
+            "messages": self.messages,
+            "artifacts": self.artifacts,
+            "budget_request": self.budget_request,
+            "cancel_requested": self.cancel_requested,
+            "retained_bytes": self.retained_bytes,
+        }
+        encoded = _json_bytes(payload)
+        if len(encoded) > _MAX_DURABLE_SNAPSHOT_BYTES:
+            raise ValueError("A2A durable task snapshot exceeds its byte limit")
+        return encoded.decode("utf-8")
+
+    @classmethod
+    def from_durable_snapshot(
+        cls,
+        snapshot: str,
+        *,
+        task_id: str,
+        tenant: str,
+        principal: str,
+        message_key: str,
+        request_digest: str,
+    ) -> _Task:
+        """Hydrate a terminal task, rejecting corrupt/tampered state."""
+        if not isinstance(snapshot, str):
+            raise ValueError("invalid A2A durable task snapshot")
+        encoded = snapshot.encode("utf-8")
+        if len(encoded) > _MAX_DURABLE_SNAPSHOT_BYTES:
+            raise ValueError("A2A durable task snapshot exceeds its byte limit")
+        payload = json.loads(snapshot)
+        if not isinstance(payload, dict) or payload.get("version") != 1:
+            raise ValueError("invalid A2A durable task snapshot version")
+        state = payload.get("state")
+        history = payload.get("status_history")
+        messages = payload.get("messages")
+        artifacts = payload.get("artifacts")
+        budget_request = payload.get("budget_request")
+        if state not in TERMINAL_STATES:
+            raise ValueError("durable A2A result is not terminal")
+        if (
+            payload.get("id") != task_id
+            or not isinstance(payload.get("context_id"), str)
+            or not isinstance(payload.get("created_at"), str)
+            or not isinstance(history, list)
+            or not history
+            or not isinstance(history[-1], dict)
+            or history[-1].get("state") != state
+            or not isinstance(messages, list)
+            or not messages
+            or not isinstance(messages[0], dict)
+            or not isinstance(messages[0].get("messageId"), str)
+            or not hmac.compare_digest(
+                hashlib.sha256(
+                    messages[0]["messageId"].encode("utf-8")
+                ).hexdigest(),
+                message_key,
+            )
+            or not isinstance(artifacts, list)
+            or not isinstance(budget_request, dict)
+            or not isinstance(payload.get("cancel_requested"), bool)
+            or not isinstance(payload.get("retained_bytes"), int)
+        ):
+            raise ValueError("invalid A2A durable task snapshot shape")
+        # Re-encode the parsed value to reject NaN/non-JSON mutations and
+        # independently verify the exact accounting convention used at
+        # admission + artifact retention.
+        retained_bytes = len(_json_bytes({
+            "history": messages,
+            "budgetRequest": budget_request,
+        }))
+        retained_bytes += sum(len(_json_bytes(artifact)) for artifact in artifacts)
+        if (
+            payload["retained_bytes"] != retained_bytes
+            or retained_bytes < 0
+            or retained_bytes > _MAX_TASK_RETAINED_BYTES
+        ):
+            raise ValueError("invalid A2A durable retained-byte accounting")
+
+        task = cls.__new__(cls)
+        task.id = task_id
+        task.context_id = payload["context_id"]
+        task.created_at = payload["created_at"]
+        task.state = state
+        task.status_history = history
+        task.messages = messages
+        task.artifacts = artifacts
+        task.push_config = None
+        task.cancel_requested = payload["cancel_requested"]
+        task.principal = principal
+        task.tenant = tenant
+        task.budget_request = budget_request
+        task.idempotency_key = (tenant, principal, messages[0]["messageId"])
+        task.request_digest = request_digest
+        task.retained_bytes = retained_bytes
+        return task
+
+
+class _DurableTaskStore:
+    """Tenant-bound, cross-process authority for A2A task idempotency.
+
+    A claim is inserted under ``BEGIN IMMEDIATE`` before any runner is invoked.
+    Terminal snapshots can be replayed by a restarted worker. A row left
+    ``in_progress`` by a crash is never reclaimed automatically: its external
+    side effects are unknowable, so another worker must refuse re-execution.
+    When the bounded snapshot budget is full, old terminal bodies become
+    ``tombstone`` rows; their message ids remain permanently consumed.
+    """
+
+    def __init__(self, path: Path | None = None):
+        self._path_override = Path(path).expanduser() if path is not None else None
+
+    @staticmethod
+    def _message_key(message_id: str) -> str:
+        # messageId is caller-controlled and may accidentally carry PII. The
+        # ledger needs equality only, so retain a fixed digest outside the
+        # optionally encrypted snapshot rather than the raw identifier.
+        return hashlib.sha256(message_id.encode("utf-8")).hexdigest()
+
+    def _path(self, tenant: str) -> Path:
+        if self._path_override is not None:
+            return self._path_override
+        from .paths import data_dir
+
+        return data_dir("a2a", "tasks.sqlite3", tenant=tenant or None)
+
+    @staticmethod
+    def _encode_snapshot(tenant: str, snapshot: str) -> str:
+        """Honor the deployment's at-rest policy for sensitive task bodies."""
+        with _task_tenant_scope(tenant):
+            from .crypto_at_rest import at_rest_enabled, seal_to_str
+
+            stored = seal_to_str(snapshot) if at_rest_enabled() else snapshot
+        if len(stored.encode("utf-8")) > _MAX_DURABLE_STORED_SNAPSHOT_BYTES:
+            raise ValueError("stored A2A durable task snapshot exceeds its byte limit")
+        return stored
+
+    @staticmethod
+    def _decode_snapshot(tenant: str, stored: str) -> str:
+        """Open a sealed snapshot; never expose plaintext under encryption."""
+        if not isinstance(stored, str):
+            raise ValueError("invalid stored A2A durable task snapshot")
+        if len(stored.encode("utf-8")) > _MAX_DURABLE_STORED_SNAPSHOT_BYTES:
+            raise ValueError("stored A2A durable task snapshot exceeds its byte limit")
+        with _task_tenant_scope(tenant):
+            from .crypto_at_rest import (
+                at_rest_enabled,
+                is_sealed_str,
+                unseal_from_str,
+            )
+
+            sealed = is_sealed_str(stored)
+            if at_rest_enabled() and not sealed:
+                raise ValueError(
+                    "unsealed A2A snapshot found while at-rest encryption is enabled"
+                )
+            return unseal_from_str(stored) if sealed else stored
+
+    @contextlib.contextmanager
+    def _connect(self, tenant: str):
+        from .file_lock import ensure_private_directory, ensure_private_file
+
+        path = self._path(tenant)
+        ensure_private_directory(path.parent)
+        try:
+            flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+            fd = os.open(path, flags, 0o600)
+        except FileExistsError:
+            ensure_private_file(path, 0o600)
+        else:
+            os.close(fd)
+            ensure_private_file(path, 0o600)
+
+        conn = sqlite3.connect(str(path), timeout=10.0, isolation_level=None)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=10000")
+            conn.execute("PRAGMA journal_mode=DELETE")
+            conn.execute("PRAGMA synchronous=FULL")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            conn.execute("PRAGMA trusted_schema=OFF")
+            conn.execute("PRAGMA secure_delete=ON")
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS a2a_task_claims (
+                    tenant TEXT NOT NULL,
+                    principal TEXT NOT NULL,
+                    message_key TEXT NOT NULL,
+                    request_digest TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (
+                        status IN ('in_progress', 'terminal', 'tombstone')
+                    ),
+                    snapshot_json TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (tenant, principal, message_key),
+                    UNIQUE (tenant, task_id)
+                );
+                CREATE INDEX IF NOT EXISTS a2a_task_claims_lookup
+                    ON a2a_task_claims(tenant, principal, task_id);
+                CREATE INDEX IF NOT EXISTS a2a_task_claims_prune
+                    ON a2a_task_claims(tenant, status, updated_at);
+                CREATE TABLE IF NOT EXISTS a2a_task_meta (
+                    tenant TEXT PRIMARY KEY,
+                    claim_count INTEGER NOT NULL,
+                    snapshot_bytes INTEGER NOT NULL
+                );
+            """)
+            yield conn
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _ensure_meta(conn: sqlite3.Connection, tenant: str) -> tuple[int, int]:
+        conn.execute(
+            "INSERT OR IGNORE INTO a2a_task_meta(tenant, claim_count, snapshot_bytes) "
+            "SELECT ?, COUNT(*), COALESCE(SUM("
+            "CASE WHEN snapshot_json IS NULL THEN 0 "
+            "ELSE length(CAST(snapshot_json AS BLOB)) END), 0) "
+            "FROM a2a_task_claims WHERE tenant = ?",
+            (tenant, tenant),
+        )
+        row = conn.execute(
+            "SELECT claim_count, snapshot_bytes FROM a2a_task_meta WHERE tenant = ?",
+            (tenant,),
+        ).fetchone()
+        if row is None:
+            raise ValueError("A2A durable task accounting unavailable")
+        count, retained = int(row[0]), int(row[1])
+        if count < 0 or retained < 0 or retained > _MAX_DURABLE_RETAINED_BYTES:
+            raise ValueError("invalid A2A durable task accounting")
+        return count, retained
+
+    @staticmethod
+    def _make_snapshot_room(
+        conn: sqlite3.Connection,
+        tenant: str,
+        *,
+        retained: int,
+        old_size: int,
+        new_size: int,
+        exclude_task_id: str = "",
+    ) -> int | None:
+        target = retained - old_size + new_size
+        while target > _MAX_DURABLE_RETAINED_BYTES:
+            row = conn.execute(
+                "SELECT task_id, length(CAST(snapshot_json AS BLOB)) AS size "
+                "FROM a2a_task_claims "
+                "WHERE tenant = ? AND status = 'terminal' "
+                "AND snapshot_json IS NOT NULL AND task_id != ? "
+                "ORDER BY updated_at ASC LIMIT 1",
+                (tenant, exclude_task_id),
+            ).fetchone()
+            if row is None:
+                return None
+            size = int(row["size"] or 0)
+            conn.execute(
+                "UPDATE a2a_task_claims SET status = 'tombstone', "
+                "snapshot_json = NULL WHERE tenant = ? AND task_id = ? "
+                "AND status = 'terminal'",
+                (tenant, str(row["task_id"])),
+            )
+            retained = max(0, retained - size)
+            target = retained - old_size + new_size
+        return target
+
+    def claim(
+        self,
+        task: _Task,
+        *,
+        message_id: str,
+        request_digest: str,
+    ) -> tuple[str, _Task | None]:
+        snapshot = self._encode_snapshot(task.tenant, task.durable_snapshot())
+        snapshot_size = len(snapshot.encode("utf-8"))
+        message_key = self._message_key(message_id)
+        now = time.time()
+        with self._connect(task.tenant) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT request_digest, task_id, status, snapshot_json "
+                "FROM a2a_task_claims WHERE tenant = ? AND principal = ? "
+                "AND message_key = ?",
+                (task.tenant, task.principal, message_key),
+            ).fetchone()
+            if row is not None:
+                original_digest = str(row["request_digest"])
+                if not hmac.compare_digest(original_digest, request_digest):
+                    return "conflict", None
+                status = str(row["status"])
+                if status == "in_progress":
+                    return "indeterminate", None
+                if status == "tombstone":
+                    return "tombstone", None
+                if status != "terminal" or row["snapshot_json"] is None:
+                    raise ValueError("invalid A2A durable task status")
+                snapshot = self._decode_snapshot(
+                    task.tenant, str(row["snapshot_json"]),
+                )
+                cached = _Task.from_durable_snapshot(
+                    snapshot,
+                    task_id=str(row["task_id"]),
+                    tenant=task.tenant,
+                    principal=task.principal,
+                    message_key=message_key,
+                    request_digest=request_digest,
+                )
+                return "cached", cached
+
+            count, retained = self._ensure_meta(conn, task.tenant)
+            if count >= _MAX_DURABLE_CLAIMS:
+                return "capacity", None
+            next_retained = self._make_snapshot_room(
+                conn,
+                task.tenant,
+                retained=retained,
+                old_size=0,
+                new_size=snapshot_size,
+            )
+            if next_retained is None:
+                # _make_snapshot_room may have selected terminal snapshots
+                # before discovering that active rows alone fill the budget.
+                # Roll the transaction back so their bodies and the metadata
+                # counter remain one atomic accounting unit.
+                conn.execute("ROLLBACK")
+                return "capacity", None
+            conn.execute(
+                "INSERT INTO a2a_task_claims("
+                "tenant, principal, message_key, request_digest, task_id, "
+                "status, snapshot_json, created_at, updated_at"
+                ") VALUES (?, ?, ?, ?, ?, 'in_progress', ?, ?, ?)",
+                (
+                    task.tenant,
+                    task.principal,
+                    message_key,
+                    request_digest,
+                    task.id,
+                    snapshot,
+                    now,
+                    now,
+                ),
+            )
+            conn.execute(
+                "UPDATE a2a_task_meta SET claim_count = ?, snapshot_bytes = ? "
+                "WHERE tenant = ?",
+                (count + 1, next_retained, task.tenant),
+            )
+            return "owner", None
+
+    def save(self, task: _Task) -> str:
+        if task.idempotency_key is None or not task.request_digest:
+            raise ValueError("durable A2A task is missing its claim identity")
+        _tenant, _principal, message_id = task.idempotency_key
+        message_key = self._message_key(message_id)
+        snapshot = self._encode_snapshot(task.tenant, task.durable_snapshot())
+        snapshot_size = len(snapshot.encode("utf-8"))
+        new_status = "terminal" if task.state in TERMINAL_STATES else "in_progress"
+        with self._connect(task.tenant) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT request_digest, status, snapshot_json "
+                "FROM a2a_task_claims WHERE tenant = ? AND principal = ? "
+                "AND message_key = ? AND task_id = ?",
+                (task.tenant, task.principal, message_key, task.id),
+            ).fetchone()
+            if row is None or not hmac.compare_digest(
+                str(row["request_digest"]), task.request_digest,
+            ):
+                raise ValueError("durable A2A claim identity mismatch")
+            old_status = str(row["status"])
+            if old_status == "tombstone":
+                return "tombstone"
+            if old_status == "terminal" and new_status != "terminal":
+                raise ValueError("durable A2A terminal state cannot be reopened")
+            old_snapshot = row["snapshot_json"]
+            old_size = (
+                len(str(old_snapshot).encode("utf-8"))
+                if old_snapshot is not None else 0
+            )
+            _count, retained = self._ensure_meta(conn, task.tenant)
+            next_retained = self._make_snapshot_room(
+                conn,
+                task.tenant,
+                retained=retained,
+                old_size=old_size,
+                new_size=snapshot_size,
+                exclude_task_id=task.id,
+            )
+            if next_retained is None:
+                if new_status != "terminal":
+                    raise ValueError("A2A durable active-state capacity reached")
+                # Preserve the no-replay claim even when the result body cannot
+                # fit. The current caller still receives its in-memory result;
+                # later retries get an explicit consumed-id refusal.
+                conn.execute(
+                    "UPDATE a2a_task_claims SET status = 'tombstone', "
+                    "snapshot_json = NULL, updated_at = ? "
+                    "WHERE tenant = ? AND principal = ? AND message_key = ? "
+                    "AND task_id = ?",
+                    (time.time(), task.tenant, task.principal, message_key, task.id),
+                )
+                actual_retained = int(conn.execute(
+                    "SELECT COALESCE(SUM(CASE WHEN snapshot_json IS NULL THEN 0 "
+                    "ELSE length(CAST(snapshot_json AS BLOB)) END), 0) "
+                    "FROM a2a_task_claims WHERE tenant = ?",
+                    (task.tenant,),
+                ).fetchone()[0])
+                conn.execute(
+                    "UPDATE a2a_task_meta SET snapshot_bytes = ? WHERE tenant = ?",
+                    (actual_retained, task.tenant),
+                )
+                return "tombstone"
+            conn.execute(
+                "UPDATE a2a_task_claims SET status = ?, snapshot_json = ?, "
+                "updated_at = ? WHERE tenant = ? AND principal = ? "
+                "AND message_key = ? AND task_id = ?",
+                (
+                    new_status,
+                    snapshot,
+                    time.time(),
+                    task.tenant,
+                    task.principal,
+                    message_key,
+                    task.id,
+                ),
+            )
+            conn.execute(
+                "UPDATE a2a_task_meta SET snapshot_bytes = ? WHERE tenant = ?",
+                (next_retained, task.tenant),
+            )
+            return new_status
+
+    def load(
+        self, *, tenant: str, principal: str, task_id: str,
+    ) -> tuple[str, _Task | None]:
+        with self._connect(tenant) as conn:
+            row = conn.execute(
+                "SELECT message_key, request_digest, status, snapshot_json "
+                "FROM a2a_task_claims WHERE tenant = ? AND principal = ? "
+                "AND task_id = ?",
+                (tenant, principal, task_id),
+            ).fetchone()
+        if row is None:
+            return "missing", None
+        status = str(row["status"])
+        if status != "terminal":
+            if status not in {"in_progress", "tombstone"}:
+                raise ValueError("invalid A2A durable task status")
+            return status, None
+        if row["snapshot_json"] is None:
+            raise ValueError("terminal A2A durable task has no snapshot")
+        snapshot = self._decode_snapshot(tenant, str(row["snapshot_json"]))
+        task = _Task.from_durable_snapshot(
+            snapshot,
+            task_id=task_id,
+            tenant=tenant,
+            principal=principal,
+            message_key=str(row["message_key"]),
+            request_digest=str(row["request_digest"]),
+        )
+        return "terminal", task
+
 
 class TaskEngine:
     """Runs A2A tasks and tracks their lifecycle. FastAPI-agnostic so it
     can be unit-tested directly; ``a2a.mount`` adapts it to HTTP/SSE."""
 
-    def __init__(self, runner: Runner | None = None):
+    def __init__(
+        self,
+        runner: Runner | None = None,
+        *,
+        durable: bool = False,
+        state_path: Path | None = None,
+    ):
         self._runner: Runner = runner or _default_runner
         self._tasks: dict[str, _Task] = {}
         # A2A messageId is the protocol's idempotency key. Scope it to the
-        # authenticated principal so unrelated callers may use the same ID.
+        # active tenant AND authenticated principal so unrelated callers may
+        # use the same ID without sharing an idempotency namespace.
         # Values carry a canonical request digest to reject key reuse with
         # different content instead of returning the wrong task.
-        self._message_index: dict[tuple[str, str], tuple[str, str]] = {}
+        self._message_index: dict[tuple[str, str, str], tuple[str, str]] = {}
         self._retained_bytes = 0
         self._lock = RLock()
+        # Directly-constructed engines keep the historical in-memory behavior
+        # unless durability is requested. The outward-facing mounted service
+        # opts in unconditionally (see a2a._mount_task_endpoint).
+        self._store = (
+            _DurableTaskStore(state_path)
+            if durable or state_path is not None else None
+        )
 
     # ---- auth + limits -------------------------------------------------
 
@@ -546,6 +1065,37 @@ class TaskEngine:
                 return "bearer:" + hashlib.sha256(given.encode()).hexdigest()
         return "anon"
 
+    @staticmethod
+    def _tenant_key() -> str:
+        """Resolve the request tenant, failing closed if policy is unreadable."""
+        try:
+            from .paths import current_tenant_id
+
+            return current_tenant_id() or ""
+        except Exception as e:
+            raise _RpcError(
+                _SERVER_BUSY, "A2A tenant scope is unavailable",
+            ) from e
+
+    @staticmethod
+    def _durable_error(message: str, error: Exception) -> _RpcError:
+        log.exception("A2A durable task state failure", exc_info=error)
+        return _RpcError(_SERVER_BUSY, message)
+
+    def _cache_loaded_locked(self, task: _Task) -> None:
+        """Best-effort cache of a durable terminal result under memory caps."""
+        existing = self._tasks.get(task.id)
+        if existing is not None:
+            return
+        if not self._make_room_locked(task.retained_bytes, new_task=True):
+            return
+        self._tasks[task.id] = task
+        self._retained_bytes += task.retained_bytes
+        if task.idempotency_key is not None:
+            self._message_index[task.idempotency_key] = (
+                task.id, task.request_digest,
+            )
+
     def _owned(self, task_id: object, principal: str) -> _Task:
         """Look up a task and enforce principal ownership.
 
@@ -557,9 +1107,44 @@ class TaskEngine:
         ``id``/``taskId`` (a list/dict), which must resolve to 'not found'
         rather than blow up the dict lookup with an unhashable-key TypeError."""
         key = task_id if isinstance(task_id, str) else ""
-        task = self._tasks.get(key)
-        if task is None or task.principal != principal:
+        tenant = self._tenant_key()
+        with self._lock:
+            task = self._tasks.get(key)
+            if (
+                task is not None
+                and task.principal == principal
+                and task.tenant == tenant
+            ):
+                return task
+        if self._store is None or not key:
             raise _RpcError(_TASK_NOT_FOUND, "task not found")
+        try:
+            status, task = self._store.load(
+                tenant=tenant, principal=principal, task_id=key,
+            )
+        except Exception as e:
+            raise self._durable_error(
+                "durable A2A task state is unavailable; refusing an ambiguous lookup",
+                e,
+            ) from e
+        if status == "missing":
+            raise _RpcError(_TASK_NOT_FOUND, "task not found")
+        if status == "in_progress":
+            raise _RpcError(
+                _SERVER_BUSY,
+                "task outcome is in progress or indeterminate on another worker; "
+                "refusing an ambiguous operation",
+            )
+        if status == "tombstone":
+            raise _RpcError(
+                _SERVER_BUSY,
+                "task result is no longer retained, but its messageId remains "
+                "consumed and will not be re-executed",
+            )
+        if status != "terminal" or task is None:
+            raise _RpcError(_SERVER_BUSY, "invalid durable A2A task state")
+        with self._lock:
+            self._cache_loaded_locked(task)
         return task
 
     def _limits(self, task: _Task | None = None) -> dict:
@@ -696,16 +1281,31 @@ class TaskEngine:
         if task.state not in TERMINAL_STATES:
             task.set_state("canceled")
 
+    def _persist_task(self, task: _Task) -> None:
+        if self._store is None:
+            return
+        try:
+            self._store.save(task)
+        except Exception as e:
+            raise self._durable_error(
+                "durable A2A settlement failed; the outcome is indeterminate "
+                "and this messageId will not be re-executed",
+                e,
+            ) from e
+
     def _cancel_task(self, task: _Task) -> None:
         with self._lock:
             self._mark_canceled(task)
+            self._persist_task(task)
 
     def _set_working(self, task: _Task) -> bool:
         with self._lock:
             if task.cancel_requested or task.state == "canceled":
                 self._mark_canceled(task)
+                self._persist_task(task)
                 return False
             task.set_state("working")
+            self._persist_task(task)
             return True
 
     def _reject_task(
@@ -714,28 +1314,34 @@ class TaskEngine:
         with self._lock:
             if task.cancel_requested or task.state == "canceled":
                 self._mark_canceled(task)
+                self._persist_task(task)
                 return False
             task.set_state("rejected")
             if detail:
                 self._add_artifact(task, detail, "error")
+            self._persist_task(task)
             return True
 
     def _fail_task(self, task: _Task, detail: str) -> bool:
         with self._lock:
             if task.cancel_requested or task.state == "canceled":
                 self._mark_canceled(task)
+                self._persist_task(task)
                 return False
             task.set_state("failed")
             self._add_artifact(task, detail, "error")
+            self._persist_task(task)
             return True
 
     def _complete_task(self, task: _Task, result: Any) -> dict | None:
         with self._lock:
             if task.cancel_requested or task.state == "canceled":
                 self._mark_canceled(task)
+                self._persist_task(task)
                 return None
             artifact = self._add_artifact(task, result or "")
             task.set_state("completed")
+            self._persist_task(task)
             return artifact
 
     @staticmethod
@@ -755,9 +1361,16 @@ class TaskEngine:
     def _request_digest(params: dict) -> str:
         return hashlib.sha256(TaskEngine._encoded_request(params)).hexdigest()
 
-    def _new_or_existing_task(
-        self, params: dict, principal: str = "anon",
-    ) -> tuple[_Task, bool]:
+    @classmethod
+    def _validated_request(
+        cls, params: dict,
+    ) -> tuple[dict, dict, str, str]:
+        """Validate and deep-copy one message/send request.
+
+        Returns ``(canonical_params, message, message_id, digest)``. The copy
+        and digest come from the same bytes, closing mutation races between
+        claim admission and runner execution.
+        """
         if not isinstance(params, dict):
             raise _RpcError(_INVALID_PARAMS, "params must be an object")
         message = params.get("message")
@@ -785,21 +1398,78 @@ class TaskEngine:
                 )
         if "metadata" in message and not isinstance(message.get("metadata"), dict):
             raise _RpcError(_INVALID_PARAMS, "message.metadata must be an object")
-        context_id = message.get("contextId") or ""
-        supplied_message_id = message.get("messageId")
+        message_id = message.get("messageId")
         if (
-            not isinstance(supplied_message_id, str)
-            or not supplied_message_id.strip()
-            or len(supplied_message_id) > _MAX_MESSAGE_ID_LENGTH
+            not isinstance(message_id, str)
+            or not message_id.strip()
+            or len(message_id) > _MAX_MESSAGE_ID_LENGTH
         ):
             raise _RpcError(
                 _INVALID_PARAMS,
                 "messageId is required and must be a non-empty string up to "
                 f"{_MAX_MESSAGE_ID_LENGTH} chars",
             )
-        encoded_request = self._encoded_request(params)
-        request_digest = hashlib.sha256(encoded_request).hexdigest()
-        idempotency_key = (principal, supplied_message_id)
+        encoded_request = cls._encoded_request(params)
+        canonical_params = json.loads(encoded_request)
+        return (
+            canonical_params,
+            canonical_params["message"],
+            message_id,
+            hashlib.sha256(encoded_request).hexdigest(),
+        )
+
+    def _claim_durable_locked(
+        self, task: _Task, *, message_id: str, request_digest: str,
+    ) -> _Task | None:
+        """Claim a durable idempotency key; return a cached terminal task."""
+        if self._store is None:
+            return None
+        try:
+            claim_status, cached = self._store.claim(
+                task,
+                message_id=message_id,
+                request_digest=request_digest,
+            )
+        except Exception as e:
+            raise self._durable_error(
+                "durable A2A claim state is unavailable; refusing to execute",
+                e,
+            ) from e
+        if claim_status == "conflict":
+            raise _RpcError(
+                _INVALID_PARAMS, "messageId was already used with different content",
+            )
+        if claim_status == "indeterminate":
+            raise _RpcError(
+                _SERVER_BUSY,
+                "messageId is already in progress or was interrupted on another "
+                "worker; its outcome is indeterminate and it will not be re-executed",
+            )
+        if claim_status == "tombstone":
+            raise _RpcError(
+                _SERVER_BUSY,
+                "messageId was already consumed; its result is no longer retained "
+                "and it will not be re-executed",
+            )
+        if claim_status == "capacity":
+            raise _RpcError(_SERVER_BUSY, "durable A2A claim capacity is full")
+        if claim_status == "cached":
+            if cached is None:
+                raise _RpcError(_SERVER_BUSY, "invalid durable A2A result")
+            return cached
+        if claim_status != "owner":
+            raise _RpcError(_SERVER_BUSY, "invalid durable A2A claim state")
+        return None
+
+    def _new_or_existing_task(
+        self, params: dict, principal: str = "anon",
+    ) -> tuple[_Task, bool]:
+        canonical_params, message, supplied_message_id, request_digest = (
+            self._validated_request(params)
+        )
+        context_id = message.get("contextId") or ""
+        tenant = self._tenant_key()
+        idempotency_key = (tenant, principal, supplied_message_id)
         # Normalise the inbound message so history echoes a complete record.
         user_message = {
             "role": message.get("role", "user"),
@@ -822,10 +1492,11 @@ class TaskEngine:
                         return task, False
                     self._message_index.pop(idempotency_key, None)
 
-            task = _Task(context_id, user_message)
+            task = _Task(context_id, user_message, tenant=tenant)
             task.principal = principal
-            task.budget_request = self._client_budget(params)
+            task.budget_request = self._client_budget(canonical_params)
             task.idempotency_key = idempotency_key
+            task.request_digest = request_digest
             user_message["taskId"] = task.id
             user_message["contextId"] = task.context_id
             retained_request_size = len(_json_bytes({
@@ -844,10 +1515,17 @@ class TaskEngine:
             if not self._make_room_locked(retained_request_size, new_task=True):
                 raise _RpcError(_SERVER_BUSY, "A2A task capacity is full")
             task.retained_bytes = retained_request_size
+            cached = self._claim_durable_locked(
+                task,
+                message_id=supplied_message_id,
+                request_digest=request_digest,
+            )
+            if cached is not None:
+                self._cache_loaded_locked(cached)
+                return cached, False
             self._tasks[task.id] = task
             self._retained_bytes += retained_request_size
-            if idempotency_key is not None:
-                self._message_index[idempotency_key] = (task.id, request_digest)
+            self._message_index[idempotency_key] = (task.id, request_digest)
         return task, True
 
     def _new_task(self, params: dict, principal: str = "anon") -> _Task:
@@ -856,6 +1534,11 @@ class TaskEngine:
         return task
 
     async def _run(self, task: _Task) -> None:
+        """Execute under the tenant captured when the task was admitted."""
+        with _task_tenant_scope(task.tenant):
+            await self._run_in_tenant(task)
+
+    async def _run_in_tenant(self, task: _Task) -> None:
         """Execute the goal, transitioning task state. Updates the record
         in place; callers read task.to_dict() afterwards."""
         if task.cancel_requested or task.state == "canceled":
@@ -933,6 +1616,24 @@ class TaskEngine:
         return task.to_dict()
 
     async def stream(
+        self,
+        params: dict,
+        principal: str = "anon",
+        *,
+        tenant: str | None = None,
+    ) -> AsyncIterator[dict]:
+        """Yield events under a request-time tenant pin.
+
+        ``StreamingResponse`` may consume an async iterator after request
+        middleware has reset its ContextVar. The HTTP adapter therefore passes
+        the tenant it captured before returning the response.
+        """
+        bound_tenant = self._tenant_key() if tenant is None else tenant
+        with _task_tenant_scope(bound_tenant):
+            async for event in self._stream_in_tenant(params, principal):
+                yield event
+
+    async def _stream_in_tenant(
         self, params: dict, principal: str = "anon",
     ) -> AsyncIterator[dict]:
         """Yield A2A stream events (already in result-object form)."""

@@ -1,6 +1,9 @@
 """Domain packs: schema, loader, and capability derivation (agent factory)."""
 from __future__ import annotations
 
+import os
+
+import pytest
 from maverick.capability import Capability
 from maverick.domain import (
     DomainProfile,
@@ -75,6 +78,50 @@ class TestLoader:
 
     def test_missing_dir_returns_empty(self, tmp_path):
         assert load_domains(tmp_path / "nope") == {}
+
+    def test_safe_content_identity_remains_authoritative(self, tmp_path):
+        pack = tmp_path / "expected.toml"
+        pack.write_text('name = "other"\n', encoding="utf-8")
+
+        assert load_domain(pack).name == "other"
+        assert list(load_domains(tmp_path)) == ["other"]
+
+    def test_oversized_pack_is_rejected(self, tmp_path):
+        pack = tmp_path / "large.toml"
+        pack.write_text(
+            'name = "large"\npersona = "' + ("x" * (257 * 1024)) + '"\n',
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="file-size limit"):
+            load_domain(pack)
+        assert load_domains(tmp_path) == {}
+
+    def test_symlinked_pack_cannot_escape_catalog(self, tmp_path):
+        outside = tmp_path.parent / "outside-domain.toml"
+        outside.write_text('name = "escaped"\n', encoding="utf-8")
+        link = tmp_path / "escaped.toml"
+        try:
+            link.symlink_to(outside)
+        except (NotImplementedError, OSError):
+            pytest.skip("symlink creation is not available")
+
+        with pytest.raises(ValueError, match="private regular file"):
+            load_domain(link)
+        assert load_domains(tmp_path) == {}
+
+    def test_hardlinked_pack_cannot_cross_catalog_boundary(self, tmp_path):
+        outside = tmp_path.parent / "linked.toml"
+        outside.write_text('name = "linked"\n', encoding="utf-8")
+        link = tmp_path / "linked.toml"
+        try:
+            os.link(outside, link)
+        except (NotImplementedError, OSError):
+            pytest.skip("hard-link creation is not available")
+
+        with pytest.raises(ValueError, match="private regular file"):
+            load_domain(link)
+        assert load_domains(tmp_path) == {}
 
 
 class TestBuiltinPacks:

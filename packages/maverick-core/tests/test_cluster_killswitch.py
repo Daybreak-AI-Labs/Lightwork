@@ -99,6 +99,19 @@ def test_shared_consult_fails_open(world):
         assert killswitch._shared_halt_active() is None  # fail-open, no raise
 
 
+def test_shared_consult_fails_closed_for_privileged_callers(world):
+    with mock.patch(
+        "maverick.world_model_backends.is_postgres_configured", return_value=True
+    ), mock.patch(
+        "maverick.world_model.open_world", side_effect=RuntimeError("db down")
+    ):
+        killswitch._last_shared_check_ts = 0.0
+        killswitch._shared_world = None
+        with pytest.raises(killswitch.Halted) as exc:
+            killswitch._shared_halt_active(fail_closed=True)
+        assert exc.value.source == "shared-error"
+
+
 # ----- cluster-wide provider spend ledger (council C5) -----
 
 def test_provider_spend_atomic_increment(world):

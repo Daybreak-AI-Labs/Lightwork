@@ -54,6 +54,24 @@ caller can't run up your provider bill:
 Every prompt is also screened by the [safety shield](safety.md) when it's
 installed (fail-open if not).
 
+## Idempotency and restart safety
+
+`message.messageId` is required and is the caller's idempotency key. Lightwork
+scopes it to the active tenant and authenticated principal, then claims it in a
+private tenant-local SQLite ledger **before** starting the goal. A retry with
+the same content returns the original terminal Task, including after a process
+restart; reuse with different content is rejected. Prompt/result snapshots
+honor Lightwork's at-rest encryption policy (including per-tenant keys).
+
+If a worker disappears after claiming an id but before durably settling the
+result, another worker returns server-busy with an explicit **outcome
+indeterminate** refusal. It never guesses that the goal is safe to run again.
+Reconcile any external effects before submitting that work under a fresh id.
+
+The retained-result budget is bounded. Old terminal result bodies may become
+no-replay tombstones, but their ids remain consumed, so memory pressure cannot
+silently turn an old request into a second execution.
+
 ## Base URL
 
 The card advertises `…/a2a/v1` as the task URL. Behind a reverse proxy,

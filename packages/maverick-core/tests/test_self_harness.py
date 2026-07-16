@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from maverick import self_harness as sh
 from maverick import self_improvement as si
+from maverick.learning_guard import Halted
 
 
 def _refl(model_id, fclass, goal, msg="boom"):
@@ -315,6 +316,31 @@ def test_full_loop_promotes_through_the_gate(monkeypatch, store):
     assert "timeout" in sh.recall_addendum("A", store).lower()
 
 
+def test_halt_after_prepare_aborts_and_propagates_without_addendum(
+    monkeypatch, store,
+):
+    ctrl = _enable(monkeypatch)
+
+    def halt_at_apply(_job: str, phase: str) -> None:
+        if phase == "apply":
+            raise Halted("operator stop", "test")
+
+    monkeypatch.setattr(sh, "check_learning_halt", halt_at_apply)
+
+    with pytest.raises(Halted, match="source=test"):
+        sh.run_self_harness(
+            [_refl("A", "timeout", f"export ledger {index}") for index in range(3)],
+            model_id="A", controller=ctrl, min_support=3, path=store,
+            held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+            score_with=lambda _line, _cases: 0.9,
+            score_without=lambda _line, _cases: 0.4,
+        )
+
+    assert not store.exists()
+    assert len(ctrl.ledger.transactions(state="aborted")) == 1
+    assert ctrl.ledger.transactions(state="committed") == []
+
+
 def test_prompt_artifact_commits_only_after_atomic_apply(monkeypatch, store, tmp_path):
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
     monkeypatch.setattr(si, "enabled", lambda: True)
@@ -518,6 +544,22 @@ def test_final_promotion_authorizer_runs_after_validation_before_apply(
     assert not store.exists()
 
 
+def test_final_promotion_authorizer_propagates_halt(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+
+    with pytest.raises(Halted, match="source=test"):
+        sh.run_self_harness(
+            _three(), model_id="M", min_support=3, controller=ctrl, path=store,
+            held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+            score_with=lambda _line, _cases: 0.95,
+            score_without=lambda _line, _cases: 0.4,
+            promotion_authorize=lambda: (_ for _ in ()).throw(
+                Halted("operator stop", "test")),
+        )
+
+    assert not store.exists()
+
+
 def test_runner_pass_disabled(monkeypatch):
     from maverick import self_improvement_runner as runner
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
@@ -682,7 +724,7 @@ def test_llm_proposer_fails_open_to_deterministic():
 
 
 def test_llm_proposer_output_is_sanitized():
-    secret = "sk-ant-" + "abcdefghij1234567890XYZ"
+    secret = "sk-ant-" + "abcdefghij1234567890XYZ"  # pragma: allowlist secret
     fn = sh.llm_proposer(_FakeLLM(text=f"leak {secret} and ctrl\x00\x1b chars"))
     p = sh.propose_addendum(_sig("timeout"), propose_fn=fn)
     assert p is not None
@@ -1951,7 +1993,7 @@ def test_propose_addendum_carries_hypothesis():
 def test_propose_addendum_sanitizes_hypothesis():
     # The hypothesis rides into the audit + provenance a human reads, so it gets
     # the same scrub as the line: secrets + control chars stripped, length bounded.
-    secret = "sk-ant-" + "abcdefghij1234567890XYZ"
+    secret = "sk-ant-" + "abcdefghij1234567890XYZ"  # pragma: allowlist secret
     fn = lambda s: {"line": "Verify the window first.",                   # noqa: E731
                     "hypothesis": f"leak {secret} ctrl\x00\x1b\n" + "x" * 400}
     p = sh.propose_addendum(_sig("timeout"), propose_fn=fn)
@@ -3444,6 +3486,22 @@ def test_eval_for_context_failure_keeps_defaults(monkeypatch, store):
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4,
         bucket_by=("domain",), eval_for_context=lambda c: 1 / 0)
     assert rep.promoted == 1                                  # defaults carried it
+
+
+def test_eval_for_context_propagates_halt(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    rs = [_refl_d("M", "auth", "log into the partner portal", "finance")
+          for _ in range(3)]
+
+    with pytest.raises(Halted, match="source=test"):
+        sh.run_self_harness(
+            rs, model_id="M", controller=ctrl, min_support=3, path=store,
+            bucket_by=("domain",),
+            eval_for_context=lambda _context: (_ for _ in ()).throw(
+                Halted("operator stop", "test")),
+        )
+
+    assert not store.exists()
 
 
 def test_domain_of_context_parsing():

@@ -86,8 +86,6 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
     cursor past these events (missing target, or no flow dispatcher wired);
     otherwise True. The missing-target cases advance the cursor themselves so a
     permanent backlog can't wedge the trigger."""
-    from maverick.templates import load_template
-
     from maverick_dashboard import event_triggers_store, trigger_events_store
     name = trig["name"]
     tenant = str(trig.get("tenant") or "")
@@ -128,8 +126,10 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
         _fire_flow(trig, res.events, owner, fire_flow, summary)
         return True
     try:
-        tpl = load_template(trig["template"])
-    except (ValueError, FileNotFoundError) as e:
+        from maverick_dashboard.triggers_store import bound_template
+
+        tpl = bound_template(trig)
+    except ValueError as e:
         detail = _safe_error(e, fallback="template unavailable")
         summary["notes"].append(f"template unavailable: {detail}")
         event_triggers_store.set_cursor(name, res.cursor, tenant=tenant)

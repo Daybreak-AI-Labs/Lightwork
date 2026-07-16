@@ -7,6 +7,7 @@ is now refused; a same-name re-install (an update) still succeeds.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -41,3 +42,44 @@ def test_same_name_reinstall_updates(tmp_path: Path):
     v2 = _write(tmp_path, "v2.md", "greety", "version two")
     s = install_skill(v2, skills_dir=skills)  # same name -> update, no error
     assert "version two" in s.path.read_text()
+
+
+@pytest.mark.parametrize("dangling", [False, True])
+def test_skill_install_refuses_symlink_target_without_touching_referent(
+    tmp_path: Path, dangling: bool,
+):
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    source = _write(tmp_path, "source.md", "greety", "new body")
+    outside = tmp_path / "outside.md"
+    original = '---\nname: "greety"\ntriggers:\n  - x\n---\nORIGINAL\n'
+    if not dangling:
+        outside.write_text(original, encoding="utf-8")
+    try:
+        (skills / "greety.md").symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this platform")
+
+    with pytest.raises(ValueError, match="alias or special file"):
+        install_skill(source, skills_dir=skills)
+    if dangling:
+        assert not outside.exists()
+    else:
+        assert outside.read_text(encoding="utf-8") == original
+
+
+def test_skill_install_refuses_hardlinked_target(tmp_path: Path):
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    source = _write(tmp_path, "source.md", "greety", "new body")
+    outside = tmp_path / "outside.md"
+    original = '---\nname: "greety"\ntriggers:\n  - x\n---\nORIGINAL\n'
+    outside.write_text(original, encoding="utf-8")
+    try:
+        os.link(outside, skills / "greety.md")
+    except OSError:
+        pytest.skip("hardlink creation is unavailable on this platform")
+
+    with pytest.raises(ValueError, match="alias or special file"):
+        install_skill(source, skills_dir=skills)
+    assert outside.read_text(encoding="utf-8") == original

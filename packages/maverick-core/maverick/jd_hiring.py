@@ -155,6 +155,28 @@ def draft_from_jd(role_title: str, jd_text: str, *, industry: str = "",
     caller's explicit, human-approved act -- ``intake.save_profile`` or the
     dashboard pack editor's save.
     """
+    # These user-controlled fields cross the provider boundary on the LLM path.
+    # Reject credentials before constructing/calling the proposer; doing this
+    # inside the proposer would be swallowed by generate_profile's deterministic
+    # fallback and could falsely report that an LLM draft was generated.
+    if llm is not None:
+        try:
+            from .safety.secret_detector import scan
+        except Exception as exc:  # pragma: no cover - built-in module is required
+            raise ValueError("provider input could not be safely screened") from exc
+
+        for label, value in (
+            ("role title", role_title),
+            ("job description", jd_text),
+            ("industry", industry),
+        ):
+            try:
+                matches = scan(str(value or ""))
+            except Exception as exc:
+                raise ValueError("provider input could not be safely screened") from exc
+            if matches:
+                raise ValueError(f"{label} contains a credential and cannot be sent")
+
     spec = IntakeSpec(
         name=role_title,
         description=(jd_text or "").strip()[:MAX_JD_CHARS],
@@ -205,8 +227,17 @@ def jd_hiring_enabled() -> bool:
     (router, intake, fleets) keep their own independent gates regardless.
     """
     try:
-        from .config import load_config
-        section = (load_config() or {}).get("agent_factory") or {}
-        return bool(section.get("jd_hiring", True))
-    except Exception:  # pragma: no cover - config unreadable => default on
-        return True
+        from .config import config_source_errors, load_config
+
+        config = load_config()
+        if config_source_errors() or not isinstance(config, dict):
+            return False
+        section = config.get("agent_factory")
+        if section is None:
+            return True
+        if not isinstance(section, dict):
+            return False
+        value = section.get("jd_hiring", True)
+        return value if isinstance(value, bool) else False
+    except Exception:  # unreadable/invalid security gate => disabled
+        return False

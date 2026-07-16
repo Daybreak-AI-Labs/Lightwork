@@ -151,7 +151,8 @@ class TestEndToEndSmoke:
         # Python's Path.home() caches in various places).
         config = tmp_path / "config.toml"
         config.write_text(
-            f'[sandbox]\nbackend = "local"\nworkdir = "{repo_workdir}"\n',
+            f'[sandbox]\nbackend = "local"\n'
+            f'workdir = {json.dumps(str(repo_workdir))}\n',
             encoding="utf-8",
         )
         monkeypatch.setenv("MAVERICK_CONFIG", str(config))
@@ -215,7 +216,8 @@ class TestEndToEndSmoke:
         be 'no-diff' so operators can debug — NOT 'success'."""
         config = tmp_path / "config.toml"
         config.write_text(
-            f'[sandbox]\nworkdir = "{repo_workdir}"\n', encoding="utf-8",
+            f'[sandbox]\nworkdir = {json.dumps(str(repo_workdir))}\n',
+            encoding="utf-8",
         )
         monkeypatch.setenv("MAVERICK_CONFIG", str(config))
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")

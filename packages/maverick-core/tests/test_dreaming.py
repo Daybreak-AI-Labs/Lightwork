@@ -906,8 +906,12 @@ class TestTenantIsolation:
 
     def test_dream_stores_follow_tenant(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
-        monkeypatch.setenv("MAVERICK_TENANT", "acme")
-        assert "tenants" in str(dreaming.insights_path())
+        monkeypatch.setenv("MAVERICK_TENANT", "tenant:acme")
+        expected = tmp_path / "tenants" / "tenant%3Aacme" / "dreams" / "insights.ndjson"
+        assert dreaming.insights_path() == expected
+        assert reflexion.default_path() == (
+            tmp_path / "tenants" / "tenant%3Aacme" / "reflexions.ndjson"
+        )
         monkeypatch.delenv("MAVERICK_TENANT")
         assert "tenants" not in str(dreaming.insights_path())
 

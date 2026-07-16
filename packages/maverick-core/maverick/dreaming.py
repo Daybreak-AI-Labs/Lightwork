@@ -22,7 +22,9 @@ lexical machinery the distillation loops use, so consolidation can never be
 steered by prompt-injected trajectory text into persisting attacker-authored
 instructions (the same reasoning that keeps MAVERICK_AUTO_DISTILL off by
 default). Off by default (``[dreaming] enable`` / ``MAVERICK_DREAMING=1``)
-and fail-open everywhere, per kernel rule 1.
+and tolerant of ordinary replay/enrichment failures. The global operator HALT
+is different: it is checked fresh and fail-closed at learning transitions, so
+an active stop or unavailable stop authority prevents durable learned writes.
 
 Optionally (``[dreaming] llm_consolidation`` / ``MAVERICK_LLM_CONSOLIDATION=1``,
 OFF by default) each clustered failure's deterministic lesson is rewritten by
@@ -44,11 +46,12 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .learning_guard import Halted, check_learning_halt
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
 
-DEFAULT_DIR = data_dir("dreams")
+DEFAULT_DIR = data_dir("dreams", tenant=None)
 DEFAULT_INSIGHTS = DEFAULT_DIR / "insights.ndjson"
 DEFAULT_REHEARSALS = DEFAULT_DIR / "rehearsals.ndjson"
 
@@ -65,12 +68,11 @@ def _tenant_path(name: str, legacy):
     """Item-30 isolation: with an ACTIVE tenant, this store lives under the
     tenant's data dir (one tenant's learned memory can never feed another's
     runs); single-tenant resolution keeps the legacy location unchanged."""
-    try:
-        from .paths import current_tenant, data_dir
-        if current_tenant():
-            return data_dir(*name.split("/"))
-    except Exception:  # pragma: no cover -- isolation never blocks resolution
-        pass
+    from .paths import current_tenant_id, data_dir
+
+    tenant = current_tenant_id()
+    if tenant:
+        return data_dir(*name.split("/"), tenant=tenant)
     return legacy
 
 
@@ -930,6 +932,7 @@ async def rehearse(
     alone grades (and the maverick-evolve eval harness is used when
     installed — the kernel never *requires* the evolve package).
     """
+    check_learning_halt("dreaming", "rehearsal_start")
     try:
         from .calibration import learning_frozen
         frozen = bool(learning_frozen())
@@ -958,14 +961,18 @@ async def rehearse(
     passed = 0
     for c in cases:
         try:
+            check_learning_halt("dreaming", "rehearsal_case")
             output = await agent(c["prompt"])
             if not rehearsal_completed(output):
                 continue
             if scorer is not None:
+                check_learning_halt("dreaming", "rehearsal_evaluation")
                 conf = float(await scorer(c["prompt"], output))
                 if conf < min_confidence:
                     continue
             passed += 1
+        except Halted:
+            raise
         except Exception as e:
             log.debug("dreaming: rehearsal case errored: %s", e)
     return (passed, len(cases))
@@ -1144,10 +1151,19 @@ def _distill_department_skills(
         kwargs: dict = {"min_examples": max(1, min_cluster)}
         if skill_store is not None:
             kwargs["store"] = skill_store
+        check_learning_halt("dreaming", "skill_promotion")
+        # Distillation performs evidence/quality/dedup work before its durable
+        # save. Re-read the strict HALT authorities at the final write boundary
+        # so a stop armed during those checks cannot race into learned state.
+        kwargs["before_save"] = lambda: check_learning_halt(
+            "dreaming", "skill_promotion",
+        )
         try:
             saved, _why = _v2.distill_and_save_gated(trajectories, **kwargs)
             if saved:
                 saved_paths.append(Path(saved))
+        except Halted:
+            raise
         except Exception as e:  # pragma: no cover -- one bad pack can't stop the cycle
             log.debug("dreaming: distill skipped: %s", e)
     return saved_paths
@@ -1229,6 +1245,7 @@ def _consolidate_learning(report, by_domain_success, failures, *,
         for cluster in cluster_failures(fs, min_cluster=min_cluster):
             ins = synthesize_insight(cluster, domain=dom, now=now)
             if use_llm:
+                check_learning_halt("dreaming", "proposal")
                 ins = _llm_enrich_insight(
                     ins, cluster, llm=llm, budget=budget, shield=shield,
                 )
@@ -1270,6 +1287,7 @@ def dream_cycle(
     Callers gate on :func:`enabled` (the CLI and any scheduler do); the cycle
     itself stays callable so tests and operators can dream on demand.
     """
+    check_learning_halt("dreaming", "start")
     cfg = {**settings(), **(settings_override or {})}
     report = DreamReport()
     if insights_path is None:
@@ -1342,6 +1360,7 @@ def dream_cycle(
         skill_store=skill_store, cfg=cfg, now=now,
         llm=llm, budget=budget, shield=shield,
     )
+    check_learning_halt("dreaming", "insight_promotion")
     report.insights_written = append_insights(
         new_insights, path=insights_path,
         max_insights=int(cfg.get("max_insights", 100)),
@@ -1352,6 +1371,7 @@ def dream_cycle(
     # and deterministic; *running* them spends real agent calls, so that step
     # stays behind its own knob + the calibration interlock (see rehearse()).
     if bool(cfg.get("rehearse", False)):
+        check_learning_halt("dreaming", "rehearsal_promotion")
         report.rehearsals_queued = save_rehearsals(
             build_rehearsal_cases(
                 failures, min_cluster=int(cfg.get("min_cluster", 2)),
@@ -1366,12 +1386,14 @@ def dream_cycle(
     # so a frozen (distrusted) verifier must not drive DELETIONS either — the
     # same reasoning that stops _consolidate_learning from ADDING learned state.
     if bool(cfg.get("retire_skills", True)) and not report.learning_frozen:
+        check_learning_halt("dreaming", "retirement")
         report.skills_retired = len(retire_stale_skills(
             skill_store, min_uses=int(cfg.get("retire_min_uses", 5)),
             below=float(cfg.get("retire_below", 0.25)),
             stats_path=skill_stats_path,
         ))
 
+    check_learning_halt("dreaming", "maintenance")
     _maintenance_phases(
         report, cfg, successes, world,
         insights_path=insights_path, reflexion_path=reflexion_path,

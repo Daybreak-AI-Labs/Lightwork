@@ -56,6 +56,28 @@ _REGISTRY_EVAL_FLAGS = {
     "cmd": {"/c", "/k"},
 }
 
+# Commands whose pinned argv[0] is only a general-purpose interpreter,
+# package/image manager, shell, or process wrapper. Its hash does not
+# authenticate the script/module/package/image selected by argv. Network-fed
+# registry and autonomous-learning paths must require a directly pinnable MCP
+# executable instead.
+_INDIRECT_STDIO_COMMANDS = frozenset({
+    # Shells and Windows script hosts.
+    "sh", "bash", "dash", "zsh", "fish", "ksh", "csh", "tcsh",
+    "powershell", "pwsh", "cmd", "wscript", "cscript", "mshta",
+    # Language / VM launchers.
+    "python", "python2", "python3", "py", "node", "nodejs", "perl",
+    "ruby", "php", "lua", "java", "javaw", "dotnet", "mono", "deno",
+    "bun",
+    # Package, build, and environment launchers.
+    "npx", "npm", "pnpm", "yarn", "bunx", "uv", "uvx", "pip", "pip3",
+    "pipx", "pipenv", "poetry", "hatch", "rye", "go", "cargo", "make",
+    "cmake", "env", "busybox", "xargs", "nice", "nohup", "timeout",
+    "setsid", "chroot", "sudo", "doas", "su", "systemd-run",
+    # Container / remote execution front ends pin the client, not workload.
+    "docker", "podman", "nerdctl", "kubectl", "flatpak", "snap", "ssh",
+})
+
 _BARE_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -91,8 +113,23 @@ def resolve_mcp(name: str, *, indexes: list[str] | None = None) -> catalog.Catal
 def _command_basename(command: str) -> str:
     """Return a normalized executable basename for registry policy checks."""
     base = command.replace("\\", "/").rsplit("/", 1)[-1].lower()
-    base = base.removesuffix(".exe")
+    for suffix in (".exe", ".cmd", ".bat", ".com", ".ps1"):
+        if base.endswith(suffix):
+            return base[:-len(suffix)]
     return base
+
+
+def is_indirect_stdio_command(command: str) -> bool:
+    """Whether ``command`` selects an unpinned second-stage artifact."""
+    base = _command_basename(command)
+    if base in _INDIRECT_STDIO_COMMANDS:
+        return True
+    # Version-suffixed interpreters/package launchers (python3.12, php8.3,
+    # ruby3.3, node20, pip3.12) are equivalent to their unsuffixed forms.
+    return bool(re.fullmatch(
+        r"(?:pythonw?|node(?:js)?|perl|ruby|php|lua|pip)(?:\d+(?:\.\d+)*)?",
+        base,
+    ))
 
 
 def _validate_registry_spec(spec: MCPServerSpec) -> None:
@@ -100,8 +137,9 @@ def _validate_registry_spec(spec: MCPServerSpec) -> None:
 
     Operator-authored config may intentionally launch arbitrary local commands,
     but registry entries are network-fed data. Require stdio registry entries to
-    pin their executable and reject shell/interpreter inline-eval forms such as
-    ``sh -c`` or ``node -e`` that turn the registry args into host code.
+    pin a directly executable MCP artifact. General-purpose interpreters,
+    package/image managers, remote runners, and wrappers are rejected because
+    their argv[0] pin does not authenticate the selected second-stage workload.
     """
     if spec.is_http:
         return
@@ -110,6 +148,17 @@ def _validate_registry_spec(spec: MCPServerSpec) -> None:
             f"MCP registry entry {spec.name!r} uses stdio command {spec.command!r} "
             "without pin_sha256; registry-installed commands must pin the "
             "executable hash"
+        )
+    if not re.fullmatch(r"[0-9a-f]{64}", spec.pin_sha256):
+        raise ValueError(
+            f"MCP registry entry {spec.name!r} requires a canonical lowercase "
+            "64-hex pin_sha256"
+        )
+    if is_indirect_stdio_command(spec.command):
+        raise ValueError(
+            f"MCP registry entry {spec.name!r} uses indirect launcher "
+            f"{_command_basename(spec.command)!r}; pin_sha256 authenticates "
+            "argv[0], not the script, module, package, image, or remote workload"
         )
     # Reject inline-eval whether the interpreter is the command itself
     # (``sh -c``) or smuggled through argv by a wrapper (``busybox sh -c``,
@@ -140,8 +189,7 @@ def _validate_registry_spec(spec: MCPServerSpec) -> None:
                 raise ValueError(
                     f"MCP registry entry {spec.name!r} reaches interpreter "
                     f"{token!r} with inline execution flag {arg!r}; registry "
-                    "entries must reference a pinned MCP executable or script "
-                    "file instead"
+                    "entries must reference a directly pinned MCP executable"
                 )
 
 
@@ -289,6 +337,7 @@ __all__ = [
     "DEFAULT_MCP_REGISTRIES",
     "load_mcp_registry",
     "resolve_mcp",
+    "is_indirect_stdio_command",
     "spec_from_entry",
     "install_mcp_from_registry",
     "add_mcp_server_to_config",

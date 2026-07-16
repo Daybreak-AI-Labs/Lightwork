@@ -3815,13 +3815,13 @@ def _fire_stored_trigger(
                 status_code=201,
             )
 
-        from maverick.templates import load_template
-
         try:
-            tpl = load_template(trigger["template"])
-        except (ValueError, FileNotFoundError) as exc:
+            from maverick_dashboard import triggers_store
+
+            tpl = triggers_store.bound_template(trigger)
+        except ValueError as exc:
             raise HTTPException(
-                status_code=409, detail="trigger template unavailable"
+                status_code=409, detail="trigger template binding is unavailable"
             ) from exc
         declared = set(tpl.params)
         params = dict(trigger.get("params") or {})
@@ -5122,10 +5122,10 @@ async def get_started_page(request: Request) -> HTMLResponse:
     Each step reflects real workspace state (provider configured? a workflow or
     agent built? anything run or automated?) so it self-completes as you go."""
     from maverick.config import any_provider_configured
-    from maverick.templates import USER_TEMPLATES
+    from maverick.templates import user_templates_dir
     provider_ok = bool(any_provider_configured())
     try:
-        has_templates = any(USER_TEMPLATES.glob("*.md"))
+        has_templates = any(user_templates_dir().glob("*.md"))
     except OSError:
         has_templates = False
     try:
@@ -5173,11 +5173,11 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
     with quick edit / automate actions. The builder is reached via 'New'. (This
     is the management index; /templates remains the browse-the-catalog page.)"""
     from maverick.config import get_features
-    from maverick.templates import USER_TEMPLATES, load_template
+    from maverick.templates import load_template, user_templates_dir
     feats = get_features()
     tpls: list[dict] = []
     try:
-        names = sorted(p.stem for p in USER_TEMPLATES.glob("*.md"))
+        names = sorted(p.stem for p in user_templates_dir().glob("*.md"))
     except OSError:
         names = []
     for name in names:
