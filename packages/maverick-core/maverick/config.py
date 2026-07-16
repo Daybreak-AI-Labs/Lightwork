@@ -1670,3 +1670,56 @@ def get_durable() -> dict:
         "enabled": bool(cfg.get("enabled", False)),
         "keep_last": max(1, keep),
     }
+
+
+def get_value() -> dict:
+    """Return the ``[value]`` section: the client's own cost/value assumptions
+    for the savings (ROI) report.
+
+    This is what makes the savings dashboard the CLIENT's number, not ours: the
+    fully-loaded human hourly rate and the human hours one comparable
+    deliverable would take by hand. The report reads REAL completed work from
+    the world model and computes, per department,
+    ``(human_hours x hourly_rate) - actual agent spend`` -- money saved vs the
+    typical human cost.
+
+    ``departments`` holds optional per-department overrides
+    (``[value.departments.<name>]`` tables with ``hourly_rate`` /
+    ``hours_per_task``) so legal work can be priced differently from support.
+    ``enable`` only shows/hides the dashboard page; the numbers are always safe
+    (read-only, they never tune anything -- the council's warning that cost
+    pressure must not defund safety). Defaults are deliberately conservative so
+    an out-of-box ROI claim is defensible, not inflated.
+    Env override: ``MAVERICK_VALUE_HOURLY_RATE`` / ``MAVERICK_VALUE_HOURS``.
+    """
+    cfg = load_config().get("value", {}) or {}
+
+    def _pos(v: object, default: float) -> float:
+        try:
+            f = float(v)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return default
+        return f if f >= 0 else default
+
+    import os
+    rate = _pos(os.environ.get("MAVERICK_VALUE_HOURLY_RATE")
+                or cfg.get("hourly_rate"), 75.0)
+    hours = _pos(os.environ.get("MAVERICK_VALUE_HOURS")
+                 or cfg.get("hours_per_task"), 2.0)
+    departments: dict[str, dict] = {}
+    raw = cfg.get("departments", {}) or {}
+    if isinstance(raw, dict):
+        for name, ov in raw.items():
+            if not isinstance(ov, dict):
+                continue
+            departments[str(name)] = {
+                "hourly_rate": _pos(ov.get("hourly_rate"), rate),
+                "hours_per_task": _pos(ov.get("hours_per_task"), hours),
+            }
+    return {
+        "enable": bool(cfg.get("enable", True)),
+        "hourly_rate": rate,
+        "hours_per_task": hours,
+        "currency": str(cfg.get("currency", "USD") or "USD").upper()[:8],
+        "departments": departments,
+    }

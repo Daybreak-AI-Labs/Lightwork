@@ -373,6 +373,14 @@ here.
   cost avoided + ROI, the capability improvement curve from the hindsight
   ledger, and governance evidence, per department (and per external vendor
   with `--fleet`). Read-only; the POC-closing artifact.
+- **Savings dashboard** (`savings.py`, `maverick savings`, dashboard
+  `/savings` + `/api/v1/savings`) — money saved vs the typical human cost,
+  from real completed work and the CLIENT's own inputs: fully-loaded human
+  hourly rate × human hours per task (global + per-department overrides,
+  `[value]` in config), editable right on the page and persisted via the
+  dashboard overlay. Savings = human cost − actual agent spend, plus ROI
+  and hours given back. Read-only over the same episode ledger as Spend;
+  zeros (never invented numbers) until goals have run.
 - **2,020-agent specialist portfolio across 53 suites** — the original 8
   business suites plus customer experience, marketing, procurement,
   data & analytics, security ops, executive office, facilities/EHS, tax

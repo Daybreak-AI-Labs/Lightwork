@@ -147,6 +147,33 @@ def _toml_str(value: str) -> str:
     return json.dumps(str(value))  # JSON strings are valid TOML basic strings
 
 
+def _dump_value(lines: list[str], val: dict) -> None:
+    """Emit [value] -- the client's cost/value assumptions for the Savings
+    page (hourly rate, hours per task, optional per-department overrides).
+    Read back by maverick.config.get_value via the same deep-merge as
+    everything else."""
+    if not val:
+        return
+    lines.append("[value]")
+    if "enable" in val:
+        lines.append(f"enable = {'true' if val['enable'] else 'false'}")
+    for k in ("hourly_rate", "hours_per_task"):
+        if k in val:
+            lines.append(f"{k} = {float(val[k])}")
+    if val.get("currency"):
+        lines.append(f"currency = {_toml_str(val['currency'])}")
+    lines.append("")
+    for name in sorted(val.get("departments") or {}):
+        ov = val["departments"][name] or {}
+        if not ov:
+            continue
+        lines.append(f"[value.departments.{_toml_str(name)}]")
+        for k in ("hourly_rate", "hours_per_task"):
+            if k in ov:
+                lines.append(f"{k} = {float(ov[k])}")
+        lines.append("")
+
+
 def _dump(data: dict) -> str:
     lines = [
         "# Dashboard-managed settings overlay (provider keys + capability/feature",
@@ -163,6 +190,7 @@ def _dump(data: dict) -> str:
             for k in sorted(tbl):
                 lines.append(f"{k} = {'true' if tbl[k] else 'false'}")
             lines.append("")
+    _dump_value(lines, data.get("value") or {})
     # [webhooks] secret -- the signing key the Settings page manages. Written
     # verbatim (never logged or re-displayed).
     whk = data.get("webhooks") or {}
@@ -292,6 +320,59 @@ def set_flow_autonomy(*, auto_evolve: bool | None = None,
             flows["auto_apply"] = bool(auto_apply)
         if not bool(flows.get("auto_evolve", False)):
             flows["auto_apply"] = False
+        _write(data)
+
+
+def set_value_assumptions(*, hourly_rate: float | None = None,
+                          hours_per_task: float | None = None,
+                          currency: str | None = None,
+                          enable: bool | None = None,
+                          departments: dict | None = None) -> None:
+    """Persist the client's cost/value assumptions ([value]) in the overlay.
+
+    Only the fields passed are changed. ``departments`` maps department name ->
+    {hourly_rate, hours_per_task}; an entry whose dict is empty/None REMOVES
+    that department's override (reverts it to the global assumption). Rates and
+    hours must be non-negative -- the Savings page is a claim a client will
+    repeat to their CFO, so junk never persists."""
+    def _pos(v: object, label: str) -> float:
+        try:
+            f = float(v)  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be a number") from exc
+        if f < 0:
+            raise ValueError(f"{label} must be >= 0")
+        return f
+
+    with _locked():
+        data = load_overlay()
+        val = data.setdefault("value", {})
+        if hourly_rate is not None:
+            val["hourly_rate"] = _pos(hourly_rate, "hourly_rate")
+        if hours_per_task is not None:
+            val["hours_per_task"] = _pos(hours_per_task, "hours_per_task")
+        if currency is not None and currency.strip():
+            val["currency"] = currency.strip().upper()[:8]
+        if enable is not None:
+            val["enable"] = bool(enable)
+        for name, ov in (departments or {}).items():
+            dep = val.setdefault("departments", {})
+            if not ov:
+                dep.pop(str(name), None)
+                continue
+            row = {}
+            if ov.get("hourly_rate") is not None:
+                row["hourly_rate"] = _pos(ov["hourly_rate"],
+                                          f"{name} hourly_rate")
+            if ov.get("hours_per_task") is not None:
+                row["hours_per_task"] = _pos(ov["hours_per_task"],
+                                             f"{name} hours_per_task")
+            if row:
+                dep[str(name)] = {**dep.get(str(name), {}), **row}
+        if not val.get("departments"):
+            val.pop("departments", None)
+        if not val:
+            data.pop("value", None)
         _write(data)
 
 

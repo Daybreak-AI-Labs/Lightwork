@@ -103,6 +103,7 @@ STEPS: list[tuple[str, str]] = [
     ("governed_connectors", "Governed connectors"),
     ("durable", "Durable execution"),
     ("finance", "Finance suite"),
+    ("value", "Savings assumptions"),
     ("advanced", "Advanced reasoning"),
     ("web_search", "Web search"),
     ("mcp_servers", "MCP servers"),
@@ -1240,6 +1241,33 @@ def pick_durable() -> dict[str, Any]:
     if not _q_confirm("Enable durable execution (crash-resume)?", default=False):
         return {"enabled": False}
     return {"enabled": True, "keep_last": 5}
+
+
+def pick_value() -> dict[str, Any]:
+    """The savings (ROI) report's cost/value assumptions -- the CLIENT's own
+    numbers, editable later on the dashboard Savings page.
+
+    The Savings dashboard compares real completed work against the typical
+    human cost: ``(tasks x hours per task x hourly rate) - agent spend``.
+    Defaults are deliberately conservative ($75/h, 2h/task). Returns a dict
+    written under ``[value]``.
+    """
+    console.print()
+    console.print(
+        "[dim]Savings report: the dashboard's Savings page compares real "
+        "completed work against what the same work would cost a human -- "
+        "using YOUR numbers. Set them now or tune them later on the page "
+        "itself. Conservative defaults keep the claim defensible.[/dim]"
+    )
+    if not _q_confirm("Set your human-cost assumptions now?", default=True):
+        return {}
+    rate = _safe_float(
+        _q_text("  Fully-loaded human hourly rate ($/hour)", default="75"),
+        default=75.0)
+    hours = _safe_float(
+        _q_text("  Human hours one comparable task takes", default="2"),
+        default=2.0)
+    return {"hourly_rate": max(0.0, rate), "hours_per_task": max(0.0, hours)}
 
 
 def pick_finance() -> dict[str, Any]:
@@ -3060,6 +3088,18 @@ def _cfg_durable(durable: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _cfg_value(value: dict[str, Any] | None) -> list[str]:
+    if not value:
+        return []
+    # The client's cost/value assumptions behind the dashboard Savings page
+    # (read by config.get_value; per-department overrides are added later from
+    # the page itself).
+    lines = ["", "[value]"]
+    for k, v in value.items():
+        _emit_kv(lines, k, v)
+    return lines
+
+
 def _cfg_finance(finance: dict[str, Any] | None) -> list[str]:
     if not finance:
         return []
@@ -3868,6 +3908,7 @@ def write_config(
     governed_connectors: dict[str, Any] | None = None,
     durable: dict[str, Any] | None = None,
     finance: dict[str, Any] | None = None,
+    value: dict[str, Any] | None = None,
     deployment: str | None = None,
     suites: dict[str, bool] | None = None,
     license_cfg: dict[str, Any] | None = None,
@@ -3977,6 +4018,7 @@ def write_config(
     lines += _cfg_governed_connectors(governed_connectors)
     lines += _cfg_durable(durable)
     lines += _cfg_finance(finance)
+    lines += _cfg_value(value)
 
     capability_config = dict(capabilities or {})
     if web_search_enabled and not capability_config.get("web_search"):
@@ -4823,6 +4865,14 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     state["finance"] = finance
     _save_partial(state)
 
+    # `is None` sentinel: declining the savings step legitimately returns {}.
+    _announce()
+    value = state.get("value")
+    if value is None:
+        value = pick_value()
+        state["value"] = value
+        _save_partial(state)
+
     _announce()
     advanced = state.get("advanced") or pick_advanced()
     state["advanced"] = advanced
@@ -4843,6 +4893,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "governed_connectors": governed_connectors,
         "durable": durable,
         "finance": finance,
+        "value": value,
         "advanced": advanced,
     }
 
@@ -5038,6 +5089,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     governed_connectors = _simple["governed_connectors"]
     durable = _simple["durable"]
     finance = _simple["finance"]
+    value = _simple["value"]
     advanced = _simple["advanced"]
 
     _announce()
@@ -5148,6 +5200,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         governed_connectors=governed_connectors if governed_connectors.get("enable") else None,
         durable=durable if durable.get("enabled") else None,
         finance=finance if finance.get("enable") else None,
+        value=value or None,
         suites=suites,
         license_cfg=license_cfg or None,
         # The advanced flow applies no preset -- the operator hand-picked

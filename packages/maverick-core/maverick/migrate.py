@@ -60,7 +60,7 @@ KNOWN_SECTIONS = frozenset({
     "sandbox", "screening", "search", "security", "self_learning",
     "sharing", "shield", "skill_synthesis", "skills",
     "system", "telemetry", "template_registries", "tenancy", "thinking",
-    "tools", "tui", "verification", "voice", "webhooks", "workforce",
+    "tools", "tui", "value", "verification", "voice", "webhooks", "workforce",
     "workspace", "world_model",
     # Registry drift, again: these are all read by real load_config() call sites
     # AND written by the installer wizard, yet were missing here -- so an operator
