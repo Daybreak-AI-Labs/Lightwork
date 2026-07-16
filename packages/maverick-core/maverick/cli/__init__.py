@@ -951,8 +951,9 @@ def factory_learn(min_support, dry_run, evidence_path) -> None:
 
     Mines recurring provisioning/approval gaps into proposer corrections and
     promotes those the self-improvement gate accepts; promoted guidance is then
-    folded into future pack generation. Off unless [self_improvement] enable
-    (or MAVERICK_FACTORY_LEARNING) is set. Live promotion requires strict v2
+    folded into future pack generation. Default-on with governed
+    self-improvement; set factory_learning=false or MAVERICK_FACTORY_LEARNING=0
+    to opt out. Live promotion requires strict v2
     evidence with unique paired case IDs, immutable evaluator/data/model/prompt
     hashes, provenance, and a verified canonical digest; v1 is inspection-only.
     """
@@ -1887,21 +1888,25 @@ def self_modify() -> None:
 
 @self_modify.command("status")
 def self_modify_status() -> None:
-    """Show both required gates, the earned research surface, and archive size."""
+    """Show client control state, readiness, earned surface, and archive size."""
     from .. import self_improvement as si
     from .. import self_modify as sm
     from ..self_modify_loop import earned_surface
     from ..self_modify_runner import build_policy, load_archive
-    modify_enabled = sm.enabled()
+    status = sm.production_status()
+    modify_enabled = status["requested"]
     improvement_enabled = si.enabled()
-    enabled = modify_enabled and improvement_enabled
-    click.echo(f"self-modify research: {'ON' if enabled else 'OFF'}")
+    enabled = status["effective"]
+    click.echo(f"self-modify research: {status['state'].upper()}")
     click.echo("  required gates: "
                f"[self_modify] enable={'true' if modify_enabled else 'false'}, "
                "[self_improvement] enable="
                f"{'true' if improvement_enabled else 'false'}")
     if not enabled:
         click.echo("  (OFF: the loop proposes, evaluates, and archives nothing.)")
+    click.echo("  production posture: research only; live code adoption disabled")
+    for blocker in status["blockers"]:
+        click.echo(f"  blocked: {blocker['message']}")
     policy = build_policy()
     archive = load_archive()
     try:
@@ -2313,7 +2318,7 @@ def airgap_cmd(action: str, as_json: bool) -> None:
 @main.command("failures")
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
 def failures_cmd(as_json: bool) -> None:
-    """Show the failure-mode distribution (opt-in [telemetry] failure_modes).
+    """Show the default-on local failure-mode distribution.
 
     When the telemetry is on, failed runs record a canonical mode (budget /
     auth / timeout / shield / sandbox / network / error); this reads them back.
@@ -3342,7 +3347,7 @@ def start(
         # < config < explicit CLI flags. A None flag passes through as "unset".
         bud = budget_from_config(
             defaults={"max_dollars": 5.0, "max_wall_seconds": 3600.0},
-            # Learned per-class default cap (lowest precedence; opt-in via
+            # Learned per-class default cap (default-on, lowest precedence; via
             # [budget] self_tuning). Department runs use their own class so
             # finance runs are sized by finance history.
             task_class=_budget_task_class(

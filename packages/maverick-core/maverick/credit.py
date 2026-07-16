@@ -13,9 +13,9 @@ multi-agent system, gated by a calibrated verifier). It is dependency-injected
 so this module imports nothing heavy and is trivially testable; ``spawn_swarm``
 wires it to ``verifier.verify_proposal`` against the goal brief.
 
-OFF by default + fail-open (``[credit] enable`` / ``MAVERICK_CREDIT=1``). It
-costs N+1 verifier passes per swarm, so the call site also budget-gates it and
-caps the swarm size it will attribute. Credit is only trustworthy when the
+The credit engine is ON by default, but its N+1 verifier calls require the
+separate ``[self_learning] allow_provider_egress`` authority. The call site
+also budget-gates it and caps the swarm size it will attribute. Credit is only trustworthy when the
 verifier is calibrated, so the caller skips it when ``calibration`` is frozen.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 
-from .config import env_flag
+from .config import governed_learning_env_flag
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def _settings() -> dict:
 
 
 def enabled() -> bool:
-    _v = env_flag("MAVERICK_CREDIT")
+    _v = governed_learning_env_flag("MAVERICK_CREDIT")
     if _v is not None:
         return _v
     return bool(_settings()["enable"])

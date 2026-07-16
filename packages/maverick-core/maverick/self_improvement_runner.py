@@ -38,6 +38,15 @@ from .si_producers import ToolOutcomeTracker, propose_policy, propose_prompt, pr
 log = logging.getLogger(__name__)
 
 
+def _learning_provider_egress_enabled() -> bool:
+    """Fail-closed authority check for auxiliary self-harness model calls."""
+    try:
+        from .self_learning import provider_egress_enabled
+        return bool(provider_egress_enabled())
+    except Exception:  # pragma: no cover -- uncertainty cannot authorize egress
+        return False
+
+
 # -- calibration: arm the verifier-drift interlock from any ground truth -----
 
 def collect_calibration(confidence: float, correct: bool, *, source: str = "auto",
@@ -896,10 +905,11 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
 
     The pass is :func:`run_self_harness_pass` (mine -> propose -> validate ->
     gate). The live A/B (``score_with``/``score_without``) is injected, OR -- when
-    the caller injects none and ``[self_harness] eval_corpus`` is configured --
-    AUTO-BUILT by :func:`_auto_evaluator` (the model generates, a verifier judges)
-    so a scheduled ``maverick self-harness run`` actually PROMOTES. With no scorer
-    and no corpus it is a DRY inspection that writes no NEW guidance, but
+    the caller injects none, ``[self_harness] eval_corpus`` is configured, and
+    learning provider egress is authorized -- AUTO-BUILT by
+    :func:`_auto_evaluator` (the model generates, a verifier judges) so a
+    scheduled ``maverick self-harness run`` actually PROMOTES. With no scorer,
+    corpus, or egress authority it is a DRY inspection that writes no NEW guidance, but
     retirement still runs -- so the cycle keeps guidance fresh either way.
     Retirement uses
     ``retire_after_days`` (arg overrides ``[self_harness]`` config; 0/None = off)
@@ -909,6 +919,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
     try:
         from . import self_harness
         st = self_harness.settings() if self_harness.enabled() else None
+        provider_egress = _learning_provider_egress_enabled()
         # ONE budget pot for everything this cycle evaluates -- the model-wide
         # A/B, the domain-scoped quads, and the metamorphic paraphraser
         # together, so the operator's cap bounds the whole cycle, not each
@@ -926,7 +937,8 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
         # [self_harness] eval_corpus is set, build the model-generates /
         # verifier-judges evaluator. Unset corpus (the default) -> stays dry, so
         # behavior is unchanged out of the box.
-        if score_with is None and score_without is None and st is not None:
+        if (score_with is None and score_without is None and st is not None
+                and provider_egress):
             corpus_path = st.get("eval_corpus")
             if corpus_path:
                 from . import self_harness_eval as eval_module
@@ -1051,6 +1063,7 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
         # (overfit to exact wording). Built only when something will actually
         # validate (a scorer exists) and the caller injected no paraphraser.
         if (st is not None and st.get("metamorphic") and score_with is not None
+                and provider_egress
                 and pass_kwargs.get("metamorphic_fn") is None):
             try:
                 from . import self_harness_eval as ev
@@ -1291,6 +1304,8 @@ def _transfer_context(st: dict, corpus_path: str):
         raise ValueError(
             "risk-limited transfer requires explicit per-target deployed-prompt "
             "snapshots and a separately budgeted holdout authorizer")
+    if not _learning_provider_egress_enabled():
+        return (lambda _model: None), _validation_floors(st)
     budget = _eval_budget(st)
     judge_unknown = bool(st.get("metamorphic"))
     cache: dict[str, tuple | None] = {}

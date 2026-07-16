@@ -25,10 +25,11 @@ Two entry points exercise this:
 
 SAFETY / KERNEL RULES
 ---------------------
-The whole feature is OFF by default (kernel rule 1: the kernel runs
-without extra persisted state). Turn it on with ``MAVERICK_SELF_LEARNING=1``
-or ``[self_learning] enable = true``. Because "create a tool" means running
-fresh model-authored code, enabling it is an explicit, opt-in trust decision.
+Governed local learning is ON by default and can be disabled with
+``MAVERICK_SELF_LEARNING=0`` or ``[self_learning] enable = false``. Because
+"create a tool" means running fresh model-authored code, that sub-capability
+remains a separate explicit trust decision, as do MCP and auxiliary provider
+egress.
 Generated source is AST-constrained to stdlib-only, scanned through the Shield
 (when installed), and bound to tenant/name/digest consent before it is executed
 or persisted (#424). Both shape validation and every later ``fn`` call run in
@@ -44,6 +45,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
 import secrets
 import tempfile
@@ -55,7 +57,7 @@ from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from .config import env_flag
+from .config import env_flag, governed_learning_env_flag
 from .file_lock import (
     atomic_read_text,
     atomic_write_text,
@@ -114,8 +116,8 @@ _MAX_LEARNED_LEDGER_BYTES = 16 * 1024 * 1024
 # config / gating
 # --------------------------------------------------------------------------
 def enabled() -> bool:
-    """Whether the self-learning loop is active. Off by default."""
-    _v = env_flag("MAVERICK_SELF_LEARNING")
+    """Whether the governed self-learning loop is active. On by default."""
+    _v = governed_learning_env_flag("MAVERICK_SELF_LEARNING")
     if _v is not None:
         return _v
     try:
@@ -132,7 +134,9 @@ def settings() -> dict:
         return get_self_learning()
     except Exception:  # pragma: no cover
         return {
-            "enable": False, "preflight": True, "create_tools": True,
+            "enable": False, "preflight": True, "create_tools": False,
+            "provision_packs": True, "allow_mcp_acquisition": False,
+            "distill_local": True,
             "max_acquisitions": 5,
         }
 
@@ -579,10 +583,17 @@ def mcp_acquisition_enabled() -> bool:
     re-enables the capability #392 disabled, so it's a separate, explicit
     trust decision. ``MAVERICK_ALLOW_MCP_ACQUISITION`` overrides config.
     """
-    _v = env_flag("MAVERICK_ALLOW_MCP_ACQUISITION")
-    if _v is not None:
-        return _v
-    return bool(settings().get("allow_mcp_acquisition", False))
+    # Presence means the operator attempted to manage this authority. An
+    # unrecognized value must fail closed instead of falling through to a
+    # permissive config value.
+    if "MAVERICK_ALLOW_MCP_ACQUISITION" in os.environ:
+        return env_flag("MAVERICK_ALLOW_MCP_ACQUISITION") is True
+    return settings().get("allow_mcp_acquisition") is True
+
+
+def provider_egress_enabled() -> bool:
+    """Whether learning may make additional task/result-bearing model calls."""
+    return settings().get("allow_provider_egress") is True
 
 
 def _parse_catalog_mcp_source(source: str) -> tuple[str, list[str]]:
@@ -1711,21 +1722,33 @@ async def preflight(
     stays agent-driven via the in-loop tool). Returns the names acquired.
     Never raises: any failure degrades to "acquired nothing".
     """
-    from .llm import model_for_role
-
     check_learning_halt("self_learning", "preflight_start")
     acquired: list[str] = []
     try:
-        resp = await llm.complete_async(
-            system=_NEEDS_SYSTEM,
-            messages=[{"role": "user", "content": f"Task:\n{goal_text}"}],
-            budget=budget, max_tokens=256,
-            model=model_for_role("summarizer"),
-        )
-        needs = _parse_needs(resp.text or "")
-    except Exception as e:  # pragma: no cover -- preflight never blocks a run
-        log.debug("self_learning preflight analysis skipped: %s", e)
+        from .safety.secret_detector import redact
+        safe_goal, _ = redact(str(goal_text or "")[:8_000])
+    except Exception as e:
+        log.debug("self_learning preflight redaction unavailable: %s", e)
         return acquired
+
+    if provider_egress_enabled():
+        try:
+            from .llm import model_for_role
+            resp = await llm.complete_async(
+                system=_NEEDS_SYSTEM,
+                messages=[{"role": "user", "content": f"Task:\n{safe_goal}"}],
+                budget=budget, max_tokens=256,
+                model=model_for_role("summarizer"),
+            )
+            needs = _parse_needs(resp.text or "")
+        except Exception as e:  # pragma: no cover -- preflight never blocks a run
+            log.debug("self_learning preflight analysis skipped: %s", e)
+            return acquired
+    else:
+        # Local first pass: match the redacted task directly against the
+        # catalog. This preserves default-on skill readiness without creating a
+        # second provider disclosure path.
+        needs = [safe_goal] if safe_goal.strip() else []
 
     from .skills import load_skills
     have = {s.name for s in load_skills()}
@@ -1754,6 +1777,7 @@ __all__ = [
     "learned_path", "generated_tools_dir",
     "Candidate", "search_capabilities", "acquire_skill", "add_mcp_server",
     "acquire_mcp_server", "mcp_acquisition_enabled",
+    "provider_egress_enabled",
     "write_generated_tool", "load_generated_tools", "audit_generated_source",
     "preflight",
     "validate_spec_url", "probe_openapi_spec", "discover_openapi_spec",

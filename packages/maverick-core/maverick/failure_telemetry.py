@@ -1,16 +1,14 @@
-"""Failure-mode telemetry (opt-in) (roadmap: 2027 H2 performance).
+"""Default-on local failure-mode telemetry (roadmap: 2027 H2 performance).
 
 When runs fail, *how* they fail is the signal worth having: is it mostly budget
 caps, provider auth, timeouts, the shield, sandbox errors? This records a
 canonical **failure mode** per failed run to a local JSONL sink, so an operator
 can see the distribution and fix the dominant cause instead of guessing.
 
-Local-first and **opt-in** (``[telemetry] failure_modes`` / env
-``MAVERICK_FAILURE_TELEMETRY=1``), default OFF — ``record`` is a cheap
-``enabled()`` check and returns immediately when unconfigured, so the
-orchestrator's best-effort tee costs nothing on a run that didn't ask for it.
-No mandatory egress: the JSONL stays on disk; ``summarize`` / ``maverick
-failures`` read it back.
+Local-first and on by default; ``[telemetry] failure_modes = false`` or
+``MAVERICK_FAILURE_TELEMETRY=0`` opts out. ``record`` returns immediately when
+disabled. No mandatory egress: the JSONL stays on disk; ``summarize`` /
+``maverick failures`` read it back.
 """
 from __future__ import annotations
 
@@ -33,17 +31,21 @@ def _scrub_detail(detail: object) -> str:
         from .secrets import scrub
         return scrub(text)
     except Exception:  # pragma: no cover -- scrubbing never breaks telemetry
-        return text
+        return ""
 
 
 def enabled() -> bool:
-    if os.environ.get("MAVERICK_FAILURE_TELEMETRY", "").strip().lower() in {
-            "1", "true", "yes", "on"}:
-        return True
     try:
-        from .config import load_config
+        from .config import (
+            governed_learning_default,
+            governed_learning_env_flag,
+            load_config,
+        )
+        override = governed_learning_env_flag("MAVERICK_FAILURE_TELEMETRY")
+        if override is not None:
+            return override
         return bool(((load_config() or {}).get("telemetry") or {})
-                    .get("failure_modes", False))
+                    .get("failure_modes", governed_learning_default()))
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
 
@@ -78,6 +80,9 @@ def record(mode: str, *, goal_id=None, detail: str = "",
            now: float | None = None, path=None) -> bool:
     """Append one failure-mode record (no-op + False when telemetry is off)."""
     if not enabled():
+        return False
+    from .learning_guard import learning_write_allowed
+    if not learning_write_allowed("failure_telemetry"):
         return False
     try:
         p = Path(path) if path is not None else _path()

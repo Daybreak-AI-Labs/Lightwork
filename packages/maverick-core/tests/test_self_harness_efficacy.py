@@ -124,7 +124,7 @@ def test_learning_is_specific_to_taught_classes(tmp_path):
 
 def test_disabled_loop_learns_nothing(tmp_path, monkeypatch):
     # Attribution control: with the loop off, no addendum, success stays baseline.
-    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
     store = tmp_path / "addenda.json"
     test = _fresh_test_set()
     before = _overall(store, test)

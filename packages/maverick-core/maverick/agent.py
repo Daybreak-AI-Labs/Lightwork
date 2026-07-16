@@ -939,9 +939,9 @@ class Agent:
         if kb is not None and sources:
             from .tools.knowledge import knowledge_search_tool
             reg.register(knowledge_search_tool(kb, sources))
-        # Self-learning: bound to this agent so it can hot-register a newly
-        # acquired tool / MCP server into THIS run's live registry. Off
-        # unless [self_learning] enable is set (kernel rule 1).
+        # Self-learning: bound to this agent so governed capability discovery
+        # can run by default. Executable tool creation and MCP acquisition stay
+        # behind their separate high-authority opt-ins.
         try:
             from . import self_learning
             if self_learning.enabled():
@@ -1748,6 +1748,8 @@ class Agent:
             record_human_override(
                 self.brief, name, _gov.reason or _gov.rule,
                 domain=self.domain,
+                channel=getattr(self.ctx, "channel", None),
+                user_id=getattr(self.ctx, "user_id", None),
             )
         except Exception:  # pragma: no cover -- never block the denial
             pass
@@ -1829,7 +1831,8 @@ class Agent:
                 return d
         if (d := self._capability_path_denial(name, args, cap)) is not None:
             return d
-        # Operating-Twin pre-execution gates (both no-op + fail-open by default):
+        # Operating-Twin pre-execution gates (governed rehearsal defaults on;
+        # both fail open on internal errors):
         # rehearsal holds an elevated-risk tool the world-model can't vouch for;
         # a learned guardrail holds an action the data engine has causally shown
         # lowers outcomes (self-correcting -- dropped when the harm is gone).
@@ -1997,6 +2000,8 @@ class Agent:
                         "tool or different arguments early instead of retrying."
                     ),
                     tools_used=[name],
+                    channel=getattr(self.ctx, "channel", None),
+                    user_id=getattr(self.ctx, "user_id", None),
                     domain=self.domain,
                 )
         except Exception:  # pragma: no cover -- learning never blocks the loop
@@ -2477,10 +2482,10 @@ class Agent:
             # [compaction] hybrid (an explicit strategy name always wins). The
             # agent's llm seam + conversation id reach the strategies that use
             # them.
-            # Process-reward guidance (opt-in, default off): if the PRM has
+            # Process-reward guidance (governed default-on): if the PRM has
             # judged the last few steps unpromising, nudge a course-change. A
             # no-op unless [self_improvement] prm_guidance is on AND a PRM is
-            # configured, so default behaviour is unchanged.
+            # configured; an explicit sub-knob or env opt-out pauses it.
             from .prm_guidance import maybe_nudge
             _prm_note = maybe_nudge(self._promise_window.values())
             if _prm_note and step - self._last_prm_nudge_step >= 3:

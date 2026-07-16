@@ -111,6 +111,29 @@ class TestRunCycleDisabled:
         assert called == []                  # the proposer never ran
         assert "disabled" in rep.reason
 
+    def test_explicit_tenant_env_refuses_all_public_entry_points(
+        self, _on, monkeypatch,
+    ):
+        monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+        called = []
+
+        rep = run_cycle(
+            archive=CodeArchive(),
+            proposer=lambda *_: called.append("proposal"),
+            evaluate=lambda *_: called.append("evaluation"),
+        )
+        reports = run_loop(
+            archive=CodeArchive(),
+            proposer=lambda *_: called.append("loop-proposal"),
+            evaluate=lambda *_: called.append("loop-evaluation"),
+            cycles=2,
+        )
+
+        assert "explicit tenant" in rep.reason
+        assert len(reports) == 1
+        assert "explicit tenant" in reports[0].reason
+        assert called == []
+
 
 class TestRunCycle:
     def test_no_surface_yet_skips(self, _on):

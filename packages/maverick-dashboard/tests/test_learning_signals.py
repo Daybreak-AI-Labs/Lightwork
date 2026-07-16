@@ -76,7 +76,7 @@ class TestFeedbackGroundsLearning:
         assert r.status_code == 404
 
     def test_no_grounding_when_consequence_disabled(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("MAVERICK_CONSEQUENCE", raising=False)
+        monkeypatch.setenv("MAVERICK_CONSEQUENCE", "0")
         consequence = _isolate(tmp_path, monkeypatch)
         w = _world(tmp_path, monkeypatch)
         gid = w.create_goal("Draft the memo", "")

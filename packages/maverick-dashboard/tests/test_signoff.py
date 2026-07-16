@@ -254,7 +254,7 @@ class TestSignoffGroundsLearning:
         assert consequence.resolve(gid, eid) == 0.0   # rejection is signal too
 
     def test_no_outcome_when_consequence_disabled(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("MAVERICK_CONSEQUENCE", raising=False)
+        monkeypatch.setenv("MAVERICK_CONSEQUENCE", "0")
         consequence = self._isolate(tmp_path, monkeypatch)
         w = _world(tmp_path, monkeypatch)
         gid = _forecast_goal(w)
@@ -264,7 +264,7 @@ class TestSignoffGroundsLearning:
             json=_decision(w, gid, "approved"),
         )
         assert r.status_code == 200
-        # kernel stays stateless by default: nothing written when the knob is off
+        # An explicit opt-out keeps the kernel stateless.
         assert consequence.resolve(gid, eid) is None
 
 
@@ -290,7 +290,7 @@ class TestCancelGroundsLearning:
         assert consequence.resolve(gid, eid) == 0.0
 
     def test_no_outcome_when_consequence_disabled(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("MAVERICK_CONSEQUENCE", raising=False)
+        monkeypatch.setenv("MAVERICK_CONSEQUENCE", "0")
         consequence = self._isolate(tmp_path, monkeypatch)
         w = _world(tmp_path, monkeypatch)
         gid = w.create_goal("Long-running thing", "")

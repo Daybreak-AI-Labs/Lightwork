@@ -129,7 +129,7 @@ def test_forget_removes_guidance_from_the_next_prompt(ctx, store, monkeypatch):
 # ---- inspect while paused / default-off ------------------------------------
 
 def test_inspection_works_while_feature_is_off(store, monkeypatch):
-    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)   # feature OFF
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")  # explicit opt-out
     sh._write_addenda({"model-x": "Operating guidance learned for this model:\n- kept lesson"},
                       store)
     # recall is inert (nothing injected), but the operator can still see + roll back
@@ -140,7 +140,7 @@ def test_inspection_works_while_feature_is_off(store, monkeypatch):
 
 
 def test_disabled_install_is_inert_in_the_prompt(ctx, store, monkeypatch):
-    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
     sh._write_addenda({"model-x": "Operating guidance learned for this model:\n- a lesson"},
                       store)
     assert "a lesson" not in _agent(ctx, "model-x").system

@@ -7,13 +7,12 @@ nudge the agent to change course (it's been on an unpromising track for a
 streak of steps) and what to say. The nudge is a trusted control signal the
 agent loop appends to the conversation, exactly like the loop-guard note.
 
-Pure and deterministic so it's trivially testable. OFF by default (env
-``MAVERICK_PRM_GUIDANCE`` / ``[self_improvement] prm_guidance``); when off,
+Pure and deterministic so it's trivially testable. ON by default (env
+``MAVERICK_PRM_GUIDANCE`` / ``[self_improvement] prm_guidance``); when disabled,
 :func:`maybe_nudge` returns None and the loop is byte-identical to today.
 """
 from __future__ import annotations
 
-import os
 from collections import deque
 
 _LOW_PROMISE = 0.35   # at/below this, a step looks unpromising
@@ -21,14 +20,13 @@ _STREAK = 3           # consecutive low steps before we intervene
 
 
 def enabled() -> bool:
-    """Whether PRM guidance may steer the loop. OFF by default, fail-open."""
-    if os.environ.get("MAVERICK_PRM_GUIDANCE", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }:
-        return True
+    """Whether PRM guidance may steer the loop. ON by default, fail-closed."""
     try:
-        from .config import get_self_improvement
-        return bool(get_self_improvement().get("prm_guidance", False))
+        from .config import get_self_improvement, governed_learning_env_flag
+        override = governed_learning_env_flag("MAVERICK_PRM_GUIDANCE")
+        if override is not None:
+            return override
+        return bool(get_self_improvement().get("prm_guidance", True))
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
 

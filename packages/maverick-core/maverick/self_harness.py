@@ -26,7 +26,8 @@ The LLM proposer is an injected seam (:data:`ProposeFn`); a deterministic
 fallback composes a guidance line from the signature so the loop runs and is
 unit-testable without a provider. Validation likewise takes injected scorers --
 a live A/B needs a real model, exactly as ``learning_rollout`` takes injected
-constraints. OFF by default (``[self_harness] enable`` / ``MAVERICK_SELF_HARNESS``).
+constraints. A clean deployment enables the conservative ``risk_limited``
+profile; ``MAVERICK_SELF_HARNESS=0`` or config can opt out.
 """
 from __future__ import annotations
 
@@ -68,17 +69,17 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
 def enabled() -> bool:
-    """Whether the self-harness loop is active. OFF by default (kernel rule 1).
+    """Whether the risk-limited self-harness loop is active. ON by default.
 
-    Turn on with ``MAVERICK_SELF_HARNESS=1`` or ``[self_harness] enable = true``.
+    Opt out with ``MAVERICK_SELF_HARNESS=0`` or ``[self_harness] enable = false``.
     When off, :func:`recall_addendum` returns ``""`` (the prompt is unchanged)
     and :func:`run_self_harness` is a no-op."""
-    if os.environ.get("MAVERICK_SELF_HARNESS", "").strip().lower() in {
-            "1", "true", "yes", "on"}:
-        return True
     try:
-        from .config import load_config
-        return bool((load_config().get("self_harness") or {}).get("enable", False))
+        from .config import get_self_harness, governed_learning_env_flag
+        override = governed_learning_env_flag("MAVERICK_SELF_HARNESS")
+        if override is not None:
+            return override
+        return bool(get_self_harness().get("enable", True))
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
 
@@ -1674,8 +1675,9 @@ def validate_proposal(  # noqa: C901 - gate remains one fail-closed evidence bou
     a success rate (or a mapping with ``success`` + optional ``cost``/
     ``latency``/``tool_calls``) for the prompt WITH vs WITHOUT the candidate line.
 
-    All of the following default OFF (preserving the base rule); a live caller
-    opts in. ``min_delta`` (effect-size floor) and ``min_held_out`` (unseen-sample
+    The low-level API keeps neutral defaults for compatibility; the production
+    risk-limited profile supplies non-weakenable floors. ``min_delta``
+    (effect-size floor) and ``min_held_out`` (unseen-sample
     floor) -- a sub-threshold lift or a 1-of-1 held-out win is not durable
     evidence. ``confidence_z`` (>0) requires the candidate's held-out Wilson lower
     bound to clear the baseline rate -- statistically-confident generalization,

@@ -235,7 +235,8 @@ def _toolchain_identity(result: object) -> str:
 def _evaluation_scope(
     corpus: CodeEvalCorpus, *, held_out_frac: float,
     held_in: list[str], held_out: list[str], captured_tree: str,
-    sandbox_identity: str, toolchain_identity: str,
+    sandbox_identity: str, sandbox_policy_identity: str,
+    toolchain_identity: str,
 ) -> str:
     payload = {
         "schema": "maverick-code-eval-scope-v2",
@@ -245,6 +246,7 @@ def _evaluation_scope(
         "held_out": held_out,
         "captured_tree": captured_tree,
         "sandbox": sandbox_identity,
+        "sandbox_policy": sandbox_policy_identity,
         "toolchain": toolchain_identity,
     }
     encoded = json.dumps(
@@ -390,6 +392,7 @@ def _evaluate_corpus_arms(
     timeout: float,
     budget,
     apply_fn: Callable[[str, Path, object], ApplyResult] | None,
+    sandbox_policy_identity: str = "",
 ) -> CorpusEvalResult:
     """Evaluate already-isolated, already-bound baseline and candidate arms."""
     base_sandbox_identity = _sandbox_identity(sb_base)
@@ -507,6 +510,7 @@ def _evaluate_corpus_arms(
             held_in=held_in, held_out=held_out,
             captured_tree=captured_tree,
             sandbox_identity=base_sandbox_identity,
+            sandbox_policy_identity=sandbox_policy_identity,
             toolchain_identity=baseline_toolchain,
         ),
     )
@@ -527,6 +531,7 @@ def evaluate_on_corpus(
     apply_fn: Callable[[str, Path, object], ApplyResult] | None = None,
     require_tracked_source: bool = False,
     expected_source_manifest: str | None = None,
+    sandbox_policy_identity: str = "",
 ) -> CorpusEvalResult:
     """Score a patch on isolated copies against a development challenge corpus.
 
@@ -638,6 +643,7 @@ def evaluate_on_corpus(
             timeout=timeout,
             budget=budget,
             apply_fn=apply_fn,
+            sandbox_policy_identity=sandbox_policy_identity,
         )
     finally:
         if owns_sandboxes:

@@ -6,6 +6,8 @@ tmp_path stores — no LLM, no real ~/.maverick state.
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 from maverick import dreaming, reflexion
 
@@ -32,9 +34,9 @@ _SETTINGS = {
 
 
 class TestEnabled:
-    def test_disabled_by_default(self, monkeypatch):
+    def test_enabled_by_default(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_DREAMING", raising=False)
-        assert dreaming.enabled() is False
+        assert dreaming.enabled() is True
 
     def test_enabled_via_env(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_DREAMING", "1")
@@ -145,6 +147,45 @@ class TestInsightStore:
         assert dreaming.recall_insights(
             "Prepare the ICFR walkthrough memo", domain="finance_sox", path=path,
         ) == []
+
+    def test_legacy_secret_is_sanitized_before_load_and_rewrite(self, tmp_path):
+        path = tmp_path / "insights.ndjson"
+        secret = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        path.write_text(json.dumps({
+            "ts": 1.0,
+            "kind": "failure_pattern",
+            "domain": "finance_sox",
+            "text": f"retry with credential {secret}",
+            "evidence": 2,
+        }) + "\n", encoding="utf-8")
+
+        loaded = dreaming.load_insights(path)
+        assert len(loaded) == 1
+        assert secret not in loaded[0].text
+
+        dreaming.append_insights(
+            [self._insight("new bounded lesson", ts=2.0)], path=path,
+        )
+        assert secret not in path.read_text(encoding="utf-8")
+
+    def test_legacy_insight_is_dropped_if_screening_fails(
+        self, tmp_path, monkeypatch,
+    ):
+        path = tmp_path / "insights.ndjson"
+        path.write_text(json.dumps({
+            "ts": 1.0,
+            "kind": "failure_pattern",
+            "domain": None,
+            "text": "legacy raw lesson",
+            "evidence": 1,
+        }) + "\n", encoding="utf-8")
+        from maverick.safety import secret_detector
+        monkeypatch.setattr(
+            secret_detector, "redact",
+            lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("down")),
+        )
+
+        assert dreaming.load_insights(path) == []
 
     def test_store_is_capped(self, tmp_path):
         path = tmp_path / "insights.ndjson"
@@ -292,10 +333,13 @@ class TestSuccessToolAttribution:
         assert "ledger_reconciler" in self._distilled_text(tmp_path)
 
     def test_no_capture_leaves_skill_without_tools(self, tmp_path, monkeypatch):
-        # Capture off -> the join is empty -> distilled skill has no tools_needed,
-        # exactly the pre-change behaviour (a default deployment is unaffected).
-        monkeypatch.delenv("MAVERICK_TRAJECTORY_CAPTURE", raising=False)
-        w, _gids, _ts = self._world_with_two_reconciliations(tmp_path, monkeypatch)
+        # An explicit pause prevents new trajectory rows from entering the join.
+        monkeypatch.setenv("MAVERICK_TRAJECTORY_CAPTURE", "0")
+        w, gids, ts = self._world_with_two_reconciliations(tmp_path, monkeypatch)
+        for gid in gids:
+            assert ts.shared().record(ts.TrajectoryStep(
+                ts=1.0, goal_id=gid, episode_id=1, step=0, role="worker",
+                tool="must_not_be_recorded", tool_succeeded=True)) is False
         self._run_dream(w, tmp_path)
         assert "tools_needed" not in self._distilled_text(tmp_path)
 
@@ -917,9 +961,10 @@ class TestTenantIsolation:
 
 
 class _FakeGoal:
-    def __init__(self, title: str, t: float):
+    def __init__(self, title: str, t: float, *, owner: str = ""):
         self.title = title
         self.updated_at = t
+        self.owner = owner
 
 
 class _FakeWorld:
@@ -931,6 +976,29 @@ class _FakeWorld:
 
 
 class TestDreamCycle:
+    def test_owned_goal_text_never_enters_tenant_shared_skills(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.setattr(dreaming, "settings", lambda: dict(_SETTINGS))
+        private = "bob-private-ledger-reconciliation"
+        world = _FakeWorld([
+            _FakeGoal(f"{private} monthly", 2.0, owner="bob"),
+            _FakeGoal(f"{private} quarterly", 1.0, owner="bob"),
+        ])
+        store = tmp_path / "learned-skills"
+
+        report = dreaming.dream_cycle(
+            world, profiles=PROFILES,
+            reflexion_path=tmp_path / "reflexions.ndjson",
+            insights_path=tmp_path / "insights.ndjson",
+            skill_store=store,
+            skill_stats_path=tmp_path / "skill_stats.json",
+        )
+
+        assert report.goals_replayed == 0
+        assert report.skills_distilled == 0
+        assert not store.exists() or not list(store.glob("*.md"))
+
     def test_full_cycle_consolidates_per_department(self, tmp_path, monkeypatch):
         monkeypatch.setattr(dreaming, "settings", lambda: dict(_SETTINGS))
         rpath = tmp_path / "reflexions.ndjson"

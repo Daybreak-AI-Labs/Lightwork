@@ -46,8 +46,8 @@ def test_dream_skips_the_flywheel_when_data_engine_off(tmp_path, monkeypatch):
 
 
 # `maverick dream` also operates the self-harness on the same nightly beat when
-# [self_harness] auto_run is on -- and doesn't when it's off or the loop is
-# disabled (the flywheel pattern: opt-in, never breaks dreaming).
+# [self_harness] auto_run is on -- and doesn't when explicitly paused or the
+# loop is disabled (the flywheel pattern never breaks dreaming).
 
 def test_dream_runs_the_self_harness_when_auto_run(tmp_path, monkeypatch):
     from maverick.self_harness import SelfHarnessReport
@@ -141,9 +141,9 @@ def test_dream_harvests_corpus_when_configured(tmp_path, monkeypatch):
 
 def test_dream_skips_the_self_harness_when_disabled(tmp_path, monkeypatch):
     _stub_dreaming(monkeypatch)
-    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
-        "self_harness": {"auto_run": True}})           # auto_run on but loop OFF
+        "self_harness": {"enable": False, "auto_run": True}})
 
     def _boom(**k):
         raise AssertionError("self-harness should not run while disabled")

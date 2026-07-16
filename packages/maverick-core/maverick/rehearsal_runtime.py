@@ -15,10 +15,10 @@ The product decisions, made conservatively:
   * **Model + refresh:** a :class:`BackoffTransitionModel` fit from the
     trajectory store, cached and rebuilt when the corpus grows materially.
 
-Posture (kernel rule 1): OFF by default, fail-open. With ``[rehearsal]`` disabled,
-no captured data yet, or any error, ``gate_tool`` returns ``proceed`` and the
-tool runs exactly as today. Only when explicitly enabled (and a model exists)
-does a confident-poor or unvouchable high-risk action get held.
+Posture: governed default-on, fail-open. With ``[rehearsal]`` explicitly
+disabled, no captured data yet, or any error, ``gate_tool`` returns ``proceed``
+and the tool runs exactly as today. When enabled and a model exists, a
+confident-poor or unvouchable high-risk action is held.
 """
 from __future__ import annotations
 

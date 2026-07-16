@@ -3,8 +3,7 @@
 The point of the module is *auditable* reward: a rubric decomposition where a
 single failing dimension can veto an otherwise-high holistic score, and a
 stable audit serialization. These tests pin those governance properties plus
-the parse/adapter robustness (fail-closed on garbage) and the off-by-default
-posture.
+the parse/adapter robustness (fail-closed on garbage) and explicit opt-out.
 """
 from __future__ import annotations
 
@@ -242,9 +241,9 @@ def test_to_audit_summary_is_compact_and_stable():
     assert json.loads(json.dumps(s)) == s    # signed-chain needs a stable dict
 
 
-def test_audit_rewards_off_by_default(monkeypatch):
+def test_audit_rewards_explicit_opt_out(monkeypatch):
     from maverick.reasoning_reward import audit_rewards_enabled
-    monkeypatch.delenv("MAVERICK_REASONING_REWARD_AUDIT", raising=False)
+    monkeypatch.setenv("MAVERICK_REASONING_REWARD_AUDIT", "0")
     assert audit_rewards_enabled() is False
 
 

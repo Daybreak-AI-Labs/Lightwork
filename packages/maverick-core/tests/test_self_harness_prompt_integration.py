@@ -71,7 +71,7 @@ def test_cross_model_isolation_in_prompt(ctx, store, monkeypatch):
 
 
 def test_disabled_keeps_prompt_unchanged(ctx, store, monkeypatch):
-    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
     monkeypatch.setattr("maverick.config.load_config", dict)
     sh._write_addenda({"model-x": _BLOCK}, store)
     assert _NEEDLE not in _agent(ctx, "model-x").system     # off -> not injected

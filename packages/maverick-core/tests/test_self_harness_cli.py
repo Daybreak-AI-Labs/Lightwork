@@ -57,7 +57,7 @@ def test_show_filters_by_model(_home):
 
 
 def test_show_warns_when_disabled(_home, monkeypatch):
-    monkeypatch.delenv("MAVERICK_SELF_HARNESS")        # feature OFF
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")  # explicit opt-out
     _seed()
     r = CliRunner().invoke(main, ["self-harness", "show"])
     assert r.exit_code == 0
@@ -284,7 +284,7 @@ def test_conflicts_semantic_falls_back_without_provider(_home, monkeypatch):
 
 
 def test_run_cli_requires_enable(_home, monkeypatch):
-    monkeypatch.delenv("MAVERICK_SELF_HARNESS")            # feature OFF
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")      # explicit opt-out
     r = CliRunner().invoke(main, ["self-harness", "run", "--model", "m"])
     assert r.exit_code != 0 and "self-harness is off" in r.output
 
@@ -307,8 +307,10 @@ def test_run_cli_halt_is_generic_and_nonzero(_home, monkeypatch):
 
 
 def test_run_cli_dry_pass(_home, monkeypatch):
-    from maverick import reflexion
+    from maverick import config, reflexion
     from maverick import self_improvement as si
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "risk_limited": False}})
     monkeypatch.setattr(si, "enabled", lambda: True)         # gate ON, so "dry" is the reason
     for i in range(3):
         reflexion.record(goal_text=f"export the nightly ledger {i}", failure_class="timeout",
@@ -342,6 +344,10 @@ def test_run_cli_retires_stale(_home, monkeypatch):
 
 def test_run_cli_warns_when_frozen(_home, monkeypatch):
     import maverick.calibration as calibration
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "risk_limited": False}})
     monkeypatch.setattr(calibration, "learning_frozen", lambda: True)
     r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])
     assert r.exit_code == 0, r.output
@@ -350,7 +356,10 @@ def test_run_cli_warns_when_frozen(_home, monkeypatch):
 
 def test_run_cli_warns_when_gate_off(_home, monkeypatch):
     import maverick.calibration as calibration
+    from maverick import config
     from maverick import self_improvement as si
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "risk_limited": False}})
     monkeypatch.setattr(calibration, "learning_frozen", lambda: False)
     monkeypatch.setattr(si, "enabled", lambda: False)        # promotion gate OFF
     r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])

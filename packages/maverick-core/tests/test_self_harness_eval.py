@@ -170,6 +170,30 @@ class _FakeLLM:
         return type("R", (), {"text": self._text})()
 
 
+def test_llm_runner_redacts_secret_before_provider_call():
+    secret = "sk-proj-" + "b" * 28
+    llm = _FakeLLM(text="done")
+
+    assert ev.llm_runner(llm)("verify", f"process payroll with {secret}") == "done"
+
+    _system, messages, _kwargs = llm.calls[0]
+    payload = messages[0]["content"]
+    assert secret not in payload
+    assert "[REDACTED:openai_api_key]" in payload
+
+
+def test_llm_judge_redacts_result_secret_before_provider_call():
+    secret = "sk-proj-" + "c" * 28
+    llm = _FakeLLM(text="yes")
+
+    assert ev.llm_judge(llm)("check result", f"completed with {secret}", "done") is True
+
+    _system, messages, _kwargs = llm.calls[0]
+    payload = messages[0]["content"]
+    assert secret not in payload
+    assert "[REDACTED:openai_api_key]" in payload
+
+
 def test_llm_judge_parses_yes_no():
     assert ev.llm_judge(_FakeLLM(text="Yes, it did."))("g", "out", "exp") is True
     assert ev.llm_judge(_FakeLLM(text="no"))("g", "out", "exp") is False

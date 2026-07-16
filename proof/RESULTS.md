@@ -56,15 +56,19 @@ byte-identical learned store across independent runs — "improves consistently"
 made checkable.
 
 ```
-  [PASS]  determinism (consistent)    6/6 runs identical (sha256 a827f0a7b37f...)
-  [PASS]  off by default              recall == '' and no store write when off
+  [PASS]  determinism (consistent)    6/6 runs identical (sha256 f0dbda1afc79...)
+  [PASS]  explicit pause              explicit pause returns '' and writes no store
   [PASS]  governed gate enforced      open gate promotes; frozen verifier writes nothing
   [PASS]  no trace poisoning          secret/scoped/control-char excluded from the recalled prompt
   [PASS]  bounded addendum            <= 8 lines / 1500 chars under overflow
   [PASS]  concurrency safe            8 concurrent promotions, 0 lost, store valid
   [PASS]  reversible + auditable      rollback handle restores exactly; forget() clears guidance
+  [PASS]  canary lifecycle            probation rides; 3 wins graduate, 2 failures pull it (audited forget)
+  [PASS]  rollback durability         forget/reject beat auto re-entry; indeterminate verdicts stay retryable
+  [PASS]  fleet store parity          same content as files; 8/8 concurrent promotions; forget round-trips
+  [PASS]  fleet corpus store          stage/reject/accept as world rows; export-import keeps every field
   ----------------------------------------------------------------------------
-  7 guarantees PROVEN, 0 failed
+  11 guarantees PROVEN, 0 failed
 ```
 
 What each guarantee underwrites, in plain terms:

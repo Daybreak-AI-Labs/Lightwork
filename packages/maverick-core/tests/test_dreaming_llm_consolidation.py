@@ -30,6 +30,7 @@ class _FakeLLM:
                  max_tokens=4096, model=None, **kw):
         self.calls += 1
         self.last_model = model
+        self.last_messages = messages
         return _Resp(self.text)
 
 
@@ -128,6 +129,19 @@ def test_enrich_skips_when_no_usable_goals():
     assert out.text == ins.text
 
 
+def test_enrich_redacts_secret_before_provider_call():
+    secret = "sk-proj-" + "a" * 28
+    cluster = _cluster()
+    cluster[0]["goal_text"] += f" using {secret}"
+    llm = _FakeLLM()
+
+    dreaming._llm_enrich_insight(_insight(), cluster, llm=llm)
+
+    payload = llm.last_messages[0]["content"]
+    assert secret not in payload
+    assert "[REDACTED:openai_api_key]" in payload
+
+
 # ---------- enablement gate ----------
 
 def test_disabled_by_default(monkeypatch):
@@ -179,6 +193,9 @@ def test_dream_cycle_deterministic_without_llm(tmp_path, monkeypatch):
 
 def test_dream_cycle_uses_llm_when_enabled(tmp_path, monkeypatch):
     monkeypatch.setattr("maverick.calibration.learning_frozen", lambda: False)
+    monkeypatch.setattr(
+        "maverick.self_learning.provider_egress_enabled", lambda: True,
+    )
     _seed_failures(tmp_path / "reflexions.ndjson")
     llm = _FakeLLM()
     report = _run(
@@ -190,6 +207,28 @@ def test_dream_cycle_uses_llm_when_enabled(tmp_path, monkeypatch):
     assert llm.calls >= 1
     ins = dreaming.load_insights(tmp_path / "insights.ndjson")
     assert any("partner feed lags" in i.text for i in ins)
+
+
+def test_dream_cycle_egress_denied_never_calls_llm(tmp_path, monkeypatch):
+    monkeypatch.setattr("maverick.calibration.learning_frozen", lambda: False)
+    monkeypatch.setattr(
+        "maverick.self_learning.provider_egress_enabled", lambda: False,
+    )
+    _seed_failures(tmp_path / "reflexions.ndjson")
+    llm = _FakeLLM()
+
+    report = _run(
+        tmp_path, llm=llm,
+        settings_override={"enable": True, "min_cluster": 2,
+                           "llm_consolidation": True},
+    )
+
+    assert report.insights_written >= 1
+    assert llm.calls == 0
+    assert any(
+        i.text.startswith("Recurring failure")
+        for i in dreaming.load_insights(tmp_path / "insights.ndjson")
+    )
 
 
 def test_dream_cycle_llm_passed_but_knob_off_stays_deterministic(tmp_path, monkeypatch):

@@ -376,7 +376,9 @@ def test_worker_starts_only_when_a_feature_is_on(monkeypatch, tmp_path):
     aq.stop()
 
     monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "0")
-    monkeypatch.delenv("MAVERICK_DREAMING", raising=False)
+    monkeypatch.setenv("MAVERICK_DREAMING", "0")
+    monkeypatch.setenv("MAVERICK_DATA_ENGINE", "0")
+    monkeypatch.setenv("MAVERICK_FLOWS", "0")
     _reset_aq(monkeypatch, aq)
     assert aq.start() is False                                # nothing on -> no worker
 
@@ -550,7 +552,7 @@ def test_reconcile_seeds_flywheel_only_when_data_engine_on(monkeypatch, tmp_path
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
-    monkeypatch.delenv("MAVERICK_DATA_ENGINE", raising=False)
+    monkeypatch.setenv("MAVERICK_DATA_ENGINE", "0")
     aq.reconcile()
     assert not [j for j in aq.queue().list(status="pending") if j.kind == aq.FLYWHEEL_KIND]
     monkeypatch.setenv("MAVERICK_DATA_ENGINE", "1")

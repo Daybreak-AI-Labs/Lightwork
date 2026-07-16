@@ -6,9 +6,9 @@ append-only store of agent steps (role, tool, outcome, error, verifier
 confidence, process-reward signal). It is the raw material the verifier/policy
 training rungs consume and the substrate the compounding-metric reads.
 
-Posture (kernel rule 1): OFF by default. Capture only happens when
-``[self_improvement] capture`` (env ``MAVERICK_TRAJECTORY_CAPTURE``) is set, so a
-default deployment records nothing. Every text field is run through
+Posture: secret-scrubbed local capture is ON by default and can be disabled with
+``[self_improvement] capture = false`` or ``MAVERICK_TRAJECTORY_CAPTURE=0``.
+Raw-text donation and provider egress remain separate opt-ins. Every text field is run through
 ``secrets.scrub`` before it touches disk (a trajectory outlives the run and must
 not become a credential leak). Writes are atomic-append, 0600, tenant-scoped via
 ``paths.data_dir``, and bounded (oldest rows roll off). Fail-open: a capture
@@ -29,14 +29,13 @@ _MAX_ROWS = 50_000  # bounded; oldest roll off
 
 
 def enabled() -> bool:
-    """Whether trajectory capture is on. OFF by default, fail-open."""
-    if os.environ.get("MAVERICK_TRAJECTORY_CAPTURE", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }:
-        return True
+    """Whether secret-scrubbed trajectory capture is on. ON by default."""
     try:
-        from .config import get_self_improvement
-        return bool(get_self_improvement().get("capture", False))
+        from .config import get_self_improvement, governed_learning_env_flag
+        override = governed_learning_env_flag("MAVERICK_TRAJECTORY_CAPTURE")
+        if override is not None:
+            return override
+        return bool(get_self_improvement().get("capture", True))
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
 
@@ -117,7 +116,12 @@ class TrajectoryStore:
 
     def record(self, step: TrajectoryStep) -> bool:
         """Append one redacted step. Returns True on success; never raises."""
-        if self.path is None:
+        # Enforce the client/operator switch at the persistence boundary; do
+        # not rely on every current and future producer remembering to gate.
+        if self.path is None or not enabled():
+            return False
+        from .learning_guard import learning_write_allowed
+        if not learning_write_allowed("trajectory_capture"):
             return False
         try:
             line = json.dumps(asdict(step.redacted()), sort_keys=True)
@@ -218,7 +222,7 @@ def reset_shared() -> None:
 
 
 def capture_step(step: TrajectoryStep, *, store: TrajectoryStore | None = None) -> bool:
-    """Opt-in entry point. No-op (returns False) unless capture is enabled."""
+    """Default-on capture entry point; returns False when explicitly disabled."""
     if not enabled():
         return False
     try:

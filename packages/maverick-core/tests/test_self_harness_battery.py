@@ -363,7 +363,7 @@ def test_recall_appends_only_when_enabled(monkeypatch, tmp_path):
                       store)
     monkeypatch.setattr(sh, "_store_path", lambda: store)
     # disabled -> empty
-    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
     monkeypatch.setattr("maverick.config.load_config", dict)
     assert sh.recall_addendum("M") == ""
     # enabled -> the block
@@ -373,7 +373,13 @@ def test_recall_appends_only_when_enabled(monkeypatch, tmp_path):
 
 
 def test_runner_pass_end_to_end(monkeypatch, tmp_path):
+    from maverick import config
     from maverick import self_improvement_runner as runner
+
+    # This fixture exercises the legacy injected-scorer path, not the sealed
+    # risk-limited production profile.
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "risk_limited": False}})
     store = tmp_path / "s.json"
     monkeypatch.setattr(sh, "_store_path", lambda: store)
     ctrl = _enable_si(monkeypatch)

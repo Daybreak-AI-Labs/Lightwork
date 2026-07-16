@@ -45,7 +45,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "max_tool_calls",
         "max_input_tokens",
         "max_output_tokens",
-        # Opt-in per-task-class self-tuning of max_dollars (self_tuning_budget.py
+        # Default-on per-task-class self-tuning of max_dollars (self_tuning_budget.py
         # reads [budget] self_tuning; self_healing.py recommends it). Without it
         # here, a client enabling the documented knob got a false "unknown key".
         "self_tuning",
@@ -60,7 +60,15 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "compartments",
         "compartment_unseal",
     },
-    "sandbox": {"backend", "workdir", "timeout"},
+    "sandbox": {
+        "backend", "workdir", "timeout", "image", "language",
+        "require_container", "allow_network", "allow_root", "pids_limit",
+        "memory", "memory_mb", "cpus", "runtime", "options",
+        "reuse_container", "cross_run_pool", "project_dir", "namespace",
+        "context", "extra_kubectl_args", "run_as_user", "provider",
+        "api_key", "network", "warm", "host", "ssh_args",
+        "host_key_checking",
+    },
     "features": {"skills", "world_model", "streaming"},
     "capabilities": {
         "computer_use",
@@ -168,7 +176,7 @@ _NUMERIC_KEYS: dict[str, set[str]] = {
         "max_input_tokens",
         "max_output_tokens",
     },
-    "sandbox": {"timeout"},
+    "sandbox": {"timeout", "pids_limit", "memory_mb", "cpus", "run_as_user"},
     "durable": {"keep_last"},
 }
 
@@ -188,7 +196,13 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "deferred_tools",
     },
     "audit": {"sign"},
+    "sandbox": {"require_container", "allow_network", "allow_root",
+                "reuse_container", "cross_run_pool", "warm"},
     "analytics": {"mcp_client_language"},
+    "self_learning": {
+        "preflight", "create_tools", "provision_packs",
+        "allow_mcp_acquisition", "allow_provider_egress", "distill_local",
+    },
 }
 
 _UNIVERSAL_BOOL_KEYS = ("enabled", "enable")

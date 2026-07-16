@@ -27,7 +27,11 @@ provenance is durably partitioned.
 """
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 import logging
+import math
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -51,7 +55,7 @@ log = logging.getLogger(__name__)
 
 def archive_path() -> Path:
     from .paths import data_dir
-    return data_dir("self_modify_archive.json")
+    return data_dir("self_modify_archive.json", tenant=None)
 
 
 def load_archive() -> CodeArchive:
@@ -60,10 +64,59 @@ def load_archive() -> CodeArchive:
 
 def _self_modify_config() -> dict:
     try:
-        from .config import load_config
-        return (load_config() or {}).get("self_modify") or {}
+        from .config import load_global_config
+        cfg = (load_global_config() or {}).get("self_modify") or {}
+        return cfg if isinstance(cfg, dict) else {}
     except Exception:  # pragma: no cover -- config never blocks
         return {}
+
+
+def _sandbox_config() -> dict:
+    try:
+        from .config import load_global_config
+        cfg = (load_global_config() or {}).get("sandbox") or {}
+        return dict(cfg) if isinstance(cfg, dict) else {}
+    except Exception:  # pragma: no cover -- secure preflight will refuse local
+        return {}
+
+
+def _sandbox_policy_digest(cfg: dict) -> str:
+    """Hash the complete DGM sandbox policy after fail-closed redaction.
+
+    The ordinary backend identity exposes only common attributes. External
+    evaluator providers can carry security-relevant nested options, so the
+    evidence scope also binds the full pinned policy without retaining secret
+    values.
+    """
+    secret_markers = (
+        "api_key", "private_key", "secret", "token", "password", "credential",
+    )
+
+    def scrub(value, *, key: str = ""):
+        lowered = key.lower()
+        if any(marker in lowered for marker in secret_markers):
+            return "<redacted>"
+        if isinstance(value, dict):
+            return {
+                str(k): scrub(v, key=str(k))
+                for k, v in sorted(value.items(), key=lambda item: str(item[0]))
+            }
+        if isinstance(value, (list, tuple)):
+            return [scrub(v, key=key) for v in value]
+        if isinstance(value, str):
+            from .safety.secret_detector import redact
+            safe, _ = redact(value)
+            return safe
+        if value is None or type(value) in (bool, int):
+            return value
+        if isinstance(value, float):
+            return value if math.isfinite(value) else "<non-finite>"
+        return f"<{type(value).__module__}.{type(value).__qualname__}>"
+
+    encoded = json.dumps(
+        scrub(cfg), ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def build_policy(cfg: dict | None = None) -> WideningPolicy:
@@ -153,6 +206,7 @@ def _default_evaluate(
     cfg: dict,
     require_tracked_source: bool = True,
     expected_source_manifest: str | None = None,
+    sandbox_cfg: dict | None = None,
 ):
     """Build the ``evaluate(patch, surface)`` seam against the real ``tree``.
 
@@ -175,6 +229,14 @@ def _default_evaluate(
     if sandbox is not None:
         raise ValueError(
             "a fixed sandbox cannot independently bind baseline and candidate copies")
+    # Pin one deployment-global policy snapshot for preflight, baseline and
+    # candidate. Reloading between copies lets a changing overlay make the
+    # arms execute under different authority even if their exposed backend
+    # attributes happen to compare equal.
+    pinned_sandbox_cfg = copy.deepcopy(
+        sandbox_cfg if sandbox_cfg is not None else _sandbox_config()
+    )
+    sandbox_policy_identity = _sandbox_policy_digest(pinned_sandbox_cfg)
     eval_command = str(cfg.get("eval_command") or "python3 -m pytest -q").strip()
     bootstrap_raw = cfg.get("eval_bootstrap")
     eval_bootstrap = (str(bootstrap_raw).strip()
@@ -195,7 +257,12 @@ def _default_evaluate(
         from .sandbox import build_sandbox
         from .self_modify_eval import require_secure_eval_sandbox
         return require_secure_eval_sandbox(
-            build_sandbox(workdir=copy_dir), copy_dir)
+            build_sandbox(
+                workdir=copy_dir,
+                sandbox_config=copy.deepcopy(pinned_sandbox_cfg),
+            ),
+            copy_dir,
+        )
 
     # Resolve the stock security profile before any model proposal can run.
     # This catches the default/local backend and egress/root opt-ins without
@@ -225,6 +292,7 @@ def _default_evaluate(
                 timeout=eval_timeout,
                 require_tracked_source=require_tracked_source,
                 expected_source_manifest=expected_source_manifest,
+                sandbox_policy_identity=sandbox_policy_identity,
             )
         finally:
             shutil.rmtree(work, ignore_errors=True)
@@ -235,7 +303,7 @@ def _default_evaluate(
 def _work_root() -> str:
     from .file_lock import ensure_private_directory
     from .paths import data_dir
-    root = data_dir("self_modify_work")
+    root = data_dir("self_modify_work", tenant=None)
     ensure_private_directory(root)
     return str(root)
 
@@ -321,7 +389,16 @@ def run(  # noqa: C901 -- orchestration keeps each privileged refusal visible
     disabled until development and confirmation provenance is durably
     partitioned."""
     from . import self_improvement as si
-    if not (sm.enabled() and si.enabled()):
+    from .paths import explicit_tenant_id
+    if explicit_tenant_id() is not None:
+        return RunSummary(
+            False,
+            reason=(
+                "self-modification is deployment-global and refuses to run "
+                "inside an explicit tenant request context"
+            ),
+        )
+    if not (sm.enabled() and sm.improvement_enabled()):
         return RunSummary(False, reason="self-modification disabled "
                           "([self_modify]/[self_improvement] enable)")
     capture_root: Path | None = None

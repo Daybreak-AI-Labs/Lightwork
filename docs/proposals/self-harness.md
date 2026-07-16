@@ -1,6 +1,6 @@
 # Self-Harness: a governed loop that learns a model-specific harness addendum
 
-**Status:** shipped (opt-in, OFF by default) · **Module:** `maverick.self_harness`
+**Status:** shipped (governed default-on) · **Module:** `maverick.self_harness`
 · **Reference:** *Self-Harness: Harnesses That Improve Themselves* (arXiv 2606.09498)
 
 ## Motivation
@@ -84,8 +84,9 @@ safety model as skills and insights.
 
 ## Safety properties
 
-- **OFF by default** (`[self_harness] enable` / `MAVERICK_SELF_HARNESS=1`); when
-  off, `recall_addendum` returns `""` and the prompt is byte-for-byte unchanged.
+- **Risk-limited and ON by default**; `[self_harness] enable = false` or
+  `MAVERICK_SELF_HARNESS=0` pauses it. While paused, `recall_addendum` returns
+  `""` and the prompt is byte-for-byte unchanged.
 - **Trace-poisoning is closed (two layers).** The addendum is recalled into
   every future run of a model across all channels/tenants, so an attacker who
   could plant text in a failure trace could otherwise poison it. (1) `mine_failures`

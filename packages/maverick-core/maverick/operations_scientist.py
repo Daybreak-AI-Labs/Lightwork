@@ -22,14 +22,14 @@ validated in the world-model). The LLM-creative hypothesis generation and the
 live A/B harness are seams; the rigorous core -- propose a swap the data says
 should help, prove it in simulation before spending a real experiment -- is here.
 
-Pure + OFF by default. ``propose`` on no failures / no memories returns ``[]``;
+Pure + ON by default. ``propose`` on no failures / no memories returns ``[]``;
 ``simulate`` on an untrustworthy model returns a non-promoting result.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .config import env_flag
+from .config import governed_learning_env_flag
 from .counterfactual_rollout import estimate_effect_via_rollout
 
 
@@ -59,8 +59,8 @@ class SimResult:
 
 
 def enabled() -> bool:
-    """Whether the Operations Scientist may run. OFF by default."""
-    _v = env_flag("MAVERICK_OPERATIONS_SCIENTIST")
+    """Whether the default-on Operations Scientist may run."""
+    _v = governed_learning_env_flag("MAVERICK_OPERATIONS_SCIENTIST")
     if _v is not None:
         return _v
     try:

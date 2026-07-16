@@ -23,16 +23,21 @@ def _isolate(tmp_path, monkeypatch):
     return world_model.WorldModel(tmp_path / "world.db")
 
 
-def test_learning_api_reports_components_off_by_default(tmp_path, monkeypatch):
+def test_learning_api_reports_governed_components_on_and_dgm_off_by_default(
+    tmp_path, monkeypatch,
+):
     monkeypatch.delenv("MAVERICK_CONSEQUENCE", raising=False)
     _isolate(tmp_path, monkeypatch)
     data = client.get("/api/v1/learning").json()
     keys = {c["key"] for c in data["components"]}
     assert {"consequence", "reflexion", "dreaming", "capture", "data_engine"} <= keys
     assert data["components_total"] == len(data["components"])
-    # the kernel is stateless by default: nothing on
-    assert all(c["on"] is False for c in data["components"])
-    assert data["components_on"] == 0
+    assert all(c["on"] is True for c in data["components"])
+    assert data["components_on"] == data["components_total"]
+    assert data["dgm"]["requested"] is False
+    assert data["dgm"]["state"] == "off"
+    assert data["dgm"]["research_only"] is True
+    assert data["dgm"]["live_adoption"] is False
     assert set(data["accumulated"]) >= {
         "decisions", "human_decisions", "approvals",
         "grounded_outcomes", "learned_capabilities", "departments",
@@ -89,12 +94,12 @@ def test_enable_all_learning_flips_every_component(tmp_path, monkeypatch):
     self = _isolate(tmp_path, monkeypatch)  # noqa: F841 (world not needed here)
     reset_config_cache()
     total = client.get("/api/v1/learning").json()["components_total"]
+    assert client.get("/api/v1/learning").json()["components_on"] == total
+    r = client.post("/api/v1/learning", json={"enabled": False})
+    assert r.status_code == 200 and r.json()["components_on"] == 0
     assert client.get("/api/v1/learning").json()["components_on"] == 0
-    r = client.post("/api/v1/learning", json={"enabled": True})
-    assert r.status_code == 200 and r.json()["components_on"] == total
-    assert client.get("/api/v1/learning").json()["components_on"] == total   # persisted
-    client.post("/api/v1/learning", json={"enabled": False})
-    assert client.get("/api/v1/learning").json()["components_on"] == 0
+    client.post("/api/v1/learning", json={"enabled": True})
+    assert client.get("/api/v1/learning").json()["components_on"] == total
 
 
 def test_flow_self_improvements_surface_in_the_moat(tmp_path, monkeypatch):
@@ -199,7 +204,167 @@ def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch
 def test_learning_page_has_enable_button(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
-    assert 'id="lrn-enable"' in t and "Turn all learning on" in t
+    assert 'id="lrn-enable"' in t and "Turn all learning off" in t
+
+
+def test_dgm_is_a_separate_acknowledged_research_toggle(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_SELF_MODIFY", raising=False)
+    _isolate(tmp_path, monkeypatch)
+    from maverick.config import reset_config_cache
+    from maverick_dashboard import settings_store
+
+    reset_config_cache()
+    assert client.post("/api/v1/learning/dgm", json={"enabled": True}).status_code == 400
+    response = client.post(
+        "/api/v1/learning/dgm",
+        json={"enabled": True, "acknowledge_research_only": True},
+    )
+    assert response.status_code == 200
+    status = response.json()["dgm"]
+    assert status["requested"] is True
+    assert status["state"] == "blocked"  # no attested evaluator/corpus/surface
+    assert status["live_adoption"] is False
+    assert settings_store.load_overlay()["self_modify"] == {"enable": True}
+
+    # The blanket learning control never arms or disarms DGM.
+    client.post("/api/v1/learning", json={"enabled": False})
+    assert client.get("/api/v1/learning").json()["dgm"]["requested"] is True
+    response = client.post("/api/v1/learning/dgm", json={"enabled": False})
+    assert response.status_code == 200
+    assert response.json()["dgm"]["requested"] is False
+
+
+def test_dgm_environment_override_is_dashboard_locked(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_SELF_MODIFY", "0")
+    _isolate(tmp_path, monkeypatch)
+    response = client.post(
+        "/api/v1/learning/dgm",
+        json={"enabled": True, "acknowledge_research_only": True},
+    )
+    assert response.status_code == 409
+    assert "MAVERICK_SELF_MODIFY" in response.json()["detail"]
+
+
+def test_dgm_config_overlay_is_dashboard_locked(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    policy = tmp_path / "operator.toml"
+    policy.write_text("[self_modify]\nenable = false\n")
+    monkeypatch.setenv("MAVERICK_CONFIG_OVERLAY", str(policy))
+    from maverick.config import reset_config_cache
+    reset_config_cache()
+    response = client.post(
+        "/api/v1/learning/dgm",
+        json={"enabled": True, "acknowledge_research_only": True},
+    )
+    assert response.status_code == 409
+    assert "MAVERICK_CONFIG_OVERLAY" in response.json()["detail"]
+
+
+def test_dgm_audit_failure_rolls_back_control(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_SELF_MODIFY", raising=False)
+    _isolate(tmp_path, monkeypatch)
+    monkeypatch.setattr("maverick.audit.record_global", lambda *a, **k: False)
+    response = client.post(
+        "/api/v1/learning/dgm",
+        json={"enabled": True, "acknowledge_research_only": True},
+    )
+    assert response.status_code == 503
+    from maverick_dashboard import settings_store
+    assert not (settings_store.load_overlay().get("self_modify") or {}).get("enable", False)
+    from maverick.config import reset_config_cache
+    reset_config_cache()
+    assert client.get("/api/v1/learning").json()["dgm"]["requested"] is False
+
+
+def test_dgm_authorization_is_durable_before_enable_is_observable(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.delenv("MAVERICK_SELF_MODIFY", raising=False)
+    _isolate(tmp_path, monkeypatch)
+    from maverick import self_modify
+    observed = []
+
+    def audit_before_publish(*_args, **_kwargs):
+        observed.append(self_modify.enabled())
+        return True
+
+    monkeypatch.setattr("maverick.audit.record_global", audit_before_publish)
+    response = client.post(
+        "/api/v1/learning/dgm",
+        json={"enabled": True, "acknowledge_research_only": True},
+    )
+
+    assert response.status_code == 200
+    assert observed == [False]
+    assert self_modify.enabled() is True
+
+
+def test_dgm_failed_authorization_never_writes_enable_bit(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_SELF_MODIFY", raising=False)
+    _isolate(tmp_path, monkeypatch)
+    from maverick_dashboard import settings_store
+    writes = []
+    original_write = settings_store._write
+    monkeypatch.setattr(
+        settings_store, "_write",
+        lambda data: writes.append(data) or original_write(data),
+    )
+    monkeypatch.setattr("maverick.audit.record_global", lambda *_a, **_k: False)
+
+    response = client.post(
+        "/api/v1/learning/dgm",
+        json={"enabled": True, "acknowledge_research_only": True},
+    )
+
+    assert response.status_code == 503
+    assert writes == []
+
+
+def test_dgm_audit_captures_acknowledgement_and_actor(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_SELF_MODIFY", raising=False)
+    _isolate(tmp_path, monkeypatch)
+    captured = []
+    monkeypatch.setattr(
+        "maverick.audit.record_global",
+        lambda kind, **payload: captured.append((kind, payload)) or True,
+    )
+    response = client.post(
+        "/api/v1/learning/dgm",
+        json={"enabled": True, "acknowledge_research_only": True},
+    )
+    assert response.status_code == 200
+    assert captured[-1][1]["acknowledged"] is True
+    assert captured[-1][1]["actor"] == "local"
+
+
+def test_dgm_and_learning_controls_require_global_admin(tmp_path, monkeypatch):
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import auth, rbac
+
+    monkeypatch.delenv("MAVERICK_SELF_MODIFY", raising=False)
+    _isolate(tmp_path, monkeypatch)
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+    token = set_tenant("acme")
+    try:
+        learning = client.post("/api/v1/learning", json={"enabled": False})
+        dgm = client.post(
+            "/api/v1/learning/dgm",
+            json={"enabled": True, "acknowledge_research_only": True},
+        )
+    finally:
+        reset_tenant(token)
+    assert learning.status_code == 403
+    assert dgm.status_code == 403
+
+
+def test_learning_page_has_separate_dgm_risk_card(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    text = client.get("/learning").text
+    assert 'id="lrn-dgm"' in text
+    assert "DGM code-evolution research" in text
+    assert "cannot deploy or adopt code" in text
 
 
 def test_learning_page_renders_the_moat(tmp_path, monkeypatch):

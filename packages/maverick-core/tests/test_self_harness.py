@@ -1,7 +1,8 @@
 """Self-Harness: governed, model-specific harness-addendum learning loop.
 
 Covers the four stages (mine -> propose -> validate -> gate) plus the safety
-properties: OFF by default, model isolation, the held-in/held-out acceptance
+properties: default-on conservative profile, explicit opt-out, model isolation,
+the held-in/held-out acceptance
 rule (no pure trades), gate-refusal leaves the store untouched, and a promoted
 addendum is recalled into the prompt.
 """
@@ -23,20 +24,26 @@ def _refl(model_id, fclass, goal, msg="boom"):
             "goal_text": goal, "failure_msg": msg}
 
 
+def _allow_provider_egress(monkeypatch):
+    monkeypatch.setattr(
+        "maverick.self_learning.provider_egress_enabled", lambda: True,
+    )
+
+
 @pytest.fixture
 def store(tmp_path):
     return tmp_path / "addenda.json"
 
 
-# ---------- off by default ----------
+# ---------- governed default ----------
 
-def test_disabled_by_default(monkeypatch, store):
+def test_enabled_by_default(monkeypatch, store):
     monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
     monkeypatch.setattr("maverick.config.load_config", dict)
-    assert sh.enabled() is False
-    assert sh.recall_addendum("m", store) == ""           # disabled -> no prompt change
+    assert sh.enabled() is True
+    assert sh.recall_addendum("m", store) == ""           # no learned line yet
     rep = sh.run_self_harness([], model_id="m", path=store)
-    assert rep.skipped == ["disabled"] and rep.promoted == 0
+    assert rep.promoted == 0
 
 
 # ---------- MINE ----------
@@ -296,6 +303,12 @@ def test_store_roundtrip_and_recall(monkeypatch, store):
 def _enable(monkeypatch, frozen=False):
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
     monkeypatch.setattr(si, "enabled", lambda: True)
+    # Most tests below exercise the historical loop mechanics directly. The
+    # pristine product default now selects the stricter unattended profile;
+    # dedicated risk_limited tests opt into that profile explicitly.
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "risk_limited": False},
+    })
     return si.SelfImprovementController(frozen_fn=lambda: frozen,
                                         ledger=si.PromotionLedger())
 
@@ -456,7 +469,7 @@ def test_count_eligible_matches_mining_filter():
 def test_cli_requires_enable(monkeypatch):
     from click.testing import CliRunner
     from maverick.cli import main
-    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
     monkeypatch.setattr("maverick.config.load_config", dict)
     res = CliRunner().invoke(main, ["self-harness", "preview", "--model", "m"])
     assert res.exit_code != 0 and "self-harness is off" in res.output
@@ -571,6 +584,9 @@ def test_runner_pass_disabled(monkeypatch):
 def test_runner_pass_driven_delegates_to_loop(monkeypatch):
     from maverick import self_improvement_runner as runner
     ctrl = _enable(monkeypatch)                       # sets SELF_HARNESS=1 + SI on
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "risk_limited": False},
+    })
     rep = runner.run_self_harness_pass(
         _three(), model_id="M", controller=ctrl,
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
@@ -1355,6 +1371,7 @@ def test_post_evaluation_refresh_uses_only_bound_judge_samples(
 def test_risk_limited_auto_cycle_refuses_missing_holdout_ledger(
     monkeypatch, tmp_path,
 ):
+    _allow_provider_egress(monkeypatch)
     from maverick import config
     from maverick import self_improvement_runner as runner
 
@@ -1548,6 +1565,7 @@ def test_overlapping_holdout_views_share_one_ledger_study_budget(tmp_path):
 def test_risk_limited_cycle_reuses_authorized_evaluator_models(
     monkeypatch, tmp_path,
 ):
+    _allow_provider_egress(monkeypatch)
     from maverick import config, llm
     from maverick import self_improvement_runner as runner
 
@@ -1612,6 +1630,7 @@ def test_risk_limited_cycle_reuses_authorized_evaluator_models(
 def test_risk_limited_cycle_refuses_unbound_injected_metamorphic_transform(
     monkeypatch, tmp_path,
 ):
+    _allow_provider_egress(monkeypatch)
     from maverick import config, llm
     from maverick import self_improvement_runner as runner
 
@@ -1640,6 +1659,7 @@ def test_risk_limited_cycle_refuses_unbound_injected_metamorphic_transform(
 def test_risk_limited_cycle_does_not_silently_disable_failed_metamorphic_check(
     monkeypatch, tmp_path,
 ):
+    _allow_provider_egress(monkeypatch)
     from maverick import config, llm, self_harness_eval
     from maverick import self_improvement_runner as runner
 
@@ -2212,8 +2232,9 @@ def test_candidates_per_signature_config(monkeypatch):
         "self_harness": {"candidates_per_signature": 0}})
     assert config.get_self_harness()["candidates_per_signature"] == 1
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
-    assert config.get_self_harness()["candidates_per_signature"] == 1
-    assert sh.settings()["candidates_per_signature"] == 1
+    # A pristine deployment selects the conservative best-of-three profile.
+    assert config.get_self_harness()["candidates_per_signature"] == 3
+    assert sh.settings()["candidates_per_signature"] == 3
 
 
 # ---------- wave 8: semantic mining (similarity_fn seam + offline default) ----------
@@ -2597,8 +2618,8 @@ def test_config_judge_samples(monkeypatch):
         "self_harness": {"judge_samples": 0}})        # floor of 1
     assert config.get_self_harness()["judge_samples"] == 1
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
-    assert config.get_self_harness()["judge_samples"] == 1
-    assert sh.settings()["judge_samples"] == 1
+    assert config.get_self_harness()["judge_samples"] == 3
+    assert sh.settings()["judge_samples"] == 3
 
 
 def test_runner_pass_applies_bucket_by_config(monkeypatch, store):
@@ -2935,7 +2956,11 @@ def test_scoped_recall_merges_model_wide_and_domain(monkeypatch, store):
 
 
 def test_scoped_recall_disabled_returns_empty(monkeypatch, store):
-    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+    sh._write_addenda({
+        sh._scoped_key("M", "domain=finance"):
+            "Operating guidance learned for this model:\n- seeded finance lesson",
+    }, store)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
     monkeypatch.setattr("maverick.config.load_config", dict)
     assert sh.recall_addendum("M", store, domain="finance") == ""
 
@@ -3052,7 +3077,9 @@ def test_cycle_auto_evaluates_and_promotes_from_corpus(monkeypatch, tmp_path, st
     cpath = tmp_path / "corpus.json"
     cpath.write_text(_json.dumps(corpus))
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {
-        "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
+        "self_harness": {"enable": True, "eval_corpus": str(cpath)},
+        "self_learning": {"allow_provider_egress": True},
+    })
 
     class _FakeLLM:
         def __init__(self, model="x", **kw):
@@ -3076,6 +3103,38 @@ def test_cycle_auto_evaluates_and_promotes_from_corpus(monkeypatch, tmp_path, st
         propose_fn=lambda s: "MAGIC-LINE bound the export window")
     assert report.promoted == 1                               # promoted FOR REAL, end to end
     assert "MAGIC-LINE" in sh.recall_addendum("M", store)
+
+
+def test_cycle_eval_corpus_requires_provider_egress(monkeypatch, tmp_path, store):
+    import json as _json
+
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+
+    _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(_json.dumps({
+        "M": [{"goal": f"g{i}", "expected": "WIN"} for i in range(10)],
+    }))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(corpus_path)},
+        "self_learning": {"allow_provider_egress": False},
+    })
+    assert runner._learning_provider_egress_enabled() is False
+    monkeypatch.setattr(
+        runner, "_auto_evaluator",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("provider-backed evaluator is not authorized")),
+    )
+
+    report, _ = runner.run_self_harness_cycle(
+        reflexions=[_refl("M", "timeout", "export ledger") for _ in range(3)],
+        model_id="M", retire=False,
+    )
+
+    assert report.mined == 1
+    assert report.promoted == 0
 
 
 def test_cycle_stays_dry_without_corpus(monkeypatch, store):
@@ -3197,6 +3256,7 @@ def test_cycle_drives_canary_lifecycle(monkeypatch, store):
 # ---------- driver reachability: judge wiring, canary staging, tool credit ----------
 
 def test_cycle_forwards_judge_samples_to_auto_evaluator(monkeypatch, tmp_path, store):
+    _allow_provider_egress(monkeypatch)
     # [self_harness] judge_samples must reach the auto-built LLM judge -- the
     # knob's only consumer is _auto_evaluator on this path.
     from maverick import config
@@ -3262,8 +3322,8 @@ def test_config_promote_as_canary(monkeypatch):
         "self_harness": {"promote_as_canary": True}})
     assert config.get_self_harness()["promote_as_canary"] is True
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
-    assert config.get_self_harness()["promote_as_canary"] is False
-    assert sh.settings()["promote_as_canary"] is False
+    assert config.get_self_harness()["promote_as_canary"] is True
+    assert sh.settings()["promote_as_canary"] is True
 
 
 def test_config_auto_run(monkeypatch):
@@ -3272,8 +3332,8 @@ def test_config_auto_run(monkeypatch):
         "self_harness": {"auto_run": True}})
     assert config.get_self_harness()["auto_run"] is True
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
-    assert config.get_self_harness()["auto_run"] is False
-    assert sh.settings()["auto_run"] is False
+    assert config.get_self_harness()["auto_run"] is True
+    assert sh.settings()["auto_run"] is True
 
 
 def test_config_eval_budget_dollars(monkeypatch):
@@ -3287,8 +3347,8 @@ def test_config_eval_budget_dollars(monkeypatch):
             "self_harness": {"eval_budget_dollars": _b}})
         assert config.get_self_harness()["eval_budget_dollars"] is None
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
-    assert config.get_self_harness()["eval_budget_dollars"] is None
-    assert sh.settings()["eval_budget_dollars"] is None
+    assert config.get_self_harness()["eval_budget_dollars"] == 5.0
+    assert sh.settings()["eval_budget_dollars"] == 5.0
 
 
 def test_eval_budget_builder_dollars_is_the_binding_cap():
@@ -3305,6 +3365,7 @@ def test_eval_budget_builder_dollars_is_the_binding_cap():
 
 
 def test_cycle_passes_eval_budget_to_auto_evaluator(monkeypatch, tmp_path, store):
+    _allow_provider_egress(monkeypatch)
     from maverick import config
     from maverick import self_improvement_runner as runner
     _enable(monkeypatch)
@@ -3326,6 +3387,7 @@ def test_cycle_passes_eval_budget_to_auto_evaluator(monkeypatch, tmp_path, store
 
 
 def test_exhausted_eval_budget_fails_the_cycle_closed(monkeypatch, tmp_path, store):
+    _allow_provider_egress(monkeypatch)
     # The auto-evaluated cycle hits its spend cap mid-validation: the candidate
     # must be REJECTED (not promoted on partial scores), nothing written, and
     # the cycle must exit cleanly.
@@ -3824,6 +3886,7 @@ def test_transfer_honors_holdout_rotations(monkeypatch, store):
 
 
 def test_runner_transfer_end_to_end(monkeypatch, tmp_path, store):
+    _allow_provider_egress(monkeypatch)
     # Driver path: fleet targets, corpus-built evaluator, canary landing.
     import json as _json
 
@@ -4096,8 +4159,8 @@ def test_config_calibrate_judge(monkeypatch):
         "self_harness": {"calibrate_judge": True}})
     assert config.get_self_harness()["calibrate_judge"] is True
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
-    assert config.get_self_harness()["calibrate_judge"] is False
-    assert sh.settings()["calibrate_judge"] is False
+    assert config.get_self_harness()["calibrate_judge"] is True
+    assert sh.settings()["calibrate_judge"] is True
 
 
 def test_config_relapse_knobs(monkeypatch):
@@ -4154,6 +4217,7 @@ def test_semantic_classifier_catches_reworded_conflict():
 
 
 def test_cycle_wires_paraphraser_when_metamorphic_on(monkeypatch, tmp_path, store):
+    _allow_provider_egress(monkeypatch)
     from maverick import config, llm
     from maverick import self_improvement_runner as runner
     _enable(monkeypatch)
@@ -4211,6 +4275,7 @@ def test_pass_fills_metamorphic_tolerance_from_config(monkeypatch, store):
 
 
 def test_cycle_metamorphic_rejects_wording_overfit_line(monkeypatch, tmp_path, store):
+    _allow_provider_egress(monkeypatch)
     # End to end on the auto path: the candidate helps on the ORIGINAL corpus
     # wording but HURTS on the paraphrases -> rejected. Same line, knob off ->
     # promotes. Proves the paraphrase check is real, not a silent no-op.
@@ -4266,6 +4331,7 @@ def test_cycle_metamorphic_rejects_wording_overfit_line(monkeypatch, tmp_path, s
 
 
 def test_cycle_promotes_domain_scoped_line_from_domain_corpus(monkeypatch, tmp_path, store):
+    _allow_provider_egress(monkeypatch)
     # End to end: a domain-keyed-ONLY corpus + per-domain mining. The model-wide
     # A/B cannot build (no model key), yet the finance-scoped weakness is
     # validated against the finance cases and promoted into the scoped block.

@@ -596,9 +596,9 @@ def test_write_config_emits_consequence_when_enabled(tmp_path: Path, monkeypatch
     assert parsed["consequence"]["enable"] is True
 
 
-def test_write_config_omits_consequence_by_default(tmp_path: Path, monkeypatch):
+def test_write_config_persists_consequence_opt_out(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={"consequence": False})
-    assert "consequence" not in parsed
+    assert parsed["consequence"]["enable"] is False
 
 
 def test_write_config_emits_routing_energy_aware(tmp_path: Path, monkeypatch):
@@ -657,6 +657,28 @@ def test_pick_self_learning_includes_distill_local(monkeypatch):
     result = pick_self_learning()
     assert result["enable"] is True
     assert result["distill_local"] is True
+
+
+def test_pick_self_learning_defaults_to_safe_governed_learning(monkeypatch):
+    """Accepting every prompt default enables learning, not executable autonomy."""
+    monkeypatch.setattr(
+        "maverick_installer.wizard._q_confirm",
+        lambda *a, default=False, **kw: default,
+    )
+    from maverick_installer.wizard import pick_self_learning
+
+    result = pick_self_learning()
+
+    assert result == {
+        "enable": True,
+        "preflight": True,
+        "create_tools": False,
+        "provision_packs": True,
+            "allow_mcp_acquisition": False,
+            "allow_provider_egress": False,
+        "distill_local": True,
+        "max_acquisitions": 5,
+    }
 
 
 # ---------- finance suite wizard step (finance-agent-suite §8) ----------
@@ -728,6 +750,49 @@ def test_pick_advanced_includes_learning_toggles(monkeypatch):
     for key in ("structured_verifier_off", "jit_rl_off",
                 "reward_laundering", "signed_approval"):
         assert key in adv, f"{key} missing from pick_advanced()"
+
+
+def test_pick_advanced_defaults_governed_learning_on_but_dgm_off(monkeypatch):
+    """The advanced wizard's Enter path keeps DGM as a separate opt-in."""
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(
+        wizard,
+        "_q_confirm",
+        lambda *a, default=False, **kw: default,
+    )
+    monkeypatch.setattr(
+        wizard,
+        "_q_select",
+        lambda *a, default=None, **kw: default,
+    )
+    monkeypatch.setattr(
+        wizard,
+        "_q_text",
+        lambda *a, default="", **kw: default,
+    )
+
+    advanced = wizard.pick_advanced()
+
+    governed_learning = {
+        "reflexion",
+        "self_harness",
+        "dreaming",
+        "skill_synthesis",
+        "experience_guidance",
+        "credit_assignment",
+        "causal_promotion",
+        "factory_learning",
+        "evaluator_evolution",
+        "rehearsal",
+        "data_engine",
+        "operations_scientist",
+        "consequence",
+    }
+    assert all(advanced[key] is True for key in governed_learning)
+    assert advanced["structured_verifier_off"] is False
+    assert advanced["jit_rl_off"] is False
+    assert advanced["self_modify"] is False
 
 
 def test_write_config_disables_reasoning_reward(tmp_path: Path, monkeypatch):
@@ -806,7 +871,7 @@ def test_write_config_emits_self_modify(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(tmp_path, monkeypatch, advanced={"self_modify": True})
     assert parsed["self_modify"]["enable"] is True
     from maverick import config
-    monkeypatch.setattr(config, "load_config", lambda *a, **k: parsed)
+    monkeypatch.setattr(config, "load_global_config", lambda *a, **k: parsed)
     resolved = config.get_self_modify()
     assert resolved["enable"] is True
     assert resolved["editable_paths"] == []  # allowlist stays commented -> inert
@@ -818,8 +883,11 @@ def test_write_config_emits_self_modify(tmp_path: Path, monkeypatch):
     assert '# eval_tests = ["path/test_feature.py::case_a",' in body
 
 
-def test_write_config_omits_self_modify_when_off(tmp_path: Path, monkeypatch):
-    parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
+@pytest.mark.parametrize("advanced", [{}, {"self_modify": False}])
+def test_write_config_omits_self_modify_when_off(
+    tmp_path: Path, monkeypatch, advanced,
+):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced=advanced)
     assert "self_modify" not in parsed
 
 

@@ -955,13 +955,11 @@ def pick_capabilities() -> dict[str, bool]:
 
 
 def pick_self_learning() -> dict[str, Any]:
-    """Opt-in to self-learning: acquire/build new capabilities on demand.
+    """Configure default-on governed capability learning.
 
-    Off by default. When on, the agent can install catalog skills, generate
-    + run new tools, and discover REST APIs when it hits a capability gap.
-    Generating and executing fresh code is a real trust decision, so this
-    ships disabled and we say so plainly. Returns a dict written under
-    ``[self_learning]``.
+    Catalog skills, API discovery, pack provisioning and local distillation are
+    on by default. Generating executable tools remains a separate trust choice.
+    Returns a dict written under ``[self_learning]``.
 
     MCP-server acquisition (#422) is a separate, even-higher-trust knob: it
     re-enables the capability #392 disabled, but only for curated, hash-pinned
@@ -972,19 +970,24 @@ def pick_self_learning() -> dict[str, Any]:
     console.print(
         "[dim]Self-learning lets the agent close capability gaps on its own: "
         "install skills, discover REST APIs, even write & run new tools. "
-        "It generates and executes fresh code in-process, so it's OFF by "
-        "default.[/dim]"
+        "Governed learning is ON by default; executable tool generation and "
+        "external MCP processes remain separate opt-ins.[/dim]"
     )
-    enable = _q_confirm("Enable self-learning?", default=False)
+    enable = _q_confirm("Enable governed self-learning?", default=True)
     if not enable:
         return {"enable": False}
     create_tools = _q_confirm(
         "  Allow the agent to GENERATE and run new tools (full autonomy)?",
-        default=True,
+        default=False,
     )
     preflight = _q_confirm(
-        "  Pre-acquire likely skills before each run (one extra LLM call)?",
+        "  Pre-acquire likely skills before each run (local catalog pass)?",
         default=True,
+    )
+    allow_provider_egress = _q_confirm(
+        "  Allow learning helpers to make EXTRA model calls with redacted task "
+        "or result text (may use another configured provider)?",
+        default=False,
     )
     provision_packs = _q_confirm(
         "  Equip newly onboarded packs: install the catalog skills and "
@@ -1003,7 +1006,7 @@ def pick_self_learning() -> dict[str, Any]:
     distill_local = _q_confirm(
         "  Distill successful runs into local skills? After a successful run, "
         "save a reusable skill under ~/.maverick/learned-skills.",
-        default=False,
+        default=True,
     )
     return {
         "enable": True,
@@ -1011,6 +1014,7 @@ def pick_self_learning() -> dict[str, Any]:
         "create_tools": create_tools,
         "provision_packs": provision_packs,
         "allow_mcp_acquisition": allow_mcp,
+        "allow_provider_egress": allow_provider_egress,
         "distill_local": distill_local,
         "max_acquisitions": 5,
     }
@@ -1367,10 +1371,11 @@ def pick_oidc() -> dict[str, Any]:
 
 
 def pick_advanced() -> dict[str, Any]:
-    """Opt-in to advanced reasoning features that ship off by default.
+    """Configure advanced reasoning, learning, and governance features.
 
-    Each trades extra tokens/latency for quality on hard or long-running
-    goals. All editable later in ~/.maverick/config.toml.
+    Governed learning choices default on; higher-authority or infrastructure
+    features retain explicit opt-ins. All are editable later in
+    ~/.maverick/config.toml.
     """
     console.print()
     advanced: dict[str, Any] = {
@@ -1428,15 +1433,15 @@ def pick_advanced() -> dict[str, Any]:
         "reflexion": _q_confirm(
             "Reflexion learning? Remember lessons from failed runs and recall them "
             "on the next similar goal.",
-            default=False,
+            default=True,
         ),
         "self_harness": _q_confirm(
             "Self-harness? Learn a MODEL-SPECIFIC operating-guidance addendum from "
             "recurring failures -- mined, validated on held-out cases, and gated "
             "through the same promotion ladder as every other learned change -- "
             "then recalled into that model's system prompt. Inspect or roll it "
-            "back any time with `maverick self-harness`. OFF by default.",
-            default=False,
+            "back any time with `maverick self-harness`. ON by default.",
+            default=True,
         ),
         "fleet_memory": _q_confirm(
             "Fleet memory? Let EXTERNAL agents (Agentforce, Copilot, custom) "
@@ -1502,7 +1507,7 @@ def pick_advanced() -> dict[str, Any]:
             "shared across departments), retires skills whose track record "
             "decayed, and prunes stale lessons. Deterministic by default "
             "(opt-in LLM enrichment + rehearsal runs are separate and budgeted).",
-            default=False,
+            default=True,
         ),
         "verify_ensemble": _q_confirm(
             "Ensemble verification? Cross-check final answers with a panel of models "
@@ -1591,7 +1596,7 @@ def pick_advanced() -> dict[str, Any]:
             "Sign verification rewards into the audit chain? Provable learning: write a "
             "tamper-evident, signed row for every structured reward the system learns "
             "from -- the per-dimension rubric, the score, and where a facet vetoed "
-            "(maverick.reasoning_reward). Off by default (adds audit volume); recommended "
+            "(maverick.reasoning_reward). On by default (adds audit volume); recommended "
             "for regulated deployments.",
             default=False,
         ),
@@ -1633,18 +1638,18 @@ def pick_advanced() -> dict[str, Any]:
         "skill_synthesis": _q_confirm(
             "Test-time skill synthesis? Write a short task-specific cheat-sheet for "
             "each goal before working on it.",
-            default=False,
+            default=True,
         ),
         "experience_guidance": _q_confirm(
             "Experience-guided orchestration? Steer planning with how similar past "
             "goals turned out (what worked, what failed).",
-            default=False,
+            default=True,
         ),
         "credit_assignment": _q_confirm(
             "Counterfactual credit assignment? After a swarm answers, work out which "
             "sub-agent actually helped (ablate + re-verify) to improve learning and "
             "routing. Costs extra verifier calls per swarm.",
-            default=False,
+            default=True,
         ),
         "causal_promotion": _q_confirm(
             "Counterfactual promotion? When governed self-improvement is on, promote a "
@@ -1652,7 +1657,7 @@ def pick_advanced() -> dict[str, Any]:
             "effect on outcomes clears the bar -- not just a correlation that co-occurred "
             "with success. Each promotion records the effect, its confidence interval, and "
             "what it adjusted for. Requires self-improvement enabled.",
-            default=False,
+            default=True,
         ),
         "factory_learning": _q_confirm(
             "Self-improving agent factory? Mine recurring pack-generation gaps (a tool a "
@@ -1670,15 +1675,15 @@ def pick_advanced() -> dict[str, Any]:
             "is immutable so a weak judge can't launder drift. Requires self-improvement "
             "enabled; an evaluator swap needs human approval until you raise max_auto_rung "
             "to 'evaluator'.",
-            default=False,
+            default=True,
         ),
         "rehearsal": _q_confirm(
             "Pre-execution rehearsal? Before a risky plan runs, simulate it against the "
             "learned world-model of your environment and gate on the prediction: proceed "
             "when the model is confident it's safe, BLOCK a confidently-poor outcome, and "
             "ESCALATE to a human when the model is unsure or has never seen the move. "
-            "Governance that lets agents be bolder where it's earned; off by default.",
-            default=False,
+            "Governance that lets agents be bolder where it's earned; on by default.",
+            default=True,
         ),
         "speculative": _q_confirm(
             "Speculative execution? On turns where the world-model is highly confident "
@@ -1693,22 +1698,22 @@ def pick_advanced() -> dict[str, Any]:
             "failures are triaged by CAUSAL impact on real outcomes (fix what moves "
             "reality most, not what's merely frequent), then mined, validated in the "
             "world-model, and promoted through the safety ladder. The workforce compounds "
-            "from its own experience; off by default.",
-            default=False,
+            "from its own experience; on by default.",
+            default=True,
         ),
         "operations_scientist": _q_confirm(
             "Operations Scientist? An agent that DISCOVERS a better process and proves it: "
             "it pairs a harmful action with the beneficial habit that should replace it, "
             "validates the swap in the world-model, then runs a real causal experiment and "
-            "ships the proven win. Discovery, not just labour; off by default.",
-            default=False,
+            "ships the proven win. Discovery, not just labour; on by default.",
+            default=True,
         ),
         "consequence": _q_confirm(
             "Consequence Engine? Ground the workforce's learning in REAL outcomes instead "
             "of a model's self-graded proxy: when a downstream result lands (an invoice "
             "paid, a ticket reopened), it overrides the proxy reward so the data engine "
-            "learns from reality. Reality is the reward signal; off by default.",
-            default=False,
+            "learns from reality. Reality is the reward signal; on by default.",
+            default=True,
         ),
         "flows": _q_confirm(
             "Flow engine? A deterministic skeleton -- branch, switch, loop, parallel, "
@@ -1988,7 +1993,7 @@ def pick_advanced() -> dict[str, Any]:
             "graduate or pull it from real run outcomes.", default=False)
         advanced["self_harness_auto_run"] = _q_confirm(
             "    Auto-run? Run the governed learning cycle for every role model "
-            "as part of `maverick dream` (no second cron entry).", default=False)
+            "as part of `maverick dream` (no second cron entry).", default=True)
         advanced["self_harness_metamorphic"] = _q_confirm(
             "    Metamorphic validation? Paraphrase held-out cases and require a "
             "candidate's lift to survive the rewording (needs the live A/B).",
@@ -3140,13 +3145,32 @@ def _cfg_license(license_cfg: dict[str, Any] | None) -> list[str]:
     return lines
 
 
-def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
+def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     advanced: dict[str, Any] | None,
     providers: list[str],
 ) -> list[str]:
     if not advanced:
         return []
     lines: list[str] = []
+    # These governed-learning sections are default-on in the kernel. Preserve a
+    # deliberate "no" from the advanced wizard instead of silently omitting the
+    # table (which would now mean on). True choices are emitted with their richer
+    # comments/settings in the existing blocks below.
+    _learning_sections = {
+        "reflexion": "reflexion",
+        "self_harness": "self_harness",
+        "dreaming": "dreaming",
+        "skill_synthesis": "skill_synthesis",
+        "experience_guidance": "experience",
+        "credit_assignment": "credit",
+        "rehearsal": "rehearsal",
+        "data_engine": "data_engine",
+        "operations_scientist": "operations_scientist",
+        "consequence": "consequence",
+    }
+    for choice, section in _learning_sections.items():
+        if choice in advanced and advanced[choice] is False:
+            lines.extend(["", f"[{section}]", "enable = false"])
     # Advanced reasoning toggles -> the kernel's config sections. Each is
     # off unless the wizard wrote it, matching the modules' own defaults.
     if (advanced.get("cost_aware") or advanced.get("verify_ensemble")
@@ -3227,7 +3251,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         if advanced.get("audit_rewards"):
             lines.append("# Sign each structured reward into the tamper-evident audit")
             lines.append("# chain (provable learning) -- the evidence the system learns")
-            lines.append("# from, not just a mutable verdict. Off by default.")
+            lines.append("# from, not just a mutable verdict. Enabled by default.")
             lines.append("audit_rewards = true")
     if advanced.get("jit_rl_off"):
         lines.append("")
@@ -3247,37 +3271,39 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("")
         lines.append("[credit]")
         lines.append("enable = true")
-    # The [self_improvement] block carries several sub-toggles; emit it if any
-    # diverges from its default (causal_promotion defaults off, factory_learning
-    # defaults on -- so we only write factory_learning when the user opts out).
+    # The [self_improvement] block carries several default-on sub-toggles; emit
+    # explicit values when the wizard records a choice, and write
+    # factory_learning=false when the user opts out.
     declined_factory = "factory_learning" in advanced and not advanced.get("factory_learning")
-    if (advanced.get("causal_promotion") or declined_factory
-            or advanced.get("evaluator_evolution") or advanced.get("signed_approval")):
+    has_learning_policy = any(
+        key in advanced
+        for key in ("causal_promotion", "factory_learning", "evaluator_evolution")
+    )
+    if has_learning_policy or advanced.get("signed_approval"):
         lines.append("")
         lines.append("[self_improvement]")
-        if (advanced.get("causal_promotion") or advanced.get("evaluator_evolution")
-                or advanced.get("signed_approval")):
-            # Every sub-toggle below rides the promotion ladder, and the ladder
-            # is off by default (self_improvement.enabled()). Without this line
-            # evaluator_evolution / require_signed_approval are written but
-            # inert -- a config that CLAIMS governance it never runs. Opting
-            # out of factory_learning alone does not turn the ladder on.
-            lines.append("enable = true")
-        if advanced.get("causal_promotion"):
+        lines.append("enable = true")
+        lines.append("capture = true")
+        lines.append("prm_guidance = true")
+        if "causal_promotion" in advanced:
             lines.append("# Promote learned changes on their confounder-adjusted causal")
             lines.append("# effect (maverick.promotion_effect), not a correlation. Applies")
             lines.append("# when self-improvement is enabled.")
-            lines.append("causal_promotion = true")
+            lines.append(
+                f"causal_promotion = {str(bool(advanced.get('causal_promotion'))).lower()}"
+            )
         if declined_factory:
             lines.append("# Keep the agent factory's generator static (do not mine")
             lines.append("# pack-generation gaps into proposer corrections).")
             lines.append("factory_learning = false")
-        if advanced.get("evaluator_evolution"):
+        if "evaluator_evolution" in advanced:
             lines.append("# Promote a better judge instead of only freezing when the")
             lines.append("# evaluator drifts: a challenger replaces the incumbent only when")
             lines.append("# its agreement with a checksum-locked ground-truth anchor beats")
             lines.append("# it (maverick.evaluator_evolution, 'evaluator' rung).")
-            lines.append("evaluator_evolution = true")
+            lines.append(
+                f"evaluator_evolution = {str(bool(advanced.get('evaluator_evolution'))).lower()}"
+            )
         if advanced.get("signed_approval"):
             lines.append("# Require a cryptographic (Ed25519) human approval for the")
             lines.append("# code/weights rungs instead of a self-settable boolean, bound to")
@@ -3539,6 +3565,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("")
         lines.append("[self_harness]")
         lines.append("enable = true")
+        lines.append("risk_limited = true")
         # Ship production-safe validation floors by default (an operator can
         # relax them): never promote on only the mined examples, require an
         # unseen-sample floor, and an effect-size floor so noisy lifts don't
@@ -3565,6 +3592,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("promote_as_canary = true")
         if advanced.get("self_harness_auto_run"):
             lines.append("auto_run = true")
+        elif "self_harness_auto_run" in advanced:
+            lines.append("auto_run = false")
         if advanced.get("self_harness_metamorphic"):
             lines.append("metamorphic = true")
         if advanced.get("self_harness_relapse"):
@@ -4457,7 +4486,8 @@ _EXPRESS_SELF_LEARNING: dict[str, Any] = {
     "preflight": True,
     "create_tools": False,
     "provision_packs": True,
-    "allow_mcp": False,
+    "allow_mcp_acquisition": False,
+    "allow_provider_egress": False,
     "distill_local": True,
 }
 

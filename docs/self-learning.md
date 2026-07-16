@@ -13,21 +13,35 @@ REST API, or generate a brand-new tool — instead of giving up. It can also
 *propose* a curated MCP server, but only one from the hash-pinned catalog and
 only after you explicitly approve it (see "MCP-server acquisition" below).
 
-It's **off by default**. The kernel runs unchanged unless you turn it on,
-because "create a tool" means generating and executing fresh code in your
-process — an explicit trust decision.
+Governed self-learning is **on by default**: catalog-skill preflight, pack
+provisioning, and local skill distillation can learn without broadening an
+agent's existing capability envelope. Generating and executing a new tool and
+starting a third-party MCP server remain separate, off-by-default trust
+decisions.
 
-## Enabling it
+The DGM code-evolution harness is also separate. `[self_modify] enable` remains
+off by default and is never changed by the blanket learning control. A global
+client admin can arm it from the dashboard Learning page or
+`POST /api/v1/learning/dgm` only after acknowledging its research-only posture.
+The enabling payload is `{"enabled": true, "acknowledge_research_only": true}`.
+Arming changes the gate; it does not start a cycle or authorize live code
+adoption. See [Configuration](configuration.md#learning--workforce-sections) for
+its readiness requirements. A valid `MAVERICK_SELF_MODIFY=0|1` environment
+override owns the setting and makes the dashboard control read-only.
 
-In the installer wizard, answer **yes** to "Enable self-learning?", or
-edit `~/.maverick/config.toml`:
+## Controlling it
+
+The installer enables governed self-learning by default. To make the posture
+explicit, edit `~/.maverick/config.toml`:
 
 ```toml
 [self_learning]
-enable           = true  # master switch (default false)
+enable           = true  # master switch (default true; set false to opt out)
 preflight        = true  # pre-acquire likely skills before each run
-create_tools     = true  # let the agent generate + run new tools
+create_tools     = false # separate opt-in: generate + run new executable tools
 allow_mcp_acquisition = false  # let the agent propose catalog MCP servers (off)
+allow_provider_egress = false  # extra task/result-bearing learning model calls
+distill_local    = true  # distill successful local trajectories into skills
 max_acquisitions = 5     # cap on auto-acquisitions per run
 ```
 
@@ -37,8 +51,14 @@ max_acquisitions = 5     # cap on auto-acquisitions per run
 > config or `MAVERICK_ALLOW_MCP_ACQUISITION=1`. An older config that still sets
 > the retired `add_mcp_servers` key is tolerated and ignored.
 
-Or for a one-off run: `MAVERICK_SELF_LEARNING=1 maverick start "..."`.
-The env var also force-*disables* (`MAVERICK_SELF_LEARNING=0`) over config.
+With `allow_provider_egress = false`, preflight still performs a local,
+secret-redacted catalog match and never calls a model. Enabling the egress knob
+permits the richer summarizer needs analysis, task-skill synthesis, and
+counterfactual credit verification; their inputs are redacted before the call.
+
+The environment variable wins over config: use
+`MAVERICK_SELF_LEARNING=0 maverick start "..."` for a one-off opt-out, or `=1`
+to force it on when policy permits.
 
 ## How it works
 
@@ -104,8 +124,10 @@ is accepted) and the same human approval `save_profile` requires.
 
 Self-learning honors the same chokepoints as the rest of the kernel:
 
-- **Off by default** — no extra persisted state until you opt in.
-- **Budget** — the generation LLM call is metered against the run's
+- **Default-on but independently stoppable** — set `[self_learning] enable =
+  false`, `MAVERICK_SELF_LEARNING=0`, or the global learning HALT before a run
+  to stop this loop. An invalid active config source fails closed.
+- **Budget** — any explicitly authorized auxiliary/generation LLM call is metered against the run's
   [budget](configuration.md); `max_acquisitions` bounds churn per run.
 - **Static audit (enforced, not just requested)** — generated tool source is
   parsed and checked against a stdlib-only allowlist *before* it is imported:
@@ -173,11 +195,11 @@ change would). A promoted correction is folded into future pack generation via
 `augment_system_prompt`, scope-matched per suite, so the next pack the factory
 writes already knows the pattern the last several taught it.
 
-It's **off by default and byte-identical to before while off** — recording
-writes nothing, mining reads nothing, and `augment_system_prompt` returns the
-base prompt unchanged. Turn it on with `[self_improvement] enable` plus the
-`factory_learning` sub-knob (default on once self-improvement is accepted), or
-force it for one run with `MAVERICK_FACTORY_LEARNING=1`. The ledger is bounded
+It is **on by default** with governed self-improvement, but remains
+independently stoppable with `[self_improvement] factory_learning = false` or
+`MAVERICK_FACTORY_LEARNING=0`. While off, recording writes nothing, mining reads
+nothing, and `augment_system_prompt` returns the base prompt unchanged. The
+ledger is bounded
 (oldest rows roll off), outcome text is secret-redacted before it's persisted,
 and — like provisioning — a correction is never a tool grant, so it widens no
 pack's envelope. Mine and preview the corrections without applying them:
@@ -225,8 +247,9 @@ checksum-pinned in `evaluator_anchors.lock.json` and enforced by `python -m
 maverick.evaluator_evolution --ci` (regenerate after an intentional anchor
 addition with `--regen`), exactly as released world-model migrations are.
 
-Off by default and a no-op while off: it runs only under `[self_improvement]
-enable` **and** the `evaluator_evolution` sub-knob. Full design in
+On by default with governed self-improvement and a no-op when explicitly
+paused: it runs only under `[self_improvement] enable` **and** the
+`evaluator_evolution` sub-knob. Full design in
 [`docs/proposals/evaluator-co-evolution.md`](./proposals/evaluator-co-evolution.md).
 
 ## MCP-server acquisition

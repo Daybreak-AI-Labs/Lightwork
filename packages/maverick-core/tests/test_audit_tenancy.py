@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import pytest
 from maverick.audit.events import AuditEvent, EventKind
-from maverick.audit.writer import AuditLog, default_audit_log, record
+from maverick.audit.writer import AuditLog, default_audit_log, record, record_global
 from maverick.paths import reset_tenant, set_tenant
 
 
@@ -104,6 +104,27 @@ def test_records_land_under_tenant_dir(monkeypatch, tmp_path):
     assert "acme goal" in tenant_file.read_text()
     # Nothing leaked into the legacy single-tenant location.
     assert not _today_file(tmp_path / ".maverick" / "audit").exists()
+
+
+def test_global_control_record_bypasses_active_tenant(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    _reset_default_logs(monkeypatch)
+    token = set_tenant("acme")
+    try:
+        assert record_global(
+            EventKind.LEARNING_CONTROL_CHANGED,
+            control="self_modify",
+            enabled=True,
+            acknowledged=True,
+        )
+    finally:
+        reset_tenant(token)
+    global_file = _today_file(tmp_path / "audit")
+    tenant_file = _today_file(tmp_path / "tenants" / "acme" / "audit")
+    assert global_file.exists()
+    assert "self_modify" in global_file.read_text(encoding="utf-8")
+    assert not tenant_file.exists()
 
 
 # --- signed chain still verifies per tenant --------------------------------

@@ -72,8 +72,12 @@ def test_run_express_enables_all_safe_features(monkeypatch, tmp_path: Path):
         "apply_patch",
         "str_replace_editor",
     }
-    # Self-learning is on WITHOUT the generate-and-run-code autonomy.
+    # Self-learning is on WITHOUT executable-tool or external-MCP autonomy.
     assert config["self_learning"]["create_tools"] is False
+    assert config["self_learning"]["allow_mcp_acquisition"] is False
+    assert config["self_learning"]["distill_local"] is True
+    # DGM is a separate, explicit production decision even in express mode.
+    assert "self_modify" not in config
 
     # License enforcement must NOT be on -- fail-open keeps everything unlocked.
     assert "license" not in config or not config["license"].get("enforce")
@@ -168,6 +172,11 @@ def test_run_consumer_writes_safe_defaults(monkeypatch, tmp_path: Path):
     assert config["persona"]["user_name"] == "Alex"
     assert config["budget"]["max_dollars"] == 5.0
     assert config["capabilities"]["web_search"] is True
+    assert config["self_learning"]["enable"] is True
+    assert config["self_learning"]["create_tools"] is False
+    assert config["self_learning"]["allow_mcp_acquisition"] is False
+    assert config["self_learning"]["distill_local"] is True
+    assert "self_modify" not in config
     # No channels, no MCP, no plugins.
     assert "channels" not in config
     assert "mcp_servers" not in config

@@ -1,8 +1,8 @@
 """Reflexion learning loop, wired into the orchestrator.
 
 The reflexion module persists a postmortem when a run fails and recalls
-it on the next similar goal. Off by default; enabled via MAVERICK_REFLEXION
-or [reflexion] enable = true. These tests cover the helpers and the
+it on the next similar goal. It is on by default and can be disabled via
+MAVERICK_REFLEXION=0 or [reflexion] enable = false. These tests cover the helpers and the
 record-on-failure integration through run_goal.
 """
 from __future__ import annotations
@@ -37,9 +37,9 @@ class TestReflexionModelId:
 
 
 class TestReflexionHelpers:
-    def test_disabled_by_default(self, monkeypatch):
+    def test_enabled_by_default(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_REFLEXION", raising=False)
-        assert reflexion.enabled() is False
+        assert reflexion.enabled() is True
 
     def test_enabled_via_env(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_REFLEXION", "1")
@@ -53,6 +53,32 @@ class TestReflexionHelpers:
         bb.post("a", "observation", "tool=read_file -> more")  # dup
         bb.post("a", "finding", "done")
         assert reflexion.tools_from_blackboard(bb) == ["read_file", "shell"]
+
+    def test_record_redacts_every_persisted_text_field(self, tmp_path):
+        path = tmp_path / "reflexions.ndjson"
+        secret = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        assert reflexion.record(
+            f"goal {secret}", "provider_error", f"failed {secret}",
+            f"lesson {secret}", tools_used=[f"tool-{secret}"],
+            channel=f"channel-{secret}", user_id=f"user-{secret}", path=path,
+        )
+        body = path.read_text(encoding="utf-8")
+        assert secret not in body
+
+    def test_record_never_falls_back_to_raw_text_when_redactor_fails(
+        self, tmp_path, monkeypatch,
+    ):
+        from maverick.safety import secret_detector
+        secret = "INTERNAL_API_KEY=abcdEFGH1234567890zz"
+        monkeypatch.setattr(
+            secret_detector, "redact", lambda *_a, **_k: (_ for _ in ()).throw(
+                RuntimeError("detector unavailable")
+            ),
+        )
+        path = tmp_path / "reflexions.ndjson"
+        assert reflexion.record(secret, secret, secret, secret, path=path)
+        body = path.read_text(encoding="utf-8")
+        assert secret not in body
 
     def test_synthesize_reflection_is_informative(self):
         text = reflexion.synthesize_reflection(
@@ -213,7 +239,7 @@ class TestHumanOverrideIngestion:
         assert "bank_transfer" in entry.reflection
 
     def test_noop_when_reflexion_disabled(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("MAVERICK_REFLEXION", raising=False)
+        monkeypatch.setenv("MAVERICK_REFLEXION", "0")
         path = tmp_path / "reflexions.ndjson"
         assert reflexion.record_human_override(
             "Wire the payment", "bank_transfer", "denied", path=path,
@@ -274,7 +300,7 @@ class TestReflexionWiring:
         assert captured[0]["goal_text"] == "[redacted by Shield]"
 
     def test_record_skipped_when_disabled(self, monkeypatch):
-        monkeypatch.delenv("MAVERICK_REFLEXION", raising=False)
+        monkeypatch.setenv("MAVERICK_REFLEXION", "0")
         captured: list[dict] = []
         monkeypatch.setattr(
             reflexion, "record",
@@ -296,6 +322,10 @@ class TestReflexionWiring:
 async def test_failed_run_records_reflexion(monkeypatch, tmp_path: Path, fake_llm):
     """A run that errors out invokes reflexion.record when enabled."""
     monkeypatch.setenv("MAVERICK_REFLEXION", "1")
+    # Keep this failure-path test focused: default-on capability preflight
+    # legitimately consumes an additional model response.
+    monkeypatch.setenv("MAVERICK_SELF_LEARNING", "0")
+    monkeypatch.setenv("MAVERICK_SKILL_SYNTHESIS", "0")
     captured: list[dict] = []
     monkeypatch.setattr(
         reflexion, "record", lambda **kw: captured.append(kw) or True,

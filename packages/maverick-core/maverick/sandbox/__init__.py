@@ -291,24 +291,32 @@ def _degrade_to_local(chosen: str, full_cfg: dict, wd: Path, timeout: float):
 def build_sandbox(
     workdir: str | Path | None = None,
     backend: str | None = None,
+    *,
+    sandbox_config: dict | None = None,
 ) -> Sandbox:
     """Construct the configured sandbox backend.
 
     Reads ``[sandbox]`` from ``~/.maverick/config.toml``; either argument
     overrides the corresponding config value.
     """
-    try:
-        from ..config import get_sandbox
-        cfg = get_sandbox()
-        full_cfg = None
+    if sandbox_config is not None:
+        # Privileged callers (DGM) pass an already scope-pinned policy snapshot
+        # so request-tenant config cannot swap the evaluator after preflight.
+        full_cfg = dict(sandbox_config) if isinstance(sandbox_config, dict) else {}
+        cfg = full_cfg
+    else:
         try:
-            from ..config import load_config
-            full_cfg = load_config().get("sandbox", {})
+            from ..config import get_sandbox
+            cfg = get_sandbox()
+            full_cfg = None
+            try:
+                from ..config import load_config
+                full_cfg = load_config().get("sandbox", {})
+            except Exception:
+                full_cfg = {}
         except Exception:
+            cfg = {}
             full_cfg = {}
-    except Exception:
-        cfg = {}
-        full_cfg = {}
 
     # Normalize the backend selector: it comes from user-typed TOML (or a CLI
     # flag) and is matched case-sensitively against the literals below, so

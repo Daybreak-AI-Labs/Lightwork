@@ -29,12 +29,12 @@ LLM-free at construction so it is deterministic and offline-testable:
     gains ``to_audit_dict``).
   * :func:`parse_structured` -- parse a rubric-structured reply from a
     verifier prompted with :data:`REASONING_REWARD_SYSTEM`, giving the real
-    per-dimension decomposition when an operator opts into the richer judge.
+    per-dimension decomposition when the richer default judge runs.
 
-Posture (kernel rule 1): OFF by default and fail-open. :func:`enabled`
-returns False unless explicitly turned on, and every parse failure degrades
-to a conservative low reward -- a flaky/structured judge can only make the
-system MORE cautious about what it accepts and learns from, never less.
+Posture: ON by default with an explicit opt-out and fail-open. Every parse
+failure degrades to a conservative low reward -- a flaky/structured judge can
+only make the system MORE cautious about what it accepts and learns from,
+never less.
 No new dependency: standard library only.
 """
 from __future__ import annotations
@@ -402,8 +402,8 @@ def enabled() -> bool:
     Fail-open: any error resolving the flag leaves it at the configured default.
     """
     try:
-        from .config import env_flag
-        v = env_flag("MAVERICK_REASONING_REWARD")
+        from .config import governed_learning_env_flag
+        v = governed_learning_env_flag("MAVERICK_REASONING_REWARD")
         if v is not None:
             return v
     except Exception:  # pragma: no cover -- env parsing never blocks
@@ -418,22 +418,22 @@ def enabled() -> bool:
 def audit_rewards_enabled() -> bool:
     """Whether structured verification rewards are signed into the audit chain.
 
-    OFF by default (avoids audit volume and matches the opt-in posture of the
-    governance features); regulated deployments turn it on for a tamper-evident
-    record of every learning signal. ``MAVERICK_REASONING_REWARD_AUDIT=1`` or
-    ``[reasoning_reward] audit_rewards``. Independent of :func:`enabled` -- the
+    ON by default for a tamper-evident record of every learning signal.
+    ``MAVERICK_REASONING_REWARD_AUDIT=0`` or
+    ``[reasoning_reward] audit_rewards = false`` opts out. Independent of
+    :func:`enabled` -- the
     reward only exists when the rubric judge ran, but signing it is a separate
     choice. Fail-open (leaves it at the configured default on any error)."""
     try:
-        from .config import env_flag
-        v = env_flag("MAVERICK_REASONING_REWARD_AUDIT")
+        from .config import governed_learning_env_flag
+        v = governed_learning_env_flag("MAVERICK_REASONING_REWARD_AUDIT")
         if v is not None:
             return v
     except Exception:  # pragma: no cover -- env parsing never blocks
         pass
     try:
         from .config import get_reasoning_reward
-        return bool(get_reasoning_reward().get("audit_rewards", False))
+        return bool(get_reasoning_reward().get("audit_rewards", True))
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
 

@@ -137,11 +137,9 @@ def test_propose_with_effect_fail_closed_on_untrustworthy():
     assert verdict.gates[0].gate == "effect_calibration"
 
 
-def test_enabled_off_by_default(monkeypatch):
-    monkeypatch.delenv("MAVERICK_CAUSAL_PROMOTION", raising=False)
-    # With no env and the knob absent from config, the feature is off.
+def test_enabled_respects_explicit_opt_out_and_opt_in(monkeypatch):
+    monkeypatch.setenv("MAVERICK_CAUSAL_PROMOTION", "0")
     monkeypatch.setattr("maverick.config.get_self_improvement", lambda: {"causal_promotion": False})
     assert pe.enabled() is False
-    # Env override turns it on.
     monkeypatch.setenv("MAVERICK_CAUSAL_PROMOTION", "1")
     assert pe.enabled() is True

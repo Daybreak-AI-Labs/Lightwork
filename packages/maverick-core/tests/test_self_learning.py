@@ -1,8 +1,9 @@
 """Self-learning: capability acquisition, generated tools, the in-loop tool.
 
-The feature is off by default (kernel rule 1). These tests cover the
-gating, the learned-capability ledger, catalog search, MCP-server
-persistence, generated-tool validation/loading, and the
+Governed learning is on by default; generated executable tools, provider egress,
+and MCP acquisition remain separate opt-ins. These tests cover those gates, the
+learned-capability ledger, catalog search, MCP-server persistence,
+generated-tool validation/loading, and the
 ``learn_capability`` tool's dispatch — all without network or a real LLM.
 """
 from __future__ import annotations
@@ -146,9 +147,9 @@ class BindMountSandbox:
 
 
 class TestGating:
-    def test_disabled_by_default(self, monkeypatch):
+    def test_enabled_by_default(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_SELF_LEARNING", raising=False)
-        assert self_learning.enabled() is False
+        assert self_learning.enabled() is True
 
     def test_enabled_via_env(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_SELF_LEARNING", "1")
@@ -161,8 +162,10 @@ class TestGating:
     def test_settings_defaults(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_SELF_LEARNING", raising=False)
         st = self_learning.settings()
-        assert st["enable"] is False
-        assert st["create_tools"] is True
+        assert st["enable"] is True
+        # Executing model-authored code remains a separate authority decision.
+        assert st["create_tools"] is False
+        assert st["allow_mcp_acquisition"] is False
         assert st["max_acquisitions"] == 5
         # The retired add_mcp_servers knob is no longer surfaced.
         assert "add_mcp_servers" not in st
@@ -957,6 +960,14 @@ class TestAcquireMcpServer:
         monkeypatch.setenv("MAVERICK_ALLOW_MCP_ACQUISITION", "1")
         assert self_learning.mcp_acquisition_enabled() is True
         monkeypatch.setenv("MAVERICK_ALLOW_MCP_ACQUISITION", "0")
+        assert self_learning.mcp_acquisition_enabled() is False
+
+    def test_invalid_acquisition_env_fails_closed(self, monkeypatch):
+        monkeypatch.setattr(
+            self_learning, "settings",
+            lambda: {"allow_mcp_acquisition": True},
+        )
+        monkeypatch.setenv("MAVERICK_ALLOW_MCP_ACQUISITION", "not-a-boolean")
         assert self_learning.mcp_acquisition_enabled() is False
 
 
@@ -1755,6 +1766,11 @@ class TestLearnTool:
 
     @pytest.mark.asyncio
     async def test_create_tool_registers_live(self, monkeypatch):
+        from maverick import self_learning as sl
+        monkeypatch.setattr(sl, "settings", lambda: {
+            "enable": True, "preflight": True, "create_tools": True,
+            "max_acquisitions": 5,
+        })
         llm = FakeLLM(scripted=[make_response(text=good_tool_source("greet_live"))])
         agent = _StubAgent(llm)
         from maverick.tools.learn import learn_capability
@@ -1824,6 +1840,7 @@ class TestPreflight:
     @pytest.mark.asyncio
     async def test_pre_acquires_matching_skill(self, monkeypatch):
         from maverick import self_learning as sl
+        monkeypatch.setattr(sl, "provider_egress_enabled", lambda: True)
         llm = FakeLLM(scripted=[make_response(text='["send an sms message"]')])
         monkeypatch.setattr(sl, "search_capabilities", lambda need, **kw: [
             sl.Candidate(kind="skill", name="send-sms", summary="sms", source="s", score=0.8),
@@ -1839,6 +1856,7 @@ class TestPreflight:
     @pytest.mark.asyncio
     async def test_no_needs_acquires_nothing(self, monkeypatch):
         from maverick import self_learning as sl
+        monkeypatch.setattr(sl, "provider_egress_enabled", lambda: True)
         llm = FakeLLM(scripted=[make_response(text="[]")])
         got = await sl.preflight(llm, "say hello", Budget(), Blackboard())
         assert got == []
@@ -1846,6 +1864,7 @@ class TestPreflight:
     @pytest.mark.asyncio
     async def test_llm_failure_degrades_gracefully(self, monkeypatch):
         from maverick import self_learning as sl
+        monkeypatch.setattr(sl, "provider_egress_enabled", lambda: True)
 
         class BoomLLM:
             async def complete_async(self, **kw):
@@ -1853,6 +1872,20 @@ class TestPreflight:
 
         got = await sl.preflight(BoomLLM(), "anything", Budget(), Blackboard())
         assert got == []
+
+    @pytest.mark.asyncio
+    async def test_default_local_preflight_never_calls_provider(self, monkeypatch):
+        from maverick import self_learning as sl
+        monkeypatch.setattr(sl, "provider_egress_enabled", lambda: False)
+        monkeypatch.setattr(sl, "search_capabilities", lambda need, **kw: [])
+
+        class RefuseLLM:
+            async def complete_async(self, **kw):
+                raise AssertionError("provider call is not authorized")
+
+        assert await sl.preflight(
+            RefuseLLM(), "private payroll task", Budget(), Blackboard()
+        ) == []
 
 
 # --- OpenAPI spec discovery (pure functions) --------------------------------

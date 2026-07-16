@@ -98,6 +98,9 @@ def consolidate(
     notes on the next dream — no stale memory of retracted preferences.
     """
     p = Path(path) if path is not None else default_path()
+    from .learning_guard import learning_write_allowed
+    if not learning_write_allowed("user_notes", "consolidate"):
+        return 0
     ts = now if now is not None else time.time()
     notes: list[dict] = []
     try:
@@ -125,7 +128,15 @@ def consolidate(
             for pref in extract_preferences(getattr(turn, "content", "") or ""):
                 if len(per_user) >= max_notes_per_user:
                     break
-                if any(_near_dup(pref, prior) for prior in per_user):
+                try:
+                    from .safety.secret_detector import redact
+                    pref, _ = redact(pref)
+                except Exception:
+                    # Raw preference text may contain credentials/PII; never
+                    # persist it when the privacy boundary is unavailable.
+                    continue
+                pref = " ".join(pref.split())[:_MAX_NOTE_LEN]
+                if not pref or any(_near_dup(pref, prior) for prior in per_user):
                     continue
                 per_user.append(pref)
                 notes.append({

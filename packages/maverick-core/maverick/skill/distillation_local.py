@@ -6,15 +6,14 @@ into a single reusable micro-skill — a ``SKILL.md`` with frontmatter (name,
 triggers, tools_needed) and numbered steps — written to
 ``~/.maverick/learned-skills/`` so it's picked up on later runs.
 
-Opt-in (``[self_learning] distill_local`` / ``MAVERICK_DISTILL_LOCAL=1``); default
-OFF. Dependency-free: ranking is by success + recency and the synthesis is
+Enabled by default (``MAVERICK_DISTILL_LOCAL=0`` opts out). Dependency-free:
+ranking is by success + recency and the synthesis is
 lexical (no embedding model required), so the loop runs anywhere. ``distill`` and
 ``to_skill_markdown`` are pure and unit-tested; the generated skill is valid for
 ``maverick.skills.validate_skill_file``.
 """
 from __future__ import annotations
 
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,16 +28,13 @@ _STOPWORDS = {
 }
 
 
-def _env_true(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def enabled() -> bool:
-    if _env_true("MAVERICK_DISTILL_LOCAL"):
-        return True
     try:
-        from ..config import load_config
-        return bool((load_config() or {}).get("self_learning", {}).get("distill_local", False))
+        from ..config import get_self_learning, governed_learning_env_flag
+        override = governed_learning_env_flag("MAVERICK_DISTILL_LOCAL")
+        if override is not None:
+            return override
+        return bool(get_self_learning().get("distill_local", True))
     except Exception:  # pragma: no cover
         return False
 
@@ -147,16 +143,25 @@ def _default_store() -> Path:
 
 def save_skill(skill: dict, store: Path | str | None = None) -> Path:
     """Write the distilled skill to ``<store>/<name>.md`` and return the path."""
-    store = Path(store) if store is not None else _default_store()
-    store.mkdir(parents=True, exist_ok=True)
-    path = store / f"{skill['name']}.md"
-    path.write_text(to_skill_markdown(skill), encoding="utf-8")
+    if not enabled():
+        raise RuntimeError("local skill distillation is disabled")
+    from ..learning_guard import learning_write_allowed
+    if not learning_write_allowed("distillation_local", "save_skill"):
+        raise RuntimeError("local skill distillation is halted")
+    name = str(skill.get("name") or "")
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) or len(name) > 96:
+        raise ValueError("distilled skill name must be bounded kebab-case")
+    from ..file_lock import atomic_write_text, ensure_private_directory
+    store = (Path(store) if store is not None else _default_store()).resolve()
+    ensure_private_directory(store)
+    path = store / f"{name}.md"
+    atomic_write_text(path, to_skill_markdown(skill), mode=0o600)
     return path
 
 
 def distill_and_save(trajectories: list[dict], *, top_k: int = 3,
                      store: Path | str | None = None) -> Path | None:
-    """Distill + persist in one call (opt-in caller checks ``enabled()``)."""
+    """Distill + persist in one call (caller checks the default-on gate)."""
     skill = distill(trajectories, top_k=top_k)
     return save_skill(skill, store) if skill else None
 

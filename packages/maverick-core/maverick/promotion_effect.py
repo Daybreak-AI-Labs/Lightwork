@@ -22,9 +22,10 @@ It is deliberately distinct from :mod:`maverick.credit` (CSCA), which does
 *offline, corpus-level* effect estimation for **promotion** decisions, and the
 two compose (CSCA can weight which sub-trajectories feed this estimator).
 
-Posture (kernel rule 1): OFF by default. The estimator is a pure function
-(usable anywhere), but the controller only consults a causal effect when the
-``[self_improvement] causal_promotion`` knob is on. Crucially it is **fail-safe
+Posture (kernel rule 1): ON by default as part of governed learning. The
+estimator is a pure function (usable anywhere), but the controller only
+consults a causal effect when the ``[self_improvement] causal_promotion`` knob
+is on. Crucially it is **fail-safe
 by calibration**: an estimate built on too little overlap, or one that leaks a
 non-zero effect under a placebo (treatment permuted within strata, which *must*
 be ~0), is marked ``trustworthy=False`` -- and the producer refuses to promote
@@ -36,7 +37,7 @@ import math
 import random
 from dataclasses import dataclass, field
 
-from .config import env_flag
+from .config import governed_learning_env_flag
 
 # Two-sided 95% normal quantile.
 _Z95 = 1.959963984540054
@@ -77,8 +78,8 @@ class EffectEstimate:
 
 
 def enabled() -> bool:
-    """Whether the controller should consult causal effects. OFF by default."""
-    _v = env_flag("MAVERICK_CAUSAL_PROMOTION")
+    """Whether the controller should consult causal effects. ON by default."""
+    _v = governed_learning_env_flag("MAVERICK_CAUSAL_PROMOTION")
     if _v is not None:
         return _v
     try:

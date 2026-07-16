@@ -44,7 +44,7 @@ async def test_failed_run_grounds_negative_outcome(monkeypatch, tmp_path: Path, 
 
 @pytest.mark.asyncio
 async def test_failed_run_not_grounded_when_consequence_off(monkeypatch, tmp_path: Path, fake_llm):
-    monkeypatch.delenv("MAVERICK_CONSEQUENCE", raising=False)
+    monkeypatch.setenv("MAVERICK_CONSEQUENCE", "0")
     _isolate(monkeypatch, tmp_path)
     fake_llm.scripted = [
         LLMResponse(text="", thinking=None, stop_reason="end_turn", tool_calls=[]),
@@ -56,5 +56,5 @@ async def test_failed_run_not_grounded_when_consequence_off(monkeypatch, tmp_pat
         sandbox=LocalBackend(workdir=tmp_path), max_depth=1,
     )
     eps = world.list_episodes(goal_id=gid, limit=1)
-    # kernel stays stateless by default: nothing grounded when the knob is off
+    # Explicit opt-out keeps the kernel stateless: no grounded outcome.
     assert not eps or consequence.resolve(gid, eps[0].id) is None

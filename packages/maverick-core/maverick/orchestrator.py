@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 @contextmanager
 def _enrich(label: str):
-    """Wrap an opt-in brief-enrichment block: its failure is logged at debug and
+    """Wrap a gated brief-enrichment block: its failure is logged at debug and
     never blocks the run. Factors the identical try/except/log.debug scaffold the
     enrichment blocks (experience, role-stats, reflexion, dreaming, ...) repeat."""
     try:
@@ -615,14 +615,14 @@ async def _apply_brief_enrichments(
     channel: str | None, user_id: str | None, domain: str | None,
     shield: Any | None,
 ) -> tuple[str, str]:
-    """Opt-in brief enrichment layers (self-learning preflight, experience,
+    """Governed brief enrichment layers (self-learning preflight, experience,
     role-stats, skill synthesis, corrections, reflexion, dream insights,
     auto-recall, tree-of-thought). Returns (brief, planning_mode). Each layer
-    is opt-in and fail-open; extracted from run_goal verbatim."""
-    # Self-learning pre-flight (opt-in): analyse the goal for capability
+    keeps its own gate and fails open; extracted from run_goal verbatim."""
+    # Default-on self-learning pre-flight: analyse the goal for capability
     # gaps and pre-acquire matching catalog skills before the swarm
-    # starts, so the agent's first turn already has them. Off by default;
-    # MCP/tool creation stays agent-driven via the learn_capability tool.
+    # starts, so the agent's first turn already has them. Provider egress,
+    # MCP acquisition and generated tools retain separate authority gates.
     with _enrich("self-learning preflight"):
         from . import self_learning
         if self_learning.enabled() and self_learning.settings()["preflight"]:
@@ -643,18 +643,21 @@ async def _apply_brief_enrichments(
                     "goal, use the learn_capability tool to acquire or build it."
                 )
 
-    # Experience-guided orchestration (opt-in, SOTA HERA): condition the
+    # Default-on experience-guided orchestration (SOTA HERA): condition the
     # brief on outcomes of similar prior goals (how many succeeded/failed).
-    # No-op unless [experience] is enabled; fail-open.
+    # No-op when explicitly disabled or no useful history exists; fail-open.
     with _enrich("experience guidance"):
         from . import experience
         _exp = experience.recall(
-            world, f"{goal.title}\n{goal.description or ''}", shield=shield
+            world,
+            f"{goal.title}\n{goal.description or ''}",
+            shield=shield,
+            owner=str(getattr(goal, "owner", "") or ""),
         )
         if _exp:
             brief = brief + "\n\n" + _exp
 
-    # Routing memory (opt-in, fed by CSCA): nudge toward roles that have
+    # Routing memory (fed by default-on CSCA): nudge toward roles that have
     # historically earned the most counterfactual credit. No-op unless
     # credit assignment is enabled and there's enough history.
     with _enrich("role-stats guidance"):
@@ -663,9 +666,9 @@ async def _apply_brief_enrichments(
         if _rg:
             brief = brief + "\n\n" + _rg
 
-    # Test-time skill synthesis (opt-in, SOTA SkillTTA): synthesize a short
-    # task-specific cheat-sheet for THIS goal and inject it. No-op unless
-    # [skill_synthesis] is enabled; spend is metered; fail-open.
+    # Default-on test-time skill synthesis (SOTA SkillTTA): synthesize a short
+    # task-specific cheat-sheet for THIS goal and inject it. The extra model call
+    # still requires provider-egress authority; spend is metered; fail-open.
     with _enrich("skill synthesis"):
         from .skill import synthesis as skill_synthesis
         if skill_synthesis.enabled():
@@ -675,7 +678,7 @@ async def _apply_brief_enrichments(
             if _sk:
                 brief = brief + "\n\n" + skill_synthesis.frame_task_skill(_sk)
 
-    # Human-correction ingestion (opt-in via [reflexion]): when the turn
+    # Default-on human-correction ingestion via [reflexion]: when the turn
     # that spawned this goal reads as "no, that's wrong" about the prior
     # answer, persist the correction as a lesson before the run starts —
     # deterministic phrase match, recorded once per correction message.
@@ -686,7 +689,7 @@ async def _apply_brief_enrichments(
             channel=channel, user_id=user_id, domain=domain,
         )
 
-    # Reflexion (opt-in): prepend lessons learned from prior FAILED
+    # Default-on reflexion: prepend lessons learned from prior FAILED
     # runs on similar goals so the orchestrator avoids repeating the
     # same dead ends. Recall is jaccard-ranked over goal text; the
     # block is empty (and this is a no-op) when reflexion is disabled
@@ -704,11 +707,12 @@ async def _apply_brief_enrichments(
             if ctx_block:
                 brief = brief + "\n" + ctx_block
 
-    # Dream insights (opt-in, [dreaming]): prepend lessons consolidated
+    # Default-on dream insight recall ([dreaming]): prepend lessons consolidated
     # OFFLINE by `maverick dream` -- recurring failure patterns clustered
     # per department. Complements reflexion (raw per-failure lessons) with
     # the distilled cross-run pattern; a domain run is boosted toward its
-    # own department's insights. No-op by default; never blocks the run.
+    # own department's insights. No-op until a dream cycle has evidence; never
+    # blocks the run.
     with _enrich("dream insight recall"):
         from . import dreaming
         if dreaming.enabled():
@@ -1284,7 +1288,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         except BudgetExceeded as e:
             _end_episode_with_spend(world, episode_id, f"budget: {e}", "failure", budget, goal_id)
             _record_quota_usage()
-            try:  # opt-in failure-mode telemetry; no-op when unconfigured
+            try:  # default-on local failure telemetry; no-op when disabled
                 from . import failure_telemetry as _ft
                 _ft.record_failure("budget", goal_id=goal_id, detail=str(e))
             except Exception:  # pragma: no cover -- telemetry never blocks a run
@@ -1314,7 +1318,7 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 _record_quota_usage()
             except Exception:  # pragma: no cover
                 pass
-            try:  # opt-in failure-mode telemetry; no-op when unconfigured
+            try:  # default-on local failure telemetry; no-op when disabled
                 from . import failure_telemetry as _ft
                 _ft.record_failure(e, goal_id=goal_id)
             except Exception:  # pragma: no cover -- telemetry never blocks a run
@@ -1465,8 +1469,8 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 # outcome, and until now invisible to the learning loop, which
                 # only saw human cancels/sign-offs. Feed it as a grounded 0.0 so
                 # the flywheel learns from organic failure, not just the proxy.
-                # Same budget-cap exclusion as above; best-effort + gated (a no-op
-                # unless [consequence] is enabled), so a default run is untouched.
+                # Same budget-cap exclusion as above; best-effort and default-on.
+                # Explicitly disabling [consequence] makes this a no-op.
                 from . import consequence
                 consequence.record_self_outcome(world, goal_id, 0.0, kind="failed")
             _fire_webhook("goal_finished", {
@@ -1677,11 +1681,11 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 _WARNED_DISTILL_DISABLED = True
                 skill_note = "\n\n[skill distill disabled: set MAVERICK_AUTO_DISTILL=1 to enable]"
 
-        # Local continuous learning (opt-in, [self_learning] distill_local):
+        # Default-on local continuous learning ([self_learning] distill_local):
         # an LLM-free, injection-safe distillation that turns recent SUCCESSFUL
         # goals into a reusable SKILL.md under ~/.maverick/learned-skills. Uses
         # the persisted goal history as trajectories, so no extra store is
-        # needed. No-op unless enabled; never raises into the run.
+        # needed. No-op when explicitly disabled; never raises into the run.
         with _enrich("local skill distillation"):
             from .skill import distillation_local as _sdl
             if _sdl.enabled():

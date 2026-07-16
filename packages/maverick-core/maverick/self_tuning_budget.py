@@ -14,16 +14,15 @@ None and the caller keeps its configured default — the learner never *lowers*
 safety below what the operator set unless it has evidence.
 
 Deterministic + offline: a capped reservoir with an injectable PRNG, persisted
-atomically (0600) to ``data_dir("budget_tuning.json")``. Opt-in via ``[budget]
-self_tuning`` (env ``MAVERICK_BUDGET_SELF_TUNING``); off by default — the
-configured static cap is used unchanged.
+atomically (0600) to ``data_dir("budget_tuning.json")``. On by default;
+``[budget] self_tuning = false`` or ``MAVERICK_BUDGET_SELF_TUNING=0`` opts out.
+An explicit configured cap still wins, and a cold class returns no suggestion.
 """
 from __future__ import annotations
 
 import json
 import logging
 import math
-import os
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,13 +37,17 @@ _RESERVOIR = 200             # bounded memory per class
 
 
 def enabled() -> bool:
-    if os.environ.get("MAVERICK_BUDGET_SELF_TUNING", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }:
-        return True
     try:
-        from .config import load_config
-        return bool(((load_config() or {}).get("budget") or {}).get("self_tuning"))
+        from .config import (
+            governed_learning_default,
+            governed_learning_env_flag,
+            load_config,
+        )
+        override = governed_learning_env_flag("MAVERICK_BUDGET_SELF_TUNING")
+        if override is not None:
+            return override
+        return bool(((load_config() or {}).get("budget") or {})
+                    .get("self_tuning", governed_learning_default()))
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
 
@@ -189,7 +192,7 @@ def reset_shared() -> None:
 
 def suggested_max_dollars(task_class: str, *,
                           learner: SelfTuningBudget | None = None) -> float | None:
-    """Opt-in entry point: the learned cap for ``task_class``, or None.
+    """Return the default-on learned cap for ``task_class``, or None.
 
     None when self-tuning is off, the class is cold, or anything fails — the
     caller keeps its configured static cap.
@@ -206,6 +209,9 @@ def record_run_cost(task_class: str, final_dollars: float, *,
                     learner: SelfTuningBudget | None = None) -> None:
     """Record a finished run's spend (always safe; only stores when on)."""
     if not enabled():
+        return
+    from .learning_guard import learning_write_allowed
+    if not learning_write_allowed("self_tuning_budget"):
         return
     try:
         (learner or shared()).observe(task_class, final_dollars)

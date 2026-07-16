@@ -163,6 +163,49 @@ def test_list_episodes_and_total_spend(world):
     assert totals["runs"] >= 1
 
 
+def test_list_episodes_owner_scope_matches_sqlite(world):
+    import uuid
+
+    token = uuid.uuid4().hex
+    alice = f"user:alice:{token}"
+    bob = f"user:bob:{token}"
+
+    alice_gid = world.create_goal("alice-owned run", owner=alice)
+    alice_eid = world.start_episode(alice_gid)
+    world.end_episode(alice_eid, "done", "success", cost_dollars=1.25)
+
+    bob_gid = world.create_goal("bob-owned run", owner=bob)
+    bob_eid = world.start_episode(bob_gid)
+    world.end_episode(bob_eid, "done", "success", cost_dollars=7.5)
+
+    legacy_gid = world.create_goal("legacy owner default")
+    legacy_eid = world.start_episode(legacy_gid)
+    world.end_episode(legacy_eid, "done", "success", cost_dollars=0.5)
+
+    assert [e.id for e in world.list_episodes(owner=alice)] == [alice_eid]
+    assert [e.id for e in world.list_episodes(owner=bob)] == [bob_eid]
+    assert world.list_episodes(owner=f"user:nobody:{token}") == []
+
+    # Owner and goal scopes are cumulative: Alice cannot select Bob's run by id.
+    assert world.list_episodes(goal_id=bob_gid, owner=alice) == []
+
+    # None retains the admin/auth-off view; the empty owner retains legacy rows.
+    admin_ids = {e.id for e in world.list_episodes(limit=10_000)}
+    assert {alice_eid, bob_eid, legacy_eid} <= admin_ids
+    legacy_ids = {e.id for e in world.list_episodes(limit=10_000, owner="")}
+    assert legacy_eid in legacy_ids
+
+    # The create path stores ownership and the migration default, not only the
+    # read query's shape.
+    with world._tx() as cur:
+        cur.execute(
+            "SELECT id, owner FROM goals WHERE id IN (%s, %s, %s)",
+            (alice_gid, bob_gid, legacy_gid),
+        )
+        owners = dict(cur.fetchall())
+    assert owners == {alice_gid: alice, bob_gid: bob, legacy_gid: ""}
+
+
 def test_ask_answer_open_questions(world):
     gid = world.create_goal("needs input")
     qid = world.ask("which region?", goal_id=gid)

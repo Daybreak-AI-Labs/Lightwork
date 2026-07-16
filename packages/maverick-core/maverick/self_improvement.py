@@ -22,12 +22,12 @@ Rungs, lowest -> highest risk: ``config`` -> ``prompt`` -> ``tool`` ->
 ``policy`` -> ``code`` -> ``weights``. Higher rungs require capability evidence
 and human approval; the lowest may auto-promote once they beat their baseline.
 
-Posture (kernel rule 1): OFF by default and a no-op while off -- nothing is ever
-promoted unless ``[self_improvement] enable`` is set, so it can never change a
-default deployment's behaviour. When ON, the gates fail **closed**: a promotion
-is a privileged write, so a broken gate, missing evidence, or any error rejects
-the change rather than letting it through. The engine being off is fail-open
-(does nothing); the engine deciding is fail-closed (won't promote on doubt).
+Posture: ON by default for governed prompt/policy learning, with an explicit
+opt-out. The gates fail **closed**: a promotion is a privileged write, so a
+broken gate, missing evidence, or any error rejects the change rather than
+letting it through. Code/weight authority and DGM execution remain separately
+gated. The engine being off is a no-op; the engine deciding will not promote on
+doubt.
 """
 from __future__ import annotations
 
@@ -104,17 +104,14 @@ _RUNG_POLICY: dict[str, dict[str, Any]] = {
 
 
 def enabled() -> bool:
-    """Whether the controller may promote anything. OFF by default, fail-open."""
-    if os.environ.get("MAVERICK_SELF_IMPROVEMENT", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }:
-        base = True
-    else:
-        try:
-            from .config import get_self_improvement
-            base = bool(get_self_improvement().get("enable", False))
-        except Exception:  # pragma: no cover -- config never blocks a run
-            return False
+    """Whether governed prompt/policy learning may promote. ON by default."""
+    try:
+        from .config import get_self_improvement, governed_learning_env_flag
+        override = governed_learning_env_flag("MAVERICK_SELF_IMPROVEMENT")
+        base = (override if override is not None
+                else bool(get_self_improvement().get("enable", True)))
+    except Exception:  # pragma: no cover -- config never blocks a run
+        return False
     if not base:
         return False
     # The governed promotion ladder is the paid "advanced_evolve" (Platinum)
@@ -1989,7 +1986,7 @@ def recover_promotions(
 
 
 def consider(cand: Candidate, *, controller: SelfImprovementController | None = None) -> Verdict:
-    """Opt-in entry point: judge a candidate self-change for promotion.
+    """Governed entry point: judge a candidate self-change for promotion.
 
     Returns a non-promoting verdict (a safe no-op for the caller) when the
     engine is off or any gate fails. The caller applies the change only on

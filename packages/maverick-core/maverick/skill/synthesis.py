@@ -7,21 +7,22 @@ inject it for the current run, and discard it. Complements Lightwork's existing
 post-hoc distillation (``skills.py``): distillation is long-term memory, this is
 working-memory scaffolding for the task in front of you.
 
-Off by default + fail-open (``[skill_synthesis] enable`` /
-``MAVERICK_SKILL_SYNTHESIS=1``). Spend is metered against the run Budget.
+On by default, but the auxiliary model call requires the separate
+``[self_learning] allow_provider_egress`` authority. Spend is metered against
+the run Budget.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from ..config import env_flag
+from ..config import governed_learning_env_flag
 
 log = logging.getLogger(__name__)
 
 
 def enabled() -> bool:
-    _v = env_flag("MAVERICK_SKILL_SYNTHESIS")
+    _v = governed_learning_env_flag("MAVERICK_SKILL_SYNTHESIS")
     if _v is not None:
         return _v
     try:
@@ -46,19 +47,22 @@ def _sanitize_text(
     scan_method: str,
     single_line: bool = False,
 ) -> str | None:
-    safe = str(text or "")[:max_chars]
+    try:
+        safe = str(text or "")[:max_chars]
+    except Exception:
+        return None
     try:
         from ..safety.secret_detector import redact as _redact
         safe, _ = _redact(safe)
     except Exception:  # pragma: no cover
-        pass
+        return None
     if shield is not None:
         try:
             verdict = getattr(shield, scan_method)(safe)
             if not getattr(verdict, "allowed", True):
                 return None
         except Exception:  # pragma: no cover
-            pass
+            return None
     if single_line:
         safe = " ".join(safe.split())
     return safe.strip()
@@ -91,6 +95,9 @@ async def synthesize_task_skill(
     the model declines (``NONE``) -- so the caller can inject unconditionally.
     """
     if not task or not task.strip():
+        return None
+    from .. import self_learning
+    if not self_learning.provider_egress_enabled():
         return None
     from ..llm import model_for_role
 

@@ -65,6 +65,27 @@ async def test_require_human_blocks_without_a_human(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_human_denial_learning_keeps_request_scope(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+    _gov(monkeypatch, {"require_human_actions": ["ping"]})
+    from maverick import reflexion
+    captured = []
+    monkeypatch.setattr(
+        reflexion, "record_human_override",
+        lambda *a, **kw: captured.append((a, kw)) or True,
+    )
+    agent = _agent(tmp_path)
+    agent.ctx.channel = "teams"
+    agent.ctx.user_id = "user-9"
+
+    out = await agent._run_tool("ping", {})
+
+    assert "requires human approval" in out
+    assert captured[-1][1]["channel"] == "teams"
+    assert captured[-1][1]["user_id"] == "user-9"
+
+
+@pytest.mark.asyncio
 async def test_require_human_runs_with_grant(monkeypatch, tmp_path):
     # A real human approval (here, a granted consent decision) lets the
     # require-human action proceed.

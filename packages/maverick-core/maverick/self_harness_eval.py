@@ -37,6 +37,22 @@ from .budget import BudgetExceeded
 log = logging.getLogger(__name__)
 
 
+def _redact_provider_text(value: object) -> str | None:
+    """Return secret-redacted provider payload text, failing closed.
+
+    The self-harness evaluates stored goals and generated outputs with models
+    that may resolve to a different provider than the live run.  Egress is
+    separately authorized by the driver, but authorization never implies that
+    credentials embedded in corpus/result text may leave the process.
+    """
+    try:
+        from .safety.secret_detector import redact
+        safe, _ = redact(str(value or ""))
+        return safe
+    except Exception:  # pragma: no cover -- raw fallback would leak secrets
+        return None
+
+
 # ---- corpus -------------------------------------------------------------
 
 def _world_corpus_kind(path: str | Path) -> str | None:
@@ -564,6 +580,12 @@ def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8
             # evidence makes corpus_ab_scorers invalidate the complete A/B.
             _judge.degraded += 1
             return False
+        safe_goal = _redact_provider_text(goal)
+        safe_output = _redact_provider_text(output)
+        safe_expected = _redact_provider_text(expected)
+        if safe_goal is None or safe_output is None or safe_expected is None:
+            _judge.degraded += 1
+            return _heuristic_judge(goal, output, expected)
         yes = no = 0
         for i in range(n):
             resp = None
@@ -584,13 +606,13 @@ def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8
                         # The operator label is deliberately withheld from the
                         # risk-limited judge. Revealing it lets a candidate win
                         # by parroting the hint and makes calibration circular.
-                        "goal": str(goal), "output": str(output),
+                        "goal": safe_goal, "output": safe_output,
                     }, sort_keys=True, ensure_ascii=False)
                 else:
                     pass_token, fail_token = "yes", "no"
                     system = _JUDGE_FRAMINGS[i % len(_JUDGE_FRAMINGS)]
-                    user = (f"GOAL:\n{goal}\n\nOUTPUT:\n{output}\n\n"
-                            f"Expected (hint): {expected}\n\nyes/no:")
+                    user = (f"GOAL:\n{safe_goal}\n\nOUTPUT:\n{safe_output}\n\n"
+                            f"Expected (hint): {safe_expected}\n\nyes/no:")
                 resp = llm.complete(system, [{"role": "user", "content": user}],
                                     budget=budget, max_tokens=max_tokens, model=model)
                 text = (getattr(resp, "text", "") or "").strip().lower()
@@ -674,11 +696,17 @@ def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None =
         resp = None
         started = time.monotonic()
         try:
-            system = system_prefix
-            if line:
-                system = (system + "\n" if system else "") + line
+            safe_prefix = _redact_provider_text(system_prefix)
+            safe_line = _redact_provider_text(line)
+            safe_goal = _redact_provider_text(goal)
+            if safe_prefix is None or safe_line is None or safe_goal is None:
+                _run.degraded += 1
+                return ""
+            system = safe_prefix
+            if safe_line:
+                system = (system + "\n" if system else "") + safe_line
             resp = llm.complete(system or "You are a helpful assistant.",
-                                [{"role": "user", "content": goal}],
+                                [{"role": "user", "content": safe_goal}],
                                 budget=budget, max_tokens=max_tokens, model=model)
             return getattr(resp, "text", "") or ""
         except BudgetExceeded:
@@ -714,15 +742,18 @@ def llm_paraphraser(llm, *, budget=None, model: str | None = None,
         out: list[str] = []
         for g in goals or []:
             try:
+                safe_goal = _redact_provider_text(g)
+                if safe_goal is None:
+                    continue
                 resp = llm.complete(
                     "Rewrite the task below in different words, preserving its "
                     "meaning exactly. Return ONLY the rewritten task -- no "
                     "preamble, no quotes, no markdown.",
-                    [{"role": "user", "content": str(g)}],
+                    [{"role": "user", "content": safe_goal}],
                     budget=budget, max_tokens=max_tokens, model=model)
                 text = (getattr(resp, "text", "") or "")
                 line = next((s.strip() for s in text.splitlines() if s.strip()), "")
-                if line and line != str(g):
+                if line and line != safe_goal:
                     out.append(line)
             except BudgetExceeded:
                 raise  # the validator catches this and skips the check whole
