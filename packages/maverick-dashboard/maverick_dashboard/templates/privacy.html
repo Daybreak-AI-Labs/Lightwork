@@ -118,7 +118,7 @@
         <div class="pw-form-actions">
           <label style="flex:1;"><span>…or register from a completed AI risk assessment</span>
             <select class="ctl" id="pw-ai-src" {% if not aira_sessions %}disabled{% endif %}>
-              {% for s in aira_sessions %}<option value="{{ s.id }}">{{ s.id }} — {{ s.subject }}</option>{% endfor %}
+              {% for s in aira_sessions[:50] %}<option value="{{ s.id }}">{{ s.id }} — {{ s.subject }}</option>{% endfor %}
               {% if not aira_sessions %}<option value="">no AI risk assessments yet</option>{% endif %}
             </select></label>
           <button class="btn" id="pw-ai-register" type="button" {% if not aira_sessions %}disabled{% endif %}>Register from assessment</button>
@@ -164,7 +164,7 @@
         <div class="pw-form-actions">
           <label style="flex:1;"><span>Draft an Art. 30 entry from a completed assessment</span>
             <select class="ctl" id="pw-ropa-src" {% if not sessions %}disabled{% endif %}>
-              {% for s in sessions %}<option value="{{ s.id }}">{{ s.id }} — {{ s.subject }}</option>{% endfor %}
+              {% for s in sessions[:50] %}<option value="{{ s.id }}">{{ s.id }} — {{ s.subject }}</option>{% endfor %}
               {% if not sessions %}<option value="">no assessments yet</option>{% endif %}
             </select></label>
           <button class="btn btn--primary" id="pw-ropa-draft" type="button" {% if not sessions %}disabled{% endif %}>Draft entry</button>

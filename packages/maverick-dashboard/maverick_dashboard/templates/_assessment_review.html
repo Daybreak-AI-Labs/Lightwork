@@ -29,6 +29,16 @@
   <div class="arv__foot">
     <span class="muted" id="arv-status" role="status" aria-live="polite" style="margin-inline-end:auto;"></span>
     <button class="btn" id="arv-send" style="display:none;">Send questions back to requester</button>
+    <label class="muted" id="arv-cadence-wrap" style="display:none; align-items:center; gap:var(--space-2); font-size:var(--text-sm);">next review
+      <select class="ctl" id="arv-cadence" aria-label="Review cadence">
+        <option value="90">90 days</option>
+        <option value="180">180 days</option>
+        <option value="365" selected>1 year</option>
+        <option value="0">none</option>
+      </select>
+    </label>
+    <button class="btn" id="arv-reject" style="display:none;">Reject</button>
+    <button class="btn btn--primary" id="arv-approve" style="display:none;">Approve</button>
   </div>
 </dialog>
 
@@ -42,7 +52,12 @@
     const riskEl = document.getElementById('arv-risk');
     const sendBtn = document.getElementById('arv-send');
     const statusEl = document.getElementById('arv-status');
+    const approveBtn = document.getElementById('arv-approve');
+    const rejectBtn = document.getElementById('arv-reject');
+    const cadenceWrap = document.getElementById('arv-cadence-wrap');
+    const cadenceSel = document.getElementById('arv-cadence');
     let currentId = null;
+    let decidedInDialog = false;
 
     function el(tag, cls, text) {
       const n = document.createElement(tag);
@@ -73,6 +88,22 @@
       sub.append(rec.type ? rec.type.toUpperCase() + ' · ' : '',
                  (rec.subject || '') + controls);
       body.appendChild(sub);
+
+      if (rec.status === 'approved' || rec.status === 'rejected') {
+        const line = el('p', null);
+        line.appendChild(el('span',
+          'badge ' + (rec.status === 'approved' ? 'done' : 'blocked'),
+          rec.status));
+        let txt = rec.decided_by ? ' by ' + rec.decided_by : '';
+        if (rec.next_review_at) {
+          const days = Math.ceil((rec.next_review_at * 1000 - Date.now()) / 86400000);
+          txt += ' · next review ' + (days >= 0 ? 'in ' + days + 'd' : (-days) + 'd overdue');
+        }
+        const note = el('span', 'muted', txt);
+        note.style.fontSize = 'var(--text-sm)';
+        line.appendChild(note);
+        body.appendChild(line);
+      }
 
       body.appendChild(el('div', 'arv__section', 'Answers'));
       const answers = rec.answers || {};
@@ -126,7 +157,36 @@
       ta.setAttribute('aria-label', 'Follow-up questions, one per line');
       body.appendChild(ta);
       sendBtn.style.display = '';
+      cadenceWrap.style.display = 'flex';
+      approveBtn.style.display = '';
+      rejectBtn.style.display = '';
     }
+
+    async function decide(decision) {
+      approveBtn.disabled = rejectBtn.disabled = true;
+      statusEl.textContent = decision === 'approved' ? 'Approving…' : 'Rejecting…';
+      try {
+        const days = parseInt(cadenceSel.value, 10) || 0;
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/decide', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision: decision, cadence_days: days })
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const rec = await r.json();
+        decidedInDialog = true;
+        statusEl.textContent = decision === 'approved'
+          ? (days ? 'Approved — next review in ' + days + ' days.' : 'Approved.')
+          : 'Rejected.';
+        render(rec);
+      } catch (e) {
+        statusEl.textContent = 'Could not record decision: ' + e.message;
+      } finally {
+        approveBtn.disabled = rejectBtn.disabled = false;
+      }
+    }
+    approveBtn.addEventListener('click', function () { decide('approved'); });
+    rejectBtn.addEventListener('click', function () { decide('rejected'); });
 
     async function open(id) {
       currentId = id;
@@ -166,6 +226,11 @@
       }
     });
     document.getElementById('arv-close').addEventListener('click', function () { dlg.close(); });
+    // A decision changes the row the page shows (status badge, due date):
+    // refresh once the reviewer is done, not mid-dialog.
+    dlg.addEventListener('close', function () {
+      if (decidedInDialog) location.reload();
+    });
 
     window.mvAssessmentReview = { open: open };
   })();

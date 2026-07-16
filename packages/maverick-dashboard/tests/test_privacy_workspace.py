@@ -118,3 +118,66 @@ def test_records_section_hidden_when_disabled(monkeypatch, tmp_path):
     assert "open DSARs" not in html
     # The assessment workspace itself still stands.
     assert "Worklist" in html
+
+
+def test_decide_endpoint_and_review_due_surfacing(monkeypatch):
+    import time as _t
+    s = _seed("Acme CRM", risky=True)
+    resp = client.post(f"/api/v1/assess/sessions/{s.id}/decide",
+                       json={"decision": "approved", "cadence_days": 30})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "approved"
+    assert client.post("/api/v1/assess/sessions/nope/decide",
+                       json={"decision": "approved"}).status_code == 404
+    assert client.post(f"/api/v1/assess/sessions/{s.id}/decide",
+                       json={"decision": "maybe"}).status_code == 422
+
+    html = client.get("/privacy").text
+    assert ">approved</span>" in html
+    assert "re-review in" in html
+    assert "Due for re-review (0)" in html
+
+    # The cadence elapses: the record surfaces as due.
+    real = _t.time
+    monkeypatch.setattr(_t, "time", lambda: real() + 31 * 86400)
+    html = client.get("/privacy").text
+    assert "Due for re-review (1)" in html
+    assert "overdue" in html
+
+
+def test_template_editor_crud_and_department_catalog():
+    # Author a new privacy questionnaire from the catalog.
+    resp = client.put("/api/v1/assess/templates/dpia_lite", json={
+        "title": "DPIA Lite", "framework": "GDPR Art. 35 (lightweight)",
+        "department": "privacy",
+        "questions": [{"text": "Is the processing high risk?",
+                       "risk_answer": "yes", "severity": "high"}]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["custom"] is True
+    # It appears in the privacy catalog but not finance's.
+    assert "DPIA Lite" in client.get("/privacy").text
+    assert "DPIA Lite" not in client.get("/finance").text
+    # Full read-back for the editor.
+    full = client.get("/api/v1/assess/templates/dpia_lite").json()
+    assert full["questions"][0]["id"] == "dpia_lite_q1"
+    # Overriding a built-in flags it custom; deleting restores it.
+    orig = client.get("/api/v1/assess/templates/pia").json()
+    assert orig["custom"] is False and len(orig["questions"]) == 10
+    resp = client.put("/api/v1/assess/templates/pia", json={
+        "title": "PIA (company edition)", "framework": "GDPR",
+        "questions": [{"text": "Only company question?",
+                       "risk_answer": "no", "severity": "low"}]})
+    assert resp.status_code == 200
+    assert "PIA (company edition)" in client.get("/privacy").text
+    assert client.delete("/api/v1/assess/templates/pia").json()[
+        "builtin_restored"] is True
+    assert client.get("/api/v1/assess/templates/pia").json()["custom"] is False
+    # Validation surfaces as 422 with the human-readable reason.
+    resp = client.put("/api/v1/assess/templates/bad", json={
+        "title": "X", "framework": "Y",
+        "questions": [{"text": "q?", "severity": "high",
+                       "risk_answer": "yes", "id": "dup"},
+                      {"text": "q2?", "severity": "high",
+                       "risk_answer": "yes", "id": "dup"}]})
+    assert resp.status_code == 422
+    assert client.delete("/api/v1/assess/templates/never").status_code == 404

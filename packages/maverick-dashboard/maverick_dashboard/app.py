@@ -1804,19 +1804,35 @@ FINANCE_ASSESSMENT_TYPES = frozenset(
     {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"})
 
 
-def _workspace_ctx(types: frozenset) -> dict:
+def _workspace_ctx(department: str) -> dict:
     """Chassis context for a department workspace: the worklist (risk pair,
     aging, follow-ups), hero stats, precedent memory, and catalog — filtered
-    to the department's assessment types."""
+    to the department's assessment types (built-ins plus any custom
+    templates authored for this department)."""
     import time as _time
 
-    from maverick.assessment import list_saved, list_templates
+    from maverick.assessment import (
+        custom_template_records,
+        list_saved,
+        list_templates,
+    )
+
+    base = (FINANCE_ASSESSMENT_TYPES if department == "finance"
+            else PRIVACY_ASSESSMENT_TYPES)
+    customs = custom_template_records()
+    types = set(base) | {
+        t for t, rec in customs.items()
+        if rec.get("department", "privacy") == department}
 
     sessions = [s for s in list_saved() if s.get("type") in types]
     now = _time.time()
     for s in sessions:
         created = float(s.get("created_at") or 0)
         s["age_days"] = int((now - created) // 86400) if created else None
+        nra = s.get("next_review_at")
+        # Days until the scheduled re-review (negative = overdue).
+        s["review_in_days"] = (int((float(nra) - now) // 86400)
+                               if nra else None)
     open_rows = [s for s in sessions
                  if s.get("status") in ("pending_review", "needs_more")]
     stats = {
@@ -1827,16 +1843,31 @@ def _workspace_ctx(types: frozenset) -> dict:
                           if s.get("status") == "needs_more"),
         "high_residual": sum(1 for s in sessions
                              if s.get("residual_risk") == "high"),
+        "review_due": sum(1 for s in sessions if s.get("review_due")),
         "oldest_open_days": (max((s["age_days"] or 0) for s in open_rows)
                             if open_rows else None),
     }
+    # At program volume (hundreds of records a year) the worklist stays
+    # sharp: actionable rows first (open work + anything due for
+    # re-review), then settled records by recency, capped — the hero stats
+    # always count everything.
+    def _rank(s: dict) -> tuple:
+        actionable = (s.get("status") in ("pending_review", "needs_more")
+                      or s.get("review_due"))
+        return (0 if actionable else 1, -(s.get("created_at") or 0))
+
+    worklist = sorted(sessions, key=_rank)[:250]
     return {
         "sessions": sessions,
+        "worklist": worklist,
         "stats": stats,
+        "department": department,
         # Precedents: what the memory recalls from — recent completions.
         "precedents": sessions[:8],
         "templates": [{"type": t.type, "title": t.title,
-                       "framework": t.framework, "questions": len(t.questions)}
+                       "framework": t.framework,
+                       "questions": len(t.questions),
+                       "custom": t.type in customs}
                       for t in list_templates() if t.type in types],
     }
 
@@ -1854,7 +1885,7 @@ async def privacy_page(request: Request) -> HTMLResponse:
     require_permission(request, "operate")
     import time as _time
 
-    ctx = _workspace_ctx(PRIVACY_ASSESSMENT_TYPES)
+    ctx = _workspace_ctx("privacy")
     # The record types — the data plane behind the [privacy_ops] knob. The
     # page still works without them.
     from maverick import privacy_ops
@@ -1888,7 +1919,7 @@ async def finance_page(request: Request) -> HTMLResponse:
     close readiness — with the shared review pop-out."""
     require_permission(request, "operate")
     return templates.TemplateResponse(
-        request, "finance.html", _workspace_ctx(FINANCE_ASSESSMENT_TYPES))
+        request, "finance.html", _workspace_ctx("finance"))
 
 
 @app.get("/savings", response_class=HTMLResponse)

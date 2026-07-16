@@ -668,6 +668,36 @@ class FollowupsIn(BaseModel):
     questions: list[str] = Field(..., min_length=1, max_length=20)
 
 
+class TemplateQuestionIn(BaseModel):
+    """One questionnaire question in a custom template."""
+    id: str = Field("", max_length=60)
+    section: str = Field("", max_length=80)
+    text: str = Field(..., min_length=3, max_length=500)
+    risk_answer: str = Field("no", pattern="^(yes|no)$")
+    severity: str = Field("medium", pattern="^(low|medium|high)$")
+    guidance: str = Field("", max_length=500)
+
+
+class TemplateIn(BaseModel):
+    """Author or edit an assessment questionnaire. Saving under a built-in
+    type overrides it (deleting the override restores the built-in)."""
+    title: str = Field(..., min_length=1, max_length=120)
+    framework: str = Field(..., min_length=1, max_length=200)
+    department: str = Field("privacy", pattern="^(privacy|finance)$")
+    description: str = Field("", max_length=500)
+    questions: list[TemplateQuestionIn] = Field(..., min_length=1,
+                                                max_length=60)
+
+
+class AssessmentDecideIn(BaseModel):
+    """The reviewer's decision on a saved assessment. An approval with a
+    cadence schedules the next review (the record comes due); 0/None means
+    no re-review date."""
+    decision: str = Field(..., pattern="^(approved|rejected)$")
+    cadence_days: int | None = Field(default=365, ge=0, le=3650)
+    note: str = Field("", max_length=4000)
+
+
 class DocDiscoverIn(BaseModel):
     """Search connected document sources (Microsoft Graph / Slack / Google
     Drive) for documents related to an assessment subject -- the SOW,
