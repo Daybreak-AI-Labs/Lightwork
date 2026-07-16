@@ -20,11 +20,11 @@ def _session_and_tools():
     return session, {t.name: t for t in assessment_tools(session)}
 
 
-def test_tool_set_is_the_four_assessor_actions():
+def test_tool_set_is_the_five_assessor_actions():
     _, tools = _session_and_tools()
     assert set(tools) == {
         "list_assessments", "start_assessment", "answer_question",
-        "finalize_assessment",
+        "similar_assessments", "finalize_assessment",
     }
 
 

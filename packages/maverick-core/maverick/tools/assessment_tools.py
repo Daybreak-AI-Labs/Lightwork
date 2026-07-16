@@ -53,6 +53,36 @@ def assessment_tools(session) -> list[Tool]:
             return f"ERROR: {e}"
         return f"Recorded {qid} = {answer}. {len(session.answers)} answered so far."
 
+    async def _similar(args: dict) -> str:
+        from ..assessment_memory import lessons, similar, suggest_answers
+        subject = str(args.get("subject", "")).strip() or session.subject
+        if not subject:
+            return ("ERROR: 'subject' is required (or start_assessment first "
+                    "so the session has one).")
+        atype = str(args.get("type", "")).strip() or session.type or None
+        rows = similar(subject, assessment_type=atype)
+        if not rows:
+            return f"No past assessments similar to {subject!r} on record."
+        lines = [f"Past assessments similar to {subject!r}:"]
+        for r in rows:
+            lines.append(
+                f"  {r['id']} ({r['type']}): {r['subject']} -> "
+                f"risk {str(r['risk_rating']).upper()}, "
+                f"{r['findings']} finding(s), similarity {r['similarity']}")
+        if atype:
+            sugg = suggest_answers(atype, subject)
+            if sugg:
+                lines.append("Suggested answers from those precedents "
+                             "(ADVISORY -- verify against this subject's own "
+                             "evidence before recording):")
+                for qid, s in sorted(sugg.items()):
+                    lines.append(f"  {qid}: {s['answer']} "
+                                 f"(confidence {s['confidence']}, "
+                                 f"from {', '.join(s['based_on'])})")
+        for note in lessons(subject, k=2):
+            lines.append(f"Lesson: {note[:300]}")
+        return "\n".join(lines)
+
     async def _finalize(args: dict) -> str:
         if not session.type:
             return "ERROR: call start_assessment first."
@@ -113,6 +143,25 @@ def assessment_tools(session) -> list[Tool]:
                 "required": ["question_id", "answer"],
             },
             fn=_answer,
+        ),
+        Tool(
+            name="similar_assessments",
+            description="Recall the org's own past assessments of similar "
+                        "subjects: prior risk ratings, advisory answer "
+                        "suggestions with provenance, and lessons. Use before "
+                        "answering questions so precedent informs (never "
+                        "replaces) evidence.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "subject": {"type": "string",
+                                "description": "defaults to the session subject"},
+                    "type": {"type": "string",
+                             "description": "assessment type filter; defaults "
+                                            "to the session type"},
+                },
+            },
+            fn=_similar,
         ),
         Tool(
             name="finalize_assessment",

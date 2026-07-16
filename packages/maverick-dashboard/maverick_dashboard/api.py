@@ -52,6 +52,7 @@ from .api_schemas import (
     ConnectionIn,
     DeliverableEditIn,
     DgmToggleIn,
+    DocDiscoverIn,
     EventTriggerIn,
     EventTriggerOut,
     FactIn,
@@ -92,6 +93,7 @@ from .api_schemas import (
     SkillCreateIn,
     SkillInstallIn,
     SkillOut,
+    SourceAttachIn,
     SpeakIn,
     TenantCreateIn,
     TenantOut,
@@ -818,6 +820,111 @@ async def upload_attachment(
         size_bytes=stored.size_bytes,
         sha256=stored.sha256,
     )
+
+
+@router.post("/docs/discover")
+async def discover_documents(request: Request, body: DocDiscoverIn) -> dict:
+    """Search the CONNECTED document sources (Microsoft Graph, Slack, Google
+    Drive) for documents related to an assessment subject -- the SOW,
+    contract, DPA a respondent would otherwise go hunt for.
+
+    Read-only against the sources; returns ranked candidates with an opaque
+    ``ref`` the attach endpoint round-trips. Sources without credentials are
+    skipped; with nothing configured this returns an empty list and says so.
+    """
+    require_permission(request, "operate")
+    from maverick import doc_discovery
+    if not doc_discovery.enabled():
+        raise HTTPException(status_code=403,
+                            detail="doc discovery is disabled ([assessments] "
+                                   "doc_discovery)")
+    configured = await run_in_threadpool(doc_discovery.configured_sources)
+    hits = await run_in_threadpool(
+        doc_discovery.discover, body.subject,
+        sources=(body.sources if body.sources is not None
+                 else configured or None),
+        limit=body.limit)
+    return {
+        "configured_sources": configured,
+        "hits": [h.to_dict() for h in hits],
+    }
+
+
+@router.post(
+    "/goals/{goal_id}/attachments/from-source",
+    response_model=AttachmentOut,
+    status_code=201,
+)
+async def attach_from_source(
+    request: Request, goal_id: int, body: SourceAttachIn, bg: BackgroundTasks,
+) -> AttachmentOut:
+    """Fetch one discovered document from its source and attach it to a goal
+    as evidence -- the one-click 'found it, attach it for me'.
+
+    The download goes through the same validation as a direct upload (size
+    cap, mime allowlist, executable/archive magic-byte deny), so discovery
+    can't smuggle in what an upload couldn't.
+    """
+    require_permission(request, "operate")
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+
+    from maverick import doc_discovery
+    from maverick.attachments import AttachmentRejected, store
+    try:
+        data, mime = await run_in_threadpool(
+            doc_discovery.fetch, body.source, body.doc_id, body.ref)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 -- a source outage is a 502, not a 500
+        raise HTTPException(status_code=502,
+                            detail=f"fetch from {body.source} failed") from e
+
+    filename = body.name.strip() or f"{body.source}-{body.doc_id[:24]}"
+    existing = sum(a.size_bytes for a in w.list_attachments(goal_id))
+    try:
+        stored = store(goal_id, filename=filename, mime=mime, data=data,
+                       existing_total=existing)
+    except AttachmentRejected as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    aid = w.add_attachment(
+        goal_id=goal_id, filename=stored.filename, mime=stored.mime,
+        size_bytes=stored.size_bytes, sha256=stored.sha256,
+        path=str(stored.path),
+    )
+    from maverick.attachments import generate_companions
+    bg.add_task(generate_companions, w, goal_id)
+    return AttachmentOut(id=aid, filename=stored.filename, mime=stored.mime,
+                         size_bytes=stored.size_bytes, sha256=stored.sha256)
+
+
+@router.get("/assessment-memory/similar")
+async def assessment_memory_similar(
+    request: Request, subject: str, type: str = "", k: int = 3,
+) -> dict:
+    """What the org already knows about subjects like this one: similar past
+    assessments (with ratings), advisory per-question answer suggestions from
+    the same template's history, and semantic lessons when the knowledge
+    plane is on. Advisory only -- nothing here answers an assessment."""
+    require_permission(request, "view")
+    from maverick import assessment_memory
+    subject = subject.strip()[:300]
+    k = max(1, min(k, 10))
+    if not subject:
+        raise HTTPException(status_code=422, detail="subject is required")
+    sim = await run_in_threadpool(
+        assessment_memory.similar, subject,
+        assessment_type=(type or None), k=k)
+    suggestions = {}
+    if type:
+        suggestions = await run_in_threadpool(
+            assessment_memory.suggest_answers, type, subject, k=k)
+    lessons = await run_in_threadpool(assessment_memory.lessons, subject, k=k)
+    return {"enabled": assessment_memory.enabled(), "similar": sim,
+            "suggestions": suggestions, "lessons": lessons}
 
 
 @router.get("/goals/{goal_id}/attachments", response_model=list[AttachmentOut])

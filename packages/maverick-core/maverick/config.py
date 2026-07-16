@@ -1777,6 +1777,42 @@ def get_durable() -> dict:
     }
 
 
+def get_assessments() -> dict:
+    """Return the ``[assessments]`` section (assessment flow assists).
+
+    ``doc_discovery`` lets the assessment flow search CONNECTED document
+    sources (Microsoft Graph, Slack, Google Drive) for the SOW/contract/DPA
+    related to the subject and attach them as evidence -- default on, but it
+    only activates when a source actually has credentials (env or a named
+    connection), so a default deployment reaches nothing. ``sources`` orders
+    which sources to try. ``learn`` turns on assessment memory: suggestions
+    and precedents distilled from the org's OWN past assessments (and the
+    knowledge plane when enabled) -- advisory only, the human review gate is
+    untouched. Env overrides: ``MAVERICK_ASSESS_DISCOVERY`` /
+    ``MAVERICK_ASSESS_LEARN`` (0 disables either).
+    """
+    import os
+    cfg = load_config().get("assessments", {}) or {}
+    raw = cfg.get("sources", ["msgraph", "slack", "gdrive"])
+    if isinstance(raw, str):
+        sources = [s.strip() for s in raw.split(",") if s.strip()]
+    elif isinstance(raw, (list, tuple)):
+        sources = [str(s).strip() for s in raw if str(s).strip()]
+    else:
+        sources = ["msgraph", "slack", "gdrive"]
+
+    def _env_off(var: str) -> bool:
+        return os.environ.get(var, "").strip().lower() in ("0", "false", "no")
+
+    return {
+        "doc_discovery": (bool(cfg.get("doc_discovery", True))
+                          and not _env_off("MAVERICK_ASSESS_DISCOVERY")),
+        "sources": sources,
+        "learn": (bool(cfg.get("learn", True))
+                  and not _env_off("MAVERICK_ASSESS_LEARN")),
+    }
+
+
 def get_value() -> dict:
     """Return the ``[value]`` section: the client's own cost/value assumptions
     for the savings (ROI) report.

@@ -16,13 +16,20 @@ Ed25519-signed audit chain.
 | PIA scoring — `maverick.assessment` (GDPR Art. 35 template) | OneTrust tenant (`:8890/onetrust` + `/ot-api`) — receives the real tool's POST |
 | Control mapping — `maverick.controls` (GDPR/ISO 27001/SOC 2/NIST/HIPAA citations) | Requester mailbox (`:8890/mail`) — real SMTP+STARTTLS delivery, captured locally |
 | Approval — real world-model approval, decided on the real `/approvals` page | Requester questionnaire (`:8890/intake/{case}`) — the emailed link |
-| Email send — `maverick.tools.email_tool` (SMTP) | |
+| Email send — `maverick.tools.email_tool` (SMTP) | SharePoint tenant (`:8890/graph-sim`) — Graph-shaped search + download, seeded with each vendor's SOW/MSA/DPA/security PDFs |
 | OneTrust filing — `maverick.tools.onetrust_tool` (confirm-gated POST) | |
 | Signed audit chain — `maverick.audit` (verify with `maverick audit verify`) | |
+| Evidence storage — `maverick.attachments` (real goal attachments: size caps, mime allowlist, executable deny) | |
+| Doc discovery — `maverick.doc_discovery` (searches connected sources for the SOW/contract/DPA) | |
+| Assessment memory — `maverick.assessment_memory` (similar past assessments + suggested answers, advisory) | |
 
 Point `ONETRUST_HOSTNAME` at a real OneTrust sandbox and the filing is live —
 same code path. Any ticketing system that can send a webhook can replace the
-mock ServiceNow.
+mock ServiceNow. Export a real `MSGRAPH_ACCESS_TOKEN` (and unset
+`MSGRAPH_BASE_URL`) and "Find my documents" searches your real SharePoint /
+OneDrive — same code path there too. The intake questionnaire learns across
+runs: submit one assessment, open a similar one, and the questions show
+one-click suggested answers with provenance (nothing is auto-answered).
 
 ## Run it
 
