@@ -22,15 +22,29 @@ confident-poor or unvouchable high-risk action is held.
 """
 from __future__ import annotations
 
+import os
 import threading
+from collections import OrderedDict
 
 from . import rehearsal
 from .rehearsal import PROCEED, RehearsalVerdict
 
 _REFRESH_EVERY = 64  # rebuild the model when the corpus grows by this many rows
+_MAX_CACHE_SOURCES = 16
 
-_lock = threading.Lock()
-_cache: dict = {"model": None, "n": -1}
+
+class _CacheEntry:
+    __slots__ = ("lock", "model", "n")
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.model = None
+        self.n = -1
+
+
+_SourceKey = tuple[str, str | int]
+_cache_lock = threading.Lock()
+_cache: OrderedDict[_SourceKey, _CacheEntry] = OrderedDict()
 
 
 def encode_state(domain, role, last_tool) -> tuple:
@@ -38,15 +52,18 @@ def encode_state(domain, role, last_tool) -> tuple:
     return (str(domain or ""), str(role or ""), str(last_tool or ""))
 
 
-def _build_model():
+def _build_model(store=None):
     """Fit a backoff world-model from the captured Operating Record (None if no
     usable data). The fit-time state encoding MUST match :func:`encode_state`."""
     try:
         from .counterfactual_rollout import transitions_from_trajectories
         from .generative_world_model import BackoffTransitionModel
-        from .trajectory_store import shared
+        if store is None:
+            from .trajectory_store import shared
 
-        steps = list(shared().iter_steps())
+            store = shared()
+
+        steps = list(store.iter_steps())
         if not steps:
             return None
 
@@ -74,25 +91,85 @@ def _build_model():
         return None
 
 
+def _source_key(store) -> _SourceKey:
+    """Stable identity for one trajectory corpus.
+
+    ``data_dir`` normally returns an absolute path, but custom deployments may
+    configure a relative ``MAVERICK_HOME``. Resolve and normalise the path so a
+    cwd change or a case/symlink alias cannot make two physical sources share a
+    cache entry (or make one source needlessly occupy multiple entries).
+    """
+    path = getattr(store, "path", None)
+    if path is None:
+        return ("store", id(store))
+    try:
+        raw = os.fsdecode(path)
+        normalised = os.path.normcase(
+            os.path.realpath(os.path.abspath(os.path.expanduser(raw)))
+        )
+        return ("path", normalised)
+    except Exception:  # pragma: no cover -- unusual PathLike implementations
+        return ("store", id(store))
+
+
+def _entry_for(source: _SourceKey) -> _CacheEntry:
+    """Return one source's entry and enforce the small global LRU bound."""
+    with _cache_lock:
+        entry = _cache.get(source)
+        if entry is None:
+            entry = _CacheEntry()
+            _cache[source] = entry
+        else:
+            _cache.move_to_end(source)
+        while len(_cache) > _MAX_CACHE_SOURCES:
+            _cache.popitem(last=False)
+        return entry
+
+
 def _model():
-    """Cached world-model, rebuilt when the trajectory corpus moves materially."""
+    """Cached world-model, isolated and refreshed per trajectory source.
+
+    A tenant/path switch must never reuse another source's fitted model. The
+    bounded LRU avoids rebuilding on every A -> B -> A switch, while per-source
+    locks allow different tenants to fit concurrently. The global map lock is
+    never held while reading trajectories or fitting a model.
+    """
     try:
         from .trajectory_store import shared
 
-        n = shared().count()
+        store = shared()
+        source = _source_key(store)
     except Exception:  # pragma: no cover
-        n = 0
-    with _lock:
-        if _cache["model"] is None or abs(n - _cache["n"]) >= _REFRESH_EVERY:
-            _cache["model"] = _build_model()
-            _cache["n"] = n
-        return _cache["model"]
+        return None
+
+    try:
+        entry = _entry_for(source)
+    except Exception:  # pragma: no cover -- cache bookkeeping must fail open
+        return None
+    try:
+        with entry.lock:
+            n = store.count()
+            # A shrink means rows were rotated, erased, or the file was
+            # replaced. Invalidate immediately so deleted learning evidence
+            # cannot keep influencing rehearsal until another 64 rows arrive.
+            if (
+                entry.model is None
+                or n < entry.n
+                or n - entry.n >= _REFRESH_EVERY
+            ):
+                try:
+                    entry.model = _build_model(store)
+                except Exception:  # pragma: no cover -- fail open under test doubles too
+                    entry.model = None
+                entry.n = n
+            return entry.model
+    except Exception:  # pragma: no cover -- rehearsal must never break a run
+        return None
 
 
 def reset_cache() -> None:
-    with _lock:
-        _cache["model"] = None
-        _cache["n"] = -1
+    with _cache_lock:
+        _cache.clear()
 
 
 def gate_tool(*, domain, role, last_tool, tool_name) -> RehearsalVerdict:
