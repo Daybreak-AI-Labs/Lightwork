@@ -72,6 +72,16 @@ def halt(reason: str, source: str = "manual") -> None:
     global _in_process_halt
     with _state_lock:
         _in_process_halt = (reason, source)
+    # Set the safety state first, then wait for any Ekko commit that sampled the
+    # prior state. A lock outage can never undo the halt; it only weakens the
+    # return-time barrier and is logged for operators.
+    try:
+        from .ekko_control import control_barrier
+
+        with control_barrier():
+            pass
+    except Exception:
+        log.exception("killswitch: Ekko commit barrier unavailable during halt")
     log.warning("killswitch: halt set (%s, source=%s)", reason, source)
     try:
         from .audit import EventKind, record
@@ -90,7 +100,11 @@ def halt(reason: str, source: str = "manual") -> None:
 def clear() -> None:
     """Reset the in-process halt. Doesn't delete the HALT file."""
     global _in_process_halt
-    with _state_lock:
+    from .ekko_control import control_barrier
+
+    # Clearing is expansive, so unlike halt it fails closed if the strict
+    # cross-process authority barrier is unavailable.
+    with control_barrier(), _state_lock:
         _in_process_halt = None
 
 

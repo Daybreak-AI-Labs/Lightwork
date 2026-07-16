@@ -95,6 +95,7 @@ STEPS: list[tuple[str, str]] = [
     ("sandbox", "Sandbox"),
     ("capabilities", "Capabilities"),
     ("self_learning", "Self-learning"),
+    ("ekko", "Ekko work discovery"),
     ("automation_import", "Automation import"),
     ("event_triggers", "Event triggers"),
     ("flows", "Flow engine"),
@@ -1019,6 +1020,100 @@ def pick_self_learning() -> dict[str, Any]:
         "allow_provider_egress": allow_provider_egress,
         "distill_local": distill_local,
         "max_acquisitions": 5,
+    }
+
+
+_EKKO_BLOCKED_APPS = [
+    "email",
+    "outlook",
+    "gmail",
+    "chat",
+    "teams",
+    "slack",
+    "crm",
+    "salesforce",
+    "erp",
+    "sap",
+    "database",
+]
+
+
+def pick_ekko() -> dict[str, Any]:
+    """Configure explicit enrollment for the Ekko work-discovery sensor.
+
+    The wizard never starts a collector or asks the operating system for
+    monitoring permissions. It only writes policy; the client enrolls a named
+    device and starts a reviewed collector separately with ``maverick ekko``.
+    """
+    console.print()
+    console.print(
+        "[dim]Ekko finds repeatable work that Lightwork could improve or "
+        "automate. It records authorized application names and timing only by "
+        "default -- never screen pixels, window titles, clipboard, keystrokes, "
+        "URLs, or document contents. Data stays local and recommendations "
+        "remain drafts until a person approves them.[/dim]"
+    )
+    if not _q_confirm(
+        "Enable Ekko policy for explicitly enrolled devices?",
+        default=False,
+    ):
+        return {"enable": False}
+
+    requested_apps = _csv_list(_q_text(
+        "  Canonical applications Ekko may observe (for example excel, "
+        "powerpoint, chrome; blank = deny all)",
+        default="",
+    ), lower=True)[:128]
+    from maverick.work_discovery import KNOWN_APPS
+
+    allowed_apps = [app for app in requested_apps if app in KNOWN_APPS]
+    dropped_apps = sorted(set(requested_apps) - set(allowed_apps))
+    if dropped_apps:
+        console.print(
+            "[yellow]  Ignored unknown application IDs: "
+            + ", ".join(dropped_apps)
+            + ". Platform collectors map executable/bundle IDs to the "
+            "canonical names before capture.[/yellow]"
+        )
+    if not allowed_apps:
+        console.print(
+            "[yellow]  No applications authorized. Ekko remains unable to "
+            "enroll or record until [ekko].allowed_apps is configured.[/yellow]"
+        )
+    capture_pick = _q_select(
+        "  Capture mode",
+        [
+            "application_metadata - application identity + timing only",
+            "guided - accept user/integration supplied action labels",
+        ],
+        default="application_metadata - application identity + timing only",
+    )
+    capture_level = capture_pick.split()[0]
+    if capture_level not in {"application_metadata", "guided"}:
+        capture_level = "application_metadata"
+
+    retention_days = max(2, min(30, _safe_int(_q_text(
+        "  Raw event retention in days (2-30)", default="14",
+    ), default=14)))
+    min_occurrences = max(2, min(100, _safe_int(_q_text(
+        "  Repetitions before Ekko suggests a process (2-100)", default="3",
+    ), default=3)))
+    min_distinct_days = max(2, min(retention_days, _safe_int(_q_text(
+        "  Distinct days required for a suggestion (2-30)", default="2",
+    ), default=2)))
+    return {
+        "enable": True,
+        "retention_days": retention_days,
+        "enrollment_days": 30,
+        "min_occurrences": min_occurrences,
+        "min_distinct_days": min_distinct_days,
+        "poll_interval_seconds": 5,
+        "capture_level": capture_level,
+        "allowed_apps": allowed_apps,
+        "blocked_apps": list(_EKKO_BLOCKED_APPS),
+        # Reserved for a future audited provider-summary path. Local discovery
+        # has no egress implementation and this must remain false.
+        "provider_egress": False,
     }
 
 
@@ -3049,6 +3144,16 @@ def _cfg_self_learning(self_learning: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _cfg_ekko(ekko: dict[str, Any] | None) -> list[str]:
+    if not ekko:
+        return []
+    # Policy only. The installer never starts/enrolls a workstation collector.
+    lines = ["", "[ekko]"]
+    for k, v in ekko.items():
+        _emit_kv(lines, k, v)
+    return lines
+
+
 def _cfg_automation_import(automation_import: dict[str, Any] | None) -> list[str]:
     if not automation_import:
         return []
@@ -3969,6 +4074,7 @@ def write_config(
     web_search_enabled: bool = False,
     skills: dict[str, Any] | None = None,
     self_learning: dict[str, Any] | None = None,
+    ekko: dict[str, Any] | None = None,
     automation_import: dict[str, Any] | None = None,
     event_triggers: dict[str, Any] | None = None,
     flows: dict[str, Any] | None = None,
@@ -4080,6 +4186,7 @@ def write_config(
     lines += _cfg_core(budget, safety, sandbox)
     lines += _cfg_skills(skills)
     lines += _cfg_self_learning(self_learning)
+    lines += _cfg_ekko(ekko)
     lines += _cfg_automation_import(automation_import)
     lines += _cfg_event_triggers(event_triggers)
     lines += _cfg_flows(flows)
@@ -4898,6 +5005,14 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     _save_partial(state)
 
     _announce()
+    # Use an explicit None sentinel: {"enable": False} is a completed answer.
+    ekko = state.get("ekko")
+    if ekko is None:
+        ekko = pick_ekko()
+        state["ekko"] = ekko
+        _save_partial(state)
+
+    _announce()
     automation_import = state.get("automation_import") or pick_automation_import()
     state["automation_import"] = automation_import
     _save_partial(state)
@@ -4965,6 +5080,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "sandbox": sandbox,
         "capabilities": capabilities,
         "self_learning": self_learning,
+        "ekko": ekko,
         "automation_import": automation_import,
         "event_triggers": event_triggers,
         "flows": flows,
@@ -5162,6 +5278,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     sandbox = _simple["sandbox"]
     capabilities = _simple["capabilities"]
     self_learning = _simple["self_learning"]
+    ekko = _simple["ekko"]
     automation_import = _simple["automation_import"]
     event_triggers = _simple["event_triggers"]
     flows = _simple["flows"]
@@ -5274,6 +5391,9 @@ def run(fast: bool = False, resume: bool = False) -> int:
         web_search_enabled=web_search_enabled,
         skills=signed_skills if (signed_skills.get("trusted_pubkeys") or signed_skills.get("require_signed") or signed_skills.get("require_signed_catalog")) else None,
         self_learning=self_learning if self_learning.get("enable") else None,
+        # Persist the explicit default-off decision. Unlike default-on governed
+        # learning, Ekko never inherits authority from another feature.
+        ekko=ekko,
         automation_import=automation_import if automation_import.get("enable") else None,
         event_triggers=event_triggers if event_triggers.get("enable") else None,
         flows=flows if flows.get("enable") else None,

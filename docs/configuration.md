@@ -305,6 +305,22 @@ provision_packs = true     # equip a freshly-approved pack with the skills + too
                            #   requires and never widens the clamped envelope.
                            #   Wired into `maverick onboard`. See FEATURES.md.
 
+[ekko]                     # client-controlled work discovery (default OFF)
+enable = false             # independent of self-learning and DGM
+retention_days = 14        # raw local events; runtime clamps to 2..30
+enrollment_days = 30       # device consent expiry; runtime clamps 1..90
+min_occurrences = 3        # repeated sequences required; runtime clamps 2..100
+min_distinct_days = 2      # avoid one-off bursts; 2..retention_days
+poll_interval_seconds = 5  # injected collector cadence; runtime clamps 1..300
+capture_level = "application_metadata" # or "guided" action labels
+allowed_apps = []          # positive allowlist; empty means observe nothing
+blocked_apps = ["email", "outlook", "gmail", "chat", "teams", "slack",
+                "crm", "salesforce", "erp", "sap", "database"]
+provider_egress = false    # reserved/unsupported; true fails closed
+# Enabling policy does not enroll a device, start a service, request OS
+# monitoring permissions, save a generated flow, or activate automation.
+# See ekko-work-discovery.md and `maverick ekko --help`.
+
 [self_improvement]         # promotion ladder for learned guidance (default on)
 enable = true
 factory_learning = true    # close the loop onto generation quality: attribute

@@ -41,9 +41,9 @@ Lightwork is proprietary, commercially licensed software (see
   (property-fuzzed up to 5,000 iterations),
   plus hostile-argument fuzzing of every connector and tool.
   Email, Matrix, WhatsApp, SMS, iMessage — one config, all channels.
-- **Build an agent from a demonstration**: watch a person do their job,
+- **Build an agent from a demonstration**: record a reviewed example of the job,
   then synthesize the agent that does it — `maverick learn-demo <file>`
-  ingests an observed transcript, induces a profile through the same
+  ingests that transcript, induces a profile through the same
   intake clamp + review gate, and provisions the skills/tools it needs.
   The factory also improves itself: `maverick factory-learn` mines
   provisioning/approval gaps back into future pack generation
@@ -98,6 +98,7 @@ platform remain proprietary.
 - [Editions](enterprise/editions.md) — Community vs Enterprise
 - [Plugins](plugins.md) — extending the tool / channel / skill surface
 - [Self-learning](self-learning.md) — acquire skills, tools, MCP servers, and APIs on demand
+- [Ekko work discovery](ekko-work-discovery.md) — local, opt-in process observation that drafts automation opportunities for human review
 - [Features → Dreaming / Hindsight / Fleet memory](FEATURES.md) — the full learning lifecycle: consolidation, regression detection, value proof, and the cross-vendor memory plane
 - [Features](FEATURES.md) — everything Lightwork does today (shipped capabilities + tools)
 - [Roadmap](ROADMAP.md) — the forward backlog (what isn't built yet)

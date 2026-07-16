@@ -568,6 +568,22 @@ here.
   (`GET /api/v1/codec` reports what it would save on real traffic) — agents
   reading the codes to *realize* the savings is a separate, gated step.
 
+- **Ekko — client-controlled work discovery** (`work_discovery.py`,
+  `work_discovery_store.py`, `ekko_daemon.py`, `maverick ekko`, independently
+  gated by default-off `[ekko]` / `MAVERICK_EKKO`) — turns repeated application
+  transitions into evidence-backed automation candidates and review-only Agent
+  Factory + Flow drafts. Enrollment is owner/device scoped, observation uses a
+  positive application allowlist with a winning sensitive-app blocklist, and
+  raw local events expire after at most 30 days. The bundled foreground daemon
+  accepts an explicitly supplied observer; it never chooses an ambient OS
+  monitor, requests endpoint permissions, starts a login service, or captures
+  screen/window/clipboard/keystroke/document content. Pausing, revoking,
+  erasing, saving a draft, and activating automation remain distinct
+  human-controlled actions. Provider
+  egress is reserved and unsupported in this release; it must remain false.
+  See
+  [`ekko-work-discovery.md`](./ekko-work-discovery.md).
+
 - **Flow engine & visual automation** (`maverick.flow.*`, gated on `[flows]`) — a
   deterministic graph of typed nodes (`ir.py`: agent / action / branch / switch /
   foreach / while / parallel / approval / delay / wait_event / scope (try-catch) /

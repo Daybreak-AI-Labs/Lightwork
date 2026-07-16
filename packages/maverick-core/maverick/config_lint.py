@@ -106,6 +106,21 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "dashboard": {"token", "theme", "density", "allow_extension", "themes", "public_url",
                   "default_suites", "group_roles", "group_suites"},
     "analytics": {"mcp_client_language"},
+    # Work discovery is a high-trust client-controlled sensor.  Keep this
+    # section fixed-key so misspelled retention/privacy knobs do not silently
+    # fall back to defaults.
+    "ekko": {
+        "enable",
+        "retention_days",
+        "enrollment_days",
+        "min_occurrences",
+        "min_distinct_days",
+        "poll_interval_seconds",
+        "capture_level",
+        "allowed_apps",
+        "blocked_apps",
+        "provider_egress",
+    },
     # --- dynamic / open-ended sections (any subkey accepted) ---
     "providers": None,
     "models": None,
@@ -178,6 +193,13 @@ _NUMERIC_KEYS: dict[str, set[str]] = {
     },
     "sandbox": {"timeout", "pids_limit", "memory_mb", "cpus", "run_as_user"},
     "durable": {"keep_last"},
+    "ekko": {
+        "retention_days",
+        "enrollment_days",
+        "min_occurrences",
+        "min_distinct_days",
+        "poll_interval_seconds",
+    },
 }
 
 # Keys that, when present, must be a bool. Section -> key. Plus the universal
@@ -203,6 +225,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "preflight", "create_tools", "provision_packs",
         "allow_mcp_acquisition", "allow_provider_egress", "distill_local",
     },
+    "ekko": {"provider_egress"},
 }
 
 _UNIVERSAL_BOOL_KEYS = ("enabled", "enable")
@@ -387,6 +410,16 @@ def lint_config(cfg: dict) -> list[Finding]:
                         ),
                     )
                 )
+            elif section == "ekko" and key == "provider_egress" and kval is True:
+                findings.append(Finding(
+                    section=section,
+                    key=key,
+                    severity="error",
+                    message=(
+                        "ekko.provider_egress is reserved and unsupported; "
+                        "it must remain false"
+                    ),
+                ))
 
     findings.extend(_lint_inline_secrets(cfg))
     findings.extend(_lint_group_mappings(cfg))
