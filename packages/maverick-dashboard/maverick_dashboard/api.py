@@ -919,10 +919,17 @@ async def get_assessment_session(request: Request, assessment_id: str) -> dict:
     respondent's notes, scored findings, rating, and the follow-up thread.
     This is what the review pop-out renders."""
     require_permission(request, "operate")
-    from maverick.assessment import load_saved
+    from maverick.assessment import get_template, load_saved
     record = await run_in_threadpool(load_saved, assessment_id[:64])
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
+    # Enrich with the template's question text + section so the pop-out
+    # shows real questions, never raw ids like "pia_necessity".
+    tpl = get_template(str(record.get("type", "")))
+    if tpl is not None:
+        record["question_text"] = {
+            q.id: {"text": q.text, "section": q.section} for q in tpl.questions
+        }
     return record
 
 

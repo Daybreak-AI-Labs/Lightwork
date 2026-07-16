@@ -754,6 +754,8 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
         for qid, rec in case.answers.items():
             try:
                 session.record(qid, rec.get("answer", ""), rec.get("note", ""))
+                if rec.get("by"):  # delegate attribution, shown in the review pop-out
+                    session.answers[qid]["by"] = rec["by"]
             except Exception:
                 continue
         result = session.evaluate()

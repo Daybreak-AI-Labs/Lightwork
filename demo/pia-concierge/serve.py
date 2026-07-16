@@ -18,6 +18,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Run the REPO's platform code, not whatever happens to be pip-installed:
+# a stale (non-editable) site-packages install otherwise serves yesterday's
+# dashboard templates after a `git pull` — the demo silently demos old code.
+# Prepending the checkout's package dirs makes `git pull` + `python serve.py`
+# always show what you just pulled, on every OS, with no pip step.
+_REPO = Path(__file__).resolve().parents[2]
+for _pkg in sorted((_REPO / "packages").glob("maverick-*")):
+    # A package root qualifies if it holds an importable top-level package
+    # (maverick-core's is `maverick`, the rest are underscored names).
+    if any(p.joinpath("__init__.py").is_file()
+           for p in _pkg.iterdir() if p.is_dir()):
+        sys.path.insert(0, str(_pkg))
+
 
 async def main() -> None:
     import uvicorn

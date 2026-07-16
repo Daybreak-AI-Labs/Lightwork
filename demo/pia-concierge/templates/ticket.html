@@ -14,6 +14,29 @@
   <p>{{ ticket.short_description }}</p>
 </div>
 
+{# One obvious forward action per stage — the demo walks itself. #}
+{% if case and case.stage in ('intake_sent', 'followup') %}
+<div class="nextstep">
+  <span class="k">Next</span>
+  <span class="t">Lightwork emailed {{ ticket.requester.split(' ')[0] }} the questionnaire link.
+    Play the requester and answer it.</span>
+  <a class="btn" href="/mail">Open the requester's inbox →</a>
+</div>
+{% elif case and case.stage == 'pending_review' %}
+<div class="nextstep">
+  <span class="k">Next</span>
+  <span class="t">Scored by Lightwork — a human decides. Review and approve in the governed queue.</span>
+  <a class="btn" href="{{ dashboard_url }}/approvals" target="lightwork">Open Lightwork approvals →</a>
+</div>
+{% elif case and case.onetrust_id %}
+<div class="nextstep">
+  <span class="k">Done</span>
+  <span class="t">Approved and filed to OneTrust as {{ case.onetrust_id }} — ticket resolved,
+    requester notified.</span>
+  <a class="btn" href="/onetrust">See it in OneTrust →</a>
+</div>
+{% endif %}
+
 <div class="grid two">
   <div class="card">
     <h2>Details</h2>
