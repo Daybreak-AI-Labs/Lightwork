@@ -19,7 +19,7 @@
           {% if _src %}<span class="badge blocked">{{ _src }}</span>{% else %}<span class="muted">consent</span>{% endif %}
         </td>
         <td>{{ a.scope or '—' }}</td>
-        <td class="muted">{{ a.detail or '' }}</td>
+        <td class="muted approval-detail">{{ a.detail or '' }}</td>
         <td>
           <button class="approval-btn" data-id="{{ a.id }}" data-action="approve">Approve</button>
           <button class="approval-btn" data-id="{{ a.id }}" data-action="deny">Deny</button>
@@ -38,9 +38,169 @@
   button.approval-btn { padding: 0.35rem 0.85rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.85rem; margin-right: 0.4rem; }
   button.approval-btn:hover { border-color: var(--brand); }
   button.approval-btn[disabled] { opacity: 0.6; cursor: not-allowed; }
+  button.approval-review { padding: 0.35rem 0.85rem; background: var(--brand-subtle); color: var(--brand); border: 1px solid var(--brand-border); border-radius: 4px; cursor: pointer; font-size: 0.85rem; margin-right: 0.4rem; font-weight: var(--font-medium); }
+  button.approval-review:hover { background: var(--brand); color: var(--brand-fg); }
+  /* Assessment review pop-out */
+  .arv { border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 0; width: min(760px, calc(100vw - 2rem)); max-height: min(84vh, 900px); background: var(--surface-1); color: var(--text); box-shadow: var(--shadow-lg); }
+  .arv::backdrop { background: var(--scrim); }
+  .arv__head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border); position: sticky; top: 0; background: inherit; }
+  .arv__head h3 { margin: 0; font-size: var(--text-lg); text-transform: none; letter-spacing: 0; color: var(--text); }
+  .arv__body { padding: var(--space-4) var(--space-5); overflow-y: auto; max-height: calc(84vh - 120px); }
+  .arv__row { display: grid; grid-template-columns: 1fr auto; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--hairline); }
+  .arv__q { font-size: var(--text-base); }
+  .arv__note { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; }
+  .arv__ans { align-self: start; }
+  .arv__section { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: var(--font-semibold); }
+  .arv textarea { width: 100%; min-height: 84px; background: var(--surface-sunken); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); font: inherit; }
+  .arv__foot { display: flex; gap: var(--space-2); justify-content: flex-end; padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border); }
 </style>
 
+<dialog class="arv" id="arv-dialog" aria-labelledby="arv-title">
+  <div class="arv__head">
+    <h3 id="arv-title">Assessment review</h3>
+    <span class="badge" id="arv-risk" style="margin-inline-start:auto;"></span>
+    <button class="btn btn--ghost" id="arv-close" aria-label="Close review">✕</button>
+  </div>
+  <div class="arv__body" id="arv-body"><p class="muted">Loading…</p></div>
+  <div class="arv__foot">
+    <span class="muted" id="arv-status" role="status" aria-live="polite" style="margin-inline-end:auto;"></span>
+    <button class="btn" id="arv-send" style="display:none;">Send questions back to requester</button>
+  </div>
+</dialog>
+
 <script>
+  // Assessment review pop-out: any approval whose detail carries an
+  // `assessment:<id>` token gets a Review button that opens the full record
+  // (answers, notes, findings, follow-up thread) and lets the reviewer send
+  // follow-up questions back to the respondent.
+  (function() {
+    const dlg = document.getElementById('arv-dialog');
+    if (!dlg) return;
+    const body = document.getElementById('arv-body');
+    const riskEl = document.getElementById('arv-risk');
+    const sendBtn = document.getElementById('arv-send');
+    const statusEl = document.getElementById('arv-status');
+    let currentId = null;
+
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text !== undefined) n.textContent = text;
+      return n;
+    }
+
+    function render(rec) {
+      body.innerHTML = '';
+      riskEl.textContent = (rec.result && rec.result.risk_rating || '?') + ' risk';
+      riskEl.className = 'badge ' +
+        ((rec.result && rec.result.risk_rating) === 'high' ? 'blocked' :
+         (rec.result && rec.result.risk_rating) === 'medium' ? 'warn' : 'done');
+      const sub = el('p', 'muted');
+      sub.append(rec.type ? rec.type.toUpperCase() + ' · ' : '', rec.subject || '');
+      body.appendChild(sub);
+
+      body.appendChild(el('div', 'arv__section', 'Answers'));
+      const answers = rec.answers || {};
+      Object.keys(answers).forEach(function (qid) {
+        const row = el('div', 'arv__row');
+        const q = el('div', 'arv__q', qid.replace(/_/g, ' '));
+        if (answers[qid].note) q.appendChild(el('div', 'arv__note', '“' + answers[qid].note + '”'));
+        const a = String(answers[qid].answer || '?');
+        const pill = el('span', 'badge ' + (a === 'no' || a === 'unknown' ? 'warn' : 'done'), a);
+        const ans = el('div', 'arv__ans'); ans.appendChild(pill);
+        row.append(q, ans); body.appendChild(row);
+      });
+
+      const findings = (rec.result && rec.result.findings) || [];
+      if (findings.length) {
+        body.appendChild(el('div', 'arv__section', 'Findings (' + findings.length + ')'));
+        findings.forEach(function (f) {
+          const row = el('div', 'arv__row');
+          const q = el('div', 'arv__q', f.question || f.text || f.question_id);
+          if (f.recommendation) q.appendChild(el('div', 'arv__note', f.recommendation));
+          const sev = el('span', 'badge ' + (f.severity === 'high' ? 'blocked' : f.severity === 'medium' ? 'warn' : 'done'), f.kind === 'unverified' ? 'unverified' : f.severity);
+          const ans = el('div', 'arv__ans'); ans.appendChild(sev);
+          row.append(q, ans); body.appendChild(row);
+        });
+      }
+
+      const fups = rec.followups || [];
+      if (fups.length) {
+        body.appendChild(el('div', 'arv__section', 'Follow-up thread'));
+        fups.forEach(function (f) {
+          const row = el('div', 'arv__row');
+          const q = el('div', 'arv__q', f.question);
+          if (f.answer) q.appendChild(el('div', 'arv__note', '↳ ' + f.answer + (f.answered_by ? ' — ' + f.answered_by : '')));
+          const st = el('span', 'badge ' + (f.answer ? 'done' : 'warn'), f.answer ? 'answered' : 'awaiting reply');
+          const ans = el('div', 'arv__ans'); ans.appendChild(st);
+          row.append(q, ans); body.appendChild(row);
+        });
+      }
+
+      body.appendChild(el('div', 'arv__section', 'Ask for more detail'));
+      const hint = el('p', 'muted', 'One question per line. The requester is re-interviewed with exactly these questions; the assessment stays parked here until they answer.');
+      hint.style.fontSize = 'var(--text-sm)';
+      body.appendChild(hint);
+      const ta = el('textarea');
+      ta.id = 'arv-questions';
+      ta.placeholder = 'e.g. Which sub-processors receive personal data under this contract?';
+      ta.setAttribute('aria-label', 'Follow-up questions, one per line');
+      body.appendChild(ta);
+      sendBtn.style.display = '';
+    }
+
+    async function open(id) {
+      currentId = id;
+      statusEl.textContent = '';
+      body.innerHTML = '<p class="muted">Loading…</p>';
+      sendBtn.style.display = 'none';
+      dlg.showModal();
+      try {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(id));
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        render(await r.json());
+      } catch (e) {
+        body.innerHTML = '';
+        body.appendChild(el('p', 'muted', 'Could not load assessment: ' + e.message));
+      }
+    }
+
+    sendBtn.addEventListener('click', async function () {
+      const ta = document.getElementById('arv-questions');
+      const questions = (ta && ta.value || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+      if (!questions.length) { statusEl.textContent = 'Write at least one question first.'; return; }
+      sendBtn.disabled = true;
+      statusEl.textContent = 'Sending…';
+      try {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/followups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ questions: questions })
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        statusEl.textContent = 'Sent — the requester will be asked these ' + questions.length + ' question(s).';
+        render(await r.json());
+      } catch (e) {
+        statusEl.textContent = 'Could not send: ' + e.message;
+      } finally {
+        sendBtn.disabled = false;
+      }
+    });
+    document.getElementById('arv-close').addEventListener('click', function () { dlg.close(); });
+
+    // Wire a Review button onto every approval row that references an assessment.
+    document.querySelectorAll('tr[data-id]').forEach(function (tr) {
+      const detail = tr.querySelector('.approval-detail');
+      const m = detail && /assessment:([A-Za-z0-9._-]+)/.exec(detail.textContent || '');
+      if (!m) return;
+      const cell = tr.querySelector('td:last-child');
+      const btn = el('button', 'approval-review', 'Review');
+      btn.type = 'button';
+      btn.addEventListener('click', function () { open(m[1]); });
+      cell.insertBefore(btn, cell.firstChild);
+    });
+  })();
+
   (function() {
     const msg = document.getElementById('approval-msg');
     document.querySelectorAll('button.approval-btn').forEach(function(btn) {

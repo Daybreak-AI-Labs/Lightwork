@@ -600,6 +600,78 @@ def save_session(session: AssessmentSession) -> Path:
     return path
 
 
+def _rewrite_saved(assessment_id: str, mutate) -> dict | None:
+    """Load a saved assessment, apply ``mutate(record)`` and write it back
+    (0600). Returns the updated record, or ``None`` for an unknown id. Reuses
+    :func:`load_saved`'s path-traversal guard."""
+    record = load_saved(assessment_id)
+    if record is None:
+        return None
+    mutate(record)
+    path = _assessments_dir() / f"{assessment_id}.json"
+    payload = json.dumps(record, indent=2, default=str)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(payload)
+    return record
+
+
+def add_followups(assessment_id: str, questions: list[str],
+                  asked_by: str = "") -> dict | None:
+    """Attach reviewer follow-up questions to a saved assessment.
+
+    The reviewer working the assessment (dashboard pop-out) sends these back
+    to the respondent; the record's ``status`` flips to ``needs_more`` until
+    every follow-up carries an answer. Returns the updated record, or None
+    for an unknown id / no usable questions."""
+    cleaned = [q.strip()[:2000] for q in questions if q and q.strip()]
+    if not cleaned:
+        return None
+
+    def _mutate(record: dict) -> None:
+        fups = record.setdefault("followups", [])
+        base = len(fups)
+        for i, q in enumerate(cleaned, start=1):
+            fups.append({
+                "id": f"fu-{base + i}",
+                "question": q,
+                "asked_by": asked_by,
+                "asked_at": time.time(),
+                "answer": "",
+                "answered_by": "",
+                "answered_at": None,
+            })
+        record["status"] = "needs_more"
+
+    return _rewrite_saved(assessment_id, _mutate)
+
+
+def answer_followup(assessment_id: str, followup_id: str, answer: str,
+                    answered_by: str = "") -> dict | None:
+    """Record the respondent's answer to one follow-up. When the last open
+    follow-up is answered the record's ``status`` returns to
+    ``pending_review``. Returns the updated record, or None for an unknown
+    assessment or follow-up id."""
+    answer = (answer or "").strip()[:4000]
+    if not answer:
+        return None
+    hit = {"found": False}
+
+    def _mutate(record: dict) -> None:
+        fups = record.get("followups") or []
+        for f in fups:
+            if f.get("id") == followup_id:
+                f["answer"] = answer
+                f["answered_by"] = answered_by
+                f["answered_at"] = time.time()
+                hit["found"] = True
+        if all(f.get("answer") for f in fups):
+            record["status"] = "pending_review"
+
+    record = _rewrite_saved(assessment_id, _mutate)
+    return record if (record is not None and hit["found"]) else None
+
+
 def list_saved() -> list[dict]:
     """Summaries of saved assessments, newest first."""
     d = _assessments_dir()
@@ -612,6 +684,7 @@ def list_saved() -> list[dict]:
         except (OSError, ValueError):
             continue
         res = data.get("result", {})
+        fups = data.get("followups") or []
         out.append({
             "id": data.get("id", p.stem),
             "type": data.get("type", "?"),
@@ -619,6 +692,8 @@ def list_saved() -> list[dict]:
             "risk_rating": res.get("risk_rating", "?"),
             "findings": len(res.get("findings", [])),
             "created_at": data.get("created_at", 0),
+            "status": data.get("status", "pending_review"),
+            "open_followups": sum(1 for f in fups if not f.get("answer")),
         })
     return sorted(out, key=lambda r: r["created_at"], reverse=True)
 

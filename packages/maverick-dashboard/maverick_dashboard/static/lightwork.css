@@ -550,6 +550,14 @@
         --glass-soft: color-mix(in srgb, var(--panel) 58%, transparent);
         --glass-border: color-mix(in srgb, var(--text) 16%, transparent);
         --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 12%, transparent);
+        /* The light-catch: a faint diagonal sheen across the top of each pane
+           (layered OVER the tint), plus a soft contact-shadow pair. Together
+           they're what makes frosted panes read as glass, not grey cards. */
+        --glass-sheen: linear-gradient(152deg,
+          color-mix(in srgb, #ffffff 5%, transparent),
+          transparent 46%);
+        --glass-shadow: 0 1px 2px rgba(0,0,0,0.16),
+          0 10px 28px -14px rgba(0,0,0,0.42);
         /* Glass propagates to every component through the derived surface
            tokens, so page-local classes (chat composer, learning stats, flow
            toolbars…) pick it up without per-template edits. The values sit
@@ -583,11 +591,11 @@
       body:not(.theme-hicontrast) .card,
       body:not(.theme-hicontrast) .mv-row,
       body:not(.theme-hicontrast) .mv-empty {
-        background: var(--glass);
+        background: var(--glass-sheen), var(--glass);
         -webkit-backdrop-filter: blur(20px) saturate(160%);
         backdrop-filter: blur(20px) saturate(160%);
         border-color: var(--glass-border);
-        box-shadow: var(--shadow-sm), var(--glass-edge);
+        box-shadow: var(--glass-shadow), var(--glass-edge);
       }
       /* Hovered glass lifts, it doesn't just recolor: the same crisp pane
          with a touch more elevation. */
@@ -595,6 +603,33 @@
       body:not(.theme-hicontrast) .mv-row:hover {
         border-color: color-mix(in srgb, var(--text) 24%, transparent);
         box-shadow: var(--shadow-md), var(--glass-edge);
+      }
+      /* Primary action: a glass-era button — subtle vertical gradient with a
+         specular top edge, so it reads as a lit key, not a flat rectangle. */
+      body:not(.theme-hicontrast) .btn--primary {
+        background: linear-gradient(180deg, var(--brand-hi), var(--brand));
+        box-shadow: 0 2px 14px color-mix(in srgb, var(--brand) 38%, transparent),
+          inset 0 1px 0 0 color-mix(in srgb, #ffffff 22%, transparent);
+      }
+      body:not(.theme-hicontrast) .btn--primary:hover {
+        background: linear-gradient(180deg,
+          color-mix(in srgb, var(--brand-hi) 86%, #ffffff 14%), var(--brand-hi));
+      }
+      /* Scrollbars join the material: thin, rounded, translucent. */
+      body:not(.theme-hicontrast) * {
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--text) 22%, transparent) transparent;
+      }
+      body:not(.theme-hicontrast) ::-webkit-scrollbar { width: 10px; height: 10px; }
+      body:not(.theme-hicontrast) ::-webkit-scrollbar-track { background: transparent; }
+      body:not(.theme-hicontrast) ::-webkit-scrollbar-thumb {
+        background: color-mix(in srgb, var(--text) 20%, transparent);
+        border-radius: var(--radius-pill);
+        border: 2px solid transparent; background-clip: content-box;
+      }
+      body:not(.theme-hicontrast) ::-webkit-scrollbar-thumb:hover {
+        background: color-mix(in srgb, var(--text) 32%, transparent);
+        border: 2px solid transparent; background-clip: content-box;
       }
       body:not(.theme-hicontrast) .topbar {
         background: color-mix(in srgb, var(--panel) 60%, transparent);
@@ -611,14 +646,16 @@
         border-inline-end-color: var(--glass-border);
       }
       body:not(.theme-hicontrast) .prefs__panel,
-      body:not(.theme-hicontrast) .mv-confirm {
-        background: var(--glass-soft);
+      body:not(.theme-hicontrast) .mv-confirm,
+      body:not(.theme-hicontrast) .arv {
+        background: var(--glass-sheen), var(--glass-soft);
         -webkit-backdrop-filter: blur(28px) saturate(170%);
         backdrop-filter: blur(28px) saturate(170%);
         border-color: var(--glass-border);
         box-shadow: var(--shadow-lg), var(--glass-edge);
       }
-      body:not(.theme-hicontrast) .mv-confirm::backdrop {
+      body:not(.theme-hicontrast) .mv-confirm::backdrop,
+      body:not(.theme-hicontrast) .arv::backdrop {
         background: var(--scrim);
         -webkit-backdrop-filter: blur(3px);
         backdrop-filter: blur(3px);

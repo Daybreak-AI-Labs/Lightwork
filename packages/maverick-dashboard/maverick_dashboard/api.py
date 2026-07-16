@@ -68,6 +68,7 @@ from .api_schemas import (
     FlowRollbackIn,
     FlowRunIn,
     FlowSaveIn,
+    FollowupsIn,
     GoalEventOut,
     GoalEventsResponse,
     GoalIn,
@@ -900,6 +901,59 @@ async def attach_from_source(
     bg.add_task(generate_companions, w, goal_id)
     return AttachmentOut(id=aid, filename=stored.filename, mime=stored.mime,
                          size_bytes=stored.size_bytes, sha256=stored.sha256)
+
+
+@router.get("/assess/sessions")
+async def list_assessment_sessions(request: Request) -> dict:
+    """Summaries of every saved third-party assessment session (PIA / AIRA /
+    vendor risk...), newest first -- the reviewer's worklist. ``status`` is
+    ``pending_review`` or ``needs_more`` (open follow-ups outstanding)."""
+    require_permission(request, "operate")
+    from maverick.assessment import list_saved
+    return {"sessions": await run_in_threadpool(list_saved)}
+
+
+@router.get("/assess/sessions/{assessment_id}")
+async def get_assessment_session(request: Request, assessment_id: str) -> dict:
+    """One full assessment record: subject, every answer with the
+    respondent's notes, scored findings, rating, and the follow-up thread.
+    This is what the review pop-out renders."""
+    require_permission(request, "operate")
+    from maverick.assessment import load_saved
+    record = await run_in_threadpool(load_saved, assessment_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    return record
+
+
+@router.post("/assess/sessions/{assessment_id}/followups")
+async def add_assessment_followups(
+    request: Request, assessment_id: str, body: FollowupsIn,
+) -> dict:
+    """Send follow-up questions back to the respondent. The record flips to
+    ``needs_more`` until every follow-up is answered; the respondent-facing
+    harness (intake portal) picks them up and re-interviews. Audited."""
+    require_permission(request, "operate")
+    from maverick.assessment import add_followups
+    who = ""
+    try:
+        principal = getattr(request.state, "principal", None)
+        who = str(getattr(principal, "id", "") or "") if principal else ""
+    except Exception:  # pragma: no cover -- attribution is best-effort
+        who = ""
+    record = await run_in_threadpool(
+        add_followups, assessment_id[:64], body.questions, who or "reviewer")
+    if record is None:
+        raise HTTPException(status_code=404,
+                            detail="no such assessment (or empty questions)")
+    try:
+        from maverick.audit import record as audit_record
+        audit_record("ASSESSMENT_FOLLOWUP", agent=who or "reviewer",
+                     assessment=assessment_id[:64],
+                     questions=len(body.questions))
+    except Exception:  # pragma: no cover -- audit is best-effort here
+        pass
+    return record
 
 
 @router.get("/assessment-memory/similar")

@@ -2,7 +2,7 @@
 {% block title %}Privacy intake — {{ case.subject }}{% endblock %}
 {% block body %}
 <style>
-  /* Co-work upload zone + discovery, scoped to the intake page. */
+  /* Co-work upload zone + discovery + delegation, scoped to the intake page. */
   .dropzone {
     border: 1.5px dashed var(--line); border-radius: 12px;
     padding: 26px 18px; text-align: center; cursor: pointer;
@@ -26,14 +26,93 @@
               padding: 2px 8px; border-radius: 99px; border: 1px solid var(--accent-dim); color: var(--accent); }
   .suggest-btn { border-color: var(--accent-dim) !important; }
   .memo { border-color: var(--accent-dim); background: var(--accent-glow); }
+  .delegated-chip { font-size: 12px; color: var(--medium); background: var(--medium-bg);
+                    border-radius: 20px; padding: 3px 10px; font-weight: 600; }
+  dialog.dlg { margin: auto; background: var(--bg-card); color: var(--ink); border: 1px solid var(--line);
+               border-radius: 14px; padding: 22px; width: min(430px, calc(100vw - 2rem)); }
+  dialog.dlg::backdrop { background: rgba(0,0,0,.55); }
+  dialog.dlg h3 { font-size: 16px; margin-bottom: 4px; }
+  dialog.dlg .sub { color: var(--ink-dim); font-size: 13px; margin-bottom: 14px; }
+  .fu-q { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .fu-q .qtext { font-weight: 600; margin-bottom: 8px; }
+  .fu-row { display: flex; gap: 8px; }
+  .fu-row input { flex: 1; }
 </style>
 
 <div class="page-head">
   <div class="eyebrow">Privacy assessment · {{ case.id }}</div>
-  <h1>Privacy questionnaire — {{ case.subject }}</h1>
-  <p>A few quick questions about how {{ case.subject }} handles personal data. This takes about
-     two minutes. Your answers feed a first-pass risk assessment that the privacy team reviews.</p>
+  {% if delegation %}
+    <h1>{{ delegation.from_name.split(' ')[0] }} needs your input — {{ case.subject }}</h1>
+    <p>{{ delegation.from_name }} delegated {{ questions|length }} question(s) about
+       {{ case.subject }} to you{% if delegation.note %} — <em>“{{ delegation.note }}”</em>{% endif %}.
+       Your answers go straight into the same assessment, credited to you.</p>
+  {% elif followups %}
+    <h1>Quick follow-up — {{ case.subject }}</h1>
+    <p>The privacy team reviewed your answers and needs a little more detail.
+       Your earlier answers are saved; only the {{ followups|length }} question(s) below are new.</p>
+  {% else %}
+    <h1>Privacy questionnaire — {{ case.subject }}</h1>
+    <p>A few quick questions about how {{ case.subject }} handles personal data. This takes about
+       two minutes. Your answers feed a first-pass risk assessment that the privacy team reviews.
+       Not your area? Delegate any question to a colleague as you go.</p>
+  {% endif %}
 </div>
+
+{% if followups %}
+  {# ---- Follow-up round: free-text answers to the reviewer's questions ---- #}
+  <div class="card memo">
+    <div class="flow"><strong>💬 From your privacy team</strong>
+      <span class="muted">answers land straight back in their review queue.</span></div>
+  </div>
+  <div id="fuList">
+    {% for f in followups %}
+    <div class="fu-q" data-fu="{{ f.id }}">
+      <div class="qtext">{{ f.question }}</div>
+      <div class="fu-row">
+        <input type="text" placeholder="Your answer…" aria-label="Answer: {{ f.question }}">
+        <button class="btn sm" type="button">Send</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="card" id="fuDone" style="display:none; border-color: var(--low);">
+    <div class="flow"><span class="risk low">✓ all answered</span>
+      <span class="muted">Thanks — the privacy team has everything they need.</span></div>
+  </div>
+<script>
+document.querySelectorAll('.fu-q').forEach(function (row) {
+  var btn = row.querySelector('button'), input = row.querySelector('input');
+  async function send() {
+    var val = input.value.trim();
+    if (!val) return;
+    btn.disabled = true; btn.textContent = 'Sending…';
+    var fd = new FormData();
+    fd.append('followup_id', row.dataset.fu);
+    fd.append('answer', val);
+    var r = await (await fetch('/intake/{{ case.id }}/followup-answer', {method: 'POST', body: fd})).json();
+    if (r.ok) {
+      btn.textContent = 'Sent ✓';
+      input.disabled = true;
+      if (r.remaining === 0) document.getElementById('fuDone').style.display = 'block';
+    } else {
+      btn.disabled = false; btn.textContent = 'Send';
+    }
+  }
+  btn.addEventListener('click', send);
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter') send(); });
+});
+</script>
+
+{% else %}
+{# ---- Normal / delegate interview ---- #}
+{% if delegation %}
+<div class="card memo">
+  <div class="flow">
+    <strong>🤝 Delegated to you</strong>
+    <span class="muted">Just these {{ questions|length }} question(s) — everything else stays with {{ delegation.from_name }}.</span>
+  </div>
+</div>
+{% endif %}
 
 <div class="card memo" id="memory" style="display:none;">
   <div class="flow">
@@ -47,6 +126,7 @@
   <div id="controls" style="margin-top:16px;"></div>
 </div>
 
+{% if not delegation %}
 <div class="card">
   <h2>Attach documents</h2>
   <p class="muted" style="margin-bottom:10px;">DPA, SOW, contract, security overview — anything that helps the review.</p>
@@ -68,6 +148,7 @@
   </div>
   <div id="foundDocs"></div>
 </div>
+{% endif %}
 
 {% if done %}
 <div class="card" style="border-color: var(--low);">
@@ -82,7 +163,7 @@
 <div id="submitBar" class="card" style="display:none;">
   <div class="flow">
     <strong>All set.</strong>
-    <span class="muted">Submit your answers for the privacy team's first-pass review.</span>
+    <span class="muted" id="submitNote">Submit your answers for the privacy team's first-pass review.</span>
     <span class="spacer"></span>
     <form method="post" action="/intake/{{ case.id }}/submit">
       <button class="btn" type="submit">Submit for review →</button>
@@ -90,16 +171,43 @@
   </div>
 </div>
 
+{% if not delegation %}
 <div class="flow" style="margin-top:8px;">
   <button class="btn ghost sm" id="autofill">⚡ Auto-fill (presenter)</button>
   <span class="faint" style="font-size:12px;">Fills realistic demo answers so you can skip the typing on stage.</span>
 </div>
+{% endif %}
+
+<dialog class="dlg" id="delegateDlg" aria-labelledby="dlg-title">
+  <h3 id="dlg-title">Ask a colleague</h3>
+  <p class="sub" id="dlg-scope"></p>
+  <label class="field"><span class="lbl">Their name</span>
+    <input type="text" id="dlg-name" placeholder="Alex Kim"></label>
+  <label class="field"><span class="lbl">Their email</span>
+    <input type="email" id="dlg-email" placeholder="alex.kim@company.com"></label>
+  <label class="field"><span class="lbl">Note (optional)</span>
+    <input type="text" id="dlg-note" placeholder="You own the security answers — can you take these?"></label>
+  <div class="flow">
+    <button class="btn" id="dlg-send" type="button">Send them a link</button>
+    <button class="btn ghost" id="dlg-cancel" type="button">Cancel</button>
+    <span class="faint" id="dlg-status" style="font-size:12px;"></span>
+  </div>
+</dialog>
 
 <script>
 const CASE = "{{ case.id }}";
+const DTOKEN = "{{ delegation.token if delegation else '' }}";
 const QUESTIONS = {{ questions|tojson }};
+const PRE_DELEGATED = {{ (case.delegations or {})|tojson }};
 let idx = 0;
 let SUGGEST = {};
+const delegated = {};   // qid -> colleague name (skip in this session's flow)
+Object.keys(PRE_DELEGATED).forEach(function (t) {
+  if (t === DTOKEN) return;  // a delegate still answers their own set
+  (PRE_DELEGATED[t].qids || []).forEach(function (qid) {
+    delegated[qid] = PRE_DELEGATED[t].to_name;
+  });
+});
 const thread = document.getElementById('thread');
 const controls = document.getElementById('controls');
 const submitBar = document.getElementById('submitBar');
@@ -121,16 +229,36 @@ function bubble(who, text) {
 const SEVLABEL = {high:'sev-high', medium:'sev-medium', low:'sev-low'};
 const ANSLABEL = {yes:'Yes', no:'No', na:'N/A', unknown:'Not sure'};
 
+function advancePastDelegated() {
+  while (idx < QUESTIONS.length && delegated[QUESTIONS[idx].id]) {
+    bubble('bot', QUESTIONS[idx].prompt);
+    bubble('me', '→ sent to ' + delegated[QUESTIONS[idx].id]);
+    idx++;
+  }
+}
+
 function ask() {
+  advancePastDelegated();
   if (idx >= QUESTIONS.length) {
     controls.innerHTML = '';
+    const waiting = Object.keys(delegated).filter(q => !ANSWERED[q]).length;
+    if (DTOKEN) {
+      bubble('bot', "That's everything on your list — thank you! You can close this tab.");
+      return;
+    }
     bubble('bot', "That's everything — thank you. You can attach documents below, then submit for review.");
+    if (waiting) {
+      document.getElementById('submitNote').textContent =
+        'Submit now — delegated answers merge in as your colleagues reply.';
+    }
     submitBar.style.display = 'block';
     return;
   }
   bubble('bot', QUESTIONS[idx].prompt);
   renderControls();
 }
+
+const ANSWERED = {};
 
 // Separate from ask() so late-arriving insights can refresh the buttons of
 // the question already on screen without re-bubbling its text.
@@ -160,6 +288,14 @@ function renderControls() {
     btn.onclick = () => answer(q, val, lbl);
     wrap.appendChild(btn);
   });
+  if (!DTOKEN) {
+    const del = document.createElement('button');
+    del.className = 'btn ghost sm';
+    del.textContent = '🤝 Ask a colleague';
+    del.title = 'Delegate this question (or the rest) to someone who knows';
+    del.onclick = () => openDelegate(q);
+    wrap.appendChild(del);
+  }
   const sec = document.createElement('span');
   sec.className = 'faint';
   sec.style.cssText = 'font-size:12px; margin-left:auto;';
@@ -178,115 +314,167 @@ async function answer(q, val, lbl) {
   const fd = new FormData();
   fd.append('question_id', q.id);
   fd.append('answer', val);
+  if (DTOKEN) fd.append('d', DTOKEN);
   await fetch(`/intake/${CASE}/answer`, {method:'POST', body:fd});
+  ANSWERED[q.id] = true;
   idx++;
   answering = false;
   setTimeout(ask, 250);
 }
 
+// ---- Delegation dialog -----------------------------------------------------
+const dlg = document.getElementById('delegateDlg');
+let dlgScope = { qids: [], label: '' };
+
+function openDelegate(q) {
+  const remaining = QUESTIONS.slice(idx).map(x => x.id).filter(id => !delegated[id]);
+  dlgScope = { qids: [q.id], label: 'this question' };
+  const scopeEl = document.getElementById('dlg-scope');
+  scopeEl.innerHTML = '';
+  const mk = (label, qids, checked) => {
+    const l = document.createElement('label');
+    l.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:4px; cursor:pointer;';
+    const r = document.createElement('input');
+    r.type = 'radio'; r.name = 'dlg-which'; r.checked = checked;
+    r.onchange = () => { dlgScope = { qids: qids, label: label }; };
+    l.append(r, document.createTextNode(label));
+    return l;
+  };
+  scopeEl.appendChild(mk('Just this question', [q.id], true));
+  if (remaining.length > 1) {
+    scopeEl.appendChild(mk('This + all remaining questions (' + remaining.length + ')', remaining, false));
+  }
+  document.getElementById('dlg-status').textContent = '';
+  if (dlg.showModal) dlg.showModal();
+}
+
+document.getElementById('dlg-cancel').onclick = () => dlg.close();
+document.getElementById('dlg-send').onclick = async () => {
+  const name = document.getElementById('dlg-name').value.trim();
+  const email = document.getElementById('dlg-email').value.trim();
+  const note = document.getElementById('dlg-note').value.trim();
+  const st = document.getElementById('dlg-status');
+  if (!email || email.indexOf('@') < 0) { st.textContent = 'A valid email is needed.'; return; }
+  st.textContent = 'Sending…';
+  const r = await (await fetch(`/intake/${CASE}/delegate`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({questions: dlgScope.qids, to_name: name || 'a colleague',
+                          to_email: email, note: note}),
+  })).json();
+  if (!r.ok) { st.textContent = r.error || 'Could not delegate.'; return; }
+  dlgScope.qids.forEach(qid => { delegated[qid] = name || 'a colleague'; });
+  dlg.close();
+  bubble('bot', '📨 Sent ' + dlgScope.qids.length + ' question(s) to ' + (name || email) +
+                ' — their answers will merge into this assessment.');
+  ask();
+};
+
 // ---- Co-work uploads: drag & drop, multi-file, per-file progress ----------
 const dropzone = document.getElementById('dropzone');
-const fileInput = document.getElementById('fileInput');
-const uploadsBox = document.getElementById('uploads');
+if (dropzone) {
+  const fileInput = document.getElementById('fileInput');
+  const uploadsBox = document.getElementById('uploads');
 
-function chip(name) {
-  const c = document.createElement('div');
-  c.className = 'filechip';
-  c.innerHTML = '<span>📎</span><span class="nm mono"></span>' +
-    '<span class="meta muted">uploading…</span>';
-  c.querySelector('.nm').textContent = name;
-  const bar = document.createElement('div');
-  bar.className = 'bar';
-  c.appendChild(bar);
-  uploadsBox.appendChild(c);
-  return c;
-}
-
-function uploadOne(file) {
-  const c = chip(file.name);
-  const bar = c.querySelector('.bar');
-  const meta = c.querySelector('.meta');
-  const xhr = new XMLHttpRequest();
-  xhr.open('POST', `/intake/${CASE}/upload`);
-  xhr.upload.onprogress = (ev) => {
-    if (ev.lengthComputable) bar.style.width = Math.round(ev.loaded / ev.total * 100) + '%';
-  };
-  xhr.onload = () => {
-    let r = {};
-    try { r = JSON.parse(xhr.responseText); } catch (e) {}
-    if (xhr.status === 200 && r.ok) {
-      bar.style.width = '100%';
-      meta.textContent = (file.size/1024).toFixed(0) + ' KB · attached ✓';
-    } else {
-      meta.textContent = 'rejected: ' + (r.error || xhr.status);
-      c.style.borderColor = 'var(--high, #c0392b)';
-      bar.remove();
-    }
-  };
-  xhr.onerror = () => { meta.textContent = 'network error'; bar.remove(); };
-  const fd = new FormData();
-  fd.append('file', file);
-  xhr.send(fd);
-}
-
-function handleFiles(list) { [...list].forEach(uploadOne); }
-
-dropzone.onclick = () => fileInput.click();
-dropzone.onkeydown = (e) => {
-  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
-};
-fileInput.onchange = () => { handleFiles(fileInput.files); fileInput.value = ''; };
-['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, (e) => {
-  e.preventDefault(); dropzone.classList.add('drag');
-}));
-['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, (e) => {
-  e.preventDefault(); dropzone.classList.remove('drag');
-}));
-dropzone.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
-
-// ---- Doc discovery: find the SOW/contract/DPA in connected sources --------
-document.getElementById('findDocs').onclick = async () => {
-  const box = document.getElementById('foundDocs');
-  box.innerHTML = '<div class="muted" style="margin-top:10px;">Searching connected sources…</div>';
-  const r = await (await fetch(`/intake/${CASE}/discover`, {method:'POST'})).json();
-  box.innerHTML = '';
-  if (!r.ok || !(r.hits || []).length) {
-    box.innerHTML = '<div class="muted" style="margin-top:10px;">No related documents found in connected sources.</div>';
-    return;
+  function chip(name) {
+    const c = document.createElement('div');
+    c.className = 'filechip';
+    c.innerHTML = '<span>📎</span><span class="nm mono"></span>' +
+      '<span class="meta muted">uploading…</span>';
+    c.querySelector('.nm').textContent = name;
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    c.appendChild(bar);
+    uploadsBox.appendChild(c);
+    return c;
   }
-  r.hits.forEach(h => {
-    const row = document.createElement('div');
-    row.className = 'found';
-    const badge = document.createElement('span');
-    badge.className = 'srcbadge';
-    badge.textContent = h.source === 'msgraph' ? 'SharePoint' : h.source;
-    const nm = document.createElement('span');
-    nm.className = 'nm mono';
-    nm.style.cssText = 'flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
-    nm.textContent = h.name;
-    const attach = document.createElement('button');
-    attach.className = 'btn ghost sm';
-    attach.textContent = 'Attach';
-    attach.onclick = async () => {
-      attach.disabled = true; attach.textContent = 'Attaching…';
-      const rr = await (await fetch(`/intake/${CASE}/attach-found`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({source: h.source, doc_id: h.doc_id, name: h.name, ref: h.ref}),
-      })).json();
-      if (rr.ok) {
-        attach.textContent = 'Attached ✓';
-        const c = chip(h.name);
-        c.querySelector('.meta').textContent = 'from ' + badge.textContent + ' ✓';
-        c.querySelector('.bar').style.width = '100%';
+  window._chip = chip;
+
+  function uploadOne(file) {
+    const c = chip(file.name);
+    const bar = c.querySelector('.bar');
+    const meta = c.querySelector('.meta');
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/intake/${CASE}/upload`);
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable) bar.style.width = Math.round(ev.loaded / ev.total * 100) + '%';
+    };
+    xhr.onload = () => {
+      let r = {};
+      try { r = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status === 200 && r.ok) {
+        bar.style.width = '100%';
+        meta.textContent = (file.size/1024).toFixed(0) + ' KB · attached ✓';
       } else {
-        attach.textContent = 'Failed';
-        attach.title = rr.error || '';
+        meta.textContent = 'rejected: ' + (r.error || xhr.status);
+        c.style.borderColor = 'var(--high, #c0392b)';
+        bar.remove();
       }
     };
-    row.append(badge, nm, attach);
-    box.appendChild(row);
-  });
-};
+    xhr.onerror = () => { meta.textContent = 'network error'; bar.remove(); };
+    const fd = new FormData();
+    fd.append('file', file);
+    xhr.send(fd);
+  }
+
+  function handleFiles(list) { [...list].forEach(uploadOne); }
+
+  dropzone.onclick = () => fileInput.click();
+  dropzone.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+  };
+  fileInput.onchange = () => { handleFiles(fileInput.files); fileInput.value = ''; };
+  ['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, (e) => {
+    e.preventDefault(); dropzone.classList.add('drag');
+  }));
+  ['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, (e) => {
+    e.preventDefault(); dropzone.classList.remove('drag');
+  }));
+  dropzone.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+
+  // ---- Doc discovery: find the SOW/contract/DPA in connected sources ------
+  document.getElementById('findDocs').onclick = async () => {
+    const box = document.getElementById('foundDocs');
+    box.innerHTML = '<div class="muted" style="margin-top:10px;">Searching connected sources…</div>';
+    const r = await (await fetch(`/intake/${CASE}/discover`, {method:'POST'})).json();
+    box.innerHTML = '';
+    if (!r.ok || !(r.hits || []).length) {
+      box.innerHTML = '<div class="muted" style="margin-top:10px;">No related documents found in connected sources.</div>';
+      return;
+    }
+    r.hits.forEach(h => {
+      const row = document.createElement('div');
+      row.className = 'found';
+      const badge = document.createElement('span');
+      badge.className = 'srcbadge';
+      badge.textContent = h.source === 'msgraph' ? 'SharePoint' : h.source;
+      const nm = document.createElement('span');
+      nm.className = 'nm mono';
+      nm.style.cssText = 'flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+      nm.textContent = h.name;
+      const attach = document.createElement('button');
+      attach.className = 'btn ghost sm';
+      attach.textContent = 'Attach';
+      attach.onclick = async () => {
+        attach.disabled = true; attach.textContent = 'Attaching…';
+        const rr = await (await fetch(`/intake/${CASE}/attach-found`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({source: h.source, doc_id: h.doc_id, name: h.name, ref: h.ref}),
+        })).json();
+        if (rr.ok) {
+          attach.textContent = 'Attached ✓';
+          const c = window._chip(h.name);
+          c.querySelector('.meta').textContent = 'from ' + badge.textContent + ' ✓';
+          c.querySelector('.bar').style.width = '100%';
+        } else {
+          attach.textContent = 'Failed';
+          attach.title = rr.error || '';
+        }
+      };
+      row.append(badge, nm, attach);
+      box.appendChild(row);
+    });
+  };
+}
 
 // ---- Learning: what the org already knows about systems like this ---------
 (async () => {
@@ -296,18 +484,20 @@ document.getElementById('findDocs').onclick = async () => {
     SUGGEST = r.suggestions || {};
     renderControls();  // refresh the on-screen question with suggestion chips
     const sim = r.similar || [];
-    if (sim.length) {
+    const memo = document.getElementById('memory');
+    if (sim.length && memo) {
       const bits = sim.slice(0, 2).map(s =>
         `${s.subject} was rated ${String(s.risk_rating).toUpperCase()}`);
       document.getElementById('memoryText').textContent =
         bits.join('; ') + '. Questions below show one-click suggested answers ' +
         'from those assessments — you confirm, nothing is auto-answered.';
-      document.getElementById('memory').style.display = 'block';
+      memo.style.display = 'block';
     }
   } catch (e) { /* learning is advisory; the intake works without it */ }
 })();
 
-document.getElementById('autofill').onclick = async () => {
+const autofillBtn = document.getElementById('autofill');
+if (autofillBtn) autofillBtn.onclick = async () => {
   await fetch(`/intake/${CASE}/autofill`, {method:'POST'});
   bubble('bot', "(Auto-filled with realistic demo answers.)");
   idx = QUESTIONS.length;
@@ -315,11 +505,15 @@ document.getElementById('autofill').onclick = async () => {
 };
 
 {% if done %}
-document.getElementById('autofill').style.display = 'none';
+if (autofillBtn) autofillBtn.style.display = 'none';
 bubble('bot', "This assessment has already been submitted — thank you!");
+{% elif delegation %}
+bubble('bot', {{ ("Hi " ~ delegation.to_name.split(' ')[0] ~ "! Just a few questions " ~ delegation.from_name.split(' ')[0] ~ " needs your expertise on.")|tojson }});
+ask();
 {% else %}
-bubble('bot', "Hi! I'll ask a few questions about how {{ case.subject }} handles personal data.");
+bubble('bot', {{ ("Hi! I'll ask a few questions about how " ~ case.subject ~ " handles personal data.")|tojson }});
 ask();
 {% endif %}
 </script>
+{% endif %}
 {% endblock %}

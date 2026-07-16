@@ -2,51 +2,184 @@
 {% set active = 'onetrust' %}
 {% block title %}OneTrust — Assessments{% endblock %}
 {% block body %}
+<style>
+  /* A OneTrust-style GRC console rendered as an app window: dark navy rail,
+     signature green accents, light content. Wordmark is plain text — no
+     trademarked artwork. */
+  .ot { border-radius: 12px; overflow: hidden; border: 1px solid #0d2b40;
+        box-shadow: 0 18px 60px rgba(0,0,0,.5); background: #f5f7f8; color: #24333f;
+        display: grid; grid-template-columns: 200px 1fr; min-height: 480px;
+        font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif; }
+  .ot__rail { background: #00263e; color: #b8c9d4; padding: 14px 0; font-size: 13.5px; }
+  .ot__logo { display: flex; align-items: center; gap: 8px; padding: 4px 16px 16px; }
+  .ot__logo .mark { width: 22px; height: 22px; border-radius: 50%;
+                    background: conic-gradient(#78be20 0 65%, #ffffff33 65% 100%); }
+  .ot__logo b { color: #fff; font-size: 15px; letter-spacing: -0.01em; }
+  .ot__nav div { padding: 8px 16px; display: flex; align-items: center; gap: 10px; cursor: default; }
+  .ot__nav div:hover { background: #ffffff10; color: #fff; }
+  .ot__nav div.on { background: #ffffff18; color: #fff; border-left: 3px solid #78be20; padding-left: 13px; }
+  .ot__main { padding: 0; }
+  .ot__top { display: flex; align-items: center; gap: 14px; background: #ffffff;
+             border-bottom: 1px solid #dde4e9; padding: 12px 22px; }
+  .ot__top h2 { font-size: 17px; font-weight: 700; color: #14242f; margin: 0; }
+  .ot__top .crumb { color: #7a8a96; font-size: 12.5px; }
+  .ot__newbtn { margin-left: auto; background: #78be20; color: #113300; border: none;
+                border-radius: 4px; padding: 8px 16px; font-weight: 700; font-size: 13px; }
+  .ot__content { padding: 18px 22px; }
+  .ot__filters { display: flex; gap: 8px; margin-bottom: 14px; }
+  .ot__filters span { font-size: 12.5px; color: #51626f; border: 1px solid #cfd9e0;
+                      border-radius: 16px; padding: 4px 12px; background: #fff; }
+  .ot__filters span.on { background: #eaf6da; border-color: #78be20; color: #3c6b00; font-weight: 600; }
+  table.ot__tbl { width: 100%; border-collapse: collapse; background: #fff; font-size: 13.5px;
+                  border: 1px solid #dde4e9; border-radius: 8px; overflow: hidden; }
+  .ot__tbl th { text-align: left; background: #f0f3f5; color: #51626f; font-size: 11.5px;
+                text-transform: uppercase; letter-spacing: .05em; padding: 10px 14px;
+                border-bottom: 1px solid #dde4e9; }
+  .ot__tbl td { padding: 12px 14px; border-bottom: 1px solid #eef1f4; vertical-align: middle; }
+  .ot__tbl tr:hover td { background: #f7fbf1; cursor: pointer; }
+  .ot__id { color: #2a7ab0; font-weight: 600; font-family: var(--mono); font-size: 12.5px; }
+  .ot__chip { display: inline-block; font-size: 11.5px; font-weight: 700; border-radius: 3px;
+              padding: 3px 10px; text-transform: capitalize; }
+  .ot__chip.completed { background: #eaf6da; color: #3c6b00; }
+  .ot__chip.high   { background: #fde8e8; color: #b42318; }
+  .ot__chip.medium { background: #fef2dd; color: #925f0a; }
+  .ot__chip.low, .ot__chip.minimal { background: #eaf6da; color: #3c6b00; }
+  .ot__empty { background: #fff; border: 1px dashed #cfd9e0; border-radius: 8px;
+               padding: 48px 20px; text-align: center; color: #7a8a96; font-size: 14px; }
+
+  /* Record detail pop-out */
+  dialog.ot-dlg { border: none; border-radius: 10px; padding: 0; margin: auto;
+                  width: min(720px, calc(100vw - 2rem)); max-height: 84vh;
+                  box-shadow: 0 24px 80px rgba(0,0,0,.55); color: #24333f;
+                  font-family: "Segoe UI", -apple-system, sans-serif; }
+  dialog.ot-dlg::backdrop { background: rgba(4, 20, 33, .6); }
+  .otd__bar { display: flex; align-items: center; gap: 12px; background: #00263e; color: #fff;
+              padding: 12px 18px; font-weight: 600; font-size: 14px; }
+  .otd__bar .ot__id { color: #9fd456; }
+  .otd__bar button { margin-left: auto; background: transparent; border: none; color: #fff;
+                     font-size: 16px; cursor: pointer; padding: 2px 8px; border-radius: 4px; }
+  .otd__bar button:hover { background: #ffffff22; }
+  .otd__body { padding: 16px 20px; overflow-y: auto; max-height: calc(84vh - 60px); background: #f5f7f8; }
+  .otd__kv { display: grid; grid-template-columns: 150px 1fr; gap: 8px 14px; font-size: 13.5px;
+             background: #fff; border: 1px solid #dde4e9; border-radius: 8px; padding: 14px 16px;
+             margin: 0 0 14px; }
+  .otd__kv dt { color: #7a8a96; }
+  .otd__kv dd { margin: 0; }
+  .otd__sec { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+              color: #51626f; margin: 14px 0 8px; }
+  .otd__finding { background: #fff; border: 1px solid #dde4e9; border-left: 4px solid #cfd9e0;
+                  border-radius: 6px; padding: 10px 14px; margin-bottom: 8px; font-size: 13.5px; }
+  .otd__finding.high { border-left-color: #b42318; }
+  .otd__finding.medium { border-left-color: #e8a13c; }
+  .otd__finding.low { border-left-color: #78be20; }
+  .otd__finding .g { color: #51626f; font-size: 12.5px; margin-top: 3px; }
+</style>
+
 <div class="sim-banner"><span class="sim-chip">Simulated</span>
   <span>Stand-in for the customer's <b>OneTrust</b> tenant. Lightwork filed these records through the
-  <b>real</b> OneTrust integration tool (<span class="mono">POST /api/assessment/v2/assessments</span>,
+  <b>real</b> integration tool (<span class="mono">POST /api/assessment/v2/assessments</span>,
   confirm-gated) — repoint <span class="mono">ONETRUST_HOSTNAME</span> at a live sandbox and it's identical.</span></div>
 
-<div class="page-head">
-  <div class="eyebrow">Assessment Automation</div>
-  <h1>Assessments</h1>
-  <p>Completed privacy impact assessments, filed automatically on approval — pre-populated with the
-     risk rating, findings, and required controls.</p>
+<div class="ot">
+  <div class="ot__rail">
+    <div class="ot__logo"><span class="mark"></span><b>OneTrust</b></div>
+    <div class="ot__nav">
+      <div>▦ Dashboard</div>
+      <div class="on">☰ Assessments</div>
+      <div>◈ Inventory</div>
+      <div>⚑ Risks</div>
+      <div>✉ Data Mapping</div>
+      <div>⚙ Settings</div>
+    </div>
+  </div>
+  <div class="ot__main">
+    <div class="ot__top">
+      <div>
+        <div class="crumb">Assessment Automation / Assessments</div>
+        <h2>Assessments</h2>
+      </div>
+      <button class="ot__newbtn" type="button">＋ New Assessment</button>
+    </div>
+    <div class="ot__content">
+      <div class="ot__filters">
+        <span class="on">All ({{ assessments|length }})</span>
+        <span>In Progress (0)</span>
+        <span>Completed ({{ assessments|length }})</span>
+      </div>
+      {% if assessments %}
+      <table class="ot__tbl">
+        <tr><th>ID</th><th>Assessment</th><th>Subject</th><th>Template</th><th>Risk</th><th>Status</th></tr>
+        {% for a in assessments %}
+        <tr data-i="{{ loop.index0 }}" role="button" tabindex="0" aria-label="Open {{ a.assessment_id }}">
+          <td class="ot__id">{{ a.assessment_id }}</td>
+          <td><b>{{ a.name }}</b></td>
+          <td>{{ a.subject }}</td>
+          <td>{{ a.template }}</td>
+          <td><span class="ot__chip {{ a.risk_level }}">{{ a.risk_level }}</span></td>
+          <td><span class="ot__chip completed">{{ a.status }}</span></td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <div class="ot__empty">No assessments yet. Approve one in the Lightwork queue and it
+        files here automatically — pre-populated with the risk rating, findings, and controls.</div>
+      {% endif %}
+    </div>
+  </div>
 </div>
 
-{% if assessments %}
-<div class="card">
-  <table>
-    <tr><th>ID</th><th>Assessment</th><th>Subject</th><th>Risk</th><th>Status</th></tr>
-    {% for a in assessments %}
-    <tr>
-      <td class="mono" style="color:var(--accent);">{{ a.assessment_id }}</td>
-      <td>{{ a.name }}<br><span class="faint" style="font-size:12px;">{{ a.template }}</span></td>
-      <td>{{ a.subject }}</td>
-      <td><span class="risk {{ a.risk_level }}">{{ a.risk_level }}</span></td>
-      <td><span class="pill state-Resolved">{{ a.status }}</span></td>
-    </tr>
-    {% endfor %}
-  </table>
-</div>
-{% for a in assessments %}
-<div class="card">
-  <div class="flow">
-    <span class="mono" style="color:var(--accent);">{{ a.assessment_id }}</span>
-    <strong>{{ a.name }}</strong>
-    <span class="spacer"></span>
-    <span class="risk {{ a.risk_level }}">{{ a.risk_level }} risk</span>
+<dialog class="ot-dlg" id="otDlg" aria-labelledby="otd-name">
+  <div class="otd__bar">
+    <span class="ot__id" id="otd-id"></span>
+    <span id="otd-name"></span>
+    <button id="otd-close" aria-label="Close">✕</button>
   </div>
-  {% if a.result and a.result.findings %}
-  <hr>
-  <div class="muted" style="font-size:13px;">
-    {{ a.result.answered }}/{{ a.result.total }} questions answered ·
-    {{ a.result.findings|length }} findings captured
-  </div>
-  {% endif %}
-</div>
-{% endfor %}
-{% else %}
-<div class="empty">No assessments filed yet. Approve one in the Approvals queue.</div>
-{% endif %}
+  <div class="otd__body" id="otd-body"></div>
+</dialog>
+
+<script>
+const RECORDS = {{ records_json | tojson }};
+const dlg = document.getElementById('otDlg');
+document.querySelectorAll('.ot__tbl tr[data-i]').forEach(function (row) {
+  function open() {
+    const r = RECORDS[Number(row.dataset.i)];
+    if (!r) return;
+    document.getElementById('otd-id').textContent = r.assessment_id;
+    document.getElementById('otd-name').textContent = r.name;
+    const b = document.getElementById('otd-body');
+    b.innerHTML = '';
+    const kv = document.createElement('dl'); kv.className = 'otd__kv';
+    [['Subject', r.subject], ['Template', r.template],
+     ['Risk level', String(r.risk_level).toUpperCase()], ['Status', r.status],
+     ['Responses', r.answered + ' / ' + r.total + ' answered'],
+     ['Filed by', 'Lightwork (governed, human-approved)']].forEach(function (p) {
+      const dt = document.createElement('dt'); dt.textContent = p[0];
+      const dd = document.createElement('dd'); dd.textContent = p[1];
+      kv.append(dt, dd);
+    });
+    b.appendChild(kv);
+    if ((r.findings || []).length) {
+      const sec = document.createElement('div'); sec.className = 'otd__sec';
+      sec.textContent = 'Findings (' + r.findings.length + ')';
+      b.appendChild(sec);
+      r.findings.forEach(function (f) {
+        const d = document.createElement('div');
+        d.className = 'otd__finding ' + (f.severity || 'low');
+        const t = document.createElement('div');
+        t.textContent = '[' + String(f.severity || '?').toUpperCase() + '] ' + (f.text || f.question || '');
+        const g = document.createElement('div'); g.className = 'g';
+        g.textContent = f.guidance || f.recommendation || '';
+        d.append(t, g);
+        b.appendChild(d);
+      });
+    }
+    dlg.showModal();
+  }
+  row.addEventListener('click', open);
+  row.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+  });
+});
+document.getElementById('otd-close').onclick = () => dlg.close();
+</script>
 {% endblock %}

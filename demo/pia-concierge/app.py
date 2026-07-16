@@ -26,6 +26,7 @@ Both processes share MAVERICK_HOME (world.db + audit chain + keys).
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import json
 import os
 from pathlib import Path
@@ -48,6 +49,8 @@ from store import STORE, Case, OneTrustAssessment, Ticket
 
 HERE = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(HERE / "templates"))
+templates.env.filters["timestamp_hm"] = (
+    lambda ts: _dt.datetime.fromtimestamp(float(ts or 0)).strftime("%H:%M"))
 
 BASE_URL = os.environ.get("PIA_BASE_URL", "http://127.0.0.1:8890")
 DASHBOARD_URL = os.environ.get("LIGHTWORK_DASHBOARD_URL", "http://127.0.0.1:8765")
@@ -425,14 +428,24 @@ async def webhook_pia(request: Request) -> JSONResponse:
 # ===========================================================================
 @app.get("/mail", response_class=HTMLResponse)
 async def mail(request: Request) -> HTMLResponse:
-    return _page(request, "mail.html", inbox=INBOX)
+    # Newest-first payload for the reading-pane pop-out; the intake link is
+    # pulled out of the body so the pane can render it as a proper button.
+    mail_json = []
+    for m in reversed(INBOX):
+        link = next((t for t in m.body.split() if t.startswith("http")), "")
+        mail_json.append({
+            "to": m.to, "subject": m.subject, "body": m.body,
+            "when": _dt.datetime.fromtimestamp(m.at).strftime("%H:%M"),
+            "link": link,
+        })
+    return _page(request, "mail.html", inbox=INBOX, mail_json=mail_json)
 
 
 # ===========================================================================
 # Intake questionnaire — requester-facing (the emailed link)
 # ===========================================================================
 @app.get("/intake/{case_id}", response_class=HTMLResponse)
-async def intake(request: Request, case_id: str) -> HTMLResponse:
+async def intake(request: Request, case_id: str, d: str = "") -> HTMLResponse:
     case = STORE.cases.get(case_id)
     if not case:
         return _page(request, "notfound.html", what=f"case {case_id}")
@@ -443,8 +456,115 @@ async def intake(request: Request, case_id: str) -> HTMLResponse:
         "severity": q.severity,
         "prompt": _INTAKE_PHRASING.get(q.id, q.text),
     } for q in tpl.questions]
+
+    # Delegate mode: an emailed ?d=<token> link scopes the interview to the
+    # questions a colleague was asked to answer.
+    delegation = None
+    if d:
+        rec = (getattr(case, "delegations", None) or {}).get(d)
+        if rec:
+            qids = set(rec["qids"])
+            questions = [q for q in questions if q["id"] in qids]
+            delegation = {"token": d, "to_name": rec["to_name"],
+                          "note": rec.get("note", ""),
+                          "from_name": case.requester}
+
+    # Follow-up mode: the privacy team sent questions back; the requester
+    # answers ONLY those (free text), then the case returns to review. A
+    # delegate link stays scoped to its delegated questions even mid-followup.
+    followups = (_open_followups(case)
+                 if case.stage == "followup" and delegation is None else [])
+
     return _page(request, "intake.html", case=case, questions=questions,
-                 done=case.stage != "intake_sent")
+                 delegation=delegation, followups=followups,
+                 done=(case.stage not in ("intake_sent", "followup")
+                       and delegation is None))
+
+
+@app.post("/intake/{case_id}/followup-answer")
+async def intake_followup_answer(
+    case_id: str,
+    followup_id: str = Form(...),
+    answer: str = Form(...),
+) -> JSONResponse:
+    """The requester answers one reviewer follow-up. Writes onto the REAL
+    assessment record; when the last one is answered the case returns to the
+    dashboard review queue."""
+    case = STORE.cases.get(case_id)
+    if not case or case.stage != "followup":
+        return JSONResponse({"ok": False}, status_code=404)
+    aid = getattr(case, "assessment_id", "")
+    from maverick.assessment import answer_followup
+    record = await asyncio.to_thread(
+        answer_followup, aid, followup_id.strip(), answer.strip(),
+        case.requester)
+    if record is None:
+        return JSONResponse({"ok": False, "error": "unknown question"},
+                            status_code=404)
+    gid = getattr(case, "goal_id", None)
+    _audit("FOLLOWUP_ANSWERED", ANALYST, gid, case=case_id,
+           followup=followup_id.strip())
+    remaining = [f for f in (record.get("followups") or []) if not f.get("answer")]
+    if not remaining:
+        case.stage = "pending_review"
+        case.log("All follow-up answers received; back with the privacy team.")
+        if gid:
+            _post_event(gid, ANALYST, "observation",
+                        "Requester answered every follow-up question. "
+                        "Assessment is back in the review queue.")
+    return JSONResponse({"ok": True, "remaining": len(remaining)})
+
+
+@app.post("/intake/{case_id}/delegate")
+async def intake_delegate(case_id: str, request: Request) -> JSONResponse:
+    """Hand specific questions (or the whole remainder) to a colleague: a
+    scoped intake link is emailed; their answers merge into the same case,
+    attributed to them."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return JSONResponse({"ok": False}, status_code=404)
+    body = await request.json()
+    qids = [str(q) for q in (body.get("questions") or []) if q][:20]
+    to_name = str(body.get("to_name", "")).strip()[:80] or "a colleague"
+    to_email = str(body.get("to_email", "")).strip()[:200]
+    note = str(body.get("note", "")).strip()[:500]
+    if not qids or not to_email or "@" not in to_email:
+        return JSONResponse({"ok": False, "error": "questions and a valid "
+                             "colleague email are required"}, status_code=400)
+    import uuid
+    token = uuid.uuid4().hex[:10]
+    dele = getattr(case, "delegations", None)
+    if dele is None:
+        dele = {}
+        case.delegations = dele  # type: ignore[attr-defined]
+    dele[token] = {"qids": qids, "to_name": to_name, "to_email": to_email,
+                   "note": note, "answered": []}
+    gid = getattr(case, "goal_id", None)
+    _audit("INTAKE_DELEGATED", ANALYST, gid, case=case_id, to=to_email,
+           questions=len(qids))
+    if gid:
+        _post_event(gid, ANALYST, "observation",
+                    f"{case.requester} delegated {len(qids)} question(s) "
+                    f"to {to_name} ({to_email}).")
+    case.log(f"Delegated {len(qids)} question(s) to {to_name}.")
+    link = f"{BASE_URL}/intake/{case_id}?d={token}"
+    await _send_email(
+        to_email,
+        f"[Action needed] {case.requester} needs your input — privacy "
+        f"assessment for {case.subject}",
+        (
+            f"Hi {to_name},\n\n"
+            f"{case.requester} is completing a privacy assessment for "
+            f"{case.subject} and delegated {len(qids)} question(s) to you"
+            + (f':\n\n    "{note}"\n' if note else ".\n")
+            + f"\nAnswer them here (takes a minute):\n\n    {link}\n\n"
+            f"— Privacy Office (automated)\n"
+        ),
+    )
+    return JSONResponse({"ok": True, "token": token,
+                         "delegated": {t: {"to_name": r["to_name"],
+                                           "qids": r["qids"]}
+                                       for t, r in dele.items()}})
 
 
 @app.post("/intake/{case_id}/answer")
@@ -453,11 +573,27 @@ async def intake_answer(
     question_id: str = Form(...),
     answer: str = Form(...),
     note: str = Form(""),
+    d: str = Form(""),
 ) -> JSONResponse:
     case = STORE.cases.get(case_id)
     if not case:
         return JSONResponse({"ok": False, "error": "unknown case"}, status_code=404)
-    case.answers[question_id] = {"answer": answer.strip().lower(), "note": note.strip()}
+    rec = {"answer": answer.strip().lower(), "note": note.strip()}
+    # A delegate's answer is attributed and only accepted for their questions.
+    if d:
+        dele = case.delegations.get(d)
+        if not dele or question_id not in dele["qids"]:
+            return JSONResponse({"ok": False, "error": "not your question"},
+                                status_code=403)
+        rec["by"] = dele["to_name"]
+        if question_id not in dele["answered"]:
+            dele["answered"].append(question_id)
+        gid = getattr(case, "goal_id", None)
+        if gid and len(dele["answered"]) == len(dele["qids"]):
+            _post_event(gid, ANALYST, "observation",
+                        f"{dele['to_name']} answered all {len(dele['qids'])} "
+                        f"delegated question(s).")
+    case.answers[question_id] = rec
     return JSONResponse({"ok": True, "answered": len(case.answers)})
 
 
@@ -621,9 +757,11 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
             except Exception:
                 continue
         result = session.evaluate()
-        # Persist where `maverick assess list` reads.
+        # Persist where `maverick assess list` reads; remember the record id
+        # so the dashboard review pop-out and the follow-up loop can find it.
         try:
             save_session(session)
+            case.assessment_id = session.id  # type: ignore[attr-defined]
         except Exception as exc:
             print(f"[assess] save_session failed: {exc}")
 
@@ -664,7 +802,9 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
             scope=f"onetrust:/api/assessment/v2/assessments · ticket {case.ticket_number}",
             detail=(f"First-pass assessment {case.id} — {result.answered}/{result.total} answered, "
                     f"{len(result.findings)} findings. Findings: {findings_txt}. "
-                    f"Required controls: {controls_txt}. Uploads: {', '.join(case.uploads) or 'none'}."),
+                    f"Required controls: {controls_txt}. Uploads: {', '.join(case.uploads) or 'none'}. "
+                    # The token the dashboard's review pop-out keys on.
+                    f"[assessment:{getattr(case, 'assessment_id', '') or 'unsaved'}]"),
             provenance="goal",
             requested_by=AGENT,
         )
@@ -710,6 +850,11 @@ async def _approval_watcher() -> None:
         try:
             pending = [c for c in STORE.cases.values() if c.stage == "pending_review"]
             for case in pending:
+                # Reviewer asked for more detail (dashboard pop-out)? Reopen
+                # the interview before looking at the approve/deny state.
+                if await asyncio.to_thread(_open_followups, case):
+                    await _reopen_for_followups(case)
+                    continue
                 status, decided_by = await asyncio.to_thread(_approval_state, case)
                 if status == "approved":
                     await _file_to_onetrust(case, decided_by)
@@ -718,6 +863,44 @@ async def _approval_watcher() -> None:
         except Exception as exc:  # pragma: no cover
             print(f"[watcher] {exc}")
         await asyncio.sleep(2)
+
+
+def _open_followups(case: Case) -> list[dict]:
+    """Unanswered reviewer follow-ups on this case's assessment record."""
+    aid = getattr(case, "assessment_id", "")
+    if not aid:
+        return []
+    try:
+        from maverick.assessment import load_saved
+        record = load_saved(aid) or {}
+        return [f for f in (record.get("followups") or []) if not f.get("answer")]
+    except Exception:  # pragma: no cover - demo resilience
+        return []
+
+
+async def _reopen_for_followups(case: Case) -> None:
+    """The privacy team sent questions back: re-interview the requester."""
+    gid = getattr(case, "goal_id", None)
+    case.stage = "followup"
+    n = len(_open_followups(case))
+    case.log(f"Privacy team asked {n} follow-up question(s); re-interviewing.")
+    _audit("FOLLOWUP_REQUESTED", ANALYST, gid, case=case.id, questions=n)
+    if gid:
+        _post_event(gid, ANALYST, "observation",
+                    f"Reviewer sent {n} follow-up question(s) back to "
+                    f"{case.requester}. Awaiting answers.")
+    intake_link = f"{BASE_URL}/intake/{case.id}"
+    await _send_email(
+        case.requester_email,
+        f"[Action needed] Follow-up questions on your privacy assessment ({case.id})",
+        (
+            f"Hi {case.requester},\n\n"
+            f"The privacy team reviewed your assessment for {case.subject} and "
+            f"needs a bit more detail — {n} quick question(s):\n\n    {intake_link}\n\n"
+            f"Your earlier answers are saved; this only covers the new questions.\n\n"
+            f"— Privacy Office (automated)\n"
+        ),
+    )
 
 
 def _approval_state(case: Case) -> tuple[str, str]:
@@ -860,7 +1043,17 @@ async def ot_list_assessments(request: Request) -> JSONResponse:
 @app.get("/onetrust", response_class=HTMLResponse)
 async def onetrust_viewer(request: Request) -> HTMLResponse:
     items = sorted(STORE.onetrust.values(), key=lambda a: a.filed_at, reverse=True)
-    return _page(request, "onetrust.html", assessments=items)
+    # Serializable payload for the record-detail pop-out.
+    records_json = [{
+        "assessment_id": a.assessment_id, "name": a.name,
+        "template": a.template, "subject": a.subject, "status": a.status,
+        "risk_level": a.risk_level,
+        "answered": (a.result or {}).get("answered", 0),
+        "total": (a.result or {}).get("total", 0),
+        "findings": (a.result or {}).get("findings", []),
+    } for a in items]
+    return _page(request, "onetrust.html", assessments=items,
+                 records_json=records_json)
 
 
 @app.get("/health")

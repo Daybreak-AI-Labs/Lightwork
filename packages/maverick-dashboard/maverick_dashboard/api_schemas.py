@@ -603,6 +603,12 @@ class UserSuitesIn(BaseModel):
     suites: list[str] = Field(default_factory=list, max_length=64)
 
 
+class FollowupsIn(BaseModel):
+    """Reviewer follow-up questions to send back to an assessment's
+    respondent (the pop-out's 'needs more detail' path)."""
+    questions: list[str] = Field(..., min_length=1, max_length=20)
+
+
 class DocDiscoverIn(BaseModel):
     """Search connected document sources (Microsoft Graph / Slack / Google
     Drive) for documents related to an assessment subject -- the SOW,

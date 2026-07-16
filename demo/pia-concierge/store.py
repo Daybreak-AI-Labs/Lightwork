@@ -63,6 +63,11 @@ class Case:
                                 # -> approved / rejected -> filed
     answers: dict[str, dict] = field(default_factory=dict)
     uploads: list[str] = field(default_factory=list)
+    # Delegated question sets: token -> {qids, to_name, to_email, note, answered}.
+    delegations: dict[str, dict] = field(default_factory=dict)
+    # The saved maverick.assessment record id (set at submit) — the dashboard
+    # review pop-out and the follow-up loop key on it.
+    assessment_id: str = ""
     result: dict[str, Any] | None = None
     controls: list[dict] = field(default_factory=list)
     approval_id: str = ""
