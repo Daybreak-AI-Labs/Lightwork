@@ -103,6 +103,7 @@ from .api_schemas import (
     TrustAgentIn,
     TrustRevokeIn,
     UserSuitesIn,
+    ValueAssumptionsIn,
     WorkflowDraftIn,
     WorkflowRefineIn,
     WorkflowSaveIn,
@@ -2967,6 +2968,76 @@ async def get_spend(request: Request) -> dict:
             }
             for e in episodes
         ],
+    }
+
+
+@router.get("/savings")
+async def get_savings(request: Request, days: int = 90) -> dict:
+    """The savings report: money saved vs the typical human cost, computed
+    from REAL completed work and the client's OWN assumptions ([value]).
+
+    ``(deliverables x hours_per_task x hourly_rate) - actual agent spend``,
+    per department and in total, over ``?days`` (clamped 1..730). Read-only;
+    with no run history yet it reports zeros, never an error, and never
+    invents a number.
+    """
+    require_permission(request, "view")
+    from maverick import savings as savings_mod
+    from maverick.config import get_value
+    days = max(1, min(int(days), 730))
+    cfg = get_value()
+    report = await run_in_threadpool(
+        savings_mod.compute, _world(), window_days=days, cfg=cfg)
+    return {
+        "enabled": cfg["enable"],
+        "report": savings_mod.to_dict(report),
+        "assumptions": {
+            "hourly_rate": cfg["hourly_rate"],
+            "hours_per_task": cfg["hours_per_task"],
+            "currency": cfg["currency"],
+            "departments": cfg["departments"],
+        },
+    }
+
+
+@router.put("/savings/assumptions")
+async def put_savings_assumptions(request: Request,
+                                  body: ValueAssumptionsIn) -> dict:
+    """Persist the client's cost/value inputs (their hourly rate and human
+    hours per task, plus per-department overrides) to the dashboard overlay --
+    the same [value] section config.toml carries, so the wizard and the UI
+    stay one source of truth. Operate-gated: these numbers become the ROI
+    story a client repeats to their CFO."""
+    require_permission(request, "operate")
+    from maverick.config import get_value, reset_config_cache
+
+    from . import settings_store
+    deps = {
+        name: (None if ov is None else
+               {k: v for k, v in (("hourly_rate", ov.hourly_rate),
+                                  ("hours_per_task", ov.hours_per_task))
+                if v is not None})
+        for name, ov in (body.departments or {}).items()
+    }
+    try:
+        settings_store.set_value_assumptions(
+            hourly_rate=body.hourly_rate,
+            hours_per_task=body.hours_per_task,
+            currency=body.currency,
+            departments=deps,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    reset_config_cache()
+    cfg = get_value()
+    return {
+        "saved": True,
+        "assumptions": {
+            "hourly_rate": cfg["hourly_rate"],
+            "hours_per_task": cfg["hours_per_task"],
+            "currency": cfg["currency"],
+            "departments": cfg["departments"],
+        },
     }
 
 

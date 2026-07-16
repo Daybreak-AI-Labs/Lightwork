@@ -710,6 +710,48 @@ def proof(ctx, days: int, human_cost, as_json: bool, fleet: bool) -> None:
                            f"{c['failures']} failure(s)")
 
 
+@main.command("savings")
+@click.option("--days", default=90, show_default=True,
+              help="Window to report over.")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+@click.pass_context
+def savings_cmd(ctx, days: int, as_json: bool) -> None:
+    """Money saved vs the typical human cost, from real completed work.
+
+    Uses YOUR cost assumptions ([value] in config, or the dashboard Savings
+    page): fully-loaded human hourly rate x human hours per task, compared
+    against actual agent spend. Read-only; reports zeros (never invents a
+    number) until goals have run.
+    """
+    from .. import savings as savings_mod
+    world = open_world(ctx.obj["db"])
+    r = savings_mod.compute(world, window_days=max(1, min(days, 730)))
+    if as_json:
+        import json as _json
+        click.echo(_json.dumps(savings_mod.to_dict(r), indent=2))
+        return
+    click.echo(f"Savings — last {r.window_days} days ({r.currency})")
+    click.echo("=" * 44)
+    click.echo(f"Deliverables completed : {r.deliverables}")
+    click.echo(f"Human hours given back : {r.human_hours:,.1f}h")
+    click.echo(f"Typical human cost     : ${r.human_cost:,.2f}  "
+               f"(${r.hourly_rate:,.2f}/h x {r.hours_per_task:g}h/task)")
+    click.echo(f"Actual agent spend     : ${r.agent_cost:,.2f}")
+    click.echo(f"Saved                  : ${r.saved:,.2f}")
+    if r.agent_cost:
+        click.echo(f"ROI                    : {r.roi_multiple:.1f}x")
+    if r.by_department:
+        click.echo("\nBy department (saved):")
+        for d in r.by_department[:12]:
+            if not d.deliverables and d.agent_cost == 0:
+                continue
+            click.echo(f"  {d.department:<22} {d.deliverables:>4} done  "
+                       f"${d.saved:>10,.2f} saved  "
+                       f"(${d.hourly_rate:,.2f}/h x {d.hours_per_task:g}h)")
+    click.echo("\nTune your rate/hours on the dashboard Savings page or "
+               "[value] in config.toml.")
+
+
 @main.command("fleet-memory")
 @click.option("--register", default=None, metavar="VENDOR:AGENT_ID",
               help="Register an external agent on the fleet roster.")

@@ -84,6 +84,9 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "view"},
     {"path": "/spend", "label": "Spend", "group": "Observe", "icon": "spend",
      "floor": "view", "default": "view"},
+    # ROI: money saved vs the client's own human-cost assumptions.
+    {"path": "/savings", "label": "Savings", "group": "Observe", "icon": "spend",
+     "floor": "view", "default": "view"},
     # The monthly statement behind Spend's "Billing statement" link.
     {"path": "/billing", "label": "Billing", "group": "Observe", "icon": "spend",
      "floor": "view", "default": "view", "in_nav": False},

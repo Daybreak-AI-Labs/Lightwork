@@ -1790,6 +1790,23 @@ async def spend_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/savings", response_class=HTMLResponse)
+async def savings_page(request: Request, days: int = 90) -> HTMLResponse:
+    """The value dashboard: money saved vs the typical human cost, computed
+    from real completed work and the client's OWN cost/value inputs (their
+    hourly rate + human hours per task, editable right on the page)."""
+    from maverick import savings as savings_mod
+    from maverick.config import get_value
+    days = max(1, min(days, 730))
+    cfg = get_value()
+    report = savings_mod.compute(_world(), window_days=days, cfg=cfg)
+    return templates.TemplateResponse(request, "savings.html", {
+        "days": days,
+        "cfg": cfg,
+        "report": savings_mod.to_dict(report),
+    })
+
+
 @app.get("/billing")
 async def billing_page(request: Request, format: str = "", period: str = ""):
     """Tenant billing statement: accrued charges for the current period, a

@@ -102,17 +102,31 @@ def _department_of(world: Any, goal_id: int, cache: dict[int, str]) -> str:
 
 def compute(
     world: Any, *, window_days: int = 90, human_cost: float | None = None,
-    episode_limit: int = 5000, now: float | None = None,
+    human_cost_for: Any = None, episode_limit: int = 5000,
+    now: float | None = None,
 ) -> WorkforceValue:
     """Assemble the workforce value report from existing signals (read-only).
 
     ``human_cost`` is the operator's fully-loaded cost of one comparable
-    human deliverable (defaults conservative). Never raises -- each signal
-    degrades independently to empty.
+    human deliverable (defaults conservative). ``human_cost_for`` is an optional
+    callable ``(department) -> float`` that overrides ``human_cost`` per
+    department -- how the savings dashboard prices legal work differently from
+    support (rate x hours per department). Never raises -- each signal degrades
+    independently to empty, and a callable that raises falls back to the flat
+    ``human_cost``.
     """
     ts_now = now if now is not None else time.time()
     cutoff = ts_now - window_days * 86400.0
     hc = DEFAULT_HUMAN_COST_PER_DELIVERABLE if human_cost is None else float(human_cost)
+
+    def _human_cost(dept: str) -> float:
+        if human_cost_for is None:
+            return hc
+        try:
+            return float(human_cost_for(dept))
+        except Exception:  # pragma: no cover -- a bad override never breaks the report
+            return hc
+
     out = WorkforceValue(window_days=window_days)
 
     depts: dict[str, DepartmentValue] = {}
@@ -132,10 +146,11 @@ def compute(
         dv.agent_cost += cost
         out.agent_cost += cost
         if done:
+            per = _human_cost(dept)
             dv.deliverables += 1
-            dv.human_baseline += hc
+            dv.human_baseline += per
             out.deliverables += 1
-            out.human_baseline += hc
+            out.human_baseline += per
     out.by_department = sorted(
         depts.values(), key=lambda d: d.cost_avoided, reverse=True,
     )

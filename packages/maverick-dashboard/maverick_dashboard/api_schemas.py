@@ -601,3 +601,22 @@ class TenantRoleIn(BaseModel):
 class UserSuitesIn(BaseModel):
     """Scope a principal to a set of department suites (job function)."""
     suites: list[str] = Field(default_factory=list, max_length=64)
+
+
+class ValueDeptIn(BaseModel):
+    """One department's cost/value override on the Savings page. Both fields
+    optional so a client can override just the rate; an all-None row clears
+    the override (reverts the department to the global assumption)."""
+    hourly_rate: float | None = Field(None, ge=0.0, le=100_000.0)
+    hours_per_task: float | None = Field(None, ge=0.0, le=10_000.0)
+
+
+class ValueAssumptionsIn(BaseModel):
+    """The client's own cost/value inputs behind the Savings report: what one
+    hour of comparable human work costs them (fully loaded) and how many human
+    hours one deliverable would take by hand. Bounds are sanity rails, not
+    policy -- the number is theirs. Only fields present are changed."""
+    hourly_rate: float | None = Field(None, ge=0.0, le=100_000.0)
+    hours_per_task: float | None = Field(None, ge=0.0, le=10_000.0)
+    currency: str | None = Field(None, max_length=8, pattern="^[A-Za-z]{3,8}$")
+    departments: dict[str, ValueDeptIn | None] = Field(default_factory=dict)
