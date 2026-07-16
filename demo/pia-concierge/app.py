@@ -784,6 +784,10 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
         result_dict = {
             "type": result.type, "subject": result.subject,
             "risk_rating": result.risk_rating,
+            "inherent_risk": result.inherent_risk,
+            "residual_risk": result.residual_risk,
+            "risks_in_scope": result.risks_in_scope,
+            "controls_in_place": result.controls_in_place,
             "answered": result.answered, "total": result.total,
             "findings": [{
                 "id": f.question_id, "section": f.section, "text": f.question,
@@ -802,7 +806,10 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
             f"File PIA for {case.subject} to OneTrust (risk: {result.risk_rating.upper()})",
             risk=risk,
             scope=f"onetrust:/api/assessment/v2/assessments · ticket {case.ticket_number}",
-            detail=(f"First-pass assessment {case.id} — {result.answered}/{result.total} answered, "
+            detail=(f"First-pass assessment {case.id} — inherent {result.inherent_risk.upper()} "
+                    f"→ residual {result.residual_risk.upper()} "
+                    f"({result.controls_in_place} of {result.risks_in_scope} risk areas controlled), "
+                    f"{result.answered}/{result.total} answered, "
                     f"{len(result.findings)} findings. Findings: {findings_txt}. "
                     f"Required controls: {controls_txt}. Uploads: {', '.join(case.uploads) or 'none'}. "
                     # The token the dashboard's review pop-out keys on.
@@ -1050,6 +1057,10 @@ async def onetrust_viewer(request: Request) -> HTMLResponse:
         "assessment_id": a.assessment_id, "name": a.name,
         "template": a.template, "subject": a.subject, "status": a.status,
         "risk_level": a.risk_level,
+        "inherent_risk": (a.result or {}).get("inherent_risk", a.risk_level),
+        "residual_risk": (a.result or {}).get("residual_risk", a.risk_level),
+        "controls_in_place": (a.result or {}).get("controls_in_place", 0),
+        "risks_in_scope": (a.result or {}).get("risks_in_scope", 0),
         "answered": (a.result or {}).get("answered", 0),
         "total": (a.result or {}).get("total", 0),
         "findings": (a.result or {}).get("findings", []),

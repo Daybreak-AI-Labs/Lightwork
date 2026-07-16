@@ -108,14 +108,14 @@
       </div>
       {% if assessments %}
       <table class="ot__tbl">
-        <tr><th>ID</th><th>Assessment</th><th>Subject</th><th>Template</th><th>Risk</th><th>Status</th></tr>
+        <tr><th>ID</th><th>Assessment</th><th>Subject</th><th>Inherent risk</th><th>Residual risk</th><th>Status</th></tr>
         {% for a in assessments %}
         <tr data-i="{{ loop.index0 }}" role="button" tabindex="0" aria-label="Open {{ a.assessment_id }}">
           <td class="ot__id">{{ a.assessment_id }}</td>
           <td><b>{{ a.name }}</b></td>
           <td>{{ a.subject }}</td>
-          <td>{{ a.template }}</td>
-          <td><span class="ot__chip {{ a.risk_level }}">{{ a.risk_level }}</span></td>
+          <td><span class="ot__chip {{ (a.result or {}).get('inherent_risk', a.risk_level) }}">{{ (a.result or {}).get('inherent_risk', a.risk_level) }}</span></td>
+          <td><span class="ot__chip {{ (a.result or {}).get('residual_risk', a.risk_level) }}">{{ (a.result or {}).get('residual_risk', a.risk_level) }}</span></td>
           <td><span class="ot__chip completed">{{ a.status }}</span></td>
         </tr>
         {% endfor %}
@@ -150,7 +150,10 @@ document.querySelectorAll('.ot__tbl tr[data-i]').forEach(function (row) {
     b.innerHTML = '';
     const kv = document.createElement('dl'); kv.className = 'otd__kv';
     [['Subject', r.subject], ['Template', r.template],
-     ['Risk level', String(r.risk_level).toUpperCase()], ['Status', r.status],
+     ['Inherent risk', String(r.inherent_risk).toUpperCase()],
+     ['Residual risk', String(r.residual_risk).toUpperCase() +
+        (r.risks_in_scope ? ' (' + r.controls_in_place + ' of ' + r.risks_in_scope + ' risk areas controlled)' : '')],
+     ['Status', r.status],
      ['Responses', r.answered + ' / ' + r.total + ' answered'],
      ['Filed by', 'Lightwork (governed, human-approved)']].forEach(function (p) {
       const dt = document.createElement('dt'); dt.textContent = p[0];

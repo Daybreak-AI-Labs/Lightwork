@@ -64,7 +64,9 @@
 <dialog class="arv" id="arv-dialog" aria-labelledby="arv-title">
   <div class="arv__head">
     <h3 id="arv-title">Assessment review</h3>
-    <span class="badge" id="arv-risk" style="margin-inline-start:auto;"></span>
+    <span class="badge" id="arv-inherent" style="margin-inline-start:auto;"></span>
+    <span aria-hidden="true" class="muted">→</span>
+    <span class="badge" id="arv-risk"></span>
     <button class="btn btn--ghost" id="arv-close" aria-label="Close review">✕</button>
   </div>
   <div class="arv__body" id="arv-body"><p class="muted">Loading…</p></div>
@@ -95,14 +97,27 @@
       return n;
     }
 
+    function riskClass(r) {
+      return 'badge ' + (r === 'high' ? 'blocked' : r === 'medium' ? 'warn' : 'done');
+    }
+
     function render(rec) {
       body.innerHTML = '';
-      riskEl.textContent = (rec.result && rec.result.risk_rating || '?') + ' risk';
-      riskEl.className = 'badge ' +
-        ((rec.result && rec.result.risk_rating) === 'high' ? 'blocked' :
-         (rec.result && rec.result.risk_rating) === 'medium' ? 'warn' : 'done');
+      const res = rec.result || {};
+      const inherent = res.inherent_risk || res.risk_rating || '?';
+      const residual = res.residual_risk || res.risk_rating || '?';
+      const inhEl = document.getElementById('arv-inherent');
+      inhEl.textContent = 'inherent ' + inherent;
+      inhEl.className = riskClass(inherent);
+      riskEl.textContent = 'residual ' + residual;
+      riskEl.className = riskClass(residual);
       const sub = el('p', 'muted');
-      sub.append(rec.type ? rec.type.toUpperCase() + ' · ' : '', rec.subject || '');
+      const controls = (res.risks_in_scope != null)
+        ? ' · ' + (res.controls_in_place || 0) + ' of ' + res.risks_in_scope +
+          ' in-scope risk areas controlled'
+        : '';
+      sub.append(rec.type ? rec.type.toUpperCase() + ' · ' : '',
+                 (rec.subject || '') + controls);
       body.appendChild(sub);
 
       body.appendChild(el('div', 'arv__section', 'Answers'));

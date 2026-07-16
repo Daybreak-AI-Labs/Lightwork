@@ -83,10 +83,20 @@ class Finding:
 class AssessmentResult:
     type: str
     subject: str
-    risk_rating: str          # "high" | "medium" | "low" | "minimal"
+    risk_rating: str          # "high" | "medium" | "low" | "minimal" (= residual)
     findings: list[Finding]
     answered: int
     total: int
+    # The GRC pair. INHERENT = the exposure the subject carries before
+    # crediting any control: the rollup of every risk area that applies (any
+    # in-scope answer, i.e. not "na"). RESIDUAL = what's left after the
+    # controls the answers attest to: the findings rollup (risky answers +
+    # unverified). ``risk_rating`` keeps carrying the residual value so every
+    # existing consumer (demo, OneTrust filing, memory) is unchanged.
+    inherent_risk: str = "minimal"
+    residual_risk: str = "minimal"
+    risks_in_scope: int = 0       # applicable risk areas (answered, not "na")
+    controls_in_place: int = 0    # of those, mitigated by the safe answer
 
 
 def _q(qid, section, text, risk_answer, severity, guidance=""):
@@ -526,6 +536,8 @@ class AssessmentSession:
         tpl = self.template()
         findings: list[Finding] = []
         answered = 0
+        in_scope: list[str] = []      # severities of every applicable risk area
+        controls_in_place = 0
         for q in tpl.questions:
             rec = self.answers.get(q.id)
             if not rec:
@@ -533,6 +545,10 @@ class AssessmentSession:
             ans = rec["answer"]
             if ans in {"yes", "no", "na"}:
                 answered += 1
+            if ans != "na":
+                # The risk area applies to this subject, so it counts toward
+                # the INHERENT exposure whether or not a control covers it.
+                in_scope.append(q.severity)
             if ans == q.risk_answer:
                 findings.append(Finding(
                     q.id, q.section, q.text, q.severity, ans, "risk", q.guidance,
@@ -542,13 +558,20 @@ class AssessmentSession:
                     q.id, q.section, q.text, q.severity, ans, "unverified",
                     q.guidance,
                 ))
+            elif ans != "na":
+                controls_in_place += 1    # in scope AND the safe answer
+        residual = _rollup([f.severity for f in findings])
         return AssessmentResult(
             type=self.type,
             subject=self.subject,
-            risk_rating=_rollup([f.severity for f in findings]),
+            risk_rating=residual,
             findings=findings,
             answered=answered,
             total=len(tpl.questions),
+            inherent_risk=_rollup(in_scope),
+            residual_risk=residual,
+            risks_in_scope=len(in_scope),
+            controls_in_place=controls_in_place,
         )
 
 
@@ -690,6 +713,11 @@ def list_saved() -> list[dict]:
             "type": data.get("type", "?"),
             "subject": data.get("subject", "?"),
             "risk_rating": res.get("risk_rating", "?"),
+            # Pre-pair records fall back to the single rating for both.
+            "inherent_risk": res.get("inherent_risk",
+                                     res.get("risk_rating", "?")),
+            "residual_risk": res.get("residual_risk",
+                                     res.get("risk_rating", "?")),
             "findings": len(res.get("findings", [])),
             "created_at": data.get("created_at", 0),
             "status": data.get("status", "pending_review"),
@@ -740,7 +768,10 @@ def render_result_text(result: AssessmentResult) -> str:
     head = f"{title}: {result.subject}"
     lines = [
         head, "=" * len(head), "",
-        f"Risk rating: {result.risk_rating.upper()}",
+        f"Inherent risk: {result.inherent_risk.upper()} -> "
+        f"Residual risk: {result.residual_risk.upper()} "
+        f"({result.controls_in_place} of {result.risks_in_scope} in-scope "
+        "risk areas controlled)",
         f"Completeness: {result.answered}/{result.total} answered, "
         f"{len(result.findings)} finding(s)",
         "",

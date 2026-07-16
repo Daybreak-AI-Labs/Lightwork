@@ -154,9 +154,12 @@ def _distill(payload: dict[str, Any]) -> str:
     """One compact, human-readable record for semantic recall."""
     res = payload.get("result") or {}
     findings = res.get("findings") or []
+    inherent = res.get("inherent_risk", res.get("risk_rating", "?"))
+    residual = res.get("residual_risk", res.get("risk_rating", "?"))
     lines = [
         f"Assessment {payload.get('id', '?')} ({payload.get('type', '?')}) "
-        f"of {payload.get('subject', '?')}: risk {res.get('risk_rating', '?')}, "
+        f"of {payload.get('subject', '?')}: risk {res.get('risk_rating', '?')} "
+        f"(inherent {inherent} -> residual {residual}), "
         f"{res.get('answered', 0)}/{res.get('total', 0)} answered, "
         f"{len(findings)} finding(s).",
     ]
