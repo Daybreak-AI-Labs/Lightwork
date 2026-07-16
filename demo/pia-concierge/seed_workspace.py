@@ -453,7 +453,7 @@ def seed() -> None:
     # ---- Volume: the rest of the year's program -------------------------
     import random
     rnd = random.Random(42)  # reproducible history
-    n = _generate_volume(rnd)
+    _generate_volume(rnd)
     _generate_records_volume(rnd)
 
     from maverick.assessment import list_saved
