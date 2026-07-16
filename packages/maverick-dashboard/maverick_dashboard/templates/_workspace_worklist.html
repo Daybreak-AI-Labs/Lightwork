@@ -77,7 +77,8 @@
         </tr>
       </thead>
       <tbody>
-        {% for s in sessions %}
+        {% set rows = worklist if worklist is defined else sessions %}
+        {% for s in rows %}
         <tr data-status="{{ s.status }}" data-residual="{{ s.residual_risk }}" data-due="{{ '1' if s.review_due else '' }}">
           <td><code>{{ s.id }}</code><br><span class="muted" style="font-size:var(--text-xs); text-transform:uppercase;">{{ s.type }}</span></td>
           <td>{{ s.subject }}</td>
@@ -109,6 +110,11 @@
         {% endfor %}
       </tbody>
     </table>
+    {% if rows | length < sessions | length %}
+      <p class="muted" style="font-size:var(--text-sm);">Showing the {{ rows | length }} most
+        actionable of {{ sessions | length }} records — open work and anything due for
+        re-review first. The stats above count everything.</p>
+    {% endif %}
     {% else %}
       <p class="muted">No assessments yet. They appear here the moment one is submitted —
         from the intake portal, the assessor agent, or <code>maverick assess</code>.</p>

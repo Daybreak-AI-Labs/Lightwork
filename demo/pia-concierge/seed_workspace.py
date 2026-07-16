@@ -97,6 +97,196 @@ ONETRUST_CSV = (
     '"CVs, interview notes","Job applicants","None","12 months"\n')
 
 
+# ---- Volume generation: an enterprise year, not a sketch -------------------
+# Weighted, seeded-random history so the workspaces read like a program that
+# runs hundreds of assessments a year (MVW-scale is 1500+; we seed a few
+# hundred so pages stay snappy while the numbers feel real).
+
+VENDORS = [
+    "Acme Corp", "Globex GmbH", "Initech LLC", "Umbrella Analytics",
+    "Stark Logistics", "Wayne Facilities", "Hooli Cloud", "Vandelay Imports",
+    "Pied Piper CDN", "Aviato Travel", "Soylent Catering", "Wonka Rewards",
+    "Cyberdyne Robotics", "Tyrell Staffing", "Oceanic Bookings",
+    "Dunder Mifflin Print", "Prestige Worldwide Events", "Gringotts Payments",
+    "Nakatomi Security", "Duff Beverages", "Sirius Cybernetics",
+    "MomCorp Fulfillment", "Massive Dynamic Research", "Veridian Dynamics",
+    "Bluth Construction", "Sterling Cooper Media", "Pearson Legal Ops",
+    "Kruger Industrial", "Vehement Capital", "Octan Energy",
+]
+SYSTEMS = [
+    "guest CRM", "loyalty points engine", "reservation platform",
+    "call-center suite", "marketing automation", "owner portal",
+    "housekeeping scheduler", "mobile check-in app", "payment gateway",
+    "survey platform", "identity provider", "data lakehouse",
+    "e-signature service", "travel-booking API", "chat widget",
+    "HRIS", "expense tool", "revenue dashboard", "email relay",
+    "document vault", "contact center analytics", "kiosk fleet",
+]
+PROJECTS = [
+    "rollout", "renewal", "migration", "pilot", "vendor swap",
+    "regional expansion", "upgrade", "consolidation", "integration",
+    "annual review",
+]
+FOLLOWUP_POOL = [
+    "Which sub-processors receive personal data under this contract?",
+    "Is production data used in any lower environment?",
+    "What is the documented retention period and who enforces it?",
+    "Has the vendor provided a current SOC 2 / ISO 27001 report?",
+    "Where is the data hosted and under what transfer mechanism?",
+    "Who holds admin access and how is it reviewed?",
+    "Is there a tested deletion path at contract end?",
+    "Has a DPIA been filed with the works council where required?",
+]
+
+VOLUME_MIX = [  # (type, count, subject builder)
+    ("pia", 120, lambda rnd: f"{rnd.choice(SYSTEMS)} {rnd.choice(PROJECTS)}"),
+    ("vendor_risk", 100, lambda rnd: rnd.choice(VENDORS)),
+    ("aira", 45, lambda rnd: f"{rnd.choice(SYSTEMS)} AI assist"),
+    ("hipaa", 30, lambda rnd: f"benefits {rnd.choice(PROJECTS)}"),
+    ("soc2", 25, lambda rnd: f"{rnd.choice(SYSTEMS)} controls"),
+    ("pci_dss", 20, lambda rnd: f"{rnd.choice(SYSTEMS)} payments"),
+    ("sox_control", 30, lambda rnd: f"{rnd.choice(['revenue', 'AP', 'AR', 'inventory', 'payroll'])} controls {rnd.choice(['Q1', 'Q2', 'Q3', 'Q4'])}"),
+    ("itgc", 15, lambda rnd: f"{rnd.choice(SYSTEMS)} access review"),
+    ("fraud_risk", 15, lambda rnd: f"{rnd.choice(['AP', 'procurement', 'T&E', 'refunds'])} process"),
+    ("close_readiness", 12, lambda rnd: f"{rnd.choice(['Jan', 'Mar', 'Jun', 'Sep', 'Dec'])} close"),
+    ("credit_risk", 8, lambda rnd: f"{rnd.choice(VENDORS)} credit line"),
+]
+
+
+def _volume_answers(rnd, template) -> dict:
+    """Weighted answers: most programs are mostly clean, some messy."""
+    profile = rnd.choices(("clean", "minor", "risky", "unverified"),
+                          weights=(45, 30, 20, 5))[0]
+    out = {}
+    for q in template.questions:
+        if rnd.random() > 0.85:  # not every question gets answered
+            continue
+        safe = "no" if q.risk_answer == "yes" else "yes"
+        if profile == "clean":
+            ans = safe if rnd.random() > 0.04 else q.risk_answer
+        elif profile == "minor":
+            risky_ok = q.severity != "high" and rnd.random() < 0.45
+            ans = q.risk_answer if risky_ok else safe
+        elif profile == "risky":
+            ans = q.risk_answer if rnd.random() < 0.4 else safe
+        else:
+            ans = "unknown" if rnd.random() < 0.5 else safe
+        out[q.id] = (ans, "")
+    return out
+
+
+def _generate_volume(rnd) -> int:
+    from maverick import assessment as A
+    n = 0
+    for type_, count, subject_of in VOLUME_MIX:
+        tpl = A.get_template(type_)
+        for _ in range(count):
+            # Denser recently: the program grew over the year.
+            days_ago = round(420 * rnd.betavariate(1.1, 1.9), 1)
+            decide = None
+            cadence = rnd.choices((90, 180, 365), weights=(15, 25, 60))[0]
+            decided_days_ago = None
+            followups = None
+            answer_followups = False
+            roll = rnd.random()
+            if days_ago > 30:
+                if roll < 0.82:
+                    decide = "approved"
+                    decided_days_ago = max(0.5, days_ago - rnd.uniform(1, 10))
+                elif roll < 0.88:
+                    decide = "rejected"
+                    decided_days_ago = max(0.5, days_ago - rnd.uniform(1, 10))
+                elif roll < 0.94:
+                    followups = rnd.sample(FOLLOWUP_POOL, rnd.randint(1, 2))
+                    answer_followups = rnd.random() < 0.5
+            else:
+                if roll < 0.30:
+                    decide = "approved"
+                    decided_days_ago = max(0.2, days_ago - rnd.uniform(0.5, 5))
+                elif roll < 0.55:
+                    followups = rnd.sample(FOLLOWUP_POOL, rnd.randint(1, 2))
+                    answer_followups = rnd.random() < 0.3
+            _assessment(type_, subject_of(rnd), _volume_answers(rnd, tpl),
+                        days_ago=days_ago, decide=decide, cadence=cadence,
+                        decided_days_ago=decided_days_ago,
+                        followups=followups,
+                        answer_followups=answer_followups)
+            n += 1
+    return n
+
+
+def _generate_records_volume(rnd) -> None:
+    from maverick import privacy_ops
+    # DPA reviews for a slice of the vendor book (varied completeness).
+    for vendor in rnd.sample(VENDORS, 24):
+        text = GOOD_DPA
+        r = rnd.random()
+        if r < 0.25:
+            text = THIN_MSA.replace("Vendor", vendor)
+        elif r < 0.45:
+            text = GOOD_DPA.replace("Standard Contractual Clauses",
+                                    "a mechanism to be agreed")
+        privacy_ops.review_dpa(vendor, text,
+                               document_name=f"{vendor.split()[0].lower()}-dpa.pdf")
+    # AI registry: one entry per AI-ish system.
+    purposes = [
+        ("drafts replies to guest messages; agent approves", "support"),
+        ("summarizes call transcripts for QA", "contact-center"),
+        ("forecasts occupancy for pricing analysts", "revenue"),
+        ("ranks job candidates for hiring", "talent-ops"),
+        ("scores credit applications for owners", "finance"),
+        ("generates marketing copy variants", "marketing"),
+        ("routes maintenance tickets by urgency", "facilities"),
+        ("detects anomalous payments for review", "finance"),
+    ]
+    for i, (purpose, owner) in enumerate(rnd.sample(purposes, 8)):
+        privacy_ops.register_ai_system(
+            f"{rnd.choice(SYSTEMS)} model {i + 1}", purpose,
+            provider=rnd.choice(("internal", "Anthropic", "vendor")),
+            owner=owner)
+    # RoPA: manual entries beyond the imports/drafts.
+    for activity, purpose in [
+        ("Guest stay processing", "Reservations, billing, and stay services"),
+        ("Owner communications", "Statements, meeting notices, ballots"),
+        ("CCTV on premises", "Safety and security of guests and staff"),
+        ("Marketing preferences", "Consent-based offers and newsletters"),
+        ("Workforce scheduling", "Shift planning and time tracking"),
+        ("Loyalty program", "Points accrual and redemption"),
+        ("Incident management", "Security and privacy incident handling"),
+    ]:
+        privacy_ops.upsert_ropa({
+            "activity": activity, "purpose": purpose,
+            "controller": "Company Ltd",
+            "data_categories": "Personal data (see activity record)",
+            "data_subjects": "Guests, owners, employees",
+            "recipients": "Processors under Art. 28 DPAs",
+            "transfers": rnd.choice(("None", "SCCs to US vendors",
+                                     "Adequacy (EU/UK)")),
+            "retention": rnd.choice(("24 months", "36 months", "7 years")),
+            "security_measures": "Encryption in transit and at rest",
+        })
+    # DSARs: a realistic month's queue + history.
+    first = ["jordan", "sam", "alex", "pat", "casey", "morgan", "riley",
+             "drew", "jamie", "quinn", "avery", "reese", "kai", "rowan"]
+    last = ["ellis", "rivera", "chen", "kumar", "ortiz", "novak", "silva",
+            "haas", "okafor", "lindqvist"]
+    for i in range(26):
+        subject = f"{rnd.choice(first)}.{rnd.choice(last)}{i}@example.com"
+        kind = rnd.choices(("access", "erasure", "portability"),
+                           weights=(60, 25, 15))[0]
+        req = privacy_ops.open_dsar(subject, kind,
+                                    channel=rnd.choice(("email", "web",
+                                                        "slack")))
+        age = rnd.uniform(0, 120)
+        privacy_ops._DSAR.update(req["id"], lambda rec, a=age: rec.update(
+            created_at=NOW - a * DAY, due_at=NOW - a * DAY + 30 * DAY))
+        if age > 25 and rnd.random() < 0.85:
+            privacy_ops.fulfill_dsar(req["id"])
+            if kind != "erasure" and rnd.random() < 0.9:
+                privacy_ops.close_dsar(req["id"], closed_by="privacy-lead")
+        # else: still open; anything older than 30d reads as overdue.
+
+
 def seed() -> None:
     from maverick import privacy_ops
 
@@ -260,9 +450,24 @@ def seed() -> None:
     if pia_ids:
         privacy_ops.draft_ropa_from_assessment(pia_ids[0])
 
-    print("Seeded: 16 assessments (privacy + finance, mixed statuses and "
-          "risk), 3 DPA reviews, 5 AI systems, 6 RoPA entries, 4 DSARs "
-          "(one overdue, one awaiting erasure).")
+    # ---- Volume: the rest of the year's program -------------------------
+    import random
+    rnd = random.Random(42)  # reproducible history
+    n = _generate_volume(rnd)
+    _generate_records_volume(rnd)
+
+    from maverick.assessment import list_saved
+    rows = list_saved()
+    from collections import Counter
+    by_status = Counter(r["status"] for r in rows)
+    print(f"Seeded {len(rows)} assessments over ~14 months "
+          f"({by_status['approved']} approved, "
+          f"{by_status['pending_review']} awaiting review, "
+          f"{by_status['needs_more']} awaiting answers, "
+          f"{by_status['rejected']} rejected; "
+          f"{sum(1 for r in rows if r['review_due'])} due for re-review), "
+          f"plus DPA reviews, the AI registry, the Art. 30 register, and a "
+          f"DSAR queue with history.")
 
 
 def main() -> None:

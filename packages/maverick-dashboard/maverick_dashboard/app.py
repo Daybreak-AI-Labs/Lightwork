@@ -1847,8 +1847,19 @@ def _workspace_ctx(department: str) -> dict:
         "oldest_open_days": (max((s["age_days"] or 0) for s in open_rows)
                             if open_rows else None),
     }
+    # At program volume (hundreds of records a year) the worklist stays
+    # sharp: actionable rows first (open work + anything due for
+    # re-review), then settled records by recency, capped — the hero stats
+    # always count everything.
+    def _rank(s: dict) -> tuple:
+        actionable = (s.get("status") in ("pending_review", "needs_more")
+                      or s.get("review_due"))
+        return (0 if actionable else 1, -(s.get("created_at") or 0))
+
+    worklist = sorted(sessions, key=_rank)[:250]
     return {
         "sessions": sessions,
+        "worklist": worklist,
         "stats": stats,
         "department": department,
         # Precedents: what the memory recalls from — recent completions.
