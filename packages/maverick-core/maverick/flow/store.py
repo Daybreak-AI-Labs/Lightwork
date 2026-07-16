@@ -39,6 +39,27 @@ def _objects_dir():
     return data_dir("flows", "objects")
 
 
+def _published_dir():
+    from ..paths import data_dir
+    return data_dir("flows", "published")
+
+
+@contextmanager
+def _activation_lock(flow_id: str):
+    """Serialize release replacement/revocation with dispatch decisions.
+
+    Draft writes do not need this lock: immutable published objects remain
+    unchanged. A live worker holds this per-flow mutex only for its final release
+    check. Mutation that wins first revokes queued work; work that wins first is
+    considered started and runs without holding this lock through execution.
+    """
+    from ..file_lock import cross_process_lock
+
+    path = _published_dir() / f".{_safe_id(flow_id)}.activation"
+    with cross_process_lock(path, strict=True):
+        yield
+
+
 def _idempotency_dir():
     from ..paths import data_dir
     return data_dir("flows", "idempotency")
@@ -308,6 +329,21 @@ def delete_flow(
     expected_version: int | None = None,
     expected_revision: str | None = None,
 ) -> bool:
+    """Revoke activation and delete one definition under one lock order."""
+    with _activation_lock(flow_id):
+        return _delete_flow_under_activation(
+            flow_id,
+            expected_version=expected_version,
+            expected_revision=expected_revision,
+        )
+
+
+def _delete_flow_under_activation(
+    flow_id: str,
+    *,
+    expected_version: int | None = None,
+    expected_revision: str | None = None,
+) -> bool:
     """Delete one definition, optionally guarded by its exact generation.
 
     API callers must pass both CAS tokens read during authorization.  Checking
@@ -326,20 +362,33 @@ def delete_flow(
                 and str(current.revision or "") != str(expected_revision)):
             raise FlowVersionConflict(
                 f"flow {flow_id!r} was replaced or changed generation")
-        p = _flows_dir() / f"{_safe_id(flow_id)}.json"
-        try:
-            p.unlink()
-        except OSError:
-            return False
-        # Drop version history too, so a later flow re-created with this id doesn't
-        # inherit stale snapshots (best-effort -- a missing history dir is fine).
-        import shutil
-        shutil.rmtree(_history_dir(flow_id), ignore_errors=True)
-        try:
-            (_schema_dir() / f"{_safe_id(flow_id)}.json").unlink()
-        except OSError:
-            pass
-        return True
+        with _activation_lock(flow_id):
+            # Authorization must disappear before the draft does.  Moving the
+            # pointer out of the live ``*.json`` namespace is atomic on the
+            # same filesystem and leaves a retryable tombstone if a later
+            # cleanup step fails or the process crashes.
+            _revoke_published_pointer_locked(flow_id)
+            p = _flows_dir() / f"{_safe_id(flow_id)}.json"
+            try:
+                p.unlink()
+            except OSError as exc:
+                raise FlowSnapshotError(
+                    f"flow {flow_id!r} was revoked but its draft could not be deleted"
+                ) from exc
+            # Drop version history too, so a later flow re-created with this id
+            # doesn't inherit stale snapshots (best-effort -- a missing history
+            # dir is fine).
+            import shutil
+            shutil.rmtree(_history_dir(flow_id), ignore_errors=True)
+            try:
+                (_schema_dir() / f"{_safe_id(flow_id)}.json").unlink()
+            except OSError:
+                pass
+            try:
+                _revoked_pointer_path(flow_id).unlink()
+            except OSError:
+                pass
+            return True
 
 
 def _safe_id(flow_id: str) -> str:
@@ -362,10 +411,84 @@ class FlowSnapshotError(RuntimeError):
     """An immutable execution-plan object is missing or fails its digest."""
 
 
+def _published_pointer_path(flow_id: str):
+    return _published_dir() / f"{_safe_id(flow_id)}.json"
+
+
+def _revoked_pointer_path(flow_id: str):
+    # Deliberately not JSON: live pointer enumeration only admits ``*.json``.
+    return _published_dir() / f".{_safe_id(flow_id)}.revoked"
+
+
+def _revoke_published_pointer_locked(flow_id: str) -> bool:
+    """Atomically remove a pointer from the live namespace.
+
+    The caller owns the activation and definition locks.  A rename failure is
+    a hard failure: deleting the draft while executable authority remains would
+    create an unmanageable live orphan.
+    """
+    import os
+
+    pointer = _published_pointer_path(flow_id)
+    try:
+        os.replace(pointer, _revoked_pointer_path(flow_id))
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise FlowSnapshotError(
+            f"published flow {flow_id!r} could not be revoked"
+        ) from exc
+
+
 def _canonical_flow_bytes(raw: dict) -> bytes:
     return json.dumps(
         raw, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
+
+
+def release_digest_for(
+    definition_digest: str,
+    subflow_digests: dict[str, str | None],
+) -> str:
+    """Content identity for one complete immutable execution bundle.
+
+    The root CAS digest alone is not a release identity: an unchanged parent
+    may be republished after one of its referenced children changes.  Domain
+    separation plus canonical JSON makes this stable across processes and
+    insensitive to dictionary insertion order while binding missing children
+    (``None``) just as strongly as present ones.
+    """
+    if not isinstance(subflow_digests, dict):
+        raise FlowSnapshotError("published subflow manifest is invalid")
+    manifest = {
+        str(key): (str(value) if value is not None else None)
+        for key, value in subflow_digests.items()
+    }
+    material = {
+        "definition_digest": str(definition_digest or ""),
+        "schema": "maverick.flow.release.v1",
+        "subflow_digests": manifest,
+    }
+    return sha256(_canonical_flow_bytes(material)).hexdigest()
+
+
+def release_id_for(
+    definition_digest: str,
+    subflow_digests: dict[str, str | None],
+) -> str:
+    """Backward-compatible name for the immutable bundle content digest.
+
+    New authorization code must use the publication-scoped ``release_id`` from
+    :func:`publish_flow`; identical content can be activated more than once.
+    """
+    return release_digest_for(definition_digest, subflow_digests)
+
+
+def _valid_release_token(value: str) -> bool:
+    import re
+
+    return bool(re.fullmatch(r"[0-9a-f]{64}", str(value or "")))
 
 
 def _store_flow_object(raw: dict) -> str:
@@ -382,6 +505,9 @@ def _store_flow_object(raw: dict) -> str:
 
 def _snapshot_flow_bundle_locked(flow: Flow) -> tuple[str, int, dict[str, str | None]]:
     """Snapshot a root and its transitive children under ``_definitions_lock``."""
+    # Unsaved dry-run drafts reach this boundary without passing save_flow.
+    # Apply the same size/secret persistence policy before writing CAS objects.
+    _assert_safe_definition(flow.to_dict())
     manifest: dict[str, str | None] = {}
     # A subflow is executable code/data owned by its definition owner.  Flow ids
     # are not capabilities: an authenticated caller who guesses another user's
@@ -451,6 +577,325 @@ def snapshot_current_flow_bundle(flow_id: str) -> tuple[str, int, dict[str, str 
         return _snapshot_flow_bundle_locked(flow)
 
 
+def definition_cohort(revision: str, version: int) -> str:
+    """Immutable evidence cohort for one saved definition.
+
+    ``Flow.revision`` is deliberately stable across ordinary saves so it can
+    detect delete/recreate ABA. Learning needs the narrower identity of one
+    exact definition, hence the generation token plus store-owned version.
+    """
+    generation = str(revision or "")
+    return f"{generation}:v{int(version or 0)}" if generation else ""
+
+
+def flow_cohort(flow: Flow) -> str:
+    return definition_cohort(flow.revision, flow.version)
+
+
+def publish_flow(
+    flow_id: str,
+    *,
+    expected_version: int,
+    expected_revision: str,
+) -> dict:
+    """Activate a coherent immutable release under the dispatch lock."""
+    with _activation_lock(flow_id):
+        return _publish_flow_under_activation(
+            flow_id,
+            expected_version=expected_version,
+            expected_revision=expected_revision,
+        )
+
+
+def save_and_publish_flow(
+    flow: Flow,
+    *,
+    expected_version: int,
+    expected_revision: str,
+    expected_release_id: str,
+) -> tuple[Flow, dict]:
+    """Save an autonomous edit and replace the exact active publication.
+
+    This is intentionally stricter than an ordinary save+publish sequence: the
+    active release must still be the caller's predecessor *and* its content must
+    match the current draft plus child graph. Thus autonomous learning cannot
+    accidentally publish unrelated human draft/child edits, and a concurrent
+    human publish wins by invalidating the activation CAS.
+    """
+    with _activation_lock(flow.id):
+        with _definitions_lock():
+            current = load_flow(flow.id)
+            if current is None:
+                raise FlowSnapshotError(f"flow {flow.id!r} is unavailable")
+            if int(current.version) != int(expected_version):
+                raise FlowVersionConflict(
+                    f"flow {flow.id!r} changed (expected version {expected_version}, "
+                    f"current {current.version})"
+                )
+            if str(current.revision or "") != str(expected_revision):
+                raise FlowVersionConflict(
+                    f"flow {flow.id!r} was replaced or changed generation"
+                )
+            published = load_published_bundle(flow.id)
+            if published is None:
+                raise FlowSnapshotError(f"flow {flow.id!r} is not published")
+            _active_flow, active_release = published
+            if str(active_release.get("release_id") or "") != str(expected_release_id):
+                raise FlowSnapshotError(
+                    f"published flow {flow.id!r} no longer matches the bound activation"
+                )
+            digest, _version, subflows = _snapshot_flow_bundle_locked(current)
+            if release_digest_for(digest, subflows) != str(
+                active_release.get("release_digest") or ""
+            ):
+                raise FlowSnapshotError(
+                    "current draft or subflow graph diverged from the active release"
+                )
+            saved = save_flow(
+                flow,
+                expected_version=expected_version,
+                expected_revision=expected_revision,
+            )
+            release = _publish_flow_under_activation(
+                saved.id,
+                expected_version=saved.version,
+                expected_revision=saved.revision,
+            )
+            return saved, release
+
+
+def _publish_flow_under_activation(
+    flow_id: str,
+    *,
+    expected_version: int,
+    expected_revision: str,
+) -> dict:
+    """Atomically activate the exact current draft as an immutable release.
+
+    Saving a definition only advances its draft history. Publication is the
+    separate activation boundary consumed by schedules and triggers. The
+    pointer contains the content-addressed root and every pinned subflow digest,
+    so later draft edits cannot alter an already-approved execution plan.
+    """
+    with _definitions_lock():
+        flow = load_flow(flow_id)
+        if flow is None:
+            raise FlowSnapshotError(f"flow {flow_id!r} is unavailable")
+        if int(flow.version) != int(expected_version):
+            raise FlowVersionConflict(
+                f"flow {flow_id!r} changed (expected version {expected_version}, "
+                f"current {flow.version})"
+            )
+        if str(flow.revision or "") != str(expected_revision):
+            raise FlowVersionConflict(
+                f"flow {flow_id!r} was replaced or changed generation"
+            )
+        errors = flow.validate()
+        if errors:
+            raise FlowSnapshotError(
+                "flow cannot be published: " + "; ".join(errors[:3])
+            )
+        digest, version, subflows = _snapshot_flow_bundle_locked(flow)
+        import secrets
+
+        release_digest = release_digest_for(digest, subflows)
+        release = {
+            "flow_id": flow.id,
+            "definition_digest": digest,
+            "definition_version": version,
+            "definition_revision": flow.revision,
+            "subflow_digests": subflows,
+            # Content identity answers "what will execute?".  Activation
+            # identity answers "is this particular authorization still live?".
+            # A fresh nonce prevents revoke/republish ABA for identical content.
+            "release_digest": release_digest,
+            "release_id": secrets.token_hex(32),
+            "published_at": time.time(),
+        }
+        # The definition lock makes the snapshot coherent; the activation lock
+        # makes pointer replacement linearizable with final worker dispatch.
+        with _activation_lock(flow.id):
+            _write_json(_published_pointer_path(flow.id), release)
+        return release
+
+
+def load_published_bundle(flow_id: str) -> tuple[Flow, dict] | None:
+    """Verified published flow and release metadata, or ``None`` if inactive.
+
+    A malformed/tampered pointer is not treated as an unpublished draft: it is
+    an integrity failure and therefore raises ``FlowSnapshotError``.
+    """
+    path = _published_pointer_path(flow_id)
+    raw = _read_json(path)
+    if raw is None:
+        if path.exists():
+            raise FlowSnapshotError("published flow pointer is unreadable")
+        return None
+    if str(raw.get("flow_id") or "") != str(flow_id):
+        raise FlowSnapshotError("published flow identity does not match its pointer")
+    flow = load_flow_snapshot(str(raw.get("definition_digest") or ""))
+    if (
+        flow.id != str(flow_id)
+        or int(flow.version) != int(raw.get("definition_version") or 0)
+        or str(flow.revision or "") != str(raw.get("definition_revision") or "")
+    ):
+        raise FlowSnapshotError("published flow metadata does not match its snapshot")
+    manifest_raw = raw.get("subflow_digests") or {}
+    if not isinstance(manifest_raw, dict):
+        raise FlowSnapshotError("published subflow manifest is invalid")
+    manifest = {
+        str(key): (str(value) if value is not None else None)
+        for key, value in manifest_raw.items()
+    }
+    validate_snapshot_bundle_owners(flow, manifest)
+    expected_release_digest = release_digest_for(
+        str(raw.get("definition_digest") or ""), manifest,
+    )
+    stored_release_digest = str(raw.get("release_digest") or "")
+    stored_release_id = str(raw.get("release_id") or "")
+    if stored_release_digest:
+        if stored_release_digest != expected_release_digest:
+            raise FlowSnapshotError(
+                "published release content failed integrity verification"
+            )
+        # New-format pointers require an independent, well-formed activation.
+        if not _valid_release_token(stored_release_id):
+            raise FlowSnapshotError("published activation identity is invalid")
+        activation_id = stored_release_id
+    else:
+        # Pre-activation-epoch pointers stored the content digest in release_id
+        # (or omitted it).  Preserve that exact authority during migration.
+        if stored_release_id and stored_release_id != expected_release_digest:
+            raise FlowSnapshotError(
+                "legacy published release identity failed integrity verification"
+            )
+        activation_id = expected_release_digest
+    release = dict(raw)
+    release["subflow_digests"] = manifest
+    release["release_digest"] = expected_release_digest
+    release["release_id"] = activation_id
+    return flow, release
+
+
+@contextmanager
+def published_flow_guard(
+    flow_id: str, *, expected_release_id: str = "", expected_digest: str = "",
+):
+    """Hold the published pointer stable while durably reserving a live run.
+
+    Release mutations acquire the per-flow activation mutex and then this global
+    definition lock before changing the pointer. A caller that re-verifies the
+    release here and writes its run row before leaving therefore sees one exact
+    pointer. Reservation is not execution authority: the worker separately uses
+    :func:`active_release_guard` immediately before dispatch.
+    """
+    with _definitions_lock():
+        published = load_published_bundle(flow_id)
+        if published is None:
+            raise FlowSnapshotError(f"flow {flow_id!r} is not published")
+        _flow, release = published
+        expected = str(expected_release_id or expected_digest or "")
+        if expected and str(release.get("release_id") or "") != expected:
+            raise FlowSnapshotError(
+                f"published flow {flow_id!r} no longer matches the bound revision"
+            )
+        yield published
+
+
+@contextmanager
+def active_release_guard(flow_id: str, *, expected_release_id: str):
+    """Linearize a final dispatch check against release mutation.
+
+    Queue reservation is intentionally insufficient authority to execute: a
+    client may revoke or replace a release while work is waiting in an outbox,
+    concurrency queue, delay, or approval. Callers keep this short per-flow lock
+    only through their execution-start decision, then release it before building
+    or invoking a potentially long executor. Thus revocation that wins first
+    refuses queued work, while revocation cannot interrupt a segment that has
+    already crossed this linearization point.
+    """
+    expected = str(expected_release_id or "")
+    if not expected:
+        raise FlowSnapshotError("flow run has no immutable release identity")
+    with _activation_lock(flow_id):
+        published = load_published_bundle(flow_id)
+        if published is None:
+            raise FlowSnapshotError(f"flow {flow_id!r} is not published")
+        _flow, release = published
+        if str(release.get("release_id") or "") != expected:
+            raise FlowSnapshotError(
+                f"published flow {flow_id!r} no longer matches the bound revision"
+            )
+        yield published
+
+
+def list_published_bundles() -> list[tuple[Flow, dict]]:
+    """Every verified active release in the current tenant namespace."""
+    directory = _published_dir()
+    if not directory.exists():
+        return []
+    out: list[tuple[Flow, dict]] = []
+    for path in sorted(directory.glob("*.json")):
+        raw = _read_json(path)
+        if raw is None:
+            if not path.exists():
+                continue
+            raise FlowSnapshotError(
+                f"published flow pointer {path.name!r} is unreadable"
+            )
+        if not raw.get("flow_id"):
+            raise FlowSnapshotError(
+                f"published flow pointer {path.name!r} has no flow identity"
+            )
+        bundle = load_published_bundle(str(raw["flow_id"]))
+        if bundle is not None:
+            out.append(bundle)
+    return out
+
+
+def unpublish_flow(
+    flow_id: str,
+    *,
+    expected_version: int,
+    expected_revision: str,
+) -> bool:
+    """Revoke one active release under the live-dispatch lock."""
+    with _activation_lock(flow_id):
+        return _unpublish_flow_under_activation(
+            flow_id,
+            expected_version=expected_version,
+            expected_revision=expected_revision,
+        )
+
+
+def _unpublish_flow_under_activation(
+    flow_id: str,
+    *,
+    expected_version: int,
+    expected_revision: str,
+) -> bool:
+    """Deactivate a release without deleting its draft or immutable objects."""
+    with _definitions_lock():
+        current = load_flow(flow_id)
+        if current is None:
+            return False
+        if int(current.version) != int(expected_version):
+            raise FlowVersionConflict(
+                f"flow {flow_id!r} changed (expected version {expected_version}, "
+                f"current {current.version})"
+            )
+        if str(current.revision or "") != str(expected_revision):
+            raise FlowVersionConflict(
+                f"flow {flow_id!r} was replaced or changed generation"
+            )
+        with _activation_lock(flow_id):
+            try:
+                (_published_dir() / f"{_safe_id(flow_id)}.json").unlink()
+                return True
+            except FileNotFoundError:
+                return False
+
+
 def load_flow_snapshot(digest: str) -> Flow:
     """Load a CAS flow object and fail closed on deletion or tampering."""
     import re
@@ -479,26 +924,74 @@ def validate_snapshot_bundle_owners(
     root: Flow,
     manifest: dict[str, str | None],
 ) -> None:
-    """Reject a pinned bundle that crosses definition-owner boundaries.
+    """Verify a pinned bundle is complete, identity-safe, and owner-contained.
 
     New bundles are checked while they are created, but durable paused runs may
     predate that invariant. Re-checking immutable child objects on delivery
     prevents an old crafted run from becoming a permanent authorization bypass.
     Missing children remain represented by ``None`` and fail later as before.
     """
+    if not isinstance(manifest, dict):
+        raise FlowSnapshotError("published subflow manifest is invalid")
     root_owner = str(root.owner or "")
-    for ref, digest in manifest.items():
-        if digest is None:
-            continue
-        child = load_flow_snapshot(digest)
-        if child.id != str(ref):
-            raise FlowSnapshotError(
-                f"subflow snapshot identity mismatch for {str(ref)!r}"
-            )
-        if str(child.owner or "") != root_owner:
-            raise FlowSnapshotError(
-                f"subflow {str(ref)!r} is unavailable to this flow owner"
-            )
+    normalized = {
+        str(ref): (str(digest) if digest is not None else None)
+        for ref, digest in manifest.items()
+    }
+    required: set[str] = set()
+    visited: set[str] = set()
+
+    def walk(flow: Flow) -> None:
+        raw = flow.to_dict()
+
+        def walk_nodes(nodes) -> None:
+            for node in nodes or []:
+                if not isinstance(node, dict):
+                    continue
+                body = node.get("body")
+                if isinstance(body, dict):
+                    walk_nodes(body.get("nodes"))
+                for branch in node.get("branches") or []:
+                    if isinstance(branch, dict):
+                        walk_nodes(branch.get("nodes"))
+                if str(node.get("kind") or "") != "subflow":
+                    continue
+                ref = str(node.get("flow_ref") or "").strip()
+                if ref:
+                    required.add(ref)
+
+        walk_nodes(raw.get("nodes"))
+
+    pending = [root]
+    while pending:
+        current = pending.pop()
+        walk(current)
+        # Only resolve newly discovered references. Cycles are legal snapshot
+        # data even though runtime cycle guards refuse their execution.
+        for ref in sorted(required - visited):
+            visited.add(ref)
+            if ref not in normalized:
+                raise FlowSnapshotError(
+                    f"subflow snapshot manifest is missing {ref!r}"
+                )
+            digest = normalized[ref]
+            if digest is None:
+                continue
+            child = load_flow_snapshot(digest)
+            if child.id != ref:
+                raise FlowSnapshotError(
+                    f"subflow snapshot identity mismatch for {ref!r}"
+                )
+            if str(child.owner or "") != root_owner:
+                raise FlowSnapshotError(
+                    f"subflow {ref!r} is unavailable to this flow owner"
+                )
+            pending.append(child)
+    extras = set(normalized) - required
+    if extras:
+        raise FlowSnapshotError(
+            f"subflow snapshot manifest has unreferenced entry {sorted(extras)[0]!r}"
+        )
 
 
 # ---- runs (resumable state) -------------------------------------------------
@@ -538,9 +1031,17 @@ class FlowRun:
     # time, like `prompt` -- so the run viewer renders what the paused node
     # actually declared, even if the flow is edited while the run waits.
     human: dict = field(default_factory=dict)
+    # Durable identity of the principal who made the human approval decision.
+    # This is intentionally separate from the run owner and queue producer.
+    decided_by: str = ""
     # Content-addressed immutable execution plan captured when the run is
     # enqueued.  The run row stays small; graph bytes deduplicate in objects/.
     definition_digest: str = ""
+    # Immutable content identity for the root plus complete pinned child graph.
+    release_digest: str = ""
+    # One publication/activation epoch.  It changes even when identical content
+    # is revoked and republished and scopes dispatch plus idempotency authority.
+    release_id: str = ""
     definition_version: int = 0
     # Stable definition-generation token.  Version resets after delete/recreate;
     # revision does not, so learning and diagnostics can never attribute an old
@@ -564,7 +1065,10 @@ class FlowRun:
             "origin": self.origin, "dry_run": self.dry_run,
             "cost_dollars": self.cost_dollars,
             "human": self.human,
+            "decided_by": self.decided_by,
             "definition_digest": self.definition_digest,
+            "release_digest": self.release_digest,
+            "release_id": self.release_id,
             "definition_version": self.definition_version,
             "definition_revision": self.definition_revision,
             "subflow_digests": self.subflow_digests,
@@ -575,6 +1079,22 @@ class FlowRun:
 
     @staticmethod
     def from_dict(d: dict) -> FlowRun:
+        definition_digest = str(d.get("definition_digest") or "")
+        subflow_digests = {
+            str(k): (str(v) if v is not None else None)
+            for k, v in (d.get("subflow_digests") or {}).items()
+        }
+        expected_release_digest = (
+            release_digest_for(definition_digest, subflow_digests)
+            if definition_digest else ""
+        )
+        stored_release_digest = str(d.get("release_digest") or "")
+        if stored_release_digest and stored_release_digest != expected_release_digest:
+            raise FlowSnapshotError("flow run content identity failed integrity checks")
+        stored_release_id = str(d.get("release_id") or "")
+        activation_id = stored_release_id or expected_release_digest
+        if activation_id and not _valid_release_token(activation_id):
+            raise FlowSnapshotError("flow run activation identity is invalid")
         return FlowRun(
             run_id=str(d.get("run_id", "")), flow_id=str(d.get("flow_id", "")),
             status=str(d.get("status", "")), data=dict(d.get("data") or {}),
@@ -588,13 +1108,13 @@ class FlowRun:
             dry_run=bool(d.get("dry_run", False)),
             cost_dollars=float(d.get("cost_dollars", 0.0) or 0.0),
             human=dict(d.get("human") or {}),
-            definition_digest=str(d.get("definition_digest") or ""),
+            decided_by=str(d.get("decided_by") or "")[:500],
+            definition_digest=definition_digest,
+            release_digest=expected_release_digest,
+            release_id=activation_id,
             definition_version=int(d.get("definition_version") or 0),
             definition_revision=str(d.get("definition_revision") or ""),
-            subflow_digests={
-                str(k): (str(v) if v is not None else None)
-                for k, v in (d.get("subflow_digests") or {}).items()
-            },
+            subflow_digests=subflow_digests,
             execution_channel=str(d.get("execution_channel") or "")[:80],
             execution_user_id=str(d.get("execution_user_id") or "")[:500],
             allowed_suites=(
@@ -611,50 +1131,138 @@ def find_run_by_idem(
     *,
     within: int | None = 500,
     revision: str | None = None,
+    definition_digest: str | None = None,
+    release_id: str | None = None,
+    owner: str | None = None,
 ) -> FlowRun | None:
     """The most recent run for ``flow_id`` with this idempotency key, if any --
-    the dedup check that stops a re-delivered event from firing a second run."""
+    the dedup check that stops a re-delivered event from firing a second run.
+
+    When ``release_id`` is supplied, deduplication is scoped to the exact root
+    plus child bundle. ``definition_digest`` remains a backward-compatible root
+    scope for callers that have not yet adopted composite releases.
+    """
     if not idem_key:
         return None
-    claim = _read_json(_idempotency_claim_path(flow_id, idem_key))
+    expected_digest = (
+        None if definition_digest is None else str(definition_digest)
+    )
+    expected_release_id = None if release_id is None else str(release_id)
+    claim = _read_json(_idempotency_claim_path(
+        flow_id,
+        idem_key,
+        expected_digest or "",
+        owner,
+        release_id=expected_release_id or "",
+    ))
+    if claim is None and expected_digest and expected_release_id:
+        # Pre-composite releases indexed claims by root digest. Read that index
+        # only as a migration hint, then verify the referenced run's derived
+        # composite identity below; a same-root/different-child run cannot alias.
+        claim = _read_json(_legacy_idempotency_claim_path(
+            flow_id, idem_key, expected_digest, owner,
+        ))
     if claim:
         claimed = load_run(str(claim.get("run_id") or ""))
         if (claimed is not None
                 and claimed.flow_id == flow_id
                 and claimed.idem_key == idem_key
-                and (revision is None or claimed.definition_revision == revision)):
+                and (revision is None or claimed.definition_revision == revision)
+                and (expected_digest is None
+                     or claimed.definition_digest == expected_digest)
+                and (expected_release_id is None
+                     or claimed.release_id == expected_release_id)
+                and (owner is None or claimed.owner == owner)):
             return claimed
     for r in list_runs(flow_id=flow_id, limit=within):
         if (r.idem_key == idem_key
-                and (revision is None or r.definition_revision == revision)):
+                and (revision is None or r.definition_revision == revision)
+                and (expected_digest is None
+                     or r.definition_digest == expected_digest)
+                and (expected_release_id is None
+                     or r.release_id == expected_release_id)
+                and (owner is None or r.owner == owner)):
             return r
     return None
 
 
-def _idempotency_claim_path(flow_id: str, idem_key: str):
+def _idempotency_claim_path(
+    flow_id: str,
+    idem_key: str,
+    definition_digest: str = "",
+    owner: str | None = None,
+    *,
+    release_id: str = "",
+):
     material = f"{flow_id}\0{idem_key}".encode()
+    release_scope = str(release_id or definition_digest or "")
+    if release_scope or owner is not None:
+        owner_scope = "<any-owner>" if owner is None else f"owner:{owner}"
+        scope_version = "v2" if release_id else "v1"
+        material += (
+            f"\0exact-release-{scope_version}\0{release_scope}\0{owner_scope}"
+        ).encode()
+    return _idempotency_dir() / f"{sha256(material).hexdigest()}.json"
+
+
+def _legacy_idempotency_claim_path(
+    flow_id: str,
+    idem_key: str,
+    definition_digest: str,
+    owner: str | None,
+):
+    material = f"{flow_id}\0{idem_key}".encode()
+    owner_scope = "<any-owner>" if owner is None else f"owner:{owner}"
+    material += (
+        f"\0exact-release-v1\0{definition_digest}\0{owner_scope}"
+    ).encode()
     return _idempotency_dir() / f"{sha256(material).hexdigest()}.json"
 
 
 @contextmanager
-def idempotency_lock(flow_id: str, idem_key: str):
-    """Serialize first-writer-wins reservation for one flow/idempotency key."""
+def idempotency_lock(
+    flow_id: str,
+    idem_key: str,
+    definition_digest: str = "",
+    owner: str | None = None,
+    *,
+    release_id: str = "",
+):
+    """Serialize reservation for one owner/flow/key/exact release."""
     from ..file_lock import cross_process_lock
     with cross_process_lock(
-        _idempotency_claim_path(flow_id, idem_key), strict=True,
+        _idempotency_claim_path(
+            flow_id, idem_key, definition_digest, owner, release_id=release_id,
+        ),
+        strict=True,
     ):
         yield
 
 
 def save_idempotency_claim(
-    flow_id: str, idem_key: str, run_id: str, *, overwrite: bool = True,
+    flow_id: str,
+    idem_key: str,
+    run_id: str,
+    *,
+    definition_digest: str = "",
+    release_id: str = "",
+    owner: str | None = None,
+    overwrite: bool = True,
 ) -> bool:
     if not idem_key:
         return False
-    path = _idempotency_claim_path(flow_id, idem_key)
+    path = _idempotency_claim_path(
+        flow_id, idem_key, definition_digest, owner, release_id=release_id,
+    )
     if not overwrite and path.exists():
         return False
-    _write_json(path, {"flow_id": flow_id, "run_id": run_id})
+    _write_json(path, {
+        "flow_id": flow_id,
+        "run_id": run_id,
+        "definition_digest": str(definition_digest),
+        "release_id": str(release_id or definition_digest),
+        "owner": "" if owner is None else str(owner),
+    })
     return True
 
 
@@ -664,6 +1272,18 @@ def new_run_id() -> str:
 
 
 def save_run(run: FlowRun) -> None:
+    expected_release_digest = (
+        release_digest_for(run.definition_digest, run.subflow_digests)
+        if run.definition_digest else ""
+    )
+    if run.release_digest and run.release_digest != expected_release_digest:
+        raise FlowSnapshotError("flow run content identity failed integrity checks")
+    run.release_digest = expected_release_digest
+    # Legacy/dry-run callers without a publication epoch receive a deterministic
+    # synthetic identity. Live queue producers must pass the pointer's nonce.
+    run.release_id = str(run.release_id or expected_release_digest)
+    if run.release_id and not _valid_release_token(run.release_id):
+        raise FlowSnapshotError("flow run activation identity is invalid")
     now = time.time()
     if not run.created:
         run.created = now
@@ -747,6 +1367,10 @@ __all__: list[str] = [
     "list_versions", "load_version", "rollback_flow",
     "FlowVersionConflict", "FlowSnapshotError", "snapshot_flow_bundle",
     "snapshot_current_flow_bundle", "load_flow_snapshot",
+    "definition_cohort", "flow_cohort", "release_digest_for", "release_id_for",
+    "publish_flow", "save_and_publish_flow",
+    "unpublish_flow", "load_published_bundle", "list_published_bundles",
+    "published_flow_guard", "active_release_guard",
     "FlowRun", "new_run_id", "save_run", "load_run", "delete_run", "run_lock",
     "list_runs", "find_run_by_idem", "idempotency_lock", "save_idempotency_claim",
     "load_flow_schema", "record_flow_schema",

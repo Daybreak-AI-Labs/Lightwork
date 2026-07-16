@@ -226,7 +226,8 @@ class TestProtocol:
         captured = {}
 
         class FakeWorld:
-            def create_goal(self, title, description):
+            def create_goal(self, title, description, *, owner=""):
+                assert owner == ""
                 return 123
 
         def fake_run_goal_sync(_llm, _world, budget, _goal_id, *, sandbox, max_depth):

@@ -17,6 +17,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
+from ..tool_results import tool_result_failed
 from . import node_outcomes, store
 from .ir import Flow, FlowNode, action_tool_policy_error
 from .runner import (
@@ -38,6 +39,18 @@ _RESUMABLE = PAUSED_STATUSES
 
 class FlowNotResumable(ValueError):
     """A resume was requested for a run that is not paused."""
+
+
+def _approval_actor_matches(actor: str, assignee: str) -> bool:
+    expected = str(assignee or "").strip().casefold()
+    if not expected:
+        return True
+    principal = str(actor or "").strip().casefold()
+    aliases = {principal}
+    if principal.startswith("user:") and principal[5:]:
+        subject = principal[5:]
+        aliases.update({subject, f"@{subject}"})
+    return expected in aliases
 
 # agent_runner(brief, data) -> (result, outcome: float | None)
 # action_runner(tool, params, data) -> (result, outcome: float | None)
@@ -94,19 +107,20 @@ def _spend_tracked(agent_runner: AgentRunner, per_call: float, spent: list) -> A
 # no double-invocation of the stateful budget wrappers on a fallback path. Set +
 # read happen synchronously on one thread (even under the foreach pool), so the
 # value is always the right node.
-_active_node: contextvars.ContextVar[tuple[str, str, str]] = contextvars.ContextVar(
-    "_flow_active_node", default=("", "", ""))
+_active_node: contextvars.ContextVar[tuple[str, str, str, str]] = contextvars.ContextVar(
+    "_flow_active_node", default=("", "", "", ""))
 
 
 def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
-                flow_id: str = "", node_id: str = "", revision: str = "") -> tuple:
+                flow_id: str = "", node_id: str = "", revision: str = "",
+                cohort: str = "") -> tuple:
     """Invoke an agent runner, bounding its wall-clock to a node ``timeout`` when
     set so a timed-out node's underlying goal self-terminates near the point the
     flow gives up waiting -- instead of running on to its default cap, still
     spending budget after the flow moved on. Injected 2-arg test runners that
     don't accept ``wall`` are called plainly. Publishes the current node id on a
     ContextVar so the production runner can attribute its goal's tools to it."""
-    token = _active_node.set((flow_id, node_id, revision))
+    token = _active_node.set((flow_id, node_id, revision, cohort))
     try:
         if wall and wall > 0:
             try:
@@ -172,6 +186,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             approve_fn: Callable[[FlowNode, dict], str] | None = None,
             run_id: str | None = None,
             resume_run_id: str | None = None, decision: str | None = None,
+            decided_by: str = "",
             expired: bool = False,
             from_failure: bool = False,
             inputs: dict | None = None, record_outcomes: bool = True,
@@ -187,6 +202,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     resume = None
     prior = None
     definition_digest = ""
+    release_digest = ""
+    release_id = ""
     definition_version = 0
     definition_revision = ""
     subflow_digests: dict[str, str | None] = {}
@@ -194,6 +211,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     execution_user_id = ""
     allowed_suites: list[str] | None = None
     has_pinned_plan = False
+    approval_resume = False
+    approval_actor = ""
     if resume_run_id:
         prior = store.load_run(resume_run_id)
         if prior is None:
@@ -206,6 +225,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         # a human rejected -- defeating the approval gate.
         retryable_failure = (from_failure and prior.status == STATUS_FAILED
                              and bool(prior.cursor))
+        approval_resume = prior.status == STATUS_PAUSED_APPROVAL
         if prior.status not in _RESUMABLE and not retryable_failure:
             raise FlowNotResumable(
                 f"run {resume_run_id!r} is not paused (status {prior.status!r})"
@@ -218,6 +238,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         if prior.definition_digest:
             flow = store.load_flow_snapshot(prior.definition_digest)
             definition_digest = prior.definition_digest
+            release_digest = prior.release_digest
+            release_id = prior.release_id
             definition_version = prior.definition_version
             definition_revision = prior.definition_revision or flow.revision
             subflow_digests = dict(prior.subflow_digests)
@@ -254,7 +276,24 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             if expired:
                 resume["expired"] = True
             else:
-                resume["decision"] = decision or "approved"
+                verdict = str(decision or "").strip()
+                paused = flow.node(prior.cursor) if prior.cursor else None
+                allowed_verdicts = {"approved", "rejected"}
+                if paused is not None:
+                    allowed_verdicts.update(str(v) for v in paused.choices)
+                if not verdict or verdict not in allowed_verdicts:
+                    raise ValueError("an explicit valid approval decision is required")
+                approval_actor = str(decided_by or "").strip()
+                if not approval_actor:
+                    raise ValueError("an attributable approver identity is required")
+                assignee = str(
+                    (prior.human or {}).get("assignee")
+                    or (paused.assignee if paused is not None else "")
+                    or ""
+                )
+                if not _approval_actor_matches(approval_actor, assignee):
+                    raise ValueError("the approver is not the declared assignee")
+                resume["decision"] = verdict
     rid = run_id or store.new_run_id()
     # A fresh run may have a queued placeholder (saved at enqueue with the
     # idempotency key + original inputs) -- preserve those instead of resetting.
@@ -262,6 +301,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     if placeholder is not None and placeholder.definition_digest:
         flow = store.load_flow_snapshot(placeholder.definition_digest)
         definition_digest = placeholder.definition_digest
+        release_digest = placeholder.release_digest
+        release_id = placeholder.release_id
         definition_version = placeholder.definition_version
         definition_revision = placeholder.definition_revision or flow.revision
         subflow_digests = dict(placeholder.subflow_digests)
@@ -296,7 +337,15 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     if not has_pinned_plan:
         definition_digest, definition_version, subflow_digests = (
             store.snapshot_flow_bundle(flow))
+        release_digest = store.release_digest_for(
+            definition_digest, subflow_digests,
+        )
+        release_id = release_digest
         definition_revision = flow.revision
+    evidence_cohort = store.definition_cohort(
+        definition_revision or flow.revision,
+        definition_version or flow.version,
+    )
     # Per-node run trace for the designer overlay. Seeded from the prior run on
     # resume so the pre-pause nodes' status survives across the pause.
     node_states: dict = dict(prior.nodes) if (resume_run_id and prior) else {}
@@ -332,6 +381,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 node.kind,
                 outcome,
                 revision=definition_revision or flow.revision,
+                cohort=evidence_cohort,
             )
 
     # Origin (what fired this run) comes from the queued placeholder when present,
@@ -363,6 +413,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             idem_key=(placeholder.idem_key if placeholder else ""),
             dry_run=(placeholder.dry_run if placeholder else not record_outcomes),
             definition_digest=definition_digest,
+            release_digest=release_digest,
+            release_id=release_id,
             definition_version=definition_version,
             definition_revision=definition_revision,
             subflow_digests=subflow_digests,
@@ -384,6 +436,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         # crash after this point leaves an indeterminate run, never the old
         # paused row that another delivery could replay.
         prior.status = STATUS_RESUMING
+        if approval_resume and not expired:
+            prior.decided_by = approval_actor
         store.save_run(prior)
 
     res = run_flow(
@@ -396,6 +450,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             flow_id=flow.id,
             node_id=node.id,
             revision=definition_revision or flow.revision,
+            cohort=evidence_cohort,
         )),
         action_fn=lambda node, params, d: _timed(node.id, lambda: action_runner(node.tool, params, d)),
         approve_fn=approve_fn, data=data, resume=resume, on_node=_on_node, now=now,
@@ -413,6 +468,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             "trigger",
             1.0 if res.status == STATUS_COMPLETED else 0.0,
             revision=definition_revision or flow.revision,
+            cohort=evidence_cohort,
         )
 
     # Snapshot the paused human task's declared UI (choices/form/assignee) onto
@@ -430,6 +486,11 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         cursor=res.cursor, resume_at=res.resume_at, prompt=res.prompt,
         error=res.error, owner=owner, origin=run_origin, cost_dollars=round(spent[0], 4),
         human=human,
+        decided_by=(
+            approval_actor
+            if resume_run_id and prior is not None and approval_resume and not expired
+            else (prior.decided_by if prior is not None else "")
+        ),
         created=(prior.created if resume_run_id and prior
                  else (placeholder.created if placeholder else 0.0)),
         nodes=node_states,
@@ -443,6 +504,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         dry_run=(prior.dry_run if (resume_run_id and prior)
                  else (placeholder.dry_run if placeholder else not record_outcomes)),
         definition_digest=definition_digest,
+        release_digest=release_digest,
+        release_id=release_id,
         definition_version=definition_version,
         definition_revision=definition_revision,
         subflow_digests=subflow_digests,
@@ -511,15 +574,18 @@ def default_agent_runner(
         # the inference support -- and a failed attempt's tools are noise anyway.
         # A reliable node (the only harden candidate) succeeds ~once per run, so
         # this yields ~one tool record per logical run, aligned with node_outcomes.
-        fid, nid, revision = _active_node.get()
+        fid, nid, revision, cohort = _active_node.get()
         if fid and nid and outcome == 1.0:
-            _capture_node_tools(fid, nid, gid, revision=revision)
+            _capture_node_tools(
+                fid, nid, gid, revision=revision, cohort=cohort,
+            )
         return (result if result is not None else (g.result if g else ""), outcome)
     return run
 
 
 def _capture_node_tools(
     flow_id: str, node_id: str, goal_id: int, *, revision: str = "",
+    cohort: str = "",
 ) -> None:
     """Record the distinct tools an agent node's goal used (for harden inference).
     No-op when trajectory capture is off (nothing to read); never raises."""
@@ -529,7 +595,9 @@ def _capture_node_tools(
             return
         tools = trajectory_store.tools_for_goal(goal_id)
         from . import node_tools
-        node_tools.record(flow_id, node_id, tools, revision=revision)
+        node_tools.record(
+            flow_id, node_id, tools, revision=revision, cohort=cohort,
+        )
     except Exception:  # pragma: no cover -- capture must never break a run
         pass
 
@@ -543,7 +611,9 @@ def default_action_runner(
 ) -> ActionRunner:
     """Production ``action_runner``: resolve the named tool from the base registry
     and call it with the rendered params. Outcome is success (1.0) unless the tool
-    returns an ``ERROR:`` string (0.0). Never raises into the flow."""
+    returns a failed, refused, or indeterminate result (0.0). Never raises into
+    the flow. High-risk nodes turn that 0.0 into the runner's indeterminate
+    quarantine rather than an automatic retry."""
     def run(tool: str, params: dict, data: dict) -> tuple[Any, float | None]:
         try:
             if policy_error := action_tool_policy_error(tool):
@@ -571,7 +641,7 @@ def default_action_runner(
             if isinstance(e, (BudgetExceeded, Halted)):
                 raise
             return (f"ERROR: {type(e).__name__}: {e}", 0.0)
-        ok = not (isinstance(result, str) and result.startswith("ERROR"))
+        ok = not tool_result_failed(result)
         return (result, 1.0 if ok else 0.0)
     return run
 

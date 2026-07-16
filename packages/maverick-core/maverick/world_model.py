@@ -2331,15 +2331,37 @@ class WorldModel:
             )
             return cur.lastrowid
 
-    def answer(self, question_id: int, answer: str) -> bool:
+    def answer(
+        self,
+        question_id: int,
+        answer: str,
+        *,
+        expected_owner: str | None = None,
+    ) -> bool:
         """Record an answer to a question. Returns False if no question with
         that id exists, so callers can flag a typo'd id instead of reporting
-        a false success."""
-        with self._writing() as conn:
-            cur = conn.execute(
-                "UPDATE questions SET answer = ?, answered_at = ? WHERE id = ?",
-                (_enc_field(answer), time.time(), question_id),
+        a false success.
+
+        ``expected_owner`` binds the mutation to the parent goal's owner in
+        the same SQL statement.  This is the object-level authorization seam
+        used by network adapters; a missing, ownerless, or foreign question is
+        deliberately the same zero-row result.
+        """
+        sql = "UPDATE questions SET answer = ?, answered_at = ? WHERE id = ?"
+        params: tuple[Any, ...] = (
+            _enc_field(answer),
+            time.time(),
+            question_id,
+        )
+        if expected_owner is not None:
+            sql += (
+                " AND goal_id IN ("
+                "SELECT id FROM goals WHERE owner = ?"
+                ")"
             )
+            params += (str(expected_owner),)
+        with self._writing() as conn:
+            cur = conn.execute(sql, params)
             return cur.rowcount > 0
 
     def open_questions(self, goal_id: int | None = None) -> list[Question]:

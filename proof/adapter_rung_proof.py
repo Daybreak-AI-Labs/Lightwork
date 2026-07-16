@@ -48,7 +48,30 @@ def run_all(work: Path) -> list[_Result]:
 
     out: list[_Result] = []
     keydir = work / "keys"
-    _mk_keys(keydir)
+    private_hex = _mk_keys(keydir)
+    from maverick import approval_signing as signing
+    public_hex = (keydir / "operator.pub").read_bytes().hex()
+
+    def approve(request):
+        return signing.sign_request(request, private_hex)
+
+    def verify(candidate):
+        signature = getattr(candidate, "approval_signature", None)
+        return (signing.verify(signing.ApprovalRequest.for_candidate(candidate),
+                               str(signature), [public_hex])
+                if signature else None)
+
+    def provision(binding):
+        import hashlib
+        digest = hashlib.sha256(
+            f"{binding['model_name']}|{binding['modelfile_sha256']}".encode()
+        ).hexdigest()
+        return {
+            "version": 1, "provider": "ollama", "verified": True,
+            "model_name": binding["model_name"], "model_digest": digest,
+            "source_modelfile_sha256": binding["modelfile_sha256"],
+            "verified_at": 123.0,
+        }
     ledger_path = work / "ledger.json"
     ledger = PromotionLedger(path=ledger_path)
     store = ar.AdapterStore(root=work / "store")
@@ -93,7 +116,10 @@ def run_all(work: Path) -> list[_Result]:
     trainer.train(review, "ollama:proof-base", dirty_dir)
     (dirty_dir / "post_init.py").write_text("import os\n", encoding="utf-8")
     dirty = ar.govern_adapter_change(dirty_dir, cases, score_fn=scorer_genuine,
-                                     keys_dir=keydir, ledger=ledger, store=store)
+                                     approve=approve, approval_verifier=verify,
+                                     approval_public_keys=[public_hex],
+                                     serving_provisioner=provision,
+                                     ledger=ledger, store=store)
     clean_dir = work / "clean_a"
     manifest_a = trainer.train(review, "ollama:proof-base", clean_dir)
     hygiene_ok = (not dirty.hygiene_ok and "post_init.py" in dirty.reason
@@ -104,12 +130,17 @@ def run_all(work: Path) -> list[_Result]:
 
     # 3. Genuine uplift promotes: signed at the weights rung, ledgered, activated.
     res_a = ar.govern_adapter_change(clean_dir, cases, score_fn=scorer_genuine,
-                                     keys_dir=keydir, ledger=ledger, store=store)
+                                     approve=approve, approval_verifier=verify,
+                                     approval_public_keys=[public_hex],
+                                     serving_provisioner=provision,
+                                     ledger=ledger, store=store)
     active = store.active() or {}
     genuine_ok = (res_a.promoted and res_a.fitness.samples >= 20
                   and res_a.fitness.candidate_score > res_a.fitness.baseline_score
                   and res_a.approver_id is not None
                   and active.get("adapter_id") == manifest_a.adapter_id
+                  and active.get("authority") == "governed-v1"
+                  and active.get("serving", {}).get("deployment", {}).get("verified") is True
                   and (res_a.serving or {}).get("create_command", "").startswith("ollama create"))
     out.append(_Result("genuine uplift promotes", genuine_ok,
                        f"held-out {res_a.fitness.baseline_score:.3f} -> "
@@ -120,7 +151,10 @@ def run_all(work: Path) -> list[_Result]:
     mem_dir = work / "memoriser"
     trainer.train(review, "ollama:proof-base", mem_dir)
     res_m = ar.govern_adapter_change(mem_dir, cases, score_fn=scorer_memoriser,
-                                     keys_dir=keydir, ledger=ledger, store=store)
+                                     approve=approve, approval_verifier=verify,
+                                     approval_public_keys=[public_hex],
+                                     serving_provisioner=provision,
+                                     ledger=ledger, store=store)
     mem_ok = (not res_m.promoted and res_m.fitness.overfit
               and "OVERFIT" in res_m.reason
               and (store.active() or {}).get("adapter_id") == manifest_a.adapter_id)
@@ -168,7 +202,10 @@ def run_all(work: Path) -> list[_Result]:
         ar.TrainExample("p5", "better", "worse", provenance="human_example")])
     manifest_b = trainer.train(review_b, "ollama:proof-base", b_dir)
     res_b = ar.govern_adapter_change(b_dir, cases, score_fn=scorer_genuine,
-                                     keys_dir=keydir, ledger=ledger, store=store)
+                                     approve=approve, approval_verifier=verify,
+                                     approval_public_keys=[public_hex],
+                                     serving_provisioner=provision,
+                                     ledger=ledger, store=store)
     swapped_to_b = (store.active() or {}).get("adapter_id") == manifest_b.adapter_id
     ar.rollback_adapter(res_b.candidate_id, store=store, ledger=ledger)
     restored = active_path.read_bytes() == pointer_a_bytes

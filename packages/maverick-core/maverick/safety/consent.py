@@ -101,6 +101,7 @@ class ConsentDecision:
     source: str           # "ledger" | "auto" | "prompt" | "non-tty-deny"
     risk: str             # "low" | "medium" | "high" | "critical"
     ts: float
+    actor: str = ""        # authenticated dashboard approver when available
 
 
 _prompt_lock = threading.Lock()
@@ -392,7 +393,13 @@ def _decide_via_dashboard(
             return None
         if row is not None and row.status != "pending":
             granted = row.status == "approved"
-            return ConsentDecision(granted, "dashboard", risk, time.time())
+            return ConsentDecision(
+                granted,
+                "dashboard",
+                risk,
+                time.time(),
+                actor=str(getattr(row, "decided_by", "") or ""),
+            )
         time.sleep(1.0)
     return None  # timed out: caller falls back
 
@@ -429,6 +436,7 @@ def _emit(
             action=action,
             decision="approve" if decision.granted else "deny",
             source=decision.source,
+            decided_by=decision.actor,
         )
     except Exception:  # pragma: no cover -- never crash on audit
         pass

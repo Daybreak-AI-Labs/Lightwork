@@ -273,6 +273,7 @@ def test_concurrent_resume_executes_downstream_action_once(tmp_path, monkeypatch
                 action_runner=action,
                 resume_run_id=paused.run_id,
                 decision="approved",
+                decided_by="system:direct",
             ).status
         except execution.FlowNotResumable:
             return "not-resumable"
@@ -289,6 +290,53 @@ def test_concurrent_resume_executes_downstream_action_once(tmp_path, monkeypatch
 
     assert outcomes == {"completed", "not-resumable"}
     assert calls == ["stripe"]
+
+
+def test_core_resume_requires_explicit_actor_and_declared_assignee(
+    tmp_path, monkeypatch,
+):
+    _patch_home(tmp_path, monkeypatch)
+    flow = Flow(id="assigned-core", name="assigned", start="gate", nodes={
+        "gate": FlowNode(
+            id="gate", kind="approval", prompt="approve?", assignee="@alice",
+        ),
+    })
+    store.save_flow(flow)
+    paused = execution.execute(
+        flow,
+        agent_runner=_noop_agent,
+        action_runner=lambda *args: ("unused", 1.0),
+    )
+
+    with pytest.raises(ValueError, match="identity"):
+        execution.execute(
+            flow,
+            agent_runner=_noop_agent,
+            action_runner=lambda *args: ("unused", 1.0),
+            resume_run_id=paused.run_id,
+            decision="approved",
+        )
+    with pytest.raises(ValueError, match="assignee"):
+        execution.execute(
+            flow,
+            agent_runner=_noop_agent,
+            action_runner=lambda *args: ("unused", 1.0),
+            resume_run_id=paused.run_id,
+            decision="approved",
+            decided_by="user:bob",
+        )
+    assert store.load_run(paused.run_id).status == "paused_approval"
+
+    completed = execution.execute(
+        flow,
+        agent_runner=_noop_agent,
+        action_runner=lambda *args: ("unused", 1.0),
+        resume_run_id=paused.run_id,
+        decision="approved",
+        decided_by="user:alice",
+    )
+    assert completed.status == "completed"
+    assert completed.decided_by == "user:alice"
 
 
 def test_paused_run_uses_pinned_root_after_edit_and_delete(tmp_path, monkeypatch):
@@ -317,6 +365,7 @@ def test_paused_run_uses_pinned_root_after_edit_and_delete(tmp_path, monkeypatch
         action_runner=lambda tool, params, data: (seen.append(tool) or "ok", 1.0),
         resume_run_id=paused.run_id,
         decision="approved",
+        decided_by="system:direct",
     )
 
     assert resumed.status == "completed"
@@ -352,6 +401,7 @@ def test_paused_run_uses_pinned_subflow_after_child_edit_and_delete(tmp_path, mo
         action_runner=lambda tool, params, data: (seen.append(tool) or "ok", 1.0),
         resume_run_id=paused.run_id,
         decision="approved",
+        decided_by="system:direct",
     )
 
     assert resumed.status == "completed"
@@ -438,6 +488,7 @@ def test_legacy_pinned_cross_owner_subflow_is_rejected_on_resume(tmp_path, monke
             ),
             resume_run_id="legacy-cross-owner",
             decision="approved",
+            decided_by="system:direct",
         )
     assert calls == []
 
@@ -525,6 +576,7 @@ def test_corrupt_pinned_snapshot_fails_closed_before_side_effect(tmp_path, monke
             action_runner=lambda tool, params, data: (calls.append(tool) or "bad", 1.0),
             resume_run_id=paused.run_id,
             decision="approved",
+            decided_by="system:direct",
         )
 
     assert calls == []
@@ -550,11 +602,45 @@ def test_high_risk_lost_ack_is_quarantined_without_a_grounded_failure(tmp_path, 
         action_runner=_lost_ack,
         resume_run_id=paused.run_id,
         decision="approved",
+        decided_by="system:direct",
     )
     assert run.status == STATUS_INDETERMINATE
     assert run.cursor == "charge"
     assert run.nodes["charge"]["status"] == STATUS_INDETERMINATE
     assert run.nodes["charge"].get("outcome") is None
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        "REFUSED (governed): approval was not granted",
+        "DRY RUN: would charge; re-run with confirm=true",
+    ],
+)
+def test_high_risk_pre_effect_refusal_is_failed_not_indeterminate(
+    tmp_path, monkeypatch, result,
+):
+    _patch_home(tmp_path, monkeypatch)
+    flow = Flow(id="pre-effect-refusal", name="refusal", start="gate", nodes={
+        "gate": FlowNode(id="gate", kind=NODE_APPROVAL, prompt="approve?", next="charge"),
+        "charge": FlowNode(id="charge", kind=NODE_ACTION, tool="stripe"),
+    })
+    store.save_flow(flow)
+    paused = execution.execute(
+        flow, agent_runner=_noop_agent, action_runner=lambda *args: ("unused", 1.0))
+
+    run = execution.execute(
+        flow,
+        agent_runner=_noop_agent,
+        action_runner=lambda *args: (result, 0.0),
+        resume_run_id=paused.run_id,
+        decision="approved",
+        decided_by="system:direct",
+    )
+
+    assert run.status == "failed"
+    assert run.cursor == "charge"
+    assert run.status != STATUS_INDETERMINATE
 
 
 def test_failed_agent_trajectory_is_quarantined_without_replay_proof(tmp_path, monkeypatch):
@@ -696,3 +782,31 @@ def test_default_action_runner_uses_registry_dict_contract_for_async_tool(monkey
     assert seen == [{"value": 7}]
     assert registry_kwargs["channel"] == "api"
     assert registry_kwargs["user_id"] == "alice"
+
+
+@pytest.mark.parametrize(
+    "reserved",
+    [
+        "REFUSED (governed): approval missing",
+        "INDETERMINATE (governed): commit receipt missing",
+    ],
+)
+def test_default_action_runner_never_scores_governed_non_success_as_success(
+    monkeypatch, reserved,
+):
+    from maverick.tools import Tool, ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register(Tool(
+        name="salesforce",
+        description="governed connector",
+        input_schema={"type": "object"},
+        fn=lambda _args: reserved,
+    ))
+    monkeypatch.setattr("maverick.tools.base_registry", lambda *a, **k: registry)
+
+    result, outcome = execution.default_action_runner(world=None)(
+        "salesforce", {"op": "post"}, {},
+    )
+    assert result == reserved
+    assert outcome == 0.0

@@ -39,6 +39,8 @@ _INTERNAL_ERROR = -32603
 
 # Runner: (tool_name, arguments) -> CallToolResult dict (isError + content[/...]).
 Runner = Callable[[str, dict], dict]
+ContextRunner = Callable[[str, dict, object], dict]
+TaskAuthorizer = Callable[[str], bool]
 
 
 class TaskError(Exception):
@@ -73,12 +75,25 @@ def _first_text(result: dict) -> str:
 class McpTask:
     """In-memory record of one task-augmented request's execution state."""
 
-    def __init__(self, *, ttl_ms: int, poll_interval_ms: int, owner: str | None = None):
+    def __init__(
+        self,
+        *,
+        ttl_ms: int,
+        poll_interval_ms: int,
+        owner: str | None = None,
+        tool_name: str = "",
+        quota_owner: str | None = None,
+    ):
         # No auth context on stdio (single client owns the pipe), so per the
         # spec's security guidance the id is cryptographically random with
         # ample entropy rather than guessable/sequential.
         self.id = secrets.token_hex(16)
         self.owner = owner
+        self.tool_name = tool_name
+        # Access ownership is session-bound; quota ownership is caller-bound.
+        # Keep them distinct so re-minting a session cannot bypass a principal's
+        # active-task ceiling.
+        self.quota_owner = owner if quota_owner is None else quota_owner
         self.status = "working"
         self.status_message = "The operation is now in progress."
         self.created_at = _now_iso()
@@ -136,6 +151,7 @@ class TaskStore:
         self,
         runner: Runner,
         *,
+        context_runner: ContextRunner | None = None,
         max_workers: int | None = None,
         max_tasks: int | None = None,
         max_tasks_per_owner: int | None = None,
@@ -147,17 +163,19 @@ class TaskStore:
         on_status_change: Callable[[McpTask], None] | None = None,
     ):
         self._runner = runner
+        self._context_runner = context_runner
         # Optional: invoked with the task each time it changes status, so the
         # server can push notifications/tasks/status. Fired outside the lock.
         self._on_status_change = on_status_change
         self._max_tasks = max_tasks if max_tasks is not None else _env_int(
             "MAVERICK_MCP_MAX_TASKS", 256, lo=1, hi=100_000)
-        # Per-owner sub-cap (HTTP multi-client mode only). The global cap above
+        # Per-caller sub-cap (HTTP multi-client mode only). The global cap above
         # is shared, and _make_room only evicts TERMINAL tasks, so without this
-        # one HTTP session could fill all 256 slots with active tasks and block
-        # task creation for every other client -- defeating the per-session
-        # isolation MAVERICK_MCP_HTTP_TASKS exists to provide. Bounded by the
-        # global cap; ignored for stdio (owner=None, single client).
+        # one principal could fill all 256 slots with active tasks and block
+        # task creation for every other client. The transport supplies a stable
+        # principal scope, distinct from the task's session-bound access owner,
+        # so session rotation cannot reset this ceiling. Bounded by the global
+        # cap; ignored for stdio (quota_owner=None, single client).
         self._max_tasks_per_owner = (
             max_tasks_per_owner if max_tasks_per_owner is not None else _env_int(
                 "MAVERICK_MCP_MAX_TASKS_PER_OWNER",
@@ -190,6 +208,8 @@ class TaskStore:
         task_param: dict,
         *,
         owner: str | None = None,
+        quota_owner: str | None = None,
+        context: object | None = None,
     ) -> McpTask:
         """Register a task (status working), kick off the worker, return it."""
         self._purge_expired()
@@ -197,15 +217,18 @@ class TaskStore:
             ttl_ms=self._resolve_ttl(task_param),
             poll_interval_ms=self._poll_ms,
             owner=owner,
+            tool_name=name,
+            quota_owner=quota_owner,
         )
         with self._lock:
-            self._reject_if_owner_over_quota_locked(owner)
+            self._reject_if_owner_over_quota_locked(task.quota_owner)
             self._make_room_for_task_locked()
             self._tasks[task.id] = task
             # Assign the future under the SAME lock that inserts the task: a
             # concurrent cancel()/_purge_expired() must never observe a freshly
             # inserted task with `future is None` and evict a starting worker.
-            task.future = self._executor.submit(self._run, task, name, arguments)
+            task.future = self._executor.submit(
+                self._run, task, name, arguments, context)
         return task
 
     def _resolve_ttl(self, task_param: dict) -> int:
@@ -218,11 +241,22 @@ class TaskStore:
             ttl = self._default_ttl_ms
         return min(ttl, self._max_ttl_ms)  # receivers MAY override the request
 
-    def _run(self, task: McpTask, name: str, arguments: dict) -> None:
+    def _run(
+        self,
+        task: McpTask,
+        name: str,
+        arguments: dict,
+        context: object | None,
+    ) -> None:
         if task.cancel_requested:  # cancelled before the worker picked it up
             return
         try:
-            result = self._runner(name, arguments)
+            if context is not None:
+                if self._context_runner is None:
+                    raise RuntimeError("task execution context has no authorized runner")
+                result = self._context_runner(name, arguments, context)
+            else:
+                result = self._runner(name, arguments)
         except Exception as e:  # noqa: BLE001 -- a runner crash must fail the task, not the pool
             log.exception("mcp task %s (%s) crashed", task.id, name)
             changed = False
@@ -253,11 +287,24 @@ class TaskStore:
 
     # ---- JSON-RPC task methods -----------------------------------------
 
-    def get(self, task_id: str, *, owner: str | None = None) -> dict:
-        return self._require(task_id, owner=owner).to_dict()
+    def get(
+        self,
+        task_id: str,
+        *,
+        owner: str | None = None,
+        authorize: TaskAuthorizer | None = None,
+    ) -> dict:
+        return self._require(task_id, owner=owner, authorize=authorize).to_dict()
 
-    def result(self, task_id: str, *, owner: str | None = None) -> dict:
-        task = self._require(task_id, owner=owner)
+    def result(
+        self,
+        task_id: str,
+        *,
+        owner: str | None = None,
+        authorize: TaskAuthorizer | None = None,
+        reauthorize: TaskAuthorizer | None = None,
+    ) -> dict:
+        task = self._require(task_id, owner=owner, authorize=authorize)
         # Block until terminal (spec requirement) -- but bound how long a SINGLE
         # call blocks, independent of the task's ttl. result() runs on the HTTP
         # dispatch thread pool, so waiting the full ttl (up to 24h) lets a caller
@@ -268,6 +315,12 @@ class TaskStore:
         wait_s = max(1.0, min((task.ttl_ms or 0) / 1000.0 + 5.0,
                               self._result_block_ms / 1000.0))
         task.done.wait(timeout=wait_s)
+        # Re-check after the potentially long wait: an operator revocation or
+        # capability narrowing that lands while result() blocks must prevent
+        # the now-sensitive result from crossing the boundary.
+        final_authorizer = reauthorize or authorize
+        if final_authorizer is not None and not final_authorizer(task.tool_name):
+            raise TaskError(_INVALID_PARAMS, "task not found")
         with self._lock:
             if task.status not in TASK_TERMINAL:
                 raise TaskError(_INTERNAL_ERROR, "timed out waiting for task result")
@@ -281,7 +334,13 @@ class TaskStore:
         out["_meta"] = meta
         return out
 
-    def cancel(self, task_id: str, *, owner: str | None = None) -> dict:
+    def cancel(
+        self,
+        task_id: str,
+        *,
+        owner: str | None = None,
+        authorize: TaskAuthorizer | None = None,
+    ) -> dict:
         self._purge_expired()
         # A hostile client can send a non-string taskId (list/dict); coerce it to
         # "" so the lookup yields a clean -32602 instead of an unhashable-key
@@ -289,7 +348,11 @@ class TaskStore:
         key = task_id if isinstance(task_id, str) else ""
         with self._lock:
             task = self._tasks.get(key)
-            if task is None or not self._owner_matches(task, owner):
+            if (
+                task is None
+                or not self._owner_matches(task, owner)
+                or (authorize is not None and not authorize(task.tool_name))
+            ):
                 raise TaskError(_INVALID_PARAMS, "task not found")
             if task.status in TASK_TERMINAL:
                 raise TaskError(
@@ -303,7 +366,13 @@ class TaskStore:
         self._notify(task)
         return snapshot
 
-    def list(self, cursor: str | None, *, owner: str | None = None) -> dict:
+    def list(
+        self,
+        cursor: str | None,
+        *,
+        owner: str | None = None,
+        authorize: TaskAuthorizer | None = None,
+    ) -> dict:
         self._purge_expired()
         start = self._decode_cursor(cursor)
         with self._lock:
@@ -311,6 +380,8 @@ class TaskStore:
                 task for task in self._tasks.values()
                 if self._owner_matches(task, owner)
             ]
+        if authorize is not None:
+            items = [task for task in items if authorize(task.tool_name)]
         if start > len(items):
             raise TaskError(_INVALID_PARAMS, "invalid cursor")
         chunk = items[start:start + self._page_size]
@@ -322,14 +393,24 @@ class TaskStore:
 
     # ---- helpers --------------------------------------------------------
 
-    def _require(self, task_id: str, *, owner: str | None = None) -> McpTask:
+    def _require(
+        self,
+        task_id: str,
+        *,
+        owner: str | None = None,
+        authorize: TaskAuthorizer | None = None,
+    ) -> McpTask:
         self._purge_expired()
         # Coerce a non-string taskId (hostile list/dict) to "" so the lookup
         # raises a clean -32602 rather than an unhashable-key TypeError.
         key = task_id if isinstance(task_id, str) else ""
         with self._lock:
             task = self._tasks.get(key)
-        if task is None or not self._owner_matches(task, owner):
+        if (
+            task is None
+            or not self._owner_matches(task, owner)
+            or (authorize is not None and not authorize(task.tool_name))
+        ):
             raise TaskError(_INVALID_PARAMS, "task not found")
         return task
 
@@ -351,22 +432,22 @@ class TaskStore:
             raise TaskError(_INVALID_PARAMS, "invalid cursor")
         return start
 
-    def _reject_if_owner_over_quota_locked(self, owner: str | None) -> None:
-        # owner=None is stdio/single-client mode: the global cap governs, no
-        # per-owner quota. In HTTP mode, count this owner's records that still
-        # occupy the shared worker/queue capacity. That includes non-terminal
-        # tasks and cancelled terminal tasks whose Future has not drained yet;
-        # otherwise one session can repeatedly create+cancel tasks to bypass
-        # the owner cap while filling the global cap with non-evictable records.
-        if owner is None:
+    def _reject_if_owner_over_quota_locked(self, quota_owner: str | None) -> None:
+        # quota_owner=None is stdio/single-client mode: the global cap governs,
+        # with no per-caller quota. In HTTP mode, count this caller's records
+        # that still occupy the shared worker/queue capacity. That includes
+        # non-terminal tasks and cancelled terminal tasks whose Future has not
+        # drained yet; otherwise session rotation plus cancel could bypass the
+        # caller cap while filling the global cap with non-evictable records.
+        if quota_owner is None:
             return
         active = sum(
             1 for t in self._tasks.values()
-            if t.owner == owner and self._task_occupies_capacity(t)
+            if t.quota_owner == quota_owner and self._task_occupies_capacity(t)
         )
         if active >= self._max_tasks_per_owner:
             raise TaskError(
-                _INVALID_PARAMS, "too many active tasks for this session")
+                _INVALID_PARAMS, "too many active tasks for this caller")
 
     @staticmethod
     def _task_occupies_capacity(task: McpTask) -> bool:

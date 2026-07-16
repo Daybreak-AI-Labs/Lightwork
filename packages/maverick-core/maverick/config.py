@@ -906,11 +906,13 @@ def get_governed_connectors() -> dict:
 
     Routing a live system-of-record write through a governed Action
     (simulate -> approve -> commit -> lineage) instead of a bare confirm-gated
-    tool call is OFF by default: it changes how enterprise writes are authorized
-    (they hit the approval floor) and records a tamper-evident lineage link, so
-    the operator opts in. ``connectors`` selects which reference REST connectors
-    to register (see :data:`maverick.governed_rest.GOVERNED_REST_FACTORIES`).
-    Env override: ``MAVERICK_GOVERNED_CONNECTORS``.
+    tool call is OFF by default in the standard profile: it changes how writes
+    are authorized and records tamper-evident transaction receipts, so a
+    standard operator opts in. Enterprise mode treats governance as a mandatory
+    runtime floor even when this stored default is false. ``connectors`` selects
+    reference REST connectors to register (see
+    :data:`maverick.governed_rest.GOVERNED_REST_FACTORIES`). Env override:
+    ``MAVERICK_GOVERNED_CONNECTORS`` (standard mode only).
     """
     cfg = load_config().get("governed_connectors", {}) or {}
     raw = cfg.get("connectors", [])

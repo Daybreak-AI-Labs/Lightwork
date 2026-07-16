@@ -614,11 +614,6 @@ _AUTH_EXEMPT = {
     "/webhook/jira",
     "/webhook/github",
     "/webhook/gitlab",
-    # Signed flow-approval links: a human clicks an approve/reject URL from a
-    # channel (Slack/Teams/email) with no dashboard session. The HMAC-signed,
-    # self-expiring token IS the auth (see maverick.flow.approvals); the state
-    # change is on the POST, gated by that token, so a link scanner's GET is inert.
-    "/flow/approve",
     # Built-in OIDC browser-login endpoints: they bootstrap a session and carry
     # their own flow-level security (state/PKCE/signed cookies). They must be
     # reachable by a browser that has no dashboard token yet; each self-gates on
@@ -3962,15 +3957,22 @@ def _fire_stored_trigger(
                 raise HTTPException(status_code=409, detail="the flow engine is off")
             from maverick.flow import store as flow_store
 
-            flow = flow_store.load_flow(trigger["flow"])
-            if flow is None:
+            try:
+                published = flow_store.load_published_bundle(trigger["flow"])
+            except flow_store.FlowSnapshotError as exc:
+                raise HTTPException(
+                    status_code=409, detail="trigger flow unavailable"
+                ) from exc
+            if published is None:
                 raise HTTPException(status_code=409, detail="trigger flow unavailable")
+            flow, release = published
             expected_owner = str(trigger.get("flow_owner") or "")
             expected_revision = str(trigger.get("flow_revision") or "")
             if not expected_revision and not auth_genuinely_off():
                 raise HTTPException(status_code=409, detail="trigger flow binding is stale")
             if expected_revision and (
-                flow.owner != expected_owner or flow.revision != expected_revision
+                flow.owner != expected_owner
+                or str(release.get("release_id") or "") != expected_revision
             ):
                 raise HTTPException(status_code=409, detail="trigger flow binding is stale")
             check_goal_rate_limit(request, source="webhook")
@@ -3985,7 +3987,7 @@ def _fire_stored_trigger(
             from maverick_dashboard import automation_queue as aq
 
             try:
-                run_id = aq.enqueue_flow_run(
+                run_id = aq.enqueue_published_flow_run(
                     trigger["flow"],
                     run_data,
                     owner=owner,
@@ -3993,6 +3995,7 @@ def _fire_stored_trigger(
                     channel="api" if user_id else None,
                     user_id=user_id,
                     allowed_suites=allowed_suites,
+                    expected_revision=expected_revision,
                 )
             except flow_store.FlowSnapshotError as exc:
                 raise HTTPException(
@@ -4119,12 +4122,18 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
         inputs = ({str(k): v for k, v in inbound_evt.items()}
                   if isinstance(inbound_evt, dict) else {})
         from maverick_dashboard import automation_queue as aq
-        resume_payload = {
-            "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner,
-            "inputs": inputs}
-        if resume_tenant:
-            resume_payload["tenant"] = resume_tenant
-        aq.queue().enqueue(aq.FLOW_RESUME_KIND, resume_payload)
+        try:
+            aq.enqueue_flow_resume(
+                run.flow_id,
+                run.run_id,
+                owner=run.owner,
+                inputs=inputs,
+                tenant=resume_tenant,
+            )
+        except flow_store.FlowSnapshotError as exc:
+            raise HTTPException(
+                status_code=409, detail="run release is no longer active"
+            ) from exc
         return JSONResponse({"run_id": run.run_id, "status": "resuming"},
                             status_code=202)
 
@@ -4201,21 +4210,51 @@ def _load_paused_approval_run(token: str):
             or str(run.prompt or "") != claim.get("prompt")
             or float(run.updated or 0.0) != float(claim.get("updated", -1.0))):
         return None, "This approval link is for an older approval step.", tenant
+    if (str((run.human or {}).get("assignee") or "") != claim.get("assignee", "")
+            or str(run.owner or "") != claim.get("owner", "")):
+        return None, "This approval link is for a different approver scope.", tenant
     return run, claim["decision"], tenant
+
+
+def _approval_link_actor(request: Request, run) -> str:
+    """Return a provable authorized actor for a signed link, or fail closed."""
+    require_permission(request, "operate")
+    principal = str(caller_principal(request) or "").strip()
+    if not principal:
+        raise HTTPException(
+            status_code=403,
+            detail="sign in with an attributable identity to decide this approval",
+        )
+    aliases = {principal.casefold()}
+    if principal.casefold().startswith("user:") and principal[5:]:
+        subject = principal[5:].casefold()
+        aliases.update({subject, f"@{subject}"})
+    assignee = str((run.human or {}).get("assignee") or "").strip().casefold()
+    if assignee and assignee not in aliases:
+        raise HTTPException(status_code=403, detail="this approval is assigned to someone else")
+    if not assignee and run.owner and principal != run.owner:
+        raise HTTPException(status_code=403, detail="this approval belongs to another user")
+    return principal
 
 
 @app.get("/flow/approve", response_class=HTMLResponse)
 async def flow_approve_confirm(request: Request, token: str = "") -> HTMLResponse:
     """Show a one-click confirmation for a signed approve/reject link. The state
     change happens on the POST (below), not this GET, so an email/link scanner
-    that pre-fetches the URL cannot silently actuate a decision. Auth is the
-    signed token itself (see ``_AUTH_EXEMPT``)."""
+    that pre-fetches the URL cannot silently actuate a decision. The token binds
+    the pause while dashboard authentication proves the approver identity."""
     from maverick import flow
     if not flow.enabled():
         raise HTTPException(status_code=404, detail="the flow engine is off")
     run, decision, _tenant = _load_paused_approval_run(token)
     if run is None:
         return _flow_approve_page("Approval unavailable", decision, status=410)
+    try:
+        _approval_link_actor(request, run)
+    except HTTPException as exc:
+        return _flow_approve_page(
+            "Approval unavailable", str(exc.detail), status=exc.status_code,
+        )
     verb = "approve" if decision == "approved" else "reject"
     name = run.flow_id
     return _flow_approve_page(
@@ -4236,8 +4275,26 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
     run, decision, tenant = _load_paused_approval_run(token)
     if run is None:
         return _flow_approve_page("Approval unavailable", decision, status=410)
+    try:
+        decided_by = _approval_link_actor(request, run)
+    except HTTPException as exc:
+        return _flow_approve_page(
+            "Approval unavailable", str(exc.detail), status=exc.status_code,
+        )
+    from maverick.flow import store as flow_store
+
     from maverick_dashboard import automation_queue as aq
-    aq.enqueue_flow_resume(run.flow_id, run.run_id, decision, run.owner, tenant=tenant)
+    try:
+        aq.enqueue_flow_resume(
+            run.flow_id, run.run_id, decision, run.owner, tenant=tenant,
+            decided_by=decided_by,
+        )
+    except flow_store.FlowSnapshotError:
+        return _flow_approve_page(
+            "Approval unavailable",
+            "This flow release is no longer active.",
+            status=410,
+        )
     verb = "approved" if decision == "approved" else "rejected"
     return _flow_approve_page("Thanks — recorded",
                               f"You {verb} “{run.flow_id}”. It is resuming now; "

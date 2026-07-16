@@ -38,12 +38,20 @@ def _current_revision(flow_id: str) -> str:
     return str(flow.revision or "") if flow is not None else ""
 
 
+def _current_cohort(flow_id: str) -> str:
+    from .store import flow_cohort, load_flow
+
+    flow = load_flow(flow_id)
+    return flow_cohort(flow) if flow is not None else ""
+
+
 def record(
     flow_id: str,
     node_id: str,
     tools: list[str],
     *,
     revision: str | None = None,
+    cohort: str | None = None,
 ) -> None:
     """Append the distinct ``tools`` one agent-node run used. Best-effort; the
     empty list (a run that called no tool) is still recorded, because it's
@@ -53,18 +61,26 @@ def record(
         "ts": time.time(), "flow_id": str(flow_id), "node_id": str(node_id),
         "tools": [str(t) for t in (tools or [])],
         "revision": str(_current_revision(flow_id) if revision is None else revision),
+        "cohort": str(_current_cohort(flow_id) if cohort is None else cohort),
     })
 
 
 def _rows_for(
-    flow_id: str, node_id: str, *, revision: str | None = None,
+    flow_id: str,
+    node_id: str,
+    *,
+    revision: str | None = None,
+    cohort: str | None = None,
 ) -> list[list[str]]:
     out: list[list[str]] = []
     expected_revision = _current_revision(flow_id) if revision is None else str(revision)
+    expected_cohort = _current_cohort(flow_id) if cohort is None else str(cohort)
     for r in tail_rows(_path(), _MAX_ROWS):
         if r.get("flow_id") != flow_id or str(r.get("node_id")) != str(node_id):
             continue
         if str(r.get("revision") or "") != expected_revision:
+            continue
+        if str(r.get("cohort") or "") != expected_cohort:
             continue
         tools = r.get("tools")
         if isinstance(tools, list):
@@ -75,7 +91,8 @@ def _rows_for(
 def dominant_tool(flow_id: str, node_id: str, *,
                   min_support: int = _DEFAULT_MIN_SUPPORT,
                   min_frac: float = _DEFAULT_MIN_FRAC,
-                  revision: str | None = None) -> str | None:
+                  revision: str | None = None,
+                  cohort: str | None = None) -> str | None:
     """The single tool this agent node has consistently called, or ``None``.
 
     Conservative on purpose -- an inferred tool can drive an *autonomous* rewrite,
@@ -84,7 +101,7 @@ def dominant_tool(flow_id: str, node_id: str, *,
     ALL those runs (a run that used two tools, or none, counts against it). Returns
     that tool only when both hold. (Only successful node runs are recorded -- see
     execution._capture_node_tools -- so one row is one run, not one retry attempt.)"""
-    rows = _rows_for(flow_id, node_id, revision=revision)
+    rows = _rows_for(flow_id, node_id, revision=revision, cohort=cohort)
     if len(rows) < min_support:
         return None
     # Only runs that used EXACTLY one tool are evidence for hardening to it.

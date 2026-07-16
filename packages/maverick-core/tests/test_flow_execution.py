@@ -171,7 +171,8 @@ class TestExecution:
         assert paused.status == "paused_approval" and paused.nodes["a"]["outcome"] == 1.0
         resumed = execution.execute(f, agent_runner=lambda b, d: ("x", 1.0),
                                     action_runner=lambda *a: ("", None),
-                                    resume_run_id=paused.run_id, decision="approved")
+                                    resume_run_id=paused.run_id, decision="approved",
+                                    decided_by="system:direct")
         # the pre-pause node's trace is preserved alongside the post-resume nodes
         assert resumed.nodes["a"]["outcome"] == 1.0 and resumed.nodes["c"]["outcome"] == 1.0
 
@@ -186,7 +187,8 @@ class TestExecution:
                                    data={"n": 1})
         assert paused.status == "paused_approval" and paused.cursor == "a"
         resumed = execution.execute(f, agent_runner=ag, action_runner=lambda *a: ("", None),
-                                    resume_run_id=paused.run_id, decision="approved")
+                                    resume_run_id=paused.run_id, decision="approved",
+                                    decided_by="system:direct")
         assert resumed.status == "completed" and resumed.data["done"] == "ran"
         assert resumed.run_id == paused.run_id          # same run, resumed in place
 
@@ -206,6 +208,7 @@ class TestExecution:
         assert paused.status == "paused_approval"
         resumed = execution.execute(f, agent_runner=ag, action_runner=lambda *a: ("", None),
                                     resume_run_id=paused.run_id, decision="approved",
+                                    decided_by="system:direct",
                                     inputs={"corrected": "the fixed value"})
         assert got["brief"] == "use the fixed value"        # human input threaded in
         assert resumed.data["corrected"] == "the fixed value"
@@ -231,6 +234,7 @@ class TestExecution:
         resumed = execution.execute(
             f, agent_runner=ag, action_runner=lambda *a: ("", None),
             resume_run_id=paused.run_id, decision="approved",
+            decided_by="system:direct",
             inputs={"amount": "999999.00", "note": "reviewed"})
         assert got["brief"] == "pay 100.00 because reviewed"
         assert resumed.data["amount"] == "100.00"
@@ -291,7 +295,8 @@ class TestExecution:
                                    action_runner=lambda *a: ("", None))
         rej = execution.execute(f, agent_runner=lambda *a: ("", None),
                                 action_runner=lambda *a: ("", None),
-                                resume_run_id=paused.run_id, decision="rejected")
+                                resume_run_id=paused.run_id, decision="rejected",
+                                decided_by="system:direct")
         assert rej.status == "rejected" and "done" not in rej.data
 
 

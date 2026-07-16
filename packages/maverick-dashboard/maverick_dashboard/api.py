@@ -70,6 +70,8 @@ from .api_schemas import (
     FlowAutonomyIn,
     FlowChatIn,
     FlowDraftIn,
+    FlowDryRunIn,
+    FlowPublishIn,
     FlowResumeIn,
     FlowRollbackIn,
     FlowRunIn,
@@ -124,6 +126,7 @@ from .api_schemas import (
 )
 from .auth import (
     assert_goal_access,
+    auth_genuinely_off,
     caller_principal,
     caller_suites,
     can_access_goal,
@@ -1719,7 +1722,8 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
         rec = connections.set_connection(
             payload.name, connector=payload.connector, base_url=payload.base_url,
             token=payload.token, owner=caller_principal(request) or "",
-            expected_owner=goal_owner_filter(request))
+            expected_owner=goal_owner_filter(request), access=payload.access,
+            allowed_principals=payload.allowed_principals)
     except PermissionError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
@@ -1743,13 +1747,37 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     owner_filter = goal_owner_filter(request)
     if rec is None or (owner_filter is not None and rec.get("owner", "") != owner_filter):
         raise HTTPException(status_code=404, detail="no such connection")
+    probe_revision = str(rec.get("revision") or "")
+
+    def _persist_probe(result: dict) -> None:
+        try:
+            connections.record_test_result(
+                name,
+                reachable=bool(result.get("reachable")),
+                authenticated=bool(result.get("authenticated")),
+                status=result.get("status"),
+                expected_owner=owner_filter,
+                expected_revision=probe_revision,
+            )
+        except connections.ConnectionVersionConflict as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="connection changed while its readiness probe was running",
+            ) from exc
+
     base = str(rec.get("base_url") or "").rstrip("/")
     if not base:
-        return {"ok": False, "detail": "no base URL set"}
+        result = {"ok": False, "reachable": False, "authenticated": False,
+                  "detail": "no base URL set"}
+        _persist_probe(result)
+        return result
 
     def _probe() -> dict:
+        import secrets
+
+        from maverick.tools import _ssrf
+
         try:
-            from maverick.tools import _ssrf
             from maverick.tools.enterprise_connectors import auth_headers_for
             # Speak the connector's saved-token auth dialect (basic / custom
             # scheme), but do not include operator environment-backed auxiliary
@@ -1764,16 +1792,62 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
             # follow_redirects=False, so a base_url or a 3xx can't turn this into
             # an internal-network probe or forward the token to another host.
             r = _ssrf.safe_get(base, headers=headers, timeout=10.0)
-            # 2xx/3xx or 401/403 all mean "reachable"; only a connect error is a hard fail.
-            ok = r.status_code < 500
-            return {"ok": ok, "status": r.status_code,
-                    "detail": ("authenticated" if r.status_code < 400
-                               else f"reachable but returned {r.status_code}")}
+            # Any HTTP status proves network reachability. It does NOT prove
+            # authentication/readiness: 401/403 are explicit auth failures and
+            # a generic 404/4xx/5xx cannot substantiate a successful credential
+            # test. Keep these concepts separate for authoring preflight.
+            # A redirect commonly points to an interactive login page; it proves
+            # reachability, not that this credential authenticated. A 2xx alone
+            # is also insufficient because many API roots are public. Challenge
+            # the same endpoint with a fresh invalid credential and require an
+            # explicit 401/403 control response before asserting that the saved
+            # token made the difference. No response body or header is retained.
+            actual_ok = 200 <= r.status_code < 300
+            ready = False
+            if actual_ok and rec.get("token"):
+                invalid_headers = auth_headers_for(
+                    str(rec.get("connector") or ""),
+                    "invalid-readiness-probe-" + secrets.token_urlsafe(32),
+                    include_extra_headers_env=False,
+                )
+                try:
+                    control = _ssrf.safe_get(
+                        base, headers=invalid_headers, timeout=10.0,
+                    )
+                except Exception as exc:  # token worked; control evidence did not
+                    return {
+                        "ok": False,
+                        "reachable": True,
+                        "authenticated": False,
+                        "status": r.status_code,
+                        "detail": (
+                            "reachable, but the invalid-credential control could "
+                            f"not be completed ({type(exc).__name__})"
+                        ),
+                    }
+                ready = control.status_code in (401, 403)
+            if r.status_code in (401, 403):
+                detail = f"authentication refused ({r.status_code})"
+            elif ready:
+                detail = "authenticated (invalid-credential control was refused)"
+            elif actual_ok:
+                detail = (
+                    "reachable, but the endpoint did not prove that the saved "
+                    "credential was required"
+                )
+            else:
+                detail = f"reachable but readiness probe returned {r.status_code}"
+            return {"ok": ready, "reachable": True, "authenticated": ready,
+                    "status": r.status_code, "detail": detail}
         except _ssrf.BlockedHost:
-            return {"ok": False, "detail": "base URL host is not permitted"}
+            return {"ok": False, "reachable": False, "authenticated": False,
+                    "detail": "base URL host is not permitted"}
         except Exception as e:  # pragma: no cover -- network varies
-            return {"ok": False, "detail": f"could not reach host: {type(e).__name__}"}
-    return await run_in_threadpool(_probe)
+            return {"ok": False, "reachable": False, "authenticated": False,
+                    "detail": f"could not reach host: {type(e).__name__}"}
+    result = await run_in_threadpool(_probe)
+    _persist_probe(result)
+    return result
 
 
 @router.delete("/connections/{name}")
@@ -1932,6 +2006,30 @@ def _assert_flow_access(request: Request, flow) -> None:
         raise HTTPException(status_code=404, detail="no such flow")
 
 
+def _flow_publication_fields(flow_id: str) -> dict:
+    """Small activation-state projection for authoring/list responses."""
+    from maverick.flow import store
+
+    try:
+        published = store.load_published_bundle(flow_id)
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409, detail="published flow release failed integrity checks"
+        ) from exc
+    if published is None:
+        return {
+            "published": False,
+            "published_version": None,
+            "published_revision": "",
+        }
+    _flow, release = published
+    return {
+        "published": True,
+        "published_version": int(release["definition_version"]),
+        "published_revision": str(release["release_id"]),
+    }
+
+
 @router.get("/flows")
 async def list_flows_endpoint(request: Request) -> dict:
     """The saved flow definitions (a summary per flow)."""
@@ -1941,7 +2039,7 @@ async def list_flows_endpoint(request: Request) -> dict:
     return {"flows": [
         {"id": f.id, "name": f.name, "nodes": len(f.nodes),
          "single_agent": f.is_single_agent(), "schedule": f.schedule,
-         "inputs": f.inputs}
+         "inputs": f.inputs, **_flow_publication_fields(f.id)}
         for f in store.list_flows()
         if _can_access_flow(request, f)
     ]}
@@ -1991,7 +2089,82 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
         "nodes": len(flow.nodes),
         "version": flow.version,
         "revision": flow.revision,
+        **_flow_publication_fields(flow.id),
     }
+
+
+@router.post("/flows/{flow_id}/publish")
+async def publish_flow_endpoint(
+    request: Request, flow_id: str, payload: FlowPublishIn,
+) -> dict:
+    """Activate one immutable draft revision for real runs/triggers/schedules."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+
+    current = store.load_flow(flow_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, current)
+    try:
+        release = store.publish_flow(
+            flow_id,
+            expected_version=payload.version,
+            expected_revision=payload.revision,
+        )
+    except store.FlowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Make schedule activation responsive to an explicit publish. The periodic
+    # reconcile remains the crash/restart repair path.
+    from maverick_dashboard import automation_queue
+
+    try:
+        automation_queue._reconcile_flow_crons()
+    except Exception:
+        # Publication already committed. Report that authoritative state and
+        # let the periodic reconciler repair scheduling instead of returning a
+        # false failure that might induce a duplicate operator retry.
+        log.exception("flow cron reconcile failed after publishing %s", flow_id)
+    return {
+        "id": flow_id,
+        "published": True,
+        "published_version": int(release["definition_version"]),
+        "published_revision": str(release["release_id"]),
+    }
+
+
+@router.post("/flows/{flow_id}/unpublish")
+async def unpublish_flow_endpoint(
+    request: Request, flow_id: str, payload: FlowPublishIn,
+) -> dict:
+    """Deactivate a release while retaining its draft and immutable history."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+
+    current = store.load_flow(flow_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, current)
+    try:
+        store.unpublish_flow(
+            flow_id,
+            expected_version=payload.version,
+            expected_revision=payload.revision,
+        )
+    except store.FlowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    from maverick_dashboard import automation_queue
+
+    try:
+        automation_queue._reconcile_flow_crons()
+    except Exception:
+        # The handler re-checks publication before firing, so a stale queued
+        # cron is inert while the periodic reconciler repairs cancellation.
+        log.exception("flow cron reconcile failed after unpublishing %s", flow_id)
+    return {"id": flow_id, "published": False}
 
 
 # Common connector tools to bias the NL drafter toward real action nodes; the
@@ -2258,6 +2431,8 @@ def _run_out(run) -> dict:
     # Definitions may contain literal connector parameters from older/user-made
     # flows, so never echo the pinned graph through run polling or SSE.
     d.pop("definition_digest", None)
+    d.pop("release_digest", None)
+    d.pop("release_id", None)
     d.pop("definition_version", None)
     d.pop("subflow_digests", None)
     return d
@@ -2373,12 +2548,40 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     if run.status not in PAUSED_STATUSES:
         raise HTTPException(status_code=409,
                             detail=f"run is not paused (status {run.status})")
+    decided_by = ""
+    if run.status == "paused_approval":
+        if not str(payload.decision or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="an explicit approval decision is required",
+            )
+        decided_by = caller_principal(request) or ""
+        if not decided_by and auth_genuinely_off():
+            decided_by = "local:dashboard"
+        if not decided_by:
+            raise HTTPException(
+                status_code=403,
+                detail="an authenticated approver identity is required",
+            )
+    from maverick.flow import store
+
     from maverick_dashboard import automation_queue as aq
-    resume_payload = {
-        "flow_id": run.flow_id, "run_id": run_id, "decision": payload.decision,
-        "inputs": dict(payload.inputs or {}), "owner": run.owner}
-    resume_payload.update(aq._job_tenant_payload())
-    aq.queue().enqueue(aq.FLOW_RESUME_KIND, resume_payload)
+    try:
+        aq.enqueue_flow_resume(
+            run.flow_id,
+            run_id,
+            payload.decision,
+            run.owner,
+            decided_by=decided_by,
+            inputs=dict(payload.inputs or {}),
+        )
+    except store.FlowSnapshotError as exc:
+        if "approver" in str(exc) or "approval decision" in str(exc):
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail="run release is no longer active",
+        ) from exc
     return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
 
 
@@ -2425,10 +2628,18 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
                 status_code=409,
                 detail="only a failed run with a recorded failure node can be "
                        "resumed from its failure; use a plain retry instead")
-        retry_payload = {"flow_id": run.flow_id, "run_id": run_id, "owner": run.owner,
-                        "from_failure": True}
-        retry_payload.update(aq._job_tenant_payload())
-        aq.queue().enqueue(aq.FLOW_RESUME_KIND, retry_payload)
+        try:
+            aq.enqueue_flow_resume(
+                run.flow_id,
+                run_id,
+                owner=run.owner,
+                from_failure=True,
+            )
+        except store.FlowSnapshotError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="run release is no longer active",
+            ) from exc
         return {"run_id": run_id, "status": "resuming", "from_node": run.cursor}
     # Runs written before immutable definition snapshots have no pin fields at
     # all.  A user-requested retry is explicitly a fresh run against the current
@@ -2449,18 +2660,56 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
                 "run from the current flow instead"
             ),
         )
-    new_id = aq.enqueue_flow_run(
-        run.flow_id,
-        dict(run.input_data or {}),
-        run.owner,
-        origin=f"retry:{run_id}",
-        dry_run=bool(run.dry_run),
-        channel=run.execution_channel or None,
-        user_id=run.execution_user_id or None,
-        allowed_suites=(
+    identity = {
+        "channel": run.execution_channel or None,
+        "user_id": run.execution_user_id or None,
+        "allowed_suites": (
             frozenset(run.allowed_suites) if run.allowed_suites is not None else None
         ),
-    )
+    }
+    if run.dry_run:
+        if legacy_unpinned:
+            raise HTTPException(
+                status_code=409,
+                detail="legacy dry run has no immutable definition to retry safely",
+            )
+        new_id = aq.enqueue_flow_run(
+            run.flow_id,
+            dict(run.input_data or {}),
+            run.owner,
+            origin=f"retry:{run_id}",
+            dry_run=True,
+            definition_digest=run.definition_digest,
+            release_digest=run.release_digest,
+            release_id=run.release_id,
+            definition_version=run.definition_version,
+            definition_revision=run.definition_revision,
+            subflow_digests=dict(run.subflow_digests or {}),
+            **identity,
+        )
+    else:
+        try:
+            published = store.load_published_bundle(run.flow_id)
+        except store.FlowSnapshotError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="published flow release failed integrity checks",
+            ) from exc
+        if published is None:
+            raise HTTPException(
+                status_code=409,
+                detail="flow is not published; publish a reviewed draft before retrying",
+            )
+        published_flow, release = published
+        _assert_flow_access(request, published_flow)
+        new_id = aq.enqueue_published_flow_run(
+            run.flow_id,
+            dict(run.input_data or {}),
+            run.owner,
+            origin=f"retry:{run_id}",
+            expected_revision=str(release["release_id"]),
+            **identity,
+        )
     return {"run_id": new_id, "status": "queued", "retried_from": run_id}
 
 
@@ -2605,12 +2854,93 @@ async def flow_insights_endpoint(request: Request) -> dict:
             changes.append({
                 "node_id": node_id, "to_kind": last.get("to_kind"),
                 "source": last.get("source"),
-                "impact": evolve.measure(f.id, node_id, float(last.get("ts") or 0.0))})
+                "impact": evolve.measure(
+                    f.id,
+                    node_id,
+                    float(last.get("ts") or 0.0),
+                    before_revision=str(last.get("before_revision") or ""),
+                    after_revision=str(last.get("after_revision") or ""),
+                )})
         if proposals or changes:
             flows_out.append({"flow_id": f.id, "name": f.name,
                               "proposals": proposals, "changes": changes})
         proposal_count += len(proposals)
     return {"flows": flows_out, "proposal_count": proposal_count}
+
+
+@router.post("/flows/dry-run")
+async def dry_run_flow_draft_endpoint(
+    request: Request, payload: FlowDryRunIn,
+) -> dict:
+    """Run exactly the submitted unsaved graph with side-effect-free executors.
+
+    This endpoint intentionally never calls ``save_flow`` or ``publish_flow``.
+    It writes only the immutable execution object and durable dry-run row needed
+    to execute/watch the test. A schedule present on the draft is inert.
+    """
+    require_permission(request, "operate")
+    _require_flows()
+    from uuid import uuid4
+
+    from maverick.flow import Flow, store
+    from maverick.flow.ir import coerce_inputs
+
+    try:
+        draft = Flow.from_dict(payload.flow)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"invalid flow: {exc}") from exc
+    if not draft.id:
+        raise HTTPException(status_code=400, detail="flow needs an 'id'")
+    prior = store.load_flow(draft.id)
+    if prior is not None:
+        _assert_flow_access(request, prior)
+        draft.owner = prior.owner
+        draft.version = int(prior.version) + 1
+        draft.revision = prior.revision
+    else:
+        draft.owner = caller_principal(request) or ""
+        draft.version = 1
+        # Never accept a client-selected generation token as provenance.
+        draft.revision = uuid4().hex
+    errors = draft.validate()
+    if errors:
+        raise HTTPException(
+            status_code=400, detail="invalid flow: " + "; ".join(errors[:5])
+        )
+    data, input_errors = coerce_inputs(draft, dict(payload.data or {}))
+    if input_errors:
+        raise HTTPException(status_code=400, detail="; ".join(input_errors))
+    try:
+        digest, version, subflows = store.snapshot_flow_bundle(draft)
+        from maverick_dashboard import automation_queue as aq
+
+        run_id, deduplicated = aq.enqueue_flow_run_once(
+            draft.id,
+            data,
+            _supervisor(request),
+            "",
+            origin="manual-dry-run",
+            dry_run=True,
+            channel="api" if execution_user_id_from_request(request) else None,
+            user_id=execution_user_id_from_request(request),
+            allowed_suites=caller_suites(request),
+            definition_digest=digest,
+            definition_version=version,
+            definition_revision=draft.revision,
+            subflow_digests=subflows,
+        )
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="draft or its immutable execution plan is unavailable",
+        ) from exc
+    run = store.load_run(run_id)
+    return {
+        "run_id": run_id,
+        "status": run.status if run else "queued",
+        "dry_run": True,
+        "deduplicated": deduplicated,
+    }
 
 
 @router.get("/flows/{flow_id}")
@@ -2622,7 +2952,7 @@ async def get_flow_endpoint(request: Request, flow_id: str) -> dict:
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
     _assert_flow_access(request, f)
-    return f.to_dict()
+    return {**f.to_dict(), **_flow_publication_fields(flow_id)}
 
 
 @router.delete("/flows/{flow_id}", status_code=204)
@@ -2642,21 +2972,44 @@ async def delete_flow_endpoint(request: Request, flow_id: str) -> None:
         )
     except store.FlowVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="flow could not be safely revoked; its draft was not deleted",
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=409, detail="flow changed while it was being deleted")
 
 
 @router.post("/flows/{flow_id}/run")
 async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dict:
-    """Start a flow run as a durable job (agent nodes become goals, action nodes
-    tool calls). Returns the run id to poll; the run may pause on an approval."""
+    """Start the exact active release as a durable live run."""
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
     from maverick.flow.ir import coerce_inputs
-    flow = store.load_flow(flow_id)
-    if flow is None:
+    draft = store.load_flow(flow_id)
+    if draft is None:
         raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, draft)
+    if payload.dry_run:
+        raise HTTPException(
+            status_code=400,
+            detail="submit the unsaved graph to /flows/dry-run for a safe test",
+        )
+    try:
+        published = store.load_published_bundle(flow_id)
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="published flow release failed integrity checks",
+        ) from exc
+    if published is None:
+        raise HTTPException(
+            status_code=409,
+            detail="flow is not published; publish the reviewed draft before a live run",
+        )
+    flow, release = published
     _assert_flow_access(request, flow)
     owner = _supervisor(request)
     # Validate/coerce the payload against the flow's declared inputs (a no-op when
@@ -2670,12 +3023,14 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
     idem = (payload.idempotency_key or "").strip()
     from maverick_dashboard import automation_queue as aq
     try:
-        run_id, deduplicated = aq.enqueue_flow_run_once(
-            flow_id, data, owner, "" if payload.dry_run else idem,
-            origin="manual", dry_run=bool(payload.dry_run),
+        run_id, deduplicated = aq.enqueue_published_flow_run_once(
+            flow_id, data, owner, idem,
+            origin="manual",
             channel="api" if execution_user_id_from_request(request) else None,
             user_id=execution_user_id_from_request(request),
-            allowed_suites=caller_suites(request))
+            allowed_suites=caller_suites(request),
+            expected_revision=str(release["release_id"]),
+        )
     except store.FlowSnapshotError as exc:
         # Snapshot internals may include object paths/digests. The caller only
         # needs to know that the definition changed or cannot be pinned safely.
@@ -2685,7 +3040,7 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
         ) from exc
     run = store.load_run(run_id)
     return {"run_id": run_id, "status": run.status if run else "queued",
-            "dry_run": bool(payload.dry_run), "deduplicated": deduplicated}
+            "dry_run": False, "deduplicated": deduplicated}
 
 
 @router.get("/flows/{flow_id}/proposals")
@@ -2757,8 +3112,14 @@ async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
                             detail=f"node is already a {payload.to_kind}")
     from_kind = node.kind
     try:
-        new_flow = evolve.apply_proposal(f, payload.node_id, payload.to_kind,
-                                         tool=payload.tool, brief=payload.brief)
+        new_flow = evolve.apply_proposal(
+            f,
+            payload.node_id,
+            payload.to_kind,
+            tool=payload.tool,
+            params=payload.params,
+            brief=payload.brief,
+        )
     except (KeyError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     errs = new_flow.validate()
@@ -2774,7 +3135,9 @@ async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
     except store.FlowVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     evolution_log.record_apply(flow_id, payload.node_id, from_kind,
-                               payload.to_kind, saved.version, source="manual")
+                               payload.to_kind, saved.version, source="manual",
+                               before_revision=store.flow_cohort(f),
+                               after_revision=store.flow_cohort(saved))
     return {"id": flow_id, "version": saved.version, "node_id": payload.node_id,
             "from_kind": from_kind, "to_kind": payload.to_kind}
 
@@ -2850,7 +3213,13 @@ async def flow_node_impact_endpoint(request: Request, flow_id: str,
     last = evolution_log.last_apply(flow_id, node_id)
     if last is None:
         return {"node_id": node_id, "changed": False, "applied": None, "impact": None}
-    impact = evolve.measure(flow_id, node_id, float(last.get("ts") or 0.0))
+    impact = evolve.measure(
+        flow_id,
+        node_id,
+        float(last.get("ts") or 0.0),
+        before_revision=str(last.get("before_revision") or ""),
+        after_revision=str(last.get("after_revision") or ""),
+    )
     return {"node_id": node_id, "changed": True,
             "applied": {"from_kind": last.get("from_kind"), "to_kind": last.get("to_kind"),
                         "version": last.get("version"), "ts": last.get("ts"),
@@ -4502,17 +4871,29 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
         raise HTTPException(
             status_code=400, detail="set exactly one of 'template' or 'flow'")
     target_flow = None
+    target_flow_release = None
     target_template = None
     if payload.flow:
         # A flow target: the flow engine must be on and the flow must exist, so
         # a trigger can't be armed against a missing graph.
         _require_flows()
         from maverick.flow import store as flow_store
-        target_flow = flow_store.load_flow(payload.flow)
-        if target_flow is None:
+        draft = flow_store.load_flow(payload.flow)
+        if draft is None:
             raise HTTPException(
                 status_code=404, detail=f"flow not found: {payload.flow!r}")
-        _assert_flow_access(request, target_flow)
+        _assert_flow_access(request, draft)
+        try:
+            published = flow_store.load_published_bundle(payload.flow)
+        except flow_store.FlowSnapshotError as exc:
+            raise HTTPException(
+                status_code=409, detail="published flow release is unavailable"
+            ) from exc
+        if published is None:
+            raise HTTPException(
+                status_code=409, detail="publish the flow before arming a trigger"
+            )
+        target_flow, target_flow_release = published
     else:
         # Validate now: the template must exist and render with the given
         # defaults, so a trigger can't be armed against a missing/incompatible
@@ -4549,7 +4930,10 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
             owner=durable_automation_owner(request), flow=payload.flow,
             tenant=current_tenant_id() or "",
             flow_owner=(target_flow.owner if target_flow is not None else ""),
-            flow_revision=(target_flow.revision if target_flow is not None else ""),
+            flow_revision=(
+                str(target_flow_release["release_id"])
+                if target_flow_release is not None else ""
+            ),
             template_snapshot=(
                 triggers_store.snapshot_from_template(target_template)
                 if target_template is not None
@@ -4660,6 +5044,7 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
         raise HTTPException(status_code=400,
                             detail="set exactly one of 'template' or 'flow'")
     target_flow = None
+    target_flow_release = None
     target_template = None
     if flow:
         from maverick import flow as flow_mod
@@ -4670,10 +5055,21 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
                 detail=("Flows aren't enabled on this server yet — an "
                         "administrator can switch on the flow engine ([flows] "
                         "in the server configuration, or MAVERICK_FLOWS=1)."))
-        target_flow = flow_store.load_flow(flow)
-        if target_flow is None:
+        draft = flow_store.load_flow(flow)
+        if draft is None:
             raise HTTPException(status_code=404, detail=f"flow not found: {flow!r}")
-        _assert_flow_access(request, target_flow)
+        _assert_flow_access(request, draft)
+        try:
+            published = flow_store.load_published_bundle(flow)
+        except flow_store.FlowSnapshotError as exc:
+            raise HTTPException(
+                status_code=409, detail="published flow release is unavailable"
+            ) from exc
+        if published is None:
+            raise HTTPException(
+                status_code=409, detail="publish the flow before arming a trigger"
+            )
+        target_flow, target_flow_release = published
     else:
         # The template must EXIST, but -- unlike a webhook trigger -- we don't
         # require it to render with the current defaults: each polled event fills
@@ -4705,7 +5101,10 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
             config=payload.config or {}, params=payload.params or {},
             owner=durable_automation_owner(request), flow=flow,
             flow_owner=(target_flow.owner if target_flow is not None else ""),
-            flow_revision=(target_flow.revision if target_flow is not None else ""),
+            flow_revision=(
+                str(target_flow_release["release_id"])
+                if target_flow_release is not None else ""
+            ),
             template_snapshot=(
                 event_triggers_store.snapshot_from_template(target_template)
                 if target_template is not None
@@ -4774,14 +5173,14 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         )
 
     def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "",
-                   origin: str = "manual") -> str:
+                   origin: str = "manual", expected_revision: str = "") -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
         # The idempotency key dedups a re-delivered event; origin records the trigger.
         from maverick_dashboard import automation_queue
         identity_owner, user_id, allowed_suites = stored_automation_identity(owner)
 
-        return automation_queue.enqueue_flow_run(
+        return automation_queue.enqueue_published_flow_run(
             flow_id,
             data,
             identity_owner,
@@ -4790,6 +5189,7 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
             channel="api" if user_id else None,
             user_id=user_id,
             allowed_suites=allowed_suites,
+            expected_revision=expected_revision,
         )
 
     results = await run_in_threadpool(

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import dataclasses
+import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from maverick import governed_actions as ga_mod
@@ -164,3 +166,112 @@ def test_lineage_caps_large_params(tmp_path):
     ga_mod.record_tool_lineage(2, "write_file", {"content": "x" * 10000}, store_dir=tmp_path)
     pj = ga_mod.load_lineage(2, store_dir=tmp_path)[0]["params_json"]
     assert pj.endswith("...(truncated)") and len(pj) < 5000
+
+
+def test_lineage_redacts_non_param_audit_fields(monkeypatch, tmp_path):
+    def _redact(value):
+        return str(value).replace("sensitive-value", "[REDACTED]"), []
+
+    monkeypatch.setattr("maverick.safety.secret_detector.redact", _redact)
+    assert ga_mod.record_tool_lineage(
+        3,
+        "connector.write.commit",
+        {"field": "safe"},
+        effect="updated sensitive-value",
+        result="remote response sensitive-value",
+        sources=("ticket-sensitive-value",),
+        force=True,
+        strict=True,
+        store_dir=tmp_path,
+    )
+    persisted = ga_mod.load_lineage(3, store_dir=tmp_path)[0]
+    assert "sensitive-value" not in json.dumps(persisted)
+    assert "[REDACTED]" in persisted["effect"]
+    assert "[REDACTED]" in persisted["result"]
+    assert "[REDACTED]" in persisted["sources"][0]
+
+
+def test_lineage_never_persists_raw_text_when_redaction_is_unavailable(
+    monkeypatch, tmp_path,
+):
+    def _unavailable(_value):
+        raise RuntimeError("detector unavailable")
+
+    monkeypatch.setattr("maverick.safety.secret_detector.redact", _unavailable)
+    assert ga_mod.record_tool_lineage(
+        5,
+        "connector.write.commit",
+        {"private": "never-store-this"},
+        result="never-store-this",
+        force=True,
+        strict=True,
+        store_dir=tmp_path,
+    )
+    raw = (tmp_path / "5.ndjson").read_text(encoding="utf-8")
+    assert "never-store-this" not in raw
+    assert "redaction unavailable" in raw
+
+
+def test_transaction_receipts_are_hashed_with_phase_and_identity(tmp_path):
+    assert ga_mod.record_tool_lineage(
+        9, "salesforce.write.prepare", {"op": "post"},
+        actor="user:alice", effect="would POST /accounts", approver="human",
+        transaction_id="tx-1", phase="PREPARE", force=True, strict=True,
+        store_dir=tmp_path,
+    )
+    assert ga_mod.record_tool_lineage(
+        9, "salesforce.write.commit", {"op": "post"},
+        actor="user:alice", effect="would POST /accounts", result="created",
+        approver="human", transaction_id="tx-1", phase="COMMIT", force=True,
+        strict=True, store_dir=tmp_path,
+    )
+    links = ga_mod.load_lineage(9, store_dir=tmp_path)
+    assert [link["phase"] for link in links] == ["PREPARE", "COMMIT"]
+    assert {link["transaction_id"] for link in links} == {"tx-1"}
+    assert all(link["actor"] == "user:alice" for link in links)
+    assert ga_mod.verify_lineage_file(9, store_dir=tmp_path).startswith("VALID: 2")
+
+
+def test_concurrent_receipts_do_not_fork_or_lose_hash_chain(tmp_path):
+    def _write(index: int) -> bool:
+        return ga_mod.record_tool_lineage(
+            12, "connector.write.prepare", {"index": index},
+            transaction_id=f"tx-{index}", phase="PREPARE", force=True,
+            strict=True, store_dir=tmp_path,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert all(pool.map(_write, range(32)))
+    links = ga_mod.load_lineage(12, store_dir=tmp_path)
+    assert len(links) == 32
+    assert {link["transaction_id"] for link in links} == {
+        f"tx-{index}" for index in range(32)
+    }
+    assert ga_mod.verify_lineage_file(12, store_dir=tmp_path).startswith("VALID: 32")
+
+
+def test_strict_receipt_failure_propagates(tmp_path):
+    with pytest.raises(ValueError):
+        ga_mod.record_tool_lineage(
+            "not-an-int", "connector.write.prepare", {}, force=True,
+            strict=True, store_dir=tmp_path,
+        )
+
+
+def test_strict_receipt_refuses_to_extend_a_tampered_chain(tmp_path):
+    assert ga_mod.record_tool_lineage(
+        18, "connector.write.prepare", {"value": "original"}, force=True,
+        strict=True, store_dir=tmp_path,
+    )
+    ledger = tmp_path / "18.ndjson"
+    link = json.loads(ledger.read_text(encoding="utf-8"))
+    link["params_json"] = '{"value":"tampered"}'
+    ledger.write_text(json.dumps(link) + "\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="lineage is not trustworthy"):
+        ga_mod.record_tool_lineage(
+            18, "connector.write.commit", {"value": "original"}, force=True,
+            strict=True, store_dir=tmp_path,
+        )
+
+    assert len(ledger.read_text(encoding="utf-8").splitlines()) == 1

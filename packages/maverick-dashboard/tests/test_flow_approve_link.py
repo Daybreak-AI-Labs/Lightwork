@@ -1,5 +1,4 @@
-"""The signed approve/reject link endpoints: a human resumes a paused flow run
-from a channel link, no dashboard session -- the token is the only auth."""
+"""Signed approval links bind a pause token to an authenticated approver."""
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -21,13 +20,39 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
 
 
-def _paused_run(rid="r1", fid="f1"):
+def _as_actor(monkeypatch, principal="user:alice"):
+    import importlib
+
+    app_module = importlib.import_module("maverick_dashboard.app")
+    monkeypatch.setattr(app_module, "caller_principal", lambda _request: principal)
+
+
+def _paused_run(rid="r1", fid="f1", *, owner="user:alice", assignee="@alice"):
     from maverick.flow import store
     from maverick.flow.ir import Flow, FlowNode
-    store.save_flow(Flow(id=fid, name="F", start="a",
-                         nodes={"a": FlowNode(id="a", kind="approval", prompt="ok?")}))
+    saved = store.save_flow(Flow(
+        id=fid,
+        name="F",
+        start="a",
+        owner=owner,
+        nodes={"a": FlowNode(
+            id="a", kind="approval", prompt="ok?", assignee=assignee,
+        )},
+    ))
+    release = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
     store.save_run(store.FlowRun(run_id=rid, flow_id=fid, status="paused_approval",
-                                 prompt="ok?", cursor="a"))
+                                 prompt="ok?", cursor="a", owner=owner,
+                                 human={"choices": [], "assignee": assignee, "form": []},
+                                 definition_digest=release["definition_digest"],
+                                 release_digest=release["release_digest"],
+                                 release_id=release["release_id"],
+                                 definition_version=release["definition_version"],
+                                 definition_revision=release["definition_revision"],
+                                 subflow_digests=release["subflow_digests"]))
     return rid, fid
 
 
@@ -36,13 +61,16 @@ def _tok(rid, decision):
     from maverick.flow.approvals import mint_token
     run = store.load_run(rid)
     return mint_token(rid, decision, cursor=run.cursor, prompt=run.prompt,
-                      updated=run.updated)
+                      updated=run.updated,
+                      assignee=str((run.human or {}).get("assignee") or ""),
+                      owner=run.owner)
 
 
 def test_get_shows_confirm_page_without_resuming(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import automation_queue as aq
     monkeypatch.setattr(aq, "_queue", None)
+    _as_actor(monkeypatch)
     rid, _ = _paused_run()
     r = _client().get("/flow/approve", params={"token": _tok(rid, "approved")})
     assert r.status_code == 200
@@ -56,6 +84,7 @@ def test_post_resumes_the_run(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import automation_queue as aq
     monkeypatch.setattr(aq, "_queue", None)
+    _as_actor(monkeypatch)
     rid, fid = _paused_run()
     tok = _tok(rid, "approved")
     r = _client().post("/flow/approve", data={"token": tok})
@@ -65,6 +94,11 @@ def test_post_resumes_the_run(monkeypatch, tmp_path):
             if j.kind == aq.FLOW_RESUME_KIND]
     assert len(jobs) == 1
     assert jobs[0].payload["run_id"] == rid and jobs[0].payload["decision"] == "approved"
+    assert jobs[0].payload["decided_by"] == "user:alice"
+
+    aq._handle_flow_resume(jobs[0])
+    from maverick.flow import store
+    assert store.load_run(rid).decided_by == "user:alice"
 
 
 def test_invalid_token_is_rejected(monkeypatch, tmp_path):
@@ -78,6 +112,7 @@ def test_post_on_already_resolved_run_is_noop(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import automation_queue as aq
     monkeypatch.setattr(aq, "_queue", None)
+    _as_actor(monkeypatch)
     rid, fid = _paused_run()
     from maverick.flow import store
     run = store.load_run(rid)
@@ -94,6 +129,7 @@ def test_old_link_cannot_resolve_later_approval(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import automation_queue as aq
     monkeypatch.setattr(aq, "_queue", None)
+    _as_actor(monkeypatch)
     rid, _ = _paused_run()
     old = _tok(rid, "approved")
     from maverick.flow import store
@@ -106,3 +142,33 @@ def test_old_link_cannot_resolve_later_approval(monkeypatch, tmp_path):
     jobs = [j for j in aq.queue().list(status="pending", limit=100)
             if j.kind == aq.FLOW_RESUME_KIND]
     assert jobs == []
+
+
+def test_anonymous_bearer_link_cannot_decide(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    rid, _ = _paused_run()
+
+    response = _client().post(
+        "/flow/approve", data={"token": _tok(rid, "approved")},
+    )
+
+    assert response.status_code == 403
+    assert aq.queue().list(status="pending", limit=100) == []
+
+
+def test_forwarded_link_is_refused_for_the_wrong_assignee(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    _as_actor(monkeypatch, "user:bob")
+    rid, _ = _paused_run()
+
+    response = _client().post(
+        "/flow/approve", data={"token": _tok(rid, "approved")},
+    )
+
+    assert response.status_code == 403
+    assert "assigned" in response.text
+    assert aq.queue().list(status="pending", limit=100) == []

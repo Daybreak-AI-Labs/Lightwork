@@ -40,15 +40,29 @@ def record_apply(
     *,
     source: str = "manual",
     revision: str | None = None,
+    before_revision: str | None = None,
+    after_revision: str | None = None,
 ) -> None:
     """Record that ``node_id`` in ``flow_id`` was swapped ``from_kind -> to_kind``,
     producing definition ``version``. ``source`` is ``manual`` (a human applied a
     proposal) or ``auto`` (the sweep did). Best-effort; never raises."""
+    generation = str(_current_revision(flow_id) if revision is None else revision)
+    if before_revision is None or after_revision is None:
+        from .store import definition_cohort
+
+        if before_revision is None:
+            before_revision = definition_cohort(generation, max(0, int(version) - 1))
+        if after_revision is None:
+            after_revision = definition_cohort(generation, int(version))
     append_row(_path(), {
         "ts": time.time(), "flow_id": str(flow_id), "node_id": str(node_id),
         "from_kind": str(from_kind), "to_kind": str(to_kind),
         "version": int(version), "source": str(source),
-        "revision": str(_current_revision(flow_id) if revision is None else revision),
+        "revision": generation,
+        # These immutable definition cohorts, not wall-clock position, are the
+        # causal comparison boundary. Later unrelated saves cannot rewrite it.
+        "before_revision": str(before_revision or ""),
+        "after_revision": str(after_revision or ""),
     })
 
 

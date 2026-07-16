@@ -65,6 +65,73 @@ def test_distinct_args_miss(monkeypatch, tmp_path):
     assert calls["n"] == 2  # different args -> distinct keys
 
 
+def test_authenticated_principals_never_share_cached_output(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")
+
+    calls = {"n": 0}
+
+    def _whoami(principal):
+        def _read(_args):
+            calls["n"] += 1
+            return f"private-for:{principal}"
+        return _read
+
+    def _tool(principal):
+        return Tool(
+            name="account_report",
+            description="principal-specific connector read",
+            input_schema={"type": "object"},
+            fn=_whoami(principal),
+            parallel_safe=True,
+        )
+
+    alice = ToolRegistry(principal="user:alice")
+    bob = ToolRegistry(principal="user:bob")
+    alice.register(_tool("user:alice"))
+    bob.register(_tool("user:bob"))
+
+    assert _run(alice, "account_report", {}) == "private-for:user:alice"
+    assert _run(alice, "account_report", {}) == "private-for:user:alice"
+    assert _run(bob, "account_report", {}) == "private-for:user:bob"
+    assert calls["n"] == 2
+
+
+def test_tenants_never_share_cached_output(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")
+
+    from maverick.paths import current_tenant_id, reset_tenant, set_tenant
+
+    calls = {"n": 0}
+
+    def _tenant_report(_args):
+        calls["n"] += 1
+        return f"private-for:{current_tenant_id()}"
+
+    reg = ToolRegistry(principal="user:operator")
+    reg.register(Tool(
+        name="tenant_report",
+        description="tenant-specific connector read",
+        input_schema={"type": "object"},
+        fn=_tenant_report,
+        parallel_safe=True,
+    ))
+
+    token = set_tenant("tenant-a")
+    try:
+        assert _run(reg, "tenant_report", {}) == "private-for:tenant-a"
+        assert _run(reg, "tenant_report", {}) == "private-for:tenant-a"
+    finally:
+        reset_tenant(token)
+    token = set_tenant("tenant-b")
+    try:
+        assert _run(reg, "tenant_report", {}) == "private-for:tenant-b"
+    finally:
+        reset_tenant(token)
+    assert calls["n"] == 2
+
+
 def test_non_parallel_safe_never_cached(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")

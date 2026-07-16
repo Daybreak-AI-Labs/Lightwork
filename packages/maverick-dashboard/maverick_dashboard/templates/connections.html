@@ -76,6 +76,14 @@
           </div>
         </div>
         <p class="cx__sub" id="cx-hint" style="margin:var(--space-2) 0 0;"></p>
+        <div class="cx__fld" style="margin-top:var(--space-3);">
+          <label><input type="checkbox" id="cx-tenant-access"> Allow every authenticated user in this tenant to use this credential</label>
+          <p class="cx__sub" style="margin:3px 0 0;">Off by default. Credential management stays admin-only either way.</p>
+        </div>
+        <div class="cx__fld" style="margin-bottom:0;">
+          <label for="cx-principals">Additional allowed principals <span class="sub">— one <code>user:id</code> per line</span></label>
+          <textarea class="input" id="cx-principals" rows="3" placeholder="user:alice"></textarea>
+        </div>
       </div>
     </details>
 
@@ -149,7 +157,9 @@
       conns.forEach(function (c) {
         var li = el('li', 'cx__row');
         li.appendChild(el('span', 'name', c.name));
-        var meta = el('div', 'meta', (c.connector ? '→ ' + c.connector + '  ' : '') + (c.base_url || '(no base URL)'));
+        var scope = c.access === 'tenant' ? 'tenant use' : 'owner/granted use';
+        var readiness = c.last_test ? (c.last_test.authenticated ? ' · ready' : ' · not ready') : ' · untested';
+        var meta = el('div', 'meta', (c.connector ? '→ ' + c.connector + '  ' : '') + (c.base_url || '(no base URL)') + ' · ' + scope + readiness);
         li.appendChild(meta);
         li.appendChild(el('span', 'cx__badge ' + (c.has_token ? 'ok' : 'no'), c.has_token ? 'token set' : 'no token'));
         var test = el('button', 'btn btn--ghost', 'Test');
@@ -181,6 +191,8 @@
       connector: document.getElementById('cx-connector').value.trim(),
       base_url: document.getElementById('cx-base').value.trim(),
       token: document.getElementById('cx-token').value,
+      access: document.getElementById('cx-tenant-access').checked ? 'tenant' : 'owner',
+      allowed_principals: document.getElementById('cx-principals').value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean),
     };
   }
 

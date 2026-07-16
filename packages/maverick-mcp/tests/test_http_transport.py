@@ -524,7 +524,10 @@ class TestSessionCookieHardening:
         cookie = resp.headers["set-cookie"]
         assert "maverick_mcp_session=" in cookie
         assert "HttpOnly" in cookie
-        assert "Max-Age=3600" in cookie
+        # Cookie-only clients must retain the caller-bound session for the
+        # TaskStore's maximum accepted TTL (7 days), even if resource state is
+        # evicted independently.
+        assert "Max-Age=604800" in cookie
         # Loopback dev over plain http must still receive the cookie.
         assert "Secure" not in cookie
 

@@ -641,7 +641,20 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
             break
     # A hard exception that survived every retry stays terminal (records WHERE it
     # failed via _NodeError up the chain) -- retries buy attempts, not silence.
-    if (high_risk_action or ambiguous_agent) and (
+    # A reserved refusal/preview proves the effect was intentionally NOT
+    # attempted (approval denied, Shield blocked, or confirm gate returned its
+    # dry-run preview). Those are terminal failures, not reconciliation cases.
+    # Ordinary ERROR/exception results remain ambiguous for a high-risk tool
+    # because the remote system may have committed before acknowledgement loss.
+    definitive_no_effect = False
+    if high_risk_action and last_exc is None and outcome == 0.0:
+        from ..tool_results import ToolResultState, classify_tool_result
+
+        definitive_no_effect = classify_tool_result(result) in {
+            ToolResultState.PREVIEW,
+            ToolResultState.REFUSED,
+        }
+    if (high_risk_action or ambiguous_agent) and not definitive_no_effect and (
         last_exc is not None or outcome == 0.0
     ):
         detail = (f"{type(last_exc).__name__}: {last_exc}" if last_exc is not None

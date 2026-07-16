@@ -385,12 +385,9 @@ def _tool_call_failed(output: str) -> bool:
     scoring every failed tool as a success. Tool-execution errors are prefixed
     ``ERROR``; shield / hook blocks (which return UNframed) start with ``⚠``.
     """
-    text = output or ""
-    if text.startswith("<tool_output "):
-        nl = text.find("\n")
-        if nl != -1:
-            text = text[nl + 1:]  # drop the frame-open line; inspect the content
-    return text.lstrip().startswith(("ERROR", "⚠", "BLOCKED by Shield"))
+    from .tool_results import tool_result_failed
+
+    return tool_result_failed(output)
 
 
 def _audit_summary(value: Any, limit: int = 200) -> str:

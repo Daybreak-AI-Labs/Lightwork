@@ -18,7 +18,7 @@ def test_mint_verify_roundtrip():
     claim = approvals.verify_token(tok)
     assert claim == {"run_id": "run-1", "decision": "approved",
                      "cursor": "a", "prompt": "ok?", "updated": 123.0,
-                     "tenant": ""}
+                     "tenant": "", "assignee": "", "owner": ""}
 
 
 def test_reject_token_carries_its_decision():

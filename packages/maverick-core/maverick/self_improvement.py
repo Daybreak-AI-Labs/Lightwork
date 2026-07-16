@@ -457,6 +457,11 @@ class SelfImprovementController:
     audit_fn: Callable[..., None] = _default_audit_fn
     ledger: PromotionLedger | None = None
     now: Callable[[], float] = time.time
+    # Optional request-scoped verifier for deployments whose approval trust
+    # root is tenant-bound.  Keeping this on the controller avoids mutating
+    # process-global environment variables while another tenant is evaluating
+    # a candidate.  It returns the trusted approver id or ``None``.
+    approval_verifier: Callable[[Candidate], str | None] | None = None
     rung_policy: dict[str, dict[str, Any]] = field(
         default_factory=lambda: {k: dict(v) for k, v in _RUNG_POLICY.items()})
 
@@ -584,13 +589,16 @@ class SelfImprovementController:
         """
         if not needs_human:
             return True, None, ""
-        enforced = False
+        enforced = self.approval_verifier is not None
         approver: str | None = None
         try:
-            from . import approval_signing
-            enforced = approval_signing.signing_enforced()
-            if enforced:
-                approver = approval_signing.verify_candidate(cand)
+            if self.approval_verifier is not None:
+                approver = self.approval_verifier(cand)
+            else:
+                from . import approval_signing
+                enforced = approval_signing.signing_enforced()
+                if enforced:
+                    approver = approval_signing.verify_candidate(cand)
         except Exception:  # pragma: no cover -- consult failure => decide below
             # If the approval subsystem errored while enforced, `approver` stays
             # None and we fail closed; if it was not enforced, fall through to

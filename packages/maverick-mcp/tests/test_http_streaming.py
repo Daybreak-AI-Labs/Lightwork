@@ -52,7 +52,9 @@ def test_sse_emits_progress_with_token(monkeypatch):
     # event before the final result.
     monkeypatch.setenv("MAVERICK_MCP_SSE_HEARTBEAT", "0.05")
 
-    def _slow_dispatch(server, method, params, *, task_owner=None, caller_identity=None):
+    def _slow_dispatch(
+        server, method, params, *, task_owner=None, caller_identity=None, **_auth,
+    ):
         time.sleep(0.3)
         return {"ok": True}
 
@@ -73,7 +75,9 @@ def test_sse_emits_progress_with_token(monkeypatch):
 def test_sse_no_progress_without_token(monkeypatch):
     monkeypatch.setenv("MAVERICK_MCP_SSE_HEARTBEAT", "0.05")
 
-    def _slow_dispatch(server, method, params, *, task_owner=None, caller_identity=None):
+    def _slow_dispatch(
+        server, method, params, *, task_owner=None, caller_identity=None, **_auth,
+    ):
         time.sleep(0.2)
         return {"ok": True}
 
@@ -112,7 +116,9 @@ def test_sse_caps_progress_events(monkeypatch):
     monkeypatch.setenv("MAVERICK_MCP_SSE_HEARTBEAT", "0.01")
     monkeypatch.setenv("MAVERICK_MCP_SSE_MAX_PROGRESS_EVENTS", "2")
 
-    def _slow_dispatch(server, method, params, *, task_owner=None, caller_identity=None):
+    def _slow_dispatch(
+        server, method, params, *, task_owner=None, caller_identity=None, **_auth,
+    ):
         time.sleep(0.08)
         return {"ok": True}
 

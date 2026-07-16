@@ -95,6 +95,16 @@ _DEFAULT_RISK: dict[str, str] = {
     "spawn_swarm": "high",
     "spawn_specialist": "high",
     "delegate_to_agent": "high",
+    # Network-reachable Lightwork MCP actions.  These names are the server's
+    # own tools (not third-party ``mcp_*`` imports), so classify them explicitly:
+    # goal execution can fan out into arbitrary tools, and the remaining writes
+    # mutate durable code/state/memory or resume privileged execution.
+    "maverick_start": "high",
+    "maverick_resume": "high",
+    "maverick_answer": "high",
+    "maverick_skill_install": "high",
+    "maverick_fact_set": "high",
+    "maverick_fleet_ingest": "high",
     # high (finance): money movement, posting to a system of record, filing with
     # an authority, or master-data mutation. Classified high so a max_risk="medium"
     # finance pack drops them from the registry and governance gates them as the
@@ -228,6 +238,12 @@ _DEFAULT_RISK: dict[str, str] = {
     "currency": "low",
     "preview_diff": "low",
     "erp_read": "low",  # read-only (GET) ERP access; no writes / host mutation
+    # Read-only Lightwork MCP queries.  Agent Trust max_risk ceilings use this
+    # same table, so a low-risk remote principal sees queries but not mutations.
+    "maverick_status": "low",
+    "maverick_skills_list": "low",
+    "maverick_fleet_recall": "low",
+    "maverick_facts_get": "low",
 }
 
 _DEFAULT_RISK_LEVEL = "medium"

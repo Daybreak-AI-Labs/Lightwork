@@ -36,6 +36,42 @@ def _drain(aq):
     w.drain()
 
 
+def _publish(client, flow_id: str) -> dict:
+    current = client.get(f"/api/v1/flows/{flow_id}")
+    assert current.status_code == 200, current.text
+    body = current.json()
+    response = client.post(f"/api/v1/flows/{flow_id}/publish", json={
+        "version": body["version"],
+        "revision": body["revision"],
+    })
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _store_published_pin(flow_id: str = "demo") -> dict:
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+
+    saved = store.save_flow(Flow(
+        id=flow_id,
+        name="Pinned",
+        start="a",
+        nodes={"a": FlowNode(id="a", kind="agent", brief="work")},
+    ))
+    release = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    return {
+        "definition_digest": release["definition_digest"],
+        "release_id": release["release_id"],
+        "definition_version": release["definition_version"],
+        "definition_revision": release["definition_revision"],
+        "subflow_digests": dict(release.get("subflow_digests") or {}),
+    }
+
+
 _FLOW = {
     "id": "demo", "name": "Demo", "start": "a",
     "nodes": [
@@ -60,10 +96,686 @@ _INPUT_FLOW = {
 }
 
 
+def test_dry_run_executes_unsaved_snapshot_without_saving_or_arming_schedule(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    draft = {
+        "id": "unsaved-draft",
+        "name": "Unsaved",
+        "start": "a",
+        "schedule": "* * * * *",
+        "nodes": [{"id": "a", "kind": "agent", "brief": "new canvas behavior"}],
+    }
+    response = _client().post(
+        "/api/v1/flows/dry-run",
+        json={"flow": draft, "data": {"sample": 1}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["dry_run"] is True
+    assert store.load_flow("unsaved-draft") is None
+    assert store.load_published_bundle("unsaved-draft") is None
+    aq._reconcile_flow_crons()
+    assert aq._pending(aq.FLOW_CRON_KIND) == []
+
+    run = store.load_run(response.json()["run_id"])
+    assert run is not None and run.dry_run is True
+    assert run.definition_digest
+    snapshotted = store.load_flow_snapshot(run.definition_digest)
+    assert snapshotted.nodes["a"].brief == "new canvas behavior"
+    assert snapshotted.schedule == "* * * * *"
+
+
+def test_dry_run_does_not_mutate_an_existing_saved_draft(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+
+    client = _client()
+    saved = client.post("/api/v1/flows", json={"flow": {
+        "id": "existing",
+        "name": "Existing",
+        "start": "a",
+        "nodes": [{"id": "a", "kind": "agent", "brief": "saved behavior"}],
+    }}).json()
+    candidate = {
+        "id": "existing",
+        "name": "Existing candidate",
+        "start": "a",
+        "version": saved["version"],
+        "revision": saved["revision"],
+        "schedule": "0 9 * * *",
+        "nodes": [{"id": "a", "kind": "agent", "brief": "unsaved behavior"}],
+    }
+    response = client.post(
+        "/api/v1/flows/dry-run", json={"flow": candidate, "data": {}},
+    )
+    assert response.status_code == 200, response.text
+
+    current = store.load_flow("existing")
+    assert current is not None
+    assert current.version == 1
+    assert current.name == "Existing"
+    assert current.nodes["a"].brief == "saved behavior"
+    run = store.load_run(response.json()["run_id"])
+    snapshot = store.load_flow_snapshot(run.definition_digest)
+    assert snapshot.version == 2
+    assert snapshot.nodes["a"].brief == "unsaved behavior"
+
+
+def test_saving_is_not_activation_and_publish_pins_the_exact_revision(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    created = client.post("/api/v1/flows", json={"flow": {
+        "id": "scheduled",
+        "name": "Scheduled",
+        "start": "a",
+        "schedule": "0 9 * * *",
+        "nodes": [{"id": "a", "kind": "agent", "brief": "published behavior"}],
+    }})
+    assert created.status_code == 201
+    draft = created.json()
+    aq._reconcile_flow_crons()
+    assert aq._pending(aq.FLOW_CRON_KIND) == []
+
+    activated = client.post("/api/v1/flows/scheduled/publish", json={
+        "version": draft["version"], "revision": draft["revision"],
+    })
+    assert activated.status_code == 200, activated.text
+    assert activated.json()["published_version"] == 1
+    assert len(activated.json()["published_revision"]) == 64
+    crons = aq._pending(aq.FLOW_CRON_KIND)
+    assert len(crons) == 1
+    assert crons[0].payload["__flow_revision__"] == activated.json()["published_revision"]
+
+    current = client.get("/api/v1/flows/scheduled").json()
+    edited = dict(current)
+    edited["name"] = "Unpublished edit"
+    edited["schedule"] = "0 17 * * *"
+    saved = client.post("/api/v1/flows", json={"flow": edited})
+    assert saved.status_code == 201
+    published_flow, release = store.load_published_bundle("scheduled")
+    assert published_flow.name == "Scheduled"
+    assert published_flow.schedule == "0 9 * * *"
+    assert release["release_id"] == activated.json()["published_revision"]
+    aq._reconcile_flow_crons()
+    assert aq._pending(aq.FLOW_CRON_KIND)[0].payload["__cron__"] == "0 9 * * *"
+
+
+def test_saved_but_unpublished_flow_cannot_start_a_live_run(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+
+    response = client.post("/api/v1/flows/demo/run", json={"data": {"order": "X"}})
+
+    assert response.status_code == 409
+    assert "not published" in response.json()["detail"]
+    assert aq._pending(aq.FLOW_RUN_KIND) == []
+
+
+def test_manual_live_run_pins_release_not_a_later_unpublished_draft(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    created = client.post("/api/v1/flows", json={"flow": _FLOW})
+    assert created.status_code == 201
+    release = _publish(client, "demo")
+
+    draft = client.get("/api/v1/flows/demo").json()
+    draft["nodes"][0]["brief"] = "unpublished replacement {{order}}"
+    updated = client.post("/api/v1/flows", json={"flow": draft})
+    assert updated.status_code == 201
+
+    response = client.post(
+        "/api/v1/flows/demo/run", json={"data": {"order": "X"}},
+    )
+    assert response.status_code == 200, response.text
+    run = store.load_run(response.json()["run_id"])
+    pinned = store.load_flow_snapshot(run.definition_digest)
+    assert run.release_id == release["published_revision"]
+    assert run.definition_version == 1
+    assert pinned.nodes["a"].brief == "assess {{order}}"
+
+
+def test_plain_live_retry_also_pins_the_published_release(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    release = _publish(client, "demo")
+    started = client.post(
+        "/api/v1/flows/demo/run", json={"data": {"order": "original"}},
+    )
+    original = store.load_run(started.json()["run_id"])
+    original.status = "completed"
+    store.save_run(original)
+
+    draft = client.get("/api/v1/flows/demo").json()
+    draft["nodes"][0]["brief"] = "unpublished retry behavior"
+    assert client.post("/api/v1/flows", json={"flow": draft}).status_code == 201
+
+    response = client.post(f"/api/v1/flows/runs/{original.run_id}/retry")
+    assert response.status_code == 200, response.text
+    retried = store.load_run(response.json()["run_id"])
+    assert retried.release_id == release["published_revision"]
+    assert store.load_flow_snapshot(retried.definition_digest).version == 1
+
+
+def test_unpublish_refuses_paused_live_resume(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    published, release = store.load_published_bundle("demo")
+    store.save_run(store.FlowRun(
+        run_id="paused-live",
+        flow_id="demo",
+        status="paused_approval",
+        owner="operator",
+        cursor="b",
+        definition_digest=release["definition_digest"],
+        definition_version=release["definition_version"],
+        definition_revision=release["definition_revision"],
+        subflow_digests=release["subflow_digests"],
+    ))
+    assert store.unpublish_flow(
+        "demo",
+        expected_version=published.version,
+        expected_revision=published.revision,
+    ) is True
+
+    response = client.post(
+        "/api/v1/flows/runs/paused-live/resume", json={"decision": "approved"},
+    )
+    assert response.status_code == 409
+    assert "no longer active" in response.json()["detail"]
+    assert aq._pending(aq.FLOW_RESUME_KIND) == []
+
+
+def test_republish_refuses_retry_from_failure_of_old_release(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    _published, v1 = store.load_published_bundle("demo")
+    store.save_run(store.FlowRun(
+        run_id="failed-v1",
+        flow_id="demo",
+        status="failed",
+        owner="operator",
+        cursor="a",
+        definition_digest=v1["definition_digest"],
+        definition_version=v1["definition_version"],
+        definition_revision=v1["definition_revision"],
+        subflow_digests=v1["subflow_digests"],
+    ))
+    draft = client.get("/api/v1/flows/demo").json()
+    draft["name"] = "replacement release"
+    assert client.post("/api/v1/flows", json={"flow": draft}).status_code == 201
+    _publish(client, "demo")
+
+    response = client.post("/api/v1/flows/runs/failed-v1/retry?from_failure=1")
+    assert response.status_code == 409
+    assert "no longer active" in response.json()["detail"]
+    assert aq._pending(aq.FLOW_RESUME_KIND) == []
+
+
+def test_publish_requires_exact_cas_and_live_run_rejects_corrupt_release(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    first = client.post("/api/v1/flows", json={"flow": _FLOW}).json()
+    current = client.get("/api/v1/flows/demo").json()
+    current["name"] = "v2 draft"
+    second = client.post("/api/v1/flows", json={"flow": current}).json()
+
+    stale = client.post("/api/v1/flows/demo/publish", json={
+        "version": first["version"], "revision": first["revision"],
+    })
+    assert stale.status_code == 409
+    wrong_generation = client.post("/api/v1/flows/demo/publish", json={
+        "version": second["version"], "revision": "attacker-selected",
+    })
+    assert wrong_generation.status_code == 409
+
+    _publish(client, "demo")
+    _published, metadata = store.load_published_bundle("demo")
+    snapshot = store._objects_dir() / f"{metadata['definition_digest']}.json"
+    snapshot.write_text('{"id":"tampered"}', encoding="utf-8")
+
+    rejected = client.post(
+        "/api/v1/flows/demo/run", json={"data": {"order": "X"}},
+    )
+    assert rejected.status_code == 409
+    assert "integrity" in rejected.json()["detail"]
+    assert aq._pending(aq.FLOW_RUN_KIND) == []
+
+
+def test_live_reservation_rechecks_publication_after_optimistic_load(
+    monkeypatch, tmp_path,
+):
+    """Unpublish winning after the first read prevents any durable live run."""
+    _isolate(monkeypatch, tmp_path)
+    import threading
+
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    current = store.load_flow("demo")
+    initial_loaded = threading.Event()
+    resume_enqueue = threading.Event()
+    real_load = store.load_published_bundle
+    first = [True]
+
+    def _pause_after_first_load(flow_id):
+        published = real_load(flow_id)
+        if first[0]:
+            first[0] = False
+            initial_loaded.set()
+            assert resume_enqueue.wait(timeout=5)
+        return published
+
+    monkeypatch.setattr(store, "load_published_bundle", _pause_after_first_load)
+    result: dict = {}
+
+    def _enqueue():
+        try:
+            result["run"] = aq.enqueue_published_flow_run_once(
+                "demo", {}, owner="user:alice",
+            )
+        except Exception as exc:  # expected fail-closed result from the worker
+            result["error"] = exc
+
+    thread = threading.Thread(target=_enqueue)
+    thread.start()
+    assert initial_loaded.wait(timeout=5)
+    assert store.unpublish_flow(
+        "demo",
+        expected_version=current.version,
+        expected_revision=current.revision,
+    ) is True
+    resume_enqueue.set()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert isinstance(result.get("error"), store.FlowSnapshotError)
+    assert "run" not in result
+    assert store.list_runs(flow_id="demo", limit=None) == []
+    assert aq._pending(aq.FLOW_RUN_KIND) == []
+
+
+def test_bound_release_is_refused_after_republication(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    v1 = _publish(client, "demo")
+    draft = client.get("/api/v1/flows/demo").json()
+    draft["name"] = "v2"
+    assert client.post("/api/v1/flows", json={"flow": draft}).status_code == 201
+    _publish(client, "demo")
+
+    with pytest.raises(store.FlowSnapshotError, match="no longer matches"):
+        aq.enqueue_published_flow_run_once(
+            "demo", {}, expected_revision=v1["published_revision"],
+        )
+    assert store.list_runs(flow_id="demo", limit=None) == []
+    assert aq._pending(aq.FLOW_RUN_KIND) == []
+
+
+@pytest.mark.parametrize("mutation", ["unpublish", "replace"])
+def test_queued_live_dispatch_revalidates_release_before_building_executors(
+    monkeypatch, tmp_path, mutation,
+):
+    """A reservation made while live cannot outlive later release revocation."""
+    _isolate(monkeypatch, tmp_path)
+    from types import SimpleNamespace
+
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    run_id = aq.enqueue_published_flow_run("demo", {"order": "queued"})
+    job = next(
+        j for j in aq._pending(aq.FLOW_RUN_KIND)
+        if j.payload.get("run_id") == run_id
+    )
+    current = store.load_flow("demo")
+    if mutation == "unpublish":
+        assert store.unpublish_flow(
+            current.id,
+            expected_version=current.version,
+            expected_revision=current.revision,
+        )
+    else:
+        current.name = "replacement"
+        saved = store.save_flow(
+            current,
+            expected_version=current.version,
+            expected_revision=current.revision,
+        )
+        store.publish_flow(
+            saved.id,
+            expected_version=saved.version,
+            expected_revision=saved.revision,
+        )
+    monkeypatch.setattr(
+        aq,
+        "_flow_runners",
+        lambda *_args, **_kwargs: pytest.fail("revoked run built live executors"),
+    )
+
+    aq._handle_flow_run(SimpleNamespace(payload=job.payload))
+
+    revoked = store.load_run(run_id)
+    assert revoked.status == "failed"
+    assert "revoked before dispatch" in revoked.error
+
+
+def test_release_revocation_does_not_hold_a_lock_through_long_execution(
+    monkeypatch, tmp_path,
+):
+    """Dispatch wins once; unpublish returns without waiting for its executor."""
+    _isolate(monkeypatch, tmp_path)
+    import threading
+    from types import SimpleNamespace
+
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    saved = store.save_flow(Flow(
+        id="long-dispatch",
+        name="Long dispatch",
+        start="agent",
+        nodes={"agent": FlowNode(id="agent", kind="agent", brief="work")},
+    ))
+    store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    run_id = aq.enqueue_published_flow_run(saved.id, {})
+    job = next(
+        j for j in aq._pending(aq.FLOW_RUN_KIND)
+        if j.payload.get("run_id") == run_id
+    )
+    executor_started = threading.Event()
+    finish_executor = threading.Event()
+    unpublished = threading.Event()
+
+    def _agent(_brief, _data):
+        executor_started.set()
+        assert finish_executor.wait(timeout=5)
+        return "done", 1.0
+
+    monkeypatch.setattr(
+        aq,
+        "_flow_runners",
+        lambda _run: (_agent, lambda *_args: ("", None)),
+    )
+    worker = threading.Thread(
+        target=aq._handle_flow_run,
+        args=(SimpleNamespace(payload=job.payload),),
+    )
+    worker.start()
+    assert executor_started.wait(timeout=5)
+
+    def _unpublish():
+        assert store.unpublish_flow(
+            saved.id,
+            expected_version=saved.version,
+            expected_revision=saved.revision,
+        )
+        unpublished.set()
+
+    revoker = threading.Thread(target=_unpublish)
+    revoker.start()
+    # The per-flow activation lock covers only execution-start linearization,
+    # not minutes/hours of agent work.
+    assert unpublished.wait(timeout=2)
+    assert worker.is_alive()
+    finish_executor.set()
+    worker.join(timeout=5)
+    revoker.join(timeout=5)
+
+    assert not worker.is_alive() and not revoker.is_alive()
+    assert store.load_run(run_id).status == "completed"
+    assert store.load_published_bundle(saved.id) is None
+
+
+def test_stale_queue_redelivery_never_rewrites_a_terminal_run(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from types import SimpleNamespace
+
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    run_id = aq.enqueue_published_flow_run("demo", {"order": "once"})
+    job = next(
+        j for j in aq._pending(aq.FLOW_RUN_KIND)
+        if j.payload.get("run_id") == run_id
+    )
+    terminal = store.load_run(run_id)
+    terminal.status = "completed"
+    store.save_run(terminal)
+    current = store.load_flow("demo")
+    current.name = "new release"
+    saved = store.save_flow(
+        current,
+        expected_version=current.version,
+        expected_revision=current.revision,
+    )
+    store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    monkeypatch.setattr(
+        aq,
+        "_flow_runners",
+        lambda *_args, **_kwargs: pytest.fail("terminal redelivery built executors"),
+    )
+
+    aq._handle_flow_run(SimpleNamespace(payload=job.payload))
+    aq._handle_flow_resume(SimpleNamespace(payload={
+        "flow_id": "demo", "run_id": run_id,
+    }))
+
+    assert store.load_run(run_id).status == "completed"
+
+
+@pytest.mark.parametrize(
+    ("status", "node_kind"),
+    [("paused_approval", "approval"), ("paused_delay", "delay")],
+)
+@pytest.mark.parametrize("mutation", ["unpublish", "replace"])
+def test_queued_live_resume_revalidates_release_at_delivery(
+    monkeypatch, tmp_path, status, node_kind, mutation,
+):
+    """Approval and delayed jobs cannot resume after their release is revoked."""
+    _isolate(monkeypatch, tmp_path)
+    from types import SimpleNamespace
+
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    gate = FlowNode(id="gate", kind=node_kind, next="effect")
+    if node_kind == "approval":
+        gate.prompt = "continue?"
+    else:
+        gate.seconds = 1
+    saved = store.save_flow(Flow(
+        id="resume-boundary",
+        name="Resume boundary",
+        start="gate",
+        nodes={
+            "gate": gate,
+            "effect": FlowNode(
+                id="effect", kind="agent", brief="perform live work",
+            ),
+        },
+    ))
+    release = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    store.save_run(store.FlowRun(
+        run_id="paused-boundary",
+        flow_id=saved.id,
+        status=status,
+        cursor="gate",
+        definition_digest=release["definition_digest"],
+        release_id=release["release_id"],
+        definition_version=release["definition_version"],
+        definition_revision=release["definition_revision"],
+        subflow_digests=release["subflow_digests"],
+    ))
+    aq.enqueue_flow_resume(
+        saved.id,
+        "paused-boundary",
+        decision="approved" if status == "paused_approval" else "",
+        decided_by="system:test" if status == "paused_approval" else "",
+    )
+    job = next(
+        j for j in aq._pending(aq.FLOW_RESUME_KIND)
+        if j.payload.get("run_id") == "paused-boundary"
+    )
+    if mutation == "unpublish":
+        assert store.unpublish_flow(
+            saved.id,
+            expected_version=saved.version,
+            expected_revision=saved.revision,
+        )
+    else:
+        saved.name = "replacement"
+        replacement = store.save_flow(
+            saved,
+            expected_version=saved.version,
+            expected_revision=saved.revision,
+        )
+        store.publish_flow(
+            replacement.id,
+            expected_version=replacement.version,
+            expected_revision=replacement.revision,
+        )
+    monkeypatch.setattr(
+        aq,
+        "_flow_runners",
+        lambda *_args, **_kwargs: pytest.fail("revoked resume built live executors"),
+    )
+
+    aq._handle_flow_resume(SimpleNamespace(payload=job.payload))
+
+    revoked = store.load_run("paused-boundary")
+    assert revoked.status == "failed"
+    assert "revoked before resume" in revoked.error
+
+
+def test_malformed_publication_pointer_fails_integrity_checks(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    pointer = store._published_dir() / "demo.json"
+    pointer.write_text("{", encoding="utf-8")
+
+    with pytest.raises(store.FlowSnapshotError, match="pointer"):
+        store.load_published_bundle("demo")
+    response = client.post("/api/v1/flows/demo/run", json={"data": {}})
+    assert response.status_code == 409
+    assert "integrity" in response.json()["detail"]
+
+
+def test_release_pointer_derives_legacy_identity_but_rejects_mismatch(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    import json
+
+    from maverick.flow import store
+
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+    pointer = store._published_dir() / "demo.json"
+    raw = json.loads(pointer.read_text(encoding="utf-8"))
+    content_digest = raw.pop("release_digest")
+    raw["release_id"] = content_digest  # pre-activation-epoch pointer format
+    pointer.write_text(json.dumps(raw), encoding="utf-8")
+
+    _flow, derived = store.load_published_bundle("demo")
+    assert derived["release_id"] == content_digest
+    assert derived["release_digest"] == content_digest
+
+    raw["release_digest"] = "0" * 64
+    pointer.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(store.FlowSnapshotError, match="release content"):
+        store.load_published_bundle("demo")
+
+
 def test_run_rejects_a_missing_required_input(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
     c.post("/api/v1/flows", json={"flow": _INPUT_FLOW})
+    _publish(c, "typed")
     r = c.post("/api/v1/flows/typed/run", json={"data": {}})
     assert r.status_code == 400 and "amount" in r.json()["detail"]
 
@@ -72,6 +784,7 @@ def test_run_coerces_a_typed_input(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
     c.post("/api/v1/flows", json={"flow": _INPUT_FLOW})
+    _publish(c, "typed")
     r = c.post("/api/v1/flows/typed/run", json={"data": {"amount": "42"}})
     assert r.status_code == 200
     from maverick.flow import store
@@ -82,9 +795,229 @@ def test_run_idempotency_key_dedups_a_repeat_submit(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
     c.post("/api/v1/flows", json={"flow": _FLOW})
+    _publish(c, "demo")
     a = c.post("/api/v1/flows/demo/run", json={"data": {"order": "X"}, "idempotency_key": "k1"}).json()
     b = c.post("/api/v1/flows/demo/run", json={"data": {"order": "X"}, "idempotency_key": "k1"}).json()
     assert a["run_id"] == b["run_id"] and b.get("deduplicated") is True
+
+
+def test_idempotency_key_is_scoped_to_exact_published_release(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    v1_release = _publish(client, "demo")
+    v1 = client.post("/api/v1/flows/demo/run", json={
+        "data": {"order": "v1"}, "idempotency_key": "business-key",
+    }).json()
+
+    draft = client.get("/api/v1/flows/demo").json()
+    draft["nodes"][0]["brief"] = "v2 {{order}}"
+    assert client.post("/api/v1/flows", json={"flow": draft}).status_code == 201
+    v2_release = _publish(client, "demo")
+    v2 = client.post("/api/v1/flows/demo/run", json={
+        "data": {"order": "v2"}, "idempotency_key": "business-key",
+    }).json()
+    v2_repeat = client.post("/api/v1/flows/demo/run", json={
+        "data": {"order": "v2"}, "idempotency_key": "business-key",
+    }).json()
+
+    assert v2["run_id"] != v1["run_id"]
+    assert v2_repeat["run_id"] == v2["run_id"]
+    assert v2_repeat["deduplicated"] is True
+    assert store.load_run(v1["run_id"]).release_id == (
+        v1_release["published_revision"]
+    )
+    assert store.load_run(v2["run_id"]).release_id == (
+        v2_release["published_revision"]
+    )
+
+
+def test_release_identity_binds_unchanged_parent_to_exact_child_manifest(
+    monkeypatch, tmp_path,
+):
+    """A child-only change is a new release, guard, and idempotency cohort."""
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    child = store.save_flow(Flow(
+        id="child",
+        name="Child",
+        start="c",
+        nodes={"c": FlowNode(id="c", kind="agent", brief="child-v1")},
+    ))
+    parent = store.save_flow(Flow(
+        id="parent",
+        name="Parent",
+        start="s",
+        nodes={"s": FlowNode(id="s", kind="subflow", flow_ref="child")},
+    ))
+    release_v1 = store.publish_flow(
+        parent.id,
+        expected_version=parent.version,
+        expected_revision=parent.revision,
+    )
+    run_v1, dedup_v1 = aq.enqueue_published_flow_run_once(
+        parent.id,
+        {},
+        idem_key="same-business-event",
+        expected_revision=release_v1["release_id"],
+    )
+    assert dedup_v1 is False
+
+    child.nodes["c"].brief = "child-v2"
+    store.save_flow(
+        child,
+        expected_version=child.version,
+        expected_revision=child.revision,
+    )
+    release_v2 = store.publish_flow(
+        parent.id,
+        expected_version=parent.version,
+        expected_revision=parent.revision,
+    )
+
+    assert release_v2["definition_digest"] == release_v1["definition_digest"]
+    assert release_v2["release_id"] != release_v1["release_id"]
+    with pytest.raises(store.FlowSnapshotError, match="bound revision"):
+        aq.enqueue_published_flow_run_once(
+            parent.id, {}, expected_revision=release_v1["release_id"],
+        )
+
+    run_v2, dedup_v2 = aq.enqueue_published_flow_run_once(
+        parent.id,
+        {},
+        idem_key="same-business-event",
+        expected_revision=release_v2["release_id"],
+    )
+    assert dedup_v2 is False and run_v2 != run_v1
+    pinned_v1 = store.load_run(run_v1)
+    pinned_v2 = store.load_run(run_v2)
+    assert pinned_v1.release_id == release_v1["release_id"]
+    assert pinned_v2.release_id == release_v2["release_id"]
+    assert pinned_v1.subflow_digests["child"] != pinned_v2.subflow_digests["child"]
+    assert store.load_flow_snapshot(
+        pinned_v1.subflow_digests["child"],
+    ).nodes["c"].brief == "child-v1"
+    assert store.load_flow_snapshot(
+        pinned_v2.subflow_digests["child"],
+    ).nodes["c"].brief == "child-v2"
+
+
+def test_identical_republish_creates_a_new_activation_and_refuses_old_work(
+    monkeypatch, tmp_path,
+):
+    """Revoke+republish cannot re-arm queued work from an older activation."""
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    saved = store.save_flow(Flow(
+        id="activation-aba",
+        name="Activation ABA",
+        start="a",
+        nodes={"a": FlowNode(id="a", kind="agent", brief="same content")},
+    ))
+    v1 = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    old_initial, duplicate = aq.enqueue_published_flow_run_once(
+        saved.id, {}, idem_key="same-event",
+    )
+    assert duplicate is False
+    store.save_run(store.FlowRun(
+        run_id="old-paused",
+        flow_id=saved.id,
+        status="paused_approval",
+        cursor="a",
+        human={"choices": [], "assignee": "", "form": []},
+        definition_digest=v1["definition_digest"],
+        release_digest=v1["release_digest"],
+        release_id=v1["release_id"],
+        definition_version=v1["definition_version"],
+        definition_revision=v1["definition_revision"],
+        subflow_digests=v1["subflow_digests"],
+    ))
+    aq.enqueue_flow_resume(
+        saved.id,
+        "old-paused",
+        decision="approved",
+        decided_by="system:test",
+    )
+
+    assert store.unpublish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    v2 = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    assert v2["release_digest"] == v1["release_digest"]
+    assert v2["release_id"] != v1["release_id"]
+    with pytest.raises(store.FlowSnapshotError, match="bound revision"):
+        aq.enqueue_published_flow_run_once(
+            saved.id, {}, expected_revision=v1["release_id"],
+        )
+    current, duplicate = aq.enqueue_published_flow_run_once(
+        saved.id, {}, idem_key="same-event",
+    )
+    assert duplicate is False and current != old_initial
+
+    monkeypatch.setattr(
+        aq,
+        "_flow_runners",
+        lambda *_args, **_kwargs: pytest.fail("old activation built executors"),
+    )
+    pending = aq.queue().list(status="pending", limit=100)
+    initial_job = next(j for j in pending if j.kind == aq.FLOW_RUN_KIND
+                       and j.payload.get("run_id") == old_initial)
+    resume_job = next(j for j in pending if j.kind == aq.FLOW_RESUME_KIND
+                      and j.payload.get("run_id") == "old-paused")
+    aq._handle_flow_run(initial_job)
+    aq._handle_flow_resume(resume_job)
+    assert store.load_run(old_initial).status == "failed"
+    assert store.load_run("old-paused").status == "failed"
+
+
+def test_idempotency_key_is_scoped_to_execution_owner(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    client = _client()
+    assert client.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(client, "demo")
+
+    alice, alice_dedup = aq.enqueue_published_flow_run_once(
+        "demo", {}, owner="user:alice", idem_key="shared-key",
+    )
+    bob, bob_dedup = aq.enqueue_published_flow_run_once(
+        "demo", {}, owner="user:bob", idem_key="shared-key",
+    )
+    alice_repeat, alice_repeat_dedup = aq.enqueue_published_flow_run_once(
+        "demo", {}, owner="user:alice", idem_key="shared-key",
+    )
+    bob_repeat, bob_repeat_dedup = aq.enqueue_published_flow_run_once(
+        "demo", {}, owner="user:bob", idem_key="shared-key",
+    )
+
+    assert alice != bob
+    assert alice_dedup is bob_dedup is False
+    assert alice_repeat == alice and alice_repeat_dedup is True
+    assert bob_repeat == bob and bob_repeat_dedup is True
 
 
 def test_idempotency_key_does_not_alias_a_recreated_flow_generation(
@@ -122,6 +1055,66 @@ def test_save_validate_get_delete(monkeypatch, tmp_path):
     assert len(c.get("/api/v1/flows/demo").json()["nodes"]) == 3
     assert c.delete("/api/v1/flows/demo").status_code == 204
     assert c.get("/api/v1/flows/demo").status_code == 404
+
+
+def test_delete_keeps_draft_and_live_pointer_when_revocation_fails(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+
+    c = _client()
+    assert c.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(c, "demo")
+
+    def _fail_revoke(_flow_id):
+        raise store.FlowSnapshotError("simulated pointer failure")
+
+    monkeypatch.setattr(store, "_revoke_published_pointer_locked", _fail_revoke)
+    response = c.delete("/api/v1/flows/demo")
+    assert response.status_code == 409
+    assert store.load_flow("demo") is not None
+    assert store.load_published_bundle("demo") is not None
+
+
+def test_delete_is_retryable_after_revocation_wins_but_draft_unlink_fails(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from pathlib import Path
+
+    from maverick.flow import store
+
+    c = _client()
+    assert c.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    _publish(c, "demo")
+    current = store.load_flow("demo")
+    draft_path = store._flows_dir() / "demo.json"
+    original_unlink = Path.unlink
+
+    def _fail_draft_unlink(path, *args, **kwargs):
+        if path == draft_path:
+            raise PermissionError("simulated draft unlink failure")
+        return original_unlink(path, *args, **kwargs)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(Path, "unlink", _fail_draft_unlink)
+        with pytest.raises(store.FlowSnapshotError, match="revoked"):
+            store.delete_flow(
+                "demo",
+                expected_version=current.version,
+                expected_revision=current.revision,
+            )
+
+    assert store.load_flow("demo") is not None
+    assert store.load_published_bundle("demo") is None
+    assert store._revoked_pointer_path("demo").exists()
+    assert store.delete_flow(
+        "demo",
+        expected_version=current.version,
+        expected_revision=current.revision,
+    )
+    assert store.load_flow("demo") is None
 
 
 def test_save_uses_client_cas_and_rejects_a_stale_editor(monkeypatch, tmp_path):
@@ -187,6 +1180,7 @@ def test_run_drains_through_queue_and_pauses_on_approval(monkeypatch, tmp_path):
     monkeypatch.setattr(execution, "default_action_runner", _fake_action)
     c = _client()
     c.post("/api/v1/flows", json={"flow": _FLOW})
+    _publish(c, "demo")
     started = c.post("/api/v1/flows/demo/run", json={"data": {"order": "X-9"}}).json()
     run_id = started["run_id"]
     assert started["status"] == "queued"
@@ -200,6 +1194,98 @@ def test_run_drains_through_queue_and_pauses_on_approval(monkeypatch, tmp_path):
     _drain(aq)
     done = c.get(f"/api/v1/flows/runs/{run_id}").json()
     assert done["status"] == "completed"
+    assert done["decided_by"] == "local:dashboard"
+
+
+def test_approval_resume_never_defaults_an_empty_body_to_approved(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    saved = store.save_flow(Flow(
+        id="explicit-decision",
+        name="Explicit decision",
+        start="gate",
+        nodes={"gate": FlowNode(id="gate", kind="approval", prompt="ok?")},
+    ))
+    release = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    store.save_run(store.FlowRun(
+        run_id="explicit-decision-run",
+        flow_id=saved.id,
+        status="paused_approval",
+        cursor="gate",
+        human={"choices": [], "assignee": "", "form": []},
+        definition_digest=release["definition_digest"],
+        release_digest=release["release_digest"],
+        release_id=release["release_id"],
+        definition_version=release["definition_version"],
+        definition_revision=release["definition_revision"],
+        subflow_digests=release["subflow_digests"],
+    ))
+
+    response = _client().post(
+        "/api/v1/flows/runs/explicit-decision-run/resume", json={},
+    )
+
+    assert response.status_code == 400
+    assert store.load_run("explicit-decision-run").status == "paused_approval"
+    assert aq.queue().list(status="pending", limit=100) == []
+
+
+def test_approval_resume_refuses_an_authenticated_wrong_assignee(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import api as api_module
+    from maverick_dashboard import automation_queue as aq
+
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(api_module, "caller_principal", lambda _request: "user:bob")
+    saved = store.save_flow(Flow(
+        id="assigned-approval",
+        name="Assigned",
+        start="gate",
+        nodes={"gate": FlowNode(
+            id="gate", kind="approval", prompt="ok?", assignee="@alice",
+        )},
+    ))
+    release = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    store.save_run(store.FlowRun(
+        run_id="assigned-approval-run",
+        flow_id=saved.id,
+        status="paused_approval",
+        cursor="gate",
+        human={"choices": [], "assignee": "@alice", "form": []},
+        definition_digest=release["definition_digest"],
+        release_digest=release["release_digest"],
+        release_id=release["release_id"],
+        definition_version=release["definition_version"],
+        definition_revision=release["definition_revision"],
+        subflow_digests=release["subflow_digests"],
+    ))
+
+    response = _client().post(
+        "/api/v1/flows/runs/assigned-approval-run/resume",
+        json={"decision": "approved"},
+    )
+
+    assert response.status_code == 403
+    assert store.load_run("assigned-approval-run").status == "paused_approval"
+    assert aq.queue().list(status="pending", limit=100) == []
 
 
 def test_manual_run_and_resume_jobs_capture_the_active_tenant(monkeypatch, tmp_path):
@@ -212,10 +1298,15 @@ def test_manual_run_and_resume_jobs_capture_the_active_tenant(monkeypatch, tmp_p
 
     token = set_tenant("tenant-a")
     try:
-        store.save_flow(Flow(
+        saved = store.save_flow(Flow(
             id="tenant-manual", name="tenant manual", start="gate", nodes={
                 "gate": FlowNode(id="gate", kind="approval", prompt="approve?"),
             }))
+        store.publish_flow(
+            saved.id,
+            expected_version=saved.version,
+            expected_revision=saved.revision,
+        )
         run_id, deduplicated = aq.enqueue_flow_run_once(
             "tenant-manual", {"value": 1}, origin="manual")
         aq.enqueue_flow_resume("tenant-manual", run_id, "approved")
@@ -291,10 +1382,15 @@ def test_queued_flow_fails_closed_when_operate_role_is_revoked(monkeypatch, tmp_
     from maverick_dashboard import automation_queue as aq
 
     _reset_aq(monkeypatch, aq)
-    store.save_flow(Flow(
+    saved = store.save_flow(Flow(
         id="revoked", name="revoked", start="a", owner="user:alice",
         nodes={"a": FlowNode(id="a", kind="agent", brief="must not run")},
     ))
+    store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
     run_id = aq.enqueue_flow_run(
         "revoked", {}, owner="user:alice", channel="api", user_id="alice")
     monkeypatch.setattr(
@@ -329,13 +1425,18 @@ def test_queued_flow_fails_closed_on_scim_lifecycle_failure(
     from maverick_dashboard import automation_queue as aq
 
     _reset_aq(monkeypatch, aq)
-    store.save_flow(Flow(
+    saved = store.save_flow(Flow(
         id="scim-revoked",
         name="scim-revoked",
         start="a",
         owner="user:alice",
         nodes={"a": FlowNode(id="a", kind="agent", brief="must not run")},
     ))
+    store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
     run_id = aq.enqueue_flow_run(
         "scim-revoked",
         {},
@@ -433,7 +1534,14 @@ def test_idempotency_claim_survives_crash_before_queue_publish(monkeypatch, tmp_
     with pytest.raises(SystemExit):
         aq.enqueue_flow_run_once("demo", {"order": "X"}, idem_key="delivery-1")
 
-    reserved = store.find_run_by_idem("demo", "delivery-1", within=0)
+    created = store.list_runs(flow_id="demo", limit=None)[0]
+    reserved = store.find_run_by_idem(
+        "demo",
+        "delivery-1",
+        within=0,
+        release_id=created.release_id,
+        owner=created.owner,
+    )
     assert reserved is not None and reserved.status == "queued"
     monkeypatch.setattr(q, "enqueue", real_enqueue)
 
@@ -463,7 +1571,14 @@ def test_ambiguous_post_commit_enqueue_error_never_duplicates_run(monkeypatch, t
     with pytest.raises(RuntimeError, match="lost acknowledgement"):
         aq.enqueue_flow_run_once("demo", {}, idem_key="delivery-ambiguous")
 
-    reserved = store.find_run_by_idem("demo", "delivery-ambiguous", within=0)
+    created = store.list_runs(flow_id="demo", limit=None)[0]
+    reserved = store.find_run_by_idem(
+        "demo",
+        "delivery-ambiguous",
+        within=0,
+        release_id=created.release_id,
+        owner=created.owner,
+    )
     assert reserved is not None and reserved.status == "queued"
     monkeypatch.setattr(q, "enqueue", real_enqueue)
     run_id, deduplicated = aq.enqueue_flow_run_once(
@@ -472,6 +1587,40 @@ def test_ambiguous_post_commit_enqueue_error_never_duplicates_run(monkeypatch, t
     jobs = [j for j in aq._pending(aq.FLOW_RUN_KIND)
             if j.payload.get("run_id") == reserved.run_id]
     assert len(jobs) == 1
+
+
+def test_composite_idempotency_lookup_verifies_a_legacy_root_claim(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+
+    pin = _store_published_pin("legacy-claim")
+    run = store.FlowRun(
+        run_id="legacy-indexed",
+        flow_id="legacy-claim",
+        status="completed",
+        idem_key="event-1",
+        **pin,
+    )
+    store.save_run(run)
+    store.save_idempotency_claim(
+        run.flow_id,
+        run.idem_key,
+        run.run_id,
+        definition_digest=run.definition_digest,
+        owner=run.owner,
+    )
+
+    found = store.find_run_by_idem(
+        run.flow_id,
+        run.idem_key,
+        within=0,
+        definition_digest=run.definition_digest,
+        release_id=run.release_id,
+        owner=run.owner,
+    )
+    assert found is not None and found.run_id == run.run_id
 
 
 class _Job:
@@ -484,8 +1633,23 @@ def _singleton_flow(mc=1):
     from maverick.flow.ir import Flow, FlowNode
     flow = Flow(id="s", name="S", start="a", max_concurrent=mc,
                 nodes={"a": FlowNode(id="a", kind="agent", brief="go")})
-    store.save_flow(flow)
-    return store.snapshot_flow_bundle(flow)[:2]
+    saved = store.save_flow(flow)
+    return store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+
+
+def _release_pin(release):
+    return {
+        "definition_digest": release["definition_digest"],
+        "release_digest": release["release_digest"],
+        "release_id": release["release_id"],
+        "definition_version": release["definition_version"],
+        "definition_revision": release["definition_revision"],
+        "subflow_digests": release["subflow_digests"],
+    }
 
 
 def test_singleton_defers_a_run_while_another_is_in_flight(monkeypatch, tmp_path):
@@ -493,13 +1657,13 @@ def test_singleton_defers_a_run_while_another_is_in_flight(monkeypatch, tmp_path
     from maverick.flow import store
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
-    digest, version = _singleton_flow(mc=1)
+    release = _singleton_flow(mc=1)
     store.save_run(store.FlowRun(
         run_id="r_active", flow_id="s", status="running",
-        definition_digest=digest, definition_version=version))
+        **_release_pin(release)))
     store.save_run(store.FlowRun(
         run_id="r_new", flow_id="s", status="queued",
-        definition_digest=digest, definition_version=version))
+        **_release_pin(release)))
     aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new"}))
     # the slot is taken -> the new run is NOT executed, it's left queued (deferred)
     assert store.load_run("r_new").status == "queued"
@@ -510,13 +1674,13 @@ def test_singleton_defers_while_another_run_waits_for_an_event(monkeypatch, tmp_
     from maverick.flow import store
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
-    digest, version = _singleton_flow(mc=1)
+    release = _singleton_flow(mc=1)
     store.save_run(store.FlowRun(
         run_id="r_waiting", flow_id="s", status="paused_event", cursor="wait",
-        definition_digest=digest, definition_version=version))
+        **_release_pin(release)))
     store.save_run(store.FlowRun(
         run_id="r_new", flow_id="s", status="queued",
-        definition_digest=digest, definition_version=version))
+        **_release_pin(release)))
 
     aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new"}))
 
@@ -529,18 +1693,18 @@ def test_singleton_defers_when_active_run_is_older_than_recent_window(monkeypatc
     from maverick.flow import store
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
-    digest, version = _singleton_flow(mc=1)
+    release = _singleton_flow(mc=1)
     now = [1_000.0]
     monkeypatch.setattr(store.time, "time", lambda: now[0])
     store.save_run(store.FlowRun(
         run_id="r_active", flow_id="s", status="running",
-        definition_digest=digest, definition_version=version))
+        **_release_pin(release)))
     now[0] = 2_000.0
     for i in range(201):
         store.save_run(store.FlowRun(run_id=f"r_done_{i}", flow_id="s", status="completed"))
     store.save_run(store.FlowRun(
         run_id="r_new", flow_id="s", status="queued",
-        definition_digest=digest, definition_version=version))
+        **_release_pin(release)))
 
     assert all(r.run_id != "r_active" for r in store.list_runs(flow_id="s", limit=200))
 
@@ -560,10 +1724,10 @@ def test_singleton_runs_when_the_slot_is_free(monkeypatch, tmp_path):
                         lambda world, **k: (lambda brief, d, **kw: ("ok", 1.0)))
     monkeypatch.setattr(execution, "default_action_runner",
                         lambda world, sandbox=None, **kwargs: (lambda t, p, d: ("", None)))
-    digest, version = _singleton_flow(mc=1)
+    release = _singleton_flow(mc=1)
     store.save_run(store.FlowRun(
         run_id="r_new", flow_id="s", status="queued",
-        definition_digest=digest, definition_version=version))
+        **_release_pin(release)))
     aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new"}))
     assert store.load_run("r_new").status == "completed"   # no sibling -> claimed + ran
 
@@ -573,13 +1737,13 @@ def test_singleton_skips_once_the_defer_budget_is_spent(monkeypatch, tmp_path):
     from maverick.flow import store
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
-    digest, version = _singleton_flow(mc=1)
+    release = _singleton_flow(mc=1)
     store.save_run(store.FlowRun(
         run_id="r_active", flow_id="s", status="paused_approval",
-        definition_digest=digest, definition_version=version))
+        **_release_pin(release)))
     store.save_run(store.FlowRun(
         run_id="r_new", flow_id="s", status="queued",
-        definition_digest=digest, definition_version=version))
+        **_release_pin(release)))
     # a run that has already been deferred to the limit is dropped, not re-queued forever
     aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new",
                               "_slot_defers": aq._SINGLETON_MAX_DEFERS}))
@@ -598,14 +1762,18 @@ def test_unlimited_flow_ignores_the_slot_guard(monkeypatch, tmp_path):
                         lambda world, sandbox=None, **kwargs: (lambda t, p, d: ("", None)))
     flow = Flow(id="u", name="U", start="a", max_concurrent=0,
                 nodes={"a": FlowNode(id="a", kind="agent", brief="go")})
-    store.save_flow(flow)
-    digest, version, _ = store.snapshot_flow_bundle(flow)
+    saved = store.save_flow(flow)
+    release = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
     store.save_run(store.FlowRun(
         run_id="ua", flow_id="u", status="running",
-        definition_digest=digest, definition_version=version))   # sibling
+        **_release_pin(release)))   # sibling
     store.save_run(store.FlowRun(
         run_id="ub", flow_id="u", status="queued",
-        definition_digest=digest, definition_version=version))
+        **_release_pin(release)))
     aq._handle_flow_run(_Job({"flow_id": "u", "run_id": "ub"}))
     assert store.load_run("ub").status == "completed"   # 0 = unlimited -> runs anyway
 
@@ -645,10 +1813,13 @@ def test_delay_sweep_reenqueues_only_due_runs(monkeypatch, tmp_path):
     from maverick.flow import store
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
+    pin = _store_published_pin()
     store.save_run(store.FlowRun(run_id="d1", flow_id="demo",
-                                 status="paused_delay", resume_at=1.0))          # due
+                                 status="paused_delay", resume_at=1.0,
+                                 **pin))                                        # due
     store.save_run(store.FlowRun(run_id="d2", flow_id="demo",
-                                 status="paused_delay", resume_at=9e18))         # not yet
+                                 status="paused_delay", resume_at=9e18,
+                                 **pin))                                         # not yet
     aq._handle_flow_sweep(None)
     jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RESUME_KIND]
     assert {j.payload["run_id"] for j in jobs} == {"d1"}
@@ -659,12 +1830,16 @@ def test_sweep_rejects_expired_approvals_but_never_paused_events(monkeypatch, tm
     from maverick.flow import store
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
+    pin = _store_published_pin()
     store.save_run(store.FlowRun(run_id="ap1", flow_id="demo",
-                                 status="paused_approval", resume_at=1.0))     # expired
+                                 status="paused_approval", resume_at=1.0,
+                                 **pin))                                      # expired
     store.save_run(store.FlowRun(run_id="ap2", flow_id="demo",
-                                 status="paused_approval", resume_at=9e18))    # still open
+                                 status="paused_approval", resume_at=9e18,
+                                 **pin))                                       # still open
     store.save_run(store.FlowRun(run_id="ev1", flow_id="demo",
-                                 status="paused_event", resume_at=1.0))        # event-only
+                                 status="paused_event", resume_at=1.0,
+                                 **pin))                                       # event-only
     aq._handle_flow_sweep(None)
     jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RESUME_KIND]
     assert {j.payload["run_id"] for j in jobs} == {"ap1"}
@@ -685,25 +1860,30 @@ def test_sweep_visits_named_tenants_and_preserves_resume_namespace(
 
     _reset_aq(monkeypatch, aq)
     registry.create_tenant("acme")
+    shared_pin = _store_published_pin()
     store.save_run(store.FlowRun(
         run_id="shared-delay",
         flow_id="demo",
         status="paused_delay",
         resume_at=1.0,
+        **shared_pin,
     ))
     token = set_tenant("acme")
     try:
+        private_pin = _store_published_pin()
         store.save_run(store.FlowRun(
             run_id="private-delay",
             flow_id="demo",
             status="paused_delay",
             resume_at=1.0,
+            **private_pin,
         ))
         store.save_run(store.FlowRun(
             run_id="private-approval",
             flow_id="demo",
             status="paused_approval",
             resume_at=1.0,
+            **private_pin,
         ))
     finally:
         reset_tenant(token)
@@ -757,6 +1937,7 @@ def test_paused_event_run_resumes_via_api_with_event_data(monkeypatch, tmp_path)
         {"id": "a", "kind": "agent", "brief": "handle {{payload}}", "output": "r"},
     ]}
     assert c.post("/api/v1/flows", json={"flow": flow}).status_code == 201
+    _publish(c, "fev")
     run_id = c.post("/api/v1/flows/fev/run", json={"data": {}}).json()["run_id"]
     _drain(aq)
     assert c.get(f"/api/v1/flows/runs/{run_id}").json()["status"] == "paused_event"
@@ -787,6 +1968,7 @@ def test_choice_approval_verdict_flows_through_resume(monkeypatch, tmp_path):
         {"id": "no", "kind": "agent", "brief": "holding", "output": "r"},
     ]}
     assert c.post("/api/v1/flows", json={"flow": flow}).status_code == 201
+    _publish(c, "fch")
     run_id = c.post("/api/v1/flows/fch/run", json={"data": {}}).json()["run_id"]
     _drain(aq)
     r = c.post(f"/api/v1/flows/runs/{run_id}/resume", json={"decision": "ship"})
@@ -1065,12 +2247,18 @@ def test_retry_from_failure_resumes_at_failed_node(monkeypatch, tmp_path):
         {"id": "b", "kind": "action", "tool": "web_search", "params": {}, "output": "r2"},
     ]}
     assert c.post("/api/v1/flows", json={"flow": flow}).status_code == 201
-    digest, version, subflows = store.snapshot_flow_bundle(store.load_flow("fret"))
+    release = _publish(c, "fret")
+    published, metadata = store.load_published_bundle("fret")
+    digest = metadata["definition_digest"]
+    version = published.version
+    subflows = metadata["subflow_digests"]
     # a run that failed AT node b, with node a's work already done
     store.save_run(store.FlowRun(run_id="rx", flow_id="fret", status="failed",
                                  cursor="b", data={"r1": "ok"},
-                                 nodes={"a": {"status": "done", "outcome": 1.0}},
-                                 definition_digest=digest, definition_version=version,
+                                     nodes={"a": {"status": "done", "outcome": 1.0}},
+                                     definition_digest=digest, definition_version=version,
+                                     release_id=release["published_revision"],
+                                     definition_revision=published.revision,
                                  subflow_digests=subflows))
     r = c.post("/api/v1/flows/runs/rx/retry?from_failure=1")
     assert r.status_code == 200, r.text
@@ -1085,6 +2273,7 @@ def test_retry_from_failure_resumes_at_failed_node(monkeypatch, tmp_path):
     store.save_run(store.FlowRun(
         run_id="ry", flow_id="fret", status="failed",
         definition_digest=digest, definition_version=version,
+        definition_revision=published.revision,
         subflow_digests=subflows))
     assert c.post("/api/v1/flows/runs/ry/retry?from_failure=1").status_code == 409
 

@@ -28,8 +28,12 @@ def _save(c, fid="f"):
 
 def _apply(c, body: dict, fid="f"):
     current = c.get(f"/api/v1/flows/{fid}").json()
+    submitted = dict(body)
+    if submitted.get("to_kind") == "action" and "params" not in submitted:
+        # Test helpers model a human-reviewed no-argument binding explicitly.
+        submitted["params"] = {}
     return c.post(f"/api/v1/flows/{fid}/apply", json={
-        **body,
+        **submitted,
         "version": current["version"],
         "revision": current["revision"],
     })
@@ -63,6 +67,84 @@ def test_auto_apply_softens_a_failing_action_when_enabled(monkeypatch, tmp_path)
     assert store.load_flow("fa").nodes["a"].kind == "agent"  # softened autonomously
     from maverick.flow import evolution_log
     assert evolution_log.last_apply("fa", "a")["source"] == "auto-apply"
+
+
+def test_auto_apply_replaces_the_exact_active_release(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    monkeypatch.setattr(
+        "maverick.config.get_flows",
+        lambda: {"auto_evolve": True, "auto_apply": True},
+    )
+    from maverick.flow import node_outcomes, store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import automation_queue as aq
+
+    saved = store.save_flow(Flow(
+        id="active-auto-apply",
+        name="F",
+        start="a",
+        nodes={"a": FlowNode(id="a", kind="action", tool="web_search", brief="do it")},
+    ))
+    before = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    for _ in range(12):
+        node_outcomes.record(saved.id, "a", "action", 0.0)
+
+    aq._handle_flow_evolve()
+
+    draft = store.load_flow(saved.id)
+    active, after = store.load_published_bundle(saved.id)
+    assert draft.nodes["a"].kind == "agent"
+    assert active.nodes["a"].kind == "agent"
+    assert after["release_id"] != before["release_id"]
+    assert after["release_digest"] != before["release_digest"]
+
+
+def test_auto_apply_skips_a_published_flow_with_diverged_human_draft(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    monkeypatch.setattr(
+        "maverick.config.get_flows",
+        lambda: {"auto_evolve": True, "auto_apply": True},
+    )
+    from maverick.flow import node_outcomes, store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import automation_queue as aq
+
+    saved = store.save_flow(Flow(
+        id="diverged-auto-apply",
+        name="Published",
+        start="a",
+        nodes={"a": FlowNode(id="a", kind="action", tool="web_search", brief="do it")},
+    ))
+    release = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    saved.name = "Human draft"
+    diverged = store.save_flow(
+        saved,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    for _ in range(12):
+        node_outcomes.record(saved.id, "a", "action", 0.0)
+
+    aq._handle_flow_evolve()
+
+    draft = store.load_flow(saved.id)
+    active, still_live = store.load_published_bundle(saved.id)
+    assert draft.version == diverged.version
+    assert draft.name == "Human draft" and draft.nodes["a"].kind == "action"
+    assert active.name == "Published" and active.nodes["a"].kind == "action"
+    assert still_live["release_id"] == release["release_id"]
 
 
 def test_auto_apply_leaves_reliable_one_tool_agent_for_human_review(monkeypatch, tmp_path):
@@ -156,6 +238,22 @@ def test_apply_without_tool_is_400(monkeypatch, tmp_path):
     c = _client()
     _save(c)
     assert _apply(c, {"node_id": "a", "to_kind": "action"}).status_code == 400
+
+
+def test_apply_tool_name_without_parameter_binding_is_400(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    _save(c)
+    current = c.get("/api/v1/flows/f").json()
+    response = c.post("/api/v1/flows/f/apply", json={
+        "node_id": "a",
+        "to_kind": "action",
+        "tool": "web_search",
+        "version": current["version"],
+        "revision": current["revision"],
+    })
+    assert response.status_code == 400
+    assert "parameter bindings" in response.json()["detail"]
 
 
 def test_apply_noop_same_kind_is_400(monkeypatch, tmp_path):
@@ -342,7 +440,7 @@ def _build_regressed_scenario():
     for _ in range(4):
         node_outcomes.record("f", "a", "agent", 0.9)        # worked well as an agent
     saved = store.save_flow(evolve.apply_proposal(
-        store.load_flow("f"), "a", "action", tool="web_search"))
+        store.load_flow("f"), "a", "action", tool="web_search", params={}))
     evolution_log.record_apply("f", "a", "agent", "action", saved.version, source="manual")
     for _ in range(6):
         node_outcomes.record("f", "a", "action", 0.2)        # regressed as an action
@@ -357,6 +455,71 @@ def test_evolve_pass_reverts_a_regression_when_enabled(monkeypatch, tmp_path):
     aq._handle_flow_evolve()
     assert store.load_flow("f").nodes["a"].kind == "agent"          # undone
     assert evolution_log.last_apply("f", "a")["source"] == "auto-revert"
+
+
+def test_auto_revert_replaces_the_exact_active_release(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    _build_regressed_scenario()
+    current = store.load_flow("f")
+    before = store.publish_flow(
+        current.id,
+        expected_version=current.version,
+        expected_revision=current.revision,
+    )
+
+    aq._handle_flow_evolve()
+
+    draft = store.load_flow("f")
+    active, after = store.load_published_bundle("f")
+    assert draft.nodes["a"].kind == "agent"
+    assert active.nodes["a"].kind == "agent"
+    assert after["release_id"] != before["release_id"]
+    assert after["release_digest"] != before["release_digest"]
+
+
+def test_autonomous_publish_cas_refuses_a_rearmed_activation(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import evolve, store
+    from maverick.flow.ir import Flow, FlowNode
+
+    saved = store.save_flow(Flow(
+        id="evolve-activation-race",
+        name="F",
+        start="a",
+        nodes={"a": FlowNode(id="a", kind="action", tool="web_search", brief="do it")},
+    ))
+    old = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    assert store.unpublish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    replacement = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    candidate = evolve.apply_proposal(saved, "a", "agent", brief="do it")
+
+    import pytest
+
+    with pytest.raises(store.FlowSnapshotError, match="activation"):
+        store.save_and_publish_flow(
+            candidate,
+            expected_version=saved.version,
+            expected_revision=saved.revision,
+            expected_release_id=old["release_id"],
+        )
+    assert store.load_flow(saved.id).nodes["a"].kind == "action"
+    assert store.load_published_bundle(saved.id)[1]["release_id"] == replacement["release_id"]
 
 
 def test_evolve_pass_visits_two_tenants_without_crossing_namespaces(
@@ -419,12 +582,44 @@ def test_evolve_pass_skips_stale_apply_after_manual_save(monkeypatch, tmp_path):
     from maverick.flow import evolve, store
     from maverick_dashboard import automation_queue as aq
     _build_regressed_scenario()
-    edited = evolve.apply_proposal(store.load_flow("f"), "a", "action", tool="safe_tool")
+    edited = evolve.apply_proposal(
+        store.load_flow("f"), "a", "action", tool="safe_tool", params={},
+    )
     store.save_flow(edited)
     aq._handle_flow_evolve()
     node = store.load_flow("f").nodes["a"]
     assert node.kind == "action"
     assert node.tool == "safe_tool"
+
+
+def test_evolve_pass_reverts_regression_across_later_unrelated_save(
+    monkeypatch, tmp_path,
+):
+    """The apply's explicit cohorts survive a later metadata-only draft save."""
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    from maverick.flow import evolution_log, store
+    from maverick_dashboard import automation_queue as aq
+
+    _build_regressed_scenario()  # v2 is the regressed agent -> action apply
+    later = store.load_flow("f")
+    later.name = "human renamed this after the apply"
+    store.save_flow(
+        later,
+        expected_version=later.version,
+        expected_revision=later.revision,
+    )  # v3 keeps the applied work definition
+
+    aq._handle_flow_evolve()
+
+    current = store.load_flow("f")
+    assert current.version == 4
+    assert current.name == "human renamed this after the apply"
+    assert current.nodes["a"].kind == "agent"
+    last = evolution_log.last_apply("f", "a")
+    assert last["source"] == "auto-revert"
+    assert last["before_revision"].endswith(":v3")
+    assert last["after_revision"].endswith(":v4")
 
 
 def test_evolve_pass_is_a_noop_when_disabled(monkeypatch, tmp_path):
@@ -528,6 +723,7 @@ def test_dry_run_resume_never_upgrades_to_real_executors(monkeypatch, tmp_path):
 
     aq._handle_flow_resume(_Job({
         "flow_id": flow.id, "run_id": rid, "decision": "approved",
+        "decided_by": "system:test",
         "dry_run": False, "owner": "user:attacker",
     }))
     done = store.load_run(rid)
@@ -584,8 +780,17 @@ def test_retry_reruns_from_original_inputs(monkeypatch, tmp_path):
     from maverick.flow import Flow, FlowNode, store
     from maverick_dashboard import automation_queue as aq
     monkeypatch.setattr(aq, "_queue", None)
-    store.save_flow(Flow(id="f", name="F", start="a",
-                         nodes={"a": FlowNode(id="a", kind="agent", brief="x")}))
+    saved = store.save_flow(Flow(
+        id="f",
+        name="F",
+        start="a",
+        nodes={"a": FlowNode(id="a", kind="agent", brief="x")},
+    ))
+    store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
     rid = store.new_run_id()
     store.save_run(store.FlowRun(run_id=rid, flow_id="f", status="failed",
                                  input_data={"order": "A1"}, data={"order": "A1", "junk": "z"}))

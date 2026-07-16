@@ -206,6 +206,21 @@ def test_list_episodes_owner_scope_matches_sqlite(world):
     assert owners == {alice_gid: alice, bob_gid: bob, legacy_gid: ""}
 
 
+def test_goal_reads_are_owner_scoped(world):
+    import uuid
+
+    token = uuid.uuid4().hex
+    alpha = f"agent:alpha:{token}"
+    bravo = f"agent:bravo:{token}"
+    alpha_gid = world.create_goal("alpha private", owner=alpha)
+    bravo_gid = world.create_goal("bravo private", owner=bravo)
+
+    assert world.get_goal(alpha_gid).owner == alpha
+    assert {g.id for g in world.list_goals(owner=alpha)} == {alpha_gid}
+    assert {g.id for g in world.list_goals(owner=bravo)} == {bravo_gid}
+    assert world.list_goals(owner=f"agent:nobody:{token}") == []
+
+
 def test_ask_answer_open_questions(world):
     gid = world.create_goal("needs input")
     qid = world.ask("which region?", goal_id=gid)
@@ -231,6 +246,15 @@ def test_ask_answer_open_questions(world):
 def test_answer_unknown_question_id_returns_false(world):
     # #394 parity: a typo'd id is reported, not a false success.
     assert world.answer(987_654_321, "nope") is False
+
+
+def test_answer_is_atomically_scoped_to_goal_owner(world):
+    gid = world.create_goal("owned question", owner="agent:alpha")
+    qid = world.ask("private?", goal_id=gid)
+
+    assert world.answer(qid, "stolen", expected_owner="agent:bravo") is False
+    assert [q.id for q in world.open_questions(gid)] == [qid]
+    assert world.answer(qid, "mine", expected_owner="agent:alpha") is True
 
 
 def test_approval_queue_lifecycle(world):

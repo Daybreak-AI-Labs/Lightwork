@@ -701,6 +701,7 @@ class PGGoal:
     updated_at: float
     deadline: float | None
     result: str | None
+    owner: str = ""
 
 
 def _seal(text):
@@ -727,6 +728,7 @@ def _dec_goal_row(row) -> PGGoal:
     return PGGoal(
         row[0], row[1], _unseal(row[2]), _unseal(row[3]), row[4],
         row[5], row[6], row[7], _unseal(row[8]),
+        str(row[9] or "") if len(row) > 9 else "",
     )
 
 
@@ -1035,7 +1037,8 @@ class PostgresWorldModel:
         frag, params = _tenant_scope()
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result FROM goals WHERE id=%s"
+            "created_at, updated_at, deadline, result, owner "
+            "FROM goals WHERE id=%s"
         )
         p: list = [goal_id]
         if frag:
@@ -1787,6 +1790,7 @@ class PostgresWorldModel:
         self,
         status: str | None = None,
         *,
+        owner: str | None = None,
         limit: int | None = None,
         offset: int = 0,
         order: str = "asc",
@@ -1795,13 +1799,16 @@ class PostgresWorldModel:
         direction = "DESC" if str(order).lower() == "desc" else "ASC"
         sql = (
             "SELECT id, parent_id, title, description, status, "
-            "created_at, updated_at, deadline, result FROM goals"
+            "created_at, updated_at, deadline, result, owner FROM goals"
         )
         params: list = []
         conds: list[str] = []
         if status:
             conds.append("status = %s")
             params.append(status)
+        if owner is not None:
+            conds.append("owner = %s")
+            params.append(str(owner))
         frag, fparams = _tenant_scope()
         if frag:
             conds.append(frag)
@@ -2600,7 +2607,13 @@ class PostgresWorldModel:
             raise ValueError(f"unknown goal_id {goal_id!r} for the active tenant")
         return int(row[0])
 
-    def answer(self, question_id: int, answer: str) -> bool:
+    def answer(
+        self,
+        question_id: int,
+        answer: str,
+        *,
+        expected_owner: str | None = None,
+    ) -> bool:
         """Record an answer. Returns False if no question has that id, so a
         typo'd id is flagged instead of reported as a false success.
 
@@ -2609,6 +2622,9 @@ class PostgresWorldModel:
         frag, fparams = _tenant_scope("g.tenant_id")
         sql = "UPDATE questions SET answer = %s, answered_at = %s WHERE id = %s"
         params: list = [_seal(answer), time.time(), question_id]
+        if expected_owner is not None:
+            sql += " AND goal_id IN (SELECT id FROM goals WHERE owner = %s)"
+            params.append(str(expected_owner))
         if frag:
             sql += " AND goal_id IN (SELECT g.id FROM goals g WHERE " + frag + ")"
             params += fparams

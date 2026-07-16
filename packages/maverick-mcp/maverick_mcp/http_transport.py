@@ -47,6 +47,7 @@ import secrets
 import threading
 import time
 from collections import OrderedDict, deque
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
@@ -54,8 +55,39 @@ log = logging.getLogger(__name__)
 _MAX_PROGRESS_TOKEN_CHARS = 128
 _DEFAULT_MAX_PROGRESS_EVENTS = 240
 _DEFAULT_MAX_RESOURCE_SESSIONS = 1024
-_SESSION_COOKIE_MAX_AGE = 3600  # seconds; header-based clients re-mint freely
+# Match TaskStore's maximum accepted TTL (7 days): a cookie-only MCP client
+# must retain its caller-bound session for the entire lifetime of a valid task.
+_SESSION_COOKIE_MAX_AGE = 7 * 24 * 60 * 60
 _LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+_SESSION_BINDING_KEY = secrets.token_bytes(32)
+
+
+@dataclass(frozen=True)
+class _MCPAuthorization:
+    """Authenticated HTTP caller plus its non-bypassable tool ceiling.
+
+    ``caller_identity`` is empty for the legacy shared bearer because that
+    credential cannot distinguish individual callers.  When Agent Trust is
+    enforced, the shared bearer is nevertheless admitted as the explicit
+    surface principal ``mcp`` and carries that entry's capability.  A
+    per-agent bearer always carries its own registry capability, even when the
+    trust plane's default-deny admission switch is disengaged: authenticating
+    *as* a scoped agent must never discard the scope attached to that token.
+    """
+
+    caller_identity: str
+    trust_principal: str
+    capability: object | None
+    credential_kind: str
+    credential_fingerprint: str
+
+
+@dataclass
+class _ResourceSession:
+    """Resource-subscription state bound to one authenticated credential."""
+
+    caller_scope: str
+    subscriptions: set[str]
 
 
 try:
@@ -209,6 +241,31 @@ def _http_tasks_enabled() -> bool:
         "1", "true", "yes", "on")
 
 
+def _needs_policy_principal(method: str, is_task_request: bool) -> bool:
+    return is_task_request or method in {
+        "tools/list",
+        "tools/call",
+        "resources/list",
+        "resources/read",
+        "resources/subscribe",
+    }
+
+
+def _task_request_flags(
+    *,
+    enabled: bool,
+    method: str,
+    params: dict,
+) -> tuple[bool, bool]:
+    is_create = (
+        enabled
+        and method == "tools/call"
+        and isinstance(params.get("task"), dict)
+    )
+    is_request = enabled and (method.startswith("tasks/") or is_create)
+    return is_request, is_create
+
+
 # --- per-caller request rate limiting (sliding 60s window) -------------------
 _RATE_LOCK = threading.Lock()
 _RATE_HITS: dict[str, deque] = {}
@@ -259,14 +316,15 @@ def _rate_ok(key: str) -> bool:
         return True
 
 
-def _check_bearer(authorization: str | None) -> tuple[bool, str]:
-    """Bearer-token gate for network HTTP transport.
+def _authorization_for_bearer(
+    authorization: str | None,
+) -> _MCPAuthorization | None:
+    """Authenticate one network caller and resolve its tool authority.
 
-    Returns ``(ok, caller_identity)`` -- ``caller_identity`` is the per-caller
-    :class:`TrustedAgent` id when a per-caller ``[agent_trust] mcp_token``
-    authenticated the request, or ``""`` for the shared ``MAVERICK_MCP_TOKEN``
-    (which carries no per-caller identity). The transport binds this identity
-    onto fleet-memory ops so a caller cannot act AS another rostered agent.
+    Returns an authorization context, or ``None`` on any authentication,
+    admission, or trust-policy failure.  The context keeps both identity and
+    capability intact through HTTP dispatch; reducing it to the old identity
+    string is the authorization bypass this boundary is designed to prevent.
 
     Unlike stdio, HTTP requests are network-reachable; token auth is
     therefore mandatory. Two accepted credentials: the shared
@@ -282,44 +340,76 @@ def _check_bearer(authorization: str | None) -> tuple[bool, str]:
     if authorization and authorization.startswith("Bearer "):
         given = authorization[len("Bearer "):].strip()
     if not given:
-        return False, ""
-    agent = None
-    try:
-        from maverick.agent_trust import agent_for_token
-        agent = agent_for_token(given, "mcp")
-    except Exception:  # pragma: no cover - never break auth on a read error
-        agent = None
-    authed = bool(
-        (expected and hmac.compare_digest(expected.encode(), given.encode()))
-        or agent is not None
-    )
-    if not authed:
-        return False, ""
-    if not _mcp_trust_ok(agent):
-        return False, ""
-    return True, (agent.id if agent is not None else "")
-
-
-def _mcp_trust_ok(agent) -> bool:
-    """Agent Trust Plane admission for MCP. True to admit; default-deny (when
-    engaged) for a caller that isn't a registered inbound agent."""
+        return None
     try:
         from maverick import agent_trust
+
+        # One snapshot for token resolution, admission, and capability.  A
+        # second config read here would create a TOCTOU window where identity
+        # came from one registry revision and authority from another.
         enforced, registry = agent_trust.load_trust_state()
-    except Exception as e:  # pragma: no cover - exercised via monkeypatched seam
-        # MCP can invoke tools on behalf of a remote agent. An unreadable trust
-        # policy is therefore an admission failure, not a reason to downgrade
-        # silently to the shared bearer.
+        agent = agent_trust.agent_for_token(given, "mcp", registry=registry)
+    except Exception as e:  # fail closed at a network tool-execution boundary
         log.error("MCP trust plane unavailable; refusing inbound caller: %s", e)
-        return False
-    if not enforced:
-        return True
-    agent_id = agent.id if agent is not None else "mcp"
-    decision = agent_trust.decide_inbound(agent_id, registry=registry, enforced=True)
+        return None
+
+    shared = bool(
+        expected and hmac.compare_digest(expected.encode(), given.encode())
+    )
+    if agent is None and not shared:
+        return None
+
+    principal = agent.id if agent is not None else "mcp"
+    decision = agent_trust.decide_inbound(
+        principal,
+        registry=registry,
+        enforced=enforced,
+    )
     if decision.denied:
-        agent_trust.record_denied(agent_id, decision, direction="inbound")
-        return False
-    return True
+        agent_trust.record_denied(principal, decision, direction="inbound")
+        return None
+
+    # A keyed, process-local digest can be retained for session ownership and
+    # queued-task rotation checks without retaining/logging a reusable bearer.
+    from .server import _credential_fingerprint
+    fingerprint = _credential_fingerprint(given)
+
+    if agent is not None:
+        # Per-agent authentication is itself an explicit scoped credential.
+        # Keep that scope even when default-deny admission is disengaged (in
+        # which case decide_inbound deliberately returns capability=None).
+        capability = decision.capability or agent.capability()
+        return _MCPAuthorization(
+            caller_identity=agent.id,
+            trust_principal=agent.id,
+            capability=capability,
+            credential_kind="agent",
+            credential_fingerprint=fingerprint,
+        )
+
+    # Shared bearer compatibility is explicit: unrestricted only while the
+    # trust plane is disengaged; when enforced, the required ``mcp`` registry
+    # entry supplies the capability that tools/list and tools/call must honor.
+    return _MCPAuthorization(
+        caller_identity="",
+        trust_principal="mcp",
+        capability=decision.capability,
+        credential_kind="shared",
+        credential_fingerprint=fingerprint,
+    )
+
+
+def _check_bearer(authorization: str | None) -> tuple[bool, str]:
+    """Back-compatible authentication probe returning ``(ok, identity)``.
+
+    HTTP request handling uses :func:`_authorization_for_bearer` so the
+    capability is not discarded.  This wrapper remains for callers/tests that
+    only need the historical authentication result.
+    """
+    caller = _authorization_for_bearer(authorization)
+    if caller is None:
+        return False, ""
+    return True, caller.caller_identity
 
 
 def _result_envelope(request_id, result: dict) -> dict:
@@ -408,12 +498,17 @@ def _sse_stream(
     method: str,
     params: dict,
     task_owner: str | None,
+    task_quota_owner: str | None = None,
     caller_identity: str | None = None,
+    caller_capability=None,
     subscriptions: set,
     request_id,
     should_persist_session: bool,
     sid: str | None,
     store_session,
+    caller_trust_principal: str | None = None,
+    caller_credential_kind: str | None = None,
+    caller_credential_fingerprint: str | None = None,
 ):
     """Async SSE generator: progress heartbeats, then the final JSON-RPC result.
 
@@ -425,8 +520,21 @@ def _sse_stream(
 
     def _dispatch_with_updates():
         with server.resource_update_scope(subscriptions):
-            result = _dispatch(server, method, params, task_owner=task_owner,
-                               caller_identity=caller_identity)
+            kwargs = {
+                "task_owner": task_owner,
+                "caller_identity": caller_identity,
+            }
+            if task_quota_owner is not None:
+                kwargs["task_quota_owner"] = task_quota_owner
+            if caller_capability is not None:
+                kwargs["caller_capability"] = caller_capability
+            if caller_trust_principal is not None:
+                kwargs.update({
+                    "caller_trust_principal": caller_trust_principal,
+                    "caller_credential_kind": caller_credential_kind,
+                    "caller_credential_fingerprint": caller_credential_fingerprint,
+                })
+            result = _dispatch(server, method, params, **kwargs)
             updates = server.drain_resource_updates()
             return result, updates
 
@@ -472,21 +580,127 @@ def _sse_stream(
     return _stream()
 
 
-def _supplied_session_id(request, resource_sessions: OrderedDict) -> str | None:
+def _caller_scope(caller: _MCPAuthorization) -> str:
+    """Opaque session scope for one authenticated principal + credential."""
+    material = "\0".join((
+        "mcp-caller-v1",
+        caller.credential_kind,
+        caller.trust_principal,
+        caller.credential_fingerprint,
+    ))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _quota_scope(caller: _MCPAuthorization) -> str:
+    """Stable per-principal quota scope, independent of token/session churn."""
+    material = "\0".join((
+        "mcp-quota-v1",
+        caller.credential_kind,
+        caller.trust_principal,
+    ))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _task_owner(sid: str, caller_scope: str) -> str:
+    """Bind task ownership to both the unguessable session and its caller."""
+    material = f"mcp-task-owner-v1\0{caller_scope}\0{sid}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _mint_session_id(caller_scope: str) -> str:
+    """Mint a self-authenticating process-local session for this caller."""
+    nonce = secrets.token_urlsafe(24)
+    mac = hmac.new(
+        _SESSION_BINDING_KEY,
+        f"mcp-session-v1\0{caller_scope}\0{nonce}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{nonce}.{mac}"
+
+
+def _supplied_session_id(
+    request,
+    caller_scope: str,
+) -> str | None:
+    """Return a valid caller-bound session without consulting any LRU state."""
     supplied = (
         request.headers.get("Mcp-Session-Id")
         or request.cookies.get("maverick_mcp_session")
     )
-    if supplied and supplied in resource_sessions:
-        resource_sessions.move_to_end(supplied)
-        return supplied
-    return None
+    if not supplied or len(supplied) > 128:
+        return None
+    try:
+        nonce, presented_mac = supplied.rsplit(".", 1)
+    except ValueError:
+        return None
+    if (
+        not 20 <= len(nonce) <= 64
+        or not all(char.isalnum() or char in "_-" for char in nonce)
+        or len(presented_mac) != 64
+        or not all(char in "0123456789abcdef" for char in presented_mac)
+    ):
+        return None
+    expected_mac = hmac.new(
+        _SESSION_BINDING_KEY,
+        f"mcp-session-v1\0{caller_scope}\0{nonce}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return supplied if hmac.compare_digest(presented_mac, expected_mac) else None
+
+
+def _resource_session_id(
+    sid: str | None,
+    resource_sessions: OrderedDict[str, _ResourceSession],
+    caller_scope: str,
+) -> str | None:
+    """Return ``sid`` only when its evictable subscription state exists."""
+    session = resource_sessions.get(sid) if sid else None
+    if session is None or not hmac.compare_digest(
+        session.caller_scope,
+        caller_scope,
+    ):
+        return None
+    resource_sessions.move_to_end(sid)
+    return sid
+
+
+def _session_plan(
+    *,
+    supplied_sid: str | None,
+    resource_sid: str | None,
+    caller_scope: str,
+    method: str,
+    is_task_request: bool,
+) -> tuple[str | None, str | None, bool, str | None]:
+    """Plan response, resource persistence, and task ownership independently."""
+    response_sid = supplied_sid
+    if response_sid is None and (
+        is_task_request or method == "resources/subscribe"
+    ):
+        response_sid = _mint_session_id(caller_scope)
+    if method == "resources/subscribe" and resource_sid is None:
+        resource_sid = response_sid
+    should_persist_resource = resource_sid is not None
+    task_owner = (
+        _task_owner(response_sid, caller_scope)
+        if is_task_request and response_sid is not None else None
+    )
+    return response_sid, resource_sid, should_persist_resource, task_owner
 
 
 def _store_session(
-    resource_sessions: OrderedDict, sid: str, subscriptions: set[str],
+    resource_sessions: OrderedDict[str, _ResourceSession],
+    sid: str,
+    caller_scope: str,
+    subscriptions: set[str],
 ) -> None:
-    resource_sessions[sid] = subscriptions
+    existing = resource_sessions.get(sid)
+    if existing is not None and not hmac.compare_digest(
+        existing.caller_scope, caller_scope
+    ):
+        # A stolen/colliding id must never overwrite another caller's state.
+        return
+    resource_sessions[sid] = _ResourceSession(caller_scope, subscriptions)
     resource_sessions.move_to_end(sid)
     while len(resource_sessions) > _max_resource_sessions():
         resource_sessions.popitem(last=False)
@@ -538,14 +752,12 @@ def build_app(server) -> FastAPI:
     # ignored and tasks/* return -32601, exactly as before.
     server._tasks_enabled = _http_tasks_enabled()
 
-    # One MCPServer handles the whole HTTP app, but resource subscriptions and
-    # async task records are per MCP HTTP client. Persist a small opaque session
-    # id in both the standard-ish MCP-Session-Id header and a same-site cookie
-    # fallback so clients that do not yet send a session header still get
-    # isolated state. Sessions are created only when a request needs persistent
-    # subscription/task state, and the map is capped so callers that ignore
-    # returned ids cannot grow process memory without bound.
-    resource_sessions: OrderedDict[str, set[str]] = OrderedDict()
+    # One MCPServer handles the whole HTTP app, but state is per authenticated
+    # MCP client. Caller-bound signed session ids authorize task ownership
+    # without depending on this map; only resource subscriptions live in the
+    # capped LRU below. Evicting an idle subscription therefore cannot orphan a
+    # still-valid task, while ignored resource ids cannot grow memory forever.
+    resource_sessions: OrderedDict[str, _ResourceSession] = OrderedDict()
     app.state.resource_sessions = resource_sessions
 
     @app.post("/mcp")
@@ -558,9 +770,12 @@ def build_app(server) -> FastAPI:
                 status_code=403,
                 detail="cross-origin request blocked (set MAVERICK_MCP_ALLOWED_ORIGINS to allow)",
             )
-        authed, caller_identity = _check_bearer(authorization)
-        if not authed:
+        caller = _authorization_for_bearer(authorization)
+        if caller is None:
             raise HTTPException(status_code=401, detail="invalid bearer")
+        caller_identity = caller.caller_identity
+        caller_scope = _caller_scope(caller)
+        quota_scope = _quota_scope(caller)
         # Per-caller rate limit (after auth so unauthenticated probes can't
         # exhaust a victim's budget). Returns 429 over the per-minute cap.
         if not _rate_ok(_rate_key(authorization, request)):
@@ -587,21 +802,38 @@ def build_app(server) -> FastAPI:
         if not isinstance(params, dict):
             raise HTTPException(status_code=400, detail="params must be a JSON object")
         accepts_sse = "text/event-stream" in (request.headers.get("accept") or "")
-        sid = _supplied_session_id(request, resource_sessions)
-        subscriptions = resource_sessions[sid] if sid is not None else set()
-        is_task_request = (
-            server._tasks_enabled
-            and (
-                method.startswith("tasks/")
-                or (method == "tools/call" and isinstance(params.get("task"), dict))
-            )
+        supplied_sid = _supplied_session_id(request, caller_scope)
+        resource_sid = _resource_session_id(
+            supplied_sid,
+            resource_sessions,
+            caller_scope,
         )
-        should_persist_session = (
-            method == "resources/subscribe" or sid is not None or is_task_request
+        subscriptions = (
+            resource_sessions[resource_sid].subscriptions
+            if resource_sid is not None else set()
         )
-        if should_persist_session and sid is None:
-            sid = secrets.token_urlsafe(24)
-        task_owner = sid if is_task_request else None
+        is_task_request, is_task_create = _task_request_flags(
+            enabled=server._tasks_enabled,
+            method=method,
+            params=params,
+        )
+        needs_policy_principal = _needs_policy_principal(method, is_task_request)
+        # Task ownership is validated by a self-authenticating session and is
+        # intentionally independent of the evictable resource-subscription
+        # LRU. Resource subscriptions reuse that session when available but do
+        # not become the authority for later tasks/get|result|cancel|list.
+        (
+            response_sid,
+            resource_sid,
+            should_persist_session,
+            task_owner,
+        ) = _session_plan(
+            supplied_sid=supplied_sid,
+            resource_sid=resource_sid,
+            caller_scope=caller_scope,
+            method=method,
+            is_task_request=is_task_request,
+        )
 
         # Streamable HTTP: when the client accepts SSE and this is a real
         # request (not a fire-and-forget notification), stream progress
@@ -617,22 +849,53 @@ def build_app(server) -> FastAPI:
                 method=method,
                 params=params,
                 task_owner=task_owner,
+                task_quota_owner=(quota_scope if is_task_create else None),
                 caller_identity=caller_identity,
+                caller_capability=caller.capability,
                 subscriptions=subscriptions,
                 request_id=request_id,
                 should_persist_session=should_persist_session,
-                sid=sid,
-                store_session=lambda s, subs: _store_session(resource_sessions, s, subs),
+                sid=resource_sid,
+                store_session=lambda s, subs: _store_session(
+                    resource_sessions, s, caller_scope, subs
+                ),
+                caller_trust_principal=(
+                    caller.trust_principal if needs_policy_principal else None
+                ),
+                caller_credential_kind=(
+                    caller.credential_kind if is_task_request else None
+                ),
+                caller_credential_fingerprint=(
+                    caller.credential_fingerprint if is_task_request else None
+                ),
             )
             response = StreamingResponse(stream, media_type="text/event-stream")
-            return _attach_session(response, sid, request)
+            return _attach_session(response, response_sid, request)
 
         # Blocking JSON path (default). Dispatch runs in a worker thread
         # for the same asyncio.run reason as above.
         def _dispatch_for_session():
             with server.resource_update_scope(subscriptions):
-                return _dispatch(server, method, params, task_owner=task_owner,
-                                 caller_identity=caller_identity)
+                kwargs = {
+                    "task_owner": task_owner,
+                    "caller_identity": caller_identity,
+                }
+                if caller.capability is not None:
+                    kwargs["caller_capability"] = caller.capability
+                if needs_policy_principal:
+                    kwargs["caller_trust_principal"] = caller.trust_principal
+                if is_task_create:
+                    kwargs.update({
+                        "task_quota_owner": quota_scope,
+                    })
+                if is_task_request:
+                    kwargs.update({
+                        "caller_credential_kind": caller.credential_kind,
+                        "caller_credential_fingerprint": (
+                            caller.credential_fingerprint
+                        ),
+                    })
+                return _dispatch(server, method, params, **kwargs)
 
         try:
             result = await asyncio.to_thread(_dispatch_for_session)
@@ -642,22 +905,31 @@ def build_app(server) -> FastAPI:
                 # strict proxies (e.g. Cloudflare) reject as a protocol violation.
                 return _attach_session(
                     Response(status_code=204),
-                    sid,
+                    response_sid,
                     request,
                 )
             return _attach_session(
                 JSONResponse(_error_envelope(request_id, e)),
-                sid,
+                response_sid,
                 request,
             )
 
-        if should_persist_session and sid is not None:
-            _store_session(resource_sessions, sid, subscriptions)
+        if should_persist_session and resource_sid is not None:
+            _store_session(
+                resource_sessions,
+                resource_sid,
+                caller_scope,
+                subscriptions,
+            )
 
         if is_notification:
             # 204 must carry no body (see above).
-            return _attach_session(Response(status_code=204), sid, request)
-        return _attach_session(JSONResponse(_result_envelope(request_id, result)), sid, request)
+            return _attach_session(Response(status_code=204), response_sid, request)
+        return _attach_session(
+            JSONResponse(_result_envelope(request_id, result)),
+            response_sid,
+            request,
+        )
 
     @app.get("/healthz")
     async def healthz():
@@ -691,7 +963,12 @@ def _dispatch(
     params: dict,
     *,
     task_owner: str | None = None,
+    task_quota_owner: str | None = None,
     caller_identity: str | None = None,
+    caller_capability=None,
+    caller_trust_principal: str | None = None,
+    caller_credential_kind: str | None = None,
+    caller_credential_fingerprint: str | None = None,
 ) -> dict:
     """Route a JSON-RPC method to the corresponding handle_* method.
 
@@ -712,8 +989,75 @@ def _dispatch(
     handler = getattr(server, handler_name)
     from maverick.fleet_memory import bind_caller
     with bind_caller(caller_identity):
-        if method == "tools/call" or method.startswith("tasks/"):
-            return handler(params, task_owner=task_owner)
+        if method == "tools/call":
+            if caller_capability is None and caller_trust_principal is None:
+                return handler(params, task_owner=task_owner)
+            return handler(
+                params,
+                task_owner=task_owner,
+                task_quota_owner=task_quota_owner,
+                caller_identity=caller_identity,
+                caller_trust_principal=caller_trust_principal,
+                caller_credential_kind=caller_credential_kind,
+                caller_credential_fingerprint=caller_credential_fingerprint,
+                capability=caller_capability,
+            )
+        if method == "tools/list":
+            if caller_capability is None and caller_trust_principal is None:
+                return handler(params)
+            return handler(
+                params,
+                caller_trust_principal=caller_trust_principal,
+                capability=caller_capability,
+            )
+        if method in {
+            "resources/list",
+            "resources/read",
+            "resources/subscribe",
+        }:
+            if caller_capability is None:
+                if caller_trust_principal is None:
+                    return handler(params)
+                if method == "resources/list":
+                    return handler(
+                        params,
+                        caller_trust_principal=caller_trust_principal,
+                    )
+                return handler(
+                    params,
+                    caller_identity=caller_identity,
+                    caller_trust_principal=caller_trust_principal,
+                )
+            if method == "resources/list":
+                return handler(
+                    params,
+                    caller_trust_principal=caller_trust_principal,
+                    capability=caller_capability,
+                )
+            return handler(
+                params,
+                caller_identity=caller_identity,
+                caller_trust_principal=caller_trust_principal,
+                capability=caller_capability,
+            )
+        if method.startswith("tasks/"):
+            if caller_capability is None and caller_trust_principal is None:
+                return handler(params, task_owner=task_owner)
+            kwargs = {
+                "task_owner": task_owner,
+                "caller_identity": caller_identity,
+                "caller_trust_principal": caller_trust_principal,
+                "capability": caller_capability,
+            }
+            if method == "tasks/result":
+                kwargs.update({
+                    "caller_credential_kind": caller_credential_kind,
+                    "caller_credential_fingerprint": caller_credential_fingerprint,
+                })
+            return handler(
+                params,
+                **kwargs,
+            )
         return handler(params)
 
 

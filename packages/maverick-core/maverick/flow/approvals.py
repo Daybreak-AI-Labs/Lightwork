@@ -1,12 +1,11 @@
 """Actionable approvals: signed approve/reject links a human can click from a
-channel -- Slack, Teams, email, SMS -- to resume a flow paused on an approval
-node, without logging into the dashboard.
+channel -- Slack, Teams, email, SMS -- to open the exact flow approval pause.
 
 A link carries a stateless HMAC token over the run, decision, expiry, and
 the exact approval pause (cursor/prompt/run timestamp). The
-dashboard endpoint verifies the token and resumes the run, so there is no
-per-channel signing scheme to implement: any surface that renders a URL gets a
-working button. The token reuses the control-plane webhook secret
+dashboard verifies the token and separately requires an authenticated,
+authorized approver identity before resuming, so a forwarded token is not a
+bearer decision capability. The token reuses the control-plane webhook secret
 (:func:`maverick.webhooks.inbound_secret`) so operators configure one key, and
 it FAILS CLOSED -- with no secret configured, no token is minted and no link is
 posted (the human falls back to the dashboard).
@@ -62,6 +61,7 @@ def _sign(material: bytes, secret: str) -> str:
 
 def mint_token(run_id: str, decision: str, *, cursor: str | None = None,
                prompt: str = "", updated: float | None = None,
+               assignee: str = "", owner: str = "",
                tenant: str | None = None,
                ttl: int = _DEFAULT_TTL, now: float | None = None) -> str | None:
     """A signed, self-expiring token authorising ONE decision on ONE approval
@@ -77,7 +77,8 @@ def mint_token(run_id: str, decision: str, *, cursor: str | None = None,
     exp = int((now if now is not None else time.time()) + ttl)
     raw = json.dumps({"r": str(run_id), "d": decision, "e": exp,
                       "c": str(cursor)[:256], "p": str(prompt)[:2000],
-                      "u": float(updated), "t": tenant},
+                      "u": float(updated), "t": tenant,
+                      "a": str(assignee)[:500], "o": str(owner)[:500]},
                      separators=(",", ":"), sort_keys=True).encode("utf-8")
     body = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
     return f"{body}.{_sign(body.encode('ascii'), secret)}"
@@ -112,20 +113,25 @@ def verify_token(token: str, *, now: float | None = None) -> dict | None:
         return None
     return {"run_id": str(run_id), "decision": str(decision),
             "cursor": str(cursor), "prompt": str(payload.get("p", "")),
-            "updated": float(updated), "tenant": tenant}
+            "updated": float(updated), "tenant": tenant,
+            "assignee": str(payload.get("a") or ""),
+            "owner": str(payload.get("o") or "")}
 
 
 def approval_links(base_url: str, run_id: str, *, cursor: str | None = None,
                    prompt: str = "", updated: float | None = None,
+                   assignee: str = "", owner: str = "",
                    tenant: str | None = None,
                    ttl: int = _DEFAULT_TTL, now: float | None = None) -> dict | None:
     """The approve/reject URLs for a run (pointing at ``/flow/approve``), or
     ``None`` when unsigned (no secret) so the caller can fall back to a plain
     notification."""
     approve = mint_token(run_id, "approved", cursor=cursor, prompt=prompt,
-                         updated=updated, tenant=tenant, ttl=ttl, now=now)
+                         updated=updated, assignee=assignee, owner=owner,
+                         tenant=tenant, ttl=ttl, now=now)
     reject = mint_token(run_id, "rejected", cursor=cursor, prompt=prompt,
-                        updated=updated, tenant=tenant, ttl=ttl, now=now)
+                        updated=updated, assignee=assignee, owner=owner,
+                        tenant=tenant, ttl=ttl, now=now)
     if not (approve and reject):
         return None
     base = base_url.rstrip("/")

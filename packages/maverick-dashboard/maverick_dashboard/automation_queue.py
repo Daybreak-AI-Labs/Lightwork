@@ -296,6 +296,12 @@ def enqueue_flow_run_once(
     channel: str | None = None,
     user_id: str | None = None,
     allowed_suites=_SUITES_UNSET,
+    definition_digest: str = "",
+    release_digest: str = "",
+    release_id: str = "",
+    definition_version: int = 0,
+    definition_revision: str = "",
+    subflow_digests: dict[str, str | None] | None = None,
 ) -> tuple[str, bool]:
     """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
     Shared by the background tick and the on-demand poll so a flow-target trigger
@@ -305,23 +311,78 @@ def enqueue_flow_run_once(
     for attribution + trigger-outcome learning. The original inputs are kept so
     the run can be retried."""
     from maverick.flow import store as flow_store
-    # The claim lock spans lookup, run reservation, queue insert, and durable
-    # claim publication.  Two processes can no longer both observe "missing".
+
+    # Resolve/verify the immutable plan before taking its exact-release claim
+    # lock. This lock ordering is deliberate: published live paths hold the
+    # definitions lock and then acquire the idempotency lock, so no generic
+    # enqueue may acquire them in the opposite order.
+    if definition_digest:
+        pinned_digest = str(definition_digest)
+        pinned_version = int(definition_version or 0)
+        pinned_subflows = dict(subflow_digests or {})
+        snapshotted_flow = flow_store.load_flow_snapshot(pinned_digest)
+        if snapshotted_flow.id != str(flow_id):
+            raise flow_store.FlowSnapshotError(
+                "flow snapshot identity does not match the requested flow"
+            )
+        if pinned_version and int(snapshotted_flow.version) != pinned_version:
+            raise flow_store.FlowSnapshotError(
+                "flow snapshot version does not match the release"
+            )
+        if (
+            definition_revision
+            and str(snapshotted_flow.revision or "") != str(definition_revision)
+        ):
+            raise flow_store.FlowSnapshotError(
+                "flow snapshot generation does not match the release"
+            )
+        flow_store.validate_snapshot_bundle_owners(
+            snapshotted_flow, pinned_subflows
+        )
+    else:
+        pinned_digest, pinned_version, pinned_subflows = (
+            flow_store.snapshot_current_flow_bundle(flow_id)
+        )
+        snapshotted_flow = flow_store.load_flow_snapshot(pinned_digest)
+    pinned_release_digest = flow_store.release_digest_for(
+        pinned_digest, pinned_subflows,
+    )
+    if release_digest and str(release_digest) != pinned_release_digest:
+        raise flow_store.FlowSnapshotError(
+            "flow release content does not match its immutable execution plan"
+        )
+    pinned_release_id = str(release_id or "")
+    if not pinned_release_id:
+        # Dry/unpublished compatibility paths use a synthetic content-scoped
+        # identity. A live producer adopts authority only from the exact active
+        # pointer; final dispatch will reject the synthetic id otherwise.
+        if not dry_run:
+            published = flow_store.load_published_bundle(flow_id)
+            if published is not None:
+                _active_flow, active_release = published
+                if str(active_release.get("release_digest") or "") == pinned_release_digest:
+                    pinned_release_id = str(active_release["release_id"])
+        pinned_release_id = pinned_release_id or pinned_release_digest
+
+    # The owner + exact-release claim lock spans lookup, run reservation, claim
+    # publication, and queue insert. Two users or two published revisions using
+    # the same business key cannot observe or suppress one another's run.
     lock = (
-        flow_store.idempotency_lock(flow_id, idem_key)
+        flow_store.idempotency_lock(
+            flow_id, idem_key, owner=owner, release_id=pinned_release_id,
+        )
         if idem_key else contextlib.nullcontext()
     )
     with lock:
-        # Pin the current generation before consulting the idempotency index.
-        # Delete/recreate intentionally starts a new key space even when the
-        # replacement reuses the same flow id and external event id.
-        definition_digest, definition_version, subflow_digests = (
-            flow_store.snapshot_current_flow_bundle(flow_id)
-        )
-        snapshotted_flow = flow_store.load_flow_snapshot(definition_digest)
         existing = (
             flow_store.find_run_by_idem(
-                flow_id, idem_key, revision=snapshotted_flow.revision)
+                flow_id,
+                idem_key,
+                revision=snapshotted_flow.revision,
+                definition_digest=pinned_digest,
+                release_id=pinned_release_id,
+                owner=owner,
+            )
             if idem_key else None
         )
         if existing is not None:
@@ -340,10 +401,12 @@ def enqueue_flow_run_once(
             run_id=run_id, flow_id=flow_id, status="queued", owner=owner,
             data=dict(data), input_data=dict(data), idem_key=idem_key, origin=origin,
             dry_run=bool(dry_run),
-            definition_digest=definition_digest,
-            definition_version=definition_version,
+            definition_digest=pinned_digest,
+            release_digest=pinned_release_digest,
+            release_id=pinned_release_id,
+            definition_version=pinned_version,
             definition_revision=snapshotted_flow.revision,
-            subflow_digests=subflow_digests,
+            subflow_digests=pinned_subflows,
             execution_channel=run_channel,
             execution_user_id=run_user_id,
             allowed_suites=run_suites))
@@ -353,7 +416,14 @@ def enqueue_flow_run_once(
         # claim left by an ordinary enqueue exception is harmless because lookup
         # verifies the referenced run before accepting it.
         if idem_key:
-            flow_store.save_idempotency_claim(flow_id, idem_key, run_id)
+            flow_store.save_idempotency_claim(
+                flow_id,
+                idem_key,
+                run_id,
+                definition_digest=pinned_digest,
+                release_id=pinned_release_id,
+                owner=owner,
+            )
         payload = {"flow_id": flow_id, "run_id": run_id, "data": data, "owner": owner,
                    "origin": origin, "dry_run": bool(dry_run)}
         payload.update(_job_tenant_payload())
@@ -380,6 +450,12 @@ def enqueue_flow_run(
     channel: str | None = None,
     user_id: str | None = None,
     allowed_suites=_SUITES_UNSET,
+    definition_digest: str = "",
+    release_digest: str = "",
+    release_id: str = "",
+    definition_version: int = 0,
+    definition_revision: str = "",
+    subflow_digests: dict[str, str | None] | None = None,
 ) -> str:
     return enqueue_flow_run_once(
         flow_id,
@@ -391,6 +467,94 @@ def enqueue_flow_run(
         channel=channel,
         user_id=user_id,
         allowed_suites=allowed_suites,
+        definition_digest=definition_digest,
+        release_digest=release_digest,
+        release_id=release_id,
+        definition_version=definition_version,
+        definition_revision=definition_revision,
+        subflow_digests=subflow_digests,
+    )[0]
+
+
+def enqueue_published_flow_run_once(
+    flow_id: str,
+    data: dict,
+    owner: str = "",
+    idem_key: str = "",
+    origin: str = "manual",
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
+    allowed_suites=_SUITES_UNSET,
+    expected_revision: str = "",
+) -> tuple[str, bool]:
+    """Queue the exact active release and report idempotent deduplication.
+
+    Loading and digest-checking publication here keeps every live producer
+    (manual, webhook, event, and cron) on one fail-closed reservation boundary.
+    Workers still reauthorize the exact release immediately before execution.
+    """
+    from maverick.flow import store
+
+    published = store.load_published_bundle(flow_id)
+    if published is None:
+        raise store.FlowSnapshotError(f"flow {flow_id!r} is not published")
+    _flow, release = published
+    if (
+        expected_revision
+        and str(release["release_id"]) != str(expected_revision)
+    ):
+        raise store.FlowSnapshotError(
+            f"published flow {flow_id!r} no longer matches the bound revision"
+        )
+    candidate_release_id = str(release["release_id"])
+    # Re-read under the publication lock and keep it through durable run/claim
+    # reservation. An unpublish or replacement that wins after the optimistic
+    # read is therefore observed. If reservation wins, the queued worker still
+    # performs a separate final activation check before building executors.
+    with store.published_flow_guard(
+        flow_id, expected_release_id=candidate_release_id,
+    ) as (_locked_flow, locked_release):
+        return enqueue_flow_run_once(
+            flow_id,
+            data,
+            owner,
+            idem_key,
+            origin,
+            channel=channel,
+            user_id=user_id,
+            allowed_suites=allowed_suites,
+            definition_digest=str(locked_release["definition_digest"]),
+            release_digest=str(locked_release["release_digest"]),
+            release_id=str(locked_release["release_id"]),
+            definition_version=int(locked_release["definition_version"]),
+            definition_revision=str(locked_release["definition_revision"]),
+            subflow_digests=dict(locked_release.get("subflow_digests") or {}),
+        )
+
+
+def enqueue_published_flow_run(
+    flow_id: str,
+    data: dict,
+    owner: str = "",
+    idem_key: str = "",
+    origin: str = "manual",
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
+    allowed_suites=_SUITES_UNSET,
+    expected_revision: str = "",
+) -> str:
+    return enqueue_published_flow_run_once(
+        flow_id,
+        data,
+        owner,
+        idem_key,
+        origin,
+        channel=channel,
+        user_id=user_id,
+        allowed_suites=allowed_suites,
+        expected_revision=expected_revision,
     )[0]
 
 
@@ -458,9 +622,21 @@ def _repair_queued_flow_outbox() -> None:
         # random idempotency key never forces an attacker-amplifiable full scan.
         for run in runs:
             if run.idem_key:
-                with store.idempotency_lock(run.flow_id, run.idem_key):
+                with store.idempotency_lock(
+                    run.flow_id,
+                    run.idem_key,
+                    owner=run.owner,
+                    release_id=run.release_id,
+                ):
                     store.save_idempotency_claim(
-                        run.flow_id, run.idem_key, run.run_id, overwrite=False)
+                        run.flow_id,
+                        run.idem_key,
+                        run.run_id,
+                        definition_digest=run.definition_digest,
+                        release_id=run.release_id,
+                        owner=run.owner,
+                        overwrite=False,
+                    )
         for run in runs:
             if run.status == "queued":
                 _ensure_queued_flow_job(run, tenant=tenant)
@@ -528,7 +704,7 @@ def _poll_due_triggers() -> None:
             triggers,
             principal=owner,
             fire=_fire,
-            fire_flow=enqueue_flow_run,
+            fire_flow=enqueue_published_flow_run,
         )
         for trigger, result in zip(triggers, group_results, strict=True):
             if result.get("poll_error"):
@@ -676,14 +852,93 @@ def _public_base_url() -> str:
     return url
 
 
-def enqueue_flow_resume(flow_id: str, run_id: str, decision: str, owner: str = "",
-                        *, tenant: str = "") -> None:
-    """Enqueue a durable resume of a paused flow run with a human decision. Shared
-    by the API resume endpoint and the signed-link approval endpoint."""
-    payload = {
-        "flow_id": flow_id, "run_id": run_id, "decision": decision, "owner": owner}
+def enqueue_flow_resume(
+    flow_id: str,
+    run_id: str,
+    decision: str = "",
+    owner: str = "",
+    *,
+    decided_by: str = "",
+    tenant: str = "",
+    inputs: dict | None = None,
+    expired: bool = False,
+    from_failure: bool = False,
+    run_at: float | None = None,
+) -> None:
+    """Reserve a resume only while its immutable live release remains active.
+
+    Dry runs stay pinned to their immutable snapshot without publication. For
+    real runs, unpublish or republish is a kill boundary: the exact run digest
+    is re-verified under the publication lock through durable queue insertion.
+    """
+    from maverick.flow import store
+
+    payload = {"flow_id": flow_id, "run_id": run_id, "owner": owner}
+    if decision:
+        payload["decision"] = decision
+    if inputs:
+        payload["inputs"] = dict(inputs)
+    if expired:
+        payload["expired"] = True
+    if from_failure:
+        payload["from_failure"] = True
     payload.update({"tenant": tenant} if tenant else _job_tenant_payload())
-    queue().enqueue(FLOW_RESUME_KIND, payload)
+
+    def _reserve() -> None:
+        run = store.load_run(run_id)
+        if run is None or run.flow_id != str(flow_id):
+            raise store.FlowSnapshotError("flow run is unavailable")
+        if owner and run.owner != owner:
+            raise store.FlowSnapshotError("flow run owner does not match")
+        if run.status == "paused_approval" and not expired:
+            _validate_approval_actor(run, decision=decision, decided_by=decided_by)
+            payload["decision"] = str(decision)
+            payload["decided_by"] = str(decided_by)
+        if not run.definition_digest:
+            raise store.FlowSnapshotError(
+                "flow run has no immutable definition to resume"
+            )
+        kwargs = {"run_at": run_at} if run_at is not None else {}
+        if run.dry_run:
+            queue().enqueue(FLOW_RESUME_KIND, payload, **kwargs)
+            return
+        with store.published_flow_guard(
+            flow_id, expected_release_id=run.release_id,
+        ):
+            queue().enqueue(FLOW_RESUME_KIND, payload, **kwargs)
+
+    if tenant:
+        _run_in_payload_tenant(payload, _reserve)
+    else:
+        _reserve()
+
+
+def _principal_aliases(principal: str) -> set[str]:
+    value = str(principal or "").strip().casefold()
+    if not value:
+        return set()
+    aliases = {value}
+    if value.startswith("user:") and value[5:]:
+        subject = value[5:]
+        aliases.update({subject, f"@{subject}"})
+    return aliases
+
+
+def _validate_approval_actor(run, *, decision: str, decided_by: str) -> None:
+    """Require an explicit verdict and an actor authorized for the pause."""
+    from maverick.flow import store
+
+    verdict = str(decision or "").strip()
+    allowed = {"approved", "rejected"}
+    allowed.update(str(v) for v in (run.human or {}).get("choices") or [])
+    if not verdict or verdict not in allowed:
+        raise store.FlowSnapshotError("an explicit valid approval decision is required")
+    aliases = _principal_aliases(decided_by)
+    if not aliases:
+        raise store.FlowSnapshotError("an attributable approver identity is required")
+    assignee = str((run.human or {}).get("assignee") or "").strip().casefold()
+    if assignee and assignee not in aliases:
+        raise store.FlowSnapshotError("the approver is not the declared assignee")
 
 
 def _approval_body(name: str, run) -> str:
@@ -694,7 +949,9 @@ def _approval_body(name: str, run) -> str:
     if base:
         from maverick.flow.approvals import approval_links
         links = approval_links(base, run.run_id, cursor=run.cursor,
-                               prompt=run.prompt, updated=run.updated)
+                               prompt=run.prompt, updated=run.updated,
+                               assignee=str((run.human or {}).get("assignee") or ""),
+                               owner=run.owner)
         if links:
             return (f"“{name}” needs your approval: {ask}\n"
                     f"✅ Approve: {links['approve']}\n"
@@ -749,13 +1006,26 @@ def _schedule_paused_resume(run, source_payload: dict) -> None:
     from maverick.flow.runner import STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY
     if run.status not in {STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY}:
         return
-    payload = {"flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner}
-    if run.status == STATUS_PAUSED_APPROVAL:
-        payload["expired"] = True
-    tenant = source_payload.get("tenant")
-    if tenant:
-        payload["tenant"] = tenant
-    queue().enqueue(FLOW_RESUME_KIND, payload, run_at=float(run.resume_at))
+    from maverick.flow import store
+    tenant = str(source_payload.get("tenant") or "")
+    try:
+        enqueue_flow_resume(
+            run.flow_id,
+            run.run_id,
+            owner=run.owner,
+            tenant=tenant,
+            expired=run.status == STATUS_PAUSED_APPROVAL,
+            run_at=float(run.resume_at),
+        )
+    except store.FlowSnapshotError:
+        # A concurrent unpublish/republish intentionally kills this pending
+        # continuation. The paused run remains inspectable; no stale release is
+        # silently re-armed.
+        log.info(
+            "flow release inactive; paused resume not scheduled: flow=%s run=%s",
+            run.flow_id,
+            run.run_id,
+        )
 
 
 _SINGLETON_DEFER_SECONDS = 30.0   # how long to wait before re-checking a busy singleton
@@ -839,6 +1109,60 @@ def _mark_flow_run_failed(run_id: str, message: str) -> None:
     store.save_run(run)
 
 
+def _quarantine_interrupted_flow_run(run, message: str) -> None:
+    """Preserve ambiguity once an earlier delivery crossed execution claim."""
+    from maverick.flow import store
+    from maverick.flow.runner import STATUS_INDETERMINATE
+
+    run.status = STATUS_INDETERMINATE
+    run.error = str(message)[:500]
+    store.save_run(run)
+
+
+def _initial_delivery_is_executable(run) -> bool:
+    """Claim-state check for one at-least-once initial queue delivery."""
+    from maverick.flow.runner import STATUS_CLAIMED, STATUS_RUNNING
+
+    if run.status == STATUS_RUNNING:
+        _quarantine_interrupted_flow_run(
+            run,
+            "fresh run delivery resumed after execution began; "
+            "external effects may have committed",
+        )
+        return False
+    # Pause/terminal redelivery is inert. Later republish must not rewrite a
+    # completed run to failed merely because its old release is gone.
+    return run.status in {"queued", STATUS_CLAIMED}
+
+
+def _reserve_initial_flow_slot(flow, payload: dict, run_id: str, dry_run: bool) -> bool:
+    """Claim a live concurrency slot, defer, or terminally skip this delivery."""
+    if (
+        not flow.max_concurrent
+        or dry_run
+        or not run_id
+        or payload.get("_resume")
+    ):
+        return True
+    with _flow_slot_guard(flow.id) as held:
+        if not held:
+            if _defer_for_slot(payload):
+                return False
+            _skip_run_at_cap(run_id)
+            return False
+        if _active_run_count(flow.id, run_id) < flow.max_concurrent:
+            _claim_run_slot(run_id)
+            return True
+        if _defer_for_slot(payload):
+            return False
+        log.warning(
+            "flow_run: %s at concurrency cap, defer budget spent"
+            " -- skipping run %s", flow.id, run_id,
+        )
+        _skip_run_at_cap(run_id)
+        return False
+
+
 def _handle_flow_run(job=None) -> None:
     """Run a stored flow to its next pause/finish (durable one-shot job). An
     agent node becomes a real goal, an action node a tool call; the run state is
@@ -857,6 +1181,8 @@ def _handle_flow_run(job=None) -> None:
                 return
             if placeholder.flow_id != flow_id:
                 _mark_flow_run_failed(run_id, "queue reservation does not match flow")
+                return
+            if not _initial_delivery_is_executable(placeholder):
                 return
             if not placeholder.definition_digest:
                 _mark_flow_run_failed(
@@ -887,43 +1213,52 @@ def _handle_flow_run(job=None) -> None:
             # swap its owner/inputs, or change learning attribution.
             owner = placeholder.owner
             dry_run = bool(placeholder.dry_run)
-            if not dry_run and not _flow_execution_authorized(placeholder):
-                _mark_flow_run_failed(run_id, "flow execution authorization was revoked")
+            try:
+                if not dry_run and not _flow_execution_authorized(placeholder):
+                    _mark_flow_run_failed(
+                        run_id, "flow execution authorization was revoked",
+                    )
+                    return
+                # Per-flow concurrency cap is decided before final dispatch.
+                # A deferred delivery rechecks publication on its next attempt.
+                if not _reserve_initial_flow_slot(flow, payload, run_id, dry_run):
+                    return
+                if not dry_run:
+                    # This short per-flow critical section is the execution-start
+                    # linearization point. Revocation that wins first refuses the
+                    # queued run; one that begins later cannot interrupt work that
+                    # has already dispatched. Never hold it across a long executor.
+                    with store.active_release_guard(
+                        flow_id, expected_release_id=placeholder.release_id,
+                    ):
+                        pass
+                # A dry run exercises the graph with mock executors and records
+                # no grounded outcome.
+                agent_runner, action_runner = (
+                    execution.sandbox_runners()
+                    if dry_run else _flow_runners(placeholder)
+                )
+                run = execution.execute(
+                    flow,
+                    agent_runner=agent_runner,
+                    action_runner=action_runner,
+                    owner=owner,
+                    data=dict(placeholder.input_data or placeholder.data or {}),
+                    run_id=payload.get("run_id"),
+                    record_outcomes=not dry_run,
+                    origin=placeholder.origin,
+                )
+                if not dry_run:
+                    _notify_flow(flow, run)
+                # A continuation performs its own release reservation. A
+                # concurrent replacement after dispatch can therefore let this
+                # segment finish while still revoking every later segment.
+                _schedule_paused_resume(run, payload)
+            except store.FlowSnapshotError:
+                _mark_flow_run_failed(
+                    run_id, "published flow release was revoked before dispatch",
+                )
                 return
-            # Per-flow concurrency cap: a singleton/limited flow (e.g. "drain the queue"
-            # / "sync record X") must not run overlapping instances -- that double-fires
-            # side effects and races the shared world. Under a per-flow lock, count
-            # in-flight runs; if at the cap, mark this run "running" only when a slot is
-            # free (so a concurrent sibling sees it), else defer the job a bit and let
-            # the running one finish. A dry run and a resume are never gated.
-            if flow.max_concurrent and not dry_run and run_id and not payload.get("_resume"):
-                with _flow_slot_guard(flow_id) as held:
-                    if held:
-                        if _active_run_count(flow_id, run_id) >= flow.max_concurrent:
-                            if _defer_for_slot(payload):
-                                return
-                            log.warning("flow_run: %s at concurrency cap, defer budget spent"
-                                        " -- skipping run %s", flow_id, run_id)
-                            _skip_run_at_cap(run_id)
-                            return
-                        _claim_run_slot(run_id)   # flip queued -> running while holding the lock
-                    elif not _defer_for_slot(payload):   # another worker is deciding; retry later
-                        _skip_run_at_cap(run_id)
-                        return
-                    else:
-                        return
-            # A dry run exercises the graph with mock executors and records no grounded
-            # outcome -- so "Test" can't hit production or skew the learning signal.
-            agent_runner, action_runner = (execution.sandbox_runners() if dry_run
-                                           else _flow_runners(placeholder))
-            run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                                    owner=owner, data=dict(
-                                        placeholder.input_data or placeholder.data or {}),
-                                    run_id=payload.get("run_id"), record_outcomes=not dry_run,
-                                    origin=placeholder.origin)
-            _schedule_paused_resume(run, payload)
-            if not dry_run:
-                _notify_flow(flow, run)
         _run_in_payload_tenant(payload, _run)
     except Exception:
         log.exception("flow run failed for %s", flow_id)
@@ -949,6 +1284,37 @@ def _handle_flow_resume(job=None) -> None:
             if prior.flow_id != flow_id:
                 _mark_flow_run_failed(run_id, "queue reservation does not match flow")
                 return
+            from maverick.flow.runner import (
+                PAUSED_STATUSES,
+                STATUS_FAILED,
+                STATUS_RESUMING,
+            )
+            if prior.status == STATUS_RESUMING:
+                _quarantine_interrupted_flow_run(
+                    prior,
+                    "resume delivery repeated after execution began; "
+                    "external effects may have committed",
+                )
+                return
+            retryable_failure = (
+                bool(payload.get("from_failure"))
+                and prior.status == STATUS_FAILED
+                and bool(prior.cursor)
+            )
+            if prior.status not in PAUSED_STATUSES and not retryable_failure:
+                return
+            if prior.status == "paused_approval" and not payload.get("expired"):
+                try:
+                    _validate_approval_actor(
+                        prior,
+                        decision=str(payload.get("decision") or ""),
+                        decided_by=str(payload.get("decided_by") or ""),
+                    )
+                except store.FlowSnapshotError:
+                    # An untrusted/corrupt queue delivery never consumes or
+                    # destroys the legitimate paused approval.
+                    log.warning("refused unattributable approval resume for %s", run_id)
+                    return
             if not prior.definition_digest:
                 _mark_flow_run_failed(
                     run_id,
@@ -973,22 +1339,42 @@ def _handle_flow_resume(job=None) -> None:
                 return
             owner = prior.owner
             dry_run = bool(prior.dry_run)
-            if not dry_run and not _flow_execution_authorized(prior):
-                _mark_flow_run_failed(run_id, "flow execution authorization was revoked")
+            try:
+                if not dry_run and not _flow_execution_authorized(prior):
+                    _mark_flow_run_failed(
+                        run_id, "flow execution authorization was revoked",
+                    )
+                    return
+                if not dry_run:
+                    with store.active_release_guard(
+                        flow_id, expected_release_id=prior.release_id,
+                    ):
+                        pass
+                agent_runner, action_runner = (
+                    execution.sandbox_runners()
+                    if dry_run else _flow_runners(prior)
+                )
+                run = execution.execute(
+                    flow,
+                    agent_runner=agent_runner,
+                    action_runner=action_runner,
+                    owner=owner,
+                    resume_run_id=run_id,
+                    decision=str(payload.get("decision") or ""),
+                    decided_by=str(payload.get("decided_by") or ""),
+                    expired=bool(payload.get("expired")),
+                    from_failure=bool(payload.get("from_failure")),
+                    inputs=dict(payload.get("inputs") or {}),
+                    record_outcomes=not dry_run,
+                )
+                if not dry_run:
+                    _notify_flow(flow, run)
+                _schedule_paused_resume(run, payload)
+            except store.FlowSnapshotError:
+                _mark_flow_run_failed(
+                    run_id, "published flow release was revoked before resume",
+                )
                 return
-            agent_runner, action_runner = (
-                execution.sandbox_runners() if dry_run else _flow_runners(prior)
-            )
-            run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                                    owner=owner, resume_run_id=run_id,
-                                    decision=str(payload.get("decision") or "approved"),
-                                    expired=bool(payload.get("expired")),
-                                    from_failure=bool(payload.get("from_failure")),
-                                    inputs=dict(payload.get("inputs") or {}),
-                                    record_outcomes=not dry_run)
-            _schedule_paused_resume(run, payload)
-            if not dry_run:
-                _notify_flow(flow, run)
         _run_in_payload_tenant(payload, _resume)
     except execution.FlowNotResumable:
         return  # already resumed/finished -- benign
@@ -1014,10 +1400,12 @@ def _handle_flow_sweep(_job=None) -> None:
             if not (run.resume_at and run.resume_at <= now):
                 continue
             if run.status == runner.STATUS_PAUSED_DELAY:
-                sweep_payload = {"flow_id": run.flow_id, "run_id": run.run_id,
-                                 "owner": run.owner}
-                sweep_payload.update(_job_tenant_payload())
-                queue().enqueue(FLOW_RESUME_KIND, sweep_payload)
+                try:
+                    enqueue_flow_resume(
+                        run.flow_id, run.run_id, owner=run.owner,
+                    )
+                except store.FlowSnapshotError:
+                    continue
             elif run.status == runner.STATUS_PAUSED_APPROVAL:
                 # An approval whose node set an expiry resolves once it lapses.
                 # The OUT-OF-BAND `expired` flag (not a decision string, so no
@@ -1025,10 +1413,15 @@ def _handle_flow_sweep(_job=None) -> None:
                 # the runner route to the node's `on_expire` escalation lane if
                 # set; without one it fails closed (rejected) -- never a silent
                 # approval.
-                sweep_payload = {"flow_id": run.flow_id, "run_id": run.run_id,
-                                 "owner": run.owner, "expired": True}
-                sweep_payload.update(_job_tenant_payload())
-                queue().enqueue(FLOW_RESUME_KIND, sweep_payload)
+                try:
+                    enqueue_flow_resume(
+                        run.flow_id,
+                        run.run_id,
+                        owner=run.owner,
+                        expired=True,
+                    )
+                except store.FlowSnapshotError:
+                    continue
             # paused_event runs are NEVER swept -- only their event resumes them.
 
     _run_for_active_tenants("flow delay sweep", _sweep_current_tenant)
@@ -1065,36 +1458,75 @@ def _evolve_current_tenant() -> None:
             last = evolution_log.last_apply(f.id, node_id)
             if not last or last.get("source") == "auto-revert":
                 continue  # never applied, or already auto-reverted -> settled
-            impact = evolve.measure(f.id, node_id, float(last.get("ts") or 0.0))
+            impact = evolve.measure(
+                f.id,
+                node_id,
+                float(last.get("ts") or 0.0),
+                before_revision=str(last.get("before_revision") or ""),
+                after_revision=str(last.get("after_revision") or ""),
+            )
             if not evolve.regressed(impact):
                 continue
             apply_version = int(last.get("version") or 0)
-            if int(f.version or 0) != apply_version:
-                continue  # stale apply boundary; a newer save may be human work
             prior = store.load_version(f.id, apply_version - 1)
-            if prior is None or node_id not in prior.nodes:
+            applied = store.load_version(f.id, apply_version)
+            if (
+                prior is None
+                or applied is None
+                or node_id not in prior.nodes
+                or node_id not in applied.nodes
+                or node_id not in f.nodes
+            ):
+                continue
+            # A later save no longer erases the measurement boundary. Preserve
+            # all later edits and revert only when this node's work definition
+            # still exactly matches what the learner applied.
+            if not evolve.same_work_definition(
+                f.nodes[node_id], applied.nodes[node_id]
+            ):
                 continue
             reverted = evolve.revert_node(f, node_id, prior.nodes[node_id])
             if reverted.validate():
                 continue  # never save a structurally broken flow
             applied_kind = f.nodes[node_id].kind
-            try:
-                saved = store.save_flow(
-                    reverted,
-                    expected_version=f.version,
-                    expected_revision=f.revision,
-                )
-            except store.FlowVersionConflict:
+            saved = _save_autonomous_flow_change(store, f, reverted)
+            if saved is None:
                 # A human or another learner won the race. Never overwrite
                 # that newer definition with a stale measurement snapshot.
                 continue
             evolution_log.record_apply(f.id, node_id, applied_kind,
                                        prior.nodes[node_id].kind, saved.version,
-                                       source="auto-revert")
+                                       source="auto-revert",
+                                       before_revision=store.flow_cohort(f),
+                                       after_revision=store.flow_cohort(saved))
             log.info("auto-reverted regressed rewrite: flow=%s node=%s (delta %.2f)",
                      f.id, node_id, impact.get("delta") or 0.0)
     if flow_mod.auto_apply_enabled():
         _auto_apply_proposals()
+
+
+def _save_autonomous_flow_change(store, current, candidate):
+    """Persist learning while preserving the active publication lifecycle."""
+    try:
+        published = store.load_published_bundle(current.id)
+        if published is None:
+            return store.save_flow(
+                candidate,
+                expected_version=current.version,
+                expected_revision=current.revision,
+            )
+        _active_flow, release = published
+        saved, _replacement = store.save_and_publish_flow(
+            candidate,
+            expected_version=current.version,
+            expected_revision=current.revision,
+            expected_release_id=str(release["release_id"]),
+        )
+        return saved
+    except (store.FlowVersionConflict, store.FlowSnapshotError):
+        # A human save/publish, a child edit, or a release revocation invalidates
+        # the autonomous predecessor. Never activate or overwrite that change.
+        return None
 
 
 def _auto_apply_proposals() -> None:
@@ -1129,16 +1561,13 @@ def _auto_apply_proposals() -> None:
                 continue
             if changed.validate():
                 continue                            # never save a structurally broken flow
-            try:
-                saved = store.save_flow(
-                    changed,
-                    expected_version=f.version,
-                    expected_revision=f.revision,
-                )
-            except store.FlowVersionConflict:
+            saved = _save_autonomous_flow_change(store, f, changed)
+            if saved is None:
                 continue
             evolution_log.record_apply(f.id, prop.node_id, prop.from_kind, prop.to_kind,
-                                       saved.version, source="auto-apply")
+                                       saved.version, source="auto-apply",
+                                       before_revision=store.flow_cohort(f),
+                                       after_revision=store.flow_cohort(saved))
             log.info("auto-applied rewrite: flow=%s node=%s %s->%s (%.0f%% over %d)%s",
                      f.id, prop.node_id, prop.from_kind, prop.to_kind, prop.mean * 100, prop.n,
                      f" via {prop.inferred_tool}" if prop.inferred_tool else "")
@@ -1161,12 +1590,25 @@ def _handle_flow_cron(job=None) -> None:
             if not flow_mod.enabled():
                 return
             from maverick.flow import store
-            flow = store.load_flow(flow_id)
-            if (flow is None
-                    or flow.schedule.strip() != str(payload.get("__cron__") or "").strip()):
-                return  # deleted, or schedule changed out from under this cron
-            # enqueue_flow_run captures the tenant restored from this payload.
-            enqueue_flow_run(flow_id, {}, owner=flow.owner, origin=f"cron:{flow_id}")
+            published = store.load_published_bundle(flow_id)
+            if published is None:
+                return
+            flow, release = published
+            if (
+                flow.schedule.strip()
+                != str(payload.get("__cron__") or "").strip()
+                or str(release["release_id"])
+                != str(payload.get("__flow_revision__") or "")
+            ):
+                return  # unpublished, or a newer release superseded this cron
+            # The release helper captures the tenant restored from this payload.
+            enqueue_published_flow_run(
+                flow_id,
+                {},
+                owner=flow.owner,
+                origin=f"cron:{flow_id}",
+                expected_revision=str(payload.get("__flow_revision__") or ""),
+            )
 
         _run_in_payload_tenant(payload, _fire)
     except Exception:  # pragma: no cover -- fail-open
@@ -1203,13 +1645,13 @@ def _reconcile_flow_crons() -> None:
     live cron gets one seeded. Idempotent -- safe to run on every reconcile."""
     from maverick.flow import store
     from maverick.scheduler import CronError, next_run, schedule_cron
-    want: dict[tuple[str, str], tuple[str, str]] = {}
+    want: dict[tuple[str, str], tuple[str, str, str]] = {}
 
     def _collect_current_tenant() -> None:
         from maverick.paths import current_tenant_id
 
         tenant = current_tenant_id() or ""
-        for f in store.list_flows():
+        for f, release in store.list_published_bundles():
             expr = f.schedule.strip()
             if not expr:
                 continue
@@ -1218,7 +1660,9 @@ def _reconcile_flow_crons() -> None:
                 next_run(expr, tz=tz)  # only schedules with a future occurrence
             except CronError:
                 continue
-            want[(tenant, f.id)] = (expr, tz)
+            want[(tenant, f.id)] = (
+                expr, tz, str(release["release_id"]),
+            )
 
     # Explicitly clear any ambient request/job tenant for the base pass, then
     # enumerate active named tenants. This prevents a reconcile invoked from a
@@ -1236,15 +1680,24 @@ def _reconcile_flow_crons() -> None:
         fid = str(p.get("flow_id") or "")
         tenant = str(p.get("tenant") or "")
         key = (tenant, fid)
-        cur = (str(p.get("__cron__") or ""), str(p.get("__tz__") or ""))
+        cur = (
+            str(p.get("__cron__") or ""),
+            str(p.get("__tz__") or ""),
+            str(p.get("__flow_revision__") or ""),
+        )
         if want.get(key) == cur and key not in covered:
             covered.add(key)          # exactly one correct cron per scoped flow
         else:
             q.cancel(j.id)            # stale (flow unscheduled, schedule/tz changed, or dup)
-    for (tenant, fid), (expr, tz) in want.items():
+    for (tenant, fid), (expr, tz, flow_revision) in want.items():
         if (tenant, fid) not in covered:
             try:
-                payload = {"flow_id": fid, "__cron__": expr, "__tz__": tz}
+                payload = {
+                    "flow_id": fid,
+                    "__cron__": expr,
+                    "__tz__": tz,
+                    "__flow_revision__": flow_revision,
+                }
                 if tenant:
                     payload["tenant"] = tenant
                 schedule_cron(q, expr, FLOW_CRON_KIND,
@@ -1358,4 +1811,5 @@ __all__ = ["start", "stop", "reconcile", "queue",
            "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND",
            "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND", "FLOW_EVOLVE_KIND",
            "FLOW_CRON_KIND", "enqueue_flow_run", "enqueue_flow_run_once",
+           "enqueue_published_flow_run", "enqueue_published_flow_run_once",
            "enqueue_flow_resume"]

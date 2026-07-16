@@ -57,6 +57,33 @@ def test_explain_prefixed_sql_needs_confirm(monkeypatch):
     assert "DRY RUN" in out
 
 
+def test_pragma_is_always_governed_as_potentially_mutating(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    from maverick.tools.database_tool import database_tool
+
+    for sql in (
+        "PRAGMA user_version",
+        "PRAGMA user_version = 7",
+        "PRAGMA writable_schema=ON",
+        "PRAGMA journal_mode=WAL",
+    ):
+        assert "DRY RUN" in database_tool().fn({"op": "query", "sql": sql}), sql
+
+
+def test_select_forms_with_known_side_effects_need_confirm(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://u:p@localhost/db")
+    from maverick.tools.database_tool import database_tool
+
+    for sql in (
+        "SELECT 'owned' INTO OUTFILE '/tmp/pwn'",
+        "SELECT * INTO copied_accounts FROM accounts",
+        "SELECT * FROM accounts FOR UPDATE",
+        "SELECT GET_LOCK('nightly', 30)",
+        "SELECT nextval('invoice_seq')",
+    ):
+        assert "DRY RUN" in database_tool().fn({"op": "query", "sql": sql}), sql
+
+
 def test_comment_prefixed_write_needs_confirm(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost/db")
     from maverick.tools.database_tool import database_tool
@@ -153,6 +180,8 @@ def test_mysql_executable_comment_needs_confirm(monkeypatch):
     for sql in (
         "/*! INSERT INTO audit_log */ SELECT * FROM users",
         "/*!80000 INSERT INTO audit_log */ SELECT * FROM users",
+        "/*M! INSERT INTO audit_log */ SELECT * FROM users",
+        "/*M!100100 INSERT INTO audit_log */ SELECT * FROM users",
     ):
         out = database_tool().fn({"op": "query", "sql": sql})
         assert "DRY RUN" in out

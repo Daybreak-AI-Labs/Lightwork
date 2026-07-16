@@ -51,20 +51,32 @@ def _require_approval_at() -> str:
         return "high"
 
 
+def _safe_lineage_text(value: object, *, max_len: int = 4000) -> str:
+    """Return bounded, redacted audit text without a raw-data fallback.
+
+    Connector responses, effect previews, source labels, and even exception
+    strings may contain credentials. If the redactor is unavailable, retain a
+    content digest for correlation instead of writing the original value into
+    the durable lineage ledger.
+    """
+    raw = str(value)
+    try:
+        from .safety.secret_detector import redact
+
+        raw, _ = redact(raw)
+    except Exception:  # pragma: no cover -- safe fallback is tested explicitly
+        digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+        raw = f"<redaction unavailable; sha256={digest}>"
+    return raw if len(raw) <= max_len else raw[:max_len] + "...(truncated)"
+
+
 def _canonical(params: dict, *, max_len: int = 4000) -> str:
-    """Stable JSON for hashing/lineage; secrets redacted THEN size-capped
-    (fail-open). The cap bounds the ledger and avoids persisting large tool
-    inputs (e.g. full file contents) verbatim."""
+    """Stable redacted JSON for hashing/lineage, bounded before persistence."""
     try:
         raw = json.dumps(params, sort_keys=True, default=str)
     except Exception:  # pragma: no cover -- unserializable -> repr
         raw = repr(params)
-    try:
-        from .safety.secret_detector import redact
-        raw, _ = redact(raw)
-    except Exception:  # pragma: no cover -- detector optional
-        pass
-    return raw if len(raw) <= max_len else raw[:max_len] + "...(truncated)"
+    return _safe_lineage_text(raw, max_len=max_len)
 
 
 def _link_hash(fields: dict, prev_hash: str) -> str:
@@ -292,33 +304,75 @@ def _lineage_dir(store_dir: str | Path | None = None) -> Path:
     return Path("~/.maverick/lineage").expanduser()
 
 
-def record_tool_lineage(goal_id: int, action: str, params: object, *,
+def record_tool_lineage(goal_id: int | None, action: str, params: object, *,
                         skills: tuple[str, ...] = (), sources: tuple[str, ...] = (),
-                        actor: str = "", store_dir: str | Path | None = None) -> None:
+                        actor: str = "", effect: str = "", result: str = "",
+                        approver: str = "", transaction_id: str = "",
+                        phase: str = "", force: bool = False,
+                        strict: bool = False,
+                        store_dir: str | Path | None = None) -> bool:
     """Append a tamper-evident lineage link for a CONSEQUENTIAL tool call
-    (risk >= medium) to ``<store>/<goal_id>.ndjson``. Fail-open: a low-risk tool
-    is skipped and any error is swallowed -- lineage must never break a run."""
+    (risk >= medium) to ``<store>/<goal_id>.ndjson``. Governed write callers can
+    set ``force`` and ``strict`` so a PREPARE receipt is durable before an
+    external effect occurs. Ordinary observability callers retain fail-soft
+    behavior. Returns whether a receipt was persisted (or intentionally skipped
+    because the action was low risk)."""
     try:
         from .safety.tool_risk import risk_rank, tool_risk
-        if risk_rank(tool_risk(str(action))) < risk_rank("medium"):
-            return  # only consequential actions are traced
+        if not force and risk_rank(tool_risk(str(action))) < risk_rank("medium"):
+            return True  # only consequential actions are traced
+        if goal_id is None:
+            from .logging_config import current_goal_id
+            goal_id = current_goal_id()
         f = _lineage_dir(store_dir)
-        f.mkdir(parents=True, exist_ok=True)
-        f = f / f"{int(goal_id)}.ndjson"
-        prev = _GENESIS
-        if f.exists():
-            for line in f.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    prev = json.loads(line).get("hash", prev)
-        pj = _canonical(params if isinstance(params, dict) else {"input": params})
-        rec = {"ts": time(), "actor": str(actor), "action": str(action),
-               "params_json": pj, "skills": list(skills), "sources": list(sources),
-               "prev_hash": prev}
-        rec["hash"] = _link_hash(rec, prev)
-        with open(f, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(rec) + "\n")
-    except Exception:  # pragma: no cover -- lineage is best-effort, never fatal
-        pass
+        from .file_lock import (
+            atomic_read_text,
+            atomic_write_text,
+            cross_process_lock,
+            ensure_private_directory,
+            ensure_private_file,
+        )
+
+        ensure_private_directory(f)
+        basename = f"{int(goal_id)}.ndjson" if goal_id is not None else "standalone.ndjson"
+        f = f / basename
+        with cross_process_lock(f, strict=strict):
+            prev = _GENESIS
+            links: list[dict] = []
+            if f.exists():
+                ensure_private_file(f)
+                for line in atomic_read_text(f, encoding="utf-8").splitlines():
+                    if line.strip():
+                        link = json.loads(line)
+                        links.append(link)
+                        prev = link.get("hash", prev)
+            if strict and links and not _verify_links(links).startswith("VALID"):
+                raise RuntimeError(
+                    "existing governed-action lineage is not trustworthy"
+                )
+            pj = _canonical(params if isinstance(params, dict) else {"input": params})
+            rec = {
+                "ts": time(),
+                "actor": _safe_lineage_text(actor, max_len=512),
+                "action": _safe_lineage_text(action, max_len=512),
+                "params_json": pj,
+                "skills": [_safe_lineage_text(v, max_len=512) for v in skills],
+                "sources": [_safe_lineage_text(v, max_len=1000) for v in sources],
+                "effect": _safe_lineage_text(effect),
+                "result": _safe_lineage_text(result),
+                "approver": _safe_lineage_text(approver, max_len=512),
+                "transaction_id": _safe_lineage_text(transaction_id, max_len=256),
+                "phase": _safe_lineage_text(phase, max_len=128),
+                "prev_hash": prev,
+            }
+            rec["hash"] = _link_hash(rec, prev)
+            body = "".join(json.dumps(link) + "\n" for link in (*links, rec))
+            atomic_write_text(f, body, mode=0o600, encoding="utf-8")
+        return True
+    except Exception:  # pragma: no cover -- strict callers exercise propagation
+        if strict:
+            raise
+        return False
 
 
 def load_lineage(goal_id: int, store_dir: str | Path | None = None) -> list[dict]:

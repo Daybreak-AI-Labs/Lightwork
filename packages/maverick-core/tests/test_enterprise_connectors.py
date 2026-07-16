@@ -54,7 +54,7 @@ def test_requires_config(monkeypatch):
     monkeypatch.delenv("ACME_TOKEN", raising=False)
     _fake_httpx(monkeypatch, request=MagicMock())
     out = _tool().fn({"op": "get", "path": "/things"})
-    assert "ERROR" in out and "ACME_BASE_URL" in out
+    assert out == "ERROR: connector configuration or request failed (RuntimeError)"
 
 
 def test_get_routes_and_returns_json(monkeypatch):
@@ -65,6 +65,31 @@ def test_get_routes_and_returns_json(monkeypatch):
     assert "items" in out
     assert req.call_args.args[0] == "GET"
     assert req.call_args.args[1] == "https://acme.example.com/things"
+
+
+def test_rest_exception_never_returns_secret_detail(monkeypatch):
+    _set(monkeypatch)
+    secret = "postgres://admin:super-secret@db.internal/customer"  # pragma: allowlist secret
+    req = MagicMock(side_effect=RuntimeError(secret))
+    _fake_httpx(monkeypatch, request=req)
+
+    out = _tool().fn({"op": "get", "path": "/things"})
+
+    assert out.startswith("ERROR:")
+    assert "super-secret" not in out and "postgres://" not in out
+
+
+def test_rest_error_body_is_secret_scrubbed_and_bounded(monkeypatch):
+    _set(monkeypatch)
+    secret = "tok123"  # pragma: allowlist secret
+    req = MagicMock(return_value=_resp(500, {"detail": secret + ("x" * 2000)}))
+    _fake_httpx(monkeypatch, request=req)
+
+    out = _tool().fn({"op": "get", "path": "/things"})
+
+    assert out.startswith("ERROR: get (500)")
+    assert secret not in out
+    assert len(out) < 600
 
 
 def test_write_needs_confirm(monkeypatch):
@@ -177,6 +202,33 @@ def test_graphql_mutation_with_leading_comment_needs_confirm(monkeypatch):
     post.assert_not_called()
 
 
+def test_graphql_mutation_with_leading_bom_needs_confirm(monkeypatch):
+    monkeypatch.setenv("ACMEGQL_URL", "https://gql.example.com")
+    monkeypatch.setenv("ACMEGQL_TOKEN", "tok")
+    post = MagicMock()
+    _fake_httpx(monkeypatch, post=post)
+    out = _gql().fn({
+        "op": "query",
+        "query": "\ufeffmutation { delete_item(id: 1) { id } }",
+    })
+    assert "DRY RUN" in out
+    post.assert_not_called()
+
+
+def test_graphql_mutation_after_escaped_block_string_needs_confirm(monkeypatch):
+    monkeypatch.setenv("ACMEGQL_URL", "https://gql.example.com")
+    monkeypatch.setenv("ACMEGQL_TOKEN", "tok")
+    post = MagicMock()
+    _fake_httpx(monkeypatch, post=post)
+    document = (
+        'query Q { echo(text: """ignored \\""" {""") }\n'
+        "mutation M { delete_item(id: 1) { id } }"
+    )
+    out = _gql().fn({"op": "query", "query": document})
+    assert "DRY RUN" in out
+    post.assert_not_called()
+
+
 def test_graphql_mutation_after_fragment_needs_confirm(monkeypatch):
     monkeypatch.setenv("ACMEGQL_URL", "https://gql.example.com")
     monkeypatch.setenv("ACMEGQL_TOKEN", "tok")
@@ -198,7 +250,7 @@ def test_graphql_requires_config(monkeypatch):
     monkeypatch.delenv("ACMEGQL_TOKEN", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
     out = _gql().fn({"op": "query", "query": "query { x }"})
-    assert "ERROR" in out and "ACMEGQL_URL" in out
+    assert out == "ERROR: connector configuration or request failed (RuntimeError)"
 
 
 def test_no_collision_with_opt_in_ambient_cred_tools():
@@ -209,6 +261,29 @@ def test_no_collision_with_opt_in_ambient_cred_tools():
     from maverick.tools.enterprise_connectors import ENTERPRISE_CONNECTOR_NAMES
 
     assert AMBIENT_CRED_TOOL_NAMES.isdisjoint(ENTERPRISE_CONNECTOR_NAMES)
+
+
+def test_every_bespoke_deferred_connector_is_ambient_blocked_or_scoped(tmp_path):
+    """A new hand-written connector cannot silently borrow operator env auth."""
+    from maverick.sandbox.local import LocalBackend
+    from maverick.tools import (
+        AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES,
+        base_registry,
+    )
+    from maverick.world_model import open_world
+
+    reg = base_registry(
+        open_world(None), LocalBackend(workdir=tmp_path),
+        _include_generated_tools=False,
+    )
+    unscoped = {
+        tool.name
+        for tool in reg.all()
+        if tool.name in reg.deferrable_names
+        and getattr(tool.fn, "__module__", "") != "maverick.tools._rest_connector"
+        and tool.name not in AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES
+    }
+    assert unscoped == set()
 
 
 def test_automation_platform_connectors_present():
@@ -245,4 +320,18 @@ def test_graphql_errors_field_is_error(monkeypatch):
     post = MagicMock(return_value=_resp(200, {"errors": [{"message": "bad field"}]}))
     _fake_httpx(monkeypatch, post=post)
     out = _gql().fn({"op": "query", "query": "query { nope }"})
-    assert out.startswith("ERROR") and "bad field" in out
+    assert out == "ERROR: graphql (200): upstream request failed"
+
+
+def test_graphql_failure_never_echoes_low_entropy_active_token(monkeypatch):
+    monkeypatch.setenv("ACMEGQL_URL", "https://gql.example.com")
+    monkeypatch.setenv("ACMEGQL_TOKEN", "tok123")
+    post = MagicMock(return_value=_resp(401, {
+        "errors": [{"message": "Authorization: Bearer tok123"}],
+    }))
+    _fake_httpx(monkeypatch, post=post)
+
+    out = _gql().fn({"op": "query", "query": "query { nope }"})
+
+    assert out == "ERROR: graphql (401): upstream request failed"
+    assert "tok123" not in out

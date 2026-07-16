@@ -371,19 +371,41 @@ class ConnectionIn(BaseModel):
     connector: str = Field("", max_length=64)
     base_url: str = Field("", max_length=2048)
     token: str = Field("", max_length=8192)
+    # Credential use is separate from credential management. Owner is the
+    # least-privilege default; tenant sharing must be explicit, and named grants
+    # can admit selected principals without exposing the token itself.
+    access: str = Field("owner", pattern="^(owner|tenant)$")
+    allowed_principals: list[str] = Field(default_factory=list, max_length=100)
 
 
 class FlowSaveIn(BaseModel):
-    """A flow definition (a graph of typed nodes) to create or replace."""
+    """A draft flow definition (a graph of typed nodes) to create or replace."""
     flow: dict
 
 
-class FlowRunIn(BaseModel):
-    """Start a flow run with optional initial data (the trigger payload).
+class FlowDryRunIn(BaseModel):
+    """Safely execute the submitted unsaved draft with mock runners.
 
-    ``dry_run`` exercises the graph with MOCK executors -- no real goal, no real
-    connector call, and no grounded outcome recorded -- so a flow can be tested
-    with sample input before it's wired to a live trigger."""
+    The graph is part of the request on purpose: a dry run must exercise what is
+    currently on the canvas, not save it and then rediscover it from mutable
+    definition state.
+    """
+    flow: dict
+    data: dict = Field(default_factory=dict)
+
+
+class FlowPublishIn(BaseModel):
+    """Activate the exact draft revision the operator reviewed."""
+    version: int = Field(..., ge=1)
+    revision: str = Field(..., min_length=1, max_length=128)
+
+
+class FlowRunIn(BaseModel):
+    """Start a real run of the exact published release with optional initial data.
+
+    ``dry_run`` is retained only for compatibility and is rejected by this
+    route. Safe tests submit the unsaved graph itself to ``/flows/dry-run`` so
+    testing cannot accidentally save or activate canvas state."""
     data: dict = Field(default_factory=dict)
     dry_run: bool = False
     # Optional caller-supplied dedup key: a repeat POST with the same key returns
@@ -398,8 +420,9 @@ class FlowResumeIn(BaseModel):
     verdict may be one of the node's declared ``choices`` (the runner validates
     against them; an unlisted verdict pauses again). A paused_event run ignores
     the decision -- the event's ``inputs`` are the point."""
-    decision: str = Field(default="approved", max_length=40,
-                          pattern=r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$")
+    # Empty remains representable for non-approval pauses, but approval routes
+    # reject it explicitly.  Never turn a missing request field into consent.
+    decision: str = Field(default="", max_length=40)
     inputs: dict = Field(default_factory=dict)
 
 
@@ -424,11 +447,15 @@ class FlowChatIn(BaseModel):
 class FlowApplyIn(BaseModel):
     """Apply a self-rewrite proposal: swap one node between agent and action.
 
-    Hardening to an action needs ``tool``; softening to an agent needs ``brief``
-    (else the node's existing brief/label is used). Produces a new flow version."""
+    Hardening to an action needs ``tool`` and an explicit reviewed ``params``
+    binding (including ``{}`` for a genuinely no-argument action); softening to
+    an agent needs ``brief`` (else the existing brief/label is used)."""
     node_id: str = Field(..., min_length=1, max_length=120)
     to_kind: str = Field(..., pattern="^(agent|action)$")
     tool: str = Field(default="", max_length=120)
+    # ``None`` means no binding evidence was supplied. An explicit ``{}`` is a
+    # reviewed no-argument binding and remains distinguishable from omission.
+    params: dict | None = None
     brief: str = Field(default="", max_length=4000)
     version: int | None = Field(default=None, ge=1)
     revision: str = Field(default="", max_length=128)

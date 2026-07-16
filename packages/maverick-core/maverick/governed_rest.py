@@ -188,15 +188,12 @@ def configured_governed_actions() -> tuple[GovernedActions, dict[str, tuple[str,
     -- nothing is registered, so the feature ships inert (kernel rule 1). When
     enabled, every name in ``connectors`` that matches a reference factory is
     registered as read+write governed Actions. Returns ``(ga, registered)``."""
-    from .config import env_flag, get_governed_connectors
+    from .config import get_governed_connectors
+    from .governed_tools import governance_enabled
 
     cfg = get_governed_connectors()
-    enabled = cfg["enable"]
-    override = env_flag("MAVERICK_GOVERNED_CONNECTORS")
-    if override is not None:
-        enabled = override
     ga = GovernedActions()
-    if not enabled:
+    if not governance_enabled():
         return ga, {}
     return ga, register_rest_connectors(ga, cfg["connectors"])
 

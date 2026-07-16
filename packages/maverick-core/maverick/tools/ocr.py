@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -28,6 +29,11 @@ from urllib.parse import urlparse
 from . import Tool
 
 log = logging.getLogger(__name__)
+
+_HF_MODEL_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+)
+_MAX_IMAGE_BYTES = 50 * 1024 * 1024
 
 
 _OCR_SCHEMA: dict[str, Any] = {
@@ -82,25 +88,56 @@ def _run_tesseract(path: str, lang: str, sandbox) -> str:
 
 
 def _run_hf(path: str, model: str) -> str:
-    import httpx
+    # This legacy backend consumes one operator-global token. It cannot express
+    # per-principal grants, so an authenticated enterprise agent must not borrow
+    # it. Local tesseract remains available and does not cross this boundary.
+    try:
+        from ..connections import current_principal
+        from ..enterprise import enterprise_enabled
+
+        if enterprise_enabled() and current_principal():
+            return (
+                "REFUSED (credentials): authenticated enterprise OCR cannot "
+                "use the operator-global Hugging Face token; use local "
+                "tesseract or a principal-scoped OCR connection."
+            )
+    except Exception:
+        return "REFUSED (credentials): OCR credential policy is unavailable"
+    if not _HF_MODEL_RE.fullmatch(model):
+        return "ERROR: hf_model must be a bounded 'owner/model' identifier"
     tok = os.environ.get("HUGGINGFACE_API_TOKEN", "").strip()
     if not tok:
         return "ERROR: backend=hf requires HUGGINGFACE_API_TOKEN."
     try:
+        if Path(path).stat().st_size > _MAX_IMAGE_BYTES:
+            return "ERROR: HF OCR input exceeds the 50 MiB limit"
         with open(path, "rb") as f:
-            blob = f.read()
+            blob = f.read(_MAX_IMAGE_BYTES + 1)
+        if len(blob) > _MAX_IMAGE_BYTES:
+            return "ERROR: HF OCR input exceeds the 50 MiB limit"
     except OSError as e:
-        return f"ERROR: read {path}: {e}"
-    r = httpx.post(
-        f"https://api-inference.huggingface.co/models/{model}",
-        headers={
-            "Authorization": f"Bearer {tok}",
-            "Content-Type": "application/octet-stream",
-        },
-        content=blob, timeout=60.0,
-    )
+        return f"ERROR: OCR input could not be read ({type(e).__name__})"
+    url = f"https://api-inference.huggingface.co/models/{model}"
+    from ..enterprise import enterprise_egress_denial
+    if denial := enterprise_egress_denial(url, tool="ocr"):
+        return f"ERROR: {denial}"
+    from ._ssrf import BlockedHost, safe_client
+    try:
+        with safe_client(url, timeout=60.0) as client:
+            r = client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {tok}",
+                    "Content-Type": "application/octet-stream",
+                },
+                content=blob,
+            )
+    except BlockedHost:
+        return "ERROR: HF OCR endpoint was blocked by the SSRF policy"
+    except Exception as e:  # noqa: BLE001
+        return f"ERROR: HF OCR request failed ({type(e).__name__[:120]})"
     if r.status_code >= 400:
-        return f"ERROR: HF OCR ({r.status_code}): {r.text[:300]}"
+        return f"ERROR: HF OCR ({r.status_code}): upstream request failed"
     try:
         data = r.json()
     except ValueError:

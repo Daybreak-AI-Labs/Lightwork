@@ -7,10 +7,10 @@ name (``salesforce`` / ``salesforce-eu``), sealed at rest with the tenant's KMS
 key exactly like the OAuth vault, so a connector can be wired from the dashboard
 without shell access.
 
-Resolution order (see :func:`resolve`): a connection named after the connector
-wins ONLY when the env var is unset, so this is purely additive -- an operator's
-existing ``<NAME>_TOKEN`` still takes precedence and nothing about the current
-env-based path changes.
+Standard/local resolution keeps legacy env precedence. Authenticated enterprise
+execution requires a saved connection whose owner/access grants admit the
+current principal; operator-global env credentials are deliberately unavailable
+at that boundary.
 
 Gated behind :func:`enabled` (``[connections] enable`` / ``MAVERICK_CONNECTIONS``);
 off by default. Token values are sealed and never returned by the listing API --
@@ -18,17 +18,29 @@ only ``has_token`` is surfaced.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
-import os
 import re
 import threading
 import time
+import uuid
+from collections.abc import Iterator, Sequence
 
 from .paths import data_dir
 from .tenant.kms import seal_text_for_tenant, unseal_text_for_tenant
 
 _lock = threading.Lock()
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_ACCESS = frozenset({"owner", "tenant"})
+_PRINCIPAL_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,256}$")
+_runtime_principal: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "maverick_connection_principal", default=None,
+)
+
+
+class ConnectionVersionConflict(RuntimeError):
+    """The credential changed after a caller began an operation on it."""
 
 
 def enabled() -> bool:
@@ -46,54 +58,87 @@ def _path():
     return data_dir("connections", "connections.sealed")
 
 
-# Unsealed-store cache keyed by path (paths are tenant-scoped, so one entry per
-# tenant) and invalidated by mtime -- resolve() runs on EVERY connector tool
-# call when env creds are unset, and must not re-decrypt an unchanged file.
-_cache: dict[str, tuple[int, dict[str, dict]]] = {}
-
-
 def _load() -> dict[str, dict]:
+    from .file_lock import atomic_read_bytes, ensure_private_file
     from .paths import current_tenant_id
+
     path = _path()
     try:
-        mtime = path.stat().st_mtime_ns
+        ensure_private_file(path)
     except OSError:
         return {}
-    key = str(path)
-    hit = _cache.get(key)   # single dict ops are GIL-atomic; a lost race just re-parses
-    if hit and hit[0] == mtime:
-        return hit[1]
     try:
-        raw = unseal_text_for_tenant(current_tenant_id(), path.read_bytes())
+        raw = unseal_text_for_tenant(current_tenant_id(), atomic_read_bytes(path))
         data = json.loads(raw)
         if not isinstance(data, dict):
             return {}
     except (FileNotFoundError, ValueError, OSError):
         return {}
-    _cache[key] = (mtime, data)
     return data
 
 
 def _save(data: dict[str, dict]) -> None:
+    from .file_lock import atomic_write_bytes, ensure_private_directory
     from .paths import current_tenant_id
+
     path = _path()
     blob = seal_text_for_tenant(current_tenant_id(), json.dumps(data, sort_keys=True))
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    tmp = path.with_suffix(".sealed.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as f:
-        f.write(blob)
-    os.replace(tmp, path)
-    _cache.pop(str(path), None)   # next _load() re-reads the fresh file
+    ensure_private_directory(path.parent)
+    atomic_write_bytes(path, blob, mode=0o600)
+
+
+@contextlib.contextmanager
+def _mutation_lock() -> Iterator[None]:
+    """Serialize credential read-modify-write across threads and processes."""
+    from .file_lock import cross_process_lock
+
+    path = _path()
+    with _lock, cross_process_lock(path, strict=True):
+        yield
 
 
 def normalize_name(name: str) -> str:
     return re.sub(r"[^a-z0-9_-]+", "-", (name or "").strip().lower()).strip("-")[:64]
 
 
+def _normalize_principals(values: Sequence[str] | None) -> tuple[str, ...]:
+    out: list[str] = []
+    for raw in values or ():
+        principal = str(raw or "").strip()
+        if not _PRINCIPAL_RE.fullmatch(principal):
+            raise ValueError("connection use principals must be 1-256 printable characters")
+        if principal not in out:
+            out.append(principal)
+    return tuple(out)
+
+
+@contextlib.contextmanager
+def bind_principal(principal: str | None) -> Iterator[None]:
+    """Bind the authenticated principal allowed to consume saved credentials.
+
+    Tool registries establish this context at the dispatch boundary.  A
+    ContextVar is required because synchronous connector functions execute in
+    ``asyncio.to_thread`` and concurrent runs must never borrow one another's
+    identity.
+    """
+    value = str(principal or "").strip() or None
+    token = _runtime_principal.set(value)
+    try:
+        yield
+    finally:
+        _runtime_principal.reset(token)
+
+
+def current_principal() -> str | None:
+    """Authenticated identity at the connector credential-use boundary."""
+    return _runtime_principal.get()
+
+
 def set_connection(name: str, *, connector: str = "", base_url: str = "",
                    token: str = "", owner: str = "",
-                   expected_owner: str | None = None) -> dict:
+                   expected_owner: str | None = None,
+                   access: str = "owner",
+                   allowed_principals: Sequence[str] | None = None) -> dict:
     """Create or replace a named connection (sealed). ``connector`` is the tool
     name it credentials (e.g. ``salesforce``); ``name`` may differ so one tool
     can have several accounts. Raises ValueError on an unusable name.
@@ -106,17 +151,29 @@ def set_connection(name: str, *, connector: str = "", base_url: str = "",
     slug = normalize_name(name)
     if not _NAME_RE.match(slug):
         raise ValueError("connection name must be a slug (a-z, 0-9, -, _)")
+    access = str(access or "owner").strip().lower()
+    if access not in _ACCESS:
+        raise ValueError("connection access must be 'owner' or 'tenant'")
+    grants = _normalize_principals(allowed_principals)
     rec = {
         "name": slug, "connector": normalize_name(connector) or slug,
         "base_url": str(base_url).strip().rstrip("/"), "token": str(token),
         "created": time.time(), "owner": str(owner or ""),
+        "access": access, "allowed_principals": list(grants),
+        # Internal CAS token. A slow readiness probe for an old credential must
+        # never mark a concurrently rotated replacement as authenticated.
+        "revision": uuid.uuid4().hex,
     }
-    with _lock:
+    with _mutation_lock():
         data = dict(_load())
         existing = data.get(slug)
         if (expected_owner is not None and existing is not None
                 and existing.get("owner", "") != expected_owner):
             raise PermissionError("a connection with that name already exists")
+        if isinstance(existing, dict):
+            rec["created"] = float(existing.get("created") or rec["created"])
+            # Updating credentials invalidates the prior readiness assertion.
+            rec.pop("last_test", None)
         data[slug] = rec
         _save(data)
     return _public(rec)
@@ -124,12 +181,15 @@ def set_connection(name: str, *, connector: str = "", base_url: str = "",
 
 def get_connection(name: str) -> dict | None:
     """The full sealed record (INCLUDING the token) for internal resolution."""
-    return _load().get(normalize_name(name))
+    rec = _load().get(normalize_name(name))
+    # Never expose the freshly decrypted store object itself: an internal
+    # caller must not mutate credential state without the locked sealed write.
+    return dict(rec) if isinstance(rec, dict) else None
 
 
 def delete_connection(name: str, owner: str | None = None) -> bool:
     slug = normalize_name(name)
-    with _lock:
+    with _mutation_lock():
         data = dict(_load())
         rec = data.get(slug)
         if rec is None or (owner is not None and rec.get("owner", "") != owner):
@@ -142,10 +202,15 @@ def delete_connection(name: str, owner: str | None = None) -> bool:
 def _public(rec: dict) -> dict:
     """A record safe to return over the API -- the token is never included, only
     whether one is set."""
+    access = str(rec.get("access") or ("owner" if rec.get("owner") else "tenant"))
+    last_test = rec.get("last_test") if isinstance(rec.get("last_test"), dict) else None
     return {
         "name": rec.get("name", ""), "connector": rec.get("connector", ""),
         "base_url": rec.get("base_url", ""), "has_token": bool(rec.get("token")),
         "created": float(rec.get("created") or 0.0), "owner": rec.get("owner", ""),
+        "access": access,
+        "allowed_principals": list(rec.get("allowed_principals") or []),
+        "last_test": dict(last_test) if last_test is not None else None,
     }
 
 
@@ -157,26 +222,91 @@ def list_connections(owner: str | None = None) -> list[dict]:
     return out
 
 
-def resolve(connector: str) -> tuple[str, str] | None:
+def _may_use(rec: dict, principal: str | None) -> bool:
+    """Whether ``principal`` may consume this credential record.
+
+    Legacy ownerless records remain tenant-shared.  Legacy owned records become
+    owner-only, closing the historical cross-principal fallback without a data
+    migration.  An absent principal is the local/operator path and may use only
+    ownerless tenant records; it can never silently borrow an authenticated
+    user's credential.
+    """
+    owner = str(rec.get("owner") or "").strip()
+    grants = {str(p).strip() for p in (rec.get("allowed_principals") or []) if str(p).strip()}
+    access = str(rec.get("access") or ("owner" if owner else "tenant")).strip().lower()
+    if principal is not None and (principal == owner or principal in grants):
+        return True
+    if access == "tenant":
+        return principal is not None or not owner
+    return principal is None and not owner
+
+
+def resolve(connector: str, *, principal: str | None = None) -> tuple[str, str] | None:
     """(base_url, token) for the first connection credentialing ``connector``,
     or None. Used as a FALLBACK by the connector layer only when the env var is
     unset, so it never overrides an operator's environment."""
     if not enabled():
         return None
     slug = normalize_name(connector)
+    caller = str(principal or "").strip() or _runtime_principal.get()
     # a connection named exactly after the connector wins; else the first one
-    # whose "connector" field points at it.
+    # whose "connector" field points at it AND whose use grant admits the
+    # authenticated caller.  Sort the fallback so selection is deterministic.
     data = _load()
     rec = data.get(slug)
-    if rec is None:
-        rec = next((r for r in data.values()
-                    if isinstance(r, dict) and r.get("connector") == slug), None)
+    if not isinstance(rec, dict) or not _may_use(rec, caller):
+        rec = next((r for _, r in sorted(data.items())
+                    if isinstance(r, dict) and r.get("connector") == slug
+                    and _may_use(r, caller)), None)
     if not rec or not rec.get("token"):
         return None
     return (str(rec.get("base_url") or ""), str(rec.get("token")))
 
 
+def record_test_result(
+    name: str,
+    *,
+    reachable: bool,
+    authenticated: bool,
+    status: int | None = None,
+    expected_owner: str | None = None,
+    expected_revision: str | None = None,
+) -> dict:
+    """Persist a bounded, non-secret readiness receipt for a connection.
+
+    The receipt is invalidated whenever credentials are replaced.  It is useful
+    to authoring/preflight code without retaining response bodies or headers.
+    """
+    slug = normalize_name(name)
+    with _mutation_lock():
+        data = dict(_load())
+        rec = data.get(slug)
+        if not isinstance(rec, dict):
+            raise KeyError(slug)
+        if expected_owner is not None and rec.get("owner", "") != expected_owner:
+            raise PermissionError("connection is not owned by this principal")
+        if (
+            expected_revision is not None
+            and str(rec.get("revision") or "") != str(expected_revision)
+        ):
+            raise ConnectionVersionConflict(
+                "connection changed while its readiness probe was running"
+            )
+        updated = dict(rec)
+        updated["last_test"] = {
+            "tested_at": time.time(),
+            "reachable": bool(reachable),
+            "authenticated": bool(authenticated),
+            "status": int(status) if status is not None else None,
+        }
+        data[slug] = updated
+        _save(data)
+    return _public(updated)
+
+
 __all__ = [
     "enabled", "set_connection", "get_connection", "delete_connection",
-    "list_connections", "resolve", "normalize_name",
+    "list_connections", "resolve", "normalize_name", "bind_principal",
+    "current_principal",
+    "record_test_result", "ConnectionVersionConflict",
 ]
