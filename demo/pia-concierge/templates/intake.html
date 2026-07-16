@@ -2,6 +2,20 @@
 {% block title %}Privacy intake — {{ case.subject }}{% endblock %}
 {% block body %}
 <style>
+  /* Intake reads as a focused form, not a dashboard: narrow column, one
+     obvious thing to do at every moment, visible progress. */
+  main { max-width: 860px; }
+  .qprog { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .qprog .lbl { font-size: 12px; font-weight: 700; letter-spacing: .06em;
+                text-transform: uppercase; color: var(--ink-faint); flex: none; }
+  .qbar { flex: 1; height: 5px; border-radius: 99px; background: var(--line-soft); overflow: hidden; }
+  .qbar > div { height: 100%; width: 0%; border-radius: 99px;
+                background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+                transition: width .3s ease; }
+  #thread > div > div { font-size: 15px; line-height: 1.55; }
+  #controls .btn { padding: 9px 18px; font-size: 14px; }
+  #controls .btn.ghost:hover { border-color: var(--accent-dim); background: var(--accent-glow); }
+
   /* Co-work upload zone + discovery + delegation, scoped to the intake page. */
   .dropzone {
     border: 1.5px dashed var(--line); border-radius: 12px;
@@ -122,6 +136,10 @@ document.querySelectorAll('.fu-q').forEach(function (row) {
 </div>
 
 <div class="card" id="chat">
+  <div class="qprog" id="qprog" aria-hidden="true">
+    <span class="lbl" id="qprog-label"></span>
+    <div class="qbar"><div id="qbar-fill"></div></div>
+  </div>
   <div id="thread"></div>
   <div id="controls" style="margin-top:16px;"></div>
 </div>
@@ -157,6 +175,11 @@ document.querySelectorAll('.fu-q').forEach(function (row) {
     <span class="muted">Your answers are with the privacy team. The assessment was scored by
       Lightwork and is awaiting human review in the governed approvals queue.</span>
   </div>
+</div>
+<div class="nextstep">
+  <span class="k">Next</span>
+  <span class="t">Switch hats: you're the privacy team now. Review the scored assessment and decide.</span>
+  <a class="btn" href="{{ dashboard_url }}/approvals" target="lightwork">Open Lightwork approvals →</a>
 </div>
 {% endif %}
 
@@ -237,8 +260,20 @@ function advancePastDelegated() {
   }
 }
 
+function progress() {
+  const label = document.getElementById('qprog-label');
+  const fill = document.getElementById('qbar-fill');
+  if (!label || !fill) return;
+  const total = QUESTIONS.length;
+  const at = Math.min(idx, total);
+  label.textContent = at >= total ? 'All ' + total + ' answered'
+                                  : 'Question ' + (at + 1) + ' of ' + total;
+  fill.style.width = Math.round(at / total * 100) + '%';
+}
+
 function ask() {
   advancePastDelegated();
+  progress();
   if (idx >= QUESTIONS.length) {
     controls.innerHTML = '';
     const waiting = Object.keys(delegated).filter(q => !ANSWERED[q]).length;
@@ -263,6 +298,7 @@ const ANSWERED = {};
 // Separate from ask() so late-arriving insights can refresh the buttons of
 // the question already on screen without re-bubbling its text.
 function renderControls() {
+  progress();
   controls.innerHTML = '';
   if (idx >= QUESTIONS.length) return;
   const q = QUESTIONS[idx];
