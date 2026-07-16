@@ -34,7 +34,11 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: var(--sans);
-    background: var(--bg);
+    background:
+      radial-gradient(1000px 640px at 85% -10%, rgba(124, 108, 255, 0.13), transparent 55%),
+      radial-gradient(820px 560px at -10% 30%, rgba(75, 212, 162, 0.07), transparent 52%),
+      var(--bg);
+    background-attachment: fixed;
     color: var(--ink);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
@@ -95,10 +99,27 @@
     padding: 2px 6px;
   }
 
-  /* ---------- cards ---------- */
+  /* ---------- cards (liquid glass over the ambient washes) ---------- */
   .card {
-    background: var(--bg-card); border: 1px solid var(--line);
+    background:
+      linear-gradient(152deg, rgba(255,255,255,0.045), transparent 46%),
+      rgba(22, 26, 38, 0.72);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    backdrop-filter: blur(18px) saturate(150%);
+    border: 1px solid rgba(232, 234, 242, 0.13);
     border-radius: var(--radius); padding: 18px 20px; margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.16), 0 10px 28px -14px rgba(0,0,0,0.42),
+      inset 0 1px 0 0 rgba(255,255,255,0.10);
+  }
+  header.top {
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    backdrop-filter: blur(18px) saturate(160%);
+    background: rgba(18, 21, 31, 0.62);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    body { background: var(--bg); }
+    .card { background: var(--bg-card); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    header.top { background: var(--bg-raise); -webkit-backdrop-filter: none; backdrop-filter: none; }
   }
   .card h2 { font-size: 15px; font-weight: 650; margin-bottom: 12px; }
   .grid { display: grid; gap: 14px; }
