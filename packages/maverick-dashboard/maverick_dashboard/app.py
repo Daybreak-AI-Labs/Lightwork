@@ -1796,22 +1796,23 @@ async def spend_page(request: Request) -> HTMLResponse:
     )
 
 
-@app.get("/privacy", response_class=HTMLResponse)
-async def privacy_page(request: Request) -> HTMLResponse:
-    """The Privacy workspace: the module view over every assessment record —
-    worklist with the inherent→residual pair, aging, open follow-ups, the
-    precedent memory, and the framework catalog. Review (and send follow-up
-    questions back) happens in the shared pop-out, on this screen.
+# One assessment engine, one workspace chassis per department: each
+# department page filters the same records/templates to its own types.
+PRIVACY_ASSESSMENT_TYPES = frozenset(
+    {"pia", "aira", "vendor_risk", "hipaa", "soc2", "pci_dss"})
+FINANCE_ASSESSMENT_TYPES = frozenset(
+    {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"})
 
-    Operate-gated like /approvals: assessment records carry answer bodies and
-    reviewer threads, a tier above viewer summaries.
-    """
-    require_permission(request, "operate")
+
+def _workspace_ctx(types: frozenset) -> dict:
+    """Chassis context for a department workspace: the worklist (risk pair,
+    aging, follow-ups), hero stats, precedent memory, and catalog — filtered
+    to the department's assessment types."""
     import time as _time
 
     from maverick.assessment import list_saved, list_templates
 
-    sessions = list_saved()
+    sessions = [s for s in list_saved() if s.get("type") in types]
     now = _time.time()
     for s in sessions:
         created = float(s.get("created_at") or 0)
@@ -1829,10 +1830,33 @@ async def privacy_page(request: Request) -> HTMLResponse:
         "oldest_open_days": (max((s["age_days"] or 0) for s in open_rows)
                             if open_rows else None),
     }
-    # Precedents: what the memory recalls from — the most recent completions.
-    precedents = sessions[:8]
-    # The record types (DPA reviews, AI registry, RoPA, DSARs) — the data
-    # plane behind the [privacy_ops] knob. The page still works without them.
+    return {
+        "sessions": sessions,
+        "stats": stats,
+        # Precedents: what the memory recalls from — recent completions.
+        "precedents": sessions[:8],
+        "templates": [{"type": t.type, "title": t.title,
+                       "framework": t.framework, "questions": len(t.questions)}
+                      for t in list_templates() if t.type in types],
+    }
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page(request: Request) -> HTMLResponse:
+    """The Privacy workspace: the module view over the privacy team's
+    assessment records — worklist with the inherent→residual pair, aging,
+    open follow-ups, the precedent memory, the framework catalog, and the
+    privacy ops record types (DPA reviews, AI registry, RoPA, DSARs).
+
+    Operate-gated like /approvals: assessment records carry answer bodies and
+    reviewer threads, a tier above viewer summaries.
+    """
+    require_permission(request, "operate")
+    import time as _time
+
+    ctx = _workspace_ctx(PRIVACY_ASSESSMENT_TYPES)
+    # The record types — the data plane behind the [privacy_ops] knob. The
+    # page still works without them.
     from maverick import privacy_ops
     records = {"enabled": privacy_ops.enabled(),
                "dpa": [], "ai": [], "ropa": [], "dsar": []}
@@ -1853,19 +1877,18 @@ async def privacy_page(request: Request) -> HTMLResponse:
             if r.get("status") in ("open", "awaiting_erasure"))
         records["dsar_overdue"] = sum(
             1 for r in records["dsar"] if r.get("overdue"))
-    # The engine is multi-department (finance runs SOX/fraud/ITGC templates
-    # through the same scorer); this workspace shows the PRIVACY catalog.
-    # Each future department workspace filters the same engine its own way.
-    privacy_types = {"pia", "aira", "vendor_risk", "hipaa", "soc2", "pci_dss"}
-    return templates.TemplateResponse(request, "privacy.html", {
-        "sessions": sessions,
-        "stats": stats,
-        "precedents": precedents,
-        "records": records,
-        "templates": [{"type": t.type, "title": t.title,
-                       "framework": t.framework, "questions": len(t.questions)}
-                      for t in list_templates() if t.type in privacy_types],
-    })
+    ctx["records"] = records
+    return templates.TemplateResponse(request, "privacy.html", ctx)
+
+
+@app.get("/finance", response_class=HTMLResponse)
+async def finance_page(request: Request) -> HTMLResponse:
+    """The Finance workspace: the same chassis over the finance team's
+    assessment types — SOX controls, fraud risk, ITGC, credit risk, and
+    close readiness — with the shared review pop-out."""
+    require_permission(request, "operate")
+    return templates.TemplateResponse(
+        request, "finance.html", _workspace_ctx(FINANCE_ASSESSMENT_TYPES))
 
 
 @app.get("/savings", response_class=HTMLResponse)

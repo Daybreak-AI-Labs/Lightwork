@@ -2,20 +2,6 @@
 {% block title %}Privacy · Lightwork{% endblock %}
 {% block content %}
 <style>
-  /* Privacy workspace — the module view over assessment records. */
-  .pw-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-4); margin-bottom: var(--space-5); }
-  .pw-filters { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
-  .pw-risk { white-space: nowrap; }
-  .pw-risk .badge + .badge { margin-inline-start: 4px; }
-  .pw-age-warn { color: var(--warn); font-weight: var(--font-medium); }
-  .pw-cat { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-  .pw-cat .chip { border: 1px solid var(--border); border-radius: var(--radius-pill);
-                  padding: 0.3rem 0.8rem; font-size: var(--text-sm); background: var(--surface-2); }
-  .pw-cat .chip b { color: var(--brand); font-weight: var(--font-semibold); }
-  .pw-review-btn { padding: 0.35rem 0.85rem; background: var(--brand); color: var(--brand-fg);
-                   border: 1px solid transparent; border-radius: 4px; cursor: pointer;
-                   font-size: 0.85rem; font-weight: var(--font-medium); }
-  .pw-review-btn:hover { background: var(--brand-hi); }
   /* Record-type tabs (DPA / AI registry / RoPA / DSAR). */
   .pw-tab[hidden] { display: none; }
   .pw-scroll { overflow-x: auto; }
@@ -41,81 +27,7 @@
     PIAs, AI risk, vendor risk, and framework readiness — with risk ratings, aging, and open
     follow-ups. Review and send questions back without leaving this screen.</p>
 
-  <div class="pw-hero">
-    <div class="stat">
-      <div class="num">{{ stats.total }}</div>
-      <div class="label">assessments</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ stats.pending }}</div>
-      <div class="label">awaiting review</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ stats.needs_more }}</div>
-      <div class="label">awaiting answers</div>
-    </div>
-    <div class="stat">
-      <div class="num {{ 'pw-age-warn' if stats.high_residual }}">{{ stats.high_residual }}</div>
-      <div class="label">high residual risk</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ stats.oldest_open_days if stats.oldest_open_days is not none else '—' }}{{ 'd' if stats.oldest_open_days is not none }}</div>
-      <div class="label">oldest open item</div>
-    </div>
-    {% if records.enabled %}
-    <div class="stat">
-      <div class="num {{ 'pw-age-warn' if records.dsar_overdue }}">{{ records.dsar_open }}</div>
-      <div class="label">open DSARs</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ records.ropa | length }}</div>
-      <div class="label">Art. 30 entries</div>
-    </div>
-    {% endif %}
-  </div>
-
-  <div class="section-head"><h2>Worklist</h2></div>
-  <div class="panel">
-    <div class="pw-filters" role="group" aria-label="Filter worklist">
-      <button class="btn btn--primary" data-filter="all" type="button">All ({{ stats.total }})</button>
-      <button class="btn" data-filter="pending_review" type="button">Needs review ({{ stats.pending }})</button>
-      <button class="btn" data-filter="needs_more" type="button">Awaiting answers ({{ stats.needs_more }})</button>
-      <button class="btn" data-filter="high" type="button">High residual ({{ stats.high_residual }})</button>
-    </div>
-    {% if sessions %}
-    <table id="pw-table">
-      <thead>
-        <tr>
-          <th scope="col">assessment</th><th scope="col">subject</th>
-          <th scope="col">risk (inherent → residual)</th>
-          <th scope="col">status</th><th scope="col">follow-ups</th>
-          <th scope="col">age</th><th scope="col"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for s in sessions %}
-        <tr data-status="{{ s.status }}" data-residual="{{ s.residual_risk }}">
-          <td><code>{{ s.id }}</code><br><span class="muted" style="font-size:var(--text-xs); text-transform:uppercase;">{{ s.type }}</span></td>
-          <td>{{ s.subject }}</td>
-          <td class="pw-risk">
-            <span class="badge {{ 'blocked' if s.inherent_risk == 'high' else 'warn' if s.inherent_risk == 'medium' else 'done' }}">{{ s.inherent_risk }}</span>
-            <span aria-hidden="true" class="muted">→</span>
-            <span class="badge {{ 'blocked' if s.residual_risk == 'high' else 'warn' if s.residual_risk == 'medium' else 'done' }}">{{ s.residual_risk }}</span>
-          </td>
-          <td><span class="badge {{ 'warn' if s.status == 'needs_more' else 'info' }}">{{ 'awaiting answers' if s.status == 'needs_more' else 'needs review' }}</span></td>
-          <td>{{ s.open_followups or '—' }}</td>
-          <td {% if s.age_days is not none and s.age_days > 7 %}class="pw-age-warn"{% endif %}>
-            {{ (s.age_days ~ 'd') if s.age_days is not none else '—' }}</td>
-          <td><button class="pw-review-btn" data-assessment="{{ s.id }}" type="button">Review</button></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-      <p class="muted">No assessments yet. They appear here the moment one is submitted —
-        from the intake portal, the assessor agent, or <code>maverick assess</code>.</p>
-    {% endif %}
-  </div>
+  {% include "_workspace_worklist.html" %}
 
   {% if records.enabled %}
   <div class="section-head"><h2>Privacy records</h2></div>
@@ -331,72 +243,11 @@
   </div>
   {% endif %}
 
-  <div class="section-head"><h2>What the org already knows</h2></div>
-  <div class="panel">
-    {% if precedents %}
-    <p class="muted" style="margin-top:0; font-size:var(--text-sm);">Completed assessments feed
-      the platform's memory: similar future requests open pre-filled with these precedents,
-      and the suggestions carry their provenance.</p>
-    <table>
-      <thead><tr><th scope="col">subject</th><th scope="col">type</th>
-        <th scope="col">inherent → residual</th><th scope="col">findings</th></tr></thead>
-      <tbody>
-        {% for p in precedents %}
-        <tr>
-          <td>{{ p.subject }}</td>
-          <td class="muted">{{ p.type }}</td>
-          <td class="pw-risk">
-            <span class="badge {{ 'blocked' if p.inherent_risk == 'high' else 'warn' if p.inherent_risk == 'medium' else 'done' }}">{{ p.inherent_risk }}</span>
-            <span aria-hidden="true" class="muted">→</span>
-            <span class="badge {{ 'blocked' if p.residual_risk == 'high' else 'warn' if p.residual_risk == 'medium' else 'done' }}">{{ p.residual_risk }}</span>
-          </td>
-          <td>{{ p.findings }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-      <p class="muted">Memory builds as assessments complete — the second assessment of a
-        similar system opens pre-filled from the first.</p>
-    {% endif %}
-  </div>
+  {% include "_workspace_memory_catalog.html" %}
 
-  <div class="section-head"><h2>Assessment catalog</h2></div>
-  <div class="panel">
-    <p class="muted" style="margin-top:0; font-size:var(--text-sm);">Frameworks the engine runs
-      today. Templates are data, not code — new questionnaires are an authoring exercise.</p>
-    <div class="pw-cat">
-      {% for t in templates %}
-        <span class="chip"><b>{{ t.title }}</b> · {{ t.framework }} · {{ t.questions }} questions</span>
-      {% endfor %}
-    </div>
-  </div>
-
-{% include "_assessment_review.html" %}
 <script>
 (function () {
   'use strict';
-  // Review pop-out triggers.
-  document.querySelectorAll('.pw-review-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      if (window.mvAssessmentReview) window.mvAssessmentReview.open(btn.dataset.assessment);
-    });
-  });
-  // Client-side worklist filters.
-  var buttons = document.querySelectorAll('.pw-filters button[data-filter]');
-  buttons.forEach(function (fb) {
-    fb.addEventListener('click', function () {
-      buttons.forEach(function (b) { b.classList.remove('btn--primary'); });
-      fb.classList.add('btn--primary');
-      var f = fb.dataset.filter;
-      document.querySelectorAll('#pw-table tbody tr').forEach(function (tr) {
-        var show = f === 'all' ||
-          (f === 'high' ? tr.dataset.residual === 'high' : tr.dataset.status === f);
-        tr.style.display = show ? '' : 'none';
-      });
-    });
-  });
-
   // Record-type tabs.
   var tabs = document.querySelectorAll('.pw-filters button[data-tab]');
   tabs.forEach(function (tb) {

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Finance · Lightwork{% endblock %}
+{% block content %}
+  <h1 class="page-title">Finance</h1>
+  <p class="page-subtitle">The finance team's workspace: every control and risk assessment the
+    platform has run — SOX controls, fraud risk, ITGC, credit risk, and close readiness — with
+    risk ratings, aging, and open follow-ups. Review and send questions back without leaving
+    this screen.</p>
+
+  {% include "_workspace_worklist.html" %}
+
+  {% include "_workspace_memory_catalog.html" %}
+{% endblock %}
