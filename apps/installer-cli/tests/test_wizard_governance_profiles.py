@@ -90,7 +90,8 @@ def test_every_level_gets_the_learning_lifecycle():
         assert preset["self_learning"]["enable"] is True, name
         # The two higher-trust autonomy switches stay OFF at every level.
         assert preset["self_learning"]["create_tools"] is False, name
-        assert preset["self_learning"]["allow_mcp"] is False, name
+        assert preset["self_learning"]["allow_mcp_acquisition"] is False, name
+        assert "self_modify" not in preset["advanced"], name
 
 
 def test_profiles_never_carry_budget():
@@ -177,6 +178,8 @@ def test_consumer_default_is_essentials(monkeypatch, tmp_path: Path):
     # The lifecycle is on...
     assert config["self_learning"]["enable"] is True
     assert config["self_learning"]["create_tools"] is False
+    assert config["self_learning"]["allow_mcp_acquisition"] is False
+    assert "self_modify" not in config
     assert config["reflexion"]["enable"] is True
     assert config["dreaming"]["enable"] is True
     # The promotion ladder the lifecycle rides is actually ON.

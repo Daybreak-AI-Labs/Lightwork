@@ -1,6 +1,6 @@
 # Evaluator co-evolution: promote a better judge, don't just freeze
 
-**Status:** shipped (opt-in, OFF by default) · **Module:** `maverick.evaluator_evolution`
+**Status:** shipped (governed default-on) · **Module:** `maverick.evaluator_evolution`
 · **Reference:** *The Red Queen Gödel Machine: Co-Evolving Agents and Their
 Evaluators* (arXiv 2606.26294)
 
@@ -71,9 +71,10 @@ self-improvement governance spine rather than beside it.
 
 ## Posture
 
-OFF by default and a no-op while off (kernel rule 1). Promotion runs only when
-`[self_improvement] enable` **and** `[self_improvement] evaluator_evolution` are
-set. The anchor governance fails *open* when no lock has been baked (an
+ON by default with governed self-improvement, and a no-op when explicitly
+paused. Promotion runs only when `[self_improvement] enable` **and**
+`[self_improvement] evaluator_evolution` are true. The anchor governance fails
+*open* when no lock has been baked (an
 ungoverned deployment) but *closed* once a role is locked. Everything in the
 module is pure and dependency-injected — it never calls an evaluator agent; the
 caller supplies each evaluator's verdicts on the anchor — so the whole mechanism

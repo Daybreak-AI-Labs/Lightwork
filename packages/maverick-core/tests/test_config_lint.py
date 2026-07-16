@@ -83,6 +83,17 @@ def test_bad_type_enabled_must_be_bool():
     assert f.key == "enabled"
 
 
+def test_high_authority_self_learning_keys_must_be_bool():
+    findings = lint_config({"self_learning": {
+        "create_tools": "false",
+        "allow_mcp_acquisition": 1,
+        "allow_provider_egress": {},
+    }})
+    assert {f.key for f in findings if f.severity == "error"} == {
+        "create_tools", "allow_mcp_acquisition", "allow_provider_egress",
+    }
+
+
 def test_dynamic_section_accepts_arbitrary_keys():
     # providers.<name> is open-ended: any subkey is fine, no findings.
     cfg = {

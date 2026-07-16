@@ -21,19 +21,21 @@ Deterministic and LLM-free *by default*: dreams are derived with the same
 lexical machinery the distillation loops use, so consolidation can never be
 steered by prompt-injected trajectory text into persisting attacker-authored
 instructions (the same reasoning that keeps MAVERICK_AUTO_DISTILL off by
-default). Off by default (``[dreaming] enable`` / ``MAVERICK_DREAMING=1``)
-and tolerant of ordinary replay/enrichment failures. The global operator HALT
+default). Governed consolidation is on by default
+(``MAVERICK_DREAMING=0`` opts out) and tolerant of ordinary replay/enrichment
+failures. The global operator HALT
 is different: it is checked fresh and fail-closed at learning transitions, so
 an active stop or unavailable stop authority prevents durable learned writes.
 
 Optionally (``[dreaming] llm_consolidation`` / ``MAVERICK_LLM_CONSOLIDATION=1``,
-OFF by default) each clustered failure's deterministic lesson is rewritten by
-the SAME configured LLM the platform already runs on (the cheap ``summarizer``
-role -- no separate key, no separate model). To preserve the injection-safety
-property above, every input snippet AND the model's output is secret-redacted
-and Shield-scanned, the call is budget-metered (kernel rule 3), and ANY error,
-budget pressure, or Shield block falls back to the deterministic text -- so the
-loop can never be broken or steered by injected text even with the LLM on.
+OFF by default, plus ``[self_learning] allow_provider_egress`` authority) each
+clustered failure's deterministic lesson is rewritten by the SAME configured
+LLM the platform already runs on (the cheap ``summarizer`` role -- no separate
+key, no separate model). To preserve the injection-safety property above, every
+input snippet AND the model's output is secret-redacted and Shield-scanned, the
+call is budget-metered (kernel rule 3), and ANY error, budget pressure, or
+Shield block falls back to the deterministic text -- so the loop can never be
+broken or steered by injected text even with the LLM on.
 """
 from __future__ import annotations
 
@@ -94,13 +96,12 @@ _LEGACY_SCOPE_UNKNOWN = "__legacy_scope_unknown__"
 
 
 def enabled() -> bool:
-    """Whether the offline dreaming loop is active. Off by default."""
-    if os.environ.get("MAVERICK_DREAMING", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }:
-        return True
+    """Whether the offline dreaming loop is active. On by default."""
     try:
-        from .config import get_dreaming
+        from .config import get_dreaming, governed_learning_env_flag
+        override = governed_learning_env_flag("MAVERICK_DREAMING")
+        if override is not None:
+            return override
         return bool(get_dreaming()["enable"])
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
@@ -203,20 +204,23 @@ def _containment(a: set[str], b: set[str]) -> float:
 
 
 def _sanitize(text: str, *, shield: Any | None = None) -> str:
-    """Redact secrets / Shield-blocked snippets before prompt embedding."""
-    safe = str(text or "")
+    """Redact secrets / Shield-blocked snippets fail-closed."""
+    try:
+        safe = str(text or "")
+    except Exception:
+        return ""
     try:
         from .safety.secret_detector import redact as _redact
         safe, _ = _redact(safe)
     except Exception:  # pragma: no cover
-        pass
+        return ""
     if shield is not None:
         try:
             verdict = shield.scan_input(safe)
             if not getattr(verdict, "allowed", True):
                 return "[redacted by Shield]"
         except Exception:  # pragma: no cover
-            pass
+            return ""
     return safe
 
 
@@ -319,6 +323,23 @@ def _llm_consolidation_enabled(cfg: dict) -> bool:
     return bool(cfg.get("llm_consolidation", False))
 
 
+def _llm_consolidation_authorized(cfg: dict) -> bool:
+    """Whether failure text may leave the local deterministic dream loop.
+
+    ``llm_consolidation`` selects the richer algorithm; the independent
+    self-learning provider-egress bit is the data-boundary authority.  Requiring
+    both keeps default-on dreaming local even for an upgraded deployment that
+    already had LLM consolidation configured.
+    """
+    if not _llm_consolidation_enabled(cfg):
+        return False
+    try:
+        from .self_learning import provider_egress_enabled
+        return bool(provider_egress_enabled())
+    except Exception:  # pragma: no cover -- uncertainty cannot authorize egress
+        return False
+
+
 def _llm_enrich_insight(
     insight: DreamInsight, cluster: list[dict], *,
     llm: Any, budget: Any | None = None, shield: Any | None = None,
@@ -384,10 +405,10 @@ def synthesize_insight(
 ) -> DreamInsight:
     """Deterministic consolidation of one failure cluster — no LLM call, so
     persisted insights can't be steered by injected trajectory text."""
-    cls = str(cluster[0].get("failure_class", "unknown"))
-    kws = _keywords([str(f.get("goal_text", "")) for f in cluster])
+    cls = _sanitize(str(cluster[0].get("failure_class", "unknown")))[:96] or "unknown"
+    kws = _keywords([_sanitize(str(f.get("goal_text", ""))) for f in cluster])
     newest = max(cluster, key=lambda f: float(f.get("ts", 0) or 0))
-    lesson = " ".join(str(newest.get("reflection", "")).split())[:240]
+    lesson = " ".join(_sanitize(str(newest.get("reflection", ""))).split())[:240]
     about = ", ".join(kws) if kws else "similar goals"
     text = (
         f"Recurring failure ({cls}, seen {len(cluster)}x) on goals about "
@@ -470,11 +491,19 @@ def load_insights(path: Path | str | None = None) -> list[DreamInsight]:
             for raw in f:
                 try:
                     d = json.loads(raw)
+                    # Old stores predate the write-time privacy boundary.
+                    # Re-screen every persisted lesson before it can be
+                    # recalled or copied into a rewritten store. If screening
+                    # is unavailable, drop the row instead of reviving raw
+                    # durable text.
+                    safe_text = _sanitize(str(d.get("text", "")))[:1_000]
+                    if not safe_text:
+                        continue
                     out.append(DreamInsight(
                         ts=float(d.get("ts", 0) or 0),
                         kind=str(d.get("kind", "failure_pattern")),
                         domain=d.get("domain"),
-                        text=str(d.get("text", "")),
+                        text=safe_text,
                         evidence=int(d.get("evidence", 1) or 1),
                         # Pre-scope insight lines may have been derived from
                         # channel/user-scoped reflexions, so treat missing
@@ -506,6 +535,10 @@ def append_insights(
     written = 0
     refreshed = 0
     for ins in new or []:
+        safe_text = _sanitize(ins.text)[:1_000]
+        if not safe_text:
+            continue
+        ins = replace(ins, text=safe_text)
         it = _tokens(ins.text)
         dup = next(
             (e for e in existing
@@ -1021,7 +1054,7 @@ def _maintenance_phases(
     # Per-user preference notes: distill explicit, deterministic preference
     # statements from recent conversations into briefing notes injected on
     # that user's future runs.
-    if world is not None and bool(cfg.get("user_notes", True)):
+    if world is not None and bool(cfg.get("user_notes", False)):
         try:
             from . import user_notes as _un
             report.user_notes_written = _un.consolidate(world, path=user_notes_path)
@@ -1236,7 +1269,7 @@ def _consolidate_learning(report, by_domain_success, failures, *,
     # summarizer role rewrites each deterministic lesson into a transferable one
     # (sanitized in/out, budget-metered, fail-open). Department-scoped insights
     # only -- the shared/global pool below stays deterministic by design.
-    use_llm = llm is not None and _llm_consolidation_enabled(cfg)
+    use_llm = llm is not None and _llm_consolidation_authorized(cfg)
     new_insights: list[DreamInsight] = []
     by_domain_failure: dict[str | None, list[dict]] = {}
     for f in failures:
@@ -1278,11 +1311,11 @@ def dream_cycle(
     """Run one full dream cycle. Deterministic and fail-open.
 
     Deterministic and LLM-free by default. If ``[dreaming] llm_consolidation``
-    is on and a configured ``llm`` (plus a ``budget`` to meter it) is passed,
-    failure-insight consolidation is enriched by that LLM -- sanitized in/out,
-    budget-metered, and fail-open to the deterministic text (see
-    :func:`_llm_enrich_insight`). With no ``llm`` the cycle is byte-for-byte the
-    old deterministic path.
+    and the independent provider-egress authority are on, and a configured
+    ``llm`` (plus a ``budget`` to meter it) is passed, failure-insight
+    consolidation is enriched by that LLM -- sanitized in/out, budget-metered,
+    and fail-open to the deterministic text (see :func:`_llm_enrich_insight`).
+    Without both authorities the cycle stays on the deterministic path.
 
     Callers gate on :func:`enabled` (the CLI and any scheduler do); the cycle
     itself stays callable so tests and operators can dream on demand.
@@ -1319,6 +1352,12 @@ def dream_cycle(
             log.debug("dreaming: trajectory tool join skipped: %s", e)
         try:
             for g in world.list_goals(status="done", limit=max_goals, order="desc"):
+                # Learned skill files are tenant-shared today. Never fold an
+                # owner-scoped user's goal title into that shared artifact;
+                # missing owner metadata is ambiguous and therefore skipped.
+                # Owner-specific skill stores/retrieval can relax this later.
+                if getattr(g, "owner", None) != "":
+                    continue
                 successes.append({
                     "goal": getattr(g, "title", "") or "",
                     "success": True,

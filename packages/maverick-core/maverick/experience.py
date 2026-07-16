@@ -8,8 +8,8 @@ missing outcome signal -- a short "N similar tasks: X succeeded, Y failed;
 lean on …, avoid …" guidance distilled from the persistent world model.
 
 Pure core (``summarize_experience``) for testability; ``recall`` is the
-world-backed convenience wrapper. Off by default + fail-open
-(``[experience] enable`` / ``MAVERICK_EXPERIENCE_GUIDANCE=1``).
+world-backed convenience wrapper. On by default and owner-scoped
+(``[experience] enable`` / ``MAVERICK_EXPERIENCE_GUIDANCE=0`` to disable).
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ import logging
 import re
 from typing import Any
 
-from .config import env_flag
+from .config import governed_learning_env_flag
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ _STOP = {
 
 
 def enabled() -> bool:
-    _v = env_flag("MAVERICK_EXPERIENCE_GUIDANCE")
+    _v = governed_learning_env_flag("MAVERICK_EXPERIENCE_GUIDANCE")
     if _v is not None:
         return _v
     try:
@@ -58,19 +58,22 @@ def _similar(a: set[str], b: set[str]) -> float:
 
 def _sanitize_anchor_title(title: Any, *, shield: Any | None = None) -> str:
     """Return a bounded, single-line prior title safe to embed as data."""
-    safe = str(title or "")[:240]
+    try:
+        safe = str(title or "")[:240]
+    except Exception:
+        return ""
     try:
         from .safety.secret_detector import redact as _redact
         safe, _ = _redact(safe)
     except Exception:  # pragma: no cover
-        pass
+        return ""
     if shield is not None:
         try:
             verdict = shield.scan_input(safe)
             if not getattr(verdict, "allowed", True):
                 return "[redacted by Shield]"
         except Exception:  # pragma: no cover
-            pass
+            return ""
     return " ".join(safe.split())[:180]
 
 
@@ -125,6 +128,7 @@ def recall(
     k: int = 5,
     scan: int = 50,
     shield: Any | None = None,
+    owner: str = "",
 ) -> str | None:
     """World-backed wrapper: pull recent finished goals + outcomes, summarize.
 
@@ -134,7 +138,10 @@ def recall(
         return None
     try:
         prior: list[tuple[str, str]] = []
-        episodes = world.list_episodes(limit=scan)
+        # Owner is an access boundary, not a ranking hint. The safe default is
+        # the unowned/local principal, never the WorldModel's owner=None
+        # administrator view that spans every user in the tenant.
+        episodes = world.list_episodes(limit=scan, owner=owner)
         for ep in episodes:
             outcome = getattr(ep, "outcome", None)
             if not outcome:

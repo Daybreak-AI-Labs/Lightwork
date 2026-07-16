@@ -328,7 +328,8 @@ def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
 
 def recall(
     query: str, *, agent_id: str = "", vendor: str = "",
-    domain: str | None = None, shield: Any | None = None,
+    domain: str | None = None, channel: str | None = None,
+    user_id: str | None = None, shield: Any | None = None,
 ) -> tuple[str, str]:
     """Governed memory read for an external agent. Returns ``(context, reason)``.
 
@@ -382,7 +383,10 @@ def recall(
     n_reflexion = n_dream = 0
     try:
         from . import reflexion
-        hits = _in_scope(reflexion.recall(safe_query, k=3, domain=domain))
+        hits = _in_scope(reflexion.recall(
+            safe_query, k=3, domain=domain,
+            channel=channel, user_id=user_id,
+        ))
         n_reflexion = len(hits)
         block = reflexion.format_context(hits, shield=shield)
         if block:
@@ -391,7 +395,10 @@ def recall(
         pass
     try:
         from . import dreaming
-        ins = _in_scope(dreaming.recall_insights(safe_query, domain=domain, k=3))
+        ins = _in_scope(dreaming.recall_insights(
+            safe_query, domain=domain, k=3,
+            channel=channel, user_id=user_id,
+        ))
         n_dream = len(ins)
         block = dreaming.format_context(ins, shield=shield)
         if block:

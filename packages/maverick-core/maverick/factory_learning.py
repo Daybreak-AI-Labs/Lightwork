@@ -15,11 +15,11 @@ So the NEXT finance pack the factory writes already knows that finance packs
 typically need ``web_search``, because the last several needed it and the gate
 agreed the pattern is real.
 
-Posture (kernel rule 1): OFF by default and a no-op while off. Recording writes
-no state, mining reads nothing, and ``augment_system_prompt`` returns the base
-prompt UNCHANGED unless ``[self_improvement] enable`` (or
-``MAVERICK_FACTORY_LEARNING``) is set -- a default deployment's generator is
-byte-identical to before. Promotion reuses ``SelfImprovementController`` so a
+Posture: ON by default with governed self-improvement and a no-op while off.
+Before enough governed evidence accumulates, recording/mining cannot change the
+generator. Set ``[self_improvement] factory_learning = false`` or
+``MAVERICK_FACTORY_LEARNING=0`` to keep it static. Promotion reuses
+``SelfImprovementController`` so a
 correction only takes effect if it beats its baseline with enough support and
 the verifier isn't drifting. Ordinary tool/skill guidance cannot grant tools;
 an envelope-widening signal is deliberately excluded from automatic promotion
@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .config import env_flag
+from .config import governed_learning_env_flag
 from .file_lock import (
     atomic_read_bytes,
     atomic_read_text,
@@ -122,14 +122,14 @@ _EVIDENCE_PROVENANCE_HASHES = (
 
 
 def enabled() -> bool:
-    """Whether the factory-learning loop is active. OFF by default, fail-open.
+    """Whether the default-on factory-learning loop is active.
 
     Rides on the self-improvement master switch (the gate it promotes through),
     with a dedicated ``[self_improvement] factory_learning`` sub-toggle (default
     on) so an operator can keep the generator static while other rungs learn.
     ``MAVERICK_FACTORY_LEARNING`` overrides both.
     """
-    v = env_flag("MAVERICK_FACTORY_LEARNING")
+    v = governed_learning_env_flag("MAVERICK_FACTORY_LEARNING")
     if v is not None:
         return v
     try:
@@ -222,6 +222,9 @@ def record_outcome(
     an unknown signal. Never raises -- a ledger write must not break onboarding.
     """
     if not enabled() or signal not in _VALID_SIGNALS:
+        return False
+    from .learning_guard import learning_write_allowed
+    if not learning_write_allowed("factory_learning"):
         return False
     safe_pack = _safe_pack(pack)
     if safe_pack is None:

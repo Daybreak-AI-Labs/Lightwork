@@ -366,14 +366,18 @@ def _record_swarm_disagreement(parent: Agent, children: list, results: list) -> 
 async def _swarm_credit_assignment(parent: Agent, children: list, results: list) -> None:
     """Counterfactual swarm credit assignment (CSCA): attribute the outcome to
     each sub-agent by ablating its contribution and re-scoring with the verifier
-    as the value oracle. Off by default; budget-gated, capped to small swarms,
-    skipped when calibration is frozen. Fail-open; a BudgetExceeded/Halt still
-    stops the run."""
+    as the value oracle. The credit gate defaults on, but verifier re-scoring
+    still requires the separate provider-egress authority. Budget-gated, capped
+    to small swarms, and skipped when calibration is frozen. Fail-open; a
+    BudgetExceeded/Halt still stops the run."""
     from .. import killswitch as _ks
     from ..budget import BudgetExceeded as _BE
     try:
         from .. import credit as _credit
         if not _credit.enabled():
+            return
+        from .. import self_learning as _self_learning
+        if not _self_learning.provider_egress_enabled():
             return
         contribs = {
             child.name: res.final
@@ -391,11 +395,20 @@ async def _swarm_credit_assignment(parent: Agent, children: list, results: list)
             frozen = False
         if not (2 <= len(contribs) <= _cs["max_children"] and headroom_ok and not frozen):
             return
+        try:
+            from ..safety.secret_detector import redact as _redact
+            safe_brief, _ = _redact(str(parent.brief or "")[:8_000])
+            contribs = {
+                name: _redact(str(value or "")[:8_000])[0]
+                for name, value in contribs.items()
+            }
+        except Exception:
+            return
         from ..verifier import verify_proposal
 
         async def _score(subset: list[str]) -> float:
             v = await verify_proposal(
-                parent.brief, "\n\n".join(subset), parent.ctx.llm,
+                safe_brief, "\n\n".join(subset), parent.ctx.llm,
                 parent.ctx.budget, proposer_model=getattr(parent, "model", None),
             )
             return float(v.confidence)

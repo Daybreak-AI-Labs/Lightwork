@@ -55,6 +55,61 @@ def test_lesson_lands_as_provenance_tagged_reflexion():
     assert reason == "ok" and "partner feed lags" in ctx
 
 
+def test_recall_uses_exact_user_scope_and_preserves_local_scope(monkeypatch):
+    monkeypatch.setenv("MAVERICK_REFLEXION", "1")
+    monkeypatch.setenv("MAVERICK_DREAMING", "1")
+    _register()
+    reflexion.record(
+        goal_text="reconcile the customer ledger",
+        failure_class="scope", failure_msg="local",
+        reflection="LOCAL_OPERATOR_REFLEXION",
+        domain="finance_sox",
+    )
+    reflexion.record(
+        goal_text="reconcile the customer ledger",
+        failure_class="scope", failure_msg="alice",
+        reflection="ALICE_PRIVATE_REFLEXION",
+        channel="api", user_id="alice", domain="finance_sox",
+    )
+    dreaming.append_insights([
+        dreaming.DreamInsight(
+            ts=1.0, kind="failure_pattern", domain="finance_sox",
+            text="LOCAL_OPERATOR_DREAM", evidence=3,
+        ),
+        dreaming.DreamInsight(
+            ts=2.0, kind="failure_pattern", domain="finance_sox",
+            text="ALICE_PRIVATE_DREAM", evidence=3,
+            channel="api", user_id="alice",
+        ),
+    ])
+
+    alice, reason = fleet_memory.recall(
+        "reconcile the customer ledger",
+        agent_id="order-bot", vendor="agentforce", domain="finance_sox",
+        channel="api", user_id="alice",
+    )
+    bob, _ = fleet_memory.recall(
+        "reconcile the customer ledger",
+        agent_id="order-bot", vendor="agentforce", domain="finance_sox",
+        channel="api", user_id="bob",
+    )
+    local, _ = fleet_memory.recall(
+        "reconcile the customer ledger",
+        agent_id="order-bot", vendor="agentforce", domain="finance_sox",
+    )
+
+    assert reason == "ok"
+    assert "ALICE_PRIVATE_REFLEXION" in alice
+    assert "ALICE_PRIVATE_DREAM" in alice
+    assert "LOCAL_OPERATOR_REFLEXION" not in alice
+    assert "LOCAL_OPERATOR_DREAM" not in alice
+    assert "ALICE_PRIVATE" not in bob
+    assert "LOCAL_OPERATOR" not in bob
+    assert "LOCAL_OPERATOR_REFLEXION" in local
+    assert "LOCAL_OPERATOR_DREAM" in local
+    assert "ALICE_PRIVATE" not in local
+
+
 def test_success_lands_in_inbox_for_dream_consolidation():
     _register()
     ok, _ = fleet_memory.ingest({

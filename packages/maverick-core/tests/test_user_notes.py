@@ -82,6 +82,31 @@ class TestConsolidateAndRecall:
         ]})
         assert user_notes.consolidate(world, path=path) == 1
 
+    def test_secret_is_redacted_before_note_persistence(self, tmp_path):
+        path = tmp_path / "user_notes.ndjson"
+        secret = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"  # pragma: allowlist secret
+        world = _World(
+            [_conv(1, "slack", "u1")],
+            {1: [_turn("user", f"I prefer using token {secret}.")]},
+        )
+        assert user_notes.consolidate(world, path=path) == 1
+        assert secret not in path.read_text(encoding="utf-8")
+
+    def test_redactor_failure_drops_raw_preference(self, tmp_path, monkeypatch):
+        from maverick.safety import secret_detector
+        monkeypatch.setattr(
+            secret_detector, "redact", lambda *_a, **_k: (_ for _ in ()).throw(
+                RuntimeError("unavailable")
+            ),
+        )
+        path = tmp_path / "user_notes.ndjson"
+        world = _World(
+            [_conv(1, "slack", "u1")],
+            {1: [_turn("user", "I prefer my private identifier 12345.")]},
+        )
+        assert user_notes.consolidate(world, path=path) == 0
+        assert not path.exists() or "identifier" not in path.read_text(encoding="utf-8")
+
 
 class TestFormatContext:
     def test_block_marks_notes_untrusted(self):

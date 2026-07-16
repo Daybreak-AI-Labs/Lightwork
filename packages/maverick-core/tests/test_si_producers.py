@@ -158,7 +158,7 @@ def test_propose_weights_is_human_gated(tmp_path, monkeypatch):
 
 
 def test_disabled_engine_blocks_all_producers(tmp_path, monkeypatch):
-    monkeypatch.delenv("MAVERICK_SELF_IMPROVEMENT", raising=False)
+    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "0")
     from maverick.self_improvement import reset_shared
     reset_shared()
     v = propose_policy("x", baseline=0.1, candidate=0.9, samples=20, rollback="r")

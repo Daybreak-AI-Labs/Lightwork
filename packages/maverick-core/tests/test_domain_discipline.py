@@ -130,8 +130,18 @@ class TestSpawnIntegration:
         assert "[redacted by Shield]" in agent.brief
 
     def test_memory_block_empty_when_loops_disabled(self, tmp_path, monkeypatch):
-        monkeypatch.delenv("MAVERICK_REFLEXION", raising=False)
-        monkeypatch.delenv("MAVERICK_DREAMING", raising=False)
+        monkeypatch.setenv("MAVERICK_REFLEXION", "0")
+        monkeypatch.setenv("MAVERICK_DREAMING", "0")
+        monkeypatch.setattr(
+            reflexion, "recall",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("disabled Reflexion recall was invoked")),
+        )
+        monkeypatch.setattr(
+            dreaming, "recall_insights",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("disabled Dreaming recall was invoked")),
+        )
         profile = DomainProfile(name="finance_sox")
         assert _department_memory(profile, "anything") == ""
 
@@ -147,6 +157,40 @@ class TestSpawnIntegration:
         profile = DomainProfile(name="finance_sox")
         memory = _department_memory(profile, "prepare the walkthrough memo")
         assert "Consolidated lessons" in memory
+
+    def test_dream_insight_recall_uses_exact_run_scope(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MAVERICK_DREAMING", "1")
+        ipath = tmp_path / "insights.ndjson"
+        dreaming.append_insights([
+            dreaming.DreamInsight(
+                ts=1.0, kind="failure_pattern", domain="finance_sox",
+                text="LOCAL_OPERATOR_LEDGER_LESSON", evidence=3,
+            ),
+            dreaming.DreamInsight(
+                ts=2.0, kind="failure_pattern", domain="finance_sox",
+                text="ALICE_PRIVATE_LEDGER_LESSON", evidence=3,
+                channel="api", user_id="alice",
+            ),
+        ], path=ipath)
+        monkeypatch.setattr(dreaming, "insights_path", lambda: ipath)
+        profile = DomainProfile(name="finance_sox")
+
+        alice = _department_memory(
+            profile, "reconcile the customer ledger",
+            channel="api", user_id="alice",
+        )
+        bob = _department_memory(
+            profile, "reconcile the customer ledger",
+            channel="api", user_id="bob",
+        )
+        local = _department_memory(profile, "reconcile the customer ledger")
+
+        assert "ALICE_PRIVATE_LEDGER_LESSON" in alice
+        assert "LOCAL_OPERATOR_LEDGER_LESSON" not in alice
+        assert "ALICE_PRIVATE_LEDGER_LESSON" not in bob
+        assert "LOCAL_OPERATOR_LEDGER_LESSON" not in bob
+        assert "LOCAL_OPERATOR_LEDGER_LESSON" in local
+        assert "ALICE_PRIVATE_LEDGER_LESSON" not in local
 
     def test_dream_insight_recall_is_shield_scanned(self, tmp_path, monkeypatch):
         """A specialist spawn recalls dream insights; an injection-bearing

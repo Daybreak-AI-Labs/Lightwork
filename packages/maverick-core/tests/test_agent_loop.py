@@ -29,6 +29,12 @@ def ctx(tmp_path: Path, fake_llm):
     )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_raw_agent_loop_from_rehearsal(monkeypatch):
+    """These tests exercise the agent/tool loop itself, not the twin gate."""
+    monkeypatch.setenv("MAVERICK_REHEARSAL", "0")
+
+
 class TestAgentLoop:
     @pytest.mark.asyncio
     async def test_final_parsing_returns_answer(self, ctx, fake_llm, make_llm_response):
@@ -407,6 +413,24 @@ class TestLoopGuard:
         assert all(n == "" for n in notes[:thr - 1])   # below threshold: silent
         assert "[loop-guard]" in notes[-1]             # at threshold: nudge
         assert str(thr) in notes[-1]                   # reports the streak count
+
+    def test_persisted_tool_failure_keeps_request_scope(self, ctx, monkeypatch):
+        from maverick import agent as agent_mod
+        from maverick import reflexion
+        captured = []
+        monkeypatch.setattr(reflexion, "enabled", lambda: True)
+        monkeypatch.setattr(
+            reflexion, "record", lambda **kw: captured.append(kw) or True,
+        )
+        ctx.channel = "slack"
+        ctx.user_id = "user-7"
+        a = Agent(ctx=ctx, role="researcher", brief="x")
+
+        for _ in range(agent_mod._LOOP_GUARD_THRESHOLD):
+            a._loop_guard_note("shell", {"cmd": "boom"}, "ERROR: nope")
+
+        assert captured[-1]["channel"] == "slack"
+        assert captured[-1]["user_id"] == "user-7"
 
     def test_success_resets_the_streak(self, ctx):
         a = Agent(ctx=ctx, role="researcher", brief="x")

@@ -25,37 +25,58 @@ def test_pending_skips_already_applied():
     # share/signoff/origin (v17), temporal fact_history (v18), rate_events (v19),
     # N-of-M dual control (v21), cluster-wide halt (v22), provider spend (v23),
     # facts provenance columns (v24), fleet learning store (v25),
-    # corpus family (v26), episode cache-token spend columns (v27).
+    # corpus family (v26), episode cache-token spend columns (v27), and
+    # per-principal goal ownership (v28).
     pending = pg.pending_migrations(1)
-    assert [v for v, _ in pending] == [10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pending] == [
+        10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+    ]
     # A DB at v10 still needs the remaining upgrades.
-    assert [v for v, _ in pg.pending_migrations(10)] == [11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(10)] == [
+        11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+    ]
     # A DB at v11 still needs the rest of the ladder.
-    assert [v for v, _ in pg.pending_migrations(11)] == [13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(11)] == [
+        13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+    ]
     # A DB at v13 still needs goal-domain + projects + artifacts + share/etc.
-    assert [v for v, _ in pg.pending_migrations(13)] == [14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(13)] == [
+        14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+    ]
     # A DB at v14 still needs projects + artifacts + share/signoff/origin.
-    assert [v for v, _ in pg.pending_migrations(14)] == [15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(14)] == [
+        15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+    ]
     # A DB at v15 still needs artifacts + share/signoff/origin + fact_history.
-    assert [v for v, _ in pg.pending_migrations(15)] == [16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(15)] == [
+        16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+    ]
     # A DB at v16 still needs the share/signoff/origin + fact_history migrations.
-    assert [v for v, _ in pg.pending_migrations(16)] == [17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(16)] == [
+        17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+    ]
     # A DB at v17 still needs fact_history + rate_events.
-    assert [v for v, _ in pg.pending_migrations(17)] == [18, 19, 21, 22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(17)] == [
+        18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+    ]
     # A DB at v18 still needs the rate_events migration.
-    assert [v for v, _ in pg.pending_migrations(18)] == [19, 21, 22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(18)] == [
+        19, 21, 22, 23, 24, 25, 26, 27, 28,
+    ]
     # A DB at v19 still needs dual-control + halt + provider-spend + facts trust.
-    assert [v for v, _ in pg.pending_migrations(19)] == [21, 22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(19)] == [
+        21, 22, 23, 24, 25, 26, 27, 28,
+    ]
     # A DB at v21 still needs halt + provider-spend + facts trust.
-    assert [v for v, _ in pg.pending_migrations(21)] == [22, 23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(21)] == [22, 23, 24, 25, 26, 27, 28]
     # A DB at v22 still needs provider-spend + facts trust.
-    assert [v for v, _ in pg.pending_migrations(22)] == [23, 24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(22)] == [23, 24, 25, 26, 27, 28]
     # A DB at v23 still needs the facts provenance migration + the store.
-    assert [v for v, _ in pg.pending_migrations(23)] == [24, 25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(23)] == [24, 25, 26, 27, 28]
     # A DB at v24 still needs the fleet learning store + corpus family.
-    assert [v for v, _ in pg.pending_migrations(24)] == [25, 26, 27]
+    assert [v for v, _ in pg.pending_migrations(24)] == [25, 26, 27, 28]
     # A DB at v25 still needs the corpus family.
-    assert [v for v, _ in pg.pending_migrations(25)] == [26, 27]
+    assert [v for v, _ in pg.pending_migrations(25)] == [26, 27, 28]
 
 
 def test_pending_is_ordered_with_custom_ladder():
@@ -93,8 +114,16 @@ def test_approval_claims_migration_adds_collaboration_columns():
 
 
 def test_schema_version_is_latest_migration():
-    assert pg._PG_SCHEMA_VERSION == 27
+    assert pg._PG_SCHEMA_VERSION == 28
     assert max(v for v, _ in pg.MIGRATIONS) == pg._PG_SCHEMA_VERSION
+
+
+def test_goal_owner_migration_is_additive_and_backfills_legacy_rows():
+    assert dict(pg.MIGRATIONS)[28] == [
+        "ALTER TABLE goals ADD COLUMN IF NOT EXISTS owner "
+        "TEXT NOT NULL DEFAULT '';",
+    ]
+    assert [v for v, _ in pg.pending_migrations(27)] == [28]
 
 
 def test_rate_events_migration_adds_table():
@@ -162,6 +191,84 @@ def test_tenant_scope_custom_column(monkeypatch):
     monkeypatch.setattr(pg, "_active_tenant", lambda: "acme")
     frag, _ = pg._tenant_scope("goals.tenant_id")
     assert frag == "(goals.tenant_id = %s OR goals.tenant_id IS NULL)"
+
+
+def test_create_goal_persists_owner_with_tenant(monkeypatch):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "tenant-a")
+    monkeypatch.setattr(pg.time, "time", lambda: 123.0)
+    monkeypatch.setattr(pg, "_seal", lambda value: value)
+
+    class FakeCursor:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, sql, params=()):
+            self.calls.append((sql, params))
+
+        def fetchone(self):
+            return (99,)
+
+    class FakeTx:
+        def __init__(self, cursor):
+            self.cursor = cursor
+
+        def __enter__(self):
+            return self.cursor
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    cursor = FakeCursor()
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: FakeTx(cursor))
+
+    assert model.create_goal(
+        "owned goal", "description", parent_id=4, owner="user:alice",
+    ) == 99
+    sql, params = cursor.calls[0]
+    assert "created_at, updated_at, owner, tenant_id" in sql
+    assert params == (
+        4, "owned goal", "description", 123.0, 123.0, "user:alice", "tenant-a",
+    )
+
+
+def test_list_episodes_combines_owner_goal_and_tenant_scopes(monkeypatch):
+    """Owner filtering must narrow, never replace, the tenant boundary."""
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "tenant-a")
+    monkeypatch.setattr(pg, "_strict_tenant_isolation", lambda: False)
+
+    class FakeCursor:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, sql, params=()):
+            self.calls.append((sql, params))
+
+        def fetchall(self):
+            return []
+
+    class FakeTx:
+        def __init__(self, cursor):
+            self.cursor = cursor
+
+        def __enter__(self):
+            return self.cursor
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    cursor = FakeCursor()
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: FakeTx(cursor))
+
+    assert model.list_episodes(limit=7, goal_id=42, owner="user:alice") == []
+
+    sql, params = cursor.calls[0]
+    assert sql.count("JOIN goals g ON g.id = e.goal_id") == 1
+    assert "e.goal_id = %s" in sql
+    assert "g.owner = %s" in sql
+    assert "(g.tenant_id = %s OR g.tenant_id IS NULL)" in sql
+    assert params == (42, "user:alice", "tenant-a", 7)
 
 
 def test_list_projects_applies_owner_and_tenant_scope(monkeypatch):

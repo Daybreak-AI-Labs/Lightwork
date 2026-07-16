@@ -19,9 +19,9 @@ the plan forward and returns a :class:`RehearsalVerdict` with the predicted
 outcome, an uncertainty (epistemic = no support; aleatoric = rollout spread), and
 a gate decision. ``gate_action`` is the governed entry point.
 
-Posture (kernel rule 1): OFF by default. When off, ``gate_action`` is a no-op
-that returns ``proceed`` (fail-open -- a disabled safety aid never blocks a run).
-When ON it fails toward caution: an unknown context, an over-uncertain rollout,
+Posture: ON by default with an explicit opt-out. When off, ``gate_action`` is a
+no-op that returns ``proceed`` (fail-open -- a disabled safety aid never blocks
+a run). When ON it fails toward caution: an unknown context, an over-uncertain rollout,
 or an internal error escalates rather than proceeding; a confidently-poor
 prediction blocks. Thresholds come from ``[rehearsal]`` config so the wizard can
 tune them. Pure, dependency-free, deterministic given a seed.
@@ -34,7 +34,7 @@ import random
 from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 
-from .config import env_flag
+from .config import governed_learning_env_flag
 
 log = logging.getLogger(__name__)
 
@@ -78,8 +78,8 @@ def _settings() -> dict:
 
 
 def enabled() -> bool:
-    """Whether rehearsal may gate actions. OFF by default, fail-open."""
-    _v = env_flag("MAVERICK_REHEARSAL")
+    """Whether default-on rehearsal may gate actions; config uncertainty disables it."""
+    _v = governed_learning_env_flag("MAVERICK_REHEARSAL")
     if _v is not None:
         return _v
     return bool(_settings().get("enable", False))

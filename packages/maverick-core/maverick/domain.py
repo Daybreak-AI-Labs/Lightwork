@@ -827,7 +827,10 @@ def _department_memory(profile: DomainProfile, task: str, *,
     try:
         from . import dreaming
         if dreaming.enabled():
-            insights = dreaming.recall_insights(task, domain=profile.name)
+            insights = dreaming.recall_insights(
+                task, domain=profile.name,
+                channel=channel, user_id=user_id,
+            )
             block = dreaming.format_context(insights, shield=shield)
             if block:
                 blocks.append(block)

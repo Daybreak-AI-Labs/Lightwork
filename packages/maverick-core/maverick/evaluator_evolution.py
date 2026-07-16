@@ -34,9 +34,9 @@ it. The mechanism, following the paper's *controlled utility evolution*:
   ``python -m maverick.evaluator_evolution --ci`` (``--regen`` to re-bake the
   lock after an intentional anchor addition).
 
-Posture (kernel rule 1): OFF by default and a no-op while off. Promotion runs
-only when ``[self_improvement] enable`` AND ``[self_improvement]
-evaluator_evolution`` are set, and then it inherits *every* self-improvement
+Posture: ON by default with governed self-improvement and a no-op while off.
+Promotion runs only when ``[self_improvement] enable`` AND
+``[self_improvement] evaluator_evolution`` are set, and then it inherits *every* self-improvement
 gate -- the calibration freeze, the evidence floor, reversibility, and the
 signed audit -- on a dedicated ``evaluator`` rung. An evaluator scores; it never
 grants a tool or executes code, so it cannot widen the capability envelope, but
@@ -362,9 +362,8 @@ def lock_problems(
 def verify_anchor_integrity(anchor: Anchor, lock: dict | None = None) -> bool:
     """Runtime guard: does this anchor match its locked checksum?
 
-    Used inside the promotion path. With no lock at all (an ungoverned
-    deployment that never baked one) we fail *open* -- governance is opt-in like
-    everything else (kernel rule 1). But once a role IS locked, a checksum
+    Used inside the promotion path. Anchor locking is separately provisioned, so
+    a deployment with no lock fails *open*. But once a role IS locked, a checksum
     mismatch fails *closed*: we will not promote an evaluator against a
     tampered or weakened anchor.
     """
@@ -450,10 +449,11 @@ def choose_challenger(
 
 
 def enabled() -> bool:
-    """Whether evaluator co-evolution may run. OFF by default, fail-open.
+    """Whether default-on evaluator co-evolution may run.
 
-    Requires self-improvement enabled AND the ``evaluator_evolution`` sub-toggle.
-    ``MAVERICK_EVALUATOR_EVOLUTION`` overrides the sub-toggle.
+    Requires self-improvement enabled AND the ``evaluator_evolution`` sub-toggle;
+    ``MAVERICK_EVALUATOR_EVOLUTION=0`` opts out. Promotion remains above the
+    default auto-rung ceiling and therefore requires approval.
     """
     try:
         from .self_improvement import enabled as si_enabled
@@ -461,8 +461,8 @@ def enabled() -> bool:
             return False
     except Exception:  # pragma: no cover -- if we can't confirm, stay off
         return False
-    from .config import env_flag
-    ov = env_flag("MAVERICK_EVALUATOR_EVOLUTION")
+    from .config import governed_learning_env_flag
+    ov = governed_learning_env_flag("MAVERICK_EVALUATOR_EVOLUTION")
     if ov is not None:
         return ov
     try:

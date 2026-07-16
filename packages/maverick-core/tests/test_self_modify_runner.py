@@ -364,6 +364,72 @@ class TestRun:
         assert "securely isolate" in result.reason
         assert calls == []
 
+    def test_stock_evaluator_pins_one_sandbox_policy_snapshot(
+        self, tmp_path, monkeypatch,
+    ):
+        config_loads = []
+        built_configs = []
+        built_ids = []
+        evidence = {}
+
+        def changing_config():
+            marker = len(config_loads) + 1
+            config_loads.append(marker)
+            return {
+                "backend": "ep:attested",
+                "options": {"marker": marker},
+                "api_key": f"secret-{marker}",
+            }
+
+        class SecureSandbox:
+            host_visible_fs = False
+            allow_network = False
+            allow_root = False
+            pids_limit = 32
+            memory = "256m"
+            bounded_output = True
+            authenticated_test_results = True
+
+            def close(self):
+                pass
+
+        def build_sandbox(**kwargs):
+            cfg = kwargs["sandbox_config"]
+            built_configs.append(cfg)
+            built_ids.append(id(cfg))
+            return SecureSandbox()
+
+        def evaluate_on_corpus(_patch_text, **kwargs):
+            kwargs["sandbox_factory"](tmp_path / "baseline")
+            kwargs["sandbox_factory"](tmp_path / "candidate")
+            evidence["policy"] = kwargs["sandbox_policy_identity"]
+            return FakeEval()
+
+        monkeypatch.setattr(runner, "_work_root", lambda: str(tmp_path))
+        monkeypatch.setattr(runner, "_sandbox_config", changing_config)
+        monkeypatch.setattr("maverick.sandbox.build_sandbox", build_sandbox)
+        monkeypatch.setattr(
+            "maverick.self_modify_corpus.evaluate_on_corpus", evaluate_on_corpus,
+        )
+
+        evaluate = runner._default_evaluate(
+            tree=tmp_path,
+            cfg={"eval_tests": ["tests/test_x.py::a", "tests/test_x.py::b"]},
+        )
+        result = evaluate(_patch())
+
+        assert result.ok is True
+        assert config_loads == [1]
+        assert len(built_configs) == 3  # preflight + baseline + candidate
+        assert all(cfg == built_configs[0] for cfg in built_configs)
+        assert len(set(built_ids)) == 3
+        assert len(evidence["policy"]) == 64
+        assert runner._sandbox_policy_digest({
+            "backend": "ep:attested", "api_key": "one",  # pragma: allowlist secret
+        }) == runner._sandbox_policy_digest({
+            "backend": "ep:attested", "api_key": "two",  # pragma: allowlist secret
+        })
+
     def test_inline_approval_and_live_apply_fail_closed(self, _enabled):
         tmp_path = _enabled
         ctrl = self._controller(tmp_path)

@@ -41,8 +41,8 @@ def test_dag_fields_flow_to_estimator_outcome(tmp_path):
     assert steps[1].outcome == 0.75
 
 
-def test_capture_off_by_default_is_noop(tmp_path, monkeypatch):
-    monkeypatch.delenv("MAVERICK_TRAJECTORY_CAPTURE", raising=False)
+def test_capture_explicit_opt_out_is_noop(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_TRAJECTORY_CAPTURE", "0")
     reset_shared()
     assert capture_step(_step()) is False
 

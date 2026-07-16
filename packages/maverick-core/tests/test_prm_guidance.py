@@ -16,8 +16,8 @@ def test_no_nudge_before_enough_steps():
     assert not should_nudge([0.1, 0.1], low=0.35, streak=3)
 
 
-def test_maybe_nudge_off_by_default(monkeypatch):
-    monkeypatch.delenv("MAVERICK_PRM_GUIDANCE", raising=False)
+def test_maybe_nudge_off_when_explicitly_disabled(monkeypatch):
+    monkeypatch.setenv("MAVERICK_PRM_GUIDANCE", "0")
     assert maybe_nudge([0.1, 0.1, 0.1]) is None
 
 

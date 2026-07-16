@@ -109,10 +109,12 @@ def test_feeds_propose_with_effect():
     est = estimate_effect_via_rollout(
         model, [START], treated_action="A", control_action="B", rollouts=20)
     # A trustworthy, positive estimate clears the producer's calibration gate and
-    # reaches the controller (which no-ops "disabled" since SI is off by default).
+    # reaches the default-on controller, which still fails closed because this
+    # estimate represents only one supported starting context (prompt promotion
+    # requires five evidence samples).
     verdict = propose_with_effect("prompt", "rollout win", est, rollback="snap")
     assert not verdict.promote
-    assert "disabled" in verdict.blocking_reason   # got PAST the trustworthiness gate
+    assert "insufficient evidence: 1 < 5 samples" in verdict.blocking_reason
 
 
 def test_transitions_from_trajectories():

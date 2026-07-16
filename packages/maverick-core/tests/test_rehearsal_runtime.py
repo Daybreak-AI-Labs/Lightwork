@@ -4,6 +4,8 @@ fail-open when disabled or data-less.
 """
 from __future__ import annotations
 
+import threading
+
 from maverick import rehearsal as rh
 from maverick import rehearsal_runtime as rt
 from maverick.trajectory_store import TrajectoryStep, TrajectoryStore
@@ -59,6 +61,119 @@ def test_gate_tool_holds_on_bad_history(tmp_path, monkeypatch):
     rt.reset_cache()
     v = rt.gate_tool(domain="ops", role="coder", last_tool="", tool_name="shell")
     assert v.decision == rh.BLOCK and v.predicted_outcome < 0.3
+
+
+def test_model_cache_rebuilds_when_trajectory_source_changes(tmp_path, monkeypatch):
+    """A tenant/store switch must not reuse another source's fitted verdict."""
+    monkeypatch.setenv("MAVERICK_REHEARSAL", "1")
+    bad_store = _store(tmp_path / "tenant-a", 0.05)
+    good_store = _store(tmp_path / "tenant-b", 0.9)
+    assert bad_store.count() == good_store.count() < rt._REFRESH_EVERY
+
+    active = {"store": bad_store}
+    monkeypatch.setattr("maverick.trajectory_store.shared", lambda: active["store"])
+    rt.reset_cache()
+
+    first = rt.gate_tool(domain="ops", role="coder", last_tool="", tool_name="shell")
+    assert first.decision == rh.BLOCK and first.predicted_outcome < 0.3
+
+    active["store"] = good_store
+    second = rt.gate_tool(domain="ops", role="coder", last_tool="", tool_name="shell")
+    assert second.decision == rh.PROCEED and second.predicted_outcome > 0.7
+
+
+def test_model_cache_reuses_source_after_tenant_round_trip(tmp_path, monkeypatch):
+    """A -> B -> A remains isolated without refitting A on its return."""
+    bad_store = _store(tmp_path / "tenant-a", 0.05)
+    good_store = _store(tmp_path / "tenant-b", 0.9)
+    active = {"store": bad_store}
+    monkeypatch.setattr("maverick.trajectory_store.shared", lambda: active["store"])
+
+    original_build = rt._build_model
+    builds = []
+
+    def counted_build(store=None):
+        builds.append(store.path)
+        return original_build(store)
+
+    monkeypatch.setattr(rt, "_build_model", counted_build)
+    rt.reset_cache()
+
+    first_a = rt.world_model()
+    active["store"] = good_store
+    model_b = rt.world_model()
+    active["store"] = bad_store
+    second_a = rt.world_model()
+
+    assert first_a is second_a
+    assert model_b is not first_a
+    assert builds.count(bad_store.path) == 1
+    assert builds.count(good_store.path) == 1
+
+
+def test_model_cache_invalidates_immediately_when_source_shrinks(tmp_path, monkeypatch):
+    """Erased trajectory evidence must stop influencing rehearsal immediately."""
+    store = _store(tmp_path / "tenant-a", 0.05)
+    monkeypatch.setattr("maverick.trajectory_store.shared", lambda: store)
+    rt.reset_cache()
+
+    assert rt.world_model() is not None
+    original_count = store.count()
+    assert 0 < original_count < rt._REFRESH_EVERY
+
+    store.path.write_text("", encoding="utf-8")
+    assert store.count() == 0
+    assert rt.world_model() is None
+
+
+def test_different_sources_build_concurrently(tmp_path, monkeypatch):
+    """A slow tenant fit must not hold the global cache map lock."""
+    stores = {
+        "a": TrajectoryStore(path=tmp_path / "tenant-a" / "t.ndjson"),
+        "b": TrajectoryStore(path=tmp_path / "tenant-b" / "t.ndjson"),
+    }
+    active = threading.local()
+    monkeypatch.setattr("maverick.trajectory_store.shared", lambda: active.store)
+
+    rendezvous = threading.Barrier(2)
+
+    def concurrent_build(store=None):
+        rendezvous.wait(timeout=5)
+        return store.path
+
+    monkeypatch.setattr(rt, "_build_model", concurrent_build)
+    rt.reset_cache()
+    results = {}
+
+    def worker(name):
+        active.store = stores[name]
+        results[name] = rt.world_model()
+
+    threads = [threading.Thread(target=worker, args=(name,)) for name in stores]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not any(thread.is_alive() for thread in threads)
+    assert results == {name: store.path for name, store in stores.items()}
+
+
+def test_model_cache_is_bounded(tmp_path, monkeypatch):
+    stores = [
+        TrajectoryStore(path=tmp_path / f"tenant-{i}" / "t.ndjson")
+        for i in range(rt._MAX_CACHE_SOURCES + 3)
+    ]
+    active = {"store": stores[0]}
+    monkeypatch.setattr("maverick.trajectory_store.shared", lambda: active["store"])
+    monkeypatch.setattr(rt, "_build_model", lambda store=None: store.path)
+    rt.reset_cache()
+
+    for store in stores:
+        active["store"] = store
+        assert rt.world_model() == store.path
+
+    assert len(rt._cache) == rt._MAX_CACHE_SOURCES
 
 
 def test_build_model_generalises_across_role(tmp_path, monkeypatch):

@@ -119,10 +119,15 @@ class EventKind:
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.
     LEARNING_UPDATE = "learning_update"
+    # Deployment-global operator control over learning gates. Kept distinct
+    # from learned-state writes so an auditor can identify who armed DGM.
+    # payload: control, enabled, actor, acknowledged, previous_requested,
+    # effective, state, blockers.
+    LEARNING_CONTROL_CHANGED = "learning_control_changed"
     # Provable learning: one signed row per structured verification reward
     # (maverick.reasoning_reward), so the EVIDENCE the system learns from -- the
     # per-dimension rubric, the holistic score, and whether a facet vetoed -- is
-    # tamper-evident in the chain, not just a mutable in-memory verdict. Opt-in
+    # tamper-evident in the chain, not just a mutable in-memory verdict. Default-on
     # ([reasoning_reward] audit_rewards); payload is to_audit_summary(): score,
     # confidence, accepts, vetoed, and per-dimension name/score/veto.
     VERIFICATION_REWARD = "verification_reward"

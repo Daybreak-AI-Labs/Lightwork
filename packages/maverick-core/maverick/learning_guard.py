@@ -46,4 +46,21 @@ def check_learning_halt(job: str, phase: str) -> None:
         raise
 
 
-__all__ = ["Halted", "check_learning_halt"]
+def learning_write_allowed(job: str, phase: str = "write") -> bool:
+    """Best-effort adapter for optional learning sinks.
+
+    Core promotion paths propagate :class:`Halted`; telemetry-style sinks keep
+    their historical non-raising contract and report ``False``/no-op instead.
+    """
+    try:
+        # Optional sinks may be on a per-step hot path. Reuse the canonical
+        # one/two-second HALT caches while retaining fail-closed shared-authority
+        # handling; privileged promotions use the fresh check above.
+        killswitch.check(fail_closed=True)
+        return True
+    except Halted:
+        log.warning("learning sink %s refused at %s: killswitch active", job, phase)
+        return False
+
+
+__all__ = ["Halted", "check_learning_halt", "learning_write_allowed"]

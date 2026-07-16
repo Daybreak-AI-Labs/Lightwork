@@ -198,6 +198,13 @@ stripped before any cloud call with `[privacy] redact_egress = true`.
 
 ## Learning & workforce sections
 
+Governed, in-process learning defaults **on**. Operators can opt out globally
+from the dashboard Learning page or disable individual sections below. This
+default does not grant higher-authority actuation: generated executable tools,
+third-party MCP acquisition, live workflow auto-apply, model-weight adoption,
+and DGM code self-modification retain separate controls. If an active config
+source is invalid, the learning defaults fail closed instead of enabling.
+
 ```toml
 [telemetry]                # trajectory donation -> the training corpus (default off)
 donate_trajectories = true # write scrubbed run records to ~/.maverick/outbox/
@@ -209,20 +216,21 @@ donate_min_confidence = 0.75  # verifier-confidence floor to donate a run
 # Feeds `maverick.training.ingest` / `export_texts` -> PRM/DPO. Full recipe
 # (incl. best-of-N pair mining) in docs/self-learning-runbook.md.
 
-[dreaming]                 # offline experience consolidation (default off)
+[dreaming]                 # offline experience consolidation (default on)
 enable = true
 # min_cluster / insight_ttl_days / retire_skills / rehearse / prune_facts /
-# snapshots / promote_shared / user_notes -- see FEATURES.md "Dreaming".
+# snapshots / promote_shared -- see FEATURES.md "Dreaming".
+user_notes = false         # separate privacy opt-in: verbatim cross-chat preferences
 trusted_insight_pubkeys = []   # peers for `maverick insights-import`
 
-[data_engine]              # Cognitive Data Engine flywheel (default off)
+[data_engine]              # Cognitive Data Engine flywheel (default on)
 enable = true              # causal failure triage -> guardrails -> habits
 # Reads the trajectory store; mutates nothing until enabled. `maverick flywheel`.
 
-[operations_scientist]     # discover + prove a better process (default off)
+[operations_scientist]     # discover + prove a better process (default on)
 enable = true              # propose a swap, validate it in the world-model first
 
-[consequence]              # reality is the reward (default off)
+[consequence]              # reality is the reward (default on)
 enable = true              # a recorded outcome overrides the verifier proxy
 # Feed outcomes via `maverick record-outcome` or POST /api/v1/outcomes.
 
@@ -234,20 +242,20 @@ enable = true              # learn short codes for repeated boilerplate; every
 enable = true              # measure (never apply) the codec's token savings on
                            # the real coordination stream; GET /api/v1/codec.
 
-[reflexion]                # cross-run failure lessons (default off)
+[reflexion]                # cross-run failure lessons (default on)
 enable = true
 
-[self_harness]             # learn a model-specific operating-guidance addendum
-enable = false             # mine failures -> propose -> regression-validate ->
+[self_harness]             # conservative harness learning (default on)
+enable = true              # mine failures -> propose -> regression-validate ->
                            #   gate. Promotion ALSO needs [self_improvement]
                            #   enable. Operator commands: `maverick self-harness
                            #   show` (what was learned), `preview` (dry-run of
                            #   what it would propose), `log` (audit trail), and
                            #   `forget` (roll a learned line back).
-# Lifecycle & evaluation knobs (all default off / historical behavior; the
-# wizard's advanced follow-up writes each on opt-in — details in
-# docs/proposals/self-harness.md):
-#   risk_limited = true          conservative profile: require >=8 held-out
+# A clean install uses the conservative unattended profile below. Existing
+# partial [self_harness] tables retain their explicitly configured lifecycle
+# settings during upgrade. Details: docs/proposals/self-harness.md.
+risk_limited = true              # require >=8 held-out
 #                                cases, 2% effect floor, two-arm 95% confidence
 #                                floor, sealed best-of-3, 3 judge votes, recent
 #                                calibration, metamorphic checks, one promotion,
@@ -264,7 +272,7 @@ enable = false             # mine failures -> propose -> regression-validate ->
 #   eval_corpus = "/path.json"   {model|domain: [{goal, expected}]} — enables
 #                                the auto-built live A/B on scheduled runs
 #   eval_budget_dollars = 5.0    spend cap per auto-evaluated cycle (fail-closed)
-#   auto_run = true              run the fleet cycle as part of `maverick dream`
+auto_run = true                  # run the fleet cycle as part of `maverick dream`
 #   promote_as_canary = true     stage every promotion on probation
 #   relapse_failure_share = 0.5  re-probate a line whose recent outcomes turn bad
 #   metamorphic = true           reject lines overfit to exact goal wording
@@ -280,8 +288,14 @@ enable = false             # mine failures -> propose -> regression-validate ->
 #                                `maverick self-harness migrate-store`; hand-edit via
 #                                `corpus export` / `corpus import`)
 
-[self_learning]            # local continuous learning (default off)
+[self_learning]            # governed local learning (default on)
 enable = true
+create_tools = false       # generated executable code remains a separate opt-in
+allow_mcp_acquisition = false # starting third-party MCP remains a separate opt-in
+allow_provider_egress = false # extra learning-only model calls may cross providers
+preflight = true           # default uses a local redacted catalog match; the
+                           # LLM needs-analysis call requires provider egress above
+distill_local = true
 provision_packs = true     # equip a freshly-approved pack with the skills + tools
                            #   its workflow needs at creation time (capability
                            #   provisioning at pack-birth). Default on once
@@ -291,7 +305,7 @@ provision_packs = true     # equip a freshly-approved pack with the skills + too
                            #   requires and never widens the clamped envelope.
                            #   Wired into `maverick onboard`. See FEATURES.md.
 
-[self_improvement]         # promotion ladder for learned guidance (default off)
+[self_improvement]         # promotion ladder for learned guidance (default on)
 enable = true
 factory_learning = true    # close the loop onto generation quality: attribute
                            #   provisioning/approval gaps to a pack's suite/signal,
@@ -300,18 +314,29 @@ factory_learning = true    # close the loop onto generation quality: attribute
                            #   Default on once self-improvement is enabled; the
                            #   wizard sets it. Force-enable via MAVERICK_FACTORY_LEARNING.
                            #   `maverick factory-learn [--dry-run]`. See FEATURES.md.
-evaluator_evolution = false # promote a BETTER judge instead of only freezing when
+evaluator_evolution = true  # promote a BETTER judge instead of only freezing when
                            #   the evaluator drifts: a challenger evaluator replaces
                            #   the incumbent only when its agreement with a fixed,
                            #   checksum-locked ground-truth ANCHOR (by the eps-best-
                            #   belief lower bound) beats it, on a dedicated `evaluator`
                            #   rung. The anchor is immutable (governed by `python -m
                            #   maverick.evaluator_evolution --ci`) so a weak judge
-                           #   can't launder drift. Off by default; an evaluator swap
-                           #   needs human approval until max_auto_rung = "evaluator".
+                           #   can't launder drift. An evaluator swap still needs
+                           #   human approval until max_auto_rung = "evaluator".
                            #   Override via MAVERICK_EVALUATOR_EVOLUTION. See FEATURES.md.
 evaluator_eps = 0.05       # confidence level of the eps-best-belief lower bound used
                            #   for evaluator promotion (lower = more conservative).
+
+[self_modify]              # research-only code DGM (default off)
+enable = false             # dashboard/API arming changes only this gate
+editable_paths = []        # readiness needs a narrow reviewed allowlist
+eval_tests = []            # readiness needs at least two discriminating tests
+# Arming does not start a cycle and never authorizes code adoption or deployment.
+# Readiness additionally requires [self_improvement] enable, a clean learning
+# HALT state, a Git snapshot/budget preflight, and an external sandbox SDK
+# backend (`[sandbox] backend = "ep:<name>"`) that enforces no egress/non-root,
+# bounded output, and authenticated structured test results. Bundled sandboxes
+# are deliberately not DGM-attested. Inspect with `maverick self-modify status`.
 
 [domains]                  # specialist-pack behavior (defaults shown)
 discipline = true          # suite operating-discipline appended at spawn

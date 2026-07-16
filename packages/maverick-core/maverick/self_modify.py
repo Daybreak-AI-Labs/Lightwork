@@ -29,8 +29,10 @@ from __future__ import annotations
 
 import fnmatch
 import logging
+import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -586,23 +588,263 @@ def _settings() -> dict:
         return {"enable": False, "editable_paths": []}
 
 
+def _production_control() -> dict:
+    """Resolve the one canonical, deployment-global DGM request bit.
+
+    Environment policy has highest precedence, followed by the optional
+    operator-owned config overlay, the dashboard overlay and base config.
+    Per-tenant config is deliberately excluded: DGM edits one shared source
+    tree, so request context must never change its authority. Invalid boolean
+    values and any unreadable global source fail closed.
+    """
+    blockers: list[dict[str, str]] = []
+    try:
+        from .config import (
+            CONFIG_OVERLAY_ENV,
+            config_source_errors,
+            env_flag,
+            load_config,
+            load_global_config,
+        )
+
+        cfg = load_global_config() or {}
+        errors = config_source_errors(include_tenant=False)
+        section = cfg.get("self_modify", {})
+        if not isinstance(section, dict):
+            section = {}
+            blockers.append({
+                "code": "invalid_self_modify_config",
+                "message": "[self_modify] must be a TOML table.",
+            })
+
+        raw_configured = section.get("enable", False)
+        if "enable" in section and type(raw_configured) is not bool:
+            blockers.append({
+                "code": "invalid_self_modify_enable",
+                "message": "[self_modify] enable must be a boolean.",
+            })
+        configured = raw_configured is True
+
+        environment_managed = "MAVERICK_SELF_MODIFY" in os.environ
+        env_override = env_flag("MAVERICK_SELF_MODIFY")
+        if environment_managed and env_override is None:
+            blockers.append({
+                "code": "invalid_self_modify_environment",
+                "message": "MAVERICK_SELF_MODIFY must be a recognized boolean.",
+            })
+
+        overlay_managed = False
+        overlay_raw = os.environ.get(CONFIG_OVERLAY_ENV, "").strip()
+        if overlay_raw:
+            overlay_cfg = load_config(Path(overlay_raw).expanduser()) or {}
+            if isinstance(overlay_cfg, dict) and "self_modify" in overlay_cfg:
+                overlay_section = overlay_cfg.get("self_modify")
+                overlay_managed = (
+                    not isinstance(overlay_section, dict)
+                    or "enable" in overlay_section
+                )
+
+        if errors:
+            blockers.append({
+                "code": "config_source_error",
+                "message": "An active global configuration source is unreadable or invalid.",
+            })
+
+        invalid = any(item["code"].startswith("invalid_") for item in blockers)
+        if errors or invalid:
+            requested = False
+        elif environment_managed:
+            requested = bool(env_override)
+        else:
+            requested = configured
+
+        managed_by = (
+            "environment" if environment_managed
+            else "config_overlay" if overlay_managed
+            else None
+        )
+        return {
+            "ok": True,
+            "cfg": cfg,
+            "section": section,
+            "errors": errors,
+            "configured": configured,
+            "requested": requested,
+            "managed_by_environment": environment_managed,
+            "managed_by_config_overlay": overlay_managed,
+            "control_managed": managed_by is not None,
+            "managed_by": managed_by,
+            "environment_override": env_override,
+            "blockers": blockers,
+        }
+    except Exception:
+        return {
+            "ok": False,
+            "cfg": {},
+            "section": {},
+            "errors": {"status": "unavailable"},
+            "configured": False,
+            "requested": False,
+            "managed_by_environment": False,
+            "managed_by_config_overlay": False,
+            "control_managed": False,
+            "managed_by": None,
+            "environment_override": None,
+            "blockers": [{
+                "code": "status_unavailable",
+                "message": "DGM configuration status is unavailable.",
+            }],
+        }
+
+
 def enabled() -> bool:
     """Whether the governed code-modification engine may run. OFF by default.
 
     ``MAVERICK_SELF_MODIFY=1`` or ``[self_modify] enable``. Even when enabled it
-    is inert until the editable allowlist is non-empty. Fail-open on a config
-    error (stays off)."""
+    is inert until the editable allowlist is non-empty. Config uncertainty
+    fails closed (stays off)."""
+    return bool(_production_control()["requested"])
+
+
+def improvement_enabled() -> bool:
+    """Resolve the DGM dependency without tenant-scoped policy escalation."""
     try:
-        from .config import env_flag
-        v = env_flag("MAVERICK_SELF_MODIFY")
-        if v is not None:
-            return v
-    except Exception:  # pragma: no cover
-        pass
-    try:
-        return bool(_settings()["enable"])
-    except Exception:  # pragma: no cover
+        from .config import (
+            GOVERNED_LEARNING_DEFAULT,
+            config_source_errors,
+            env_flag,
+            load_global_config,
+        )
+        cfg = load_global_config() or {}
+        if config_source_errors(include_tenant=False):
+            return False
+        section = cfg.get("self_improvement", {})
+        if not isinstance(section, dict):
+            return False
+        raw = section.get("enable", GOVERNED_LEARNING_DEFAULT)
+        if type(raw) is not bool:
+            return False
+        if "MAVERICK_SELF_IMPROVEMENT" in os.environ:
+            override = env_flag("MAVERICK_SELF_IMPROVEMENT")
+            if override is None:
+                return False
+            base = override
+        else:
+            base = raw
+        if not base:
+            return False
+        from .entitlements import require
+        return require("advanced_evolve")
+    except Exception:  # pragma: no cover -- uncertainty cannot arm DGM
         return False
+
+
+def production_status() -> dict:
+    """Return a side-effect-free, fail-closed production control-plane view.
+
+    ``requested`` answers whether the client turned the research harness on;
+    ``effective`` additionally requires the governed self-improvement gate;
+    ``ready`` means the static production prerequisites are configured.  A run
+    still performs its own fresh Git, budget, HALT and sandbox attestation
+    checks before any proposer is called.  Enabling never authorizes live code
+    adoption: the stock runner can only propose, evaluate and archive.
+    """
+    control = _production_control()
+    cfg = control["cfg"]
+    section = control["section"]
+    errors = control["errors"]
+    configured = control["configured"]
+    requested = control["requested"]
+    blockers: list[dict[str, str]] = list(control["blockers"])
+    sandbox = cfg.get("sandbox") or {}
+    if not isinstance(sandbox, dict):
+        sandbox = {}
+
+    improvement_on = improvement_enabled()
+    if not improvement_on:
+        blockers.append({
+            "code": "self_improvement_disabled",
+            "message": "Governed self-improvement is disabled or not entitled.",
+        })
+
+    paths = section.get("editable_paths")
+    configured_surface = bool(
+        isinstance(paths, list) and any(str(p).strip() for p in paths)
+    )
+    tiers = section.get("tiers")
+    if isinstance(tiers, list):
+        configured_surface = configured_surface or any(
+            isinstance(tier, dict)
+            and isinstance(tier.get("editable_paths"), list)
+            and any(str(p).strip() for p in tier["editable_paths"])
+            for tier in tiers
+        )
+    if not configured_surface:
+        blockers.append({
+            "code": "editable_surface_missing",
+            "message": "Configure a narrow [self_modify] editable_paths allowlist.",
+        })
+
+    tests = section.get("eval_tests")
+    configured_tests = (
+        [str(test).strip() for test in tests if str(test).strip()]
+        if isinstance(tests, list) else []
+    )
+    if len(configured_tests) < 2:
+        blockers.append({
+            "code": "challenge_corpus_missing",
+            "message": "Configure at least two discriminating eval_tests.",
+        })
+
+    backend = str(sandbox.get("backend") or "local").strip().lower()
+    if not backend.startswith("ep:"):
+        blockers.append({
+            "code": "attested_evaluator_missing",
+            "message": (
+                "Configure an external ep: sandbox backend that authenticates "
+                "bounded test results; bundled backends are not DGM-attested."
+            ),
+        })
+
+    if requested:
+        try:
+            from .learning_guard import check_learning_halt
+            check_learning_halt("self_modify", "status")
+        except Exception:
+            blockers.append({
+                "code": "learning_halt_active",
+                "message": "The global learning HALT is active or unavailable.",
+            })
+
+    # De-duplicate codes defensively if two malformed inputs collapse to the
+    # same refusal. Stable order makes API/UI snapshots and tests deterministic.
+    blockers = list({item["code"]: item for item in blockers}.values())
+    effective = bool(requested and improvement_on and not errors)
+    ready = bool(effective and not blockers)
+    # A corrupt active policy is operationally blocked, even if we cannot trust
+    # it enough to recover the requested bit. Missing readiness prerequisites
+    # alone do not make the normal default-off state look unhealthy.
+    state = (
+        "ready" if ready
+        else "blocked" if requested or bool(errors)
+        else "off"
+    )
+    return {
+        "configured": configured,
+        "requested": bool(requested),
+        "effective": effective,
+        "ready": ready,
+        "state": state,
+        "managed_by_environment": control["managed_by_environment"],
+        "managed_by_config_overlay": control["managed_by_config_overlay"],
+        "control_managed": control["control_managed"],
+        "managed_by": control["managed_by"],
+        "environment_override": control["environment_override"],
+        "research_only": True,
+        "live_adoption": False,
+        "runtime_preflight_required": True,
+        "blockers": blockers,
+    }
 
 
 def default_surface() -> EditableSurface:

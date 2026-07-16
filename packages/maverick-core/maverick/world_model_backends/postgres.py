@@ -504,6 +504,14 @@ _EPISODE_CACHE_TOKENS_MIGRATION = [
     "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS cache_write_tokens INTEGER DEFAULT 0;",
 ]
 
+# v28: per-principal goal ownership. SQLite has carried ``goals.owner`` since
+# v11; Postgres previously exposed only tenant isolation, so authenticated
+# callers of owner-scoped episode reads could not get SQLite-equivalent results.
+# The empty default preserves legacy/admin semantics for every existing row.
+_GOAL_OWNER_MIGRATION = [
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS owner TEXT NOT NULL DEFAULT '';",
+]
+
 MIGRATIONS: list[tuple[int, list[str]]] = [
     (1, SCHEMA),
     (10, _TENANT_MIGRATION),
@@ -522,6 +530,7 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     (25, _HARNESS_STORE_MIGRATION),
     (26, _HARNESS_CORPUS_MIGRATION),
     (27, _EPISODE_CACHE_TOKENS_MIGRATION),
+    (28, _GOAL_OWNER_MIGRATION),
 ]
 
 # Highest migration version = the reported schema version.
@@ -1002,15 +1011,22 @@ class PostgresWorldModel:
 
     # ----- goal methods -----
 
-    def create_goal(self, title: str, description: str = "", parent_id: int | None = None) -> int:
+    def create_goal(
+        self,
+        title: str,
+        description: str = "",
+        parent_id: int | None = None,
+        *,
+        owner: str = "",
+    ) -> int:
         now = time.time()
         tenant = _active_tenant()
         with self._tx() as cur:
             cur.execute(
                 "INSERT INTO goals(parent_id, title, description, status, "
-                "created_at, updated_at, tenant_id) "
-                "VALUES(%s, %s, %s, 'pending', %s, %s, %s) RETURNING id",
-                (parent_id, _seal(title), _seal(description), now, now, tenant),
+                "created_at, updated_at, owner, tenant_id) "
+                "VALUES(%s, %s, %s, 'pending', %s, %s, %s, %s) RETURNING id",
+                (parent_id, _seal(title), _seal(description), now, now, owner, tenant),
             )
             row = cur.fetchone()
         return int(row[0])
@@ -1058,10 +1074,10 @@ class PostgresWorldModel:
     ) -> bool:
         """Atomically claim a pending goal at the remote execution boundary.
 
-        The Postgres backend currently isolates goals by tenant rather than the
-        SQLite ``owner`` column.  A concrete owner scope cannot be proven here,
-        so fail closed; shared-operator calls still receive the tenant-scoped
-        compare-and-swap used by cross-host dispatch.
+        Owner-aware remote claiming remains outside this method's parity scope,
+        so a concrete ``expected_owner`` still fails closed. Shared-operator
+        calls receive the tenant-scoped compare-and-swap used by cross-host
+        dispatch; storing ``goals.owner`` must never silently weaken that gate.
         """
         if expected_owner is not None:
             return False
@@ -2065,7 +2081,19 @@ class PostgresWorldModel:
                  cache_read_tokens, cache_write_tokens, episode_id, *cparams),
             )
 
-    def list_episodes(self, limit: int = 50, goal_id: int | None = None) -> list:
+    def list_episodes(
+        self,
+        limit: int = 50,
+        goal_id: int | None = None,
+        owner: str | None = None,
+    ) -> list:
+        """Recent run-cost episodes, newest first.
+
+        ``owner`` scopes to one principal's runs through the owning goal;
+        ``None`` retains the tenant-wide admin/auth-off view. Tenant and owner
+        predicates are cumulative, so an owner filter can never widen the
+        active tenant boundary.
+        """
         from ..world_model import EpisodeSpend
         cols = (
             "e.id, e.goal_id, e.started_at, e.ended_at, e.outcome, "
@@ -2077,11 +2105,14 @@ class PostgresWorldModel:
         conds: list[str] = []
         params: list = []
         table = "episodes e"
-        if frag:
+        if frag or owner is not None:
             table += " JOIN goals g ON g.id = e.goal_id"
         if goal_id is not None:
             conds.append("e.goal_id = %s")
             params.append(goal_id)
+        if owner is not None:
+            conds.append("g.owner = %s")
+            params.append(owner)
         if frag:
             conds.append(frag)
             params += fparams

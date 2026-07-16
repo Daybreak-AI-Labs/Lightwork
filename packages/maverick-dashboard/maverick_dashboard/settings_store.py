@@ -61,26 +61,81 @@ FEATURE_DEFAULTS = {"skills": True, "world_model": True, "streaming": True}
 # overlay, which load_config deep-merges so every subsystem's enabled() sees it)
 # and the /learning status view (which pairs each key with its live enabled()).
 # Keeping both off one list stops the button and the view from drifting when a
-# subsystem is added. All OFF by default.
+# subsystem is added. Governed learning defaults ON; DGM is intentionally not
+# in this registry and has its own high-risk production control.
 LEARNING_SUBSYSTEMS: list[dict] = [
+    {"key": "self_learning", "section": "self_learning", "config_key": "enable",
+     "label": "Governed capability learning",
+     "how": "[self_learning] enable — or MAVERICK_SELF_LEARNING=0 to opt out"},
+    {"key": "distill_local", "section": "self_learning", "config_key": "distill_local",
+     "label": "Local skill distillation",
+     "how": "[self_learning] distill_local — or MAVERICK_DISTILL_LOCAL=0"},
+    {"key": "failure_telemetry", "section": "telemetry", "config_key": "failure_modes",
+     "label": "Local failure-mode telemetry",
+     "how": "[telemetry] failure_modes or MAVERICK_FAILURE_TELEMETRY=0"},
+    {"key": "budget_tuning", "section": "budget", "config_key": "self_tuning",
+     "label": "Evidence-based budget tuning",
+     "how": "[budget] self_tuning or MAVERICK_BUDGET_SELF_TUNING=0"},
     {"key": "consequence", "section": "consequence", "config_key": "enable",
      "label": "Grounded outcomes (reality feedback)",
-     "how": "[consequence] enable — or MAVERICK_CONSEQUENCE=1"},
+     "how": "[consequence] enable — or MAVERICK_CONSEQUENCE=0"},
     {"key": "reflexion", "section": "reflexion", "config_key": "enable",
      "label": "Failure memory (learn from mistakes)",
-     "how": "[reflexion] enable — or MAVERICK_REFLEXION=1"},
+     "how": "[reflexion] enable — or MAVERICK_REFLEXION=0"},
     {"key": "dreaming", "section": "dreaming", "config_key": "enable",
      "label": "Consolidation (distil skills + insights)",
-     "how": "[dreaming] enable — then run `maverick dream` on a schedule"},
+     "how": "[dreaming] enable — or MAVERICK_DREAMING=0"},
+    {"key": "experience", "section": "experience", "config_key": "enable",
+     "label": "Experience-guided planning",
+     "how": "[experience] enable — or MAVERICK_EXPERIENCE_GUIDANCE=0"},
+    {"key": "skill_synthesis", "section": "skill_synthesis", "config_key": "enable",
+     "label": "Task-specific skill synthesis",
+     "how": "[skill_synthesis] enable — or MAVERICK_SKILL_SYNTHESIS=0"},
+    {"key": "self_improvement", "section": "self_improvement", "config_key": "enable",
+     "label": "Governed improvement promotion",
+     "how": "[self_improvement] enable — or MAVERICK_SELF_IMPROVEMENT=0"},
+    {"key": "prm_guidance", "section": "self_improvement", "config_key": "prm_guidance",
+     "label": "Process-reward guidance",
+     "how": "[self_improvement] prm_guidance or MAVERICK_PRM_GUIDANCE=0"},
     {"key": "capture", "section": "self_improvement", "config_key": "capture",
      "label": "Trajectory capture (fuel for the flywheel)",
-     "how": "[self_improvement] capture — or MAVERICK_TRAJECTORY_CAPTURE=1"},
+     "how": "[self_improvement] capture — or MAVERICK_TRAJECTORY_CAPTURE=0"},
+    {"key": "causal_promotion", "section": "self_improvement", "config_key": "causal_promotion",
+     "label": "Causal promotion evidence",
+     "how": "[self_improvement] causal_promotion — or MAVERICK_CAUSAL_PROMOTION=0"},
+    {"key": "factory_learning", "section": "self_improvement", "config_key": "factory_learning",
+     "label": "Self-improving agent factory",
+     "how": "[self_improvement] factory_learning — or MAVERICK_FACTORY_LEARNING=0"},
+    {"key": "evaluator_evolution", "section": "self_improvement", "config_key": "evaluator_evolution",
+     "label": "Evaluator co-evolution",
+     "how": "[self_improvement] evaluator_evolution — or MAVERICK_EVALUATOR_EVOLUTION=0"},
+    {"key": "self_harness", "section": "self_harness", "config_key": "enable",
+     "label": "Risk-limited self-harness",
+     "how": "[self_harness] enable — or MAVERICK_SELF_HARNESS=0"},
     {"key": "data_engine", "section": "data_engine", "config_key": "enable",
      "label": "Improvement flywheel",
-     "how": "[data_engine] enable"},
+     "how": "[data_engine] enable — or MAVERICK_DATA_ENGINE=0"},
+    {"key": "operations_scientist", "section": "operations_scientist", "config_key": "enable",
+     "label": "Operations scientist",
+     "how": "[operations_scientist] enable — or MAVERICK_OPERATIONS_SCIENTIST=0"},
+    {"key": "rehearsal", "section": "rehearsal", "config_key": "enable",
+     "label": "Pre-execution rehearsal",
+     "how": "[rehearsal] enable — or MAVERICK_REHEARSAL=0"},
+    {"key": "credit", "section": "credit", "config_key": "enable",
+     "label": "Counterfactual agent credit",
+     "how": "[credit] enable — or MAVERICK_CREDIT=0"},
+    {"key": "reasoning_reward", "section": "reasoning_reward", "config_key": "enable",
+     "label": "Structured reasoning rewards",
+     "how": "[reasoning_reward] enable or MAVERICK_REASONING_REWARD=0"},
+    {"key": "reward_audit", "section": "reasoning_reward", "config_key": "audit_rewards",
+     "label": "Tamper-evident reward audit",
+     "how": "[reasoning_reward] audit_rewards or MAVERICK_REASONING_REWARD_AUDIT=0"},
+    {"key": "jit_rl", "section": "jit_rl", "config_key": "enable",
+     "label": "JitRL test-time adaptation",
+     "how": "[jit_rl] enable or MAVERICK_JIT_RL=0"},
 ]
 LEARNING_TOGGLES = [(s["section"], s["config_key"]) for s in LEARNING_SUBSYSTEMS]
-_LEARNING_SECTIONS = [s["section"] for s in LEARNING_SUBSYSTEMS]
+_LEARNING_SECTIONS = list(dict.fromkeys(s["section"] for s in LEARNING_SUBSYSTEMS))
 
 # Channels offered in the UI: name + per-field spec. Keys MUST match what
 # server.py's _wire_<name> reads from [channels.<name>] (verified against the
@@ -156,12 +211,20 @@ def _dump(data: dict) -> str:
     ]
     # "flows" carries the autonomous self-improvement knobs (auto_evolve/auto_apply,
     # both booleans) -- persisted here so set_flow_autonomy survives a restart.
-    for section in ("capabilities", "features", "flows", *_LEARNING_SECTIONS):
+    for section in ("capabilities", "features", "flows", "self_modify",
+                    *_LEARNING_SECTIONS):
         tbl = data.get(section) or {}
         if tbl:
             lines.append(f"[{section}]")
             for k in sorted(tbl):
-                lines.append(f"{k} = {'true' if tbl[k] else 'false'}")
+                value = tbl[k]
+                if isinstance(value, bool):
+                    rendered = "true" if value else "false"
+                elif isinstance(value, (int, float)):
+                    rendered = str(value)
+                else:
+                    rendered = _toml_str(value)
+                lines.append(f"{k} = {rendered}")
             lines.append("")
     # [webhooks] secret -- the signing key the Settings page manages. Written
     # verbatim (never logged or re-displayed).
@@ -260,17 +323,104 @@ def set_toggle(section: str, name: str, enabled: bool) -> None:
         _write(data)
 
 
-def set_learning(enabled: bool) -> None:
+def set_learning(enabled: bool, *, actor: str = "local") -> None:
     """Turn the whole self-learning loop on or off in one action -- writes each
     of ``LEARNING_TOGGLES`` to the overlay, which ``load_config()`` deep-merges,
     so every subsystem's ``enabled()`` sees it. (An env var like
     ``MAVERICK_CONSEQUENCE`` still overrides the overlay if a deployment set
     one.)"""
     with _locked():
-        data = load_overlay()
+        before = load_overlay()
+        data = json.loads(json.dumps(before))
         for section, key in LEARNING_TOGGLES:
             data.setdefault(section, {})[key] = bool(enabled)
+        # The product-wide control selects the conservative unattended harness
+        # profile explicitly. Core config keeps legacy partial [self_harness]
+        # tables backward-compatible, so relying on an implicit default here
+        # could otherwise reactivate a weaker old policy.
+        harness = data.setdefault("self_harness", {})
+        harness["risk_limited"] = bool(enabled)
+        harness["auto_run"] = bool(enabled)
+        from maverick.config import reset_config_cache
+        # Persist the authorization record before publishing a control bit.
+        # Runtime readers do not take the dashboard settings lock, so writing
+        # first would create a window where an unaudited state was observable.
+        try:
+            from maverick.audit import EventKind, record_global
+            audited = record_global(
+                EventKind.LEARNING_CONTROL_CHANGED,
+                control="governed_learning",
+                enabled=bool(enabled),
+                actor=actor,
+                acknowledged=False,
+                phase="authorized",
+            )
+        except Exception:
+            audited = False
+        if not audited:
+            raise RuntimeError("global learning control audit could not be persisted")
         _write(data)
+        reset_config_cache()
+
+
+def set_dgm(
+    enabled: bool,
+    *,
+    actor: str = "local",
+    acknowledged: bool = False,
+) -> dict:
+    """Set only the canonical, default-off DGM request bit.
+
+    Editable surfaces, challenge tests, evaluator policy and adoption authority
+    are deliberately not dashboard-editable. The production runner rechecks all
+    of them and never adopts code.
+    """
+    with _locked():
+        from maverick import self_modify
+        from maverick.config import reset_config_cache
+
+        before_status = self_modify.production_status()
+        blocker_codes = {item["code"] for item in before_status["blockers"]}
+        if before_status["control_managed"]:
+            raise PermissionError("a higher-precedence deployment policy owns DGM")
+        if "config_source_error" in blocker_codes:
+            raise PermissionError("an active global config source is invalid")
+        if enabled and not acknowledged:
+            raise ValueError("research-only acknowledgement is required")
+        if enabled and any(code.startswith("invalid_") for code in blocker_codes):
+            raise PermissionError("DGM boolean configuration is invalid")
+        before = load_overlay()
+        data = json.loads(json.dumps(before))
+        data.setdefault("self_modify", {})["enable"] = bool(enabled)
+        # The global audit entry is the durable authorization record; the
+        # subsequent atomic overlay replacement is the commit. Record the
+        # authorization before publishing so an audit failure can never leave
+        # even a transiently observable enabled state.
+        try:
+            from maverick.audit import EventKind, record_global
+            audited = record_global(
+                EventKind.LEARNING_CONTROL_CHANGED,
+                control="self_modify",
+                enabled=bool(enabled),
+                actor=actor,
+                acknowledged=bool(acknowledged),
+                previous_requested=bool(before_status["requested"]),
+                previous_effective=bool(before_status["effective"]),
+                previous_state=before_status["state"],
+                phase="authorized",
+            )
+        except Exception:
+            audited = False
+        if not audited:
+            raise RuntimeError("global DGM control audit could not be persisted")
+        _write(data)
+        reset_config_cache()
+        after = self_modify.production_status()
+        if bool(after["requested"]) != bool(enabled):
+            _write(before)
+            reset_config_cache()
+            raise PermissionError("a higher-precedence deployment policy owns DGM")
+        return after
 
 
 def set_flow_autonomy(*, auto_evolve: bool | None = None,
@@ -437,6 +587,7 @@ def channels_state() -> list[dict]:
 __all__ = [
     "PROVIDERS", "CAPABILITY_DEFAULTS", "FEATURE_DEFAULTS", "CHANNELS",
     "LEARNING_SUBSYSTEMS", "load_overlay", "set_provider", "clear_provider",
+    "set_dgm",
     "set_toggle", "set_learning", "set_flow_autonomy", "state", "set_channel", "clear_channel",
     "channels_state",
 ]

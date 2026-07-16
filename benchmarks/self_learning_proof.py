@@ -64,7 +64,8 @@ def _setup_home() -> tuple[Path, str]:
     os.environ["MAVERICK_AUDIT_SIGNING_KEY"] = priv.private_bytes(
         ser.Encoding.Raw, ser.PrivateFormat.Raw, ser.NoEncryption()).hex()
     pub = priv.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw).hex()
-    # Turn the governed learning loops ON for this sandbox (off by default).
+    # Pin the governed learning loops ON for this isolated proof, independent of
+    # any operator overrides in the invoking environment.
     for k in ("MAVERICK_SELF_IMPROVEMENT", "MAVERICK_SELF_HARNESS",
               "MAVERICK_FLEET_MEMORY", "MAVERICK_EVALUATOR_EVOLUTION",
               "MAVERICK_DREAMING"):

@@ -19,9 +19,9 @@ not from a model's opinion of it.
 
 The per-customer connectors that CALL ``record_outcome`` (map an invoice/contract
 id back to the episode that touched it) are integration seams; the grounded join,
-the store, and the prefer-reality rule are here. OFF by default: ``record_outcome``
-just stores (harmless), and the data-engine join only consults real outcomes when
-``[consequence]`` is enabled.
+the store, and the prefer-reality rule are here. Grounding is ON by default.
+Direct external outcome submissions remain durable evidence even when the join is
+disabled; the data engine only consumes them while ``[consequence]`` is enabled.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import env_flag
+from .config import governed_learning_env_flag
 
 log = logging.getLogger(__name__)
 
@@ -41,8 +41,8 @@ _MAX_ROWS = 100_000
 
 
 def enabled() -> bool:
-    """Whether the data-engine join should prefer real outcomes. OFF by default."""
-    _v = env_flag("MAVERICK_CONSEQUENCE")
+    """Whether the default-on data-engine join should prefer real outcomes."""
+    _v = governed_learning_env_flag("MAVERICK_CONSEQUENCE")
     if _v is not None:
         return _v
     try:
@@ -163,6 +163,9 @@ def record_outcome(goal_id: int, episode_id: int, value: float, *, kind: str = "
     the real result in [0, 1] (paid=1.0 / unpaid=0.0, renewed=1.0, reopened=0.0,
     or a graded result). Just stores; the data-engine join decides whether to use
     it (gated by ``[consequence]``)."""
+    from .learning_guard import learning_write_allowed
+    if not learning_write_allowed("consequence"):
+        return False
     return (store or shared()).record(goal_id, episode_id, value, kind=kind)
 
 
@@ -199,8 +202,8 @@ def record_self_outcome(world, goal_id: int, value: float, *, kind: str,
     opposed to :func:`record_outcome`, which a system-of-record connector calls
     with an episode id it already knows. Resolves the episode from ``world``
     (duck-typed: needs ``list_episodes(goal_id=, limit=)``). A no-op returning
-    ``False`` unless ``[consequence]`` is enabled (the kernel stays stateless by
-    default), and never raises -- grounding is best-effort and must not fail the
+    ``False`` when ``[consequence]`` is explicitly disabled, and never raises --
+    grounding is best-effort and must not fail the
     action that produced it."""
     try:
         if not enabled():
@@ -319,6 +322,9 @@ def link_outcome_key(key: str, goal_id: int, episode_id: int, *,
                      store: CorrelationStore | None = None) -> bool:
     """Record that ``key`` (an external business id) was acted on by this episode,
     so a later outcome reported against ``key`` can be grounded. Always harmless."""
+    from .learning_guard import learning_write_allowed
+    if not learning_write_allowed("consequence", "link_outcome_key"):
+        return False
     return (store or shared_correlation()).link(key, goal_id, episode_id)
 
 

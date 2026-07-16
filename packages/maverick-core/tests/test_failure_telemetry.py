@@ -1,4 +1,4 @@
-"""Failure-mode telemetry: classify, opt-in record, summarize, CLI."""
+"""Failure-mode telemetry: classify, default-on record, summarize, CLI."""
 from __future__ import annotations
 
 import json
@@ -19,7 +19,7 @@ def test_classify_exception():
 
 
 def test_record_is_noop_when_disabled(tmp_path, monkeypatch):
-    monkeypatch.delenv("MAVERICK_FAILURE_TELEMETRY", raising=False)
+    monkeypatch.setenv("MAVERICK_FAILURE_TELEMETRY", "0")
     monkeypatch.setattr("maverick.config.load_config", dict)
     p = tmp_path / "f.jsonl"
     assert ft.record("budget", path=p) is False
@@ -79,7 +79,7 @@ def test_summarize_missing_and_malformed(tmp_path):
 
 def test_cli_failures_empty(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
-    monkeypatch.delenv("MAVERICK_FAILURE_TELEMETRY", raising=False)
+    monkeypatch.setenv("MAVERICK_FAILURE_TELEMETRY", "0")
     monkeypatch.setattr("maverick.config.load_config", dict)
     res = CliRunner().invoke(main, ["failures"])
     assert res.exit_code == 0

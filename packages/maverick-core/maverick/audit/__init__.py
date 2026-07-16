@@ -33,9 +33,11 @@ from .signing import (  # noqa: F401
 from .writer import (  # noqa: F401
     AuditLog,
     default_audit_log,
+    global_audit_log,
     goal_context,
     reanchor_after_erase,
     record,
+    record_global,
     reset_goal_context,
     set_goal_context,
 )
@@ -45,7 +47,9 @@ __all__ = [
     "EventKind",
     "AuditLog",
     "default_audit_log",
+    "global_audit_log",
     "record",
+    "record_global",
     "reanchor_after_erase",
     "scrub_user",
     "delete_user",

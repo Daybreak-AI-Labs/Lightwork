@@ -81,7 +81,7 @@ class TestMaybeRecordCorrection:
         ) is False
 
     def test_noop_when_reflexion_disabled(self, monkeypatch):
-        monkeypatch.delenv("MAVERICK_REFLEXION", raising=False)
+        monkeypatch.setenv("MAVERICK_REFLEXION", "0")
         world = _World([
             _turn("assistant", "Total is $1.2M.", ts=1.0),
             _turn("user", "that's wrong", ts=2.0),

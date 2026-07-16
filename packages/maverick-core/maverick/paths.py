@@ -66,6 +66,14 @@ def _tenant_segment(tenant: str) -> str:
     return segment
 
 
+def explicit_tenant_id() -> str | None:
+    """Tenant selected by request/process context, excluding client binding."""
+    t = _TENANT.get()
+    if t:
+        return t
+    return os.environ.get("MAVERICK_TENANT", "").strip() or None
+
+
 def current_tenant_id() -> str | None:
     """The active raw tenant id, or ``None`` for the shared/legacy root.
 
@@ -73,12 +81,9 @@ def current_tenant_id() -> str | None:
     Unlike :func:`current_tenant`, this returns the operator-facing tenant id
     before path encoding so config lookups can use natural tenant keys.
     """
-    t = _TENANT.get()
-    if t:
-        return t
-    env = os.environ.get("MAVERICK_TENANT", "").strip()
-    if env:
-        return env
+    explicit = explicit_tenant_id()
+    if explicit:
+        return explicit
     # Client binding: one deployment = one enterprise client. The configured
     # client id is the tenant FLOOR, so client data never resolves to an
     # un-scoped shared root. None when no client is bound (legacy single-root).
@@ -210,6 +215,7 @@ __all__ = [
     "InvalidTenantError",
     "TenantPolicyError",
     "MAX_TENANT_SEGMENT_LENGTH",
+    "explicit_tenant_id",
     "tenant_by_user_enabled",
     "tenant_scope",
 ]

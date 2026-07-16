@@ -14,8 +14,8 @@ object per line. Each entry records:
   - tools_used    — list of tools the agent ran before failing
 
 Retrieval: ``recall(goal_text, k=3)`` returns the top-K most similar
-prior reflections. Used by the orchestrator's pre-run context layer
-(opt-in via [reflexion] enable = true).
+prior reflections. Used by the orchestrator's default-on pre-run context layer
+(disable via [reflexion] enable = false).
 
 Similarity scoring: embedding cosine when fastembed is installed, so a
 lesson phrased differently from the current goal still matches; otherwise
@@ -36,6 +36,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .file_lock import cross_process_lock
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -123,25 +124,49 @@ def record(
     Fail-safe: write errors are logged and swallowed — a failed
     reflection write should never block a subsequent agent run.
     """
+    from .learning_guard import learning_write_allowed
+    if not learning_write_allowed("reflexion"):
+        return False
     path = path if path is not None else default_path()
+    # This is the durable privacy boundary. Callers are numerous and some pass
+    # raw provider/exception text, so every free-text field is independently
+    # redacted and bounded here. A redactor failure returns an empty string;
+    # persistence never falls back to the original secret-bearing value.
+    def safe(value: Any, limit: int) -> str:
+        try:
+            return _sanitize_text(str(value or ""))[:limit]
+        except Exception:
+            return ""
+
+    safe_class = re.sub(r"[^A-Za-z0-9_.:-]+", "_", safe(failure_class, 96)).strip("_")
+    safe_tools = [safe(tool, 128) for tool in list(tools_used or [])[:32]]
+    safe_tools = [tool for tool in safe_tools if tool]
+
+    def optional(value: Any, limit: int) -> str | None:
+        if value is None:
+            return None
+        cleaned = safe(value, limit)
+        return cleaned or None
+
     entry = Reflexion(
         ts=time.time(),
-        goal_text=goal_text or "",
-        failure_class=failure_class or "unknown",
-        failure_msg=failure_msg or "",
-        reflection=reflection or "",
-        tools_used=list(tools_used or []),
-        channel=channel,
-        user_id=user_id,
-        domain=domain,
-        model_id=model_id,
-        role=role,
+        goal_text=safe(goal_text, 2_000),
+        failure_class=safe_class or "unknown",
+        failure_msg=safe(failure_msg, 1_000),
+        reflection=safe(reflection, 4_000),
+        tools_used=safe_tools,
+        channel=optional(channel, 128),
+        user_id=optional(user_id, 256),
+        domain=optional(domain, 128),
+        model_id=optional(model_id, 256),
+        role=optional(role, 128),
     )
     with _lock:
         try:
-            _ensure_file(path)
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry.to_dict(), default=str) + "\n")
+            with cross_process_lock(path):
+                _ensure_file(path)
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry.to_dict(), default=str) + "\n")
             return True
         except OSError as e:
             log.warning("reflexion: write failed: %s", e)
@@ -194,20 +219,23 @@ def _scope_matches(
 
 
 def _sanitize_text(text: str, *, shield: Any | None = None) -> str:
-    """Redact secrets and drop Shield-blocked persisted prompt snippets."""
-    safe = str(text or "")
+    """Redact secrets and drop unsafe persisted prompt snippets fail-closed."""
+    try:
+        safe = str(text or "")
+    except Exception:
+        return ""
     try:
         from .safety.secret_detector import redact as _redact
         safe, _ = _redact(safe)
     except Exception:  # pragma: no cover
-        pass
+        return ""
     if shield is not None:
         try:
             verdict = shield.scan_input(safe)
             if not getattr(verdict, "allowed", True):
                 return "[redacted by Shield]"
         except Exception:  # pragma: no cover
-            pass
+            return ""
     return safe
 
 
@@ -405,17 +433,25 @@ def format_context(
 def enabled() -> bool:
     """Whether the cross-run reflexion learning loop is active.
 
-    Off by default — the agent kernel must run without extra persisted
-    state (CLAUDE.md rule 1 spirit). Turn it on with ``MAVERICK_REFLEXION=1``
-    or ``[reflexion] enable = true`` in ``~/.maverick/config.toml``.
+    On by default. ``MAVERICK_REFLEXION=0`` or
+    ``[reflexion] enable = false`` provides an explicit opt-out.
     """
-    if os.environ.get("MAVERICK_REFLEXION", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }:
-        return True
     try:
-        from .config import load_config
-        return bool(load_config().get("reflexion", {}).get("enable", False))
+        from .config import (
+            config_source_errors,
+            governed_learning_default,
+            governed_learning_env_flag,
+            load_config,
+        )
+        override = governed_learning_env_flag("MAVERICK_REFLEXION")
+        if override is not None:
+            return override
+        cfg = load_config()
+        if config_source_errors():
+            return False
+        return bool(
+            cfg.get("reflexion", {}).get("enable", governed_learning_default())
+        )
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
 

@@ -67,6 +67,12 @@ def __getattr__(name: str):
 
 CONFIG_OVERLAY_ENV = "MAVERICK_CONFIG_OVERLAY"
 
+# Governed, in-process learning is the product baseline. High-authority
+# actuation remains independently gated: code self-modification, live workflow
+# auto-apply, generated-code execution, external MCP acquisition and model
+# weight adoption do not inherit this default.
+GOVERNED_LEARNING_DEFAULT = True
+
 # Dashboard Settings overlay for config-read settings (provider keys,
 # capability/feature toggles). Deep-merged over config.toml on every
 # load_config() — always-on at a fixed path next to config.toml — so UI edits
@@ -260,7 +266,7 @@ def dashboard_overrides_path() -> Path:
     return config_path().parent / DASHBOARD_OVERRIDES_BASENAME
 
 
-def config_source_errors() -> dict[str, str]:
+def config_source_errors(*, include_tenant: bool = True) -> dict[str, str]:
     """Unreadable/corrupt files among the active config sources.
 
     ``load_config`` intentionally returns defaults for malformed TOML so a typo
@@ -272,9 +278,10 @@ def config_source_errors() -> dict[str, str]:
     overlay = os.environ.get(CONFIG_OVERLAY_ENV)
     if overlay:
         paths.append(Path(overlay).expanduser())
-    tenant = tenant_config_path()
-    if tenant is not None:
-        paths.append(tenant)
+    if include_tenant:
+        tenant = tenant_config_path()
+        if tenant is not None:
+            paths.append(tenant)
     # Optional overlays are skipped by ``load_config`` once they disappear, so
     # a parse error cached while the file existed would otherwise remain
     # security-significant forever. Clear it only when the filesystem
@@ -297,6 +304,40 @@ def config_source_errors() -> dict[str, str]:
         for path in paths
         if str(path) in _toml_errors
     }
+
+
+def governed_learning_default() -> bool:
+    """Default-on only when every active configuration source is trustworthy.
+
+    The fail-soft TOML loader deliberately maps both an absent file and a
+    malformed file to ``{}``. Mutating learning must distinguish them: absence
+    gets the product default, while an unreadable/corrupt policy fails closed.
+    """
+    try:
+        return GOVERNED_LEARNING_DEFAULT and not bool(config_source_errors())
+    except Exception:  # pragma: no cover -- uncertainty cannot enable mutation
+        return False
+
+
+def governed_learning_env_flag(name: str) -> bool | None:
+    """Tri-state learning override that cannot bypass corrupt policy.
+
+    An explicit ``VAR=0`` remains a reliable opt-out. ``VAR=1`` is honored only
+    after every active configuration source parses successfully.
+    """
+    try:
+        load_config()
+        if config_source_errors():
+            return False
+        value = env_flag(name)
+        # ``env_flag`` intentionally treats absent and malformed values alike
+        # for general feature switches. Default-on learning cannot: a present
+        # but unrecognized value must never fall through and enable mutation.
+        if value is None and name in os.environ:
+            return False
+        return value
+    except Exception:  # pragma: no cover -- uncertainty cannot enable mutation
+        return False
 
 
 def tenant_config_path() -> Path | None:
@@ -340,10 +381,29 @@ def env_flag(name: str) -> bool | None:
     return None
 
 
-def load_config(path: Path | None = None) -> dict:
-    if path is not None:
-        return _load_config_file(path)
+def _strict_config_bool(
+    cfg: dict, key: str, default: bool, *, invalid: bool = False,
+) -> bool:
+    """Read a policy boolean without Python's string-truthiness footgun.
 
+    TOML normally supplies a real bool, but dashboard overlays and callers may
+    provide malformed values. Missing uses the documented default; a present
+    non-bool uses the caller's fail-closed posture.
+    """
+    if key not in cfg:
+        return bool(default)
+    value = cfg.get(key)
+    return value if isinstance(value, bool) else bool(invalid)
+
+
+def load_global_config() -> dict:
+    """Load deployment-global config without a per-tenant overlay.
+
+    Repo-global control planes such as DGM must not change authority depending
+    on whichever tenant happens to be active in the current request context.
+    The dashboard overlay remains writable by the global admin; the optional
+    operator-owned config overlay still has higher precedence.
+    """
     # Wizard-persisted secrets must be in the environment BEFORE interpolation,
     # or every "${ANTHROPIC_API_KEY}" the wizard wrote resolves to "" on a bare
     # pip/CLI install. setdefault semantics: a real export always wins.
@@ -357,6 +417,14 @@ def load_config(path: Path | None = None) -> dict:
     overlay = os.environ.get(CONFIG_OVERLAY_ENV)
     if overlay:
         cfg = _deep_merge_config(cfg, _load_config_file(Path(overlay).expanduser()))
+    return cfg
+
+
+def load_config(path: Path | None = None) -> dict:
+    if path is not None:
+        return _load_config_file(path)
+
+    cfg = load_global_config()
     # Per-tenant overlay (highest precedence): when a tenant is active, its own
     # config.toml wins, so each client supplies its own provider API keys, model
     # choices and budget without sharing one global credential set. Skipped in
@@ -659,12 +727,10 @@ def get_governed_connectors() -> dict:
 def get_self_learning() -> dict:
     """Return the ``[self_learning]`` section with defaults filled in.
 
-    The whole feature is off by default (``enable = false``) so the kernel
-    keeps current behavior out of the box. When enabled, the sub-toggles
-    default ON (the operator has already accepted the trust decision):
-    ``preflight`` pre-acquires catalog skills before a run; ``create_tools``
-    lets the agent generate + run new tools. ``max_acquisitions`` caps how
-    many capabilities a single run may auto-acquire.
+    Governed capability learning is on by default. Catalog-skill preflight,
+    pack provisioning and local lexical distillation are safe defaults;
+    generating executable tools and starting third-party MCP processes remain
+    separate, explicit authority decisions.
 
     Back-compat: a config that still carries the retired ``add_mcp_servers``
     key is tolerated (it is simply ignored) — agent-driven MCP acquisition
@@ -676,9 +742,13 @@ def get_self_learning() -> dict:
     except (TypeError, ValueError):
         max_acq = 5
     return {
-        "enable": bool(cfg.get("enable", False)),
-        "preflight": bool(cfg.get("preflight", True)),
-        "create_tools": bool(cfg.get("create_tools", True)),
+        "enable": _strict_config_bool(
+            cfg, "enable", governed_learning_default()),
+        "preflight": _strict_config_bool(cfg, "preflight", True),
+        # High-authority booleans are intentionally strict: a string such as
+        # ``"false"`` is truthy in Python and must never arm executable-code
+        # generation through a malformed overlay.
+        "create_tools": cfg.get("create_tools") is True,
         # The agent factory equips a freshly approved pack with the catalog
         # skills + synthesized tools its workflow needs (maverick.provision).
         # On by default once self-learning is accepted; still bounded by
@@ -689,7 +759,13 @@ def get_self_learning() -> dict:
         # a third-party subprocess, so it ships OFF independently of the
         # self-learning master switch (#422). Env override:
         # MAVERICK_ALLOW_MCP_ACQUISITION.
-        "allow_mcp_acquisition": bool(cfg.get("allow_mcp_acquisition", False)),
+        "allow_mcp_acquisition": cfg.get("allow_mcp_acquisition") is True,
+        # Extra learning-only model calls may select a different configured
+        # provider/role and can expose task or child-result text. Keep that
+        # egress a separate explicit authority even though the local learning
+        # engines themselves default on.
+        "allow_provider_egress": cfg.get("allow_provider_egress") is True,
+        "distill_local": _strict_config_bool(cfg, "distill_local", True),
         "max_acquisitions": max(1, max_acq),
     }
 
@@ -697,11 +773,11 @@ def get_self_learning() -> dict:
 def get_self_harness() -> dict:
     """Return the ``[self_harness]`` section with defaults filled in.
 
-    OFF by default (kernel rule 1). The tuning knobs default to the loop's
-    historical behavior so enabling the feature changes nothing until an
-    operator opts into the stricter/optional paths:
+    ON by default under the conservative ``risk_limited`` profile. The loop
+    still cannot promote without held-out evidence, calibration and its
+    promotion-controller gates:
 
-    - ``risk_limited``: opt into the conservative unattended-promotion profile
+    - ``risk_limited``: select the conservative unattended-promotion profile
       (held-out/effect/confidence floors, sealed best-of-3 selection, replicated
       judge votes, durable holdout accounting, operational caps, recent judge
       calibration, metamorphic checks, and canary staging). Safety-critical
@@ -724,11 +800,17 @@ def get_self_harness() -> dict:
       (0 = never; only acted on when a driver/CLI runs retirement).
     """
     cfg = load_config().get("self_harness", {})
+    # A deployment with no harness policy gets the new conservative default-on
+    # profile. An existing partial [self_harness] table keeps its historical
+    # constituent defaults unless the operator (or dashboard/installer)
+    # explicitly selects risk_limited/auto_run. This prevents an upgrade from
+    # silently rewriting evaluation thresholds or starting scheduled spend.
+    pristine_default = not cfg
     # One explicit profile for unattended, research-grade promotion.  It changes
     # defaults plus non-weakenable safety floors/ceilings. Constituent knobs may
     # still be tightened deliberately.
-    # The feature itself remains OFF unless ``enable`` is set (kernel rule 1).
-    risk_limited = bool(cfg.get("risk_limited", False))
+    risk_limited = _strict_config_bool(
+        cfg, "risk_limited", pristine_default, invalid=True)
 
     def _num(key, default, cast):
         try:
@@ -820,19 +902,21 @@ def get_self_harness() -> dict:
             if raw_eval_budget is not None and raw_eval_budget > 0.0 else None)
 
     return {
-        "enable": bool(cfg.get("enable", False)),
+        "enable": _strict_config_bool(
+            cfg, "enable", governed_learning_default()),
         "risk_limited": risk_limited,
         # Run the governed cycle for every configured role model as part of
         # `maverick dream` (the nightly learning beat), so the harness operates
-        # itself without a second cron entry. Default off -- `dream` behaves
-        # exactly as before.
-        "auto_run": bool(cfg.get("auto_run", False)),
+        # itself without a second cron entry. A pristine deployment defaults on;
+        # an existing partial section retains its historical off default.
+        "auto_run": _strict_config_bool(cfg, "auto_run", pristine_default),
         "min_support": (
             max(3, _num("min_support", 3, int)) if risk_limited
             else max(1, _num("min_support", 3, int))),
         "min_support_by_class": by_class,
         "require_held_out": (
-            True if risk_limited else bool(cfg.get("require_held_out", False))),
+            True if risk_limited else _strict_config_bool(
+                cfg, "require_held_out", False)),
         "min_held_out": (
             max(8, _num("min_held_out", 8, int)) if risk_limited
             else max(0, _num("min_held_out", 0, int))),
@@ -845,7 +929,7 @@ def get_self_harness() -> dict:
         "max_cost_factor": _risk_cap("max_cost_factor", 1.25),
         "max_latency_factor": _risk_cap("max_latency_factor", 1.25),
         "max_tool_calls_factor": _risk_cap("max_tool_calls_factor", 1.10),
-        "semantic_mining": bool(cfg.get("semantic_mining", False)),
+        "semantic_mining": _strict_config_bool(cfg, "semantic_mining", False),
         # Keep the risk study's search multiplicity fixed. More proposals are
         # not a tighter control: they increase selection pressure and compute.
         "candidates_per_signature": (
@@ -884,7 +968,8 @@ def get_self_harness() -> dict:
         # calibration.learning_frozen can detect THIS loop's judge drifting.
         # Default off -- telemetry only, never load-bearing.
         "calibrate_judge": (
-            True if risk_limited else bool(cfg.get("calibrate_judge", False))),
+            True if risk_limited else _strict_config_bool(
+                cfg, "calibrate_judge", False)),
         # A conservative run requires a recent adequate calibration receipt;
         # collecting judge telemetry alone is not an interlock.
         "calibration_max_age_hours": calibration_max_age,
@@ -892,7 +977,7 @@ def get_self_harness() -> dict:
         # fleet model's graduated lines on the rest of the fleet (gated,
         # canaried, budget-capped; the tried-memory keeps steady-state spend
         # near zero). Default off -- transfer runs only via the CLI.
-        "transfer_auto": bool(cfg.get("transfer_auto", False)),
+        "transfer_auto": _strict_config_bool(cfg, "transfer_auto", False),
         # Where the learning stores (addenda, provenance, transfer memory)
         # live: "files" = per-host JSON under ~/.maverick (default); "world" =
         # tables in the shared world database, so a fleet spanning hosts
@@ -918,7 +1003,8 @@ def get_self_harness() -> dict:
         # the rewording -- rejects lines overfit to exact phrasing. Default off;
         # tolerance allows a small slip on the paraphrases.
         "metamorphic": (
-            True if risk_limited else bool(cfg.get("metamorphic", False))),
+            True if risk_limited else _strict_config_bool(
+                cfg, "metamorphic", False)),
         "metamorphic_tolerance": (
             0.0 if risk_limited
             else max(0.0, _num("metamorphic_tolerance", 0.0, float))),
@@ -928,12 +1014,13 @@ def get_self_harness() -> dict:
         # canary review, rather than permanent on arrival (default off -- a
         # promotion lands permanent, the historical behavior).
         "promote_as_canary": (
-            True if risk_limited else bool(cfg.get("promote_as_canary", False))),
+            True if risk_limited else _strict_config_bool(
+                cfg, "promote_as_canary", False)),
         "retire_after_days": max(0.0, _num("retire_after_days", 0.0, float)),
         # Re-measure each existing line's live A/B lift each cycle and DEMOTE
         # dead weight (default off -- a general corpus can under-credit a line
         # that helps only its own failure class, so this is operator opt-in).
-        "efficacy_review": bool(cfg.get("efficacy_review", False)),
+        "efficacy_review": _strict_config_bool(cfg, "efficacy_review", False),
         # Path to an eval corpus ({model|domain: [{goal, expected}]}) JSON. When
         # set, the driver auto-builds the LIVE A/B (model generates, verifier
         # judges) so a scheduled pass can actually PROMOTE; unset -> dry pass.
@@ -1063,7 +1150,7 @@ def get_calibration() -> dict:
 def get_credit() -> dict:
     """Return the ``[credit]`` section (counterfactual swarm credit assignment).
 
-    OFF by default: CSCA costs N+1 verifier passes per swarm. ``max_children``
+    ON by default but budget-limited: CSCA costs N+1 verifier passes per swarm. ``max_children``
     caps the swarm size it will attribute (skip larger ones); ``min_budget_
     headroom`` is the fraction of budget that must remain before it runs.
     """
@@ -1077,7 +1164,8 @@ def get_credit() -> dict:
     except (TypeError, ValueError):
         head = 0.4
     return {
-        "enable": bool(cfg.get("enable", False)),
+        "enable": _strict_config_bool(
+            cfg, "enable", governed_learning_default()),
         "max_children": maxc,
         "min_budget_headroom": max(0.0, min(1.0, head)),
     }
@@ -1116,9 +1204,10 @@ def get_search() -> dict:
 
 def get_skill_synthesis() -> dict:
     """Return the ``[skill_synthesis]`` section (test-time task-specific skills).
-    OFF by default."""
+    ON by default; spend remains metered by the run budget."""
     cfg = load_config().get("skill_synthesis", {})
-    return {"enable": bool(cfg.get("enable", False))}
+    return {"enable": _strict_config_bool(
+        cfg, "enable", governed_learning_default())}
 
 
 def get_fleet_memory() -> dict:
@@ -1194,9 +1283,10 @@ def get_domains() -> dict:
 
 def get_experience() -> dict:
     """Return the ``[experience]`` section (outcome-guided orchestration).
-    OFF by default."""
+    ON by default."""
     cfg = load_config().get("experience", {})
-    return {"enable": bool(cfg.get("enable", False))}
+    return {"enable": _strict_config_bool(
+        cfg, "enable", governed_learning_default())}
 
 
 def get_tax() -> dict:
@@ -1227,7 +1317,7 @@ def get_tax() -> dict:
 def get_dreaming() -> dict:
     """Return the ``[dreaming]`` section (offline experience consolidation).
 
-    OFF by default. ``min_cluster`` is the evidence floor before a recurring
+    ON by default. ``min_cluster`` is the evidence floor before a recurring
     pattern is consolidated (a one-off is noise); ``max_insights`` caps the
     persisted insight store; ``prune`` lets a dream cycle compact the
     reflexion log down to ``keep_reflexions`` deduplicated entries.
@@ -1259,7 +1349,8 @@ def get_dreaming() -> dict:
             return default
 
     return {
-        "enable": bool(cfg.get("enable", False)),
+        "enable": _strict_config_bool(
+            cfg, "enable", governed_learning_default()),
         "min_cluster": _int("min_cluster", 2),
         "max_insights": _int("max_insights", 100),
         "prune": bool(cfg.get("prune", True)),
@@ -1275,13 +1366,15 @@ def get_dreaming() -> dict:
         # Retire a failure insight once this many NEWER similar successes
         # contradict it ("we now reliably do X").
         "contradiction_successes": _int("contradiction_successes", 2),
-        # Fact consolidation deletes operator data, so it is opt-in even
-        # inside the already-opt-in dreaming feature.
+        # Fact consolidation deletes operator data, so it remains a separate
+        # opt-in inside default-on dreaming.
         "prune_facts": bool(cfg.get("prune_facts", False)),
         "facts_max_age_days": _nonneg_int("facts_max_age_days", 180),
         "facts_cap": _nonneg_int("facts_cap", 2000),
         # Distill explicit user-preference statements into per-user notes.
-        "user_notes": bool(cfg.get("user_notes", True)),
+        # Verbatim cross-conversation preference persistence is a separate
+        # privacy decision, not inherited from default-on consolidation.
+        "user_notes": bool(cfg.get("user_notes", False)),
         # Quarantine this cycle's NEW skills while the continuously-tracked
         # benchmark suite is regressing (learning-side canary).
         "benchmark_gate": bool(cfg.get("benchmark_gate", True)),
@@ -1316,9 +1409,9 @@ def get_dreaming() -> dict:
 def get_self_improvement() -> dict:
     """Return the ``[self_improvement]`` section (governed learning promotion).
 
-    OFF by default and a no-op while off: when ``enable`` is false the
-    Self-Improvement Controller never promotes a self-change, so a default
-    deployment is unaffected. ``min_improvement`` is the eval margin a candidate
+    ON by default for governed prompt/policy learning. When ``enable`` is false,
+    the Self-Improvement Controller never promotes a self-change. ``min_improvement``
+    is the eval margin a candidate
     must beat its own baseline by before any rung is eligible; ``max_auto_rung``
     is the highest rung that may be promoted without a human (anything above it
     -- e.g. ``code``/``weights`` -- always requires explicit approval).
@@ -1337,32 +1430,37 @@ def get_self_improvement() -> dict:
         if isinstance(raw_keys, list) else [])
 
     return {
-        "enable": bool(cfg.get("enable", False)),
+        "enable": _strict_config_bool(
+            cfg, "enable", governed_learning_default()),
         "min_improvement": _ratio("min_improvement", 0.0),
         "max_auto_rung": str(cfg.get("max_auto_rung", "policy")).strip().lower() or "policy",
-        # Phase-0 capture (raw-trajectory store) and PRM-in-loop guidance, both
-        # off by default; see maverick.trajectory_store / maverick.prm_guidance.
-        "capture": bool(cfg.get("capture", False)),
-        "prm_guidance": bool(cfg.get("prm_guidance", False)),
+        # Phase-0 capture fuels the default-on flywheel. Raw-text donation and
+        # provider egress remain separate opt-ins.
+        "capture": _strict_config_bool(cfg, "capture", True),
+        "prm_guidance": _strict_config_bool(
+            cfg, "prm_guidance", governed_learning_default()),
         # Counterfactual promotion: judge a self-change on its confounder-adjusted
         # CAUSAL effect (maverick.promotion_effect) rather than a correlational
-        # baseline/candidate diff. Off by default; the controller only consults a
-        # causal effect when this is set.
-        "causal_promotion": bool(cfg.get("causal_promotion", False)),
+        # baseline/candidate diff. On by default; set false to use the direct
+        # baseline/candidate evidence path.
+        "causal_promotion": _strict_config_bool(
+            cfg, "causal_promotion", True, invalid=True),
         # Self-improving agent factory (maverick.factory_learning): mine recurring
         # pack-generation gaps into proposer corrections and promote them through
         # this same gate. Sub-toggle of the master switch -- on once
         # self-improvement is accepted; set false to keep the generator static.
-        "factory_learning": bool(cfg.get("factory_learning", True)),
+        "factory_learning": _strict_config_bool(
+            cfg, "factory_learning", True),
         # Evaluator co-evolution (maverick.evaluator_evolution): instead of only
         # FREEZING learning when the judge drifts, promote a better judge --
         # a challenger evaluator replaces the incumbent only when its agreement
         # with a fixed ground-truth ANCHOR (by the epsilon-best-belief lower bound)
-        # beats it, on the dedicated ``evaluator`` rung. Off by default; the
+        # beats it, on the dedicated ``evaluator`` rung. On by default; the
         # anchor is the guardrail (immutable, checksum-locked) so a weak anchor
         # cannot launder drift. ``evaluator_eps`` is the confidence level of the
         # lower bound (lower = more conservative). After arXiv 2606.26294.
-        "evaluator_evolution": bool(cfg.get("evaluator_evolution", False)),
+        "evaluator_evolution": _strict_config_bool(
+            cfg, "evaluator_evolution", True),
         "evaluator_eps": _ratio("evaluator_eps", 0.05),
         # Cryptographic approval of code/weights promotions
         # (maverick.approval_signing): trusted approver Ed25519 public keys (hex)
@@ -1371,7 +1469,8 @@ def get_self_improvement() -> dict:
         # (default) keeps the legacy self-settable boolean-approval path.
         "approver_keys": approver_keys,
         "approver_keys_dir": str(cfg.get("approver_keys_dir") or "") or None,
-        "require_signed_approval": bool(cfg.get("require_signed_approval", False)),
+        "require_signed_approval": _strict_config_bool(
+            cfg, "require_signed_approval", False, invalid=True),
     }
 
 
@@ -1386,11 +1485,13 @@ def get_reasoning_reward() -> dict:
     verifier."""
     cfg = load_config().get("reasoning_reward", {})
     return {
-        "enable": bool(cfg.get("enable", True)),
+        "enable": _strict_config_bool(
+            cfg, "enable", governed_learning_default()),
         # Sign each structured reward into the tamper-evident audit chain
-        # (provable learning). OFF by default -- opt in for the full signed
-        # learning trail. See reasoning_reward.audit_rewards_enabled.
-        "audit_rewards": bool(cfg.get("audit_rewards", False)),
+        # (provable learning). ON by default; set false to suppress these audit
+        # rows. See reasoning_reward.audit_rewards_enabled.
+        "audit_rewards": _strict_config_bool(
+            cfg, "audit_rewards", governed_learning_default()),
     }
 
 
@@ -1418,7 +1519,8 @@ def get_jit_rl() -> dict:
     except (TypeError, ValueError):
         beta = 1.0
     return {
-        "enable": bool(cfg.get("enable", True)),
+        "enable": _strict_config_bool(
+            cfg, "enable", governed_learning_default()),
         "k": _int("k", 8),
         "beta": beta,
         "max_experiences": _int("max_experiences", 5000),
@@ -1433,11 +1535,11 @@ def get_self_modify() -> dict:
     control-plane path unconditionally. ``editable_paths`` is a list of
     repo-relative fnmatch globs the agent MAY propose changes to; empty (the
     default) means nothing is editable."""
-    cfg = load_config().get("self_modify", {})
+    cfg = load_global_config().get("self_modify", {})
     paths = cfg.get("editable_paths")
     editable = ([str(p).strip() for p in paths if str(p).strip()]
                 if isinstance(paths, list) else [])
-    return {"enable": bool(cfg.get("enable", False)), "editable_paths": editable}
+    return {"enable": cfg.get("enable") is True, "editable_paths": editable}
 
 
 def get_adapter_rung() -> dict:
@@ -1475,8 +1577,8 @@ def get_rehearsal() -> dict:
 
     The governance half of the Operating Twin: before a risky plan executes, it
     is simulated against the learned world-model and gated on the prediction.
-    OFF by default and fail-open -- when ``enable`` is false ``gate_action`` is a
-    no-op that proceeds, so a default deployment is unaffected. ``outcome_floor``
+    ON by default and uncertainty escalates. When explicitly disabled,
+    ``gate_action`` is a no-op that proceeds. ``outcome_floor``
     is the predicted-outcome below which a *confident* rehearsal blocks;
     ``min_support`` is the (state, action) observations the model needs before it
     will vouch for a move (below it the action is escalated, never waved through);
@@ -1491,7 +1593,8 @@ def get_rehearsal() -> dict:
             return default
 
     return {
-        "enable": bool(cfg.get("enable", False)),
+        "enable": _strict_config_bool(
+            cfg, "enable", governed_learning_default()),
         "outcome_floor": _num("outcome_floor", 0.5),
         "min_support": _num("min_support", 5, int),
         "max_uncertainty": _num("max_uncertainty", 0.25),
@@ -1532,9 +1635,9 @@ def get_data_engine() -> dict:
 
     The Tesla-style improvement flywheel for the agent workforce: production
     failures are causally triaged, a fix is mined + validated in the world-model,
-    promoted through the safety ladder, and measured against real outcomes. OFF
-    by default -- when ``enable`` is false the engine never runs, so a default
-    deployment is unaffected. ``failure_threshold`` is the outcome below which an
+    promoted through the safety ladder, and measured against real outcomes. ON
+    by default; empty or insufficient evidence produces no candidate.
+    ``failure_threshold`` is the outcome below which an
     episode counts as a failure; ``min_support`` is the evidence a causal-impact
     estimate needs before a failure class is ranked.
     """
@@ -1547,7 +1650,8 @@ def get_data_engine() -> dict:
             return default
 
     return {
-        "enable": bool(cfg.get("enable", False)),
+        "enable": _strict_config_bool(
+            cfg, "enable", governed_learning_default()),
         "failure_threshold": _num("failure_threshold", 0.5),
         "min_support": _num("min_support", 8, int),
         "top_k": _num("top_k", 10, int),
@@ -1560,12 +1664,13 @@ def get_consequence() -> dict:
     Reality as the reward: real downstream outcomes (invoice paid, contract
     renewed, ticket stayed closed), reported by a system-of-record connector and
     joined back to the episode that acted, become the grounded learning signal.
-    OFF by default -- when ``enable`` is false the data-engine join keeps using
-    the verifier-confidence proxy, so a default deployment is unaffected;
+    ON by default -- when ``enable`` is false the data-engine join keeps using
+    the verifier-confidence proxy, so an opted-out deployment is unaffected;
     recording outcomes is always harmless (it just stores).
     """
     cfg = load_config().get("consequence", {})
-    return {"enable": bool(cfg.get("enable", False))}
+    return {"enable": _strict_config_bool(
+        cfg, "enable", governed_learning_default())}
 
 
 def get_deployment() -> dict:
@@ -1620,11 +1725,11 @@ def get_operations_scientist() -> dict:
     An agent that discovers a better process and proves it causally: it pairs a
     harmful action with the beneficial habit that should replace it, validates the
     swap in the world-model, then (downstream) runs a real experiment and ships
-    the proven win. OFF by default -- when ``enable`` is false the engine never
-    runs, so a default deployment is unaffected.
+    the proven win. ON by default; it remains evidence- and promotion-gated.
     """
     cfg = load_config().get("operations_scientist", {})
-    return {"enable": bool(cfg.get("enable", False))}
+    return {"enable": _strict_config_bool(
+        cfg, "enable", governed_learning_default())}
 
 
 def get_emergent_protocol() -> dict:

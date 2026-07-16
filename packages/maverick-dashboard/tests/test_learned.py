@@ -63,7 +63,7 @@ def _seed_harness(monkeypatch, tmp_path, *, enabled=True):
     if enabled:
         monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
     else:
-        monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+        monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
         monkeypatch.setattr("maverick.config.load_config", dict)
     sh._write_addenda(
         {"claude-x": "Operating guidance learned for this model:\n"

@@ -76,9 +76,16 @@ here.
   with a persisted per-conversation cursor — folds only new turns), and
   **`graph`** (an entity-relation digest); each degrades deterministically
   without an llm and is selected by name via `[context] compaction_strategy`.
+- **Governed learning defaults on** — the in-process learning loops are enabled
+  on a clean install and can be disabled individually or together from the
+  dashboard Learning page. Higher-authority actions do not inherit that default:
+  generated executable tools, third-party MCP acquisition, extra task/result-
+  bearing provider calls, verbatim cross-conversation user notes, live flow
+  auto-apply, model-weight adoption, and DGM code self-modification retain
+  separate gates.
 - **Local continuous learning** — distill successful run trajectories into a
   reusable, validator-compliant `SKILL.md` under `~/.maverick/learned-skills`
-  (`skill_distillation_local.py`), opt-in via `[self_learning] distill_local`.
+  (`skill_distillation_local.py`), default-on via `[self_learning] distill_local`.
   **v2** (`skill_distillation_v2.py`) adds two quality gates so the loop stays
   useful: it won't distill from fewer than N successful trajectories (a one-off
   success is noise), and it dedups a candidate against the learned-skills store
@@ -104,7 +111,7 @@ here.
   so its attempts share a `task_family`. End-to-end recipe in
   [`self-learning-runbook.md`](./self-learning-runbook.md).
 - **Dreaming (offline consolidation)** — `maverick dream` (`dreaming.py`,
-  opt-in `[dreaming] enable`) replays recent successes + failure reflexions
+  default-on `[dreaming] enable`) replays recent successes + failure reflexions
   while the swarm is idle, attributes them to departments (domain packs),
   distills recurring wins into learned skills per department (via the gated
   v2 distiller), clusters recurring failures into *dream insights*
@@ -116,7 +123,8 @@ here.
   `domain` field), and same-department lessons outrank equally-similar
   generic ones at recall time.
 - **Self-harness (model-specific harness learning)** — `maverick self-harness`
-  (`self_harness.py`, opt-in `[self_harness] enable`) mines one model's
+  (`self_harness.py`, default-on under the conservative `risk_limited` profile)
+  mines one model's
   recurring failure reflexions into weakness *signatures*, proposes a *minimal*
   operating-guidance line for each, and regression-validates it on held-in AND
   held-out cases (rejecting an edit that overfits its own examples). Survivors
@@ -129,7 +137,8 @@ here.
   mining. After *Self-Harness: Harnesses That Improve Themselves* (arXiv
   2606.09498); design in [`docs/proposals/self-harness.md`](./proposals/self-harness.md).
 - **Evaluator co-evolution (promote a better judge, don't just freeze)** —
-  `maverick.evaluator_evolution` (opt-in `[self_improvement] evaluator_evolution`)
+  `maverick.evaluator_evolution` (default-on
+  `[self_improvement] evaluator_evolution`)
   extends the calibration interlock from *freeze-on-drift* to *promote-on-drift*:
   a challenger evaluator replaces the incumbent only when its agreement with a
   fixed ground-truth **anchor**, measured by the conservative epsilon-best-belief
@@ -143,7 +152,9 @@ here.
   signal stationary. The anchor is the guardrail, so released anchors are
   **immutable**: checksum-pinned in `evaluator_anchors.lock.json` and enforced by
   `python -m maverick.evaluator_evolution --ci` (a weak or mutable anchor would
-  launder drift). OFF by default. After *The Red Queen Gödel Machine:
+  launder drift). The loop is enabled by default, but the evaluator rung remains
+  above the default auto-promotion ceiling and therefore requires human approval.
+  After *The Red Queen Gödel Machine:
   Co-Evolving Agents and Their Evaluators* (arXiv 2606.26294); design in
   [`docs/proposals/evaluator-co-evolution.md`](./proposals/evaluator-co-evolution.md).
 - **Shared generic insight promotion** — when explicitly enabled with
@@ -177,9 +188,9 @@ here.
   contrast, and the confounders adjusted for. Fail-closed by calibration: an
   estimate with too little overlap, or one that leaks a non-zero effect under a
   within-stratum placebo permutation, is refused. Distinct from per-swarm CSCA
-  (`credit.py`) — this is offline, corpus-level, for promotion decisions. Opt-in
-  via `[self_improvement] causal_promotion`; applies only when self-improvement
-  is enabled.
+  (`credit.py`) — this is offline, corpus-level, for promotion decisions.
+  Default-on via `[self_improvement] causal_promotion`; applies only when
+  self-improvement is enabled.
 - **Model-based counterfactual rollouts** — when confounding is so severe that no
   stratum has both arms (zero overlap), stratification is blind; g-computation
   over a tabular transition model fit from the logged `(state, action) ->
@@ -198,15 +209,15 @@ here.
   confidently-poor outcome, and **escalate** to a human/canary when the rollout is
   too uncertain or — crucially — when the model has never seen the move (a
   simulator that bluffs about the unknown is worse than none). Governance as a
-  capability, not just a brake. OFF by default and fail-open (`[rehearsal]
-  enable`); when on it fails toward caution (unknown / over-uncertain / error all
+  capability, not just a brake. Default-on (`[rehearsal] enable`); it fails
+  toward caution (unknown / over-uncertain / error all
   escalate). The verdict maps onto the existing consent / autonomy-gate surfaces.
 - **Human-override ingestion** — when a human declines an Art-14 approval
   gate, the refusal is persisted as a recallable lesson
   (`reflexion.record_human_override`, failure class `human_override`,
   department-tagged) so the next similar goal proposes an alternative or
   seeks approval earlier — and dreaming consolidates repeated refusals into
-  department insights. Opt-in via `[reflexion]`; the audit record is
+  department insights. Default-on via `[reflexion]`; the audit record is
   unchanged.
 - **Signal capture across the run lifecycle** — goal rows persist their
   department (schema v14 `domain` column; resumes inherit it); a stall on a
@@ -251,6 +262,18 @@ here.
   `--rollback latest|<name>` restore wholesale); with an active tenant,
   every learned store resolves under the tenant's data dir so one tenant's
   memory never feeds another's runs.
+- **Client-controlled research DGM** — `[self_modify] enable` remains off by
+  default and outside the blanket learning control. A deployment-global admin
+  can arm it from the dashboard Learning page or `POST /api/v1/learning/dgm`
+  after acknowledging that it is research-only. Arming does not run a cycle and
+  never authorizes code adoption or deployment. A ready state requires a narrow
+  editable surface, at least two discriminating `eval_tests`, and an external
+  attested `ep:<name>` sandbox; every operator-run cycle repeats Git, budget,
+  HALT, containment, and evaluator checks. If `MAVERICK_SELF_MODIFY` is set, the
+  environment owns the setting and the dashboard control is read-only. An
+  operator-owned `MAVERICK_CONFIG_OVERLAY` that sets the DGM bit likewise locks
+  the dashboard control. Tenant overlays cannot alter the repo-global gate,
+  editable surface, challenge corpus, or evaluator policy.
 - **Governed Actions** (`governed_actions.py`, `governed_connectors.py`;
   opt-in, additive) — a consequential operation can be a typed `ActionSpec`
   rather than a free-form call: **simulated** before commit (effect preview,
@@ -471,15 +494,15 @@ here.
   search); it takes an injected embedder rather than embedding itself, so
   recall reuses the local fastembed model.
 - **Cognitive Data Engine — the causal improvement flywheel** (`data_engine.py`
-  + `flywheel.py`, `maverick flywheel`, opt-in `[data_engine] enable` /
+  + `flywheel.py`, `maverick flywheel`, default-on `[data_engine] enable` /
   `MAVERICK_DATA_ENGINE`) — the Tesla-style data engine for a governed
   workforce: production failures are triaged by their **causal** impact on real
   outcomes (fix what moves reality most, not what's merely frequent), the worst
   actions are mined into **guardrails** (`negative_knowledge.py` — kept only
   when the causal harm is trustworthy and self-retired when it's gone),
   beneficial actions consolidate into **habits** (`procedural_memory.py`, a
-  reinforce/forget curve), and the whole loop composes in one pass. OFF by
-  default; reads the trajectory store, mutates nothing until enabled. Observable
+  reinforce/forget curve), and the whole loop composes in one pass. It reads the
+  trajectory store and can be disabled independently. Observable
   read-only at `GET /api/v1/flywheel` (mined guardrails + consolidated habits).
 - **Causal estimators — the rigor under the flywheel** (`promotion_effect.py`,
   `counterfactual_rollout.py`) — effects are estimated, not guessed: a
@@ -490,19 +513,19 @@ here.
   change. Validated to recover a known effect under confounding while rejecting
   the naive (confounded) contrast.
 - **Operations Scientist — discover a better process and prove it**
-  (`operations_scientist.py`, opt-in `[operations_scientist] enable` /
+  (`operations_scientist.py`, default-on `[operations_scientist] enable` /
   `MAVERICK_OPERATIONS_SCIENTIST`) — pairs a causally-harmful action with the
   beneficial habit that should replace it ("stop A; do B"), validates the swap
   in the world-model **before** spending a real experiment, and only a
   trustworthy positive lift is promoted to a live trial. Discovery, not just
-  labour; OFF by default.
+  labour; it can be disabled independently.
 - **Consequence Engine — reality is the reward** (`consequence.py`, `maverick
-  record-outcome`, dashboard `POST /api/v1/outcomes`, opt-in `[consequence]
+  record-outcome`, dashboard `POST /api/v1/outcomes`, default-on `[consequence]
   enable` / `MAVERICK_CONSEQUENCE`) — when a real downstream result lands (an
   invoice paid, a ticket reopened), it **overrides the verifier's self-graded
   proxy** so the flywheel learns from what actually happened, not from a model
-  grading its own work. Newest outcome wins, clamped to [0,1]; inert (proxy
-  passes through) until enabled. The HTTP entry point a CRM/ERP/ticketing
+  grading its own work. Newest outcome wins, clamped to [0,1]; when disabled the
+  verifier proxy passes through unchanged. The HTTP entry point a CRM/ERP/ticketing
   connector calls once reality reports back.
 - **Emergent Substrate — an auditable coordination shorthand** (`emergent_protocol.py`
   + `emergent_tokens.py`, `maverick codebook` / `codec-learn` / `codec-probe`,
@@ -563,8 +586,8 @@ here.
   proposal (agent → deterministic action) can name — and, under `[flows]
   auto_apply`, autonomously apply — the inferred tool instead of waiting for a
   human to pick one. Both autonomy knobs (`auto_evolve` revert, `auto_apply`
-  forward) are toggled from the Learning page, deliberately kept off the blanket
-  "turn all learning on" button. `evolution_log.improvement_count()` reports the
+  forward) are toggled from the Learning page, deliberately kept outside the
+  blanket learning control. `evolution_log.improvement_count()` reports the
   self-rewrites that stuck (reverted ones netted out) as the moat number. A failed run records WHICH node failed (`FlowRun.cursor`) and can
   **resume from the failed step** with the data as of the failure
   (`execution.execute(from_failure=True)`, `POST /flows/runs/{id}/retry?from_failure=1`)
@@ -1219,7 +1242,7 @@ honors `sort_keys`, and degrades on any value orjson rejects, so it's a safe
 drop-in for round-trip/transport paths (wired into the tool-output cache
 snapshot). Deliberately NOT used for cache keys/signatures, where exact bytes
 must stay backend-stable. **Self-tuning budgets — online auto-apply**
-(`self_tuning_budget.py`, opt-in `[budget] self_tuning`; the auto-applying
+(`self_tuning_budget.py`, default-on `[budget] self_tuning`; the auto-applying
 companion to the advisory `maverick budget tune` / `budget_tuner.py`, which
 only *recommends* a cap for a human to set): learns a default spend cap *per
 coarse task class*
@@ -1617,8 +1640,8 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   `SelfImprovementController` on the `prompt` rung (guidance text widens no
   capability, so no escalation proof or human sign-off is required — only the
   evidence + calibration gates), and promoted guidance is folded into future
-  pack generation (`augment_system_prompt`, scope-matched per suite). OFF by
-  default and byte-identical to before while off; gated by `[self_improvement]
+  pack generation (`augment_system_prompt`, scope-matched per suite). Default-on
+  and byte-identical to before while disabled; gated by `[self_improvement]
   enable` + the `factory_learning` sub-knob (wizard step) or
   `MAVERICK_FACTORY_LEARNING`. Live promotion requires self-digested v2 paired
   evidence with immutable data/split/evaluator/model/prompt provenance and uses
@@ -2057,7 +2080,7 @@ budget-tune`): learn a `max_dollars` recommendation from the historical
 per-goal spend distribution (a high percentile + margin, so the common case
 fits while a runaway still trips it), bucketable by an injected task-class
 classifier; read-only — the operator sets the value. **Failure-mode telemetry** (`failure_telemetry.py`, `maverick failures`,
-opt-in `[telemetry] failure_modes`): a failed run records a canonical mode
+default-on `[telemetry] failure_modes`): a failed run records a canonical mode
 (budget / auth / timeout / shield / sandbox / network / error) to a local JSONL
 sink — the orchestrator tees from its budget and generic failure seams,
 best-effort and a no-op when the telemetry is off — so an operator sees the

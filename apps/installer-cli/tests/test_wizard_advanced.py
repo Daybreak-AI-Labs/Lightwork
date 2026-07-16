@@ -1,7 +1,8 @@
-"""The wizard's 'Advanced reasoning' step writes the kernel's opt-in config
-sections, and the keys it writes are exactly the ones the kernel modules
-read (the rule-6 integrity check: a wizard toggle must actually reach the
-feature)."""
+"""The wizard's advanced step writes opt-ins and default-on learning opt-outs.
+
+The keys it writes are exactly the ones the kernel modules read (the rule-6
+integrity check: a wizard toggle must actually reach the feature).
+"""
 from __future__ import annotations
 
 try:
@@ -40,14 +41,15 @@ def test_advanced_all_on_writes_kernel_sections(tmp_path, monkeypatch):
     assert "[reflexion]" in cfg and "enable = true" in cfg
 
 
-def test_advanced_all_off_writes_no_sections(tmp_path, monkeypatch):
+def test_advanced_all_off_persists_default_on_learning_opt_out(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, dict.fromkeys(
         ["cost_aware", "verify_ensemble", "tree_of_thought",
          "compact_history", "reflexion", "enforce_quotas", "pg_rls"], False,
     ))
-    for section in ("[routing]", "[planning]", "[context]", "[reflexion]",
-                    "[quotas]", "[world_model]"):
+    for section in ("[routing]", "[planning]", "[context]", "[quotas]",
+                    "[world_model]"):
         assert section not in cfg
+    assert tomllib.loads(cfg)["reflexion"]["enable"] is False
 
 
 def test_pg_rls_writes_world_model_section_with_prep_reminder(tmp_path, monkeypatch):
@@ -96,9 +98,9 @@ def test_self_harness_toggle_writes_and_reaches_the_kernel(tmp_path, monkeypatch
     assert self_harness.enabled() is True
 
 
-def test_self_harness_off_writes_no_section(tmp_path, monkeypatch):
+def test_self_harness_off_persists_opt_out(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {"self_harness": False})
-    assert "[self_harness]" not in cfg
+    assert tomllib.loads(cfg)["self_harness"]["enable"] is False
 
 
 def test_effort_and_cache_prewarm_write_and_are_read(tmp_path, monkeypatch):

@@ -2,7 +2,7 @@
 
 The Tesla autopilot data engine, reborn for a governed AI workforce: production
 failures become causally-prioritised, simulation-validated, governance-gated
-improvements. This module is the crank's first stage -- turn the raw (opt-in)
+improvements. This module is the crank's first stage -- turn the raw governed
 trajectory corpus into a RANKED queue of failure classes, ordered by how much
 fixing each would lift *real outcomes*.
 
@@ -14,7 +14,7 @@ effect on the episode outcome (reusing ``promotion_effect``); the actions that
 *provably lower* outcomes, by the most, with confidence, are the top of the
 queue. Each class carries failing exemplars for the downstream fix-miner.
 
-Pure + dependency-free + OFF by default (reads only the opt-in trajectory store;
+Pure + dependency-free + ON by default (reads only the governed trajectory store;
 ``triage`` on an empty corpus returns ``[]``). The later crank stages
 (fix-mining, sim-validation, promotion, real-outcome measurement) build on this.
 """
@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from . import promotion_effect as pe
-from .config import env_flag
+from .config import governed_learning_env_flag
 
 
 @dataclass(frozen=True)
@@ -41,8 +41,8 @@ class FailureClass:
 
 
 def enabled() -> bool:
-    """Whether the data engine may run. OFF by default, fail-open."""
-    _v = env_flag("MAVERICK_DATA_ENGINE")
+    """Whether the default-on data engine may run."""
+    _v = governed_learning_env_flag("MAVERICK_DATA_ENGINE")
     if _v is not None:
         return _v
     try:

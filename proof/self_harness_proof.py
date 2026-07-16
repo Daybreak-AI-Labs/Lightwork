@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import atexit
 import hashlib
+import json
 import os
 import pathlib
 import shutil
@@ -37,6 +38,17 @@ import threading
 _ISOLATED_HOME = tempfile.mkdtemp(prefix="maverick-self-harness-proof-")
 os.environ["MAVERICK_HOME"] = _ISOLATED_HOME
 atexit.register(shutil.rmtree, _ISOLATED_HOME, ignore_errors=True)
+
+# This scoreboard isolates the deterministic injected-scorer core. Production
+# defaults to the stricter risk-limited profile, whose authenticated evaluator,
+# calibration receipt, and sealed-holdout contract are covered by the test
+# battery. Pin the legacy profile explicitly instead of weakening that default.
+_BASE_CONFIG = pathlib.Path(_ISOLATED_HOME) / "proof-config.toml"
+_BASE_CONFIG.write_text(
+    "[self_harness]\nenable = true\nrisk_limited = false\n",
+    encoding="utf-8",
+)
+os.environ["MAVERICK_CONFIG"] = str(_BASE_CONFIG)
 
 # Make the shipped package importable however this is launched (repo root, CI, ...).
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent
@@ -79,7 +91,10 @@ def _recs(model="claude-opus-4-8", *, classes=("timeout", "auth", "parse"),
 
 
 _GOOD_AB = dict(score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
-_ENOUGH = dict(held_in=["a", "b"], held_out=["c", "d", "e"])
+_ENOUGH = dict(
+    held_in=["a", "b"],
+    held_out=["c", "d", "e", "f", "g"],
+)
 
 
 # --------------------------------------------------------------------------
@@ -102,19 +117,19 @@ def g_determinism() -> str:
     return f"6/6 runs identical (sha256 {digests[0][:12]}...)"
 
 
-def g_off_by_default() -> str:
+def g_explicit_pause() -> str:
     """Disabled -> recall returns '' and the store is never written."""
     from maverick import self_harness as sh
-    os.environ.pop("MAVERICK_SELF_HARNESS", None)
-    os.environ.pop("MAVERICK_SELF_IMPROVEMENT", None)
+    os.environ["MAVERICK_SELF_HARNESS"] = "0"
+    os.environ["MAVERICK_SELF_IMPROVEMENT"] = "0"
     with tempfile.TemporaryDirectory() as d:
         store = pathlib.Path(d) / "addenda.json"
         rep = sh.run_self_harness(_recs(), model_id="claude-opus-4-8", min_support=3,
                                   controller=_ctrl(), path=store, **_ENOUGH, **_GOOD_AB)
         _check(rep.skipped == ["disabled"], f"not skipped: {rep.skipped}")
-        _check(not store.exists(), "store written while disabled")
+        _check(not store.exists(), "store written while explicitly paused")
         _check(sh.recall_addendum("claude-opus-4-8", store) == "", "recall non-empty")
-    return "recall == '' and no store write when off"
+    return "explicit pause returns '' and writes no store"
 
 
 def g_gate_enforced() -> str:
@@ -286,7 +301,10 @@ def g_rollback_durable() -> str:
     from maverick import self_harness_eval as ev
     os.environ["MAVERICK_SELF_HARNESS"] = "1"
     os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
-    quad = (["a", "b"], ["c", "d", "e"], lambda a, c: 0.95, lambda a, c: 0.4)
+    quad = (
+        ["a", "b"], ["c", "d", "e", "f", "g"],
+        lambda a, c: 0.95, lambda a, c: 0.4,
+    )
     with tempfile.TemporaryDirectory() as d:
         store = pathlib.Path(d) / "addenda.json"
         # SRC learns a line through the real gate; transfer lands it on TGT.
@@ -348,7 +366,10 @@ def g_store_parity() -> str:
     # Same workload through the WORLD store (config selects it; the world DB
     # lives inside this proof's throwaway MAVERICK_HOME).
     cfg = pathlib.Path(_ISOLATED_HOME) / "config.toml"
-    cfg.write_text('[self_harness]\nenable = true\nstore = "world"\n')
+    cfg.write_text(
+        '[self_harness]\nenable = true\nrisk_limited = false\nstore = "world"\n',
+        encoding="utf-8",
+    )
     os.environ["MAVERICK_CONFIG"] = str(cfg)
     try:
         _check(sh.settings().get("store") == "world", "store knob did not resolve")
@@ -382,7 +403,7 @@ def g_store_parity() -> str:
         _check(sh.forget_addendum("M"), "world-store forget removed nothing")
         _check(sh.recall_addendum("M") == "", "forgotten guidance still recalled")
     finally:
-        os.environ.pop("MAVERICK_CONFIG", None)
+        os.environ["MAVERICK_CONFIG"] = str(_BASE_CONFIG)
         cfg.unlink(missing_ok=True)
     return "same content as files; 8/8 concurrent promotions; forget round-trips"
 
@@ -397,8 +418,11 @@ def g_corpus_store() -> str:
     os.environ["MAVERICK_SELF_HARNESS"] = "1"
     cpath = pathlib.Path(_ISOLATED_HOME) / "corpus.json"
     cfg = pathlib.Path(_ISOLATED_HOME) / "config.toml"
-    cfg.write_text('[self_harness]\nenable = true\nstore = "world"\n'
-                   f'eval_corpus = "{cpath}"\n')
+    cfg.write_text(
+        '[self_harness]\nenable = true\nrisk_limited = false\nstore = "world"\n'
+        f"eval_corpus = {json.dumps(str(cpath))}\n",
+        encoding="utf-8",
+    )
     os.environ["MAVERICK_CONFIG"] = str(cfg)
     try:
         _check(ev.stage_candidates(cpath, "M", [
@@ -424,14 +448,14 @@ def g_corpus_store() -> str:
                and "export the ledger" in by_goal,
                f"round trip lost operator data: {raw}")
     finally:
-        os.environ.pop("MAVERICK_CONFIG", None)
+        os.environ["MAVERICK_CONFIG"] = str(_BASE_CONFIG)
         cfg.unlink(missing_ok=True)
     return "stage/reject/accept as world rows; export-import keeps every field"
 
 
 GUARANTEES = [
     ("determinism (consistent)", g_determinism),
-    ("off by default", g_off_by_default),
+    ("explicit pause", g_explicit_pause),
     ("governed gate enforced", g_gate_enforced),
     ("no trace poisoning", g_no_poison),
     ("bounded addendum", g_bounded),

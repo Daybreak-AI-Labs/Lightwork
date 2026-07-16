@@ -101,6 +101,9 @@ class JitStore:
 
     def record(self, features, action: str, ret: float) -> None:
         """Append one experience. Never raises."""
+        from .learning_guard import learning_write_allowed
+        if not learning_write_allowed("jit_rl"):
+            return
         try:
             exp = Experience(
                 features=tuple(float(x) for x in features),
@@ -197,9 +200,11 @@ class JitStore:
         if self.path is None:
             return
         try:
+            from .file_lock import cross_process_lock
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(exp.to_dict()) + "\n")
+            with cross_process_lock(self.path):
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(exp.to_dict()) + "\n")
             try:
                 os.chmod(self.path, 0o600)
             except OSError:
@@ -306,8 +311,8 @@ def enabled() -> bool:
     it off. Fail-open: any error resolving the flag leaves it at the configured
     default."""
     try:
-        from .config import env_flag
-        v = env_flag("MAVERICK_JIT_RL")
+        from .config import governed_learning_env_flag
+        v = governed_learning_env_flag("MAVERICK_JIT_RL")
         if v is not None:
             return v
     except Exception:  # pragma: no cover -- env parsing never blocks

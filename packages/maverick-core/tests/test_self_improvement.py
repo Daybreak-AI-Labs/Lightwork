@@ -783,14 +783,20 @@ def test_promote_without_signature_leaves_fields_none(tmp_path, monkeypatch):
     assert rec.approval_signature is None
 
 
-# -- disabled-by-default posture (kernel rule 1) ---------------------------
+# -- governed default-on posture ------------------------------------------
 
-def test_disabled_by_default_is_a_noop(monkeypatch):
+def test_enabled_by_default_can_consider_safe_rung(monkeypatch):
     monkeypatch.delenv("MAVERICK_SELF_IMPROVEMENT", raising=False)
     reset_shared()
     v = consider(_cand(rung="config"))
-    assert not v.ok
-    assert "disabled" in v.blocking_reason
+    assert v.ok
+
+
+def test_explicit_opt_out_is_a_noop(monkeypatch):
+    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "0")
+    reset_shared()
+    v = consider(_cand(rung="config"))
+    assert not v.ok and "disabled" in v.blocking_reason
 
 
 def test_consider_promotes_when_enabled(tmp_path, monkeypatch):

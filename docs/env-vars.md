@@ -74,13 +74,14 @@ for false unless noted otherwise.
 | `MAVERICK_BON_EARLY_EXIT` | `1` (on) | Best-of-N stops the ladder after the first candidate whose tests all pass. Set `0` to run all N attempts, so a *failing* candidate is also captured — needed to mine a DPO preference pair (pass vs fail) from one coding task. |
 | `MAVERICK_TREE_OF_THOUGHT` | unset (off) | Enable tree-of-thought planning: fork candidate plans, critic selects. |
 | `MAVERICK_TOT_CANDIDATES` | built-in | Number of candidate plans tree-of-thought forks. |
-| `MAVERICK_REFLEXION` | config `[reflexion] enable` (off) | Enable the reflexion self-critique loop. |
-| `MAVERICK_DREAMING` | config `[dreaming] enable` (off) | Enable offline experience consolidation (`maverick dream`). |
-| `MAVERICK_SELF_HARNESS` | config `[self_harness] enable` (off) | Enable the self-harness loop: learn a model-specific, regression-validated operating-guidance addendum from failure traces (`maverick self-harness`; promotion also needs `[self_improvement] enable`). |
-| `MAVERICK_FACTORY_LEARNING` | config `[self_improvement] enable` (off) | Force-enable the self-improving-factory loop: mine provisioning/approval gaps into proposer corrections, promoted on the `prompt` rung and folded into future pack generation (`maverick factory-learn`; needs `[self_improvement] enable`). Overrides config. |
-| `MAVERICK_DATA_ENGINE` | config `[data_engine] enable` (off) | Enable the Cognitive Data Engine flywheel: causal failure triage → guardrails → habits (`maverick flywheel`). |
-| `MAVERICK_OPERATIONS_SCIENTIST` | config `[operations_scientist] enable` (off) | Enable the Operations Scientist: propose + simulate a better process before a real experiment. |
-| `MAVERICK_CONSEQUENCE` | config `[consequence] enable` (off) | Ground learning in real downstream outcomes over the verifier proxy (`maverick record-outcome`). |
+| `MAVERICK_REFLEXION` | config `[reflexion] enable` (on) | Override the default-on reflexion self-critique loop; set `0` to opt out. |
+| `MAVERICK_DREAMING` | config `[dreaming] enable` (on) | Override default-on offline experience consolidation (`maverick dream`); set `0` to opt out. |
+| `MAVERICK_SELF_HARNESS` | config `[self_harness] enable` (on) | Override the default-on conservative self-harness loop (`maverick self-harness`; promotion also needs `[self_improvement] enable`). |
+| `MAVERICK_FACTORY_LEARNING` | config `[self_improvement] factory_learning` (on when the master is on) | Override the factory loop directly: `0` disables it and `1` force-enables it even if the self-improvement master is off. |
+| `MAVERICK_DATA_ENGINE` | config `[data_engine] enable` (on) | Override the default-on Cognitive Data Engine flywheel: causal failure triage → guardrails → habits (`maverick flywheel`). |
+| `MAVERICK_OPERATIONS_SCIENTIST` | config `[operations_scientist] enable` (on) | Override the default-on Operations Scientist: propose + simulate a better process before a real experiment. |
+| `MAVERICK_CONSEQUENCE` | config `[consequence] enable` (on) | Override default-on grounding in real downstream outcomes (`maverick record-outcome`). |
+| `MAVERICK_SELF_MODIFY` | config `[self_modify] enable` (off) | Arm/disarm the research-only DGM gate. Setting this env var makes the deployment environment authoritative, so the dashboard control is read-only. Arming never starts a cycle or permits live code adoption. |
 | `MAVERICK_FLOWS` | config `[flows] enable` (off) | Enable the visual flow-automation engine (deterministic graph of agent/action/branch/… nodes; the dashboard designer + triggers). |
 | `MAVERICK_FLOWS_AUTO` | config `[flows] auto_evolve` (off) | Let the flow self-rewrite loop act autonomously: revert a node rewrite it measures as a regression. Pairs with `[flows] auto_apply` (apply an improvement forward) — both are also toggleable from the dashboard Learning page. |
 | `MAVERICK_EMERGENT_PROTOCOL` | config `[emergent_protocol] enable` (off) | Enable the auditable coordination codec (sentinel form; `maverick codebook`). |
@@ -106,7 +107,7 @@ for false unless noted otherwise.
 | `MAVERICK_AUTO_RECALL` | unset (off) | Auto-recall related prior goals/facts into a run. |
 | `MAVERICK_AUTO_RECALL_K` | `3` | Number of prior items to recall when auto-recall is on. |
 | `MAVERICK_AUTO_DISTILL` | unset (off) | Auto-distill skills from completed runs. |
-| `MAVERICK_SELF_LEARNING` | config `[self_learning] enable` (off) | Enable the self-learning loop. |
+| `MAVERICK_SELF_LEARNING` | config `[self_learning] enable` (on) | Override governed self-learning; set `0` to opt out. Generated tools and MCP acquisition keep their separate off-by-default controls. |
 | `MAVERICK_SKILL_DECAY` | `1` (on) | Set `0` to disable time-decay of skill usefulness stats. |
 | `MAVERICK_ALLOW_SKILL_INSTALL` | unset (off) | Opt in to installing skills from free-text URLs. |
 | `MAVERICK_VECTOR_STORE` | config `[memory] backend` | Semantic-recall backend: `chroma`, `qdrant`, `weaviate`, `pgvector`, or unset/`none` to disable. |

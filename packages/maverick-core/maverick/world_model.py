@@ -30,7 +30,7 @@ from .paths import data_dir
 log = logging.getLogger(__name__)
 
 DEFAULT_DB = data_dir("world.db")
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -542,6 +542,9 @@ MIGRATIONS: dict[int, list[str]] = {
         "ALTER TABLE episodes ADD COLUMN cache_read_tokens INTEGER DEFAULT 0",
         "ALTER TABLE episodes ADD COLUMN cache_write_tokens INTEGER DEFAULT 0",
     ],
+    # v28 Postgres adds goals.owner for SQLite owner-scoped episode parity.
+    # SQLite has carried this column since v11, so its matching head is a no-op.
+    28: [],
 }
 
 

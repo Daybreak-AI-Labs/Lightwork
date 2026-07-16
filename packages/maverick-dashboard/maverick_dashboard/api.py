@@ -51,6 +51,7 @@ from .api_schemas import (
     ComposeIn,
     ConnectionIn,
     DeliverableEditIn,
+    DgmToggleIn,
     EventTriggerIn,
     EventTriggerOut,
     FactIn,
@@ -6472,26 +6473,68 @@ async def outcomes_api(request: Request, top: int = 0) -> dict:
 def _learning_snapshot(request: Request) -> dict:
     """Learning-engine status + accumulated moat. Shared by the JSON endpoint
     and the /learning page so both render identical numbers."""
-    from maverick import consequence, dreaming, reflexion, trajectory_store
-    from maverick.config import get_data_engine
+    from maverick import (
+        consequence,
+        credit,
+        data_engine,
+        dreaming,
+        evaluator_evolution,
+        experience,
+        factory_learning,
+        failure_telemetry,
+        jit_rl,
+        operations_scientist,
+        prm_guidance,
+        reasoning_reward,
+        reflexion,
+        rehearsal,
+        self_harness,
+        self_improvement,
+        self_learning,
+        self_tuning_budget,
+        trajectory_store,
+    )
+    from maverick.config import get_self_improvement
     from maverick.operating_record import assemble, stats
+    from maverick.skill import distillation_local, synthesis
 
     from maverick_dashboard.settings_store import LEARNING_SUBSYSTEMS
 
-    def _data_engine_on() -> bool:
+    def _causal_promotion_on() -> bool:
         try:
-            return bool(get_data_engine().get("enable", False))
+            return bool(
+                self_improvement.enabled()
+                and get_self_improvement().get("causal_promotion", False)
+            )
         except Exception:  # pragma: no cover - config never blocks the view
             return False
 
     # Live enabled() per subsystem key -- paired with the shared registry so the
     # label/how/config metadata stays single-sourced in settings_store.
     on_by_key = {
+        "self_learning": self_learning.enabled(),
+        "distill_local": distillation_local.enabled(),
+        "failure_telemetry": failure_telemetry.enabled(),
+        "budget_tuning": self_tuning_budget.enabled(),
         "consequence": consequence.enabled(),
         "reflexion": reflexion.enabled(),
         "dreaming": dreaming.enabled(),
+        "experience": experience.enabled(),
+        "skill_synthesis": synthesis.enabled(),
+        "self_improvement": self_improvement.enabled(),
+        "prm_guidance": prm_guidance.enabled(),
         "capture": trajectory_store.enabled(),
-        "data_engine": _data_engine_on(),
+        "causal_promotion": _causal_promotion_on(),
+        "factory_learning": factory_learning.enabled(),
+        "evaluator_evolution": evaluator_evolution.enabled(),
+        "self_harness": self_harness.enabled(),
+        "data_engine": data_engine.enabled(),
+        "operations_scientist": operations_scientist.enabled(),
+        "rehearsal": rehearsal.enabled(),
+        "credit": credit.enabled(),
+        "reasoning_reward": reasoning_reward.enabled(),
+        "reward_audit": reasoning_reward.audit_rewards_enabled(),
+        "jit_rl": jit_rl.enabled(),
     }
     components = [
         {"key": s["key"], "label": s["label"],
@@ -6547,8 +6590,16 @@ def _learning_snapshot(request: Request) -> dict:
             }
         except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
             flow_autonomy = None
+    dgm = None
+    if owner is None:
+        try:
+            from maverick import self_modify
+            dgm = self_modify.production_status()
+        except Exception:  # pragma: no cover -- status is fail-closed in core
+            dgm = None
     return {
         "components": components,
+        "dgm": dgm,
         "flow_autonomy": flow_autonomy,
         "accumulated": accumulated,
         "components_on": sum(1 for c in components if c["on"]),
@@ -6579,9 +6630,70 @@ async def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> 
     ``load_config`` merges for every tenant and worker -- not an owner-scoped
     action, so an operator must not flip it (e.g. force-enable trajectory
     capture deployment-wide, or disable the whole learning loop)."""
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
-    settings_store.set_learning(payload.enabled)
+    try:
+        settings_store.set_learning(
+            payload.enabled,
+            actor=caller_principal(request) or "local",
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    from maverick.config import reset_config_cache
+    reset_config_cache()
+    return _learning_snapshot(request)
+
+
+@router.post("/learning/dgm")
+async def set_dgm_endpoint(request: Request, payload: DgmToggleIn) -> dict:
+    """Arm/disarm research-only DGM without starting a cycle.
+
+    This deployment-global control changes only ``[self_modify] enable``. The
+    runner independently attests its editable surface, challenge corpus,
+    budget, Git snapshot, HALT and evaluator before model execution, and has no
+    live code-adoption path.
+    """
+    require_global_permission(request, "admin")
+    if payload.enabled and not payload.acknowledge_research_only:
+        raise HTTPException(
+            status_code=400,
+            detail="acknowledge_research_only=true is required to enable DGM",
+        )
+    from maverick import self_modify
+    from maverick.config import reset_config_cache
+    before = self_modify.production_status()
+    blocker_codes = {item["code"] for item in before["blockers"]}
+    if "config_source_error" in blocker_codes:
+        raise HTTPException(
+            status_code=409,
+            detail="DGM control refused while an active global config source is invalid",
+        )
+    if before["control_managed"]:
+        owner = {
+            "environment": "MAVERICK_SELF_MODIFY in the deployment environment",
+            "config_overlay": "MAVERICK_CONFIG_OVERLAY",
+        }.get(before["managed_by"], "deployment policy")
+        raise HTTPException(
+            status_code=409,
+            detail=f"DGM is managed by higher-precedence {owner}",
+        )
+    if payload.enabled and any(code.startswith("invalid_") for code in blocker_codes):
+        raise HTTPException(
+            status_code=409,
+            detail="DGM enable refused until its boolean configuration is valid",
+        )
+    from maverick_dashboard import settings_store
+    try:
+        settings_store.set_dgm(
+            payload.enabled,
+            actor=caller_principal(request) or "local",
+            acknowledged=payload.acknowledge_research_only,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    reset_config_cache()
     return _learning_snapshot(request)
 
 

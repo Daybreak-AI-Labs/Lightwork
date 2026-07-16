@@ -44,12 +44,17 @@ from dataclasses import dataclass
 
 from . import self_modify as sm
 from .learning_guard import Halted, check_learning_halt
+from .paths import explicit_tenant_id
 from .self_modify_archive import CodeArchive, CodeCandidate
 from .self_modify_context import ProposalContext
 
 log = logging.getLogger(__name__)
 
 MAX_DGM_CYCLES = 100
+_EXPLICIT_TENANT_REFUSAL = (
+    "self-modification is deployment-global and refuses to run "
+    "inside an explicit tenant request context"
+)
 
 
 @dataclass(frozen=True)
@@ -360,6 +365,9 @@ def run_cycle(
     A no-op (empty report) while the engine is disabled — checked here so no
     proposer is ever invoked on a default deployment."""
     report = CycleReport()
+    if explicit_tenant_id() is not None:
+        report.reason = _EXPLICIT_TENANT_REFUSAL
+        return report
     if not (sm.enabled() and _si_enabled()):
         report.reason = "self-modification disabled"
         return report
@@ -471,6 +479,8 @@ def run_loop(
     and accumulating into ``archive``. Stops early with an inert report if the
     engine is disabled. Each cycle is independent and fail-closed."""
     reports: list[CycleReport] = []
+    if explicit_tenant_id() is not None:
+        return [CycleReport(reason=_EXPLICIT_TENANT_REFUSAL)]
     if not (sm.enabled() and _si_enabled()):
         return [CycleReport(reason="self-modification disabled")]
     if (not isinstance(cycles, int) or isinstance(cycles, bool)

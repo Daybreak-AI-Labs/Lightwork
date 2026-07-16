@@ -222,8 +222,8 @@ def _verdicts(anchor, *, agree):
 
 
 def test_consider_promotion_no_op_when_disabled(monkeypatch):
-    monkeypatch.delenv("MAVERICK_SELF_IMPROVEMENT", raising=False)
-    monkeypatch.delenv("MAVERICK_EVALUATOR_EVOLUTION", raising=False)
+    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "0")
+    monkeypatch.setenv("MAVERICK_EVALUATOR_EVOLUTION", "0")
     anchor = _anchor()
     slot = ee.EvaluatorSlot(role="reviewer", evaluator_id="old")
     res = ee.consider_promotion(

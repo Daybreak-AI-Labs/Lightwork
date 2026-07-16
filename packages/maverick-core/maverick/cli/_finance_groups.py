@@ -91,8 +91,9 @@ def finance_lint_sod_cmd() -> None:
 
 
 def _run_self_harness_nightly(world) -> None:
-    """Operate the self-harness on the dream beat (opt-in, ``[self_harness]
-    auto_run``): the governed mine -> propose -> validate -> gate cycle for
+    """Operate the self-harness on the dream beat when ``[self_harness]
+    auto_run`` is active (the pristine governed profile enables it): the
+    mine -> propose -> validate -> gate cycle for
     every configured role model, so the loop runs without a second cron entry.
     Each model's pass auto-builds its live A/B from ``[self_harness]
     eval_corpus`` when configured (else it is a dry inspection + stale-line
@@ -219,12 +220,13 @@ def dream(ctx, max_goals: int, rehearse: bool, rehearse_budget: float,
         )
         if snap is not None:
             click.echo(f"[snapshot: {snap.name}]")
-    # LLM-in-the-loop consolidation (opt-in, [dreaming] llm_consolidation):
+    # LLM-in-the-loop consolidation (two-key opt-in: the dreaming algorithm
+    # knob plus the independent learning provider-egress authority):
     # wire the SAME configured LLM the platform runs on (cheap summarizer role)
     # into insight consolidation, metered by its own small budget and scanned by
     # the shield. Fail-open: with the knob off this stays the deterministic path.
     dream_llm = dream_budget = dream_shield = None
-    if dreaming._llm_consolidation_enabled(cfg):
+    if dreaming._llm_consolidation_authorized(cfg):
         from ..budget import Budget
         from ..llm import LLM, model_for_role
         dream_llm = LLM(model=model_for_role("summarizer"))

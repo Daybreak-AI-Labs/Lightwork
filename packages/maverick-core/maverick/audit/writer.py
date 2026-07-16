@@ -613,6 +613,24 @@ def default_audit_log() -> AuditLog:
         return log_obj
 
 
+def global_audit_log() -> AuditLog:
+    """Return the deployment-global writer regardless of tenant context.
+
+    Repo-wide control-plane changes must not land in a tenant-scoped chain that
+    can later be erased with that tenant. This intentionally shares the legacy
+    no-tenant singleton so signing, tests and verification use one chain.
+    """
+    global _default
+    from ..paths import data_dir
+
+    audit_dir = data_dir("audit", tenant=None)
+    with _default_lock:
+        if _default is None:
+            _default = AuditLog(audit_dir)
+        _defaults[audit_dir] = _default
+        return _default
+
+
 def record(
     kind: str,
     *,
@@ -636,6 +654,24 @@ def record(
         payload=payload,
     )
     return default_audit_log().record(event)
+
+
+def record_global(
+    kind: str,
+    *,
+    agent: str = "system",
+    goal_id: int | None = None,
+    **payload: Any,
+) -> bool:
+    """Record a deployment-global control event outside tenant routing."""
+    event = AuditEvent(
+        ts=time.time(),
+        kind=kind,
+        agent=agent,
+        goal_id=goal_id,
+        payload=payload,
+    )
+    return global_audit_log().record(event)
 
 
 def reanchor_after_erase() -> int:

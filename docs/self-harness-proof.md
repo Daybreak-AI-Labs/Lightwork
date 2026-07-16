@@ -27,7 +27,8 @@ from a model's own failure traces: `MINE` recurring failure signatures →
 (reject overfit / pure trades) → `GATE` through `self_improvement.consider()`
 (evidence floor, calibration-freeze interlock, reversibility, signed audit). The
 accepted line is recalled into the system prompt at build time; it is never a
-kernel-template mutation, and OFF by default.
+kernel-template mutation. The governed risk-limited profile is ON by default
+and can be paused explicitly.
 
 ## How consistency was proven
 
@@ -94,8 +95,8 @@ python3 proof/self_harness_proof.py
 ```
 
 ```
-  [PASS]  determinism (consistent)    6/6 runs identical (sha256 194ee706fa13...)
-  [PASS]  off by default              recall == '' and no store write when off
+  [PASS]  determinism (consistent)    6/6 runs identical (sha256 f0dbda1afc79...)
+  [PASS]  explicit pause              explicit pause returns '' and writes no store
   [PASS]  governed gate enforced      open gate promotes; frozen verifier writes nothing
   [PASS]  no trace poisoning          secret/scoped/control-char excluded from the recalled prompt
   [PASS]  bounded addendum            <= 8 lines / 1500 chars under overflow
