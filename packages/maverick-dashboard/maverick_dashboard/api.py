@@ -903,6 +903,21 @@ async def attach_from_source(
                          size_bytes=stored.size_bytes, sha256=stored.sha256)
 
 
+
+
+@router.get("/assess/templates")
+async def list_assessment_templates(request: Request) -> dict:
+    """The assessment catalog: every framework the engine can run (PIA, AIRA,
+    vendor risk, HIPAA, SOC 2, PCI DSS, ...) with its question count."""
+    require_permission(request, "view")
+    from maverick.assessment import list_templates
+    return {"templates": [
+        {"type": t.type, "title": t.title, "framework": t.framework,
+         "questions": len(t.questions)}
+        for t in list_templates()
+    ]}
+
+
 @router.get("/assess/sessions")
 async def list_assessment_sessions(request: Request) -> dict:
     """Summaries of every saved third-party assessment session (PIA / AIRA /

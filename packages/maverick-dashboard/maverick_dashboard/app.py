@@ -1796,6 +1796,55 @@ async def spend_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page(request: Request) -> HTMLResponse:
+    """The Privacy workspace: the module view over every assessment record —
+    worklist with the inherent→residual pair, aging, open follow-ups, the
+    precedent memory, and the framework catalog. Review (and send follow-up
+    questions back) happens in the shared pop-out, on this screen.
+
+    Operate-gated like /approvals: assessment records carry answer bodies and
+    reviewer threads, a tier above viewer summaries.
+    """
+    require_permission(request, "operate")
+    import time as _time
+
+    from maverick.assessment import list_saved, list_templates
+
+    sessions = list_saved()
+    now = _time.time()
+    for s in sessions:
+        created = float(s.get("created_at") or 0)
+        s["age_days"] = int((now - created) // 86400) if created else None
+    open_rows = [s for s in sessions
+                 if s.get("status") in ("pending_review", "needs_more")]
+    stats = {
+        "total": len(sessions),
+        "pending": sum(1 for s in sessions
+                       if s.get("status") == "pending_review"),
+        "needs_more": sum(1 for s in sessions
+                          if s.get("status") == "needs_more"),
+        "high_residual": sum(1 for s in sessions
+                             if s.get("residual_risk") == "high"),
+        "oldest_open_days": (max((s["age_days"] or 0) for s in open_rows)
+                            if open_rows else None),
+    }
+    # Precedents: what the memory recalls from — the most recent completions.
+    precedents = sessions[:8]
+    # The engine is multi-department (finance runs SOX/fraud/ITGC templates
+    # through the same scorer); this workspace shows the PRIVACY catalog.
+    # Each future department workspace filters the same engine its own way.
+    privacy_types = {"pia", "aira", "vendor_risk", "hipaa", "soc2", "pci_dss"}
+    return templates.TemplateResponse(request, "privacy.html", {
+        "sessions": sessions,
+        "stats": stats,
+        "precedents": precedents,
+        "templates": [{"type": t.type, "title": t.title,
+                       "framework": t.framework, "questions": len(t.questions)}
+                      for t in list_templates() if t.type in privacy_types],
+    })
+
+
 @app.get("/savings", response_class=HTMLResponse)
 async def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     """The value dashboard: money saved vs the typical human cost, computed

@@ -113,6 +113,11 @@ PAGES: tuple[dict, ...] = (
     # -- Govern ---------------------------------------------------------------
     {"path": "/approvals", "label": "Approvals", "group": "Govern", "icon": "check",
      "floor": "operate", "default": "operate"},
+    # The Privacy workspace: the module view over assessment records (PIA /
+    # AIRA / vendor risk / framework readiness). Operate floor — records carry
+    # answer bodies and reviewer threads, a tier above viewer summaries.
+    {"path": "/privacy", "label": "Privacy", "group": "Govern", "icon": "shield",
+     "floor": "operate", "default": "operate"},
     {"path": "/permissions", "label": "Permissions", "group": "Govern", "icon": "key",
      "floor": "view", "default": "operate"},
     {"path": "/simulate", "label": "Simulate", "group": "Govern", "icon": "graph",
