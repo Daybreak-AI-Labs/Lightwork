@@ -40,6 +40,7 @@ from ._shared import (
 from ._shared import _world_cache as _world_cache  # re-export: tests clear api._world_cache
 from .api_schemas import (
     AgentOverrideIn,
+    AiSystemIn,
     AnswerIn,
     AssessmentEvidenceIn,
     AssessmentRefreshIn,
@@ -53,6 +54,8 @@ from .api_schemas import (
     DeliverableEditIn,
     DgmToggleIn,
     DocDiscoverIn,
+    DpaReviewIn,
+    DsarIn,
     EventTriggerIn,
     EventTriggerOut,
     FactIn,
@@ -88,6 +91,7 @@ from .api_schemas import (
     ReparentIn,
     RetitleIn,
     RoleOverrideIn,
+    RopaIn,
     ScheduleIn,
     ScheduleOut,
     SignoffIn,
@@ -903,6 +907,159 @@ async def attach_from_source(
                          size_bytes=stored.size_bytes, sha256=stored.sha256)
 
 
+
+
+# --------------------------------------------------------------------------- #
+# Privacy ops record types (the workspace's data plane). All operate-gated:
+# these records carry vendor terms, system inventories, and subject requests.
+# --------------------------------------------------------------------------- #
+
+def _privacy_ops_or_403():
+    from maverick import privacy_ops
+    if not privacy_ops.enabled():
+        raise HTTPException(status_code=403,
+                            detail="privacy ops are disabled ([privacy_ops] "
+                                   "enable)")
+    return privacy_ops
+
+
+@router.get("/privacy/dpa-reviews")
+async def list_dpa_reviews(request: Request) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    return {"reviews": await run_in_threadpool(ops.list_dpa_reviews)}
+
+
+@router.post("/privacy/dpa-reviews", status_code=201)
+async def create_dpa_review(request: Request, body: DpaReviewIn) -> dict:
+    """Clause-by-clause Art. 28 review of a pasted/extracted DPA. Every
+    verdict carries its matched excerpt -- explainable, reviewer-verifiable."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    return await run_in_threadpool(
+        ops.review_dpa, body.vendor, body.text,
+        document_name=body.document_name)
+
+
+@router.get("/privacy/dpa-reviews/{review_id}")
+async def get_dpa_review(request: Request, review_id: str) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(ops.get_dpa_review, review_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such review")
+    return record
+
+
+@router.get("/privacy/ai-systems")
+async def list_ai_systems(request: Request) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    return {"systems": await run_in_threadpool(ops.list_ai_systems)}
+
+
+@router.post("/privacy/ai-systems", status_code=201)
+async def register_ai_system(request: Request, body: AiSystemIn) -> dict:
+    """Add an AI system to the registry, classified against the EU AI Act's
+    tiers on the way in (screening aid, not legal advice)."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    return await run_in_threadpool(
+        ops.register_ai_system, body.name, body.purpose,
+        provider=body.provider, owner=body.owner,
+        assessment_id=body.assessment_id)
+
+
+@router.get("/privacy/ropa")
+async def list_ropa(request: Request) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    return {"activities": await run_in_threadpool(ops.list_ropa)}
+
+
+@router.post("/privacy/ropa", status_code=201)
+async def upsert_ropa(request: Request, body: RopaIn) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    payload = body.model_dump(exclude_none=True)
+    ropa_id = payload.pop("ropa_id", "")
+    record = await run_in_threadpool(ops.upsert_ropa, payload,
+                                     ropa_id=ropa_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such activity")
+    return record
+
+
+@router.post("/privacy/ropa/from-assessment/{assessment_id}", status_code=201)
+async def ropa_from_assessment(request: Request, assessment_id: str) -> dict:
+    """Auto-draft an Art. 30 entry from a completed assessment -- the moment
+    assessments start FEEDING the inventory instead of dying in a folder."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(
+        ops.draft_ropa_from_assessment, assessment_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    return record
+
+
+@router.get("/privacy/ropa/export.csv")
+async def export_ropa_csv(request: Request) -> Response:
+    """The Art. 30 register as CSV -- what a supervisory authority asks for."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    rows = await run_in_threadpool(ops.export_ropa_art30)
+    import csv
+    import io
+    buf = io.StringIO()
+    fields = ["id", *ops.ROPA_FIELDS, "assessment_id", "source"]
+    w = csv.DictWriter(buf, fieldnames=fields)
+    w.writeheader()
+    for r in rows:
+        w.writerow(r)
+    return Response(
+        content=buf.getvalue(), media_type="text/csv",
+        headers={"Content-Disposition":
+                 'attachment; filename="ropa-art30.csv"'})
+
+
+@router.get("/privacy/dsar")
+async def list_dsar_requests(request: Request) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    return {"requests": await run_in_threadpool(ops.list_dsars)}
+
+
+@router.post("/privacy/dsar", status_code=201)
+async def open_dsar_request(request: Request, body: DsarIn) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    return await run_in_threadpool(
+        ops.open_dsar, body.subject_id, body.kind, channel=body.channel)
+
+
+@router.post("/privacy/dsar/{request_id}/fulfill")
+async def fulfill_dsar_request(request: Request, request_id: str) -> dict:
+    """Access/portability run the REAL subject-data export; erasure records
+    the exact `maverick erase` invocation for a deliberate operator run --
+    never destructive from the API."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(ops.fulfill_dsar, request_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404,
+                            detail="no such open request")
+    return record
+
+
+@router.post("/privacy/dsar/{request_id}/close")
+async def close_dsar_request(request: Request, request_id: str) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(ops.close_dsar, request_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such request")
+    return record
 
 
 @router.get("/assess/templates")

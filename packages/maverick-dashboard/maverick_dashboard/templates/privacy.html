@@ -16,6 +16,24 @@
                    border: 1px solid transparent; border-radius: 4px; cursor: pointer;
                    font-size: 0.85rem; font-weight: var(--font-medium); }
   .pw-review-btn:hover { background: var(--brand-hi); }
+  /* Record-type tabs (DPA / AI registry / RoPA / DSAR). */
+  .pw-tab[hidden] { display: none; }
+  .pw-scroll { overflow-x: auto; }
+  .pw-form { display: flex; flex-direction: column; gap: var(--space-3);
+             margin-bottom: var(--space-4); padding: var(--space-3);
+             border: 1px dashed var(--border); border-radius: 8px; }
+  .pw-form-row { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+  .pw-form label { display: flex; flex-direction: column; gap: var(--space-1);
+                   flex: 1; min-width: 12rem; }
+  .pw-form textarea { resize: vertical; }
+  .pw-form-actions { display: flex; align-items: center; gap: var(--space-3);
+                     flex-wrap: wrap; }
+  .pw-form-err { color: var(--danger); font-size: var(--text-sm); }
+  .pw-clip { max-width: 18rem; overflow: hidden; text-overflow: ellipsis;
+             white-space: nowrap; }
+  .pw-due-warn { color: var(--danger); font-weight: var(--font-medium); }
+  .pw-clauses td { font-size: var(--text-sm); }
+  .pw-erase-cmd { font-size: var(--text-xs); }
 </style>
 
   <h1 class="page-title">Privacy</h1>
@@ -44,6 +62,16 @@
       <div class="num">{{ stats.oldest_open_days if stats.oldest_open_days is not none else '—' }}{{ 'd' if stats.oldest_open_days is not none }}</div>
       <div class="label">oldest open item</div>
     </div>
+    {% if records.enabled %}
+    <div class="stat">
+      <div class="num {{ 'pw-age-warn' if records.dsar_overdue }}">{{ records.dsar_open }}</div>
+      <div class="label">open DSARs</div>
+    </div>
+    <div class="stat">
+      <div class="num">{{ records.ropa | length }}</div>
+      <div class="label">Art. 30 entries</div>
+    </div>
+    {% endif %}
   </div>
 
   <div class="section-head"><h2>Worklist</h2></div>
@@ -88,6 +116,220 @@
         from the intake portal, the assessor agent, or <code>maverick assess</code>.</p>
     {% endif %}
   </div>
+
+  {% if records.enabled %}
+  <div class="section-head"><h2>Privacy records</h2></div>
+  <div class="panel">
+    <div class="pw-filters" role="group" aria-label="Record types">
+      <button class="btn btn--primary" data-tab="dpa" type="button">DPA reviews ({{ records.dpa | length }})</button>
+      <button class="btn" data-tab="ai" type="button">AI registry ({{ records.ai | length }})</button>
+      <button class="btn" data-tab="ropa" type="button">RoPA ({{ records.ropa | length }})</button>
+      <button class="btn" data-tab="dsar" type="button">DSARs ({{ records.dsar | length }})</button>
+    </div>
+
+    <div class="pw-tab" id="pw-tab-dpa">
+      <form class="pw-form" data-endpoint="/api/v1/privacy/dpa-reviews">
+        <div class="pw-form-row">
+          <label><span>Vendor</span>
+            <input class="ctl" name="vendor" required maxlength="200" placeholder="Acme Corp"></label>
+          <label><span>Document name (optional)</span>
+            <input class="ctl" name="document_name" maxlength="300" placeholder="acme-dpa.pdf"></label>
+        </div>
+        <label><span>DPA / processing terms text</span>
+          <textarea class="ctl" name="text" rows="5" required
+            placeholder="Paste the agreement text — each GDPR Art. 28(3) clause is checked and every verdict quotes its evidence."></textarea></label>
+        <div class="pw-form-actions">
+          <button class="btn btn--primary" type="submit">Review against Art. 28</button>
+          <span class="pw-form-err" role="alert"></span>
+        </div>
+      </form>
+      {% if records.dpa %}
+      <div class="pw-scroll">
+      <table>
+        <thead><tr><th scope="col">vendor</th><th scope="col">clauses found</th>
+          <th scope="col">risk (inherent → residual)</th><th scope="col">status</th>
+          <th scope="col">reviewed</th><th scope="col"></th></tr></thead>
+        <tbody>
+          {% for r in records.dpa %}
+          <tr>
+            <td>{{ r.vendor }}{% if r.document_name %}<br><span class="muted" style="font-size:var(--text-xs);">{{ r.document_name }}</span>{% endif %}</td>
+            <td>{{ r.clauses_present }}/{{ r.clauses_total }}</td>
+            <td class="pw-risk">
+              <span class="badge {{ 'blocked' if r.inherent_risk == 'high' else 'warn' if r.inherent_risk == 'medium' else 'done' }}">{{ r.inherent_risk }}</span>
+              <span aria-hidden="true" class="muted">→</span>
+              <span class="badge {{ 'blocked' if r.residual_risk == 'high' else 'warn' if r.residual_risk == 'medium' else 'done' }}">{{ r.residual_risk }}</span>
+            </td>
+            <td><span class="badge info">{{ r.status | replace('_', ' ') }}</span></td>
+            <td class="muted">{{ r.created }}</td>
+            <td><button class="btn pw-dpa-clauses" data-review="{{ r.id }}" type="button">Clauses</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+        <p class="muted">No DPA reviews yet. Paste a vendor's processing terms above —
+          the clause-by-clause Art. 28(3) verdicts land here with their evidence.</p>
+      {% endif %}
+    </div>
+
+    <div class="pw-tab" id="pw-tab-ai" hidden>
+      <form class="pw-form" data-endpoint="/api/v1/privacy/ai-systems">
+        <div class="pw-form-row">
+          <label><span>System name</span>
+            <input class="ctl" name="name" required maxlength="200" placeholder="CV screener"></label>
+          <label><span>Provider (optional)</span>
+            <input class="ctl" name="provider" maxlength="200" placeholder="OpenAI, internal, ..."></label>
+          <label><span>Owner (optional)</span>
+            <input class="ctl" name="owner" maxlength="200" placeholder="who answers for it"></label>
+        </div>
+        <label><span>What it does</span>
+          <textarea class="ctl" name="purpose" rows="2" required
+            placeholder="Describe the system's purpose — it is classified against the EU AI Act's tiers on the way in."></textarea></label>
+        <div class="pw-form-actions">
+          <button class="btn btn--primary" type="submit">Register &amp; classify</button>
+          <span class="pw-form-err" role="alert"></span>
+        </div>
+      </form>
+      {% if records.ai %}
+      <div class="pw-scroll">
+      <table>
+        <thead><tr><th scope="col">system</th><th scope="col">purpose</th>
+          <th scope="col">AI Act tier</th><th scope="col">signals</th>
+          <th scope="col">obligations</th><th scope="col">added</th></tr></thead>
+        <tbody>
+          {% for r in records.ai %}
+          <tr>
+            <td>{{ r.name }}{% if r.provider %}<br><span class="muted" style="font-size:var(--text-xs);">{{ r.provider }}</span>{% endif %}</td>
+            <td class="pw-clip" title="{{ r.purpose }}">{{ r.purpose }}</td>
+            <td><span class="badge {{ 'blocked' if r.tier == 'prohibited' else 'warn' if r.tier == 'high' else 'info' if r.tier == 'limited' else 'done' }}">{{ r.tier }}</span></td>
+            <td class="muted" style="font-size:var(--text-sm);">{{ r.signals | join('; ') or '—' }}</td>
+            <td><details><summary>{{ r.obligations | length }} obligation{{ 's' if r.obligations | length != 1 }}</summary>
+              <ul style="margin:var(--space-2) 0 0; padding-inline-start:1.2rem; font-size:var(--text-sm);">
+                {% for o in r.obligations %}<li>{{ o }}</li>{% endfor %}
+              </ul></details></td>
+            <td class="muted">{{ r.created }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      <p class="muted" style="font-size:var(--text-xs);">Automated screening against the
+        EU AI Act's category tests — a triage aid, not legal advice.</p>
+      {% else %}
+        <p class="muted">No AI systems registered. Add one above — the classifier applies the
+          Act's own tests (Art. 5 prohibited practices, Annex III high-risk areas, Art. 50
+          transparency) and records the tier's obligations.</p>
+      {% endif %}
+    </div>
+
+    <div class="pw-tab" id="pw-tab-ropa" hidden>
+      <div class="pw-form">
+        <div class="pw-form-actions">
+          <label style="flex:1;"><span>Draft an Art. 30 entry from a completed assessment</span>
+            <select class="ctl" id="pw-ropa-src" {% if not sessions %}disabled{% endif %}>
+              {% for s in sessions %}<option value="{{ s.id }}">{{ s.id }} — {{ s.subject }}</option>{% endfor %}
+              {% if not sessions %}<option value="">no assessments yet</option>{% endif %}
+            </select></label>
+          <button class="btn btn--primary" id="pw-ropa-draft" type="button" {% if not sessions %}disabled{% endif %}>Draft entry</button>
+          <a class="btn" href="/api/v1/privacy/ropa/export.csv">Export CSV (Art. 30)</a>
+          <span class="pw-form-err" id="pw-ropa-err" role="alert"></span>
+        </div>
+      </div>
+      {% if records.ropa %}
+      <div class="pw-scroll">
+      <table>
+        <thead><tr><th scope="col">activity</th><th scope="col">purpose</th>
+          <th scope="col">data categories</th><th scope="col">transfers</th>
+          <th scope="col">retention</th><th scope="col">source</th></tr></thead>
+        <tbody>
+          {% for r in records.ropa %}
+          <tr>
+            <td>{{ r.activity }}</td>
+            <td class="pw-clip" title="{{ r.purpose }}">{{ r.purpose or '—' }}</td>
+            <td class="pw-clip" title="{{ r.data_categories }}">{{ r.data_categories or '—' }}</td>
+            <td class="pw-clip" title="{{ r.transfers }}">{{ r.transfers or '—' }}</td>
+            <td class="pw-clip" title="{{ r.retention }}">{{ r.retention or '—' }}</td>
+            <td class="muted" style="font-size:var(--text-xs);">{{ r.source }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      <p class="muted" style="font-size:var(--text-xs);">Drafts stay editable via the API —
+        an entry is a starting point with provenance, not a verdict.</p>
+      {% else %}
+        <p class="muted">The register is empty. Draft the first entry from a completed
+          assessment — this is the moment assessments start feeding the inventory instead
+          of dying in a filing cabinet.</p>
+      {% endif %}
+    </div>
+
+    <div class="pw-tab" id="pw-tab-dsar" hidden>
+      <form class="pw-form" data-endpoint="/api/v1/privacy/dsar">
+        <div class="pw-form-row">
+          <label><span>Data subject</span>
+            <input class="ctl" name="subject_id" required maxlength="200" placeholder="jordan@example.com"></label>
+          <label><span>Request kind</span>
+            <select class="ctl" name="kind">
+              <option value="access">access</option>
+              <option value="portability">portability</option>
+              <option value="erasure">erasure</option>
+            </select></label>
+          <label><span>Channel (optional)</span>
+            <input class="ctl" name="channel" maxlength="64" placeholder="email, slack, ..."></label>
+        </div>
+        <div class="pw-form-actions">
+          <button class="btn btn--primary" type="submit">Open request (30-day clock starts)</button>
+          <span class="pw-form-err" role="alert"></span>
+        </div>
+      </form>
+      {% if records.dsar %}
+      <div class="pw-scroll">
+      <table>
+        <thead><tr><th scope="col">request</th><th scope="col">subject</th>
+          <th scope="col">kind</th><th scope="col">status</th>
+          <th scope="col">due</th><th scope="col">actions</th></tr></thead>
+        <tbody>
+          {% for r in records.dsar %}
+          <tr>
+            <td><code>{{ r.id }}</code></td>
+            <td>{{ r.subject_id }}</td>
+            <td>{{ r.kind }}</td>
+            <td>
+              <span class="badge {{ 'done' if r.status == 'fulfilled' else 'warn' if r.status == 'awaiting_erasure' else 'info' if r.status == 'open' else '' }}">{{ r.status | replace('_', ' ') }}</span>
+              {% if r.status == 'awaiting_erasure' and r.fulfillment %}
+                <br><code class="pw-erase-cmd">{{ r.fulfillment.erase_command }}</code>
+              {% endif %}
+            </td>
+            <td {% if r.overdue %}class="pw-due-warn"{% endif %}>
+              {% if r.status in ('open', 'awaiting_erasure') %}
+                {{ (r.days_left ~ 'd left') if not r.overdue else ((r.days_left | abs) ~ 'd overdue') }}
+              {% else %}—{% endif %}</td>
+            <td>
+              {% if r.status == 'open' %}
+                <button class="btn pw-dsar-act" data-id="{{ r.id }}" data-act="fulfill" type="button">
+                  {{ 'Run export' if r.kind in ('access', 'portability') else 'Prepare erasure' }}</button>
+              {% endif %}
+              {% if r.status != 'closed' %}
+                <button class="btn pw-dsar-act" data-id="{{ r.id }}" data-act="close" type="button">Close</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      <p class="muted" style="font-size:var(--text-xs);">Access and portability run the real
+        subject-data export. Erasure is never destructive from here — it prepares the exact
+        <code>maverick erase</code> command for a deliberate operator run.</p>
+      {% else %}
+        <p class="muted">No subject requests tracked. Open one above — the statutory 30-day
+          clock and the fulfillment machinery (real exports, deliberate erasure) are wired in.</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 
   <div class="section-head"><h2>What the org already knows</h2></div>
   <div class="panel">
@@ -141,7 +383,7 @@
     });
   });
   // Client-side worklist filters.
-  var buttons = document.querySelectorAll('.pw-filters button');
+  var buttons = document.querySelectorAll('.pw-filters button[data-filter]');
   buttons.forEach(function (fb) {
     fb.addEventListener('click', function () {
       buttons.forEach(function (b) { b.classList.remove('btn--primary'); });
@@ -152,6 +394,119 @@
           (f === 'high' ? tr.dataset.residual === 'high' : tr.dataset.status === f);
         tr.style.display = show ? '' : 'none';
       });
+    });
+  });
+
+  // Record-type tabs.
+  var tabs = document.querySelectorAll('.pw-filters button[data-tab]');
+  tabs.forEach(function (tb) {
+    tb.addEventListener('click', function () {
+      tabs.forEach(function (b) { b.classList.remove('btn--primary'); });
+      tb.classList.add('btn--primary');
+      document.querySelectorAll('.pw-tab').forEach(function (p) {
+        p.hidden = p.id !== 'pw-tab-' + tb.dataset.tab;
+      });
+    });
+  });
+
+  function post(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      if (r.ok) { location.reload(); return null; }
+      return r.text().then(function (t) {
+        throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 300));
+      });
+    });
+  }
+
+  // Create forms (DPA review, AI system, DSAR) -> POST JSON -> reload.
+  document.querySelectorAll('.pw-form[data-endpoint]').forEach(function (form) {
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var body = {};
+      form.querySelectorAll('[name]').forEach(function (el) {
+        if (el.value) body[el.name] = el.value;
+      });
+      var err = form.querySelector('.pw-form-err');
+      err.textContent = '';
+      post(form.dataset.endpoint, body).catch(function (e) {
+        err.textContent = e.message;
+      });
+    });
+  });
+
+  // RoPA: draft an entry from a completed assessment.
+  var draftBtn = document.getElementById('pw-ropa-draft');
+  if (draftBtn) {
+    draftBtn.addEventListener('click', function () {
+      var sel = document.getElementById('pw-ropa-src');
+      var err = document.getElementById('pw-ropa-err');
+      if (!sel.value) return;
+      err.textContent = '';
+      post('/api/v1/privacy/ropa/from-assessment/' +
+           encodeURIComponent(sel.value)).catch(function (e) {
+        err.textContent = e.message;
+      });
+    });
+  }
+
+  // DSAR row actions: fulfill (real export / prepare erasure) and close.
+  document.querySelectorAll('.pw-dsar-act').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      post('/api/v1/privacy/dsar/' + encodeURIComponent(btn.dataset.id) +
+           '/' + btn.dataset.act).catch(function (e) {
+        btn.disabled = false;
+        window.alert(e.message);
+      });
+    });
+  });
+
+  // DPA clause detail: fetch the full review, render verdicts + evidence.
+  document.querySelectorAll('.pw-dpa-clauses').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var row = btn.closest('tr');
+      var open = row.nextElementSibling &&
+                 row.nextElementSibling.classList.contains('pw-clauses');
+      if (open) { row.nextElementSibling.remove(); return; }
+      fetch('/api/v1/privacy/dpa-reviews/' +
+            encodeURIComponent(btn.dataset.review))
+        .then(function (r) { return r.json(); })
+        .then(function (rec) {
+          var tr = document.createElement('tr');
+          tr.className = 'pw-clauses';
+          var td = document.createElement('td');
+          td.colSpan = row.children.length;
+          var tbl = document.createElement('table');
+          var head = tbl.createTHead().insertRow();
+          ['requirement', 'citation', 'verdict', 'evidence'].forEach(function (h) {
+            var th = document.createElement('th');
+            th.scope = 'col'; th.textContent = h; head.appendChild(th);
+          });
+          var tb = tbl.createTBody();
+          (rec.clauses || []).forEach(function (c) {
+            var r2 = tb.insertRow();
+            r2.insertCell().textContent = c.requirement;
+            r2.insertCell().textContent = c.citation;
+            var vc = r2.insertCell();
+            var badge = document.createElement('span');
+            badge.className = 'badge ' + (c.status === 'present' ? 'done' :
+              c.status === 'unclear' ? 'warn' : 'blocked');
+            badge.textContent = c.status;
+            vc.appendChild(badge);
+            var ec = r2.insertCell();
+            ec.className = 'pw-clause-excerpt muted';
+            ec.textContent = c.excerpt ? '“…' + c.excerpt + '…”'
+                                       : 'no matching language found';
+          });
+          td.appendChild(tbl);
+          tr.appendChild(td);
+          row.after(tr);
+        })
+        .catch(function () { window.alert('could not load clause detail'); });
     });
   });
 })();

@@ -1831,6 +1831,28 @@ async def privacy_page(request: Request) -> HTMLResponse:
     }
     # Precedents: what the memory recalls from — the most recent completions.
     precedents = sessions[:8]
+    # The record types (DPA reviews, AI registry, RoPA, DSARs) — the data
+    # plane behind the [privacy_ops] knob. The page still works without them.
+    from maverick import privacy_ops
+    records = {"enabled": privacy_ops.enabled(),
+               "dpa": [], "ai": [], "ropa": [], "dsar": []}
+    if records["enabled"]:
+        records["dpa"] = privacy_ops.list_dpa_reviews()
+        records["ai"] = privacy_ops.list_ai_systems()
+        records["ropa"] = privacy_ops.list_ropa()
+        records["dsar"] = privacy_ops.list_dsars()
+        for rows in (records["dpa"], records["ai"], records["ropa"],
+                     records["dsar"]):
+            for r in rows:
+                created = float(r.get("created_at") or 0)
+                r["created"] = (_time.strftime("%Y-%m-%d",
+                                               _time.localtime(created))
+                                if created else "—")
+        records["dsar_open"] = sum(
+            1 for r in records["dsar"]
+            if r.get("status") in ("open", "awaiting_erasure"))
+        records["dsar_overdue"] = sum(
+            1 for r in records["dsar"] if r.get("overdue"))
     # The engine is multi-department (finance runs SOX/fraud/ITGC templates
     # through the same scorer); this workspace shows the PRIVACY catalog.
     # Each future department workspace filters the same engine its own way.
@@ -1839,6 +1861,7 @@ async def privacy_page(request: Request) -> HTMLResponse:
         "sessions": sessions,
         "stats": stats,
         "precedents": precedents,
+        "records": records,
         "templates": [{"type": t.type, "title": t.title,
                        "framework": t.framework, "questions": len(t.questions)}
                       for t in list_templates() if t.type in privacy_types],

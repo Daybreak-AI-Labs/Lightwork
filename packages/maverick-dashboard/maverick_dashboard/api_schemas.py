@@ -603,6 +603,48 @@ class UserSuitesIn(BaseModel):
     suites: list[str] = Field(default_factory=list, max_length=64)
 
 
+class DpaReviewIn(BaseModel):
+    """Review a Data Processing Agreement against the Art. 28(3) checklist.
+    ``text`` is the agreement body (pasted or extracted); bounded like other
+    document inputs."""
+    vendor: str = Field(..., min_length=1, max_length=200)
+    document_name: str = Field("", max_length=300)
+    text: str = Field(..., min_length=1, max_length=2_000_000)
+
+
+class AiSystemIn(BaseModel):
+    """Register an AI system in the governance registry; it is classified
+    against the EU AI Act's tiers on the way in."""
+    name: str = Field(..., min_length=1, max_length=200)
+    purpose: str = Field(..., min_length=1, max_length=2000)
+    provider: str = Field("", max_length=200)
+    owner: str = Field("", max_length=200)
+    assessment_id: str = Field("", max_length=64)
+
+
+class RopaIn(BaseModel):
+    """Create or update one Art. 30(1) record of processing activity. Only
+    fields present are changed on update."""
+    ropa_id: str = Field("", max_length=64)
+    activity: str | None = Field(None, max_length=2000)
+    purpose: str | None = Field(None, max_length=2000)
+    controller: str | None = Field(None, max_length=2000)
+    data_categories: str | None = Field(None, max_length=2000)
+    data_subjects: str | None = Field(None, max_length=2000)
+    recipients: str | None = Field(None, max_length=2000)
+    transfers: str | None = Field(None, max_length=2000)
+    retention: str | None = Field(None, max_length=2000)
+    security_measures: str | None = Field(None, max_length=2000)
+    assessment_id: str = Field("", max_length=64)
+
+
+class DsarIn(BaseModel):
+    """Open a data-subject request with its statutory due date."""
+    subject_id: str = Field(..., min_length=1, max_length=200)
+    kind: str = Field(..., pattern="^(access|portability|erasure)$")
+    channel: str = Field("", max_length=64)
+
+
 class FollowupsIn(BaseModel):
     """Reviewer follow-up questions to send back to an assessment's
     respondent (the pop-out's 'needs more detail' path)."""
