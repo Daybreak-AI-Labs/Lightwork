@@ -78,6 +78,8 @@ PAGES: tuple[dict, ...] = (
     # -- Observe --------------------------------------------------------------
     {"path": "/overview", "label": "Overview", "group": "Observe", "icon": "overview",
      "floor": "view", "default": "view"},
+    {"path": "/ekko", "label": "Ekko", "group": "Observe", "icon": "eye",
+     "floor": "operate", "default": "operate"},
     {"path": "/oversight", "label": "Oversight", "group": "Observe", "icon": "eye",
      "floor": "view", "default": "view"},
     {"path": "/discovery", "label": "Discovery", "group": "Observe", "icon": "overview",

@@ -108,6 +108,7 @@ for false unless noted otherwise.
 | `MAVERICK_AUTO_RECALL_K` | `3` | Number of prior items to recall when auto-recall is on. |
 | `MAVERICK_AUTO_DISTILL` | unset (off) | Auto-distill skills from completed runs. |
 | `MAVERICK_SELF_LEARNING` | config `[self_learning] enable` (on) | Override governed self-learning; set `0` to opt out. Generated tools and MCP acquisition keep their separate off-by-default controls. |
+| `MAVERICK_EKKO` | config `[ekko] enable` (off) | Controls only Ekko's master policy switch. It never enrolls a device, grants an application, starts a collector, or enables provider egress. Invalid values fail closed. |
 | `MAVERICK_SKILL_DECAY` | `1` (on) | Set `0` to disable time-decay of skill usefulness stats. |
 | `MAVERICK_ALLOW_SKILL_INSTALL` | unset (off) | Opt in to installing skills from free-text URLs. |
 | `MAVERICK_VECTOR_STORE` | config `[memory] backend` | Semantic-recall backend: `chroma`, `qdrant`, `weaviate`, `pgvector`, or unset/`none` to disable. |
