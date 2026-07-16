@@ -1804,13 +1804,25 @@ FINANCE_ASSESSMENT_TYPES = frozenset(
     {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"})
 
 
-def _workspace_ctx(types: frozenset) -> dict:
+def _workspace_ctx(department: str) -> dict:
     """Chassis context for a department workspace: the worklist (risk pair,
     aging, follow-ups), hero stats, precedent memory, and catalog — filtered
-    to the department's assessment types."""
+    to the department's assessment types (built-ins plus any custom
+    templates authored for this department)."""
     import time as _time
 
-    from maverick.assessment import list_saved, list_templates
+    from maverick.assessment import (
+        custom_template_records,
+        list_saved,
+        list_templates,
+    )
+
+    base = (FINANCE_ASSESSMENT_TYPES if department == "finance"
+            else PRIVACY_ASSESSMENT_TYPES)
+    customs = custom_template_records()
+    types = set(base) | {
+        t for t, rec in customs.items()
+        if rec.get("department", "privacy") == department}
 
     sessions = [s for s in list_saved() if s.get("type") in types]
     now = _time.time()
@@ -1838,10 +1850,13 @@ def _workspace_ctx(types: frozenset) -> dict:
     return {
         "sessions": sessions,
         "stats": stats,
+        "department": department,
         # Precedents: what the memory recalls from — recent completions.
         "precedents": sessions[:8],
         "templates": [{"type": t.type, "title": t.title,
-                       "framework": t.framework, "questions": len(t.questions)}
+                       "framework": t.framework,
+                       "questions": len(t.questions),
+                       "custom": t.type in customs}
                       for t in list_templates() if t.type in types],
     }
 
@@ -1859,7 +1874,7 @@ async def privacy_page(request: Request) -> HTMLResponse:
     require_permission(request, "operate")
     import time as _time
 
-    ctx = _workspace_ctx(PRIVACY_ASSESSMENT_TYPES)
+    ctx = _workspace_ctx("privacy")
     # The record types — the data plane behind the [privacy_ops] knob. The
     # page still works without them.
     from maverick import privacy_ops
@@ -1893,7 +1908,7 @@ async def finance_page(request: Request) -> HTMLResponse:
     close readiness — with the shared review pop-out."""
     require_permission(request, "operate")
     return templates.TemplateResponse(
-        request, "finance.html", _workspace_ctx(FINANCE_ASSESSMENT_TYPES))
+        request, "finance.html", _workspace_ctx("finance"))
 
 
 @app.get("/savings", response_class=HTMLResponse)

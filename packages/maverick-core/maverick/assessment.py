@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -489,12 +490,152 @@ TEMPLATES: dict[str, AssessmentTemplate] = {
 }
 
 
+# --- Custom / edited templates ---------------------------------------------
+# Templates are data, not code: an operator can edit a built-in questionnaire
+# or author a new one from the workspace. Custom templates live as JSON under
+# the tenant home and WIN over the built-in of the same type; deleting the
+# custom file restores the built-in. Scoring is identical -- evaluate() only
+# reads template.questions.
+
+TEMPLATE_DEPARTMENTS = ("privacy", "finance")
+_TYPE_RE = r"^[a-z0-9_]{2,40}$"
+_SEVERITIES = ("low", "medium", "high")
+
+
+def _custom_templates_dir() -> Path:
+    from .paths import data_dir
+    return data_dir("custom_templates")
+
+
+def save_custom_template(payload: dict) -> AssessmentTemplate:
+    """Validate + persist a custom (or built-in-overriding) template.
+
+    Raises ValueError with a human-readable reason on bad input; returns
+    the live template on success."""
+    t = str(payload.get("type", "")).strip().lower()
+    if not re.match(_TYPE_RE, t):
+        raise ValueError("type must be a slug: lowercase letters, digits, _")
+    title = str(payload.get("title", "")).strip()[:120]
+    framework = str(payload.get("framework", "")).strip()[:200]
+    if not title or not framework:
+        raise ValueError("title and framework are required")
+    department = str(payload.get("department", "privacy")).strip().lower()
+    if department not in TEMPLATE_DEPARTMENTS:
+        raise ValueError(f"department must be one of {TEMPLATE_DEPARTMENTS}")
+    raw_qs = payload.get("questions") or []
+    if not 1 <= len(raw_qs) <= 60:
+        raise ValueError("a template needs 1-60 questions")
+    questions = []
+    seen_ids: set[str] = set()
+    for i, q in enumerate(raw_qs, start=1):
+        text = str(q.get("text", "")).strip()[:500]
+        if len(text) < 3:
+            raise ValueError(f"question {i}: text is required")
+        qid = str(q.get("id", "")).strip().lower() or f"{t}_q{i}"
+        if not re.match(r"^[a-z0-9_]{1,60}$", qid) or qid in seen_ids:
+            raise ValueError(f"question {i}: bad or duplicate id {qid!r}")
+        seen_ids.add(qid)
+        risk_answer = str(q.get("risk_answer", "no")).strip().lower()
+        if risk_answer not in ("yes", "no"):
+            raise ValueError(f"question {i}: risk_answer must be yes or no")
+        severity = str(q.get("severity", "medium")).strip().lower()
+        if severity not in _SEVERITIES:
+            raise ValueError(f"question {i}: severity must be low|medium|high")
+        questions.append({
+            "id": qid,
+            "section": str(q.get("section", "")).strip()[:80] or "General",
+            "text": text,
+            "risk_answer": risk_answer,
+            "severity": severity,
+            "guidance": str(q.get("guidance", "")).strip()[:500],
+        })
+    record = {"type": t, "title": title, "framework": framework,
+              "department": department,
+              "description": str(payload.get("description", "")).strip()[:500],
+              "questions": questions, "updated_at": time.time()}
+    d = _custom_templates_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(d, 0o700)
+    except OSError:  # pragma: no cover
+        pass
+    path = d / f"{t}.json"
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(record, indent=2))
+    return _template_from_record(record)
+
+
+def delete_custom_template(assessment_type: str) -> bool:
+    """Remove a custom template (restoring the built-in when one exists)."""
+    t = (assessment_type or "").strip().lower()
+    if not re.match(_TYPE_RE, t):
+        return False
+    path = _custom_templates_dir() / f"{t}.json"
+    try:
+        path.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def _template_from_record(record: dict) -> AssessmentTemplate:
+    return AssessmentTemplate(
+        type=record["type"], title=record["title"],
+        framework=record["framework"],
+        description=record.get("description", ""),
+        questions=tuple(_q(q["id"], q["section"], q["text"],
+                           q["risk_answer"], q["severity"],
+                           q.get("guidance", ""))
+                        for q in record.get("questions", [])))
+
+
+def custom_template_records() -> dict[str, dict]:
+    """Raw custom-template records by type (carries ``department``)."""
+    d = _custom_templates_dir()
+    if not d.exists():
+        return {}
+    out: dict[str, dict] = {}
+    for p in sorted(d.glob("*.json")):
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+            if re.match(_TYPE_RE, str(rec.get("type", ""))):
+                out[rec["type"]] = rec
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def template_department(assessment_type: str) -> str:
+    """Which department workspace a template belongs to."""
+    rec = custom_template_records().get((assessment_type or "").lower())
+    if rec:
+        return rec.get("department", "privacy")
+    if assessment_type in ("sox_control", "fraud_risk", "itgc",
+                           "credit_risk", "close_readiness"):
+        return "finance"
+    return "privacy"
+
+
 def list_templates() -> list[AssessmentTemplate]:
-    return list(TEMPLATES.values())
+    merged: dict[str, AssessmentTemplate] = dict(TEMPLATES)
+    for t, rec in custom_template_records().items():
+        try:
+            merged[t] = _template_from_record(rec)
+        except (KeyError, TypeError):  # pragma: no cover -- corrupt file
+            continue
+    return list(merged.values())
 
 
 def get_template(assessment_type: str) -> AssessmentTemplate | None:
-    return TEMPLATES.get((assessment_type or "").strip().lower())
+    t = (assessment_type or "").strip().lower()
+    rec = custom_template_records().get(t)
+    if rec:
+        try:
+            return _template_from_record(rec)
+        except (KeyError, TypeError):  # pragma: no cover -- corrupt file
+            pass
+    return TEMPLATES.get(t)
 
 
 # --- A running assessment --------------------------------------------------

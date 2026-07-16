@@ -103,6 +103,7 @@ from .api_schemas import (
     SkillOut,
     SourceAttachIn,
     SpeakIn,
+    TemplateIn,
     TenantCreateIn,
     TenantOut,
     TenantPlanIn,
@@ -1134,6 +1135,69 @@ async def list_assessment_templates(request: Request) -> dict:
          "questions": len(t.questions)}
         for t in list_templates()
     ]}
+
+
+@router.get("/assess/templates/{assessment_type}")
+async def get_assessment_template(request: Request,
+                                  assessment_type: str) -> dict:
+    """One template in full (questions included) for the catalog editor."""
+    require_permission(request, "view")
+    from maverick.assessment import (
+        custom_template_records,
+        get_template,
+        template_department,
+    )
+    tpl = get_template(assessment_type[:64])
+    if tpl is None:
+        raise HTTPException(status_code=404, detail="no such template")
+    return {
+        "type": tpl.type, "title": tpl.title, "framework": tpl.framework,
+        "description": tpl.description,
+        "department": template_department(tpl.type),
+        "custom": tpl.type in custom_template_records(),
+        "questions": [{"id": q.id, "section": q.section, "text": q.text,
+                       "risk_answer": q.risk_answer, "severity": q.severity,
+                       "guidance": q.guidance} for q in tpl.questions],
+    }
+
+
+@router.put("/assess/templates/{assessment_type}")
+async def put_assessment_template(request: Request, assessment_type: str,
+                                  body: TemplateIn) -> dict:
+    """Author or edit a questionnaire from the workspace catalog. Templates
+    are data, not code -- saving under a built-in type overrides it; the
+    override is a file an operator can delete to restore the original."""
+    require_permission(request, "operate")
+    from maverick.assessment import save_custom_template
+    try:
+        tpl = await run_in_threadpool(
+            save_custom_template,
+            {"type": assessment_type[:64], **body.model_dump()})
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    try:
+        from maverick.audit import record as audit_record
+        audit_record("TEMPLATE_SAVED", agent="operator",
+                     template=tpl.type, questions=len(tpl.questions))
+    except Exception:  # pragma: no cover -- audit is best-effort here
+        pass
+    return {"type": tpl.type, "title": tpl.title,
+            "questions": len(tpl.questions), "custom": True}
+
+
+@router.delete("/assess/templates/{assessment_type}")
+async def delete_assessment_template(request: Request,
+                                     assessment_type: str) -> dict:
+    """Remove a custom template / override (built-ins are restored, never
+    deleted)."""
+    require_permission(request, "operate")
+    from maverick.assessment import TEMPLATES, delete_custom_template
+    removed = await run_in_threadpool(delete_custom_template,
+                                      assessment_type[:64])
+    if not removed:
+        raise HTTPException(status_code=404, detail="no custom template")
+    return {"deleted": assessment_type[:64],
+            "builtin_restored": assessment_type[:64] in TEMPLATES}
 
 
 @router.get("/assess/sessions")
