@@ -668,6 +668,15 @@ class FollowupsIn(BaseModel):
     questions: list[str] = Field(..., min_length=1, max_length=20)
 
 
+class AssessmentDecideIn(BaseModel):
+    """The reviewer's decision on a saved assessment. An approval with a
+    cadence schedules the next review (the record comes due); 0/None means
+    no re-review date."""
+    decision: str = Field(..., pattern="^(approved|rejected)$")
+    cadence_days: int | None = Field(default=365, ge=0, le=3650)
+    note: str = Field("", max_length=4000)
+
+
 class DocDiscoverIn(BaseModel):
     """Search connected document sources (Microsoft Graph / Slack / Google
     Drive) for documents related to an assessment subject -- the SOW,

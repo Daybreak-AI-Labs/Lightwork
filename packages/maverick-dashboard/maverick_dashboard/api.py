@@ -42,6 +42,7 @@ from .api_schemas import (
     AgentOverrideIn,
     AiSystemIn,
     AnswerIn,
+    AssessmentDecideIn,
     AssessmentEvidenceIn,
     AssessmentRefreshIn,
     AssessmentReviewIn,
@@ -1190,6 +1191,37 @@ async def add_assessment_followups(
         audit_record("ASSESSMENT_FOLLOWUP", agent=who or "reviewer",
                      assessment=assessment_id[:64],
                      questions=len(body.questions))
+    except Exception:  # pragma: no cover -- audit is best-effort here
+        pass
+    return record
+
+
+@router.post("/assess/sessions/{assessment_id}/decide")
+async def decide_assessment_session(
+    request: Request, assessment_id: str, body: AssessmentDecideIn,
+) -> dict:
+    """Record the reviewer's decision. Approval with a cadence schedules the
+    next review -- the workspace surfaces the record again when it comes due,
+    and the follow-up cycle re-opens it. Audited."""
+    require_permission(request, "operate")
+    from maverick.assessment import decide_assessment
+    who = ""
+    try:
+        principal = getattr(request.state, "principal", None)
+        who = str(getattr(principal, "id", "") or "") if principal else ""
+    except Exception:  # pragma: no cover -- attribution is best-effort
+        who = ""
+    record = await run_in_threadpool(
+        decide_assessment, assessment_id[:64], body.decision,
+        decided_by=who or "reviewer", note=body.note,
+        cadence_days=body.cadence_days)
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    try:
+        from maverick.audit import record as audit_record
+        audit_record("ASSESSMENT_DECIDED", agent=who or "reviewer",
+                     assessment=assessment_id[:64], decision=body.decision,
+                     cadence_days=body.cadence_days or 0)
     except Exception:  # pragma: no cover -- audit is best-effort here
         pass
     return record

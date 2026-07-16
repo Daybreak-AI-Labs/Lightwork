@@ -695,6 +695,39 @@ def answer_followup(assessment_id: str, followup_id: str, answer: str,
     return record if (record is not None and hit["found"]) else None
 
 
+DECISIONS = ("approved", "rejected")
+
+
+def decide_assessment(assessment_id: str, decision: str, *,
+                      decided_by: str = "", note: str = "",
+                      cadence_days: int | None = 365) -> dict | None:
+    """Record the reviewer's decision on a saved assessment.
+
+    ``approved`` closes the loop and (with a cadence) schedules the next
+    review -- the record becomes a living one that comes due instead of a
+    PDF that dies in a folder. ``rejected`` closes it with no re-review
+    date. Either decision is re-openable: sending new follow-ups flips the
+    record back to ``needs_more`` and the cycle runs again."""
+    decision = (decision or "").strip().lower()
+    if decision not in DECISIONS:
+        raise ValueError(f"decision must be one of {DECISIONS}")
+
+    def _mutate(record: dict) -> None:
+        record["status"] = decision
+        record["decided_at"] = time.time()
+        record["decided_by"] = decided_by
+        record["decision_note"] = (note or "").strip()[:4000]
+        if decision == "approved" and cadence_days:
+            record["cadence_days"] = int(cadence_days)
+            record["next_review_at"] = (record["decided_at"]
+                                        + int(cadence_days) * 86400)
+        else:
+            record["cadence_days"] = None
+            record["next_review_at"] = None
+
+    return _rewrite_saved(assessment_id, _mutate)
+
+
 def list_saved() -> list[dict]:
     """Summaries of saved assessments, newest first."""
     d = _assessments_dir()
@@ -722,6 +755,12 @@ def list_saved() -> list[dict]:
             "created_at": data.get("created_at", 0),
             "status": data.get("status", "pending_review"),
             "open_followups": sum(1 for f in fups if not f.get("answer")),
+            "decided_at": data.get("decided_at"),
+            "next_review_at": data.get("next_review_at"),
+            "review_due": (data.get("status") == "approved"
+                           and bool(data.get("next_review_at"))
+                           and time.time()
+                           >= float(data.get("next_review_at") or 0)),
         })
     return sorted(out, key=lambda r: r["created_at"], reverse=True)
 

@@ -1817,6 +1817,10 @@ def _workspace_ctx(types: frozenset) -> dict:
     for s in sessions:
         created = float(s.get("created_at") or 0)
         s["age_days"] = int((now - created) // 86400) if created else None
+        nra = s.get("next_review_at")
+        # Days until the scheduled re-review (negative = overdue).
+        s["review_in_days"] = (int((float(nra) - now) // 86400)
+                               if nra else None)
     open_rows = [s for s in sessions
                  if s.get("status") in ("pending_review", "needs_more")]
     stats = {
@@ -1827,6 +1831,7 @@ def _workspace_ctx(types: frozenset) -> dict:
                           if s.get("status") == "needs_more"),
         "high_residual": sum(1 for s in sessions
                              if s.get("residual_risk") == "high"),
+        "review_due": sum(1 for s in sessions if s.get("review_due")),
         "oldest_open_days": (max((s["age_days"] or 0) for s in open_rows)
                             if open_rows else None),
     }

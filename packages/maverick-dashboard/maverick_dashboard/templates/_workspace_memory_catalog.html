@@ -62,7 +62,8 @@
       var f = fb.dataset.filter;
       document.querySelectorAll('#pw-table tbody tr').forEach(function (tr) {
         var show = f === 'all' ||
-          (f === 'high' ? tr.dataset.residual === 'high' : tr.dataset.status === f);
+          (f === 'high' ? tr.dataset.residual === 'high' :
+           f === 'due' ? tr.dataset.due === '1' : tr.dataset.status === f);
         tr.style.display = show ? '' : 'none';
       });
     });

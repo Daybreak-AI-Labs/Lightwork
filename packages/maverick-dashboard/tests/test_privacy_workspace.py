@@ -118,3 +118,28 @@ def test_records_section_hidden_when_disabled(monkeypatch, tmp_path):
     assert "open DSARs" not in html
     # The assessment workspace itself still stands.
     assert "Worklist" in html
+
+
+def test_decide_endpoint_and_review_due_surfacing(monkeypatch):
+    import time as _t
+    s = _seed("Acme CRM", risky=True)
+    resp = client.post(f"/api/v1/assess/sessions/{s.id}/decide",
+                       json={"decision": "approved", "cadence_days": 30})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "approved"
+    assert client.post("/api/v1/assess/sessions/nope/decide",
+                       json={"decision": "approved"}).status_code == 404
+    assert client.post(f"/api/v1/assess/sessions/{s.id}/decide",
+                       json={"decision": "maybe"}).status_code == 422
+
+    html = client.get("/privacy").text
+    assert ">approved</span>" in html
+    assert "re-review in" in html
+    assert "Due for re-review (0)" in html
+
+    # The cadence elapses: the record surfaces as due.
+    real = _t.time
+    monkeypatch.setattr(_t, "time", lambda: real() + 31 * 86400)
+    html = client.get("/privacy").text
+    assert "Due for re-review (1)" in html
+    assert "overdue" in html
