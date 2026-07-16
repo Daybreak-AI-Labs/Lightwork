@@ -61,6 +61,46 @@ def test_risky_answers_score_findings_and_roll_up():
     assert r.answered == 3                     # yes/no/na count; unknown does not
 
 
+def test_inherent_vs_residual_risk_pair():
+    """Inherent = every applicable risk area (before crediting controls);
+    residual = what the findings leave open. A control in place lowers
+    residual but never lowers inherent; 'na' removes the area from both."""
+    from maverick.assessment import AssessmentSession
+
+    s = AssessmentSession(type="vendor_risk", subject="Acme Corp")
+    s.record("vr_dpa", "yes")                 # high area, CONTROLLED
+    s.record("vr_encryption", "yes")          # high area, CONTROLLED
+    s.record("vr_breach_history", "no")       # medium area, safe answer
+    s.record("vr_deletion", "no")             # medium area, RISK answer
+    s.record("vr_business_continuity", "na")  # out of scope entirely
+    r = s.evaluate()
+
+    assert r.inherent_risk == "high"          # high areas apply to this vendor
+    assert r.residual_risk == "medium"        # only the deletion gap is open
+    assert r.risk_rating == r.residual_risk   # back-compat alias
+    assert r.risks_in_scope == 4              # the four non-na answers
+    assert r.controls_in_place == 3           # dpa, encryption, breach history
+    # Fully clean subject: both ratings collapse to minimal.
+    s2 = AssessmentSession(type="vendor_risk", subject="Clean Corp")
+    s2.record("vr_dpa", "na")
+    r2 = s2.evaluate()
+    assert (r2.inherent_risk, r2.residual_risk) == ("minimal", "minimal")
+    assert r2.risks_in_scope == 0
+
+
+def test_saved_summaries_carry_the_risk_pair(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    from maverick.assessment import AssessmentSession, list_saved, save_session
+
+    s = AssessmentSession(type="pia", subject="Acme CRM")
+    s.record("pia_transfers", "yes")          # high risk answer -> open finding
+    s.record("pia_security", "yes")           # safe answer -> controlled
+    save_session(s)
+    row = next(r for r in list_saved() if r["id"] == s.id)
+    assert row["inherent_risk"] == "high"
+    assert row["residual_risk"] == "high"
+
+
 def test_record_rejects_bad_answer_and_unknown_question():
     from maverick.assessment import AssessmentSession
 
