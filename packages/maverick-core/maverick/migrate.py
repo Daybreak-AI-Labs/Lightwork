@@ -55,7 +55,7 @@ KNOWN_SECTIONS = frozenset({
     "model_proxy", "models", "notifications", "oauth", "observability",
     "obsidian", "operations_scientist",
     "perf", "persona", "planning", "plugins", "privacy",
-    "provider_failover", "providers", "queue", "quotas", "reflexion",
+    "privacy_ops", "provider_failover", "providers", "queue", "quotas", "reflexion",
     "retention", "role_assignments", "roles", "routing", "safety",
     "sandbox", "screening", "search", "security", "self_learning",
     "sharing", "shield", "skill_synthesis", "skills",

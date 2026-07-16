@@ -1363,11 +1363,15 @@ def pick_assessments() -> dict[str, Any]:
     discovery = _q_confirm("Enable assessment doc discovery?", default=True)
     learn = _q_confirm("Enable assessment learning (suggest from past "
                        "assessments)?", default=True)
+    ops = _q_confirm("Enable the privacy ops record types (DPA review, AI "
+                     "registry, RoPA, DSAR tracker)?", default=True)
     out: dict[str, Any] = {}
     if not discovery:
         out["doc_discovery"] = False
     if not learn:
         out["learn"] = False
+    if not ops:
+        out["privacy_ops"] = False
     return out
 
 
@@ -3230,11 +3234,17 @@ def _cfg_durable(durable: dict[str, Any] | None) -> list[str]:
 def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     if not assessments:
         return []
-    # Assessment assists are default-on; write the table only when the
-    # operator opted OUT of something (write-only-on-divergence convention).
-    lines = ["", "[assessments]"]
-    for k, v in assessments.items():
-        _emit_kv(lines, k, v)
+    # Assessment assists + privacy ops are default-on; write tables only when
+    # the operator opted OUT of something (write-only-on-divergence).
+    body = {k: v for k, v in assessments.items() if k != "privacy_ops"}
+    lines: list[str] = []
+    if body:
+        lines += ["", "[assessments]"]
+        for k, v in body.items():
+            _emit_kv(lines, k, v)
+    if "privacy_ops" in assessments:
+        lines += ["", "[privacy_ops]"]
+        _emit_kv(lines, "enable", assessments["privacy_ops"])
     return lines
 
 

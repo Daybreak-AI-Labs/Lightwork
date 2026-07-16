@@ -76,3 +76,45 @@ def test_approvals_page_still_carries_shared_popout():
     assert resp.status_code == 200
     assert resp.text.count('id="arv-dialog"') == 1
     assert "mvAssessmentReview" in resp.text
+
+
+def test_records_section_renders_all_four_types():
+    from maverick import privacy_ops
+    privacy_ops.review_dpa(
+        "Acme Corp", "processor acts on documented instructions from the "
+        "controller; audit rights; retention for 12 months",
+        document_name="acme-dpa.pdf")
+    privacy_ops.register_ai_system(
+        "CV screener", "ranks job candidates for hiring")
+    s = _seed("Acme CRM")
+    privacy_ops.draft_ropa_from_assessment(s.id)
+    privacy_ops.open_dsar("jordan@example.com", "erasure", channel="email")
+
+    html = client.get("/privacy").text
+    # DPA reviews tab: vendor row + the clause-detail trigger.
+    assert "Acme Corp" in html and "acme-dpa.pdf" in html
+    assert 'class="btn pw-dpa-clauses"' in html
+    # AI registry tab: high-risk tier from the Annex III employment test.
+    assert "CV screener" in html
+    assert ">high</span>" in html
+    # RoPA tab: the drafted Art. 30 entry with provenance + CSV export.
+    assert "Processing via Acme CRM" in html
+    assert "/api/v1/privacy/ropa/export.csv" in html
+    # DSAR tab: subject + 30-day clock; erasure needs the operator step.
+    assert "jordan@example.com" in html
+    assert "d left" in html
+    # Hero stats grew the records pair.
+    assert "open DSARs" in html and "Art. 30 entries" in html
+
+
+def test_records_section_hidden_when_disabled(monkeypatch, tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("[privacy_ops]\nenable = false\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
+    from maverick import config
+    config.reset_config_cache()
+    html = client.get("/privacy").text
+    assert "Privacy records" not in html
+    assert "open DSARs" not in html
+    # The assessment workspace itself still stands.
+    assert "Worklist" in html
