@@ -104,6 +104,7 @@ STEPS: list[tuple[str, str]] = [
     ("durable", "Durable execution"),
     ("finance", "Finance suite"),
     ("value", "Savings assumptions"),
+    ("assessments", "Assessment assists"),
     ("advanced", "Advanced reasoning"),
     ("web_search", "Web search"),
     ("mcp_servers", "MCP servers"),
@@ -1245,6 +1246,34 @@ def pick_durable() -> dict[str, Any]:
     if not _q_confirm("Enable durable execution (crash-resume)?", default=False):
         return {"enabled": False}
     return {"enabled": True, "keep_last": 5}
+
+
+def pick_assessments() -> dict[str, Any]:
+    """Assessment-flow assists (doc discovery + learning), both default ON.
+
+    Doc discovery searches connected sources (Microsoft Graph / Slack /
+    Google Drive) for the SOW/contract/DPA related to an assessment subject;
+    it only activates when a source has credentials. Learning suggests
+    answers from the org's OWN past assessments -- advisory only. Returns a
+    dict written under ``[assessments]`` only on divergence from defaults.
+    """
+    console.print()
+    console.print(
+        "[dim]Assessment assists: doc discovery finds the SOW/contract/DPA in "
+        "your connected Microsoft 365 / Slack / Google Drive when someone "
+        "fills an assessment; learning suggests answers from your own past "
+        "assessments (a human still reviews everything). Both ON by default; "
+        "discovery stays inert until a source is connected.[/dim]"
+    )
+    discovery = _q_confirm("Enable assessment doc discovery?", default=True)
+    learn = _q_confirm("Enable assessment learning (suggest from past "
+                       "assessments)?", default=True)
+    out: dict[str, Any] = {}
+    if not discovery:
+        out["doc_discovery"] = False
+    if not learn:
+        out["learn"] = False
+    return out
 
 
 def pick_value() -> dict[str, Any]:
@@ -3093,6 +3122,17 @@ def _cfg_durable(durable: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
+    if not assessments:
+        return []
+    # Assessment assists are default-on; write the table only when the
+    # operator opted OUT of something (write-only-on-divergence convention).
+    lines = ["", "[assessments]"]
+    for k, v in assessments.items():
+        _emit_kv(lines, k, v)
+    return lines
+
+
 def _cfg_value(value: dict[str, Any] | None) -> list[str]:
     if not value:
         return []
@@ -3938,6 +3978,7 @@ def write_config(
     durable: dict[str, Any] | None = None,
     finance: dict[str, Any] | None = None,
     value: dict[str, Any] | None = None,
+    assessments: dict[str, Any] | None = None,
     deployment: str | None = None,
     suites: dict[str, bool] | None = None,
     license_cfg: dict[str, Any] | None = None,
@@ -4048,6 +4089,7 @@ def write_config(
     lines += _cfg_durable(durable)
     lines += _cfg_finance(finance)
     lines += _cfg_value(value)
+    lines += _cfg_assessments(assessments)
 
     capability_config = dict(capabilities or {})
     if web_search_enabled and not capability_config.get("web_search"):
@@ -4903,6 +4945,14 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         state["value"] = value
         _save_partial(state)
 
+    # `is None` sentinel: keeping both defaults legitimately returns {}.
+    _announce()
+    assessments = state.get("assessments")
+    if assessments is None:
+        assessments = pick_assessments()
+        state["assessments"] = assessments
+        _save_partial(state)
+
     _announce()
     advanced = state.get("advanced") or pick_advanced()
     state["advanced"] = advanced
@@ -4924,6 +4974,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "durable": durable,
         "finance": finance,
         "value": value,
+        "assessments": assessments,
         "advanced": advanced,
     }
 
@@ -5120,6 +5171,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     durable = _simple["durable"]
     finance = _simple["finance"]
     value = _simple["value"]
+    assessments = _simple["assessments"]
     advanced = _simple["advanced"]
 
     _announce()
@@ -5231,6 +5283,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         durable=durable if durable.get("enabled") else None,
         finance=finance if finance.get("enable") else None,
         value=value or None,
+        assessments=assessments or None,
         suites=suites,
         license_cfg=license_cfg or None,
         # The advanced flow applies no preset -- the operator hand-picked

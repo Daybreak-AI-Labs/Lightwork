@@ -1,11 +1,45 @@
 {% extends "base.html" %}
 {% block title %}Privacy intake — {{ case.subject }}{% endblock %}
 {% block body %}
+<style>
+  /* Co-work upload zone + discovery, scoped to the intake page. */
+  .dropzone {
+    border: 1.5px dashed var(--line); border-radius: 12px;
+    padding: 26px 18px; text-align: center; cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .dropzone:hover, .dropzone.drag {
+    border-color: var(--accent-dim); background: var(--accent-glow);
+  }
+  .dropzone .hint { font-size: 12px; }
+  .filechip {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; margin-top: 8px;
+    border: 1px solid var(--line); border-radius: 10px; font-size: 13px;
+  }
+  .filechip .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .filechip .bar { height: 3px; border-radius: 99px; background: var(--accent-dim); width: 0%; transition: width .12s ease; }
+  .filechip .meta { font-size: 11px; }
+  .found { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-top: 8px;
+           border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
+  .srcbadge { font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+              padding: 2px 8px; border-radius: 99px; border: 1px solid var(--accent-dim); color: var(--accent); }
+  .suggest-btn { border-color: var(--accent-dim) !important; }
+  .memo { border-color: var(--accent-dim); background: var(--accent-glow); }
+</style>
+
 <div class="page-head">
   <div class="eyebrow">Privacy assessment · {{ case.id }}</div>
   <h1>Privacy questionnaire — {{ case.subject }}</h1>
   <p>A few quick questions about how {{ case.subject }} handles personal data. This takes about
      two minutes. Your answers feed a first-pass risk assessment that the privacy team reviews.</p>
+</div>
+
+<div class="card memo" id="memory" style="display:none;">
+  <div class="flow">
+    <strong>💡 We've seen systems like this before.</strong>
+    <span class="muted" id="memoryText"></span>
+  </div>
 </div>
 
 <div class="card" id="chat">
@@ -14,17 +48,25 @@
 </div>
 
 <div class="card">
-  <h2>Attach documents (optional)</h2>
-  <p class="muted" style="margin-bottom:10px;">DPA, security overview, architecture diagram — anything that helps the review.</p>
-  <form id="uploadForm">
-    <div class="flow">
-      <input type="file" id="fileInput" style="flex:1;">
-      <button class="btn ghost" type="submit">Attach</button>
-    </div>
-  </form>
-  <div id="uploads" class="muted" style="margin-top:10px;">
-    {% for u in case.uploads %}<div class="mono">📎 {{ u }}</div>{% endfor %}
+  <h2>Attach documents</h2>
+  <p class="muted" style="margin-bottom:10px;">DPA, SOW, contract, security overview — anything that helps the review.</p>
+
+  <div class="dropzone" id="dropzone" role="button" tabindex="0"
+       aria-label="Upload documents: drag and drop, or press Enter to browse">
+    <div>📎 <strong>Drop files here</strong> or click to browse</div>
+    <div class="hint muted">PDF, Office, text, images — up to 100&nbsp;MB each. You can add several at once.</div>
+    <input type="file" id="fileInput" multiple style="display:none;">
   </div>
+  <div id="uploads">
+    {% for u in case.uploads %}<div class="filechip"><span>📎</span><span class="nm mono">{{ u }}</span></div>{% endfor %}
+  </div>
+
+  <div class="flow" style="margin-top:14px;">
+    <button class="btn ghost" id="findDocs" type="button">🔍 Find my documents</button>
+    <span class="faint" style="font-size:12px;">Searches your connected sources (SharePoint / OneDrive) for
+      this vendor's SOW, contract, and DPA — so you don't have to.</span>
+  </div>
+  <div id="foundDocs"></div>
 </div>
 
 {% if done %}
@@ -57,6 +99,7 @@
 const CASE = "{{ case.id }}";
 const QUESTIONS = {{ questions|tojson }};
 let idx = 0;
+let SUGGEST = {};
 const thread = document.getElementById('thread');
 const controls = document.getElementById('controls');
 const submitBar = document.getElementById('submitBar');
@@ -76,18 +119,39 @@ function bubble(who, text) {
 }
 
 const SEVLABEL = {high:'sev-high', medium:'sev-medium', low:'sev-low'};
+const ANSLABEL = {yes:'Yes', no:'No', na:'N/A', unknown:'Not sure'};
 
 function ask() {
-  controls.innerHTML = '';
   if (idx >= QUESTIONS.length) {
+    controls.innerHTML = '';
     bubble('bot', "That's everything — thank you. You can attach documents below, then submit for review.");
     submitBar.style.display = 'block';
     return;
   }
+  bubble('bot', QUESTIONS[idx].prompt);
+  renderControls();
+}
+
+// Separate from ask() so late-arriving insights can refresh the buttons of
+// the question already on screen without re-bubbling its text.
+function renderControls() {
+  controls.innerHTML = '';
+  if (idx >= QUESTIONS.length) return;
   const q = QUESTIONS[idx];
-  bubble('bot', q.prompt);
   const wrap = document.createElement('div');
   wrap.className = 'flow';
+  // Learned suggestion first: one click confirms what the org already knows.
+  const s = SUGGEST[q.id];
+  if (s && ANSLABEL[s.answer]) {
+    const sb = document.createElement('button');
+    sb.className = 'btn ghost sm suggest-btn';
+    sb.textContent = '💡 Use suggested: ' + ANSLABEL[s.answer];
+    sb.title = 'From ' + (s.based_on || []).join(', ') +
+      (s.note ? (' — "' + s.note + '"') : '') +
+      ' (confidence ' + Math.round((s.confidence || 0) * 100) + '%)';
+    sb.onclick = () => answer(q, s.answer, ANSLABEL[s.answer] + ' (suggested)');
+    wrap.appendChild(sb);
+  }
   const opts = [['yes','Yes'],['no','No'],['na','N/A'],['unknown','Not sure']];
   opts.forEach(([val,lbl]) => {
     const btn = document.createElement('button');
@@ -104,27 +168,144 @@ function ask() {
   controls.appendChild(wrap);
 }
 
+let answering = false;  // a double-click must not skip the next question
+
 async function answer(q, val, lbl) {
+  if (answering) return;
+  answering = true;
+  controls.querySelectorAll('button').forEach(b => { b.disabled = true; });
   bubble('me', lbl);
   const fd = new FormData();
   fd.append('question_id', q.id);
   fd.append('answer', val);
   await fetch(`/intake/${CASE}/answer`, {method:'POST', body:fd});
   idx++;
+  answering = false;
   setTimeout(ask, 250);
 }
 
-document.getElementById('uploadForm').onsubmit = async (e) => {
-  e.preventDefault();
-  const f = document.getElementById('fileInput').files[0];
-  if (!f) return;
+// ---- Co-work uploads: drag & drop, multi-file, per-file progress ----------
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const uploadsBox = document.getElementById('uploads');
+
+function chip(name) {
+  const c = document.createElement('div');
+  c.className = 'filechip';
+  c.innerHTML = '<span>📎</span><span class="nm mono"></span>' +
+    '<span class="meta muted">uploading…</span>';
+  c.querySelector('.nm').textContent = name;
+  const bar = document.createElement('div');
+  bar.className = 'bar';
+  c.appendChild(bar);
+  uploadsBox.appendChild(c);
+  return c;
+}
+
+function uploadOne(file) {
+  const c = chip(file.name);
+  const bar = c.querySelector('.bar');
+  const meta = c.querySelector('.meta');
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `/intake/${CASE}/upload`);
+  xhr.upload.onprogress = (ev) => {
+    if (ev.lengthComputable) bar.style.width = Math.round(ev.loaded / ev.total * 100) + '%';
+  };
+  xhr.onload = () => {
+    let r = {};
+    try { r = JSON.parse(xhr.responseText); } catch (e) {}
+    if (xhr.status === 200 && r.ok) {
+      bar.style.width = '100%';
+      meta.textContent = (file.size/1024).toFixed(0) + ' KB · attached ✓';
+    } else {
+      meta.textContent = 'rejected: ' + (r.error || xhr.status);
+      c.style.borderColor = 'var(--high, #c0392b)';
+      bar.remove();
+    }
+  };
+  xhr.onerror = () => { meta.textContent = 'network error'; bar.remove(); };
   const fd = new FormData();
-  fd.append('file', f);
-  const r = await (await fetch(`/intake/${CASE}/upload`, {method:'POST', body:fd})).json();
-  const box = document.getElementById('uploads');
-  box.innerHTML = (r.uploads||[]).map(u => '<div class="mono">📎 '+u+'</div>').join('');
-  document.getElementById('fileInput').value = '';
+  fd.append('file', file);
+  xhr.send(fd);
+}
+
+function handleFiles(list) { [...list].forEach(uploadOne); }
+
+dropzone.onclick = () => fileInput.click();
+dropzone.onkeydown = (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
 };
+fileInput.onchange = () => { handleFiles(fileInput.files); fileInput.value = ''; };
+['dragenter','dragover'].forEach(ev => dropzone.addEventListener(ev, (e) => {
+  e.preventDefault(); dropzone.classList.add('drag');
+}));
+['dragleave','drop'].forEach(ev => dropzone.addEventListener(ev, (e) => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+}));
+dropzone.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+
+// ---- Doc discovery: find the SOW/contract/DPA in connected sources --------
+document.getElementById('findDocs').onclick = async () => {
+  const box = document.getElementById('foundDocs');
+  box.innerHTML = '<div class="muted" style="margin-top:10px;">Searching connected sources…</div>';
+  const r = await (await fetch(`/intake/${CASE}/discover`, {method:'POST'})).json();
+  box.innerHTML = '';
+  if (!r.ok || !(r.hits || []).length) {
+    box.innerHTML = '<div class="muted" style="margin-top:10px;">No related documents found in connected sources.</div>';
+    return;
+  }
+  r.hits.forEach(h => {
+    const row = document.createElement('div');
+    row.className = 'found';
+    const badge = document.createElement('span');
+    badge.className = 'srcbadge';
+    badge.textContent = h.source === 'msgraph' ? 'SharePoint' : h.source;
+    const nm = document.createElement('span');
+    nm.className = 'nm mono';
+    nm.style.cssText = 'flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+    nm.textContent = h.name;
+    const attach = document.createElement('button');
+    attach.className = 'btn ghost sm';
+    attach.textContent = 'Attach';
+    attach.onclick = async () => {
+      attach.disabled = true; attach.textContent = 'Attaching…';
+      const rr = await (await fetch(`/intake/${CASE}/attach-found`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({source: h.source, doc_id: h.doc_id, name: h.name, ref: h.ref}),
+      })).json();
+      if (rr.ok) {
+        attach.textContent = 'Attached ✓';
+        const c = chip(h.name);
+        c.querySelector('.meta').textContent = 'from ' + badge.textContent + ' ✓';
+        c.querySelector('.bar').style.width = '100%';
+      } else {
+        attach.textContent = 'Failed';
+        attach.title = rr.error || '';
+      }
+    };
+    row.append(badge, nm, attach);
+    box.appendChild(row);
+  });
+};
+
+// ---- Learning: what the org already knows about systems like this ---------
+(async () => {
+  try {
+    const r = await (await fetch(`/intake/${CASE}/insights`)).json();
+    if (!r.ok) return;
+    SUGGEST = r.suggestions || {};
+    renderControls();  // refresh the on-screen question with suggestion chips
+    const sim = r.similar || [];
+    if (sim.length) {
+      const bits = sim.slice(0, 2).map(s =>
+        `${s.subject} was rated ${String(s.risk_rating).toUpperCase()}`);
+      document.getElementById('memoryText').textContent =
+        bits.join('; ') + '. Questions below show one-click suggested answers ' +
+        'from those assessments — you confirm, nothing is auto-answered.';
+      document.getElementById('memory').style.display = 'block';
+    }
+  } catch (e) { /* learning is advisory; the intake works without it */ }
+})();
 
 document.getElementById('autofill').onclick = async () => {
   await fetch(`/intake/${CASE}/autofill`, {method:'POST'});

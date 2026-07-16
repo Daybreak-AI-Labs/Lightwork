@@ -603,6 +603,25 @@ class UserSuitesIn(BaseModel):
     suites: list[str] = Field(default_factory=list, max_length=64)
 
 
+class DocDiscoverIn(BaseModel):
+    """Search connected document sources (Microsoft Graph / Slack / Google
+    Drive) for documents related to an assessment subject -- the SOW,
+    contract, DPA a respondent would otherwise hunt for by hand."""
+    subject: str = Field(..., min_length=1, max_length=300)
+    sources: list[str] | None = Field(default=None, max_length=8)
+    limit: int = Field(8, ge=1, le=25)
+
+
+class SourceAttachIn(BaseModel):
+    """Fetch one discovered document from its source and attach it to a goal
+    as evidence (the one-click 'attach it for me'). ``ref`` round-trips the
+    opaque fetch details discovery returned for the hit."""
+    source: str = Field(..., min_length=1, max_length=40)
+    doc_id: str = Field(..., min_length=1, max_length=500)
+    name: str = Field("", max_length=300)
+    ref: dict = Field(default_factory=dict)
+
+
 class ValueDeptIn(BaseModel):
     """One department's cost/value override on the Savings page. Both fields
     optional so a client can override just the rate; an all-None row clears

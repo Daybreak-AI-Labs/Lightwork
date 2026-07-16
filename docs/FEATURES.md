@@ -396,6 +396,24 @@ here.
   cost avoided + ROI, the capability improvement curve from the hindsight
   ledger, and governance evidence, per department (and per external vendor
   with `--fleet`). Read-only; the POC-closing artifact.
+- **Assessment doc discovery** (`doc_discovery.py`, `POST /api/v1/docs/
+  discover`, `POST /api/v1/goals/{id}/attachments/from-source`) — when
+  someone is filling an assessment, searches the CONNECTED sources
+  (Microsoft Graph/SharePoint/OneDrive, Slack files, Google Drive) for the
+  subject's SOW/contract/DPA/security paperwork and attaches it as real
+  goal evidence in one click. Creds resolve env-first then named sealed
+  connections; fetched bytes pass the same validation as a direct upload
+  (size cap, mime allowlist, executable deny). Fail-open per source;
+  `[assessments] doc_discovery` + sources list; inert until a source is
+  connected.
+- **Assessment memory** (`assessment_memory.py`, `GET /api/v1/assessment-
+  memory/similar`, agent tool `similar_assessments`) — the assessment flow
+  learns from the org's own past assessments: similar-subject precedents
+  with risk ratings, advisory per-question answer suggestions (majority
+  vote with confidence + provenance; ties dropped), and semantic lessons
+  via the knowledge plane (`assessments` collection, ingested on every
+  `save_session`) when enabled. Advisory only — the human review gate is
+  untouched. `[assessments] learn`.
 - **Savings dashboard** (`savings.py`, `maverick savings`, dashboard
   `/savings` + `/api/v1/savings`) — money saved vs the typical human cost,
   from real completed work and the CLIENT's own inputs: fully-loaded human

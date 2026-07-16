@@ -128,6 +128,130 @@ async def _startup() -> None:
     except Exception as exc:  # pragma: no cover
         print(f"[mailsink] could not bind {host}:{port}: {exc}")
     app.state.watcher = asyncio.create_task(_approval_watcher())
+    # Point the REAL doc-discovery module at this process's simulated
+    # SharePoint tenant (setdefault: exporting real Graph creds instead makes
+    # discovery search the real tenant with zero code change).
+    os.environ.setdefault("MSGRAPH_ACCESS_TOKEN", GRAPH_SIM_TOKEN)
+    os.environ.setdefault("MSGRAPH_BASE_URL", f"{BASE_URL}/graph-sim")
+    print(f"[graph-sim] simulated SharePoint tenant at {BASE_URL}/graph-sim")
+
+
+# ===========================================================================
+# Simulated SharePoint/OneDrive tenant (Microsoft Graph shapes). Only the
+# TENANT is simulated — search + fetch go through the real
+# maverick.doc_discovery module, exactly as they would against graph.microsoft
+# .com. Docs are seeded per case so "find my documents" has something to find.
+# ===========================================================================
+GRAPH_SIM_TOKEN = "demo-graph-token"  # pragma: allowlist secret
+GRAPH_DOCS: dict[str, dict[str, Any]] = {}
+
+
+def _mini_pdf(title: str, lines: list[str]) -> bytes:
+    """A tiny, valid one-page PDF (passes the attachment mime + magic checks)."""
+    def esc(s: str) -> str:
+        return s.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+    body = ["BT /F1 14 Tf 54 760 Td (" + esc(title) + ") Tj ET"]
+    y = 730
+    for ln in lines:
+        body.append("BT /F1 10 Tf 54 " + str(y) + " Td (" + esc(ln) + ") Tj ET")
+        y -= 16
+    stream = "\n".join(body).encode()
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n"
+        + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for i, obj in enumerate(objs, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    for off in offsets:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += (b"trailer\n<< /Size " + str(len(objs) + 1).encode()
+            + b" /Root 1 0 R >>\nstartxref\n" + str(xref).encode()
+            + b"\n%%EOF\n")
+    return bytes(out)
+
+
+def _seed_corp_docs(subject: str) -> None:
+    """Drop the documents a real org would already have for this vendor into
+    the simulated tenant: the SOW, MSA, DPA, and security overview — plus an
+    unrelated doc so ranking visibly works."""
+    docs = [
+        (f"{subject} — Statement of Work (SOW) FY26.pdf",
+         [f"Statement of Work between the Company and {subject}.",
+          "Scope: managed service, personal data of customers in scope.",
+          "Term: 12 months. Data locations: us-east-1."]),
+        (f"{subject} — Data Processing Agreement (DPA, signed).pdf",
+         [f"Art. 28 GDPR data processing agreement with {subject}.",
+          "Processor obligations, sub-processor list, SCC module 2 annex."]),
+        (f"{subject} — Master Services Agreement (MSA).pdf",
+         [f"Master services agreement governing all {subject} orders.",
+          "Liability caps, security exhibit, audit rights."]),
+        (f"{subject} — Security Overview & Architecture.pdf",
+         [f"{subject} platform security whitepaper.",
+          "Encryption at rest (AES-256), TLS 1.2+, SOC 2 Type II attested."]),
+        ("Company holiday calendar FY26.pdf",
+         ["All-hands calendar. Nothing to do with any vendor."]),
+    ]
+    for name, lines in docs:
+        doc_id = f"doc-{abs(hash((subject, name))) % 10**10:010d}"
+        if doc_id not in GRAPH_DOCS:
+            GRAPH_DOCS[doc_id] = {
+                "name": name, "subject": subject,
+                "bytes": _mini_pdf(name, lines), "mime": "application/pdf",
+            }
+
+
+def _graph_auth_ok(request: Request) -> bool:
+    tok = request.headers.get("authorization", "")
+    return tok == f"Bearer {os.environ.get('MSGRAPH_ACCESS_TOKEN', GRAPH_SIM_TOKEN)}"
+
+
+@app.post("/graph-sim/search/query")
+async def graph_sim_search(request: Request) -> JSONResponse:
+    if not _graph_auth_ok(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    body = await request.json()
+    try:
+        q = str(body["requests"][0]["query"]["queryString"])
+    except (KeyError, IndexError, TypeError):
+        return JSONResponse({"error": "bad request"}, status_code=400)
+    tokens = {t.lower() for t in q.split() if len(t) > 2}
+    hits = []
+    for doc_id, doc in GRAPH_DOCS.items():
+        name = doc["name"].lower()
+        subj = doc["subject"].lower()
+        if any(t in name or t in subj for t in tokens):
+            hits.append({
+                "summary": f"…{doc['name']}…",
+                "resource": {
+                    "id": doc_id, "name": doc["name"],
+                    "webUrl": f"{BASE_URL}/graph-sim/web/{doc_id}",
+                    "size": len(doc["bytes"]),
+                    "file": {"mimeType": doc["mime"]},
+                    "parentReference": {"driveId": "demo-drive"},
+                },
+            })
+    return JSONResponse({"value": [{"hitsContainers": [{"hits": hits}]}]})
+
+
+@app.get("/graph-sim/drives/{drive_id}/items/{item_id}/content")
+async def graph_sim_content(request: Request, drive_id: str, item_id: str):
+    if not _graph_auth_ok(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    doc = GRAPH_DOCS.get(item_id)
+    if not doc:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    from fastapi.responses import Response
+    return Response(content=doc["bytes"], media_type=doc["mime"])
 
 
 def _page(request: Request, template: str, **ctx: Any) -> HTMLResponse:
@@ -257,6 +381,8 @@ async def webhook_pia(request: Request) -> JSONResponse:
     case.goal_id = gid  # type: ignore[attr-defined]
     STORE.cases[case_id] = case
     ticket.case_id = case_id
+    # The org "already has" this vendor's paperwork in the simulated tenant.
+    _seed_corp_docs(ticket.system_name)
 
     _audit("GOAL_START", AGENT, gid, case=case_id, ticket=number,
            subject=ticket.system_name, source=body.get("source", "webhook"))
@@ -346,20 +472,137 @@ async def intake_autofill(case_id: str) -> JSONResponse:
     return JSONResponse({"ok": True, "answered": len(case.answers)})
 
 
+def _store_evidence(case: Case, filename: str, data: bytes, mime: str,
+                    *, via: str) -> tuple[bool, str]:
+    """Store evidence bytes as a REAL goal attachment (size cap, mime
+    allowlist, executable/archive deny — the platform's own rules), mirror it
+    onto the case's upload list, and audit. Returns (ok, message)."""
+    gid = getattr(case, "goal_id", None)
+    label = f"{filename} ({len(data):,} bytes)"
+    if gid:
+        try:
+            from maverick.attachments import AttachmentRejected, store
+            w = _world()
+            existing = sum(a.size_bytes for a in w.list_attachments(gid))
+            stored = store(gid, filename=filename, mime=mime, data=data,
+                           existing_total=existing)
+            w.add_attachment(goal_id=gid, filename=stored.filename,
+                             mime=stored.mime, size_bytes=stored.size_bytes,
+                             sha256=stored.sha256, path=str(stored.path))
+            label = f"{stored.filename} ({stored.size_bytes:,} bytes)"
+        except AttachmentRejected as exc:
+            return False, str(exc)
+        except Exception as exc:  # pragma: no cover - demo resilience
+            print(f"[attach] real store failed, keeping demo record: {exc}")
+    case.uploads.append(f"{label} — via {via}")
+    _audit("EVIDENCE_CAPTURE", ANALYST, gid, case=case.id, artifact=filename,
+           bytes=len(data), via=via)
+    if gid:
+        _post_event(gid, ANALYST, "artifact",
+                    f"Evidence attached ({via}): {label}")
+    return True, label
+
+
 @app.post("/intake/{case_id}/upload")
 async def intake_upload(case_id: str, file: UploadFile) -> JSONResponse:
     case = STORE.cases.get(case_id)
     if not case:
         return JSONResponse({"ok": False}, status_code=404)
-    data = await file.read()
-    case.uploads.append(f"{file.filename} ({len(data)} bytes)")
-    gid = getattr(case, "goal_id", None)
-    _audit("EVIDENCE_CAPTURE", ANALYST, gid, case=case_id, artifact=file.filename,
-           bytes=len(data))
-    if gid:
-        _post_event(gid, ANALYST, "artifact",
-                    f"Requester attached evidence: {file.filename} ({len(data)} bytes)")
+    # Bounded read: the intake link is unauthenticated by design, so an
+    # oversized body must fail fast instead of buffering without limit.
+    from maverick.attachments import MAX_FILE_BYTES
+    data = await file.read(MAX_FILE_BYTES + 1)
+    if len(data) > MAX_FILE_BYTES:
+        return JSONResponse(
+            {"ok": False, "error": f"file too large (limit {MAX_FILE_BYTES} "
+                                   "bytes)", "uploads": case.uploads},
+            status_code=400)
+    mime = file.content_type or "application/octet-stream"
+    ok, msg = await asyncio.to_thread(
+        _store_evidence, case, file.filename or "upload", data, mime,
+        via="upload")
+    if not ok:
+        return JSONResponse({"ok": False, "error": msg,
+                             "uploads": case.uploads}, status_code=400)
     return JSONResponse({"ok": True, "uploads": case.uploads})
+
+
+@app.post("/intake/{case_id}/discover")
+async def intake_discover(case_id: str) -> JSONResponse:
+    """Search the connected document sources (here: the simulated SharePoint
+    tenant, via the REAL maverick.doc_discovery module) for this case's
+    SOW/contract/DPA/security paperwork."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return JSONResponse({"ok": False}, status_code=404)
+    from maverick import doc_discovery
+    hits = await asyncio.to_thread(doc_discovery.discover, case.subject)
+    gid = getattr(case, "goal_id", None)
+    _audit("TOOL_CALL", ANALYST, gid, tool="doc_discovery", case=case_id,
+           subject=case.subject, hits=len(hits))
+    if gid and hits:
+        _post_event(gid, ANALYST, "observation",
+                    f"Doc discovery found {len(hits)} candidate document(s) "
+                    f"for {case.subject} in connected sources.")
+    return JSONResponse({"ok": True, "hits": [h.to_dict() for h in hits]})
+
+
+@app.post("/intake/{case_id}/attach-found")
+async def intake_attach_found(case_id: str, request: Request) -> JSONResponse:
+    """One-click attach of a discovered document: fetch through the real
+    doc_discovery path, store as real goal evidence."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return JSONResponse({"ok": False}, status_code=404)
+    body = await request.json()
+    source = str(body.get("source", ""))
+    doc_id = str(body.get("doc_id", ""))
+    name = str(body.get("name", "")) or f"{source}-{doc_id[:16]}"
+    ref = body.get("ref") or {}
+    from maverick import doc_discovery
+    try:
+        data, mime = await asyncio.to_thread(
+            doc_discovery.fetch, source, doc_id, ref)
+    except ValueError as exc:  # our own clean validation messages
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception:  # noqa: BLE001 -- no transport/URL detail to the caller
+        return JSONResponse({"ok": False, "error": "could not fetch that "
+                             "document from the source"}, status_code=400)
+    ok, msg = await asyncio.to_thread(
+        _store_evidence, case, name, data,
+        doc_discovery.resolve_mime(name, mime), via=f"found in {source}")
+    status = 200 if ok else 400
+    return JSONResponse({"ok": ok, "error": None if ok else msg,
+                         "uploads": case.uploads}, status_code=status)
+
+
+@app.get("/intake/{case_id}/insights")
+async def intake_insights(case_id: str) -> JSONResponse:
+    """What the org already knows: similar past assessments (real
+    maverick.assessment records) + advisory per-question suggestions.
+
+    Deliberate demo tradeoff: like the rest of the intake surface this is
+    reachable by case id, so precedent subjects/ratings/notes are visible to
+    anyone holding an intake link. The PLATFORM twin
+    (``GET /api/v1/assessment-memory/similar``) sits behind the dashboard's
+    ``view`` permission — production respondent portals should proxy through
+    that, not replicate this open endpoint."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return JSONResponse({"ok": False}, status_code=404)
+    from maverick import assessment_memory
+
+    def _collect() -> dict[str, Any]:
+        return {
+            "similar": assessment_memory.similar(
+                case.subject, assessment_type="pia", k=3),
+            "suggestions": assessment_memory.suggest_answers(
+                "pia", case.subject, k=3),
+            "lessons": assessment_memory.lessons(case.subject, k=2),
+        }
+
+    data = await asyncio.to_thread(_collect)
+    return JSONResponse({"ok": True, **data})
 
 
 @app.post("/intake/{case_id}/submit")

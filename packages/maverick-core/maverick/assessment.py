@@ -576,19 +576,27 @@ def save_session(session: AssessmentSession) -> Path:
         pass
     result = session.evaluate()
     path = d / f"{session.id}.json"
-    payload = json.dumps({
+    record = {
         "id": session.id,
         "type": session.type,
         "subject": session.subject,
         "created_at": session.created_at,
         "answers": session.answers,
         "result": asdict(result),
-    }, indent=2, default=str)
+    }
+    payload = json.dumps(record, indent=2, default=str)
     # The assessment holds sensitive content (subject, answers, findings); write
     # it 0600 so a co-tenant on a shared host can't read it (like dsar export).
     fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(payload)
+    # Assessment memory: distill into the knowledge plane so future
+    # assessments recall this one. Fail-open -- the JSON above is canonical.
+    try:
+        from .assessment_memory import record_session
+        record_session(record)
+    except Exception:  # noqa: BLE001 -- memory must never break a save
+        pass
     return path
 
 
