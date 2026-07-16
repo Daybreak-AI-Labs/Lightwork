@@ -638,6 +638,23 @@ class RopaIn(BaseModel):
     assessment_id: str = Field("", max_length=64)
 
 
+class DpaFromDocumentIn(BaseModel):
+    """Review a DPA fetched straight from a connected source (the hit comes
+    from the dpa-documents search); ``ref`` is the opaque hit reference the
+    source returned."""
+    vendor: str = Field(..., min_length=1, max_length=200)
+    source: str = Field(..., min_length=1, max_length=32)
+    doc_id: str = Field(..., min_length=1, max_length=300)
+    ref: dict | None = None
+    document_name: str = Field("", max_length=300)
+
+
+class OneTrustImportIn(BaseModel):
+    """OneTrust RoPA / Data Mapping CSV export to import into the Art. 30
+    register; bounded like other document inputs."""
+    csv_text: str = Field(..., min_length=1, max_length=2_000_000)
+
+
 class DsarIn(BaseModel):
     """Open a data-subject request with its statutory due date."""
     subject_id: str = Field(..., min_length=1, max_length=200)

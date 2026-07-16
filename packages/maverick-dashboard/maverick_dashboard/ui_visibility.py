@@ -118,6 +118,10 @@ PAGES: tuple[dict, ...] = (
     # answer bodies and reviewer threads, a tier above viewer summaries.
     {"path": "/privacy", "label": "Privacy", "group": "Govern", "icon": "shield",
      "floor": "operate", "default": "operate"},
+    # The Finance workspace: the same chassis over the finance assessment
+    # types (SOX control / fraud risk / ITGC / credit risk / close readiness).
+    {"path": "/finance", "label": "Finance", "group": "Govern", "icon": "spend",
+     "floor": "operate", "default": "operate"},
     {"path": "/permissions", "label": "Permissions", "group": "Govern", "icon": "key",
      "floor": "view", "default": "operate"},
     {"path": "/simulate", "label": "Simulate", "group": "Govern", "icon": "graph",

@@ -1,0 +1,71 @@
+{# Department-workspace chassis, bottom half: the precedent memory panel,
+   the framework catalog, the shared review pop-out, and the chassis JS
+   (worklist filters + review triggers). Include after any page-specific
+   sections so those sit between the worklist and this block. #}
+  <div class="section-head"><h2>What the org already knows</h2></div>
+  <div class="panel">
+    {% if precedents %}
+    <p class="muted" style="margin-top:0; font-size:var(--text-sm);">Completed assessments feed
+      the platform's memory: similar future requests open pre-filled with these precedents,
+      and the suggestions carry their provenance.</p>
+    <table>
+      <thead><tr><th scope="col">subject</th><th scope="col">type</th>
+        <th scope="col">inherent → residual</th><th scope="col">findings</th></tr></thead>
+      <tbody>
+        {% for p in precedents %}
+        <tr>
+          <td>{{ p.subject }}</td>
+          <td class="muted">{{ p.type }}</td>
+          <td class="pw-risk">
+            <span class="badge {{ 'blocked' if p.inherent_risk == 'high' else 'warn' if p.inherent_risk == 'medium' else 'done' }}">{{ p.inherent_risk }}</span>
+            <span aria-hidden="true" class="muted">→</span>
+            <span class="badge {{ 'blocked' if p.residual_risk == 'high' else 'warn' if p.residual_risk == 'medium' else 'done' }}">{{ p.residual_risk }}</span>
+          </td>
+          <td>{{ p.findings }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted">Memory builds as assessments complete — the second assessment of a
+        similar system opens pre-filled from the first.</p>
+    {% endif %}
+  </div>
+
+  <div class="section-head"><h2>Assessment catalog</h2></div>
+  <div class="panel">
+    <p class="muted" style="margin-top:0; font-size:var(--text-sm);">Frameworks the engine runs
+      today. Templates are data, not code — new questionnaires are an authoring exercise.</p>
+    <div class="pw-cat">
+      {% for t in templates %}
+        <span class="chip"><b>{{ t.title }}</b> · {{ t.framework }} · {{ t.questions }} questions</span>
+      {% endfor %}
+    </div>
+  </div>
+
+{% include "_assessment_review.html" %}
+<script>
+(function () {
+  'use strict';
+  // Review pop-out triggers.
+  document.querySelectorAll('.pw-review-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (window.mvAssessmentReview) window.mvAssessmentReview.open(btn.dataset.assessment);
+    });
+  });
+  // Client-side worklist filters.
+  var buttons = document.querySelectorAll('.pw-filters button[data-filter]');
+  buttons.forEach(function (fb) {
+    fb.addEventListener('click', function () {
+      buttons.forEach(function (b) { b.classList.remove('btn--primary'); });
+      fb.classList.add('btn--primary');
+      var f = fb.dataset.filter;
+      document.querySelectorAll('#pw-table tbody tr').forEach(function (tr) {
+        var show = f === 'all' ||
+          (f === 'high' ? tr.dataset.residual === 'high' : tr.dataset.status === f);
+        tr.style.display = show ? '' : 'none';
+      });
+    });
+  });
+})();
+</script>

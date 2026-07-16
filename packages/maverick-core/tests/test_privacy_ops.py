@@ -156,3 +156,88 @@ class TestDsar:
             "maverick erase --user jordan@example.com")
         closed = privacy_ops.close_dsar(r["id"], closed_by="privacy-lead")
         assert closed["status"] == "closed"
+
+
+class TestDepthHooks:
+    """The workspace feeding itself: AIRA -> registry, connected sources ->
+    DPA review, OneTrust export -> RoPA."""
+
+    def _aira(self, prohibited="no", high_risk="no",
+              purpose_note="conversational assistant for customer tickets"):
+        from maverick.assessment import AssessmentSession, save_session
+        s = AssessmentSession(type="aira", subject="Support triage bot")
+        s.record("aira_purpose", "yes", purpose_note)
+        s.record("aira_prohibited", prohibited)
+        s.record("aira_high_risk", high_risk)
+        save_session(s)
+        return s
+
+    def test_register_from_assessment_carries_purpose_and_provenance(self):
+        s = self._aira()
+        r = privacy_ops.register_ai_system_from_assessment(s.id)
+        assert r["name"] == "Support triage bot"
+        assert r["purpose"] == "conversational assistant for customer tickets"
+        assert r["assessment_id"] == s.id
+        # Keyword screening alone: a support assistant is Art. 50 limited.
+        assert r["tier"] == "limited"
+
+    def test_attestations_ratchet_tier_upward_only(self):
+        s = self._aira(high_risk="yes")
+        r = privacy_ops.register_ai_system_from_assessment(s.id)
+        assert r["tier"] == "high"
+        assert any("Annex III" in sig for sig in r["signals"])
+        s2 = self._aira(prohibited="yes")
+        r2 = privacy_ops.register_ai_system_from_assessment(s2.id)
+        assert r2["tier"] == "prohibited"
+        assert privacy_ops.register_ai_system_from_assessment("nope") is None
+
+    def test_review_dpa_from_document_text_and_docx(self, monkeypatch):
+        from maverick import doc_discovery
+
+        def fake_fetch(source, doc_id, ref=None, **kw):
+            if doc_id == "plain":
+                return GOOD_DPA.encode(), "text/plain"
+            if doc_id == "word":
+                import io
+                import zipfile
+                buf = io.BytesIO()
+                body = "".join(f"<w:p><w:r><w:t>{line}</w:t></w:r></w:p>"
+                               for line in GOOD_DPA.splitlines())
+                with zipfile.ZipFile(buf, "w") as z:
+                    z.writestr("word/document.xml",
+                               f"<w:document>{body}</w:document>")
+                return (buf.getvalue(),
+                        "application/vnd.openxmlformats-officedocument"
+                        ".wordprocessingml.document")
+            return b"%PDF-1.7 binary", "application/pdf"
+
+        monkeypatch.setattr(doc_discovery, "fetch", fake_fetch)
+        r = privacy_ops.review_dpa_from_document(
+            "Acme Corp", "msgraph", "plain", document_name="acme-dpa.txt")
+        assert r["clauses_present"] >= 9
+        assert r["document_name"] == "acme-dpa.txt"
+        r2 = privacy_ops.review_dpa_from_document(
+            "Acme Corp", "msgraph", "word", document_name="acme-dpa.docx")
+        assert r2["clauses_present"] >= 9
+        with pytest.raises(ValueError, match="cannot extract text"):
+            privacy_ops.review_dpa_from_document(
+                "Acme Corp", "msgraph", "scan", document_name="scan.pdf")
+
+    def test_import_onetrust_ropa_maps_drifting_headers(self):
+        csv_text = (
+            '"Processing Activity Name","Purpose of Processing",'
+            '"Personal Data Categories","Cross-Border Transfers",'
+            '"Retention Period","Irrelevant Column"\n'
+            '"CRM marketing","Campaign targeting","Contact details, usage",'
+            '"SCCs to US vendors","24 months","x"\n'
+            '"","orphan row without a name","","","",""\n'
+            '"Payroll","Salary processing","Bank details","None",'
+            '"7 years","y"\n')
+        imported = privacy_ops.import_onetrust_ropa(csv_text)
+        assert [e["activity"] for e in imported] == ["CRM marketing",
+                                                     "Payroll"]
+        assert imported[0]["transfers"] == "SCCs to US vendors"
+        assert all(e["source"] == "onetrust" for e in imported)
+        # Imported rows land in the same register the CSV export reads.
+        assert {e["activity"] for e in privacy_ops.export_ropa_art30()} == {
+            "CRM marketing", "Payroll"}

@@ -54,6 +54,7 @@ from .api_schemas import (
     DeliverableEditIn,
     DgmToggleIn,
     DocDiscoverIn,
+    DpaFromDocumentIn,
     DpaReviewIn,
     DsarIn,
     EventTriggerIn,
@@ -84,6 +85,7 @@ from .api_schemas import (
     LearningToggleIn,
     OAuthAuthorizeIn,
     OAuthExchangeIn,
+    OneTrustImportIn,
     OutcomeByKeyIn,
     OutcomeIn,
     OutcomeLinkIn,
@@ -951,6 +953,37 @@ async def get_dpa_review(request: Request, review_id: str) -> dict:
     return record
 
 
+@router.get("/privacy/dpa-documents")
+async def search_dpa_documents(request: Request, vendor: str = "") -> dict:
+    """Find a vendor's DPA/contract where it already lives (MS Graph /
+    Slack / Google Drive) so the review starts from the real document."""
+    require_permission(request, "operate")
+    _privacy_ops_or_403()
+    from maverick import doc_discovery
+    # "enabled" means it can actually search: feature on AND >=1 source
+    # holds credentials — otherwise the UI says "connect a source", not
+    # "no matching documents".
+    if not doc_discovery.enabled() or not doc_discovery.configured_sources():
+        return {"enabled": False, "hits": []}
+    hits = await run_in_threadpool(
+        doc_discovery.discover, vendor[:200],
+        keywords=("dpa", "data processing", "agreement", "contract"))
+    return {"enabled": True, "hits": [h.to_dict() for h in hits]}
+
+
+@router.post("/privacy/dpa-reviews/from-document", status_code=201)
+async def create_dpa_review_from_document(request: Request,
+                                          body: DpaFromDocumentIn) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    try:
+        return await run_in_threadpool(
+            ops.review_dpa_from_document, body.vendor, body.source,
+            body.doc_id, ref=body.ref, document_name=body.document_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @router.get("/privacy/ai-systems")
 async def list_ai_systems(request: Request) -> dict:
     require_permission(request, "operate")
@@ -968,6 +1001,21 @@ async def register_ai_system(request: Request, body: AiSystemIn) -> dict:
         ops.register_ai_system, body.name, body.purpose,
         provider=body.provider, owner=body.owner,
         assessment_id=body.assessment_id)
+
+
+@router.post("/privacy/ai-systems/from-assessment/{assessment_id}",
+             status_code=201)
+async def register_ai_system_from_assessment(request: Request,
+                                             assessment_id: str) -> dict:
+    """A completed AIRA feeds the registry the way a PIA feeds the RoPA;
+    the assessment's attestations only ever ratchet the tier upward."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(
+        ops.register_ai_system_from_assessment, assessment_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    return record
 
 
 @router.get("/privacy/ropa")
@@ -1001,6 +1049,18 @@ async def ropa_from_assessment(request: Request, assessment_id: str) -> dict:
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
     return record
+
+
+@router.post("/privacy/ropa/import-onetrust", status_code=201)
+async def import_onetrust(request: Request, body: OneTrustImportIn) -> dict:
+    """Import OneTrust's RoPA/Data-Mapping CSV export -- their register
+    comes in with source provenance and stays editable here."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    imported = await run_in_threadpool(ops.import_onetrust_ropa,
+                                       body.csv_text)
+    return {"imported": len(imported),
+            "activities": [e["activity"] for e in imported]}
 
 
 @router.get("/privacy/ropa/export.csv")
