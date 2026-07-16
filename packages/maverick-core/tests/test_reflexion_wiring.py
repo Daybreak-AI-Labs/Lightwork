@@ -56,7 +56,7 @@ class TestReflexionHelpers:
 
     def test_record_redacts_every_persisted_text_field(self, tmp_path):
         path = tmp_path / "reflexions.ndjson"
-        secret = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        secret = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"  # pragma: allowlist secret
         assert reflexion.record(
             f"goal {secret}", "provider_error", f"failed {secret}",
             f"lesson {secret}", tools_used=[f"tool-{secret}"],
@@ -69,7 +69,7 @@ class TestReflexionHelpers:
         self, tmp_path, monkeypatch,
     ):
         from maverick.safety import secret_detector
-        secret = "INTERNAL_API_KEY=abcdEFGH1234567890zz"
+        secret = "INTERNAL_API_KEY=abcdEFGH1234567890zz"  # pragma: allowlist secret
         monkeypatch.setattr(
             secret_detector, "redact", lambda *_a, **_k: (_ for _ in ()).throw(
                 RuntimeError("detector unavailable")

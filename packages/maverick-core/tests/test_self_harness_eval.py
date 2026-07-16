@@ -171,7 +171,7 @@ class _FakeLLM:
 
 
 def test_llm_runner_redacts_secret_before_provider_call():
-    secret = "sk-proj-" + "b" * 28
+    secret = "sk-proj-" + "b" * 28  # pragma: allowlist secret
     llm = _FakeLLM(text="done")
 
     assert ev.llm_runner(llm)("verify", f"process payroll with {secret}") == "done"
@@ -183,7 +183,7 @@ def test_llm_runner_redacts_secret_before_provider_call():
 
 
 def test_llm_judge_redacts_result_secret_before_provider_call():
-    secret = "sk-proj-" + "c" * 28
+    secret = "sk-proj-" + "c" * 28  # pragma: allowlist secret
     llm = _FakeLLM(text="yes")
 
     assert ev.llm_judge(llm)("check result", f"completed with {secret}", "done") is True

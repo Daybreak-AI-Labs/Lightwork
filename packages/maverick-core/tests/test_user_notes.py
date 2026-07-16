@@ -84,7 +84,7 @@ class TestConsolidateAndRecall:
 
     def test_secret_is_redacted_before_note_persistence(self, tmp_path):
         path = tmp_path / "user_notes.ndjson"
-        secret = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        secret = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"  # pragma: allowlist secret
         world = _World(
             [_conv(1, "slack", "u1")],
             {1: [_turn("user", f"I prefer using token {secret}.")]},

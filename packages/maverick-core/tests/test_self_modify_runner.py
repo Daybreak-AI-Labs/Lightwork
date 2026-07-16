@@ -425,9 +425,9 @@ class TestRun:
         assert len(set(built_ids)) == 3
         assert len(evidence["policy"]) == 64
         assert runner._sandbox_policy_digest({
-            "backend": "ep:attested", "api_key": "one",
+            "backend": "ep:attested", "api_key": "one",  # pragma: allowlist secret
         }) == runner._sandbox_policy_digest({
-            "backend": "ep:attested", "api_key": "two",
+            "backend": "ep:attested", "api_key": "two",  # pragma: allowlist secret
         })
 
     def test_inline_approval_and_live_apply_fail_closed(self, _enabled):

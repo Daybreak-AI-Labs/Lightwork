@@ -130,7 +130,7 @@ def test_enrich_skips_when_no_usable_goals():
 
 
 def test_enrich_redacts_secret_before_provider_call():
-    secret = "sk-proj-" + "a" * 28
+    secret = "sk-proj-" + "a" * 28  # pragma: allowlist secret
     cluster = _cluster()
     cluster[0]["goal_text"] += f" using {secret}"
     llm = _FakeLLM()

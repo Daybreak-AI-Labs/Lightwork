@@ -150,7 +150,7 @@ class TestInsightStore:
 
     def test_legacy_secret_is_sanitized_before_load_and_rewrite(self, tmp_path):
         path = tmp_path / "insights.ndjson"
-        secret = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        secret = "sk-proj-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"  # pragma: allowlist secret
         path.write_text(json.dumps({
             "ts": 1.0,
             "kind": "failure_pattern",
