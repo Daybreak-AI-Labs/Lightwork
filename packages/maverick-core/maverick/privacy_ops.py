@@ -246,6 +246,46 @@ def review_dpa(vendor: str, text: str, *, document_name: str = "",
     return _DPA.save(record)
 
 
+def _document_text(data: bytes, mime: str) -> str:
+    """Honest text extraction for the formats we can read with the stdlib:
+    text/json/xml decode as UTF-8; docx is a ZIP whose word/document.xml we
+    strip of tags. Anything else returns "" and the caller says so — no
+    pretending a PDF was read."""
+    m = (mime or "").split(";")[0].strip().lower()
+    if m.startswith("text/") or m in ("application/json", "application/xml"):
+        return data.decode("utf-8", errors="ignore")
+    if m == ("application/vnd.openxmlformats-officedocument"
+             ".wordprocessingml.document"):
+        import io
+        import zipfile
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                xml = z.read("word/document.xml").decode("utf-8",
+                                                         errors="ignore")
+        except (KeyError, zipfile.BadZipFile, OSError):
+            return ""
+        return re.sub(r"<[^>]+>", "", xml.replace("</w:p>", "\n"))
+    return ""
+
+
+def review_dpa_from_document(vendor: str, source: str, doc_id: str, *,
+                             ref: dict | None = None,
+                             document_name: str = "") -> dict:
+    """Review a DPA straight from a connected source (MS Graph / Slack /
+    Google Drive via :mod:`maverick.doc_discovery`) — find the contract where
+    it already lives instead of pasting it. Raises ValueError when the source
+    is unconfigured or the document's format yields no text."""
+    from . import doc_discovery
+    data, mime = doc_discovery.fetch(source, doc_id, ref)
+    mime = doc_discovery.resolve_mime(document_name or doc_id, mime)
+    text = _document_text(data, mime)
+    if not text.strip():
+        raise ValueError(
+            f"cannot extract text from {mime or 'unknown format'} — "
+            "supported: text, JSON/XML, docx. Paste the text instead.")
+    return review_dpa(vendor, text, document_name=document_name or doc_id)
+
+
 def list_dpa_reviews() -> list[dict]:
     return [{k: r.get(k) for k in
              ("id", "vendor", "document_name", "created_at", "status",
@@ -343,6 +383,48 @@ def register_ai_system(name: str, purpose: str, *, provider: str = "",
     return _AI.save(record)
 
 
+_TIER_RANK = {"minimal": 0, "limited": 1, "high": 2, "prohibited": 3}
+
+
+def register_ai_system_from_assessment(assessment_id: str) -> dict | None:
+    """Register the system a completed AIRA assessment describes — the
+    assessment feeds the registry the same way a PIA feeds the RoPA.
+
+    Keyword screening runs as usual, then the assessment's own attestations
+    ratchet the tier UPWARD only (an attested Art. 5 practice or Annex III
+    use outranks quiet wording; nothing ever downgrades)."""
+    from .assessment import load_saved
+    rec = load_saved(assessment_id)
+    if rec is None:
+        return None
+    answers = rec.get("answers") or {}
+
+    def ans(qid: str) -> str:
+        return str((answers.get(qid) or {}).get("answer", ""))
+
+    def note(qid: str) -> str:
+        return str((answers.get(qid) or {}).get("note", ""))
+
+    record = register_ai_system(
+        rec.get("subject") or "unnamed system",
+        note("aira_purpose") or f"See assessment {assessment_id}",
+        assessment_id=assessment_id)
+    tier, signals = record["tier"], list(record["signals"])
+    if ans("aira_prohibited") == "yes" and _TIER_RANK[tier] < 3:
+        tier = "prohibited"
+        signals.append("assessment attests an Art. 5 prohibited practice")
+    elif ans("aira_high_risk") == "yes" and _TIER_RANK[tier] < 2:
+        tier = "high"
+        signals.append("assessment attests an Annex III high-risk use")
+    if tier != record["tier"]:
+        def _ratchet(r: dict) -> None:
+            r["tier"] = tier
+            r["signals"] = signals
+            r["obligations"] = _TIER_OBLIGATIONS[tier]
+        record = _AI.update(record["id"], _ratchet)
+    return record
+
+
 def list_ai_systems() -> list[dict]:
     return _AI.list()
 
@@ -424,6 +506,56 @@ def draft_ropa_from_assessment(assessment_id: str) -> dict | None:
         "assessment_id": assessment_id,
         "source": f"assessment:{assessment_id}",
     })
+
+
+# OneTrust RoPA/Data-Mapping CSV export -> Art. 30 fields. Their column
+# names drift across versions and templates, so each field carries the
+# aliases seen in real exports; matching is case-insensitive.
+_ONETRUST_HEADERS = {
+    "activity": ("processing activity name", "processing activity",
+                 "activity name", "activity", "name"),
+    "purpose": ("purpose of processing", "purposes of processing",
+                "purpose", "purposes"),
+    "controller": ("controller", "legal entity", "organization"),
+    "data_categories": ("personal data categories", "data categories",
+                        "categories of personal data", "data elements"),
+    "data_subjects": ("categories of data subjects", "data subject types",
+                      "data subjects"),
+    "recipients": ("categories of recipients", "recipients",
+                   "third party recipients"),
+    "transfers": ("cross-border transfers", "international transfers",
+                  "transfer mechanism", "transfers"),
+    "retention": ("retention period", "retention schedule", "retention"),
+    "security_measures": ("technical and organizational measures",
+                          "security measures", "security"),
+}
+
+
+def import_onetrust_ropa(csv_text: str) -> list[dict]:
+    """Import OneTrust's RoPA / Data Mapping CSV export into the Art. 30
+    register — the "connect to OneTrust" on-ramp: their record comes in with
+    ``source="onetrust"`` provenance and stays editable here.
+
+    Tolerant of their column-name drift; rows without a recognizable
+    activity name are skipped rather than guessed at."""
+    import csv as _csv
+    import io
+    reader = _csv.DictReader(io.StringIO(csv_text or ""))
+    imported = []
+    for row in list(reader)[:5000]:
+        low = {(k or "").strip().lower(): (v or "").strip()
+               for k, v in row.items()}
+        entry: dict = {}
+        for field, aliases in _ONETRUST_HEADERS.items():
+            for alias in aliases:
+                if low.get(alias):
+                    entry[field] = low[alias]
+                    break
+        if not entry.get("activity"):
+            continue
+        entry["source"] = "onetrust"
+        imported.append(upsert_ropa(entry))
+    return imported
 
 
 def list_ropa() -> list[dict]:
@@ -530,7 +662,9 @@ __all__ = [
     "AI_ACT_NOTE", "DPA_CHECKLIST", "DSAR_DUE_DAYS", "DSAR_KINDS",
     "ROPA_FIELDS", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
-    "fulfill_dsar", "get_ai_system", "get_dpa_review", "list_ai_systems",
+    "fulfill_dsar", "get_ai_system", "get_dpa_review",
+    "import_onetrust_ropa", "list_ai_systems",
     "list_dpa_reviews", "list_dsars", "list_ropa", "open_dsar",
-    "register_ai_system", "review_dpa", "upsert_ropa",
+    "register_ai_system", "register_ai_system_from_assessment",
+    "review_dpa", "review_dpa_from_document", "upsert_ropa",
 ]

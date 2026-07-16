@@ -55,6 +55,16 @@
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
+      <div class="pw-form">
+        <div class="pw-form-actions">
+          <label style="flex:1;"><span>…or find the DPA where it already lives</span>
+            <input class="ctl" id="pw-dpa-vendor" maxlength="200"
+                   placeholder="vendor name — searches connected sources (SharePoint, Slack, Drive)"></label>
+          <button class="btn" id="pw-dpa-search" type="button">Search connected sources</button>
+          <span class="pw-form-err" id="pw-dpa-search-err" role="alert"></span>
+        </div>
+        <div id="pw-dpa-hits"></div>
+      </div>
       {% if records.dpa %}
       <div class="pw-scroll">
       <table>
@@ -103,6 +113,20 @@
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
+      {% set aira_sessions = sessions | selectattr('type', 'equalto', 'aira') | list %}
+      <div class="pw-form">
+        <div class="pw-form-actions">
+          <label style="flex:1;"><span>…or register from a completed AI risk assessment</span>
+            <select class="ctl" id="pw-ai-src" {% if not aira_sessions %}disabled{% endif %}>
+              {% for s in aira_sessions %}<option value="{{ s.id }}">{{ s.id }} — {{ s.subject }}</option>{% endfor %}
+              {% if not aira_sessions %}<option value="">no AI risk assessments yet</option>{% endif %}
+            </select></label>
+          <button class="btn" id="pw-ai-register" type="button" {% if not aira_sessions %}disabled{% endif %}>Register from assessment</button>
+          <span class="pw-form-err" id="pw-ai-err" role="alert"></span>
+        </div>
+        <p class="muted" style="margin:0; font-size:var(--text-xs);">The assessment's attestations
+          only ever raise the tier — an attested Art. 5 practice or Annex III use outranks quiet wording.</p>
+      </div>
       {% if records.ai %}
       <div class="pw-scroll">
       <table>
@@ -148,6 +172,15 @@
           <span class="pw-form-err" id="pw-ropa-err" role="alert"></span>
         </div>
       </div>
+      <form class="pw-form" data-endpoint="/api/v1/privacy/ropa/import-onetrust">
+        <label><span>Import from OneTrust (RoPA / Data Mapping CSV export)</span>
+          <textarea class="ctl" name="csv_text" rows="3" required
+            placeholder='Paste the CSV export — e.g. "Processing Activity Name","Purpose of Processing",... Their register lands here with provenance and stays editable.'></textarea></label>
+        <div class="pw-form-actions">
+          <button class="btn" type="submit">Import to the Art. 30 register</button>
+          <span class="pw-form-err" role="alert"></span>
+        </div>
+      </form>
       {% if records.ropa %}
       <div class="pw-scroll">
       <table>
@@ -288,6 +321,79 @@
       });
     });
   });
+
+  // AI registry: register the system a completed AIRA describes.
+  var aiBtn = document.getElementById('pw-ai-register');
+  if (aiBtn) {
+    aiBtn.addEventListener('click', function () {
+      var sel = document.getElementById('pw-ai-src');
+      var err = document.getElementById('pw-ai-err');
+      if (!sel.value) return;
+      err.textContent = '';
+      post('/api/v1/privacy/ai-systems/from-assessment/' +
+           encodeURIComponent(sel.value)).catch(function (e) {
+        err.textContent = e.message;
+      });
+    });
+  }
+
+  // DPA: find the contract in connected sources, review it in place.
+  var dpaSearch = document.getElementById('pw-dpa-search');
+  if (dpaSearch) {
+    dpaSearch.addEventListener('click', function () {
+      var vendor = document.getElementById('pw-dpa-vendor').value.trim();
+      var err = document.getElementById('pw-dpa-search-err');
+      var box = document.getElementById('pw-dpa-hits');
+      if (!vendor) { err.textContent = 'enter a vendor name first'; return; }
+      err.textContent = 'searching…';
+      box.textContent = '';
+      fetch('/api/v1/privacy/dpa-documents?vendor=' +
+            encodeURIComponent(vendor))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.enabled) {
+            err.textContent = 'no document sources connected — configure ' +
+              'Microsoft Graph, Slack, or Google Drive under [assessments]';
+            return;
+          }
+          err.textContent = data.hits.length ? '' : 'no matching documents';
+          data.hits.forEach(function (h) {
+            var row = document.createElement('div');
+            row.className = 'pw-form-actions';
+            var name = document.createElement('span');
+            name.style.flex = '1';
+            name.textContent = h.name + ' — ' + h.source;
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn';
+            btn.textContent = 'Review this document';
+            btn.addEventListener('click', function () {
+              btn.disabled = true;
+              err.textContent = 'reviewing…';
+              fetch('/api/v1/privacy/dpa-reviews/from-document', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vendor: vendor, source: h.source,
+                                       doc_id: h.doc_id, ref: h.ref || null,
+                                       document_name: h.name })
+              }).then(function (r) {
+                if (r.ok) { location.reload(); return null; }
+                return r.text().then(function (t) {
+                  throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 200));
+                });
+              }).catch(function (e) {
+                btn.disabled = false;
+                err.textContent = e.message;
+              });
+            });
+            row.appendChild(name);
+            row.appendChild(btn);
+            box.appendChild(row);
+          });
+        })
+        .catch(function (e) { err.textContent = e.message; });
+    });
+  }
 
   // RoPA: draft an entry from a completed assessment.
   var draftBtn = document.getElementById('pw-ropa-draft');

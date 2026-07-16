@@ -131,3 +131,52 @@ def test_validation():
         "subject_id": "x", "kind": "espionage"}).status_code == 422
     assert client.post("/api/v1/privacy/dpa-reviews", json={
         "vendor": "", "text": "x"}).status_code == 422
+
+
+def test_ai_registry_from_assessment_ratchets_tier():
+    from maverick.assessment import AssessmentSession, save_session
+    s = AssessmentSession(type="aira", subject="Support triage bot")
+    s.record("aira_purpose", "yes", "conversational assistant for tickets")
+    s.record("aira_high_risk", "yes")
+    save_session(s)
+    resp = client.post(f"/api/v1/privacy/ai-systems/from-assessment/{s.id}")
+    assert resp.status_code == 201, resp.text
+    rec = resp.json()
+    assert rec["tier"] == "high"
+    assert rec["assessment_id"] == s.id
+    assert client.post(
+        "/api/v1/privacy/ai-systems/from-assessment/nope").status_code == 404
+
+
+def test_dpa_from_document_and_search(monkeypatch):
+    from maverick import doc_discovery
+    monkeypatch.setattr(doc_discovery, "fetch",
+                        lambda *a, **k: (DPA_TEXT.encode(), "text/plain"))
+    resp = client.post("/api/v1/privacy/dpa-reviews/from-document", json={
+        "vendor": "Acme Corp", "source": "msgraph", "doc_id": "d1",
+        "document_name": "acme-dpa.txt"})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["clauses_present"] >= 9
+    # A format we cannot honestly read is a 400, not a fake review.
+    monkeypatch.setattr(doc_discovery, "fetch",
+                        lambda *a, **k: (b"%PDF-1.7", "application/pdf"))
+    resp = client.post("/api/v1/privacy/dpa-reviews/from-document", json={
+        "vendor": "Acme", "source": "msgraph", "doc_id": "d2"})
+    assert resp.status_code == 400
+    # Search fails soft when no connector is configured — and says so
+    # (enabled=False), rather than pretending it searched and found nothing.
+    resp = client.get("/api/v1/privacy/dpa-documents?vendor=Acme")
+    assert resp.status_code == 200
+    assert resp.json() == {"enabled": False, "hits": []}
+
+
+def test_onetrust_ropa_import():
+    csv_text = ('"Processing Activity Name","Purpose of Processing",'
+                '"Retention Period"\n'
+                '"CRM marketing","Campaign targeting","24 months"\n')
+    resp = client.post("/api/v1/privacy/ropa/import-onetrust",
+                       json={"csv_text": csv_text})
+    assert resp.status_code == 201
+    assert resp.json() == {"imported": 1, "activities": ["CRM marketing"]}
+    rows = client.get("/api/v1/privacy/ropa").json()["activities"]
+    assert rows[0]["source"] == "onetrust"
