@@ -542,22 +542,28 @@
        ===================================================================== */
     @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
       body:not(.theme-hicontrast) {
-        --glass: color-mix(in srgb, var(--panel) 68%, transparent);
-        --glass-soft: color-mix(in srgb, var(--panel) 54%, transparent);
-        --glass-border: color-mix(in srgb, var(--text) 13%, transparent);
-        --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 8%, transparent);
+        /* Cleaner glass (website-parity pass): a slightly more solid pane
+           (72%) with a stronger blur reads crisp instead of muddy — text sits
+           on quieter noise; the hairline (16%) and top specular edge (12%)
+           define each pane the way a polished frosted card does. */
+        --glass: color-mix(in srgb, var(--panel) 72%, transparent);
+        --glass-soft: color-mix(in srgb, var(--panel) 58%, transparent);
+        --glass-border: color-mix(in srgb, var(--text) 16%, transparent);
+        --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 12%, transparent);
         /* Glass propagates to every component through the derived surface
            tokens, so page-local classes (chat composer, learning stats, flow
            toolbars…) pick it up without per-template edits. The values sit
            over the fixed ambient gradient below, so translucency alone reads
            as glass even without a backdrop blur of its own. */
-        --surface-1: color-mix(in srgb, var(--panel) 72%, transparent);
-        --surface-2: color-mix(in srgb, color-mix(in srgb, var(--panel) 86%, var(--text) 14%) 62%, transparent);
-        --surface-sunken: color-mix(in srgb, var(--bg) 52%, transparent);
+        --surface-1: color-mix(in srgb, var(--panel) 76%, transparent);
+        --surface-2: color-mix(in srgb, color-mix(in srgb, var(--panel) 86%, var(--text) 14%) 66%, transparent);
+        --surface-sunken: color-mix(in srgb, var(--bg) 56%, transparent);
+        /* Ambient washes: tighter stops + lower amplitude — a clean glow
+           behind the glass, not a smear across it. */
         background:
-          radial-gradient(1100px 720px at 88% -12%, color-mix(in srgb, var(--brand) 15%, transparent), transparent 62%),
-          radial-gradient(920px 640px at -12% 28%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 58%),
-          radial-gradient(760px 540px at 55% 112%, color-mix(in srgb, var(--info) 8%, transparent), transparent 60%),
+          radial-gradient(1100px 720px at 88% -12%, color-mix(in srgb, var(--brand) 12%, transparent), transparent 56%),
+          radial-gradient(920px 640px at -12% 28%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 52%),
+          radial-gradient(760px 540px at 55% 112%, color-mix(in srgb, var(--info) 6%, transparent), transparent 54%),
           var(--bg);
         background-attachment: fixed;
       }
@@ -578,30 +584,37 @@
       body:not(.theme-hicontrast) .mv-row,
       body:not(.theme-hicontrast) .mv-empty {
         background: var(--glass);
-        -webkit-backdrop-filter: blur(16px) saturate(150%);
-        backdrop-filter: blur(16px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(160%);
+        backdrop-filter: blur(20px) saturate(160%);
         border-color: var(--glass-border);
         box-shadow: var(--shadow-sm), var(--glass-edge);
       }
+      /* Hovered glass lifts, it doesn't just recolor: the same crisp pane
+         with a touch more elevation. */
+      body:not(.theme-hicontrast) .card:hover,
+      body:not(.theme-hicontrast) .mv-row:hover {
+        border-color: color-mix(in srgb, var(--text) 24%, transparent);
+        box-shadow: var(--shadow-md), var(--glass-edge);
+      }
       body:not(.theme-hicontrast) .topbar {
-        background: color-mix(in srgb, var(--panel) 56%, transparent);
-        -webkit-backdrop-filter: blur(18px) saturate(170%);
-        backdrop-filter: blur(18px) saturate(170%);
+        background: color-mix(in srgb, var(--panel) 60%, transparent);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        backdrop-filter: blur(20px) saturate(180%);
         border-bottom-color: var(--glass-border);
       }
       body:not(.theme-hicontrast) .sidebar {
         background: linear-gradient(180deg,
-          color-mix(in srgb, var(--panel) 46%, transparent),
-          color-mix(in srgb, var(--panel) 24%, transparent));
-        -webkit-backdrop-filter: blur(18px) saturate(160%);
-        backdrop-filter: blur(18px) saturate(160%);
+          color-mix(in srgb, var(--panel) 48%, transparent),
+          color-mix(in srgb, var(--panel) 26%, transparent));
+        -webkit-backdrop-filter: blur(20px) saturate(170%);
+        backdrop-filter: blur(20px) saturate(170%);
         border-inline-end-color: var(--glass-border);
       }
       body:not(.theme-hicontrast) .prefs__panel,
       body:not(.theme-hicontrast) .mv-confirm {
         background: var(--glass-soft);
-        -webkit-backdrop-filter: blur(24px) saturate(160%);
-        backdrop-filter: blur(24px) saturate(160%);
+        -webkit-backdrop-filter: blur(28px) saturate(170%);
+        backdrop-filter: blur(28px) saturate(170%);
         border-color: var(--glass-border);
         box-shadow: var(--shadow-lg), var(--glass-edge);
       }

@@ -159,16 +159,24 @@
       departments: {}
     };
     var globalRate = body.hourly_rate, globalHours = body.hours_per_task;
-    fd.forEach(function (val, key) {
-      var m = key.match(/^(rate|hours)::(.+)$/);
+    // Only a row the user actually EDITED becomes (or updates) an override:
+    // compare each input to its rendered default. An untouched row keeps
+    // following the global assumption — changing the global rate must not
+    // silently pin every department at the old numbers. (document-wide query:
+    // the table inputs associate via form= and are not form descendants.)
+    document.querySelectorAll('.sv-dept-input').forEach(function (input) {
+      if (input.value === input.defaultValue) return;
+      var m = input.name.match(/^(rate|hours)::(.+)$/);
       if (!m) return;
-      var dept = m[2], num = parseFloat(val);
+      var num = parseFloat(input.value);
       if (isNaN(num)) return;
-      var row = body.departments[dept] = body.departments[dept] || {};
+      var row = body.departments[m[2]] = body.departments[m[2]] || {};
       if (m[1] === 'rate') row.hourly_rate = num; else row.hours_per_task = num;
     });
-    // A row still matching the global numbers is not an override — drop it so
-    // it keeps following the global assumption when that changes later.
+    // An edit that lands BOTH axes exactly back on the global numbers is not
+    // an override — clear it so the row follows the global again. (A partial
+    // edit is kept as-is: nulling would also wipe the other axis's stored
+    // override.)
     Object.keys(body.departments).forEach(function (dept) {
       var row = body.departments[dept];
       if (row.hourly_rate === globalRate && row.hours_per_task === globalHours) {
