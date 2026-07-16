@@ -1,6 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Audit log · Lightwork{% endblock %}
 {% block content %}
+  <style>
+    /* Detail cell: labeled fields instead of a raw JSON dump; the chain
+       material (hash/sig) folds away behind the signature badge. */
+    .aud-detail { display: flex; flex-direction: column; gap: 2px; max-width: 46rem; }
+    .aud-kv { display: grid; grid-template-columns: 9rem 1fr; gap: var(--space-2); align-items: baseline; }
+    .aud-k { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.03em; font-family: var(--font-mono, monospace); }
+    .aud-v { font-size: var(--text-sm); word-break: break-word; min-width: 0; }
+    .aud-v code { font-size: var(--text-xs); white-space: pre-wrap; word-break: break-all; }
+    .aud-sig { margin-top: 2px; }
+    .aud-sig summary { cursor: pointer; color: var(--muted); font-size: var(--text-xs); list-style-position: inside; }
+    .aud-sig summary:hover { color: var(--text); }
+    .aud-sig[open] summary { margin-bottom: 4px; }
+    .aud-hash { font-size: var(--text-xs); word-break: break-all; color: var(--muted); }
+  </style>
+
   <h1 class="page-title">Audit</h1>
   <p class="page-subtitle">A complete, tamper-resistant record of everything that has happened here — filter or search any event.</p>
 
@@ -110,10 +125,33 @@
             <td class="muted">{{ ev.goal_id if ev.goal_id is not none else '-' }}</td>
             <td>
               {% set keep = ['v', 'ts', 'kind', 'agent', 'goal_id'] %}
-              {% set extras = {} %}
-              {% for k, v in ev.items() if k not in keep %}{% set _ = extras.update({k: v}) %}{% endfor %}
-              {% if extras %}
-                <code style="font-size: 0.75rem; display: block; white-space: pre-wrap; word-break: break-all;">{{ extras | tojson(indent=2) }}</code>
+              {% set chain_keys = ['hash', 'prev_hash', 'sig', 'key_id'] %}
+              {% set payload = {} %}
+              {% set chain = {} %}
+              {% for k, v in ev.items() if k not in keep %}
+                {% if k in chain_keys %}{% set _ = chain.update({k: v}) %}
+                {% else %}{% set _ = payload.update({k: v}) %}{% endif %}
+              {% endfor %}
+              {% if payload or chain %}
+                <div class="aud-detail">
+                  {% for k, v in payload.items() %}
+                  <div class="aud-kv">
+                    <span class="aud-k">{{ k }}</span>
+                    <span class="aud-v">{% if v is string or v is number or v is boolean %}{{ v }}{% else %}<code>{{ v | tojson(indent=2) }}</code>{% endif %}</span>
+                  </div>
+                  {% endfor %}
+                  {% if chain %}
+                  <details class="aud-sig">
+                    <summary>🔏 signed{% if chain.key_id %} · key {{ chain.key_id[:10] }}…{% endif %}{% if not chain.prev_hash %} · genesis{% endif %}</summary>
+                    {% for k in chain_keys if k in chain %}
+                    <div class="aud-kv">
+                      <span class="aud-k">{{ k }}</span>
+                      <span class="aud-v"><code class="aud-hash">{{ chain[k] if chain[k] else '— genesis (first link in the chain) —' }}</code></span>
+                    </div>
+                    {% endfor %}
+                  </details>
+                  {% endif %}
+                </div>
               {% else %}
                 <span class="muted">-</span>
               {% endif %}
