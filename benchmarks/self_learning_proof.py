@@ -144,7 +144,13 @@ def cap_flows(home: Path) -> str:
     stats = {nid: {"n": 12, "mean": 0.95} for nid in f.nodes}
     props = evolve.propose(f, min_support=1, stats=stats)
     assert props and props[0].to_kind == "action", "reliable agent node not proposed for hardening"
-    f2 = evolve.apply_proposal(f, props[0].node_id, props[0].to_kind, tool="report_tool")
+    f2 = evolve.apply_proposal(
+        f,
+        props[0].node_id,
+        props[0].to_kind,
+        tool="report_tool",
+        params={"period": "previous_day"},
+    )
     assert f2.nodes[props[0].node_id].kind != f.nodes[props[0].node_id].kind, "node kind unchanged"
     m = evolve.measure("f1", props[0].node_id, 15.0, series=[(10.0, 0.4), (20.0, 0.9)])
     assert m["improved"], f"measure did not confirm improvement: {m}"
