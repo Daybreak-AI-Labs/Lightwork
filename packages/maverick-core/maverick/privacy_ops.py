@@ -246,6 +246,78 @@ def review_dpa(vendor: str, text: str, *, document_name: str = "",
     return _DPA.save(record)
 
 
+_PDF_LITERAL = re.compile(rb"\((?:\\.|[^\\()])*\)")
+_PDF_ESCAPES = {b"n": b"\n", b"r": b"\r", b"t": b"\t", b"b": b"\b",
+                b"f": b"\f", b"(": b"(", b")": b")", b"\\": b"\\"}
+
+
+def _pdf_literal_bytes(lit: bytes) -> bytes:
+    """Decode one PDF literal string ``(...)`` including escapes/octals."""
+    out = bytearray()
+    i, end = 1, len(lit) - 1
+    while i < end:
+        c = lit[i:i + 1]
+        if c == b"\\" and i + 1 < end:
+            nxt = lit[i + 1:i + 2]
+            if nxt.isdigit():  # octal \ddd (1-3 digits)
+                j = i + 1
+                while j < min(i + 4, end) and lit[j:j + 1].isdigit():
+                    j += 1
+                try:
+                    out.append(int(lit[i + 1:j], 8) & 0xFF)
+                except ValueError:  # pragma: no cover
+                    pass
+                i = j
+                continue
+            out += _PDF_ESCAPES.get(nxt, nxt)
+            i += 2
+            continue
+        out += c
+        i += 1
+    return bytes(out)
+
+
+def _pdf_text(data: bytes) -> str:
+    """Best-effort text from a digital PDF with the stdlib only.
+
+    Decompresses FlateDecode content streams (zlib) and reads the text-
+    showing operators (``Tj``, ``'``, and ``TJ`` arrays; hex strings too).
+    Honest limits: no encryption, no CID/Unicode font maps -- a scanned or
+    exotic PDF yields too little text and the caller says so instead of
+    reviewing garbage."""
+    import zlib
+    chunks: list[str] = []
+    for m in re.finditer(rb"stream\r?\n(.*?)endstream", data, re.DOTALL):
+        raw = m.group(1)
+        try:
+            raw = zlib.decompress(raw)
+        except zlib.error:
+            pass  # uncompressed content stream -- use as-is
+        if b"Tj" not in raw and b"TJ" not in raw and b"'" not in raw:
+            continue
+        # TJ arrays: concatenate the string chunks (kerning splits words).
+        for arr in re.finditer(rb"\[((?:[^\]]|\\.)*?)\]\s*TJ", raw):
+            parts = [_pdf_literal_bytes(lit.group(0))
+                     for lit in _PDF_LITERAL.finditer(arr.group(1))]
+            if parts:
+                chunks.append(b"".join(parts).decode("latin-1"))
+        # Plain Tj / ' operators, one string each.
+        for lit in re.finditer(rb"(\((?:\\.|[^\\()])*\))\s*(?:Tj|')",
+                               raw):
+            chunks.append(_pdf_literal_bytes(lit.group(1)).decode("latin-1"))
+        for hexs in re.finditer(rb"<([0-9A-Fa-f\s]+)>\s*Tj", raw):
+            digits = re.sub(rb"\s", b"", hexs.group(1))
+            if len(digits) % 2:
+                digits += b"0"
+            try:
+                chunks.append(bytes.fromhex(digits.decode()).decode("latin-1"))
+            except ValueError:  # pragma: no cover
+                continue
+    text = "\n".join(chunks)
+    printable = re.sub(r"[^\x20-\x7e\n\u00a0-\uffff]", "", text)
+    return printable if len(printable.strip()) >= 40 else ""
+
+
 def _document_text(data: bytes, mime: str) -> str:
     """Honest text extraction for the formats we can read with the stdlib:
     text/json/xml decode as UTF-8; docx is a ZIP whose word/document.xml we
@@ -254,6 +326,8 @@ def _document_text(data: bytes, mime: str) -> str:
     m = (mime or "").split(";")[0].strip().lower()
     if m.startswith("text/") or m in ("application/json", "application/xml"):
         return data.decode("utf-8", errors="ignore")
+    if m == "application/pdf":
+        return _pdf_text(data)
     if m == ("application/vnd.openxmlformats-officedocument"
              ".wordprocessingml.document"):
         import io
@@ -282,7 +356,8 @@ def review_dpa_from_document(vendor: str, source: str, doc_id: str, *,
     if not text.strip():
         raise ValueError(
             f"cannot extract text from {mime or 'unknown format'} — "
-            "supported: text, JSON/XML, docx. Paste the text instead.")
+            "supported: text, JSON/XML, docx, and digital (text-based) "
+            "PDFs. Scanned documents need pasting instead.")
     return review_dpa(vendor, text, document_name=document_name or doc_id)
 
 
