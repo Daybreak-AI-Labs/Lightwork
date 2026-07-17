@@ -21,7 +21,7 @@ def test_templates_registered_and_looked_up():
     types = {t.type for t in list_templates()}
     # Core compliance templates + the finance suite (finance-agent-suite §6).
     assert types == {
-        "pia", "aira", "vendor_risk",
+        "pia", "aira", "vendor_risk", "tia",
         "hipaa", "soc2", "pci_dss",
         "sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness",
     }
