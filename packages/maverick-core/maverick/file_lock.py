@@ -71,6 +71,97 @@ def _canonical_lock_path(path: Path) -> str:
     return os.path.normcase(os.path.realpath(os.path.abspath(path)))
 
 
+_REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
+def _unsafe_lock_alias(path: Path, info: os.stat_result) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    return (
+        stat.S_ISLNK(info.st_mode)
+        or bool(getattr(info, "st_file_attributes", 0) & _REPARSE_ATTRIBUTE)
+        or bool(callable(is_junction) and is_junction())
+    )
+
+
+def _lock_identity(info: os.stat_result) -> tuple:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+    )
+
+
+def _validate_open_lock_file(path: Path, fd: int) -> os.stat_result:
+    """Bind a lock descriptor to one non-alias, single-link regular path."""
+    try:
+        visible = path.lstat()
+        opened = os.fstat(fd)
+    except OSError as exc:
+        raise PermissionError(f"lock path could not be verified: {path}") from exc
+    if (
+        _unsafe_lock_alias(path, visible)
+        or _unsafe_lock_alias(path, opened)
+        or not stat.S_ISREG(visible.st_mode)
+        or not stat.S_ISREG(opened.st_mode)
+        or visible.st_nlink != 1
+        or opened.st_nlink != 1
+        or _lock_identity(visible) != _lock_identity(opened)
+    ):
+        raise PermissionError(
+            f"lock path is not a stable single-link regular file: {path}"
+        )
+    return opened
+
+
+def _validate_existing_lock_path(path: Path) -> os.stat_result:
+    """Reject an existing sidecar unless it is one single-link regular file."""
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise PermissionError(f"lock path could not be inspected: {path}") from exc
+    if (
+        _unsafe_lock_alias(path, info)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+    ):
+        raise PermissionError(
+            f"lock path is not a stable single-link regular file: {path}"
+        )
+    return info
+
+
+def _open_lock_file(path: Path) -> int:
+    """Open/create a sidecar without ever creating a link's referent."""
+    try:
+        prior = path.lstat()
+    except FileNotFoundError:
+        prior = None
+    except OSError as exc:
+        raise PermissionError(f"lock path could not be inspected: {path}") from exc
+    if prior is not None:
+        _validate_existing_lock_path(path)
+
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_BINARY", 0)
+    if prior is not None:
+        # No O_CREAT for an existing pathname: if it is swapped to a dangling
+        # link after validation, the open fails without creating the referent.
+        # Other replacements are caught by descriptor/path identity binding.
+        return os.open(str(path), flags)
+    try:
+        # O_EXCL makes the lstat/open creation gap safe even on the Windows CRT:
+        # a sidecar (including a dangling link) planted after lstat produces
+        # EEXIST instead of being followed.
+        return os.open(str(path), flags | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # A racer published a sidecar. Re-enter through the existing-object
+        # path without O_CREAT, so a dangling link's referent cannot be created.
+        _validate_existing_lock_path(path)
+        return os.open(str(path), flags)
+
+
 def _local_lock_for(path: Path) -> threading.RLock:
     canonical = _canonical_lock_path(path)
     return _LOCAL_LOCK_STRIPES[hash(canonical) % len(_LOCAL_LOCK_STRIPES)]
@@ -555,9 +646,23 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
         target.parent.mkdir(parents=True, exist_ok=True)
         # Failure to create/open the coordination primitive must not silently
         # disable serialization for security-sensitive read-modify-write state.
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+        fd = _open_lock_file(lock_path)
         backend: str | None = None
         try:
+            _validate_open_lock_file(lock_path, fd)
+            if os.name == "nt":
+                # CRT ``os.open`` does not request WRITE_DAC, so SetSecurityInfo
+                # on that handle fails on real Windows.  Harden by path only
+                # inside the caller's private parent, bracketed by descriptor /
+                # path identity validation so a replacement fails closed.
+                harden_path_permissions(lock_path)
+                _validate_open_lock_file(lock_path, fd)
+            else:
+                os.fchmod(fd, 0o600)
+                if (os.fstat(fd).st_mode & 0o777) != 0o600:
+                    raise PermissionError(
+                        f"lock file could not be made private: {lock_path}"
+                    )
             try:
                 import fcntl
             except ImportError:
@@ -599,7 +704,7 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
                 raise RuntimeError(
                     "no cross-process lock backend is available"
                 ) from None
-            harden_path_permissions(lock_path)
+            _validate_open_lock_file(lock_path, fd)
             held[canonical] = (1, backend is not None)
             try:
                 yield

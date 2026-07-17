@@ -158,6 +158,26 @@ def test_tampered_session_cookie_is_ignored(client, monkeypatch):
     assert invites.local_session_principal(_Req()) is None
 
 
+@pytest.mark.parametrize("subject", ["alice ", "alice\n", "x" * 252])
+def test_signed_invite_session_rejects_invalid_subject_domain(monkeypatch, subject):
+    import time
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    from maverick.web_session import sign_session
+    from maverick_dashboard import invites
+
+    now = int(time.time())
+    raw = sign_session(
+        {"sub": subject, "iat": now, "exp": now + 3600},
+        invites.local_session_secret(),
+    )
+
+    class _Req:
+        cookies = {"mvk_session": raw}
+
+    assert invites.local_session_principal(_Req()) is None
+
+
 # ---------- HTTP: admin mint + revoke on /users ----------
 
 def test_admin_mints_and_revokes_links(client, monkeypatch):

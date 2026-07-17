@@ -19,7 +19,7 @@
              white-space: nowrap; }
   .pw-due-warn { color: var(--danger); font-weight: var(--font-medium); }
   .pw-clauses td { font-size: var(--text-sm); }
-  .pw-erase-cmd { font-size: var(--text-xs); }
+  .pw-erase-note { display: inline-block; font-size: var(--text-xs); }
 </style>
 
   <h1 class="page-title">Privacy</h1>
@@ -257,7 +257,7 @@
             <td>
               <span class="badge {{ 'done' if r.status == 'fulfilled' else 'warn' if r.status == 'awaiting_erasure' else 'info' if r.status == 'open' else '' }}">{{ r.status | replace('_', ' ') }}</span>
               {% if r.status == 'awaiting_erasure' and r.fulfillment %}
-                <br><code class="pw-erase-cmd">{{ r.fulfillment.erase_command }}</code>
+                <br><span class="muted pw-erase-note">{{ r.fulfillment.operator_instruction }}</span>
               {% endif %}
             </td>
             <td {% if r.overdue %}class="pw-due-warn"{% endif %}>
@@ -279,8 +279,8 @@
       </table>
       </div>
       <p class="muted" style="font-size:var(--text-xs);">Access and portability run the real
-        subject-data export. Erasure is never destructive from here — it prepares the exact
-        <code>maverick erase</code> command for a deliberate operator run.</p>
+        subject-data export. Erasure is never destructive from here — it prepares a structured
+        handoff for an authenticated operator workflow and intentionally renders no shell command.</p>
       {% else %}
         <p class="muted">No subject requests tracked. Open one above — the statutory 30-day
           clock and the fulfillment machinery (real exports, deliberate erasure) are wired in.</p>

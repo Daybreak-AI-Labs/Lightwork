@@ -25,9 +25,9 @@ artifacts meant to be exported and audited, not secrets):
   assessments feed the inventory instead of dying in a filing cabinet.
 * **DSAR requests** — a tracker with statutory due dates (30 days) over the
   REAL fulfillment machinery: access/portability exports run
-  :func:`maverick.dsar.export_subject_data`; erasure records the exact
-  ``maverick erase`` invocation (destructive fulfillment stays a deliberate,
-  operator-run step).
+  :func:`maverick.dsar.export_subject_data`; erasure records a structured
+  argument vector for an authenticated operator workflow (destructive
+  fulfillment stays deliberate and no shell command is rendered).
 
 Gated by ``[privacy_ops] enable`` (default on — local record stores, already
 behind the workspace's operate floor). Everything fails soft and nothing here
@@ -35,12 +35,182 @@ auto-approves, auto-erases, or bypasses the human gates.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import logging
 import os
 import re
+import stat
+import threading
 import time
 import uuid
 from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+_REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+_MAX_PRIVACY_JSON_BYTES = 16 * 1024 * 1024
+_MAX_DOCX_ENTRIES = 1024
+_MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
+_MAX_DOCX_DOCUMENT_XML_BYTES = 8 * 1024 * 1024
+_MAX_DOCX_COMPRESSION_RATIO = 200
+_RECORD_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
+
+
+def _unsafe_path_alias(path: Path, info: os.stat_result) -> bool:
+    """POSIX symlink or Windows junction/reparse point."""
+    is_junction = getattr(path, "is_junction", None)
+    return (
+        stat.S_ISLNK(info.st_mode)
+        or bool(getattr(info, "st_file_attributes", 0) & _REPARSE_ATTRIBUTE)
+        or bool(callable(is_junction) and is_junction())
+    )
+
+
+def _component_identity(info: os.stat_result) -> tuple:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        getattr(info, "st_file_attributes", None),
+        getattr(info, "st_reparse_tag", None),
+    )
+
+
+def _file_identity(info: os.stat_result) -> tuple:
+    """Fields stable across path-stat and descriptor-stat on Windows/POSIX."""
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        getattr(info, "st_mtime_ns", None),
+    )
+
+
+def _validated_private_directory(
+    directory: Path,
+    *,
+    must_exist: bool,
+) -> tuple[Path, tuple[tuple, ...]]:
+    """Validate every lexical component without following path aliases."""
+    from .file_lock import private_path_is_restricted
+
+    absolute = Path(os.path.abspath(os.fspath(directory)))
+    parts = absolute.parts
+    cursor = Path(parts[0])
+    identities: list[tuple] = []
+    found_final = False
+    for index, part in enumerate(parts):
+        if index:
+            cursor /= part
+        try:
+            info = cursor.lstat()
+        except FileNotFoundError:
+            break
+        except OSError as exc:
+            raise PermissionError(
+                f"privacy store path could not be verified: {cursor}"
+            ) from exc
+        if _unsafe_path_alias(cursor, info):
+            raise PermissionError(
+                f"privacy store path aliases are not permitted: {cursor}"
+            )
+        if not stat.S_ISDIR(info.st_mode):
+            raise PermissionError(
+                f"privacy store component is not a directory: {cursor}"
+            )
+        identities.append(_component_identity(info))
+        found_final = index == len(parts) - 1
+    if must_exist and not found_final:
+        raise FileNotFoundError(absolute)
+    if found_final and not private_path_is_restricted(absolute, 0o700):
+        raise PermissionError(
+            f"privacy store directory is not private: {absolute}"
+        )
+    return absolute, tuple(identities)
+
+
+def _read_private_json(path: Path, *, root: Path) -> dict:
+    """No-follow, handle-bound JSON read from a verified private directory."""
+    from .file_lock import private_path_is_restricted
+
+    root, components_before = _validated_private_directory(root, must_exist=True)
+    lexical = Path(os.path.abspath(os.fspath(path)))
+    if lexical.parent != root:
+        raise PermissionError("privacy state path escaped its store")
+    before = lexical.lstat()
+    if (
+        _unsafe_path_alias(lexical, before)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+    ):
+        raise PermissionError("privacy state is not a single-link regular file")
+    if before.st_size > _MAX_PRIVACY_JSON_BYTES:
+        raise ValueError("privacy state exceeds the size limit")
+    if not private_path_is_restricted(lexical, 0o600):
+        raise PermissionError("privacy state file is not private")
+
+    root_fd: int | None = None
+    fd: int | None = None
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        if os.name != "nt":
+            root_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            root_flags |= getattr(os, "O_NOFOLLOW", 0)
+            root_fd = os.open(root, root_flags)
+            if _component_identity(os.fstat(root_fd)) != components_before[-1]:
+                raise PermissionError("privacy store root changed during open")
+            fd = os.open(lexical.name, flags, dir_fd=root_fd)
+        else:
+            # Windows CRT descriptors have no openat. The verified component
+            # identities are rechecked before returning any bytes; final
+            # reparse points are rejected from both path and handle metadata.
+            fd = os.open(lexical, flags)
+        opened = os.fstat(fd)
+        if (
+            _unsafe_path_alias(lexical, opened)
+            or not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or _file_identity(opened) != _file_identity(before)
+        ):
+            raise PermissionError("privacy state changed during open")
+        chunks: list[bytes] = []
+        remaining = _MAX_PRIVACY_JSON_BYTES + 1
+        while remaining:
+            chunk = os.read(fd, min(remaining, 64 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        if len(raw) > _MAX_PRIVACY_JSON_BYTES:
+            raise ValueError("privacy state exceeds the size limit")
+        after = os.fstat(fd)
+        current = lexical.lstat()
+        _, components_after = _validated_private_directory(
+            root,
+            must_exist=True,
+        )
+        if (
+            _file_identity(after) != _file_identity(opened)
+            or _file_identity(current) != _file_identity(before)
+            or components_after != components_before
+            or not private_path_is_restricted(lexical, 0o600)
+        ):
+            raise PermissionError("privacy state changed during read")
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if root_fd is not None:
+            os.close(root_fd)
+    value = json.loads(raw.decode("utf-8", errors="strict"))
+    if not isinstance(value, dict):
+        raise ValueError("privacy state is not a JSON object")
+    return value
 
 # --------------------------------------------------------------------------- #
 # Config gate + shared store
@@ -55,9 +225,18 @@ def enabled() -> bool:
         return True
 
 
+class RecordConflict(RuntimeError):
+    """A caller tried to replace a stale privacy record revision."""
+
+
 class _RecordStore:
-    """Tenant-scoped JSON records: ``data_dir(<name>)/<id>.json`` at 0600,
-    with the same path-traversal guard the assessment store uses."""
+    """Tenant-scoped, atomic JSON records with per-record strict locking.
+
+    Every mutation is a locked read-modify-atomic-replace and increments the
+    monotonic ``revision``. That prevents torn reads and lost updates across the
+    dashboard, workers, and multiple server processes; ``expected_revision``
+    adds compare-and-swap for callers that reviewed a specific version.
+    """
 
     def __init__(self, name: str, prefix: str) -> None:
         self.name = name
@@ -70,53 +249,431 @@ class _RecordStore:
     def new_id(self) -> str:
         return f"{self.prefix}-{uuid.uuid4().hex[:10]}"
 
-    def save(self, record: dict) -> dict:
-        d = self._dir()
-        d.mkdir(parents=True, exist_ok=True)
+    def _path(self, record_id: str) -> Path | None:
+        record_id = str(record_id or "")
+        if (
+            not _RECORD_ID_RE.fullmatch(record_id)
+            or not record_id.startswith(f"{self.prefix}-")
+        ):
+            return None
+        base, _ = _validated_private_directory(
+            self._dir(),
+            must_exist=False,
+        )
+        return base / f"{record_id}.json"
+
+    def _read_path(self, path: Path) -> dict | None:
         try:
-            os.chmod(d, 0o700)
-        except OSError:  # pragma: no cover
-            pass
-        path = d / f"{record['id']}.json"
-        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(json.dumps(record, indent=2, default=str))
-        return record
+            value = _read_private_json(path, root=path.parent)
+            expected_id = path.stem
+            if (
+                value.get("id") != expected_id
+                or not _RECORD_ID_RE.fullmatch(expected_id)
+                or not expected_id.startswith(f"{self.prefix}-")
+            ):
+                raise PermissionError(
+                    "privacy record identity does not match its store path"
+                )
+            return value
+        except PermissionError:
+            raise
+        except (FileNotFoundError, OSError, UnicodeError, ValueError):
+            return None
+
+    @staticmethod
+    def _revision(record: dict | None) -> int:
+        try:
+            return max(0, int((record or {}).get("revision") or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _write_path(
+        cls,
+        path: Path,
+        record: dict,
+        previous: dict | None,
+        *,
+        bump_revision: bool = True,
+    ) -> dict:
+        from .file_lock import atomic_write_text
+
+        saved = dict(record)
+        prior_revision = cls._revision(previous)
+        saved["revision"] = prior_revision + (1 if bump_revision else 0)
+        logical_record = {
+            key: value for key, value in saved.items()
+            if key != "_audit_pending"
+        }
+        record_sha256 = hashlib.sha256(json.dumps(
+            logical_record,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")).hexdigest()
+        # Bind each durable outbox receipt to the exact logical version and
+        # status committed by the mutation that created it.  A later retry
+        # must not accidentally describe the record's newer state.
+        raw_pending = saved.get("_audit_pending")
+        pending_items = (
+            raw_pending
+            if isinstance(raw_pending, list)
+            else [raw_pending] if isinstance(raw_pending, dict) else []
+        )
+        if pending_items:
+            stamped: list[dict] = []
+            for item in pending_items:
+                if not isinstance(item, dict):
+                    continue
+                receipt = dict(item)
+                receipt.setdefault("revision", saved["revision"])
+                receipt.setdefault("status", str(saved.get("status") or ""))
+                receipt.setdefault("record_sha256", record_sha256)
+                stamped.append(receipt)
+            saved["_audit_pending"] = stamped
+        atomic_write_text(
+            path,
+            json.dumps(saved, indent=2, default=str),
+            mode=0o600,
+        )
+        return saved
+
+    def save(self, record: dict, *, expected_revision: int | None = None) -> dict:
+        """Atomically create/replace a record, optionally with CAS."""
+        from .file_lock import cross_process_lock, ensure_private_directory
+
+        path = self._path(str(record.get("id") or ""))
+        if path is None:
+            raise ValueError("invalid privacy record id")
+        ensure_private_directory(path.parent)
+        _validated_private_directory(path.parent, must_exist=True)
+        with cross_process_lock(path, strict=True):
+            current = self._read_path(path)
+            current_revision = self._revision(current)
+            if (
+                expected_revision is not None
+                and current_revision != int(expected_revision)
+            ):
+                raise RecordConflict(
+                    f"privacy record changed (expected revision "
+                    f"{expected_revision}, found {current_revision})"
+                )
+            return self._write_path(path, record, current)
 
     def load(self, record_id: str) -> dict | None:
-        base = self._dir()
-        path = (base / f"{record_id}.json").resolve()
-        if path.parent != base.resolve():
+        from .file_lock import cross_process_lock
+
+        path = self._path(record_id)
+        if path is None:
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            info = path.lstat()
+        except FileNotFoundError:
             return None
+        if _unsafe_path_alias(path, info):
+            raise PermissionError("privacy record path alias is not permitted")
+        with cross_process_lock(path, strict=True):
+            return self._read_path(path)
 
     def list(self) -> list[dict]:
-        d = self._dir()
+        from .file_lock import cross_process_lock
+
+        d, _ = _validated_private_directory(self._dir(), must_exist=False)
         if not d.exists():
             return []
         out = []
         for p in d.glob("*.json"):
-            try:
-                out.append(json.loads(p.read_text(encoding="utf-8")))
-            except (OSError, ValueError):
-                continue
+            info = p.lstat()
+            if _unsafe_path_alias(p, info):
+                raise PermissionError("privacy record path alias is not permitted")
+            with cross_process_lock(p, strict=True):
+                record = self._read_path(p)
+            if record is not None:
+                out.append(record)
         return sorted(out, key=lambda r: r.get("created_at", 0), reverse=True)
 
-    def update(self, record_id: str, mutate) -> dict | None:
-        record = self.load(record_id)
-        if record is None:
+    def iter_record_ids(
+        self,
+        *,
+        start_after: str = "",
+        limit: int = 100,
+    ):
+        """Yield a rotating, bounded window of validated record identities.
+
+        Directory enumeration may inspect names, but this method deliberately
+        performs no record reads and acquires no per-record locks.  Callers can
+        therefore put a hard budget on expensive/contended reads while a cursor
+        prevents a large store's lexical prefix from starving later records.
+        """
+        d, _ = _validated_private_directory(self._dir(), must_exist=False)
+        if not d.exists():
+            return
+        paths = sorted(
+            (path for path in d.iterdir() if path.name.endswith(".json")),
+            key=lambda path: path.name,
+        )
+        if not paths:
+            return
+        cursor = str(start_after or "")
+        pivot = next(
+            (index for index, path in enumerate(paths) if path.name > cursor),
+            len(paths),
+        )
+        ordered = paths[pivot:] + paths[:pivot]
+        for path in ordered[:max(0, int(limit))]:
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                raise PermissionError(
+                    f"privacy record path could not be inspected: {path}"
+                ) from exc
+            record_id = path.stem
+            if (
+                _unsafe_path_alias(path, info)
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or not _RECORD_ID_RE.fullmatch(record_id)
+                or not record_id.startswith(f"{self.prefix}-")
+            ):
+                raise PermissionError(
+                    "privacy record scan found an invalid record path"
+                )
+            yield path.name, record_id
+
+    def update(
+        self,
+        record_id: str,
+        mutate,
+        *,
+        expected_revision: int | None = None,
+        metadata_only: bool = False,
+    ) -> dict | None:
+        """Run ``mutate`` under the per-record lock and publish if changed.
+
+        ``metadata_only`` is reserved for durable audit-outbox bookkeeping: it
+        atomically rewrites the receipt without changing the logical record
+        revision that the signed event and client CAS are bound to.
+        """
+        from .file_lock import cross_process_lock, ensure_private_directory
+
+        path = self._path(record_id)
+        if path is None:
             return None
-        mutate(record)
-        return self.save(record)
+        ensure_private_directory(path.parent)
+        _validated_private_directory(path.parent, must_exist=True)
+        with cross_process_lock(path, strict=True):
+            record = self._read_path(path)
+            if record is None:
+                return None
+            current_revision = self._revision(record)
+            if (
+                expected_revision is not None
+                and current_revision != int(expected_revision)
+            ):
+                raise RecordConflict(
+                    f"privacy record changed (expected revision "
+                    f"{expected_revision}, found {current_revision})"
+                )
+            updated = dict(record)
+            mutate(updated)
+            if updated == record:
+                return record
+            return self._write_path(
+                path,
+                updated,
+                record,
+                bump_revision=not metadata_only,
+            )
 
 
 _DPA = _RecordStore("dpa_reviews", "DPA")
 _AI = _RecordStore("ai_registry", "AI")
 _ROPA = _RecordStore("ropa", "ROPA")
 _DSAR = _RecordStore("dsar_requests", "DSAR")
+
+
+def _actor_label(actor: str = "") -> str:
+    """Bounded, collision-resistant durable label for an exact identity."""
+    identity = str(actor or "")
+    if len(identity) <= 256:
+        return identity
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"{identity[:183]}#sha256:{digest}"
+
+
+def _pending_audit(action: str, actor: str = "") -> dict:
+    """A durable, non-PII outbox receipt embedded in the mutated record."""
+    return {
+        "event_id": uuid.uuid4().hex,
+        "action": str(action)[:64],
+        "actor": _actor_label(actor) or "system",
+        "prepared_at": time.time(),
+    }
+
+
+def _queue_audit(record: dict, action: str, actor: str = "") -> None:
+    """Append an event to a record's durable outbox without losing a racer."""
+    raw = record.get("_audit_pending")
+    if isinstance(raw, list):
+        queue = [item for item in raw if isinstance(item, dict)]
+    elif isinstance(raw, dict):  # migrate an in-flight single-receipt record
+        queue = [raw]
+    else:
+        queue = []
+    queue.append(_pending_audit(action, actor))
+    record["_audit_pending"] = queue
+
+
+def _audit_mutation(
+    store: _RecordStore,
+    record_type: str,
+    record: dict,
+    *,
+    _status: dict | None = None,
+) -> dict:
+    """Flush an embedded audit outbox receipt, retaining it on failure.
+
+    The mutation and ``_audit_pending`` are published in the same atomic record
+    write. The signed audit append then runs while holding that record's strict
+    cross-process lock. Only a successful ``audit_record()`` removes the receipt;
+    false/exception leaves a durable retryable marker. Delivery is intentionally
+    **at least once**: a crash after append but before receipt removal can append
+    the same stable ``event_id`` again, allowing consumers to deduplicate without
+    ever losing the mutation's audit event.
+    """
+    record_id = str(record.get("id") or "")
+    outcome: dict | None = None
+
+    def _flush(current: dict) -> None:
+        nonlocal outcome
+        raw = current.get("_audit_pending")
+        if isinstance(raw, list):
+            queue = [item for item in raw if isinstance(item, dict)]
+        elif isinstance(raw, dict):
+            queue = [raw]
+        else:
+            queue = []
+        if _status is not None:
+            _status["had_pending"] = bool(queue)
+        if not queue:
+            outcome = current
+            return
+        remaining = list(queue)
+        for pending in queue:
+            try:
+                from .audit import EventKind
+                from .audit import record as audit_record
+                from .paths import current_tenant_id
+
+                ok = audit_record(
+                    EventKind.PRIVACY_RECORD_CHANGED,
+                    agent=str(pending.get("actor") or "system"),
+                    event_id=str(pending.get("event_id") or ""),
+                    occurred_at=float(pending.get("prepared_at") or 0.0),
+                    actor=str(pending.get("actor") or "system"),
+                    tenant=current_tenant_id() or "",
+                    record_type=record_type,
+                    action=str(pending.get("action") or ""),
+                    record_id=record_id,
+                    revision=int(
+                        pending.get("revision")
+                        or _RecordStore._revision(current)
+                    ),
+                    status=str(
+                        pending.get("status")
+                        or current.get("status")
+                        or ""
+                    ),
+                    record_sha256=str(pending.get("record_sha256") or ""),
+                )
+                if not ok:
+                    raise RuntimeError("audit writer refused privacy event")
+            except Exception as exc:
+                log.error(
+                    "privacy mutation audit pending for %s/%s (%s)",
+                    record_type,
+                    pending.get("action"),
+                    type(exc).__name__,
+                )
+                break
+            remaining.pop(0)
+        if remaining:
+            current["_audit_pending"] = remaining
+        else:
+            current.pop("_audit_pending", None)
+        outcome = current
+
+    saved = store.update(record_id, _flush, metadata_only=True)
+    return saved or outcome or record
+
+
+_AUDIT_RETRY_STATE_LOCK = threading.Lock()
+_AUDIT_RETRY_CURSORS: dict[str, str] = {}
+_AUDIT_RETRY_STORE_OFFSET = 0
+
+
+def retry_pending_audits(*, limit: int = 100) -> int:
+    """Retry a rotating bounded window of durable audit outbox receipts.
+
+    ``limit`` budgets record reads and per-record lock acquisitions, not merely
+    successful audit appends.  Persistent cursors rotate within each store and
+    the starting store rotates between calls, preventing a large or unavailable
+    first store from monopolizing every retry pass.
+    """
+    global _AUDIT_RETRY_STORE_OFFSET
+
+    cleared = 0
+    visited = 0
+    visit_limit = max(1, int(limit))
+    stores = (
+        ("dpa_review", _DPA),
+        ("ai_system", _AI),
+        ("ropa", _ROPA),
+        ("dsar", _DSAR),
+    )
+    with _AUDIT_RETRY_STATE_LOCK:
+        start = _AUDIT_RETRY_STORE_OFFSET % len(stores)
+        order = tuple(range(start, len(stores))) + tuple(range(start))
+        iterators = {
+            index: iter(stores[index][1].iter_record_ids(
+                start_after=_AUDIT_RETRY_CURSORS.get(stores[index][0], ""),
+                limit=visit_limit,
+            ))
+            for index in order
+        }
+        active = set(order)
+        while active and visited < visit_limit:
+            progressed = False
+            for index in order:
+                if index not in active or visited >= visit_limit:
+                    continue
+                try:
+                    filename, record_id = next(iterators[index])
+                except StopIteration:
+                    active.remove(index)
+                    continue
+                progressed = True
+                record_type, store = stores[index]
+                _AUDIT_RETRY_CURSORS[record_type] = filename
+                visited += 1
+                status: dict[str, bool] = {}
+                result = _audit_mutation(
+                    store,
+                    record_type,
+                    {"id": record_id},
+                    _status=status,
+                )
+                if status.get("had_pending") and not isinstance(
+                    result.get("_audit_pending"),
+                    (dict, list),
+                ):
+                    cleared += 1
+                # Resume at the next store even when this pass exhausts its
+                # budget in the middle of a round-robin cycle.
+                _AUDIT_RETRY_STORE_OFFSET = (index + 1) % len(stores)
+            if not progressed:
+                break
+    return cleared
 
 # --------------------------------------------------------------------------- #
 # DPA review -- Art. 28(3) clause checklist
@@ -233,7 +790,7 @@ def review_dpa(vendor: str, text: str, *, document_name: str = "",
         "vendor": (vendor or "").strip()[:200],
         "document_name": (document_name or "").strip()[:300],
         "created_at": time.time(),
-        "reviewed_by": reviewed_by,
+        "reviewed_by": _actor_label(reviewed_by),
         "status": "pending_review",
         "clauses": clauses,
         "exposures": exposures,
@@ -243,7 +800,9 @@ def review_dpa(vendor: str, text: str, *, document_name: str = "",
         "residual_risk": _rollup(residual_sev),
         "chars_reviewed": len(body),
     }
-    return _DPA.save(record)
+    _queue_audit(record, "create", reviewed_by)
+    saved = _DPA.save(record, expected_revision=0)
+    return _audit_mutation(_DPA, "dpa_review", saved)
 
 
 _PDF_LITERAL = re.compile(rb"\((?:\\.|[^\\()])*\)")
@@ -334,9 +893,50 @@ def _document_text(data: bytes, mime: str) -> str:
         import zipfile
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as z:
-                xml = z.read("word/document.xml").decode("utf-8",
-                                                         errors="ignore")
-        except (KeyError, zipfile.BadZipFile, OSError):
+                entries = z.infolist()
+                if (
+                    len(entries) > _MAX_DOCX_ENTRIES
+                    or sum(max(0, info.file_size) for info in entries)
+                    > _MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES
+                ):
+                    return ""
+                documents = [
+                    info for info in entries
+                    if info.filename == "word/document.xml"
+                ]
+                if len(documents) != 1:
+                    return ""
+                document = documents[0]
+                if (
+                    document.flag_bits & 0x1
+                    or document.file_size < 0
+                    or document.file_size > _MAX_DOCX_DOCUMENT_XML_BYTES
+                    or (
+                        document.file_size > 0
+                        and (
+                            document.compress_size <= 0
+                            or document.file_size
+                            > document.compress_size * _MAX_DOCX_COMPRESSION_RATIO
+                        )
+                    )
+                ):
+                    return ""
+                # Do not use ZipFile.read(): a forged/bomb entry can otherwise
+                # allocate its entire decompressed body before we inspect it.
+                with z.open(document, "r") as stream:
+                    raw = stream.read(_MAX_DOCX_DOCUMENT_XML_BYTES + 1)
+                if len(raw) > _MAX_DOCX_DOCUMENT_XML_BYTES:
+                    return ""
+                xml = raw.decode("utf-8", errors="ignore")
+        except (
+            EOFError,
+            KeyError,
+            NotImplementedError,
+            OSError,
+            RuntimeError,
+            zipfile.BadZipFile,
+            zipfile.LargeZipFile,
+        ):
             return ""
         return re.sub(r"<[^>]+>", "", xml.replace("</w:p>", "\n"))
     return ""
@@ -344,13 +944,22 @@ def _document_text(data: bytes, mime: str) -> str:
 
 def review_dpa_from_document(vendor: str, source: str, doc_id: str, *,
                              ref: dict | None = None,
-                             document_name: str = "") -> dict:
+                             document_name: str = "",
+                             reviewed_by: str = "",
+                             principal: str | None = None,
+                             allow_ambient_credentials: bool = False) -> dict:
     """Review a DPA straight from a connected source (MS Graph / Slack /
     Google Drive via :mod:`maverick.doc_discovery`) — find the contract where
     it already lives instead of pasting it. Raises ValueError when the source
     is unconfigured or the document's format yields no text."""
     from . import doc_discovery
-    data, mime = doc_discovery.fetch(source, doc_id, ref)
+    data, mime = doc_discovery.fetch(
+        source,
+        doc_id,
+        ref,
+        principal=principal,
+        allow_ambient_credentials=allow_ambient_credentials,
+    )
     mime = doc_discovery.resolve_mime(document_name or doc_id, mime)
     text = _document_text(data, mime)
     if not text.strip():
@@ -358,10 +967,16 @@ def review_dpa_from_document(vendor: str, source: str, doc_id: str, *,
             f"cannot extract text from {mime or 'unknown format'} — "
             "supported: text, JSON/XML, docx, and digital (text-based) "
             "PDFs. Scanned documents need pasting instead.")
-    return review_dpa(vendor, text, document_name=document_name or doc_id)
+    return review_dpa(
+        vendor,
+        text,
+        document_name=document_name or doc_id,
+        reviewed_by=reviewed_by,
+    )
 
 
 def list_dpa_reviews() -> list[dict]:
+    retry_pending_audits()
     return [{k: r.get(k) for k in
              ("id", "vendor", "document_name", "created_at", "status",
               "inherent_risk", "residual_risk", "clauses_present",
@@ -369,6 +984,7 @@ def list_dpa_reviews() -> list[dict]:
 
 
 def get_dpa_review(review_id: str) -> dict | None:
+    retry_pending_audits()
     return _DPA.load(review_id)
 
 
@@ -438,7 +1054,8 @@ def classify_ai_system(name: str, purpose: str) -> dict:
 
 
 def register_ai_system(name: str, purpose: str, *, provider: str = "",
-                       owner: str = "", assessment_id: str = "") -> dict:
+                       owner: str = "", assessment_id: str = "",
+                       registered_by: str = "", _audit: bool = True) -> dict:
     """Add an AI system to the registry, classified on the way in."""
     cls = classify_ai_system(name, purpose)
     record = {
@@ -448,6 +1065,7 @@ def register_ai_system(name: str, purpose: str, *, provider: str = "",
         "provider": (provider or "").strip()[:200],
         "owner": (owner or "").strip()[:200],
         "assessment_id": (assessment_id or "").strip()[:64],
+        "registered_by": _actor_label(registered_by),
         "created_at": time.time(),
         "status": "registered",
         "tier": cls["tier"],
@@ -455,13 +1073,20 @@ def register_ai_system(name: str, purpose: str, *, provider: str = "",
         "obligations": cls["obligations"],
         "note": AI_ACT_NOTE,
     }
-    return _AI.save(record)
+    if _audit:
+        _queue_audit(record, "register", registered_by)
+    saved = _AI.save(record, expected_revision=0)
+    if _audit:
+        saved = _audit_mutation(_AI, "ai_system", saved)
+    return saved
 
 
 _TIER_RANK = {"minimal": 0, "limited": 1, "high": 2, "prohibited": 3}
 
 
-def register_ai_system_from_assessment(assessment_id: str) -> dict | None:
+def register_ai_system_from_assessment(
+    assessment_id: str, *, registered_by: str = "",
+) -> dict | None:
     """Register the system a completed AIRA assessment describes — the
     assessment feeds the registry the same way a PIA feeds the RoPA.
 
@@ -483,7 +1108,9 @@ def register_ai_system_from_assessment(assessment_id: str) -> dict | None:
     record = register_ai_system(
         rec.get("subject") or "unnamed system",
         note("aira_purpose") or f"See assessment {assessment_id}",
-        assessment_id=assessment_id)
+        assessment_id=assessment_id,
+        registered_by=registered_by,
+    )
     tier, signals = record["tier"], list(record["signals"])
     if ans("aira_prohibited") == "yes" and _TIER_RANK[tier] < 3:
         tier = "prohibited"
@@ -496,15 +1123,20 @@ def register_ai_system_from_assessment(assessment_id: str) -> dict | None:
             r["tier"] = tier
             r["signals"] = signals
             r["obligations"] = _TIER_OBLIGATIONS[tier]
+            _queue_audit(r, "assessment_tier_ratchet", registered_by)
         record = _AI.update(record["id"], _ratchet)
+        if record is not None:
+            record = _audit_mutation(_AI, "ai_system", record)
     return record
 
 
 def list_ai_systems() -> list[dict]:
+    retry_pending_audits()
     return _AI.list()
 
 
 def get_ai_system(system_id: str) -> dict | None:
+    retry_pending_audits()
     return _AI.load(system_id)
 
 
@@ -517,28 +1149,59 @@ ROPA_FIELDS = ("activity", "purpose", "controller", "data_categories",
                "security_measures")
 
 
-def upsert_ropa(record: dict, *, ropa_id: str = "") -> dict:
-    """Create or update one Art. 30 processing-activity record."""
+def upsert_ropa(
+    record: dict,
+    *,
+    ropa_id: str = "",
+    updated_by: str = "",
+    expected_revision: int | None = None,
+    _audit: bool = True,
+) -> dict | None:
+    """Create or atomically update one Art. 30 processing-activity record."""
     rid = (ropa_id or "").strip()
-    base = _ROPA.load(rid) if rid else None
-    out = dict(base or {
-        "id": _ROPA.new_id(), "created_at": time.time(),
-        "source": record.get("source", "manual"), "assessment_id": "",
-    })
-    for f in ROPA_FIELDS:
-        if record.get(f) is not None:
-            out[f] = str(record.get(f, ""))[:2000]
-    for f in ROPA_FIELDS:
-        out.setdefault(f, "")
-    if record.get("assessment_id"):
-        out["assessment_id"] = str(record["assessment_id"])[:64]
-    out["updated_at"] = time.time()
-    return _ROPA.save(out)
+    if rid and expected_revision is None:
+        raise ValueError("revision is required when updating a RoPA activity")
+    action = "update" if rid else "create"
+
+    def _apply(out: dict) -> None:
+        for field in ROPA_FIELDS:
+            if record.get(field) is not None:
+                out[field] = str(record.get(field, ""))[:2000]
+        for field in ROPA_FIELDS:
+            out.setdefault(field, "")
+        if record.get("assessment_id"):
+            out["assessment_id"] = str(record["assessment_id"])[:64]
+        out["updated_at"] = time.time()
+        out["updated_by"] = _actor_label(updated_by)
+        if _audit:
+            _queue_audit(out, action, updated_by)
+
+    if rid:
+        saved = _ROPA.update(
+            rid,
+            _apply,
+            expected_revision=expected_revision,
+        )
+    else:
+        saved = {
+            "id": _ROPA.new_id(),
+            "created_at": time.time(),
+            "created_by": _actor_label(updated_by),
+            "source": record.get("source", "manual"),
+            "assessment_id": "",
+        }
+        _apply(saved)
+        saved = _ROPA.save(saved, expected_revision=0)
+    if saved is not None and _audit:
+        saved = _audit_mutation(_ROPA, "ropa", saved)
+    return saved
 
 
 # PIA answers -> Art. 30 field hints. The draft is explicit about provenance
 # ("from PIA ...") and everything stays editable -- a draft, not a verdict.
-def draft_ropa_from_assessment(assessment_id: str) -> dict | None:
+def draft_ropa_from_assessment(
+    assessment_id: str, *, created_by: str = "",
+) -> dict | None:
     """Auto-draft a RoPA entry from a completed assessment (the moment the
     assessment flow starts FEEDING the inventory)."""
     from .assessment import load_saved
@@ -580,7 +1243,7 @@ def draft_ropa_from_assessment(assessment_id: str) -> dict | None:
         "security_measures": security,
         "assessment_id": assessment_id,
         "source": f"assessment:{assessment_id}",
-    })
+    }, updated_by=created_by)
 
 
 # OneTrust RoPA/Data-Mapping CSV export -> Art. 30 fields. Their column
@@ -606,7 +1269,7 @@ _ONETRUST_HEADERS = {
 }
 
 
-def import_onetrust_ropa(csv_text: str) -> list[dict]:
+def import_onetrust_ropa(csv_text: str, *, imported_by: str = "") -> list[dict]:
     """Import OneTrust's RoPA / Data Mapping CSV export into the Art. 30
     register — the "connect to OneTrust" on-ramp: their record comes in with
     ``source="onetrust"`` provenance and stays editable here.
@@ -629,16 +1292,23 @@ def import_onetrust_ropa(csv_text: str) -> list[dict]:
         if not entry.get("activity"):
             continue
         entry["source"] = "onetrust"
-        imported.append(upsert_ropa(entry))
+        saved = upsert_ropa(
+            entry,
+            updated_by=imported_by,
+        )
+        if saved is not None:
+            imported.append(saved)
     return imported
 
 
 def list_ropa() -> list[dict]:
+    retry_pending_audits()
     return _ROPA.list()
 
 
 def export_ropa_art30() -> list[dict]:
     """The Art. 30 register, exportable shape (stable field order)."""
+    retry_pending_audits()
     return [{f: r.get(f, "") for f in
              ("id", *ROPA_FIELDS, "assessment_id", "source")}
             for r in _ROPA.list()]
@@ -650,6 +1320,116 @@ def export_ropa_art30() -> list[dict]:
 
 DSAR_KINDS = ("access", "portability", "erasure")
 DSAR_DUE_DAYS = 30  # GDPR Art. 12(3): one month
+_DSAR_EXPORT_SCHEMA = 1
+_DSAR_EXPORT_META = "_lightwork_export"
+_ERASURE_OPERATOR_INSTRUCTION = (
+    "Erasure is ready for an authorized operator. Use the authenticated "
+    "Lightwork erasure workflow; this API intentionally does not render a "
+    "shell command."
+)
+
+
+def _erasure_argv(record: dict) -> list[str]:
+    """Structured erasure arguments; consumers must execute with no shell."""
+    argv = ["maverick", "erase", "--user", str(record.get("subject_id") or "")]
+    if record.get("channel"):
+        argv.extend(["--channel", str(record["channel"])])
+    return argv
+
+
+def _secure_erasure_handoff(record: dict) -> bool:
+    """Remove legacy shell text and enforce the structured handoff shape."""
+    if record.get("kind") != "erasure" or not isinstance(
+        record.get("fulfillment"), dict,
+    ):
+        return False
+    fulfillment = dict(record["fulfillment"])
+    fulfillment.pop("erase_command", None)
+    fulfillment["erase_argv"] = _erasure_argv(record)
+    fulfillment["operator_instruction"] = _ERASURE_OPERATOR_INSTRUCTION
+    if fulfillment == record["fulfillment"]:
+        return False
+    record["fulfillment"] = fulfillment
+    return True
+
+
+def _dsar_export_intent(record: dict) -> dict:
+    from .paths import current_tenant_id
+
+    return {
+        "schema": _DSAR_EXPORT_SCHEMA,
+        "tenant": current_tenant_id() or "",
+        "request_id": str(record.get("id") or ""),
+        "subject_id": str(record.get("subject_id") or ""),
+        "channel": str(record.get("channel") or ""),
+    }
+
+
+def _dsar_export_digest(intent: dict, bundle: dict) -> str:
+    canonical = json.dumps(
+        {"intent": intent, "bundle": bundle},
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _valid_dsar_bundle(bundle: object, intent: dict) -> bool:
+    if not isinstance(bundle, dict) or not isinstance(bundle.get("counts"), dict):
+        return False
+    subject = bundle.get("subject")
+    if not isinstance(subject, dict) or subject.get("user_id") != intent["subject_id"]:
+        return False
+    expected_channel = intent["channel"] or None
+    if expected_channel is not None and subject.get("channel") != expected_channel:
+        return False
+    return bundle.get("tenant") == (intent["tenant"] or None)
+
+
+def _load_dsar_export_artifact(
+    path: Path,
+    *,
+    intent: dict,
+) -> tuple[dict, str] | None:
+    try:
+        artifact = _read_private_json(path, root=path.parent)
+    except (FileNotFoundError, OSError, UnicodeError, ValueError):
+        return None
+    meta = artifact.get(_DSAR_EXPORT_META)
+    if not isinstance(meta, dict) or meta.get("intent") != intent:
+        return None
+    bundle = {key: value for key, value in artifact.items()
+              if key != _DSAR_EXPORT_META}
+    if not _valid_dsar_bundle(bundle, intent):
+        return None
+    expected = _dsar_export_digest(intent, bundle)
+    digest = str(meta.get("sha256") or "")
+    if not digest or not hmac.compare_digest(digest, expected):
+        return None
+    return bundle, digest
+
+
+def _write_dsar_export_artifact(path: Path, intent: dict, bundle: dict) -> str:
+    from .file_lock import atomic_write_text
+
+    if not _valid_dsar_bundle(bundle, intent):
+        raise ValueError("DSAR exporter returned data for a different subject")
+    digest = _dsar_export_digest(intent, bundle)
+    artifact = {
+        **bundle,
+        _DSAR_EXPORT_META: {
+            "schema": _DSAR_EXPORT_SCHEMA,
+            "intent": intent,
+            "sha256": digest,
+        },
+    }
+    atomic_write_text(
+        path,
+        json.dumps(artifact, indent=2, default=str),
+        mode=0o600,
+    )
+    return digest
 
 
 def open_dsar(subject_id: str, kind: str, *, channel: str = "",
@@ -663,13 +1443,15 @@ def open_dsar(subject_id: str, kind: str, *, channel: str = "",
         "subject_id": (subject_id or "").strip()[:200],
         "channel": (channel or "").strip()[:64],
         "kind": kind,
-        "opened_by": opened_by,
+        "opened_by": _actor_label(opened_by),
         "created_at": now,
         "due_at": now + DSAR_DUE_DAYS * 86400,
         "status": "open",
         "fulfillment": None,
     }
-    return _DSAR.save(record)
+    _queue_audit(record, "open", opened_by)
+    saved = _DSAR.save(record, expected_revision=0)
+    return _audit_mutation(_DSAR, "dsar", saved)
 
 
 # What an inbound data-subject request sounds like. Deterministic and
@@ -742,9 +1524,25 @@ def open_dsar_from_message(text: str, *, channel: str = "",
 
 
 def list_dsars() -> list[dict]:
+    retry_pending_audits()
     now = time.time()
     out = []
-    for r in _DSAR.list():
+    for stored in _DSAR.list():
+        r = stored
+        probe = dict(stored)
+        if _secure_erasure_handoff(probe):
+            migrated = False
+
+            def _migrate(current: dict) -> None:
+                nonlocal migrated
+                if _secure_erasure_handoff(current):
+                    _queue_audit(current, "secure_erasure_handoff", "system")
+                    migrated = True
+
+            updated = _DSAR.update(str(stored.get("id") or ""), _migrate)
+            if updated is not None and migrated:
+                updated = _audit_mutation(_DSAR, "dsar", updated)
+            r = updated or stored
         if "status" not in r:  # not a request record (defensive)
             continue
         r = dict(r)
@@ -754,52 +1552,110 @@ def list_dsars() -> list[dict]:
     return out
 
 
-def fulfill_dsar(request_id: str) -> dict | None:
+def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
     """Fulfill an open request through the REAL machinery.
 
     ``access`` / ``portability``: runs :func:`maverick.dsar.export_subject_data`
     and stores the bundle (counts recorded on the request). ``erasure``: never
-    destructive from here -- records the exact ``maverick erase`` invocation
-    for the operator to run deliberately (the CLI carries the confirmation
-    flow, knowledge-plane scrub, and audit trail)."""
-    record = _DSAR.load(request_id)
-    if record is None or record.get("status") != "open":
+    destructive from here -- returns structured arguments for an authenticated
+    operator workflow (the CLI carries the confirmation flow, knowledge-plane
+    scrub, and audit trail). No shell command is constructed or executed."""
+    changed = False
+    invalid = False
+
+    def _fulfill(record: dict) -> None:
+        nonlocal changed, invalid
+        if _secure_erasure_handoff(record):
+            _queue_audit(record, "secure_erasure_handoff", fulfilled_by)
+            changed = True
+            return
+        # Durable idempotency receipt: once a fulfillment exists, every retry
+        # returns it without repeating the export or changing the revision.
+        if record.get("fulfillment"):
+            return
+        if record.get("status") != "open":
+            invalid = True
+            return
+        if record.get("kind") in ("access", "portability"):
+            from .file_lock import ensure_private_directory
+            from .paths import data_dir
+
+            out_dir = ensure_private_directory(
+                data_dir("dsar_requests") / "exports"
+            )
+            out_path = out_dir / f"{record['id']}-export.json"
+            _validated_private_directory(out_dir, must_exist=True)
+            intent = _dsar_export_intent(record)
+            recovered = _load_dsar_export_artifact(out_path, intent=intent)
+            if recovered is None:
+                from .dsar import export_subject_data
+
+                bundle = export_subject_data(
+                    record["subject_id"],
+                    channel=record.get("channel") or None,
+                    tenant=intent["tenant"] or None,
+                )
+                artifact_sha256 = _write_dsar_export_artifact(
+                    out_path,
+                    intent,
+                    bundle,
+                )
+            else:
+                bundle, artifact_sha256 = recovered
+            record["status"] = "fulfilled"
+            record["fulfilled_at"] = time.time()
+            record["fulfilled_by"] = _actor_label(fulfilled_by)
+            record["fulfillment"] = {
+                "export_path": str(out_path),
+                "counts": bundle.get("counts", {}),
+                "export_schema": _DSAR_EXPORT_SCHEMA,
+                "artifact_sha256": artifact_sha256,
+            }
+            _queue_audit(record, "fulfill", fulfilled_by)
+            changed = True
+            return
+
+        # Erasure remains a deliberate operator step. Arguments stay structured
+        # so Windows cmd.exe metacharacters are data, never executable syntax.
+        # Any consumer must pass this argv to a process API with shell=False.
+        record["status"] = "awaiting_erasure"
+        record["fulfilled_at"] = time.time()
+        record["fulfilled_by"] = _actor_label(fulfilled_by)
+        record["fulfillment"] = {
+            "erase_argv": _erasure_argv(record),
+            "operator_instruction": _ERASURE_OPERATOR_INSTRUCTION,
+        }
+        _queue_audit(record, "fulfill", fulfilled_by)
+        changed = True
+
+    saved = _DSAR.update(request_id, _fulfill)
+    if saved is None or invalid:
         return None
-    if record["kind"] in ("access", "portability"):
-        from .dsar import export_subject_data
-        bundle = export_subject_data(
-            record["subject_id"], channel=record.get("channel") or None)
-        from .paths import data_dir
-        # Bundles live in a subdirectory: the record store globs *.json in
-        # its own dir, and a bundle is not a request record.
-        out_dir = data_dir("dsar_requests") / "exports"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{record['id']}-export.json"
-        fd = os.open(str(out_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-                     0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(json.dumps(bundle, indent=2, default=str))
-        def _done(r: dict) -> None:
-            r["status"] = "fulfilled"
-            r["fulfilled_at"] = time.time()
-            r["fulfillment"] = {"export_path": str(out_path),
-                                "counts": bundle.get("counts", {})}
-        return _DSAR.update(request_id, _done)
-    # erasure: deliberate operator step, never an API side effect.
-    cmd = (f"maverick erase --user {record['subject_id']}"
-           + (f" --channel {record['channel']}" if record.get("channel") else ""))
-    def _ready(r: dict) -> None:
-        r["status"] = "awaiting_erasure"
-        r["fulfillment"] = {"erase_command": cmd}
-    return _DSAR.update(request_id, _ready)
+    if changed or isinstance(saved.get("_audit_pending"), (dict, list)):
+        saved = _audit_mutation(_DSAR, "dsar", saved)
+    return saved
 
 
 def close_dsar(request_id: str, *, closed_by: str = "") -> dict | None:
+    changed = False
+
     def _close(r: dict) -> None:
+        nonlocal changed
+        if r.get("status") == "closed":
+            return
+        _secure_erasure_handoff(r)
         r["status"] = "closed"
         r["closed_at"] = time.time()
-        r["closed_by"] = closed_by
-    return _DSAR.update(request_id, _close)
+        r["closed_by"] = _actor_label(closed_by)
+        _queue_audit(r, "close", closed_by)
+        changed = True
+
+    saved = _DSAR.update(request_id, _close)
+    if saved is not None and (
+        changed or isinstance(saved.get("_audit_pending"), (dict, list))
+    ):
+        saved = _audit_mutation(_DSAR, "dsar", saved)
+    return saved
 
 
 # --------------------------------------------------------------------------- #
@@ -994,11 +1850,12 @@ __all__ = [
     "AI_ACT_NOTE", "BREACH_NOTIFY_HOURS", "DPA_CHECKLIST", "DSAR_DUE_DAYS",
     "DSAR_KINDS", "close_incident", "decide_incident_notification",
     "list_incidents", "open_incident", "program_report",
-    "ROPA_FIELDS", "classify_ai_system", "close_dsar",
+    "ROPA_FIELDS", "RecordConflict", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
     "detect_dsar", "fulfill_dsar", "get_ai_system", "get_dpa_review",
     "import_onetrust_ropa", "list_ai_systems", "open_dsar_from_message",
     "list_dpa_reviews", "list_dsars", "list_ropa", "open_dsar",
     "register_ai_system", "register_ai_system_from_assessment",
-    "review_dpa", "review_dpa_from_document", "upsert_ropa",
+    "retry_pending_audits", "review_dpa", "review_dpa_from_document",
+    "upsert_ropa",
 ]

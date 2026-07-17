@@ -192,6 +192,38 @@ def test_explicit_use_grant_and_tenant_sharing():
     assert connections.resolve("shared") is None
 
 
+def test_principals_that_differ_only_by_trailing_space_never_share_credentials():
+    connections.set_connection(
+        "acme", connector="acme", token="plain",
+        owner="user:alice",
+    )
+    connections.set_connection(
+        "acme-spaced", connector="acme", token="spaced",
+        owner="user:alice ",
+    )
+
+    assert connections.resolve("acme", principal="user:alice") == ("", "plain")
+    assert connections.resolve("acme", principal="user:alice ") == ("", "spaced")
+
+    with connections.bind_principal("user:alice "):
+        assert connections.current_principal() == "user:alice "
+        assert connections.resolve("acme") == ("", "spaced")
+
+
+def test_allowed_principal_grants_are_exact_and_not_trimmed():
+    connections.set_connection(
+        "granted-exact",
+        token="secret",
+        owner="agent:owner",
+        allowed_principals=["user:alice "],
+    )
+
+    assert connections.resolve("granted-exact", principal="user:alice") is None
+    assert connections.resolve("granted-exact", principal="user:alice ") == (
+        "", "secret",
+    )
+
+
 def test_registry_binds_identity_at_credential_use_boundary():
     from maverick.tools import Tool, ToolRegistry
 
@@ -288,3 +320,12 @@ def test_stale_readiness_probe_cannot_certify_rotated_credentials():
 def test_invalid_connection_use_principal_is_rejected():
     with pytest.raises(ValueError, match="printable"):
         connections.set_connection("bad-grant", token="x", allowed_principals=["bad\nuser"])
+
+
+def test_connection_principal_length_boundary():
+    accepted = "p" * 256
+    connections.set_connection("boundary", token="x", owner=accepted)
+    assert connections.resolve("boundary", principal=accepted) == ("", "x")
+
+    with pytest.raises(ValueError, match="1-256 printable"):
+        connections.set_connection("too-long", token="x", owner="p" * 257)

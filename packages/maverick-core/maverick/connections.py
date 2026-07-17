@@ -33,7 +33,7 @@ from .tenant.kms import seal_text_for_tenant, unseal_text_for_tenant
 _lock = threading.Lock()
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _ACCESS = frozenset({"owner", "tenant"})
-_PRINCIPAL_RE = re.compile(r"^[^\x00-\x1f\x7f]{1,256}$")
+_MAX_PRINCIPAL_LENGTH = 256
 _runtime_principal: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "maverick_connection_principal", default=None,
 )
@@ -101,12 +101,25 @@ def normalize_name(name: str) -> str:
     return re.sub(r"[^a-z0-9_-]+", "-", (name or "").strip().lower()).strip("-")[:64]
 
 
+def _valid_principal(value: object) -> bool:
+    """Whether ``value`` is in the bounded opaque principal domain."""
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= _MAX_PRINCIPAL_LENGTH
+        and value.isprintable()
+    )
+
+
+def _require_principal(value: object) -> str:
+    if not _valid_principal(value):
+        raise ValueError("connection principals must be 1-256 printable characters")
+    return value
+
+
 def _normalize_principals(values: Sequence[str] | None) -> tuple[str, ...]:
     out: list[str] = []
     for raw in values or ():
-        principal = str(raw or "").strip()
-        if not _PRINCIPAL_RE.fullmatch(principal):
-            raise ValueError("connection use principals must be 1-256 printable characters")
+        principal = _require_principal(raw)
         if principal not in out:
             out.append(principal)
     return tuple(out)
@@ -121,7 +134,10 @@ def bind_principal(principal: str | None) -> Iterator[None]:
     ``asyncio.to_thread`` and concurrent runs must never borrow one another's
     identity.
     """
-    value = str(principal or "").strip() or None
+    if principal is None or principal == "":
+        value = None
+    else:
+        value = _require_principal(principal)
     token = _runtime_principal.set(value)
     try:
         yield
@@ -155,10 +171,14 @@ def set_connection(name: str, *, connector: str = "", base_url: str = "",
     if access not in _ACCESS:
         raise ValueError("connection access must be 'owner' or 'tenant'")
     grants = _normalize_principals(allowed_principals)
+    if owner is None or owner == "":
+        owner_value = ""
+    else:
+        owner_value = _require_principal(owner)
     rec = {
         "name": slug, "connector": normalize_name(connector) or slug,
         "base_url": str(base_url).strip().rstrip("/"), "token": str(token),
-        "created": time.time(), "owner": str(owner or ""),
+        "created": time.time(), "owner": owner_value,
         "access": access, "allowed_principals": list(grants),
         # Internal CAS token. A slow readiness probe for an old credential must
         # never mark a concurrently rotated replacement as authenticated.
@@ -231,8 +251,21 @@ def _may_use(rec: dict, principal: str | None) -> bool:
     ownerless tenant records; it can never silently borrow an authenticated
     user's credential.
     """
-    owner = str(rec.get("owner") or "").strip()
-    grants = {str(p).strip() for p in (rec.get("allowed_principals") or []) if str(p).strip()}
+    raw_owner = rec.get("owner")
+    if raw_owner is None or raw_owner == "":
+        owner = ""
+    elif _valid_principal(raw_owner):
+        owner = raw_owner
+    else:
+        return False
+    if principal is not None and not _valid_principal(principal):
+        return False
+    raw_grants = rec.get("allowed_principals") or []
+    if not isinstance(raw_grants, list) or any(
+        not _valid_principal(p) for p in raw_grants
+    ):
+        return False
+    grants = set(raw_grants)
     access = str(rec.get("access") or ("owner" if owner else "tenant")).strip().lower()
     if principal is not None and (principal == owner or principal in grants):
         return True
@@ -248,7 +281,12 @@ def resolve(connector: str, *, principal: str | None = None) -> tuple[str, str] 
     if not enabled():
         return None
     slug = normalize_name(connector)
-    caller = str(principal or "").strip() or _runtime_principal.get()
+    if principal is None:
+        caller = _runtime_principal.get()
+    elif principal == "":
+        caller = None
+    else:
+        caller = _require_principal(principal)
     # a connection named exactly after the connector wins; else the first one
     # whose "connector" field points at it AND whose use grant admits the
     # authenticated caller.  Sort the fallback so selection is deterministic.

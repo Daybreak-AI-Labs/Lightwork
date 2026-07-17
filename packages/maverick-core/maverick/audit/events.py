@@ -31,6 +31,11 @@ Payload shapes (kind -> required fields, all events also carry
   agent_trust_denied: peer:str, direction:str (inbound|outbound), rule:str,
                      reason:str, correlation_id:str — an external agent was
                      refused by the Agent Trust Plane.
+  privacy_record_changed: event_id:str, occurred_at:float, actor:str, tenant:str,
+                     record_type:str, action:str, record_id:str, revision:int,
+                     status:str, record_sha256:str (opaque control metadata and
+                     a content commitment only; never DPA text, subject ids,
+                     RoPA content, or export bodies)
 """
 from __future__ import annotations
 
@@ -184,6 +189,9 @@ class EventKind:
     # JSON register alone. payload: subject_kind:str, subject:str, lens:str,
     # decision:str (accepted|needs_work), reviewer:str, result_status:str.
     ASSESSMENT_REVIEW = "assessment_review"
+    # A privacy record mutation. The originating record retains a durable
+    # audit-outbox receipt until this event is accepted by the signed chain.
+    PRIVACY_RECORD_CHANGED = "privacy_record_changed"
 
 
 @dataclass

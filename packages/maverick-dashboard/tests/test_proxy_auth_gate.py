@@ -33,6 +33,18 @@ def test_trusted_proxy_header_sets_principal(monkeypatch):
     assert req.state.principal.principal == "user:alice"
 
 
+def test_trusted_proxy_rejects_padded_identity_instead_of_trimming(monkeypatch):
+    monkeypatch.setattr(auth, "proxy_auth_enabled", lambda: True)
+    monkeypatch.setattr(auth, "proxy_trusts", lambda _host: True)
+    monkeypatch.setattr(auth, "proxy_header_name", lambda: "X-Forwarded-User")
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+
+    req = _req(headers={"X-Forwarded-User": "alice "})
+
+    assert auth.require_principal(req) is None
+    assert not hasattr(req.state, "principal")
+
+
 def test_untrusted_peer_header_ignored(monkeypatch):
     # Header present but the peer is not the trusted proxy -> ignored. With OIDC
     # off this falls through to None: a direct client cannot spoof identity.

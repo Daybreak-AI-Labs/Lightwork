@@ -126,6 +126,30 @@ def test_extract_identity_maps_nameid_and_attrs():
     assert ident.attributes["groups"] == ["admins"]
 
 
+@pytest.mark.parametrize("name_id", [" alice", "alice ", "alice\n", "x" * 252])
+def test_extract_identity_rejects_invalid_nameid_without_canonicalizing(name_id):
+    class _NID:
+        text = name_id
+
+    class _Response(_FakeResp):
+        name_id = _NID()
+
+    with pytest.raises(saml_mod.SamlUnavailable, match="no NameID"):
+        saml_mod.extract_identity(_Response())
+
+
+def test_extract_identity_accepts_full_principal_length_boundary():
+    subject = "x" * 251
+
+    class _NID:
+        text = subject
+
+    class _Response(_FakeResp):
+        name_id = _NID()
+
+    assert len(saml_mod.extract_identity(_Response()).principal) == 256
+
+
 def test_extract_identity_requires_nameid():
     class _NoNID:
         name_id = None

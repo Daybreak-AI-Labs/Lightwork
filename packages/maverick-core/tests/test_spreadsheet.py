@@ -24,6 +24,9 @@ def test_neutralize_formula_helper():
     assert ss._neutralize_formula("@x") == "'@x"
     assert ss._neutralize_formula("\tx") == "'\tx"
     assert ss._neutralize_formula("\rx") == "'\rx"
+    assert ss._neutralize_formula("\nx") == "'\nx"
+    assert ss._neutralize_formula("  =x") == "'  =x"
+    assert ss._neutralize_formula(" \t=x") == "' \t=x"
     assert ss._neutralize_formula("safe") == "safe"
     assert ss._neutralize_formula(42) == 42       # numbers untouched
     assert ss._neutralize_formula("") == ""       # empty untouched

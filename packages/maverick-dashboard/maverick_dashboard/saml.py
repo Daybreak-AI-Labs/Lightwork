@@ -315,18 +315,22 @@ def extract_identity(authn_response) -> SamlIdentity:
     this is called, so a None/unsigned response must never reach here."""
     if authn_response is None:
         raise SamlUnavailable("SAML response did not verify")
-    name_id = ""
+    from maverick.oidc import validate_subject
+
+    name_id = None
     nid = getattr(authn_response, "name_id", None)
     if nid is not None:
-        name_id = str(getattr(nid, "text", "") or "").strip()
-    if not name_id:
+        name_id = getattr(nid, "text", None)
+    if name_id is None or name_id == "":
         try:
             subj = authn_response.get_subject()
-            name_id = str(getattr(subj, "text", "") or "").strip()
+            name_id = getattr(subj, "text", None)
         except Exception:  # pragma: no cover -- response shape varies
-            name_id = ""
-    if not name_id:
-        raise SamlUnavailable("SAML assertion carried no NameID")
+            name_id = None
+    try:
+        name_id = validate_subject(name_id)
+    except ValueError:
+        raise SamlUnavailable("SAML assertion carried no NameID") from None
     try:
         attrs = authn_response.get_identity() or {}
     except Exception:  # pragma: no cover
@@ -339,7 +343,13 @@ def extract_identity(authn_response) -> SamlIdentity:
 def mint_session_cookie(name_id: str, *, secret: str | None = None) -> str:
     """Sign an ``mvk_session`` value for ``user:<name_id>`` -- the SAME cookie the
     OIDC browser login issues, so it verifies through the shared session path."""
+    from maverick.oidc import validate_subject
     from maverick.web_session import sign_session
+
+    try:
+        name_id = validate_subject(name_id)
+    except ValueError:
+        raise SamlUnavailable("SAML assertion carried no NameID") from None
 
     secret = secret if secret is not None else _session_secret()
     if not secret:

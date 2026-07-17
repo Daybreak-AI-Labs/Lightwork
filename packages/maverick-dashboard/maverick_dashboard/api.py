@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import difflib
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -837,6 +839,118 @@ async def upload_attachment(
     )
 
 
+def _privacy_auth_genuinely_off() -> bool:
+    """Strict auth-off decision for privacy credential and mutation boundaries."""
+    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+        return False
+    try:
+        from maverick.config import config_source_errors, load_config
+
+        config = load_config() or {}
+        if config_source_errors():
+            return False
+    except Exception:
+        return False
+    if not isinstance(config, dict):
+        return False
+
+    def _env_override(name: str) -> bool | None:
+        raw = os.environ.get(name)
+        if raw is None or not raw.strip():
+            return None
+        value = raw.strip().lower()
+        if value in {"1", "true", "yes", "on"}:
+            return True
+        if value in {"0", "false", "no", "off"}:
+            return False
+        # Invalid auth policy is uncertainty, never permission to use ambient
+        # credentials or mint an unattributed privacy mutation.
+        return True
+
+    dashboard = config.get("dashboard") or {}
+    auth = config.get("auth") or {}
+    if not isinstance(dashboard, dict) or not isinstance(auth, dict):
+        return False
+
+    configured = []
+    for env_name, section_value in (
+        ("MAVERICK_DASHBOARD_REQUIRE_AUTH", dashboard.get("require_auth", False)),
+        ("MAVERICK_DASHBOARD_INVITES", dashboard.get("invites", False)),
+    ):
+        override = _env_override(env_name)
+        if override is None:
+            if not isinstance(section_value, bool):
+                return False
+            configured.append(section_value)
+        else:
+            configured.append(override)
+
+    oidc = auth.get("oidc") or {}
+    proxy = auth.get("proxy") or {}
+    saml = auth.get("saml") or {}
+    if not all(isinstance(section, dict) for section in (oidc, proxy, saml)):
+        return False
+    for env_name, section in (
+        ("MAVERICK_OIDC_ENABLED", oidc),
+        ("MAVERICK_PROXY_AUTH", proxy),
+    ):
+        override = _env_override(env_name)
+        if override is None:
+            enabled = section.get("enabled", False)
+            if not isinstance(enabled, bool):
+                return False
+            configured.append(enabled)
+        else:
+            configured.append(override)
+    # SAML has no enable flag: any configured surface is an auth mechanism;
+    # a partial section is still uncertainty and therefore denies ambient use.
+    configured.append(bool(saml))
+    return not any(configured)
+
+
+def _request_identity(request: Request) -> str | None:
+    """Verified identity; ``None`` only in genuine local auth-off mode."""
+    principal = str(caller_principal(request) or "")
+    if principal:
+        return principal
+    expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN", "")
+    if expected:
+        authorization = request.headers.get("authorization", "")
+        supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
+        if supplied and hmac.compare_digest(supplied, expected):
+            return "auth:dashboard-token"
+        raise HTTPException(
+            status_code=401,
+            detail="authenticated caller identity required",
+        )
+    if _privacy_auth_genuinely_off():
+        return None
+    raise HTTPException(
+        status_code=401,
+        detail="authenticated caller identity required",
+    )
+
+
+def _request_actor(request: Request) -> str:
+    """Stable attributable actor for dashboard-originated durable writes."""
+    identity = _request_identity(request) or "local:dashboard"
+    if len(identity) <= 256:
+        return identity
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"{identity[:183]}#sha256:{digest}"
+
+
+def _document_source_principal(request: Request) -> str | None:
+    """Credential-use principal; local auth-off keeps operator semantics."""
+    principal = _request_identity(request)
+    if principal is not None and len(principal) > 256:
+        raise HTTPException(
+            status_code=403,
+            detail="authenticated principal is too long for connection grants",
+        )
+    return principal
+
+
 @router.post("/docs/discover")
 async def discover_documents(request: Request, body: DocDiscoverIn) -> dict:
     """Search the CONNECTED document sources (Microsoft Graph, Slack, Google
@@ -853,12 +967,21 @@ async def discover_documents(request: Request, body: DocDiscoverIn) -> dict:
         raise HTTPException(status_code=403,
                             detail="doc discovery is disabled ([assessments] "
                                    "doc_discovery)")
-    configured = await run_in_threadpool(doc_discovery.configured_sources)
+    principal = _document_source_principal(request)
+    allow_ambient = principal is None
+    configured = await run_in_threadpool(
+        doc_discovery.configured_sources,
+        principal=principal,
+        allow_ambient_credentials=allow_ambient,
+    )
     hits = await run_in_threadpool(
         doc_discovery.discover, body.subject,
         sources=(body.sources if body.sources is not None
                  else configured or None),
-        limit=body.limit)
+        limit=body.limit,
+        principal=principal,
+        allow_ambient_credentials=allow_ambient,
+    )
     return {
         "configured_sources": configured,
         "hits": [h.to_dict() for h in hits],
@@ -889,9 +1012,16 @@ async def attach_from_source(
 
     from maverick import doc_discovery
     from maverick.attachments import AttachmentRejected, store
+    principal = _document_source_principal(request)
     try:
         data, mime = await run_in_threadpool(
-            doc_discovery.fetch, body.source, body.doc_id, body.ref)
+            doc_discovery.fetch,
+            body.source,
+            body.doc_id,
+            body.ref,
+            principal=principal,
+            allow_ambient_credentials=principal is None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001 -- a source outage is a 502, not a 500
@@ -948,7 +1078,9 @@ async def create_dpa_review(request: Request, body: DpaReviewIn) -> dict:
     ops = _privacy_ops_or_403()
     return await run_in_threadpool(
         ops.review_dpa, body.vendor, body.text,
-        document_name=body.document_name)
+        document_name=body.document_name,
+        reviewed_by=_request_actor(request),
+    )
 
 
 @router.get("/privacy/dpa-reviews/{review_id}")
@@ -971,11 +1103,22 @@ async def search_dpa_documents(request: Request, vendor: str = "") -> dict:
     # "enabled" means it can actually search: feature on AND >=1 source
     # holds credentials — otherwise the UI says "connect a source", not
     # "no matching documents".
-    if not doc_discovery.enabled() or not doc_discovery.configured_sources():
+    principal = _document_source_principal(request)
+    allow_ambient = principal is None
+    configured = await run_in_threadpool(
+        doc_discovery.configured_sources,
+        principal=principal,
+        allow_ambient_credentials=allow_ambient,
+    )
+    if not doc_discovery.enabled() or not configured:
         return {"enabled": False, "hits": []}
     hits = await run_in_threadpool(
         doc_discovery.discover, vendor[:200],
-        keywords=("dpa", "data processing", "agreement", "contract"))
+        keywords=("dpa", "data processing", "agreement", "contract"),
+        sources=configured,
+        principal=principal,
+        allow_ambient_credentials=allow_ambient,
+    )
     return {"enabled": True, "hits": [h.to_dict() for h in hits]}
 
 
@@ -984,12 +1127,24 @@ async def create_dpa_review_from_document(request: Request,
                                           body: DpaFromDocumentIn) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
+    principal = _document_source_principal(request)
     try:
         return await run_in_threadpool(
             ops.review_dpa_from_document, body.vendor, body.source,
-            body.doc_id, ref=body.ref, document_name=body.document_name)
+            body.doc_id,
+            ref=body.ref,
+            document_name=body.document_name,
+            reviewed_by=_request_actor(request),
+            principal=principal,
+            allow_ambient_credentials=principal is None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 - source failures are status-only
+        raise HTTPException(
+            status_code=502,
+            detail="document source request failed",
+        ) from e
 
 
 @router.get("/privacy/ai-systems")
@@ -1008,7 +1163,9 @@ async def register_ai_system(request: Request, body: AiSystemIn) -> dict:
     return await run_in_threadpool(
         ops.register_ai_system, body.name, body.purpose,
         provider=body.provider, owner=body.owner,
-        assessment_id=body.assessment_id)
+        assessment_id=body.assessment_id,
+        registered_by=_request_actor(request),
+    )
 
 
 @router.post("/privacy/ai-systems/from-assessment/{assessment_id}",
@@ -1020,7 +1177,10 @@ async def register_ai_system_from_assessment(request: Request,
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     record = await run_in_threadpool(
-        ops.register_ai_system_from_assessment, assessment_id[:64])
+        ops.register_ai_system_from_assessment,
+        assessment_id[:64],
+        registered_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
     return record
@@ -1039,8 +1199,17 @@ async def upsert_ropa(request: Request, body: RopaIn) -> dict:
     ops = _privacy_ops_or_403()
     payload = body.model_dump(exclude_none=True)
     ropa_id = payload.pop("ropa_id", "")
-    record = await run_in_threadpool(ops.upsert_ropa, payload,
-                                     ropa_id=ropa_id)
+    revision = payload.pop("revision", None)
+    try:
+        record = await run_in_threadpool(
+            ops.upsert_ropa,
+            payload,
+            ropa_id=ropa_id,
+            updated_by=_request_actor(request),
+            expected_revision=revision,
+        )
+    except ops.RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="no such activity")
     return record
@@ -1053,7 +1222,10 @@ async def ropa_from_assessment(request: Request, assessment_id: str) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     record = await run_in_threadpool(
-        ops.draft_ropa_from_assessment, assessment_id[:64])
+        ops.draft_ropa_from_assessment,
+        assessment_id[:64],
+        created_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
     return record
@@ -1065,10 +1237,20 @@ async def import_onetrust(request: Request, body: OneTrustImportIn) -> dict:
     comes in with source provenance and stays editable here."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    imported = await run_in_threadpool(ops.import_onetrust_ropa,
-                                       body.csv_text)
+    imported = await run_in_threadpool(
+        ops.import_onetrust_ropa,
+        body.csv_text,
+        imported_by=_request_actor(request),
+    )
     return {"imported": len(imported),
             "activities": [e["activity"] for e in imported]}
+
+
+def _csv_formula_safe(value: object) -> object:
+    """Neutralize spreadsheet formulas while preserving ordinary CSV values."""
+    from maverick.tools.spreadsheet import _neutralize_formula
+
+    return _neutralize_formula(value)
 
 
 @router.get("/privacy/ropa/export.csv")
@@ -1084,7 +1266,7 @@ async def export_ropa_csv(request: Request) -> Response:
     w = csv.DictWriter(buf, fieldnames=fields)
     w.writeheader()
     for r in rows:
-        w.writerow(r)
+        w.writerow({field: _csv_formula_safe(r.get(field, "")) for field in fields})
     return Response(
         content=buf.getvalue(), media_type="text/csv",
         headers={"Content-Disposition":
@@ -1103,7 +1285,12 @@ async def open_dsar_request(request: Request, body: DsarIn) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     return await run_in_threadpool(
-        ops.open_dsar, body.subject_id, body.kind, channel=body.channel)
+        ops.open_dsar,
+        body.subject_id,
+        body.kind,
+        channel=body.channel,
+        opened_by=_request_actor(request),
+    )
 
 
 @router.post("/privacy/dsar/from-message", status_code=201)
@@ -1128,12 +1315,16 @@ async def open_dsar_from_message(request: Request,
 
 @router.post("/privacy/dsar/{request_id}/fulfill")
 async def fulfill_dsar_request(request: Request, request_id: str) -> dict:
-    """Access/portability run the REAL subject-data export; erasure records
-    the exact `maverick erase` invocation for a deliberate operator run --
-    never destructive from the API."""
+    """Access/portability run the real subject-data export. Erasure returns a
+    structured argv handoff for a deliberate authenticated operator workflow;
+    the API never constructs or executes a shell command."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(ops.fulfill_dsar, request_id[:64])
+    record = await run_in_threadpool(
+        ops.fulfill_dsar,
+        request_id[:64],
+        fulfilled_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(status_code=404,
                             detail="no such open request")
@@ -1144,7 +1335,11 @@ async def fulfill_dsar_request(request: Request, request_id: str) -> dict:
 async def close_dsar_request(request: Request, request_id: str) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(ops.close_dsar, request_id[:64])
+    record = await run_in_threadpool(
+        ops.close_dsar,
+        request_id[:64],
+        closed_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(status_code=404, detail="no such request")
     return record
@@ -1703,7 +1898,7 @@ async def list_connections_endpoint(request: Request) -> dict:
     require_permission(request, "operate")
     _require_connections()
     from maverick import connections
-    return {"connections": connections.list_connections(owner=goal_owner_filter(request))}
+    return {"connections": connections.list_connections(owner=_request_identity(request))}
 
 
 @router.post("/connections", status_code=201)
@@ -1719,10 +1914,11 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
         # Owner-scope like triggers: a non-admin can't overwrite another
         # tenant's connection by reusing its name. Enforced INSIDE the store
         # lock (expected_owner) so the check and the write are atomic.
+        owner = _request_identity(request)
         rec = connections.set_connection(
             payload.name, connector=payload.connector, base_url=payload.base_url,
-            token=payload.token, owner=caller_principal(request) or "",
-            expected_owner=goal_owner_filter(request), access=payload.access,
+            token=payload.token, owner=owner or "",
+            expected_owner=owner, access=payload.access,
             allowed_principals=payload.allowed_principals)
     except PermissionError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
@@ -1744,7 +1940,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     # Owner-scope like list/delete/create: a non-admin can only test their own
     # connection (else a name-guess is a cross-owner reachability oracle AND
     # sends another owner's token). A 404 (not 403) so it can't confirm the name.
-    owner_filter = goal_owner_filter(request)
+    owner_filter = _request_identity(request)
     if rec is None or (owner_filter is not None and rec.get("owner", "") != owner_filter):
         raise HTTPException(status_code=404, detail="no such connection")
     probe_revision = str(rec.get("revision") or "")
@@ -1855,7 +2051,7 @@ async def delete_connection_endpoint(request: Request, name: str) -> dict:
     require_permission(request, "admin")  # managing credentials is admin-only
     _require_connections()
     from maverick import connections
-    if not connections.delete_connection(name, owner=goal_owner_filter(request)):
+    if not connections.delete_connection(name, owner=_request_identity(request)):
         raise HTTPException(status_code=404, detail="no connection with that name")
     return {"deleted": connections.normalize_name(name)}
 
@@ -1896,7 +2092,7 @@ async def export_assessments_endpoint(request: Request, format: str = "json") ->
         w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         for r in rows:
-            w.writerow(r)
+            w.writerow({col: _csv_formula_safe(r.get(col, "")) for col in cols})
         return Response(content=buf.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": "attachment; filename=assessments.csv"})
     return JSONResponse({"rows": rows})
@@ -4463,7 +4659,6 @@ async def export_deliverable_csv(request: Request, goal_id: int) -> Response:
     import io as _io
 
     from maverick.deliverable import render_deliverable
-    from maverick.tools.spreadsheet import _neutralize_formula
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
@@ -4486,9 +4681,9 @@ async def export_deliverable_csv(request: Request, goal_id: int) -> Response:
     writer = csv.writer(buf)
     # Neutralize spreadsheet formulas so an opened CSV can't execute injected
     # formula cells (=, +, -, @) in Excel/Sheets.
-    writer.writerow([_neutralize_formula(cell) for cell in rendered.table.headers])
+    writer.writerow([_csv_formula_safe(cell) for cell in rendered.table.headers])
     writer.writerows(
-        [_neutralize_formula(cell) for cell in row] for row in rendered.table.rows
+        [_csv_formula_safe(cell) for cell in row] for row in rendered.table.rows
     )
     return Response(
         content=buf.getvalue(),
@@ -6534,9 +6729,15 @@ async def compliance_report_csv(framework: str = "all") -> Response:
     writer = csv.writer(buf)
     writer.writerow(["framework", "control", "regulation", "status", "detail"])
     for c in checks:
-        writer.writerow([c.framework, c.control, c.regulation, c.status, c.detail])
+        writer.writerow([
+            _csv_formula_safe(value)
+            for value in (c.framework, c.control, c.regulation, c.status, c.detail)
+        ])
     writer.writerow([])
-    writer.writerow(["disclaimer", COMPLIANCE_DISCLAIMER])
+    writer.writerow([
+        _csv_formula_safe("disclaimer"),
+        _csv_formula_safe(COMPLIANCE_DISCLAIMER),
+    ])
     fname = f"lightwork-compliance-{framework}.csv"
     return Response(
         content=buf.getvalue(),

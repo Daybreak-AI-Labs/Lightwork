@@ -96,10 +96,13 @@ def _proxy_principal(request: Request) -> VerifiedPrincipal | None:
     client_host = request.client.host if request.client else ""
     if not proxy_trusts(client_host):
         return None
-    value = (request.headers.get(proxy_header_name(), "") or "").strip()
+    value = request.headers.get(proxy_header_name(), "") or ""
     if not value:
         return None
-    return principal_from_proxy(value)
+    try:
+        return principal_from_proxy(value)
+    except ValueError:
+        return None
 
 
 def _invite_session_principal(request: Request) -> VerifiedPrincipal | None:
@@ -143,10 +146,12 @@ def execution_user_id_from_request(request: Request) -> str | None:
     falling back to ``user:local``.
     """
     principal = getattr(getattr(request, "state", None), "principal", None)
-    sub = str(getattr(principal, "sub", "") or "").strip()
-    if sub:
+    sub = getattr(principal, "sub", "")
+    if isinstance(sub, str) and sub:
         return sub
-    principal_name = str(getattr(principal, "principal", "") or "").strip()
+    principal_name = getattr(principal, "principal", "")
+    if not isinstance(principal_name, str):
+        return None
     if principal_name.startswith("user:") and len(principal_name) > len("user:"):
         return principal_name[len("user:"):]
     return None
@@ -177,8 +182,8 @@ def caller_principal(request: Request) -> str | None:
     principal = getattr(getattr(request, "state", None), "principal", None)
     if principal is None:
         return None
-    name = str(getattr(principal, "principal", "") or "").strip()
-    return name or None
+    name = getattr(principal, "principal", "")
+    return name if isinstance(name, str) and name else None
 
 
 def auth_genuinely_off() -> bool:
@@ -235,7 +240,9 @@ def _pin_tenant_from_principal(request: Request, principal: VerifiedPrincipal) -
 
         if not tenant_by_user_enabled():
             return
-        name = str(getattr(principal, "principal", "") or "").strip()
+        name = getattr(principal, "principal", "")
+        if not isinstance(name, str):
+            name = ""
         if not name or getattr(request.state, "tenant_pin_token", None) is not None:
             return
         request.state.tenant_pin_token = set_tenant(f"api:{name}")
@@ -705,8 +712,8 @@ def websocket_caller_principal(principal: VerifiedPrincipal | None) -> str | Non
     """
     if principal is None:
         return None
-    name = str(getattr(principal, "principal", "") or "").strip()
-    return name or None
+    name = getattr(principal, "principal", "")
+    return name if isinstance(name, str) and name else None
 
 
 def _websocket_same_origin(websocket) -> bool:

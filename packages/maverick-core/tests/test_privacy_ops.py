@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from maverick import privacy_ops
@@ -65,6 +69,19 @@ class TestDpaReview:
         assert "clauses" not in rows[0], "summaries stay light"
         assert privacy_ops.get_dpa_review("../../etc/passwd") is None
 
+    def test_long_actor_labels_remain_collision_resistant(self):
+        common = "user:" + ("a" * 300)
+        first = privacy_ops.review_dpa(
+            "One", GOOD_DPA, reviewed_by=common + "-one",
+        )
+        second = privacy_ops.review_dpa(
+            "Two", GOOD_DPA, reviewed_by=common + "-two",
+        )
+        assert len(first["reviewed_by"]) <= 256
+        assert len(second["reviewed_by"]) <= 256
+        assert first["reviewed_by"] != second["reviewed_by"]
+        assert "#sha256:" in first["reviewed_by"]
+
 
 class TestAiRegistry:
     def test_high_risk_classification_with_signals(self):
@@ -95,7 +112,11 @@ class TestRopa:
             "activity": "Email marketing", "purpose": "Campaigns",
             "data_categories": "Contact data", "retention": "24 months"})
         rid = r["id"]
-        privacy_ops.upsert_ropa({"retention": "12 months"}, ropa_id=rid)
+        privacy_ops.upsert_ropa(
+            {"retention": "12 months"},
+            ropa_id=rid,
+            expected_revision=r["revision"],
+        )
         rows = privacy_ops.export_ropa_art30()
         row = next(x for x in rows if x["id"] == rid)
         assert row["retention"] == "12 months"
@@ -120,6 +141,63 @@ class TestRopa:
 
     def test_draft_from_unknown_assessment_is_none(self):
         assert privacy_ops.draft_ropa_from_assessment("nope") is None
+
+    def test_atomic_partial_updates_and_stale_revision_cas(self, monkeypatch):
+        import maverick.audit as audit
+
+        monkeypatch.setattr(audit, "record", lambda *a, **k: True)
+        created = privacy_ops.upsert_ropa({
+            "activity": "Payroll", "purpose": "Pay employees",
+        })
+        assert created is not None
+        rid = created["id"]
+        initial_revision = created["revision"]
+
+        updates = [
+            ("retention", {"retention": "7 years"}),
+            ("controller", {"controller": "Acme Ltd"}),
+        ]
+
+        def attempt(item):
+            label, payload = item
+            try:
+                return label, privacy_ops.upsert_ropa(
+                    payload,
+                    ropa_id=rid,
+                    expected_revision=initial_revision,
+                )
+            except privacy_ops.RecordConflict:
+                return label, None
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(attempt, updates))
+
+        assert sum(record is not None for _, record in outcomes) == 1
+
+        final = next(r for r in privacy_ops.list_ropa() if r["id"] == rid)
+        assert final["revision"] == initial_revision + 1
+        losing_label = next(label for label, record in outcomes if record is None)
+        losing_payload = dict(updates)[losing_label]
+        retried = privacy_ops.upsert_ropa(
+            losing_payload,
+            ropa_id=rid,
+            expected_revision=final["revision"],
+        )
+        assert retried is not None
+        assert retried["retention"] == "7 years"
+        assert retried["controller"] == "Acme Ltd"
+        assert retried["revision"] == initial_revision + 2
+        with pytest.raises(ValueError, match="revision is required"):
+            privacy_ops.upsert_ropa(
+                {"purpose": "unversioned overwrite"},
+                ropa_id=rid,
+            )
+        with pytest.raises(privacy_ops.RecordConflict):
+            privacy_ops.upsert_ropa(
+                {"purpose": "stale overwrite"},
+                ropa_id=rid,
+                expected_revision=initial_revision,
+            )
 
 
 class TestDsar:
@@ -147,15 +225,373 @@ class TestDsar:
         listed = privacy_ops.list_dsars()
         assert [x["status"] for x in listed if x["id"] == r["id"]] == ["fulfilled"]
 
-    def test_erasure_fulfillment_is_never_destructive_from_the_api(self):
-        r = privacy_ops.open_dsar("jordan@example.com", "erasure",
-                                  channel="email")
+    def test_erasure_fulfillment_is_structured_not_shell_text(self):
+        subject = "jordan@example.com & calc.exe | whoami > owned.txt"
+        channel = "email & echo %COMSPEC% ^ !PATH!"
+        r = privacy_ops.open_dsar(subject, "erasure", channel=channel)
         ready = privacy_ops.fulfill_dsar(r["id"])
         assert ready["status"] == "awaiting_erasure"
-        assert ready["fulfillment"]["erase_command"].startswith(
-            "maverick erase --user jordan@example.com")
+        handoff = ready["fulfillment"]
+        assert handoff["erase_argv"] == [
+            "maverick", "erase", "--user", subject, "--channel", channel,
+        ]
+        assert "erase_command" not in handoff
+        assert subject not in handoff["operator_instruction"]
+        assert "shell command" in handoff["operator_instruction"]
         closed = privacy_ops.close_dsar(r["id"], closed_by="privacy-lead")
         assert closed["status"] == "closed"
+
+    def test_concurrent_fulfillment_exports_exactly_once(self, monkeypatch):
+        import maverick.audit as audit
+        from maverick import dsar
+
+        monkeypatch.setattr(audit, "record", lambda *a, **k: True)
+        calls = 0
+        calls_lock = threading.Lock()
+
+        def fake_export(user_id, *, channel=None, tenant=None):
+            nonlocal calls
+            with calls_lock:
+                calls += 1
+            time.sleep(0.03)
+            return {
+                "subject": {"user_id": user_id, "channel": channel},
+                "tenant": tenant,
+                "counts": {"facts": 1},
+            }
+
+        monkeypatch.setattr(dsar, "export_subject_data", fake_export)
+        opened = privacy_ops.open_dsar(
+            "jordan@example.com", "access", channel="email",
+            opened_by="user:alice",
+        )
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(
+                lambda _: privacy_ops.fulfill_dsar(
+                    opened["id"], fulfilled_by="user:alice",
+                ),
+                range(8),
+            ))
+
+        assert calls == 1
+        assert all(result is not None for result in results)
+        assert {r["status"] for r in results if r is not None} == {"fulfilled"}
+        assert len({r["fulfillment"]["export_path"] for r in results
+                    if r is not None}) == 1
+        stored = privacy_ops.list_dsars()[0]
+        assert stored["revision"] == opened["revision"] + 1
+        assert "_audit_pending" not in stored
+
+    def test_planted_or_cross_subject_export_is_regenerated(self, monkeypatch):
+        import maverick.audit as audit
+        from maverick import dsar
+        from maverick.file_lock import atomic_write_text, ensure_private_directory
+        from maverick.paths import data_dir
+
+        monkeypatch.setattr(audit, "record", lambda *a, **k: True)
+        calls = []
+
+        def fake_export(user_id, *, channel=None, tenant=None):
+            calls.append((user_id, channel, tenant))
+            return {
+                "subject": {"user_id": user_id, "channel": channel},
+                "tenant": tenant,
+                "counts": {"facts": 1},
+            }
+
+        monkeypatch.setattr(dsar, "export_subject_data", fake_export)
+        first = privacy_ops.open_dsar("alice", "access", channel="email")
+        out_dir = ensure_private_directory(data_dir("dsar_requests") / "exports")
+        first_path = out_dir / f"{first['id']}-export.json"
+        atomic_write_text(first_path, "{}", mode=0o600)
+        first_done = privacy_ops.fulfill_dsar(first["id"])
+        assert first_done is not None and first_done["status"] == "fulfilled"
+        assert calls == [("alice", "email", None)]
+
+        second = privacy_ops.open_dsar("bob", "access", channel="teams")
+        second_path = out_dir / f"{second['id']}-export.json"
+        atomic_write_text(
+            second_path,
+            first_path.read_text(encoding="utf-8"),
+            mode=0o600,
+        )
+        second_done = privacy_ops.fulfill_dsar(second["id"])
+        assert second_done is not None and second_done["status"] == "fulfilled"
+        assert calls[-1] == ("bob", "teams", None)
+        artifact = json.loads(second_path.read_text(encoding="utf-8"))
+        assert artifact["subject"] == {"user_id": "bob", "channel": "teams"}
+        assert artifact["_lightwork_export"]["intent"]["request_id"] == second["id"]
+        assert len(second_done["fulfillment"]["artifact_sha256"]) == 64
+
+    def test_crash_after_artifact_write_reuses_bound_export(self, monkeypatch):
+        import maverick.audit as audit
+        from maverick import dsar
+
+        monkeypatch.setattr(audit, "record", lambda *a, **k: True)
+        calls = 0
+
+        def fake_export(user_id, *, channel=None, tenant=None):
+            nonlocal calls
+            calls += 1
+            return {
+                "subject": {"user_id": user_id, "channel": channel},
+                "tenant": tenant,
+                "counts": {"facts": 1},
+            }
+
+        monkeypatch.setattr(dsar, "export_subject_data", fake_export)
+        opened = privacy_ops.open_dsar("alice", "access", channel="email")
+        original_write = privacy_ops._RecordStore._write_path
+
+        def crash_after_artifact(
+            cls, path, record, previous, *, bump_revision=True,
+        ):
+            if path.stem == opened["id"] and record.get("status") == "fulfilled":
+                raise OSError("simulated crash before record commit")
+            return original_write(
+                path,
+                record,
+                previous,
+                bump_revision=bump_revision,
+            )
+
+        with monkeypatch.context() as crash:
+            crash.setattr(
+                privacy_ops._RecordStore,
+                "_write_path",
+                classmethod(crash_after_artifact),
+            )
+            with pytest.raises(OSError, match="simulated crash"):
+                privacy_ops.fulfill_dsar(opened["id"])
+
+        assert calls == 1
+        assert privacy_ops._DSAR.load(opened["id"])["status"] == "open"
+        recovered = privacy_ops.fulfill_dsar(opened["id"])
+        assert recovered is not None and recovered["status"] == "fulfilled"
+        assert calls == 1
+        assert Path(recovered["fulfillment"]["export_path"]).is_file()
+
+
+def test_audit_outbox_retries_without_revision_churn(monkeypatch):
+    import maverick.audit as audit
+
+    monkeypatch.setattr(audit, "record", lambda *a, **k: False)
+    created = privacy_ops.review_dpa(
+        "Acme", GOOD_DPA, reviewed_by="user:alice",
+    )
+    revision = created["revision"]
+    pending = created.get("_audit_pending")
+    assert isinstance(pending, list) and len(pending) == 1
+    event_id = pending[0]["event_id"]
+
+    captured = []
+
+    def accept(kind, **payload):
+        captured.append((kind, payload))
+        return True
+
+    monkeypatch.setattr(audit, "record", accept)
+    assert privacy_ops.retry_pending_audits() == 1
+    stored = privacy_ops.get_dpa_review(created["id"])
+    assert stored is not None
+    assert stored["revision"] == revision
+    assert "_audit_pending" not in stored
+    assert captured[0][1]["event_id"] == event_id
+    assert captured[0][1]["revision"] == revision
+    assert captured[0][1]["status"] == "pending_review"
+    assert len(captured[0][1]["record_sha256"]) == 64
+    assert captured[0][1]["occurred_at"] > 0
+    assert privacy_ops.retry_pending_audits() == 0
+    assert privacy_ops.get_dpa_review(created["id"])["revision"] == revision
+
+
+def test_privacy_store_refuses_linked_root(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    root = tmp_path / "dpa_reviews"
+    try:
+        root.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable on this host")
+    with pytest.raises(PermissionError, match="aliases"):
+        privacy_ops.review_dpa("Acme", GOOD_DPA)
+    assert list(outside.iterdir()) == []
+
+
+def test_privacy_store_refuses_hardlink_and_mismatched_identity(tmp_path):
+    from maverick.file_lock import atomic_write_text
+
+    created = privacy_ops.review_dpa("Acme", GOOD_DPA)
+    root = tmp_path / "dpa_reviews"
+    source = root / f"{created['id']}.json"
+    linked = root / "DPA-deadbeef00.json"
+    try:
+        linked.hardlink_to(source)
+    except OSError:
+        pytest.skip("hardlinks are unavailable on this host")
+    with pytest.raises(PermissionError, match="single-link"):
+        privacy_ops._DPA.load(created["id"])
+    linked.unlink()
+
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload["id"] = "DPA-deadbeef00"
+    atomic_write_text(source, json.dumps(payload), mode=0o600)
+    with pytest.raises(PermissionError, match="identity"):
+        privacy_ops._DPA.load(created["id"])
+
+
+def test_privacy_store_rejects_malformed_filename(tmp_path):
+    from maverick.file_lock import atomic_write_text, ensure_private_directory
+
+    root = ensure_private_directory(tmp_path / "dsar_requests")
+    malformed = root / "DSAR-attacker!.json"
+    atomic_write_text(
+        malformed,
+        json.dumps({"id": "DSAR-attacker!", "status": "open"}),
+        mode=0o600,
+    )
+    with pytest.raises(PermissionError, match="identity"):
+        privacy_ops._DSAR.list()
+
+
+def test_privacy_handle_read_does_not_follow_swap_to_secret(tmp_path, monkeypatch):
+    created = privacy_ops.review_dpa("Acme", GOOD_DPA)
+    record_path = tmp_path / "dpa_reviews" / f"{created['id']}.json"
+    secret = tmp_path / "outside-secret.json"
+    secret.write_text(
+        json.dumps({"id": created["id"], "vendor": "DO NOT DISCLOSE"}),
+        encoding="utf-8",
+    )
+    secret.chmod(0o600)
+    probe = tmp_path / "symlink-probe"
+    try:
+        probe.symlink_to(secret)
+        probe.unlink()
+    except OSError:
+        pytest.skip("symlinks are unavailable on this host")
+
+    real_open = privacy_ops.os.open
+    swapped = False
+
+    def swapping_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal swapped
+        candidate = Path(path)
+        if not swapped and candidate.name == record_path.name:
+            swapped = True
+            record_path.unlink()
+            record_path.symlink_to(secret)
+        if dir_fd is None:
+            return real_open(path, flags, mode)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(privacy_ops.os, "open", swapping_open)
+    try:
+        result = privacy_ops._DPA.load(created["id"])
+    except PermissionError:
+        # Windows exposes the path/handle mismatch directly; POSIX O_NOFOLLOW
+        # may instead be normalized to an unreadable record. Both are a
+        # fail-closed outcome, provided the outside payload is never returned.
+        result = None
+    assert result is None or result.get("vendor") != "DO NOT DISCLOSE"
+    assert swapped is True
+
+
+def test_audit_outbox_is_at_least_once_with_stable_event_id(monkeypatch):
+    import maverick.audit as audit
+
+    monkeypatch.setattr(audit, "record", lambda *a, **k: False)
+    created = privacy_ops.review_dpa("Acme", GOOD_DPA, reviewed_by="user:alice")
+    event_id = created["_audit_pending"][0]["event_id"]
+    captured = []
+    monkeypatch.setattr(
+        audit,
+        "record",
+        lambda kind, **payload: captured.append(payload["event_id"]) or True,
+    )
+    original_write = privacy_ops._RecordStore._write_path
+
+    def crash_before_clear(cls, path, record, previous, *, bump_revision=True):
+        if not bump_revision:
+            raise OSError("simulated crash after signed append")
+        return original_write(
+            path, record, previous, bump_revision=bump_revision,
+        )
+
+    with monkeypatch.context() as crash:
+        crash.setattr(
+            privacy_ops._RecordStore,
+            "_write_path",
+            classmethod(crash_before_clear),
+        )
+        with pytest.raises(OSError, match="simulated crash"):
+            privacy_ops.retry_pending_audits()
+    assert privacy_ops.retry_pending_audits() == 1
+    assert captured == [event_id, event_id]
+
+
+def test_audit_retry_limit_bounds_failed_attempts(monkeypatch):
+    import maverick.audit as audit
+
+    calls = 0
+
+    def unavailable(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return False
+
+    monkeypatch.setattr(audit, "record", unavailable)
+    for index in range(5):
+        privacy_ops.review_dpa(f"Vendor {index}", GOOD_DPA)
+    original_read = privacy_ops._DPA._read_path
+    reads = 0
+
+    def counted_read(path):
+        nonlocal reads
+        reads += 1
+        return original_read(path)
+
+    monkeypatch.setattr(privacy_ops._DPA, "_read_path", counted_read)
+    calls = 0
+    assert privacy_ops.retry_pending_audits(limit=2) == 0
+    assert calls == 2
+    assert reads == 2
+
+
+def test_audit_retry_cursor_rotates_past_nonpending_records(monkeypatch):
+    import maverick.audit as audit
+
+    monkeypatch.setattr(privacy_ops, "_AUDIT_RETRY_CURSORS", {})
+    monkeypatch.setattr(privacy_ops, "_AUDIT_RETRY_STORE_OFFSET", 0)
+    captured = []
+    monkeypatch.setattr(
+        audit,
+        "record",
+        lambda kind, **payload: captured.append(payload["event_id"]) or True,
+    )
+    privacy_ops._DPA.save({
+        "id": "DPA-0000000000",
+        "status": "pending_review",
+        "created_at": 1,
+    })
+    privacy_ops._DPA.save({
+        "id": "DPA-1111111111",
+        "status": "pending_review",
+        "created_at": 2,
+        "_audit_pending": [{
+            "event_id": "stable-event-id",
+            "action": "create",
+            "actor": "system",
+            "prepared_at": 1.0,
+        }],
+    })
+
+    # The first one-record pass visits a record with no outbox receipt. The
+    # persistent filename/store cursors make the next one-record pass advance
+    # rather than rescanning that lexical prefix forever.
+    assert privacy_ops.retry_pending_audits(limit=1) == 0
+    assert captured == []
+    assert privacy_ops.retry_pending_audits(limit=1) == 1
+    assert captured == ["stable-event-id"]
 
 
 class TestDepthHooks:
@@ -222,6 +658,33 @@ class TestDepthHooks:
         with pytest.raises(ValueError, match="cannot extract text"):
             privacy_ops.review_dpa_from_document(
                 "Acme Corp", "msgraph", "scan", document_name="scan.pdf")
+
+    def test_docx_zip_bomb_is_rejected_before_entry_read(self, monkeypatch):
+        import io
+        import zipfile
+
+        buf = io.BytesIO()
+        oversized = b"<w:document>" + (
+            b"A" * privacy_ops._MAX_DOCX_DOCUMENT_XML_BYTES
+        ) + b"</w:document>"
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("word/document.xml", oversized)
+
+        opened = False
+        original_open = zipfile.ZipFile.open
+
+        def tracked_open(self, *args, **kwargs):
+            nonlocal opened
+            opened = True
+            return original_open(self, *args, **kwargs)
+
+        monkeypatch.setattr(zipfile.ZipFile, "open", tracked_open)
+        assert privacy_ops._document_text(
+            buf.getvalue(),
+            "application/vnd.openxmlformats-officedocument"
+            ".wordprocessingml.document",
+        ) == ""
+        assert opened is False
 
     def test_import_onetrust_ropa_maps_drifting_headers(self):
         csv_text = (

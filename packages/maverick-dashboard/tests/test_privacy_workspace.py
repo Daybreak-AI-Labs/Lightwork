@@ -88,7 +88,10 @@ def test_records_section_renders_all_four_types():
         "CV screener", "ranks job candidates for hiring")
     s = _seed("Acme CRM")
     privacy_ops.draft_ropa_from_assessment(s.id)
-    privacy_ops.open_dsar("jordan@example.com", "erasure", channel="email")
+    dsar = privacy_ops.open_dsar(
+        "jordan@example.com", "erasure", channel="email",
+    )
+    privacy_ops.fulfill_dsar(dsar["id"])
 
     html = client.get("/privacy").text
     # DPA reviews tab: vendor row + the clause-detail trigger.
@@ -103,6 +106,9 @@ def test_records_section_renders_all_four_types():
     # DSAR tab: subject + 30-day clock; erasure needs the operator step.
     assert "jordan@example.com" in html
     assert "d left" in html
+    assert "authenticated operator workflow" in html
+    assert "maverick erase" not in html
+    assert "erase_command" not in html
     # Hero stats grew the records pair.
     assert "open DSARs" in html and "Art. 30 entries" in html
 

@@ -413,7 +413,10 @@ def session_ttl_seconds() -> int:
 
 def mint_local_session(email: str) -> str:
     """A signed session cookie value for ``user:<email>`` (no-IdP mode)."""
+    from maverick.oidc import validate_subject
     from maverick.web_session import sign_session
+
+    email = validate_subject(email)
     now = int(time.time())
     return sign_session({"sub": email, "iat": now, "exp": now + session_ttl_seconds()},
                         local_session_secret())
@@ -433,8 +436,10 @@ def local_session_principal(request):
     payload = verify_session(raw, local_session_secret())
     if not payload:
         return None
-    sub = payload.get("sub")
-    if not isinstance(sub, str) or not sub:
+    from maverick.oidc import validate_subject
+    try:
+        sub = validate_subject(payload.get("sub"))
+    except ValueError:
         return None
     from .session_revocation import is_revoked
     if is_revoked(sub, payload.get("iat")):
