@@ -481,9 +481,71 @@ _PCI_DSS = AssessmentTemplate(
     ),
 )
 
+_TIA = AssessmentTemplate(
+    type="tia",
+    title="Transfer Impact Assessment",
+    framework="Schrems II / EDPB Recommendations 01/2020",
+    description="Assess a cross-border transfer of personal data: the "
+                "destination's legal regime and the supplementary measures "
+                "that make the safeguard hold in practice.",
+    questions=(
+        _q("tia_mechanism", "Transfer mechanism",
+           "Is a valid Chapter V transfer mechanism in place (adequacy, "
+           "SCCs, BCRs)?",
+           "no", "high", "Put SCCs/BCRs in place or rely on an adequacy "
+           "decision before transferring (Art. 44-49)."),
+        _q("tia_mapping", "Transfer mapping",
+           "Are the destination countries, recipients, and onward transfers "
+           "mapped for this flow?",
+           "no", "high", "Map the full transfer chain including "
+           "sub-processors' locations (EDPB step 1)."),
+        _q("tia_local_law", "Destination legal regime",
+           "Has the destination's surveillance/access law been assessed "
+           "against the mechanism (e.g. FISA 702, national security access)?",
+           "no", "high", "Assess problematic legislation in practice; "
+           "document the analysis (EDPB step 3)."),
+        _q("tia_gov_requests", "Government access",
+           "Has the importer disclosed its history of government access "
+           "requests (transparency report or attestation)?",
+           "no", "medium", "Obtain the importer's disclosure history and "
+           "warrant-canary posture."),
+        _q("tia_encryption_transit", "Supplementary measures",
+           "Is the data encrypted in transit with keys held outside the "
+           "destination's jurisdiction where feasible?",
+           "no", "high", "Apply transport encryption with exporter-side "
+           "key custody (EDPB technical measure)."),
+        _q("tia_encryption_rest", "Supplementary measures",
+           "Is the data encrypted or pseudonymised at rest such that the "
+           "importer alone cannot re-identify subjects?",
+           "no", "high", "Encrypt/pseudonymise at rest with keys retained "
+           "by the exporter where the use case allows."),
+        _q("tia_contract_measures", "Contractual measures",
+           "Do the contracts add measures beyond the SCC baseline "
+           "(challenge obligations, notification duties, audits)?",
+           "no", "medium", "Add contractual supplementary measures: "
+           "challenge government requests, notify the exporter, permit "
+           "audits."),
+        _q("tia_necessity", "Data minimisation",
+           "Is the transferred data limited to what the purpose strictly "
+           "requires?",
+           "no", "medium", "Minimise fields and subjects in scope before "
+           "transferring (Art. 5(1)(c))."),
+        _q("tia_reassessment", "Ongoing review",
+           "Is there a trigger to re-assess when the destination's law or "
+           "the transfer changes?",
+           "no", "medium", "Set a review cadence and legal-change trigger "
+           "(EDPB step 6)."),
+        _q("tia_suspension", "Exit path",
+           "Can the transfer be suspended or the data repatriated if the "
+           "safeguard fails?",
+           "no", "high", "Define the suspension/repatriation path before "
+           "relying on the transfer."),
+    ),
+)
+
 TEMPLATES: dict[str, AssessmentTemplate] = {
     t.type: t for t in (
-        _PIA, _AIRA, _VENDOR_RISK,
+        _PIA, _AIRA, _VENDOR_RISK, _TIA,
         _SOX_CONTROL, _FRAUD_RISK, _ITGC, _CREDIT_RISK, _CLOSE_READINESS,
         _HIPAA, _SOC2, _PCI_DSS,
     )

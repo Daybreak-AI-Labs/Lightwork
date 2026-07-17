@@ -898,8 +898,8 @@ def program_report(assessment_types: set | None = None) -> dict:
 
     from .assessment import list_saved
 
-    types = assessment_types or {"pia", "aira", "vendor_risk", "hipaa",
-                                 "soc2", "pci_dss"}
+    types = assessment_types or {"pia", "aira", "vendor_risk", "tia",
+                                 "hipaa", "soc2", "pci_dss"}
     rows = [s for s in list_saved() if s.get("type") in types]
     status = Counter(r["status"] for r in rows)
     residual = Counter(r["residual_risk"] for r in rows)

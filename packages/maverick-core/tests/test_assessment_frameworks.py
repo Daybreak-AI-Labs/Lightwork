@@ -60,3 +60,22 @@ def test_agent_tool_lists_the_new_frameworks():
     out = asyncio.run(tools["list_assessments"].fn({}))
     for atype in NEW:
         assert atype in out
+
+
+def test_tia_template_scores_transfer_posture(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    from maverick.assessment import TEMPLATES, AssessmentSession
+    tpl = TEMPLATES["tia"]
+    assert tpl.framework.startswith("Schrems II")
+    assert len(tpl.questions) == 10
+    s = AssessmentSession(type="tia", subject="EU→US telemetry flow")
+    s.record("tia_mechanism", "yes")
+    s.record("tia_mapping", "yes")
+    s.record("tia_local_law", "no", "FISA 702 exposure not yet analysed")
+    s.record("tia_encryption_transit", "yes")
+    s.record("tia_encryption_rest", "unknown")
+    r = s.evaluate()
+    assert r.inherent_risk == "high"
+    assert r.residual_risk == "high"  # unanalysed regime + unverified crypto
+    ids = {f.question_id for f in r.findings}
+    assert {"tia_local_law", "tia_encryption_rest"} <= ids

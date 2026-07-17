@@ -142,6 +142,7 @@ VOLUME_MIX = [  # (type, count, subject builder)
     ("pia", 120, lambda rnd: f"{rnd.choice(SYSTEMS)} {rnd.choice(PROJECTS)}"),
     ("vendor_risk", 100, lambda rnd: rnd.choice(VENDORS)),
     ("aira", 45, lambda rnd: f"{rnd.choice(SYSTEMS)} AI assist"),
+    ("tia", 25, lambda rnd: f"EU→{rnd.choice(['US', 'IN', 'PH', 'UK', 'SG'])} {rnd.choice(SYSTEMS)} flow"),
     ("hipaa", 30, lambda rnd: f"benefits {rnd.choice(PROJECTS)}"),
     ("soc2", 25, lambda rnd: f"{rnd.choice(SYSTEMS)} controls"),
     ("pci_dss", 20, lambda rnd: f"{rnd.choice(SYSTEMS)} payments"),
