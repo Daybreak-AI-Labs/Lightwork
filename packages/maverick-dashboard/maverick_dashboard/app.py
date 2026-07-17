@@ -1933,6 +1933,24 @@ async def privacy_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "privacy.html", ctx)
 
 
+@app.get("/privacy/report", response_class=HTMLResponse)
+async def privacy_report_page(request: Request) -> HTMLResponse:
+    """The privacy program report: a print-friendly board pack over every
+    register. Same operate floor as the workspace it summarizes."""
+    require_permission(request, "operate")
+    import time as _time
+
+    from maverick import privacy_ops
+    if not privacy_ops.enabled():
+        raise HTTPException(status_code=404,
+                            detail="privacy ops are disabled")
+    report = privacy_ops.program_report()
+    report["generated"] = _time.strftime(
+        "%Y-%m-%d %H:%M", _time.localtime(report["generated_at"]))
+    return templates.TemplateResponse(request, "privacy_report.html",
+                                      {"r": report})
+
+
 @app.get("/finance", response_class=HTMLResponse)
 async def finance_page(request: Request) -> HTMLResponse:
     """The Finance workspace: the same chassis over the finance team's

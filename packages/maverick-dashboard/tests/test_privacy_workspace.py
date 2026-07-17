@@ -181,3 +181,29 @@ def test_template_editor_crud_and_department_catalog():
                        "risk_answer": "yes", "id": "dup"}]})
     assert resp.status_code == 422
     assert client.delete("/api/v1/assess/templates/never").status_code == 404
+
+
+def test_program_report_page_and_api():
+    from maverick import privacy_ops
+    s = _seed("Acme CRM", risky=True)
+    from maverick.assessment import decide_assessment
+    decide_assessment(s.id, "approved", cadence_days=30)
+    privacy_ops.review_dpa("Acme Corp", "audit rights and retention only")
+    privacy_ops.open_dsar("j@example.com", "access")
+    inc = privacy_ops.open_incident("Misdirected batch", severity="high")
+    privacy_ops.decide_incident_notification(inc["id"], True, rationale="x")
+
+    api = client.get("/api/v1/privacy/report").json()
+    assert api["assessments"]["total"] == 1
+    assert api["assessments"]["by_status"]["approved"] == 1
+    assert api["dsar"]["open"] == 1
+    assert api["incidents"]["notified"] == 1
+    assert api["dpa"]["total"] == 1
+    assert api["dpa"]["top_gaps"], "gaps list the missing clauses"
+
+    html = client.get("/privacy/report").text
+    assert "Privacy program report" in html
+    assert "most-missed clause" in html
+    assert "Print / save as PDF" in html
+    # The workspace links to it.
+    assert 'href="/privacy/report"' in client.get("/privacy").text
