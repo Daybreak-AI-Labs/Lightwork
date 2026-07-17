@@ -414,6 +414,65 @@ here.
   via the knowledge plane (`assessments` collection, ingested on every
   `save_session`) when enabled. Advisory only — the human review gate is
   untouched. `[assessments] learn`.
+- **Department workspaces** (dashboard `/privacy` + `/finance`, shared
+  chassis partials) — one workspace pattern per department over the same
+  assessment engine: worklist with the inherent→residual risk pair, aging,
+  follow-ups, client-side filters, hero stats, precedent memory (rows open
+  the full record in the review pop-out), and the framework catalog. Built
+  for program volume: actionable rows first (open work + due re-reviews),
+  capped table with an honest "showing X of N", stats always count
+  everything. Operate floor — records carry answer bodies.
+- **Assessment lifecycle** (`assessment.decide_assessment`, `POST /api/v1/
+  assess/sessions/{id}/decide`) — reviewer decisions (approved/rejected,
+  attributed, audited as `ASSESSMENT_DECIDED`) with a review cadence:
+  approval schedules `next_review_at` (90d/180d/1yr/none from the shared
+  pop-out) and the record comes due — "due for re-review" stat + filter +
+  countdown column in both workspaces. Re-engagement is the existing
+  follow-up loop (needs_more → answered → pending_review → re-decide).
+- **Editable questionnaire templates** (`assessment.save_custom_template`,
+  `GET/PUT/DELETE /api/v1/assess/templates/{type}`, catalog editor on the
+  workspaces) — templates are data an operator edits, not code: a custom
+  template (JSON under the tenant home, department-tagged privacy|finance)
+  WINS over the built-in of the same type; deleting the override restores
+  the built-in, which is never modified. Scoring identical; strict
+  human-readable validation; saves audited (`TEMPLATE_SAVED`).
+- **Privacy ops record types** (`privacy_ops.py`, `/api/v1/privacy/*`,
+  tabs on `/privacy`; `[privacy_ops] enable`, wizard step) — the "nimble
+  OneTrust" data plane, every engine deterministic and explainable:
+  - *DPA reviews* — clause-by-clause GDPR Art. 28(3) verdicts
+    (present/unclear/missing) where every call quotes its matched excerpt;
+    inherent risk from the document's declared exposure, residual falls as
+    clauses are found. Reviews from pasted text, from CONNECTED sources
+    (`/privacy/dpa-documents` search + review-in-place via doc discovery),
+    or from digital PDFs (stdlib extractor: FlateDecode, Tj/TJ/hex
+    operators; scanned PDFs refuse honestly).
+  - *AI systems registry* — EU AI Act tier screening
+    (prohibited/high/limited/minimal) using the Act's own tests (Art. 5,
+    Annex III, Art. 50) with matched signals + tier obligations; a
+    completed AIRA registers its system (`/privacy/ai-systems/
+    from-assessment/{id}`) and attestations ratchet the tier UPWARD only.
+  - *RoPA / data inventory* — Art. 30(1) records; a completed PIA drafts
+    an entry with provenance (`draft_ropa_from_assessment`), OneTrust's
+    RoPA/Data-Mapping CSV export imports with `source="onetrust"`
+    (tolerant of their column drift), `export.csv` produces the register
+    an authority asks for.
+  - *DSAR tracker* — statutory 30-day clock over the REAL machinery:
+    access/portability run `dsar.export_subject_data`; erasure only ever
+    prepares the exact `maverick erase` command (never destructive from
+    the API). Intake from inbound messages: `detect_dsar` classifies the
+    email a subject actually sent (Art. 15/17/20 phrasing), extracts the
+    address, and keeps the matched phrases as provenance.
+  - *Incident register* — Art. 33 72-hour clock from discovery ("past
+    72h" badge while undecided); the notification call stays a documented
+    HUMAN decision both ways (rationale required — Art. 33(5) covers the
+    "no"), attributed and audited. The register never notifies anyone
+    itself.
+- **Workspace history seeder** (`demo/pia-concierge/seed_workspace.py`) —
+  seeds an enterprise year through the real engines: ~436 assessments over
+  14 months across both departments (weighted statuses, cadences with a
+  due-for-re-review queue, varied risk), DPA reviews, the AI registry, a
+  populated Art. 30 register, a DSAR queue with history, and incidents in
+  three states. Reproducible (seeded random), <1s, marker-guarded.
 - **Savings dashboard** (`savings.py`, `maverick savings`, dashboard
   `/savings` + `/api/v1/savings`) — money saved vs the typical human cost,
   from real completed work and the CLIENT's own inputs: fully-loaded human

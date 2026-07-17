@@ -45,6 +45,48 @@ No LLM key and no external accounts needed. State lives in
 in ONE process on purpose: the audit chain's signer requires a single writing
 process — the same shape as `maverick dashboard` itself.
 
+**Make it look like a year of use** (optional, recommended before a pitch):
+
+```bash
+MAVERICK_HOME=demo/pia-concierge/.demo-home python3 demo/pia-concierge/seed_workspace.py
+# PowerShell: cd demo\pia-concierge; $env:MAVERICK_HOME = "$PWD\.demo-home"; python seed_workspace.py
+```
+
+Seeds ~436 assessments over 14 months through the real engines (approved on
+review cadences with a due-for-re-review queue, live backlog, varied risk),
+plus DPA reviews, the AI registry, a populated Art. 30 register, a DSAR queue
+with history, and incidents in three states. Run it BEFORE starting the
+servers or restart them after. Marker-guarded; `--force` adds another batch.
+
+## The Privacy workspace (right window → Govern → Privacy)
+
+The program-of-record view worth showing after (or instead of) the ticket
+flow — everything below runs on real records:
+
+- **Worklist** — every assessment with the inherent→residual risk pair,
+  status, follow-ups, and the re-review countdown; filters for needs-review /
+  awaiting-answers / high-residual / due-for-re-review. The **Review** pop-out
+  approves with a cadence (records come due), rejects, or sends questions
+  back — without leaving the page.
+- **DPA reviews** — paste a vendor's terms (or search connected sources, or a
+  digital PDF) for clause-by-clause Art. 28(3) verdicts where every call
+  quotes its evidence.
+- **AI registry** — EU AI Act tier screening with signals + obligations; a
+  completed AI risk assessment registers its system with an upward-only tier
+  ratchet.
+- **RoPA** — Art. 30 entries drafted from PIAs, imported from a OneTrust CSV
+  export, exported back out as the register an authority asks for.
+- **DSARs** — paste the email a data subject actually sent; the tracker
+  detects the kind (Art. 15/17/20), starts the 30-day clock, runs the real
+  export for access, and only ever *prepares* the erase command.
+- **Incidents** — the Art. 33 72-hour clock, with the notify-or-document
+  decision recorded both ways.
+- **Assessment catalog** — click any framework to edit its questionnaire, or
+  author a new one; custom versions override built-ins until deleted.
+
+`Govern → Finance` is the same chassis over SOX / fraud / ITGC / credit /
+close-readiness — the "one workspace per department" proof.
+
 ## Demo script (~6 minutes)
 
 Two browser windows: **left** = external world (:8890), **right** = Lightwork
