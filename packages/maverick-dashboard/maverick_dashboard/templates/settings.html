@@ -272,9 +272,10 @@
     <p class="muted" style="margin-top: 0;">High-impact tools, off by default. Changes made here apply on the next run and never modify your server's configuration files.</p>
     <form method="post" action="/settings/capabilities">
       {% for c in capabilities %}
-      <label style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0;">
-        <span>{{ c.name|replace('_', ' ')|capitalize }}</span>
-        <input type="checkbox" name="{{ c.name }}"{% if c.enabled %} checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--brand);" />
+      <label style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--hairline);">
+        <span style="flex: 1;">{{ c.name|replace('_', ' ')|capitalize }}
+          {% if c.info %}<br><span class="muted" style="font-size: var(--text-sm); font-weight: normal;">{{ c.info }}</span>{% endif %}</span>
+        <input type="checkbox" name="{{ c.name }}"{% if c.enabled %} checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--brand); flex-shrink: 0;" />
       </label>
       {% endfor %}
       <p style="margin-bottom: 0;"><button type="submit" class="btn btn--primary">Save capabilities</button></p>
@@ -286,8 +287,9 @@
     <p class="muted" style="margin-top: 0;">Agent behaviours that are otherwise on by default.</p>
     <form method="post" action="/settings/features">
       {% for f in features %}
-      <label style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0;">
-        <span>{{ f.name|replace('_', ' ')|capitalize }}</span>
+      <label style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--hairline);">
+        <span style="flex: 1;">{{ f.name|replace('_', ' ')|capitalize }}
+          {% if f.info %}<br><span class="muted" style="font-size: var(--text-sm); font-weight: normal;">{{ f.info }}</span>{% endif %}</span>
         <input type="checkbox" name="{{ f.name }}"{% if f.enabled %} checked{% endif %} style="width: 18px; height: 18px; accent-color: var(--brand);" />
       </label>
       {% endfor %}

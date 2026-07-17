@@ -332,6 +332,29 @@
       <div id="dept-roster">
         <p class="muted" id="dept-loading">Loading departments…</p>
       </div>
+      <dialog id="dept-dialog" aria-labelledby="dept-dlg-title"
+              style="border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 0; width: min(560px, calc(100vw - 2rem)); max-height: min(80vh, 720px); background: var(--bg); color: var(--text); box-shadow: var(--shadow-lg); margin: auto; overflow: hidden;">
+        <div style="display: flex; flex-direction: column; max-height: min(80vh, 720px);">
+        <div style="display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border);">
+          <span class="dept__avatar" id="dept-dlg-avatar"></span>
+          <div style="flex: 1; min-width: 0;">
+            <h3 id="dept-dlg-title" style="margin: 0; font-size: var(--text-lg); text-transform: none; letter-spacing: 0; color: var(--text);"></h3>
+            <div class="muted" id="dept-dlg-sub" style="font-size: var(--text-sm);"></div>
+          </div>
+          <button class="btn btn--ghost" id="dept-dlg-close" aria-label="Close department details">✕</button>
+        </div>
+        <div style="padding: var(--space-4) var(--space-5); overflow-y: auto; flex: 1; min-height: 0;">
+          <p class="muted" id="dept-dlg-charter" style="margin-top: 0;"></p>
+          <div class="muted" style="font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--space-2);">Specialists on this team</div>
+          <ul id="dept-dlg-members" style="margin: 0; padding-inline-start: 1.2rem; text-transform: capitalize;"></ul>
+        </div>
+        <div style="display: flex; gap: var(--space-2); justify-content: flex-end; align-items: center; padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border);">
+          <span class="muted" id="dept-dlg-msg" role="status" aria-live="polite" style="margin-inline-end: auto; font-size: var(--text-sm);"></span>
+          <a class="btn btn--ghost" href="/workforce" style="font-size: var(--text-sm);">Open Workforce ↗</a>
+          <button class="btn btn--primary" id="dept-dlg-deploy" type="button">Deploy team</button>
+        </div>
+        </div>
+      </dialog>
     </div>
   </div>
 
@@ -615,14 +638,75 @@
             + '<div class="dept__sub">' + esc(d.charter || (n + ' specialists')) + '</div></span></div>'
             + (preview ? '<p class="dept__preview">' + esc(preview) + '</p>' : '')
             + '<div class="dept__foot">' + deploy
-            + '<a class="btn btn--ghost" href="/workforce" style="font-size:var(--text-sm);">View</a></div>'
+            + '<button type="button" class="btn btn--ghost dep-details" data-key="' + esc(d.key) + '" style="font-size:var(--text-sm);">Details</button></div>'
             + '<div class="dep-msg muted" role="status" aria-live="polite" style="font-size:var(--text-xs);margin-top:var(--space-2);"></div>'
             + '</div>';
         }).join('');
       }
+      var byKey = {};
       fetch('/api/v1/departments').then(function (r) { return r.ok ? r.json() : []; })
-        .then(function (list) { render(Array.isArray(list) ? list : []); })
+        .then(function (list) {
+          list = Array.isArray(list) ? list : [];
+          list.forEach(function (d) { byKey[d.key] = d; });
+          render(list);
+        })
         .catch(function () { host.innerHTML = '<p class="muted">Could not load departments.</p>'; });
+
+      // Department details pop-out: the full roster + charter, deploy in
+      // place — no page jump.
+      var dlg = document.getElementById('dept-dialog');
+      var dlgDeploy = document.getElementById('dept-dlg-deploy');
+      var dlgKey = null;
+      function openDept(key) {
+        var d = byKey[key];
+        if (!d || !dlg) return;
+        dlgKey = key;
+        document.getElementById('dept-dlg-avatar').textContent = initials(d.title);
+        document.getElementById('dept-dlg-title').textContent = d.title || key;
+        var members = d.members || [];
+        var n = members.length || d.headcount || 0;
+        document.getElementById('dept-dlg-sub').textContent =
+          n + ' specialist' + (n === 1 ? '' : 's') + (d.entitled ? '' : ' · paid add-on');
+        document.getElementById('dept-dlg-charter').textContent = d.charter || '';
+        var ul = document.getElementById('dept-dlg-members');
+        ul.innerHTML = '';
+        members.forEach(function (m) {
+          var li = document.createElement('li');
+          li.textContent = memberLabel(m, d.key);
+          ul.appendChild(li);
+        });
+        if (!members.length) {
+          var li = document.createElement('li');
+          li.className = 'muted';
+          li.textContent = 'Roster loads on deploy.';
+          ul.appendChild(li);
+        }
+        document.getElementById('dept-dlg-msg').textContent = '';
+        dlgDeploy.disabled = false;
+        dlg.showModal();
+      }
+      host.addEventListener('click', function (e) {
+        var det = e.target.closest('.dep-details');
+        if (det) { openDept(det.dataset.key); return; }
+        var card = e.target.closest('.dept');
+        if (card && !e.target.closest('button') && !e.target.closest('a')) openDept(card.dataset.key);
+      });
+      document.getElementById('dept-dlg-close').addEventListener('click', function () { dlg.close(); });
+      dlgDeploy.addEventListener('click', function () {
+        if (!dlgKey) return;
+        var msg = document.getElementById('dept-dlg-msg');
+        dlgDeploy.disabled = true;
+        msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…';
+        fetch('/api/v1/departments/' + encodeURIComponent(dlgKey) + '/deploy',
+              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+          .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
+          .then(function (res) {
+            dlgDeploy.disabled = false;
+            if (res.ok) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team deployed as a fleet.'; }
+            else { msg.style.color = 'var(--danger)'; msg.textContent = (res.j && res.j.detail) || ('Could not deploy (' + res.status + ').'); }
+          })
+          .catch(function () { dlgDeploy.disabled = false; msg.style.color = 'var(--danger)'; msg.textContent = 'Could not deploy — check your connection.'; });
+      });
 
       host.addEventListener('click', function (e) {
         var btn = e.target.closest('.dep-deploy');

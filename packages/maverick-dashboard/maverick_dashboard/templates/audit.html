@@ -112,7 +112,15 @@
 
   <div class="panel">
     {% if events %}
-      <table>
+      <div style="display: flex; gap: var(--space-3); align-items: end; margin-bottom: var(--space-3); flex-wrap: wrap;">
+        <label style="flex: 1 1 280px;">
+          <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">filter shown events (instant)</div>
+          <input type="text" id="audit-quick" placeholder="type to filter — kind, agent, case, subject, any field"
+                 style="width: 100%; padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
+        </label>
+        <span class="muted" id="audit-quick-count" role="status" aria-live="polite" style="font-size: var(--text-sm); padding-bottom: 0.5rem;"></span>
+      </div>
+      <table id="audit-table">
         <thead>
           <tr><th scope="col">ts</th><th scope="col">kind</th><th scope="col">agent</th><th scope="col">goal</th><th scope="col">detail</th></tr>
         </thead>
@@ -167,4 +175,27 @@
       </p>
     {% endif %}
   </div>
+<script>
+  // Instant filter over the loaded events — matches any text in the row
+  // (kind, agent, goal, every detail field). Complements the server-side
+  // day/kind loaders above without another round trip.
+  (function () {
+    const input = document.getElementById('audit-quick');
+    const count = document.getElementById('audit-quick-count');
+    const table = document.getElementById('audit-table');
+    if (!input || !table) return;
+    const rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
+    function apply() {
+      const q = input.value.trim().toLowerCase();
+      let shown = 0;
+      rows.forEach(function (tr) {
+        const hit = !q || tr.textContent.toLowerCase().indexOf(q) !== -1;
+        tr.style.display = hit ? '' : 'none';
+        if (hit) shown++;
+      });
+      count.textContent = q ? (shown + ' of ' + rows.length + ' events') : '';
+    }
+    input.addEventListener('input', apply);
+  })();
+</script>
 {% endblock %}

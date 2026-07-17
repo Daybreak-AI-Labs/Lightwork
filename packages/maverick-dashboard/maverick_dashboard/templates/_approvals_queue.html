@@ -84,6 +84,19 @@
       btn.type = 'button';
       btn.addEventListener('click', function () { window.mvAssessmentReview.open(m[1]); });
       cell.insertBefore(btn, cell.firstChild);
+      tr.dataset.assessment = m[1];
+    });
+
+    // One decision, not two clicks: approving/rejecting the assessment in
+    // the pop-out decides the linked approval-gate row through the queue's
+    // own (audited) approve/deny path.
+    document.addEventListener('mv-assessment-decided', function (ev) {
+      const d = ev.detail || {};
+      const row = document.querySelector('tr[data-assessment="' + d.id + '"]');
+      if (!row) return;
+      const action = d.decision === 'approved' ? 'approve' : 'deny';
+      const btn = row.querySelector('button.approval-btn[data-action="' + action + '"]');
+      if (btn && !btn.disabled) btn.click();
     });
   })();
 
