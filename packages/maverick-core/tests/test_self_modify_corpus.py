@@ -10,7 +10,10 @@ import subprocess
 from pathlib import Path
 
 from maverick.self_modify_corpus import CodeEvalCorpus, evaluate_on_corpus
-from maverick.self_modify_eval import AuthenticatedTestCounts
+from maverick.self_modify_eval import (
+    AuthenticatedTestCounts,
+    AuthenticatedTestEvidence,
+)
 
 IDS = tuple(f"tests/test_x.py::test_{i}" for i in range(6))
 
@@ -32,6 +35,8 @@ class _FakeSB:
     the command targets the held-out subset."""
     host_visible_fs = False
     authenticated_test_results = True
+    test_evidence_protocol = "maverick.test-evidence.v1"
+    test_evidence_authority = "corpus-test-controller-key-1"
 
     def __init__(self, workdir: Path, is_candidate: bool,
                  held_out: set[str], scenario: str, *,
@@ -44,6 +49,7 @@ class _FakeSB:
         self.image = image
         self.toolchain_version = toolchain_version
         self.calls: list[str] = []
+        self.requests = []
         self.closed = False
 
     def exec(self, cmd, timeout=None):
@@ -71,6 +77,14 @@ class _FakeSB:
                 exit_code = 1 if self.scenario == "missing_env" else 0
             return R()
 
+        raise AssertionError(
+            "test commands must use the authenticated controller channel",
+        )
+
+    def exec_authenticated_tests(self, request, timeout=None):
+        cmd = request.command
+        self.calls.append(cmd)
+        self.requests.append(request)
         is_out = any(i in cmd for i in self.held_out)
         # baseline: 1/2 pass on both splits.
         passed, failed = 1, 1
@@ -83,21 +97,13 @@ class _FakeSB:
                 passed, failed = (2, 0) if not is_out else (1, 1)  # held-in only
             elif self.scenario == "attrition" and is_out:
                 passed, failed = 1, 0            # a held-out test stopped running
-        text = "" if self.scenario == "no_results" else (
-            f"{passed} passed, {failed} failed in 0.1s" if failed else
-            f"{passed} passed in 0.1s")
-        if self.scenario == "spoof":
-            text = "999999 passed, 0 failed\n" + text
-
-        class R:
-            stdout = text
-            stderr = ""
-            exit_code = 0 if failed == 0 else 1
-            authenticated_test_counts = (
-                None if self.scenario == "no_results"
-                else AuthenticatedTestCounts(passed, failed)
-            )
-        return R()
+        if self.scenario == "no_results":
+            return object()
+        return AuthenticatedTestEvidence.for_request(
+            request,
+            authority=self.test_evidence_authority,
+            counts=AuthenticatedTestCounts(passed, failed),
+        )
 
     def close(self):
         self.closed = True
@@ -295,6 +301,30 @@ class TestEvaluateOnCorpus:
         assert sandbox_changed.ok is True and toolchain_changed.ok is True
         assert first.evidence_scope != sandbox_changed.evidence_scope
         assert first.evidence_scope != toolchain_changed.evidence_scope
+
+    def test_requests_bind_distinct_baseline_and_candidate_subjects_and_contexts(
+        self, tmp_path,
+    ):
+        src = _seed(tmp_path)
+        corpus = CodeEvalCorpus(test_ids=IDS)
+        _, held_out = corpus.split()
+        created: list[_FakeSB] = []
+        result = evaluate_on_corpus(
+            _patch(), src=src, workroot=tmp_path / "w", corpus=corpus,
+            sandbox_factory=_factory(set(held_out), "genuine", created),
+            sandbox_policy_identity="a" * 64,
+        )
+        assert result.ok is True
+        baseline = next(sb for sb in created if not sb.is_candidate)
+        candidate = next(sb for sb in created if sb.is_candidate)
+        assert baseline.requests and candidate.requests
+        assert len({request.subject_sha256 for request in baseline.requests}) == 1
+        assert len({request.subject_sha256 for request in candidate.requests}) == 1
+        assert baseline.requests[0].subject_sha256 != candidate.requests[0].subject_sha256
+        assert (
+            baseline.requests[0].execution_context_sha256
+            != candidate.requests[0].execution_context_sha256
+        )
 
     def test_mismatched_sandbox_identity_refuses_comparison(self, tmp_path):
         src = _seed(tmp_path)

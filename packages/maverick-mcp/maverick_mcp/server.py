@@ -68,6 +68,24 @@ def _credential_fingerprint(credential: str) -> str:
         hashlib.sha256,
     ).hexdigest()
 
+
+@contextlib.contextmanager
+def _canonical_world():
+    """Yield the configured, tenant-aware world and release only owned handles.
+
+    ``open_world`` is the single backend-selection boundary for SQLite and
+    Postgres.  A no-path SQLite world may be owned by the process-wide tenant
+    cache, while a Postgres world is normally a per-call handle; delegating the
+    teardown decision to ``close_world_if_owned`` preserves both contracts.
+    """
+    from maverick.world_model import close_world_if_owned, open_world
+
+    world = open_world()
+    try:
+        yield world
+    finally:
+        close_world_if_owned(world)
+
 def _configure_mcp_logging() -> None:
     """Apply Lightwork's shared logging config (honors MAVERICK_LOG_FORMAT=json,
     the correlation-id context filter, and secret scrubbing). Logs to STDERR —
@@ -633,8 +651,6 @@ class MCPServer:
             # an authorization oracle for a scoped caller.
             raise _ProtocolError(-32602, f"unknown resource path: {uri}")
         path = uri[len("maverick://"):]
-        from maverick.world_model import DEFAULT_DB, WorldModel
-        wm = WorldModel(DEFAULT_DB)
 
         if path == "goals":
             owner = self._connector_principal(
@@ -642,10 +658,11 @@ class MCPServer:
                 caller_trust_principal,
                 capability,
             )
-            goals = (
-                wm.list_goals(owner=owner)
-                if owner is not None else wm.list_goals()
-            )
+            with _canonical_world() as wm:
+                goals = (
+                    wm.list_goals(owner=owner)
+                    if owner is not None else wm.list_goals()
+                )
             data = [
                 {"id": g.id, "status": g.status, "title": g.title}
                 for g in goals[-20:]
@@ -1378,19 +1395,18 @@ class MCPServer:
 
         Re-derives from the world model so the text handlers in _dispatch_tool
         stay untouched; returns None for tools without an outputSchema."""
-        from maverick.world_model import WorldModel
         if name == "maverick_status":
-            w = WorldModel()
-            owner = self._current_object_principal()
-            goals = (
-                w.list_goals(owner=owner)
-                if owner is not None else w.list_goals()
-            )
-            goal_ids = {goal.id for goal in goals}
-            questions = [
-                question for question in w.open_questions()
-                if owner is None or question.goal_id in goal_ids
-            ]
+            with _canonical_world() as w:
+                owner = self._current_object_principal()
+                goals = (
+                    w.list_goals(owner=owner)
+                    if owner is not None else w.list_goals()
+                )
+                goal_ids = {goal.id for goal in goals}
+                questions = [
+                    question for question in w.open_questions()
+                    if owner is None or question.goal_id in goal_ids
+                ]
             return {
                 "goals": [
                     {"id": g.id, "status": g.status, "title": g.title}
@@ -1410,7 +1426,8 @@ class MCPServer:
                 ],
             }
         if name == "maverick_facts_get":
-            return {"facts": dict(WorldModel().get_facts())}
+            with _canonical_world() as w:
+                return {"facts": dict(w.get_facts())}
         return None
 
     @staticmethod
@@ -1437,7 +1454,6 @@ class MCPServer:
         from maverick.llm import LLM
         from maverick.orchestrator import run_goal_sync
         from maverick.sandbox import build_sandbox
-        from maverick.world_model import WorldModel
         title = args["title"]
         description = args.get("description", "")
         reasons = self._shield_scan_reason(f"{title}\n{description}", output=False)
@@ -1465,96 +1481,97 @@ class MCPServer:
             ceiling=os.environ.get("MAVERICK_MCP_MAX_DEPTH", 3),
         )
         budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall)
-        world = WorldModel()
-        goal_id = world.create_goal(
-            title,
-            description,
-            owner=self._current_object_principal() or "",
-        )
-        llm = LLM()
-        sandbox = build_sandbox()
-        run_kwargs = {"sandbox": sandbox, "max_depth": max_depth}
-        if capability is not None:
-            run_kwargs["capability"] = capability
-        answer = run_goal_sync(llm, world, budget, goal_id, **run_kwargs)
+        with _canonical_world() as world:
+            goal_id = world.create_goal(
+                title,
+                description,
+                owner=self._current_object_principal() or "",
+            )
+            llm = LLM()
+            sandbox = build_sandbox()
+            run_kwargs = {"sandbox": sandbox, "max_depth": max_depth}
+            if capability is not None:
+                run_kwargs["capability"] = capability
+            answer = run_goal_sync(llm, world, budget, goal_id, **run_kwargs)
         self._structured_override = {"goal_id": goal_id, "answer": answer}
         return answer
 
     def _tool_status(self) -> str:
-        from maverick.world_model import WorldModel
-        w = WorldModel()
-        owner = self._current_object_principal()
-        goals = (
-            w.list_goals(owner=owner)
-            if owner is not None else w.list_goals()
-        )
-        if not goals:
-            return "no goals yet"
-        lines = [f"#{g.id} [{g.status}] {g.title}" for g in goals[-10:]]
-        goal_ids = {goal.id for goal in goals}
-        questions = [
-            question for question in w.open_questions()
-            if owner is None or question.goal_id in goal_ids
-        ]
-        for q in questions:
-            lines.append(f"  open question #{q.id} (goal {q.goal_id}): {q.question}")
-        return "\n".join(lines)
+        with _canonical_world() as w:
+            owner = self._current_object_principal()
+            goals = (
+                w.list_goals(owner=owner)
+                if owner is not None else w.list_goals()
+            )
+            if not goals:
+                return "no goals yet"
+            lines = [f"#{g.id} [{g.status}] {g.title}" for g in goals[-10:]]
+            goal_ids = {goal.id for goal in goals}
+            questions = [
+                question for question in w.open_questions()
+                if owner is None or question.goal_id in goal_ids
+            ]
+            for q in questions:
+                lines.append(
+                    f"  open question #{q.id} (goal {q.goal_id}): {q.question}"
+                )
+            return "\n".join(lines)
 
     def _tool_resume(self, args: dict, *, capability=None) -> str:
         from maverick.budget import Budget
         from maverick.llm import LLM
         from maverick.orchestrator import run_goal_sync
         from maverick.sandbox import build_sandbox
-        from maverick.world_model import WorldModel
-        w = WorldModel()
-        owner = self._current_object_principal()
-        goal_id = args.get("goal_id")
-        if goal_id is None:
-            if owner is None:
-                g = w.active_goal()
+        with _canonical_world() as w:
+            owner = self._current_object_principal()
+            goal_id = args.get("goal_id")
+            if goal_id is None:
+                if owner is None:
+                    g = w.active_goal()
+                else:
+                    active = [
+                        goal for goal in w.list_goals(owner=owner)
+                        if goal.status in ("active", "blocked")
+                    ]
+                    g = max(active, key=lambda goal: goal.updated_at, default=None)
+                if not g:
+                    return "no active or blocked goal to resume"
+                goal_id = g.id
             else:
-                active = [
-                    goal for goal in w.list_goals(owner=owner)
-                    if goal.status in ("active", "blocked")
-                ]
-                g = max(active, key=lambda goal: goal.updated_at, default=None)
-            if not g:
-                return "no active or blocked goal to resume"
-            goal_id = g.id
-        else:
-            try:
-                goal_id = int(goal_id)
-            except (TypeError, ValueError, OverflowError):
-                raise _ProtocolError(-32602, f"invalid goal_id: {goal_id!r}") from None
-        self._goal_for_principal(w, goal_id, owner)
-        # Clamp to the same operator ceilings as _tool_start. Over HTTP the
-        # budget is client-controlled; a bare Budget() let a resume bypass
-        # the MAVERICK_MCP_MAX_* caps that _tool_start enforces.
-        max_dollars = _bounded_float(
-            args.get("max_dollars", 5.0),
-            default=5.0,
-            ceiling=os.environ.get("MAVERICK_MCP_MAX_DOLLARS", 5.0),
-        )
-        max_wall = _bounded_float(
-            args.get("max_wall_seconds", 3600),
-            default=3600.0,
-            ceiling=os.environ.get("MAVERICK_MCP_MAX_WALL_SECONDS", 3600.0),
-        )
-        max_depth = _bounded_int(
-            args.get("max_depth", 3),
-            default=3,
-            ceiling=os.environ.get("MAVERICK_MCP_MAX_DEPTH", 3),
-        )
-        budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall)
-        run_kwargs = {"sandbox": build_sandbox(), "max_depth": max_depth}
-        if capability is not None:
-            run_kwargs["capability"] = capability
-        answer = run_goal_sync(LLM(), w, budget, goal_id, **run_kwargs)
+                try:
+                    goal_id = int(goal_id)
+                except (TypeError, ValueError, OverflowError):
+                    raise _ProtocolError(
+                        -32602, f"invalid goal_id: {goal_id!r}"
+                    ) from None
+            self._goal_for_principal(w, goal_id, owner)
+            # Clamp to the same operator ceilings as _tool_start. Over HTTP the
+            # budget is client-controlled; a bare Budget() let a resume bypass
+            # the MAVERICK_MCP_MAX_* caps that _tool_start enforces.
+            max_dollars = _bounded_float(
+                args.get("max_dollars", 5.0),
+                default=5.0,
+                ceiling=os.environ.get("MAVERICK_MCP_MAX_DOLLARS", 5.0),
+            )
+            max_wall = _bounded_float(
+                args.get("max_wall_seconds", 3600),
+                default=3600.0,
+                ceiling=os.environ.get("MAVERICK_MCP_MAX_WALL_SECONDS", 3600.0),
+            )
+            max_depth = _bounded_int(
+                args.get("max_depth", 3),
+                default=3,
+                ceiling=os.environ.get("MAVERICK_MCP_MAX_DEPTH", 3),
+            )
+            budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall)
+            run_kwargs = {"sandbox": build_sandbox(), "max_depth": max_depth}
+            if capability is not None:
+                run_kwargs["capability"] = capability
+            answer = run_goal_sync(LLM(), w, budget, goal_id, **run_kwargs)
         self._structured_override = {"goal_id": goal_id, "answer": answer}
         return answer
 
     def _tool_answer(self, args: dict) -> str:
-        from maverick.world_model import WorldModel
         # A bad id is an invalid-params protocol error (-32602), not a tool
         # execution error -- mirror _tool_resume so typed clients can tell them
         # apart (the old `int(...)` surfaced an isError tool result instead).
@@ -1569,12 +1586,12 @@ class MCPServer:
         reasons = self._shield_scan_reason(answer, output=False)
         if reasons is not None:
             return f"⚠ answer rejected by Shield: {reasons}"
-        w = WorldModel()
-        owner = self._current_object_principal()
-        answered = (
-            w.answer(qid, answer, expected_owner=owner)
-            if owner is not None else w.answer(qid, answer)
-        )
+        with _canonical_world() as w:
+            owner = self._current_object_principal()
+            answered = (
+                w.answer(qid, answer, expected_owner=owner)
+                if owner is not None else w.answer(qid, answer)
+            )
         if not answered:
             raise _ProtocolError(-32602, "question not found")
         self._structured_override = {"question_id": qid}
@@ -1622,19 +1639,17 @@ class MCPServer:
         _mg.audit_write(args["key"], prov, decision)
         if not decision.allowed:
             return f"⚠ fact rejected by Memory Guard: {decision.reason}"
-        from maverick.world_model import WorldModel
-        w = WorldModel()
-        w.upsert_fact(
-            args["key"], args["value"], source=prov.source,
-            trust_tier=int(prov.trust), sensitivity=prov.sensitivity.value,
-        )
+        with _canonical_world() as w:
+            w.upsert_fact(
+                args["key"], args["value"], source=prov.source,
+                trust_tier=int(prov.trust), sensitivity=prov.sensitivity.value,
+            )
         self._structured_override = {"key": args["key"]}
         return f"set {args['key']}"
 
     def _tool_facts_get(self) -> str:
-        from maverick.world_model import WorldModel
-        w = WorldModel()
-        facts = w.get_facts()
+        with _canonical_world() as w:
+            facts = w.get_facts()
         if not facts:
             return "no facts known"
         # Bounded: this string re-enters the calling LLM's context, and the
@@ -1834,48 +1849,47 @@ class MCPServer:
         goal_id = (self._structured_override or {}).get("goal_id")
         if goal_id is None:
             return None
-        from maverick.world_model import WorldModel
-        world = WorldModel()
-        owner = self._current_object_principal()
-        if owner is not None:
-            try:
-                self._goal_for_principal(world, goal_id, owner)
-            except _ProtocolError:
-                return None
-        max_rounds = _bounded_int(
-            os.environ.get("MAVERICK_MCP_MAX_ELICIT_ROUNDS", 8),
-            default=8, ceiling=64,
-        )
-        resume_args = {"goal_id": goal_id}
-        for limit_name in ("max_dollars", "max_wall_seconds", "max_depth"):
-            if original_args and limit_name in original_args:
-                resume_args[limit_name] = original_args[limit_name]
-        final_answer: str | None = None
-        for _ in range(max_rounds):
-            questions = [q for q in world.open_questions() if q.goal_id == goal_id]
-            if not questions:
-                break
-            answered = False
-            for q in questions:
-                reply = self._elicit_question(q.question)
-                if reply is None:
-                    return final_answer  # declined / blocked / timed out
-                if owner is not None:
-                    if not world.answer(q.id, reply, expected_owner=owner):
-                        return final_answer
+        with _canonical_world() as world:
+            owner = self._current_object_principal()
+            if owner is not None:
+                try:
+                    self._goal_for_principal(world, goal_id, owner)
+                except _ProtocolError:
+                    return None
+            max_rounds = _bounded_int(
+                os.environ.get("MAVERICK_MCP_MAX_ELICIT_ROUNDS", 8),
+                default=8, ceiling=64,
+            )
+            resume_args = {"goal_id": goal_id}
+            for limit_name in ("max_dollars", "max_wall_seconds", "max_depth"):
+                if original_args and limit_name in original_args:
+                    resume_args[limit_name] = original_args[limit_name]
+            final_answer: str | None = None
+            for _ in range(max_rounds):
+                questions = [q for q in world.open_questions() if q.goal_id == goal_id]
+                if not questions:
+                    break
+                answered = False
+                for q in questions:
+                    reply = self._elicit_question(q.question)
+                    if reply is None:
+                        return final_answer  # declined / blocked / timed out
+                    if owner is not None:
+                        if not world.answer(q.id, reply, expected_owner=owner):
+                            return final_answer
+                    else:
+                        # Preserve the local/stdio duck-typed WorldModel contract:
+                        # older embeddings recorded the answer but returned None.
+                        world.answer(q.id, reply)
+                    answered = True
+                if not answered:
+                    break
+                if capability is None:
+                    final_answer = self._tool_resume(dict(resume_args))
                 else:
-                    # Preserve the local/stdio duck-typed WorldModel contract:
-                    # older embeddings recorded the answer but returned None.
-                    world.answer(q.id, reply)
-                answered = True
-            if not answered:
-                break
-            if capability is None:
-                final_answer = self._tool_resume(dict(resume_args))
-            else:
-                final_answer = self._tool_resume(
-                    dict(resume_args), capability=capability)
-        return final_answer
+                    final_answer = self._tool_resume(
+                        dict(resume_args), capability=capability)
+            return final_answer
 
     def _elicit_question(self, question: str) -> str | None:
         """Elicit one free-text answer, shield-screening both legs.

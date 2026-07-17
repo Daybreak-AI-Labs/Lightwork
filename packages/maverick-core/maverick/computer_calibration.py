@@ -28,8 +28,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -176,27 +174,19 @@ def _default_path() -> Path:
 
 
 def save_calibration(transform: CalibrationTransform, path: Path | None = None) -> Path:
-    """Persist ``transform`` atomically (unique temp file + ``os.replace``), 0600."""
-    p = path if path is not None else _default_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
+    """Persist ``transform`` atomically with owner-only file permissions."""
+    p = Path(path) if path is not None else _default_path()
     payload = {
         "scale_x": transform.scale_x,
         "scale_y": transform.scale_y,
         "offset_x": transform.offset_x,
         "offset_y": transform.offset_y,
     }
-    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".calibration-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, p)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    from .file_lock import atomic_write_text, ensure_private_directory
+
+    if path is None:
+        ensure_private_directory(p.parent)
+    atomic_write_text(p, json.dumps(payload))
     return p
 
 

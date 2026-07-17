@@ -74,7 +74,12 @@ def test_capabilities_reports_optional_methods(tmp_path):
         def put_file(self, src, dst):
             pass
 
-    assert sdk.capabilities(WithFiles()) == {"exec", "put_file"}
+        def exec_authenticated_tests(self, request, timeout=None):
+            pass
+
+    assert sdk.capabilities(WithFiles()) == {
+        "exec", "put_file", "exec_authenticated_tests",
+    }
 
 
 class _GoodExternal:

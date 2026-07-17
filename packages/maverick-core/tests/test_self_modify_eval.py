@@ -14,6 +14,17 @@ import pytest
 from maverick import self_modify_eval as ev
 from maverick.self_modify_eval import EvalResult, Score, evaluate_patch
 
+_TEST_SUBJECT = "1" * 64
+_TEST_EXECUTION_CONTEXT = "2" * 64
+
+
+def _pytest_score(**kwargs):
+    return ev.pytest_score(
+        subject_sha256=_TEST_SUBJECT,
+        execution_context_sha256=_TEST_EXECUTION_CONTEXT,
+        **kwargs,
+    )
+
 
 def _seed_repo(root: Path) -> Path:
     src = root / "src"
@@ -26,6 +37,27 @@ def _seed_repo(root: Path) -> Path:
 def _edit_patch() -> str:
     return ("diff --git a/pkg/a.py b/pkg/a.py\n--- a/pkg/a.py\n+++ b/pkg/a.py\n"
             "@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 99\n")
+
+
+class _EvidenceBackend:
+    authenticated_test_results = True
+    test_evidence_protocol = "maverick.test-evidence.v1"
+    test_evidence_authority = "test-controller-key-1"
+
+    def __init__(self, counts=None, *, evidence=True):
+        self.counts = counts
+        self.evidence = evidence
+        self.seen_request = None
+
+    def exec_authenticated_tests(self, request, timeout=None):
+        self.seen_request = request
+        if not self.evidence:
+            return object()
+        return ev.AuthenticatedTestEvidence.for_request(
+            request,
+            authority=self.test_evidence_authority,
+            counts=self.counts,
+        )
 
 
 class TestMaterializationBoundary:
@@ -57,47 +89,25 @@ class TestScorers:
         assert isinstance(s, Score) and s.value == 2.0 and s.samples == 2
 
     def test_pytest_score_pass_rate(self, tmp_path):
-        # The controller trusts only backend-authenticated structured outcomes.
-        class FakeSB:
-            authenticated_test_results = True
-
-            def exec(self, cmd, timeout=None):
-                class R:
-                    stdout = "candidate-controlled output is irrelevant"
-                    stderr = ""
-                    exit_code = 0
-                    authenticated_test_counts = ev.AuthenticatedTestCounts(8, 2)
-                return R()
-        score = ev.pytest_score(sandbox=FakeSB())(tmp_path)
+        backend = _EvidenceBackend(ev.AuthenticatedTestCounts(8, 2))
+        score = _pytest_score(sandbox=backend)(tmp_path)
         assert score.samples == 10
         assert abs(score.value - 0.8) < 1e-9
+        assert backend.seen_request.command == "python3 -m pytest -q"
 
     def test_pytest_score_no_summary_is_zero(self, tmp_path):
-        class FakeSB:
-            authenticated_test_results = True
-
-            def exec(self, cmd, timeout=None):
-                class R:
-                    stdout = ""
-                    stderr = ""
-                    exit_code = 1
-                return R()
-        score = ev.pytest_score(sandbox=FakeSB())(tmp_path)
+        score = _pytest_score(
+            sandbox=_EvidenceBackend(None, evidence=False),
+        )(tmp_path)
         assert score == Score(0.0, 0)
 
     def test_spoofed_stdout_cannot_inflate_authenticated_counts(self, tmp_path):
-        class FakeSB:
-            authenticated_test_results = True
-
+        class Backend(_EvidenceBackend):
             def exec(self, _cmd, timeout=None):
-                class R:
-                    stdout = "999999 passed\n1 passed, 1 failed in 0.1s"
-                    stderr = ""
-                    exit_code = 1
-                    authenticated_test_counts = ev.AuthenticatedTestCounts(1, 1)
-                return R()
+                raise AssertionError("generic candidate output must not be read")
 
-        assert ev.pytest_score(sandbox=FakeSB())(tmp_path) == Score(0.5, 2)
+        backend = Backend(ev.AuthenticatedTestCounts(1, 1))
+        assert _pytest_score(sandbox=backend)(tmp_path) == Score(0.5, 2)
 
     def test_spoofed_stdout_without_backend_authentication_is_unavailable(
         self, tmp_path,
@@ -110,24 +120,45 @@ class TestScorers:
                     exit_code = 0
                 return R()
 
-        assert ev.pytest_score(sandbox=FakeSB())(tmp_path) == Score(0.0, 0)
+        assert _pytest_score(sandbox=FakeSB())(tmp_path) == Score(0.0, 0)
 
     def test_nonterminal_or_malformed_authenticated_counts_are_unavailable(
         self, tmp_path,
     ):
-        class FakeSB:
+        backend = _EvidenceBackend(
+            ev.AuthenticatedTestCounts(100, 0, terminal=False),
+        )
+        assert _pytest_score(sandbox=backend)(tmp_path) == Score(0.0, 0)
+
+    def test_replayed_or_cross_command_evidence_is_unavailable(self, tmp_path):
+        first_request = ev.AuthenticatedTestRequest.issue(
+            "pytest first",
+            subject_sha256=_TEST_SUBJECT,
+            execution_context_sha256=_TEST_EXECUTION_CONTEXT,
+        )
+        replay = ev.AuthenticatedTestEvidence.for_request(
+            first_request,
+            authority=_EvidenceBackend.test_evidence_authority,
+            counts=ev.AuthenticatedTestCounts(100, 0),
+        )
+
+        class ReplayBackend(_EvidenceBackend):
+            def exec_authenticated_tests(self, request, timeout=None):
+                return replay
+
+        assert _pytest_score(
+            sandbox=ReplayBackend(ev.AuthenticatedTestCounts(100, 0)),
+            command="pytest second",
+        )(tmp_path) == Score(0.0, 0)
+
+    def test_boolean_only_backend_is_not_authenticated(self, tmp_path):
+        class BooleanOnly:
             authenticated_test_results = True
 
             def exec(self, _cmd, timeout=None):
-                class R:
-                    stdout = "100 passed"
-                    stderr = ""
-                    exit_code = 0
-                    authenticated_test_counts = ev.AuthenticatedTestCounts(
-                        100, 0, terminal=False)
-                return R()
+                raise AssertionError("ordinary exec must not be trusted")
 
-        assert ev.pytest_score(sandbox=FakeSB())(tmp_path) == Score(0.0, 0)
+        assert _pytest_score(sandbox=BooleanOnly())(tmp_path) == Score(0.0, 0)
 
 
 class TestBudgetedExec:
@@ -196,16 +227,15 @@ class TestStockSandboxProfile:
             ev.require_secure_eval_sandbox(Backend(), tmp_path)
 
     def test_accepts_bounded_non_host_no_egress_backend(self, tmp_path):
-        class Backend:
+        class Backend(_EvidenceBackend):
             host_visible_fs = False
             allow_network = False
             allow_root = False
             pids_limit = 128
             memory = "1g"
             bounded_output = True
-            authenticated_test_results = True
 
-        backend = Backend()
+        backend = Backend(ev.AuthenticatedTestCounts(1, 0))
         assert ev.require_secure_eval_sandbox(backend, tmp_path) is backend
 
     def test_refuses_backend_without_bounded_host_output_capture(self, tmp_path):
@@ -228,8 +258,26 @@ class TestStockSandboxProfile:
             memory = "1g"
             bounded_output = True
 
-        with pytest.raises(ev.EvalSandboxError, match="authenticated test results"):
+        with pytest.raises(ev.EvalSandboxError, match="authenticated evaluator evidence"):
             ev.require_secure_eval_sandbox(Backend(), tmp_path)
+
+    def test_refuses_boolean_only_evidence_claim_with_actionable_contract(
+        self, tmp_path,
+    ):
+        class Backend:
+            host_visible_fs = False
+            allow_network = False
+            allow_root = False
+            pids_limit = 128
+            memory = "1g"
+            bounded_output = True
+            authenticated_test_results = True
+
+        with pytest.raises(ev.EvalSandboxError) as caught:
+            ev.require_secure_eval_sandbox(Backend(), tmp_path)
+        message = str(caught.value)
+        assert "exec_authenticated_tests" in message
+        assert "JUnit/workspace files" in message
 
     def test_policy_lookup_failure_requires_container(self, monkeypatch):
         monkeypatch.setattr(
@@ -473,12 +521,11 @@ class TestEvaluatePatch:
         assert res.samples == 6
 
 
-class _FakeContainerSB:
+class _FakeContainerSB(_EvidenceBackend):
     """A non-host-visible backend stand-in (like docker/gvisor)."""
     host_visible_fs = False
-    authenticated_test_results = True
-
     def __init__(self):
+        super().__init__(ev.AuthenticatedTestCounts(3, 0))
         self.calls = []
 
     def exec(self, cmd, timeout=None):
@@ -487,8 +534,11 @@ class _FakeContainerSB:
             stdout = "3 passed in 0.1s"
             stderr = ""
             exit_code = 0
-            authenticated_test_counts = ev.AuthenticatedTestCounts(3, 0)
         return R()
+
+    def exec_authenticated_tests(self, request, timeout=None):
+        self.calls.append(request.command)
+        return super().exec_authenticated_tests(request, timeout=timeout)
 
 
 class TestIsolationPolicy:
@@ -533,7 +583,7 @@ class TestIsolationPolicy:
     def test_pytest_score_uses_container_and_scores(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ev, "container_required", lambda: True)
         sb = _FakeContainerSB()
-        score = ev.pytest_score(sandbox=sb)(tmp_path)
+        score = _pytest_score(sandbox=sb)(tmp_path)
         assert score.samples == 3 and score.value == 1.0
         assert sb.calls  # ran in the container, not the host
 
@@ -543,7 +593,7 @@ class TestIsolationPolicy:
         class Budget:
             def check(self):
                 raise RuntimeError("budget exhausted")
-        score = ev.pytest_score(budget=Budget())(tmp_path)
+        score = _pytest_score(budget=Budget())(tmp_path)
         assert score == Score(0.0, 0)
 
 

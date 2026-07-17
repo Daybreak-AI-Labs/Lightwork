@@ -54,7 +54,40 @@ def test_requires_config(monkeypatch):
     monkeypatch.delenv("ACME_TOKEN", raising=False)
     _fake_httpx(monkeypatch, request=MagicMock())
     out = _tool().fn({"op": "get", "path": "/things"})
-    assert out == "ERROR: connector configuration or request failed (RuntimeError)"
+    assert out == "ERROR: connector requires ACME_BASE_URL + ACME_TOKEN"
+
+
+def test_config_error_names_only_missing_identifiers_not_values(monkeypatch):
+    _fake_httpx(monkeypatch, request=MagicMock())
+    base = "https://private-operator-host.example"
+    monkeypatch.setenv("ACME_BASE_URL", base)
+    monkeypatch.delenv("ACME_TOKEN", raising=False)
+
+    out = _tool().fn({"op": "get", "path": "/things"})
+
+    assert out == "ERROR: connector requires ACME_TOKEN"
+    assert base not in out
+
+    token = "low-entropy-active-value"  # pragma: allowlist secret
+    monkeypatch.delenv("ACME_BASE_URL", raising=False)
+    monkeypatch.setenv("ACME_TOKEN", token)
+    out = _tool().fn({"op": "get", "path": "/things"})
+
+    assert out == "ERROR: connector requires ACME_BASE_URL"
+    assert token not in out
+
+
+def test_invalid_config_identifiers_are_not_reflected(monkeypatch):
+    _fake_httpx(monkeypatch, request=MagicMock())
+    bad_base = "BAD-NAME"
+    bad_token = "BAD.TOKEN"
+
+    out = _tool(base_url_env=bad_base, token_env=bad_token).fn(
+        {"op": "get", "path": "/things"}
+    )
+
+    assert out == "ERROR: connector configuration is incomplete"
+    assert bad_base not in out and bad_token not in out
 
 
 def test_get_routes_and_returns_json(monkeypatch):
@@ -75,7 +108,7 @@ def test_rest_exception_never_returns_secret_detail(monkeypatch):
 
     out = _tool().fn({"op": "get", "path": "/things"})
 
-    assert out.startswith("ERROR:")
+    assert out == "ERROR: connector configuration or request failed (RuntimeError)"
     assert "super-secret" not in out and "postgres://" not in out
 
 
@@ -250,7 +283,19 @@ def test_graphql_requires_config(monkeypatch):
     monkeypatch.delenv("ACMEGQL_TOKEN", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
     out = _gql().fn({"op": "query", "query": "query { x }"})
+    assert out == "ERROR: connector requires ACMEGQL_URL + ACMEGQL_TOKEN"
+
+
+def test_graphql_runtime_error_never_returns_secret_detail(monkeypatch):
+    monkeypatch.setenv("ACMEGQL_URL", "https://gql.example.com")
+    monkeypatch.setenv("ACMEGQL_TOKEN", "tok")
+    secret = "opaque-low-entropy-value"  # pragma: allowlist secret
+    _fake_httpx(monkeypatch, post=MagicMock(side_effect=RuntimeError(secret)))
+
+    out = _gql().fn({"op": "query", "query": "query { x }"})
+
     assert out == "ERROR: connector configuration or request failed (RuntimeError)"
+    assert secret not in out
 
 
 def test_no_collision_with_opt_in_ambient_cred_tools():

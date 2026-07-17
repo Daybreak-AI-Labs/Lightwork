@@ -439,18 +439,31 @@ def _servicer(service, pb2, pb2_grpc, *, bearer_token: str | None = None):
 
         def StreamEpisode(self, request, context):
             agent = _require_authorized(context, bearer_token)
-            for ev in service.stream_episode(
+            stream = service.stream_episode(
                 request.goal_id,
                 since_id=request.since_id,
                 max_seconds=_stream_deadline(request.max_seconds or None),
                 expected_owner=_agent_owner(agent),
-            ):
-                if not context.is_active():  # client hung up
-                    return
-                yield pb2.Event(
-                    id=ev.id, goal_id=ev.goal_id, agent=ev.agent,
-                    kind=ev.kind, content=ev.content, ts=ev.ts,
-                )
+            )
+            try:
+                for ev in stream:
+                    if not context.is_active():  # client hung up
+                        return
+                    yield pb2.Event(
+                        id=ev.id, goal_id=ev.goal_id, agent=ev.agent,
+                        kind=ev.kind, content=ev.content, ts=ev.ts,
+                    )
+            finally:
+                # GoalService holds one backend handle for the stream.  Do not
+                # rely on CPython refcounting to finalize its generator when a
+                # client disconnects; alternate runtimes may otherwise retain
+                # a Postgres connection/pool until an arbitrary GC cycle.
+                close = getattr(stream, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:  # pragma: no cover -- preserve RPC status
+                        log.debug("gRPC episode stream close failed", exc_info=True)
 
         def Cancel(self, request, context):
             agent = _require_authorized(context, bearer_token)

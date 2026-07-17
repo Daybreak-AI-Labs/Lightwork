@@ -589,6 +589,7 @@ class WorkflowSaveIn(BaseModel):
     budget_dollars: float = Field(5.0, ge=0.0, le=100.0)
     budget_wall_seconds: float = Field(3600.0, ge=1.0, le=86400.0)
     overwrite: bool = False
+    expected_generation: int | None = Field(None, ge=0)
 
 
 class TenantCreateIn(BaseModel):

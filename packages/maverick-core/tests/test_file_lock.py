@@ -15,6 +15,7 @@ import time
 
 import pytest
 from maverick.file_lock import (
+    atomic_create_text,
     atomic_read_bytes,
     atomic_read_text,
     atomic_write_bytes,
@@ -22,8 +23,36 @@ from maverick.file_lock import (
     atomic_write_text_chunks,
     cross_process_lock,
     ensure_private_file,
+    open_private_append,
     private_path_is_restricted,
 )
+
+
+def _make_shared_directory(path):
+    path.mkdir(mode=0o777)
+    if os.name == "nt":
+        subprocess.run(
+            [
+                "icacls",
+                str(path),
+                "/grant",
+                "*S-1-1-0:(OI)(CI)RX",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        path.chmod(0o755)
+    assert not private_path_is_restricted(path, 0o700)
+
+
+def _directory_security_snapshot(path):
+    if os.name == "nt":
+        import maverick.file_lock as file_lock
+
+        return file_lock._windows_private_sddl(path)[0]
+    return path.stat().st_mode & 0o777
 
 
 def test_atomic_write_replaces_whole_file(tmp_path):
@@ -38,6 +67,46 @@ def test_atomic_write_creates_parent_dirs(tmp_path):
     p = tmp_path / "nested" / "deep" / "s.txt"
     atomic_write_text(p, "hello")
     assert p.read_text() == "hello"
+
+
+def test_private_file_helpers_do_not_claim_existing_shared_parent(tmp_path):
+    shared = tmp_path / "shared"
+    _make_shared_directory(shared)
+    unrelated = shared / "unrelated.txt"
+    unrelated.write_text("keep-access", encoding="utf-8")
+    parent_security = _directory_security_snapshot(shared)
+    unrelated_security = (
+        _directory_security_snapshot(unrelated)
+        if os.name == "nt"
+        else unrelated.stat().st_mode & 0o777
+    )
+
+    created = shared / "created.txt"
+    appended = shared / "events.jsonl"
+    atomic_create_text(created, "secret")
+    fd = open_private_append(appended)
+    try:
+        os.write(fd, b'{"event":"ok"}\n')
+    finally:
+        os.close(fd)
+
+    assert _directory_security_snapshot(shared) == parent_security
+    assert not private_path_is_restricted(shared, 0o700)
+    assert unrelated.read_text(encoding="utf-8") == "keep-access"
+    if os.name == "nt":
+        assert _directory_security_snapshot(unrelated) == unrelated_security
+    else:
+        assert unrelated.stat().st_mode & 0o777 == unrelated_security
+    assert private_path_is_restricted(created)
+    assert private_path_is_restricted(appended)
+
+
+def test_private_file_helper_owns_and_hardens_missing_parent(tmp_path):
+    parent = tmp_path / "owned-state"
+    target = parent / "secret.txt"
+    atomic_create_text(target, "secret")
+    assert private_path_is_restricted(parent, 0o700)
+    assert private_path_is_restricted(target)
 
 
 def test_atomic_write_supports_non_bmp_windows_path(tmp_path):
@@ -98,6 +167,31 @@ def test_ensure_private_file_hardens_existing_file(tmp_path):
     ensure_private_file(p)
     assert private_path_is_restricted(p)
     assert p.read_text(encoding="utf-8") == "secret"
+
+
+def test_ensure_private_file_rejects_identity_swap_during_hardening(
+    tmp_path, monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    path = tmp_path / "sensitive.txt"
+    replacement = tmp_path / "replacement.txt"
+    displaced = tmp_path / "displaced.txt"
+    path.write_text("original", encoding="utf-8")
+    replacement.write_text("attacker replacement", encoding="utf-8")
+    real_harden = file_lock.harden_path_permissions
+
+    def _swap_after_hardening(candidate, mode=0o600):
+        real_harden(candidate, mode)
+        os.replace(candidate, displaced)
+        os.replace(replacement, candidate)
+
+    monkeypatch.setattr(file_lock, "harden_path_permissions", _swap_after_hardening)
+    with pytest.raises(PermissionError, match="identity changed"):
+        ensure_private_file(path)
+
+    assert path.read_text(encoding="utf-8") == "attacker replacement"
+    assert displaced.read_text(encoding="utf-8") == "original"
 
 
 def test_ensure_private_file_rejects_non_regular_path(tmp_path):
@@ -363,6 +457,81 @@ for _ in range(20):
         stdout, stderr = process.communicate(timeout=60)
         assert process.returncode == 0, (stdout, stderr)
     assert json.loads(p.read_text())["c"] == 80
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows byte-range lock regression")
+def test_windows_lock_creator_alone_initializes_byte(tmp_path):
+    """A contender waits for the O_EXCL creator; it never writes the lock byte."""
+    target = tmp_path / "creator-race.json"
+    creator_ready = tmp_path / "creator-ready"
+    contender_ready = tmp_path / "contender-ready"
+    release = tmp_path / "release-creator"
+    code = r"""
+import sys
+import time
+from pathlib import Path
+import maverick.file_lock as file_lock
+
+mode, target_raw, marker_raw, release_raw = sys.argv[1:]
+target = Path(target_raw)
+marker = Path(marker_raw)
+release = Path(release_raw)
+if mode == "creator":
+    real_write = file_lock.os.write
+    def delayed_creator_write(fd, data):
+        marker.write_text("ready", encoding="utf-8")
+        deadline = time.monotonic() + 10.0
+        while not release.exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("creator was not released")
+            time.sleep(0.005)
+        return real_write(fd, data)
+    file_lock.os.write = delayed_creator_write
+else:
+    real_wait = file_lock._wait_for_windows_lock_initialization
+    def marked_wait(path, fd):
+        marker.write_text("ready", encoding="utf-8")
+        return real_wait(path, fd)
+    file_lock._wait_for_windows_lock_initialization = marked_wait
+
+with file_lock.cross_process_lock(target, strict=True):
+    pass
+"""
+
+    def wait_for(path):
+        deadline = time.monotonic() + 10.0
+        while not path.exists():
+            if time.monotonic() >= deadline:
+                pytest.fail(f"subprocess did not reach marker {path.name}")
+            time.sleep(0.005)
+
+    creator = subprocess.Popen(
+        [
+            sys.executable, "-c", code, "creator", str(target),
+            str(creator_ready), str(release),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    wait_for(creator_ready)
+    contender = subprocess.Popen(
+        [
+            sys.executable, "-c", code, "contender", str(target),
+            str(contender_ready), str(release),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    wait_for(contender_ready)
+    assert contender.poll() is None
+    release.write_text("go", encoding="utf-8")
+
+    for process in (creator, contender):
+        stdout, stderr = process.communicate(timeout=30)
+        assert process.returncode == 0, (stdout, stderr)
+    assert (tmp_path / "creator-race.json.lock").read_bytes() == b"\0"
 
 
 def test_cross_process_lock_fails_closed_when_dir_unwritable(tmp_path):

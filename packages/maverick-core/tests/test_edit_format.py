@@ -1,8 +1,11 @@
 """Tests for the SEARCH/REPLACE edit format module (Wave 11)."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def _make_git_repo(tmp_path: Path) -> Path:
@@ -351,6 +354,10 @@ class TestApplyBlocks:
         assert "sk-secret" not in diff
 
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="git pathspec-magic filenames contain characters forbidden by Windows",
+    )
     def test_render_diff_treats_scoped_paths_as_literals(self, tmp_path):
         """Security: prevent git pathspec-magic injection from model-supplied
         SEARCH/REPLACE paths such as `:(glob)*`.

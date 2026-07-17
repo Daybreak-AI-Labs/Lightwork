@@ -43,6 +43,14 @@ def _event(sender=SENDER, text="hello agent", msg_id="wamid.X1"):
     }
 
 
+def _claim_ok(monkeypatch):
+    """Most tests are not about dedup; provide an available claim store."""
+    wm = MagicMock()
+    wm.mark_message_processed.return_value = True
+    monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
+    return wm
+
+
 def test_verification_handshake():
     ch = _channel()
     client = TestClient(ch._app)
@@ -60,11 +68,7 @@ def test_verification_handshake():
 def test_signed_message_drives_handler_and_replies(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
-    # No dedup DB in tests: claim path is exercised separately.
-    monkeypatch.setattr(
-        "maverick.world_model.WorldModel",
-        MagicMock(side_effect=RuntimeError("no db")),
-    )
+    _claim_ok(monkeypatch)
     client = TestClient(ch._app)
     body = json.dumps(_event()).encode()
     r = client.post("/webhook/whatsapp-cloud", content=body,
@@ -84,10 +88,7 @@ def test_handler_exception_reply_is_redacted(monkeypatch):
     secret = "boom token=sk-SECRET path=/etc/passwd"  # pragma: allowlist secret
     ch = _channel(handler=AsyncMock(side_effect=RuntimeError(secret)))
     ch.send = AsyncMock()
-    monkeypatch.setattr(
-        "maverick.world_model.WorldModel",
-        MagicMock(side_effect=RuntimeError("no db")),
-    )
+    _claim_ok(monkeypatch)
     client = TestClient(ch._app)
     body = json.dumps(_event()).encode()
     r = client.post("/webhook/whatsapp-cloud", content=body,
@@ -148,6 +149,27 @@ def test_dedup_claim_skips_redelivery(monkeypatch):
     assert r.status_code == 200
     wm.mark_message_processed.assert_called_once_with("whatsapp_cloud", "wamid.X1")
     assert not ch.handler.await_count
+
+
+def test_claim_store_failure_is_retryable_and_never_runs_handler(monkeypatch):
+    ch = _channel()
+    ch.send = AsyncMock()
+    monkeypatch.setattr(
+        "maverick.world_model.open_world",
+        MagicMock(side_effect=RuntimeError("claim store offline")),
+    )
+    client = TestClient(ch._app)
+    body = json.dumps(_event()).encode()
+
+    r = client.post(
+        "/webhook/whatsapp-cloud",
+        content=body,
+        headers={"X-Hub-Signature-256": _sign(body)},
+    )
+
+    assert r.status_code == 503
+    assert not ch.handler.await_count
+    assert not ch.send.await_count
 
 
 def test_send_posts_to_graph(monkeypatch):
@@ -265,10 +287,7 @@ def test_handler_exception_returns_generic_reply(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
     ch.handler = AsyncMock(side_effect=RuntimeError("/srv/secret/path leaked!"))
-    monkeypatch.setattr(
-        "maverick.world_model.WorldModel",
-        MagicMock(side_effect=RuntimeError("no db")),
-    )
+    _claim_ok(monkeypatch)
     client = TestClient(ch._app)
     body = json.dumps(_event()).encode()
     r = client.post("/webhook/whatsapp-cloud", content=body,

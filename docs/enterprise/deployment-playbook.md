@@ -17,7 +17,7 @@ in [§10 Known gaps](#10-known-gaps-to-track).
 |---|---|---|
 | Who runs it? | Customer self-hosts **(recommended)** / we host | Data boundary, sub-processor list |
 | Tenancy | One instance **per customer** (recommended) / shared multi-tenant | Channels, OIDC, isolation model |
-| State backend | SQLite (1 replica) / **Postgres** (scale, HA, RLS) | Replica count, backups |
+| World-model backend | SQLite / **Postgres** (managed HA, pooling, RLS) | Backups, DB isolation; control plane remains 1 replica |
 | Trust of agent-run code | Trusted ops only / **untrusted/multi-tenant** | Sandbox backend (§6.1) — **blocker if wrong** |
 | LLM | Cloud (Anthropic/OpenAI/…) / **self-hosted** (vLLM/Ollama/TGI) | Egress lock, data residency |
 | Auth | Dashboard token / OIDC SSO / reverse-proxy | What you collect from their IdP |
@@ -53,12 +53,13 @@ From their IdP (Okta/Entra/Auth0/Google):
 - ☐ The list of admin principals → `[dashboard] admins` / `MAVERICK_DASHBOARD_ADMINS`.
 - ◇ Alternative: reverse-proxy SSO — they tell you the trusted header + upstream IPs (`[auth.proxy]`).
 
-### 2.3 Database (for scale / HA)
+### 2.3 Database (for managed HA / isolation)
 - ◇ A **Postgres 14+** instance (managed RDS/CloudSQL/Azure DB recommended),
   multi-AZ, automated backups w/ PITR → a DSN of the form
   `postgres://…@HOST:5432/DBNAME` (credentials from their secret store) for
   `MAVERICK_PG_DSN`. SQLite (no dependency) is fine for a single-replica
-  per-customer instance.
+  per-customer instance. Postgres does not make every file-backed control-plane
+  store replica-safe; keep the dashboard/serve process at one replica.
 
 ### 2.4 Network / TLS
 - ☐ A **DNS hostname** for the dashboard (e.g. `maverick.customer.com`).
@@ -68,6 +69,8 @@ From their IdP (Okta/Entra/Auth0/Google):
 ### 2.5 Secrets you will generate (give them visibility, store in their secret store)
 - ☐ `MAVERICK_DASHBOARD_TOKEN` — random 32+ bytes (API/remote auth).
 - ◇ `MAVERICK_ENCRYPTION_KEY` — 32-byte hex/base64 (at-rest encryption).
+- ☐ `MAVERICK_BACKUP_SIGNING_KEY` — separate 32-byte hex/base64 key shared
+  only with authenticated backup/restore hosts; never place it in an archive.
 - ◇ `MAVERICK_A2A_TOKEN`, `MAVERICK_MCP_TOKEN`, gRPC bearer — if those surfaces are exposed.
 - ◇ `MAVERICK_WEBHOOK_SECRET` — if outbound webhooks are used.
 
@@ -116,8 +119,8 @@ kubectl create secret generic maverick-secrets \
 # 2. Install with your values (see deploy/helm/maverick/values.yaml)
 helm install maverick deploy/helm/maverick -f my-values.yaml
 ```
-Key `values.yaml` knobs: `image.{repository,tag}`, `replicaCount` (1 for SQLite,
-≥3 only with Postgres), `worldModel.backend`, `persistence.{size,storageClass}`,
+Key `values.yaml` knobs: `image.{repository,tag}`, `replicaCount` (must remain
+1; scale remote workers separately), `worldModel.backend`, `persistence.{size,storageClass}`,
 `secret.data.*`, `env.*` (MAVERICK_ENTERPRISE, MAVERICK_OIDC_*, MAVERICK_TENANT_BY_USER),
 `ingress.{hosts,tls,annotations}`, and the `securityContext` block (already
 hardened: runAsNonRoot, drop ALL caps, fsGroup, seccomp RuntimeDefault).
@@ -217,6 +220,7 @@ still restrict to a **vetted, code-reviewed** set.
 ```bash
 MAVERICK_ENCRYPTION_KEY=<32-byte hex/base64>   # at-rest AES-256-GCM
 MAVERICK_AUDIT_SIGN=1                           # tamper-evident Ed25519 audit chain
+MAVERICK_BACKUP_SIGNING_KEY=<32-byte hex/base64> # authenticated DR archives
 ```
 ```toml
 [audit]
@@ -271,10 +275,15 @@ Wire monitoring from `deploy/observability/`: `prometheus-rules.yaml`
 
 **Backup / restore (per client/tenant):**
 ```bash
+export MAVERICK_BACKUP_SIGNING_KEY='<32-byte hex/base64 secret shared with standby>'
 maverick backup create --out /backups/acme-$(date +%F).tgz   # consistent (SQLite online-backup API)
-maverick backup info /backups/acme-2026-06-18.tgz            # manifest: client_id, schema ver, hashes
-maverick backup restore /backups/acme-2026-06-18.tgz         # fail-closed on client_id/schema mismatch
+maverick backup info /backups/acme-2026-06-18.tgz            # authenticates manifest before display
+maverick backup restore /backups/acme-2026-06-18.tgz         # transactional; auth/client/schema fail closed
 ```
+
+The signing key is not stored in the archive. Provision the same key through
+the active and standby hosts' secret manager. `--force` never bypasses manifest
+authentication, archive limits, or path/type validation.
 
 **Upgrade:** a pre-migration snapshot is written automatically
 (`world.db.pre-migration-v<N>.bak`); migrations are forward-only and CI-gated to
@@ -322,6 +331,7 @@ Honest, current state — what's now enforced in code vs. what genuinely remains
 ### Remaining (disclose to the customer / roadmap)
 | Area | Gap | Interim mitigation |
 |---|---|---|
+| Multi-replica control plane | Postgres centralizes the world model, but workflow releases/runs, A2A durable claims, audit/learning ledgers, and tenant-local policy files are not all transactionally shared yet. | Helm refuses `replicaCount > 1` and control-plane HPA. Run one dashboard/serve replica and scale remote workers separately. |
 | MCP | Shared bearer grants full tool access; per-tenant gating only via Agent Trust Plane (opt-in). | `[agent_trust] enforce=true` with per-agent tokens. |
 | Plugins | Granted plugins run **in-process** — no runtime syscall/network sandbox (load-time grants only). | Vet + code-review allowlisted plugins. |
 | Firecracker | Silently falls back to Docker if the VM layer is unavailable. | Monitor logs; alert on fallback. |

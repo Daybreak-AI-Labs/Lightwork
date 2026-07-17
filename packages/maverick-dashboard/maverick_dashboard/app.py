@@ -1740,30 +1740,36 @@ async def tenants_page(request: Request) -> HTMLResponse:
 
 def _tenant_overview_rows() -> list[dict]:
     """Per-tenant rollup for the multi-tenant view: goals by status (from the
-    tenant's own world DB, when one exists), today's spend, suspended flag.
+    tenant's configured world backend), today's spend, suspended flag.
 
     Fail-soft per tenant: an unreadable world DB or spend ledger yields zero
-    counts/spend, never a 500. A tenant whose world.db doesn't exist yet (no
-    runs) reports empty counts rather than materializing the DB.
+    counts/spend, never a 500. On SQLite a tenant whose world.db doesn't exist
+    yet reports empty counts rather than materializing the DB. Postgres has no
+    local sentinel file, so it is always queried under an explicit tenant
+    scope through the canonical backend selector.
     """
     from maverick.tenant.registry import list_tenants, tenant_spend_today
+    from maverick.world_model_backends import is_postgres_configured
+
+    postgres = is_postgres_configured()
     rows: list[dict] = []
     for t in list_tenants():
         counts: dict[str, int] = {}
         try:
             from maverick.workspace import Workspace
             db = Workspace(t.id).db_path
-            if db.exists():
-                from maverick.world_model import WorldModel
-                wm = WorldModel(db)
-                try:
-                    counts = {
-                        str(r[0]): int(r[1]) for r in wm.conn.execute(
-                            "SELECT status, COUNT(*) FROM goals GROUP BY status"
-                        )
-                    }
-                finally:
-                    wm.close()
+            if postgres or db.exists():
+                from maverick.paths import tenant_scope
+                from maverick.world_model import close_world_if_owned, open_world
+
+                with tenant_scope(tenant=t.id):
+                    wm = open_world()
+                    try:
+                        # Aggregate in the selected backend. Do not decrypt and
+                        # materialize every goal just to render a histogram.
+                        counts = wm.goal_status_counts()
+                    finally:
+                        close_world_if_owned(wm)
         except Exception:  # pragma: no cover -- one bad tenant DB never 500s
             counts = {}
         try:
@@ -2145,25 +2151,35 @@ async def replay_page(request: Request) -> HTMLResponse:
 
     With no ``?goal=<id>`` it lists recent runs (owner-scoped) to pick from.
     """
-    from maverick.world_model import open_world
+    from maverick.world_model import close_world_if_owned, open_world
 
     from .control_plane import build_replay
     raw = (request.query_params.get("goal") or "").strip()
     goal_id = int(raw) if raw.isdigit() else None
     w = open_world()
-    if goal_id is None:
-        goals = w.list_goals(limit=50, order="desc", owner=goal_owner_filter(request))
+    try:
+        if goal_id is None:
+            goals = w.list_goals(
+                limit=50, order="desc", owner=goal_owner_filter(request)
+            )
+            return templates.TemplateResponse(
+                request,
+                "replay.html",
+                {"goal": None, "goals": goals, "replay": None},
+            )
+        goal = w.get_goal(goal_id)
+        if goal is None:
+            raise HTTPException(status_code=404, detail="no such goal")
+        assert_goal_access(request, goal)
+        replay = build_replay(goal_id, window=(goal.created_at, goal.updated_at))
         return templates.TemplateResponse(
-            request, "replay.html", {"goal": None, "goals": goals, "replay": None},
+            request, "replay.html", {"goal": goal, "goals": None, "replay": replay},
         )
-    goal = w.get_goal(goal_id)
-    if goal is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, goal)
-    replay = build_replay(goal_id, window=(goal.created_at, goal.updated_at))
-    return templates.TemplateResponse(
-        request, "replay.html", {"goal": goal, "goals": None, "replay": replay},
-    )
+    finally:
+        try:
+            close_world_if_owned(w)
+        except Exception:  # pragma: no cover -- best-effort response teardown
+            pass
 
 
 @app.get("/trust", response_class=HTMLResponse)
@@ -5375,7 +5391,8 @@ async def workflow_builder_page(request: Request, template: str | None = None,
                             "params": list(t.params), "budget_dollars": t.budget_dollars,
                             # Carry the wall-seconds cap so a save round-trip can't
                             # silently reset it to the schema default (3600).
-                            "budget_wall_seconds": t.budget_wall_seconds}
+                            "budget_wall_seconds": t.budget_wall_seconds,
+                            "generation": t.generation}
         except (ValueError, FileNotFoundError):
             edit_prefill = None
     elif template:
@@ -5947,15 +5964,16 @@ async def metrics(request: Request) -> PlainTextResponse:
     try:
         import shutil
 
-        from maverick.world_model import DEFAULT_DB
+        from maverick.world_model import default_db_path
         from maverick.world_model_backends import is_postgres_configured
-        probe = DEFAULT_DB.parent if DEFAULT_DB.parent.exists() else None
+        db_path = default_db_path()
+        probe = db_path.parent if db_path.parent.exists() else None
         usage = shutil.disk_usage(str(probe) if probe else ".")
         # The world-DB-bytes gauge is a SQLite-file metric; on Postgres the size
         # lives in the DB server, not a local file, so emit it only for SQLite
         # rather than report a misleading 0. Disk-free stays useful on both.
         if not is_postgres_configured():
-            db_bytes = DEFAULT_DB.stat().st_size if DEFAULT_DB.exists() else 0
+            db_bytes = db_path.stat().st_size if db_path.exists() else 0
             lines += [
                 "# HELP maverick_world_db_bytes Size of the world.db file on disk",
                 "# TYPE maverick_world_db_bytes gauge",

@@ -23,6 +23,8 @@ def test_agent_id_cannot_be_registered_under_two_vendors():
     assert fleet_memory.register_agent("order-bot", "agentforce") is True
     assert fleet_memory.register_agent("order-bot", "copilot") is False
     assert fleet_memory.register_agent("order-bot", "agentforce") is True
+    from maverick.file_lock import private_path_is_restricted
+    assert private_path_is_restricted(fleet_memory.registry_path())
 
 
 def test_ambiguous_legacy_vendor_identity_fails_closed(monkeypatch):

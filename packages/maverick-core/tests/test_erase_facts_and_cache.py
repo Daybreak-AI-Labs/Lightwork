@@ -8,6 +8,7 @@ had ANY distilled fact failed the COMMIT and aborted the whole erase.
 """
 import os
 
+import pytest
 from click.testing import CliRunner
 from maverick import cli as cli_mod
 from maverick.world_model import WorldModel
@@ -70,6 +71,14 @@ def test_erase_clears_llm_cache(tmp_path, monkeypatch):
     cache.store(key, provider="anthropic", model="x", text="sure")
     assert cache.lookup(key) is not None
 
+    # A second principal's row in the same database must also be removed: the
+    # content-addressed key cannot prove which subject appears in a prompt.
+    from maverick.connections import bind_principal
+    with bind_principal("user:someone-else"):
+        other = llm_cache_mod.LLMCache(db_path=cache_db)
+        other.store(key, provider="anthropic", model="x", text="other")
+        assert other.lookup(key) is not None
+
     db = tmp_path / "world.db"
     wm = WorldModel(db)
     wm.get_or_create_conversation("telegram", "u123")
@@ -83,3 +92,17 @@ def test_erase_clears_llm_cache(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     # The cached prompt/answer (which held the user's PII) is gone.
     assert llm_cache_mod.LLMCache(db_path=cache_db).lookup(key) is None
+    with bind_principal("user:someone-else"):
+        assert llm_cache_mod.LLMCache(db_path=cache_db).lookup(key) is None
+
+
+def test_all_authority_cache_purge_requires_explicit_confirmation(
+    tmp_path, monkeypatch,
+):
+    import maverick.cache.llm as llm_cache_mod
+
+    cache_db = tmp_path / "llm_cache.db"
+    monkeypatch.setattr(llm_cache_mod, "DEFAULT_DB", cache_db)
+    cache = llm_cache_mod.LLMCache(db_path=cache_db)
+    with pytest.raises(PermissionError, match="confirmed"):
+        cache.purge_all_authorities_for_erasure()

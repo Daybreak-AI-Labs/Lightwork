@@ -514,6 +514,17 @@ AgentFn = Callable[[FlowNode, str, dict], tuple[Any, float | None]]
 ActionFn = Callable[[FlowNode, dict, dict], tuple[Any, float | None]]
 
 
+def _safe_error_text(value: Any, *, limit: int = 500) -> str:
+    """Redact untrusted executor text before persistence or catch routing."""
+    try:
+        from .redact import redact
+
+        safe = str(redact(str(value)))
+    except Exception:  # pragma: no cover - error reporting must fail closed
+        safe = "execution failed (details redacted)"
+    return safe[:limit]
+
+
 class _Pause(Exception):
     def __init__(self, kind: str, node: FlowNode, data: dict, resume_at: float | None = None):
         self.kind, self.node, self.data, self.resume_at = kind, node, data, resume_at
@@ -529,15 +540,18 @@ class _NodeError(Exception):
     failed run records WHERE it failed (the retry-from-failure entry point)."""
 
     def __init__(self, node_id: str, cause: Exception):
-        super().__init__(f"node {node_id!r}: {cause}")
+        super().__init__(f"node {node_id!r}: {_safe_error_text(cause)}")
         self.node_id = node_id
+        self.cause = cause
 
 
 class _Indeterminate(Exception):
     """A work boundary may have committed an effect without proving its state."""
 
     def __init__(self, node_id: str, detail: str, *, boundary: str = "high-risk action"):
-        super().__init__(f"{boundary} {node_id!r} is indeterminate: {detail}")
+        super().__init__(
+            f"{boundary} {node_id!r} is indeterminate: {_safe_error_text(detail)}"
+        )
         self.node_id = node_id
 
 
@@ -657,8 +671,10 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     if (high_risk_action or ambiguous_agent) and not definitive_no_effect and (
         last_exc is not None or outcome == 0.0
     ):
-        detail = (f"{type(last_exc).__name__}: {last_exc}" if last_exc is not None
-                  else str(result))
+        detail = _safe_error_text(
+            f"{type(last_exc).__name__}: {last_exc}"
+            if last_exc is not None else result
+        )
         # Ambiguity is not a grounded failure signal.  Preserve the trace status
         # but do not feed a guessed 0.0 into self-learning.
         ctx.on_node(node, STATUS_INDETERMINATE, None)
@@ -677,7 +693,7 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     if outcome == 0.0 and node.on_error:
         return node.on_error
     if outcome == 0.0:
-        raise RuntimeError(f"work node failed: {str(result)[:500]}")
+        raise RuntimeError(f"work node failed: {_safe_error_text(result)}")
     if node.output:
         data[node.output] = result
     return node.next
@@ -805,7 +821,7 @@ def _run_scope(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     except _NodeError as e:
         if node.on_error is None:
             raise
-        data["_error"] = str(e)          # the catch arm can read what went wrong
+        data["_error"] = _safe_error_text(e)  # safe for downstream catch branches
         ctx.on_node(node, "caught", 0.0)
         return node.on_error
     ctx.on_node(node, "done", None)
@@ -1110,15 +1126,20 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
         return FlowRunResult(status=STATUS_REJECTED, data=r.data, cursor=r.node.id)
     except _NodeError as e:  # an executor blew up inside a known node -- keep the
         # node id as the cursor so the run can be retried from right there.
-        return FlowRunResult(status=STATUS_FAILED, data=data, error=str(e),
-                             cursor=e.node_id)
+        return FlowRunResult(status=STATUS_FAILED, data=data,
+                              error=_safe_error_text(e, limit=2000),
+                              cursor=e.node_id)
     except _Indeterminate as e:
-        return FlowRunResult(status=STATUS_INDETERMINATE, data=data, error=str(e),
-                             cursor=e.node_id)
+        return FlowRunResult(status=STATUS_INDETERMINATE, data=data,
+                              error=_safe_error_text(e, limit=2000),
+                              cursor=e.node_id)
     except (BudgetExceeded, Halted):
         raise
     except Exception as e:  # a node executor blew up -> surface, don't crash the caller
-        return FlowRunResult(status=STATUS_FAILED, data=data, error=str(e))
+        return FlowRunResult(
+            status=STATUS_FAILED, data=data,
+            error=_safe_error_text(e, limit=2000),
+        )
 
 
 __all__ = [

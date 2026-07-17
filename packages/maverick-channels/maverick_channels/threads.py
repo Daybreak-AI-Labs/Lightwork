@@ -47,7 +47,16 @@ import asyncio
 import logging
 import os
 
-from .base import Channel, Handler, IncomingMessage, backoff_delay, is_allowed, normalize_allowlist
+from .base import (
+    Channel,
+    Handler,
+    IncomingMessage,
+    backoff_delay,
+    claim_processed_message,
+    is_allowed,
+    normalize_allowlist,
+    release_processed_message,
+)
 
 log = logging.getLogger(__name__)
 
@@ -129,12 +138,13 @@ class ThreadsChannel(Channel):
         # claim infrastructure is down: skip now, retry next poll. "Process
         # anyway" here would re-run the goal every poll_seconds.
         try:
-            from maverick.world_model import DEFAULT_DB, WorldModel
-            wm = WorldModel(DEFAULT_DB)
-            if not wm.mark_message_processed("threads", reply_id):
+            if not claim_processed_message("threads", reply_id):
                 return  # already handled (this run or an earlier one)
         except Exception:
-            log.warning("threads dedup claim failed; deferring reply %s to next poll", reply_id)
+            log.exception(
+                "threads dedup claim failed; deferring reply %s to next poll",
+                reply_id,
+            )
             return
 
         incoming = IncomingMessage(
@@ -150,9 +160,11 @@ class ThreadsChannel(Channel):
         except Exception:
             log.exception("threads handler error")
             try:
-                wm.release_processed_message("threads", reply_id)
+                release_processed_message("threads", reply_id)
             except Exception:  # pragma: no cover
-                log.warning("threads dedup release failed")
+                # The claim remains durable, so the next poll cannot execute
+                # this failed delivery a second time.
+                log.exception("threads dedup release failed; claim remains held")
             return
         if reply_text:
             await self.send(reply_id, reply_text)

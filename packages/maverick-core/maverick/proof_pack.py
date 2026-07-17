@@ -194,7 +194,7 @@ def _environment() -> dict:
 def build(world=None, *, human_cost: float | None = None,
           now: float | None = None) -> dict:
     """Run every collector; return the (unsigned) proof-pack manifest."""
-    from .world_model import open_world
+    from .world_model import close_world_if_owned, open_world
     own_world = world is None
     w = open_world() if own_world else world
     try:
@@ -209,8 +209,8 @@ def build(world=None, *, human_cost: float | None = None,
     finally:
         if own_world:
             try:
-                w.close()
-            except Exception:  # pragma: no cover -- best effort
+                close_world_if_owned(w)
+            except Exception:  # pragma: no cover -- best-effort CLI teardown
                 pass
     hard = [e for e in sections if e.hard]
     return {

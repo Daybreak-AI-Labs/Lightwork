@@ -14,21 +14,70 @@ the tool degrades with an actionable error when it's missing.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import stat
 import threading
 from pathlib import Path
 
-from .paths import data_dir
+from .file_lock import (
+    atomic_create_bytes,
+    atomic_read_bytes,
+    atomic_read_text,
+    atomic_write_bytes,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+    require_private_directory,
+)
+from .paths import current_tenant_id, data_dir
 
 # Serializes the read-modify-write in store()/delete() so concurrent writers to
 # the shared vault file can't clobber each other's entries (last os.replace won).
 _VAULT_LOCK = threading.Lock()
 
-_STORE = data_dir("vault")
-_KEY_FILE = _STORE / "key"
-_DATA_FILE = _STORE / "browser.json"
+
+def _authority_id(tenant: str | None, principal: str | None) -> str:
+    """Opaque path tag for the exact tenant/client + principal authority."""
+    # Do not strip/case-fold either identity. Authentication treats principal
+    # strings as bounded opaque values, so normalisation here would collapse
+    # distinct authorities onto one credential store.
+    encoded = json.dumps(
+        {
+            "version": 1,
+            "tenant": tenant,
+            "principal": principal,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(b"maverick:browser-vault:authority:\0" + encoded).hexdigest()
+
+
+def _default_store() -> Path:
+    """Resolve the active authority's vault directory at call time.
+
+    The tenant is already represented by :func:`data_dir`; the authority hash
+    is still tenant-inclusive so a future explicit/shared storage backend
+    cannot silently collapse two tenants. The legacy unbound/local authority
+    keeps its historical location for single-user compatibility.
+    """
+    from .connections import current_principal
+
+    tenant = current_tenant_id()
+    principal = current_principal()
+    # Pass the captured raw tenant explicitly rather than resolving active
+    # context a second time inside data_dir().
+    base = data_dir("vault", tenant=tenant or None)
+    if principal is None:
+        return base
+    return base / "authorities" / _authority_id(tenant, principal)
+
+
+def _default_paths() -> tuple[Path, Path]:
+    store = _default_store()
+    return store / "key", store / "browser.json"
 
 
 def _require_fernet():
@@ -67,15 +116,30 @@ def decrypt_entry(key: bytes, token: str) -> dict:
 class Vault:
     """A file-backed map of name -> encrypted entry, sealed under ``key``."""
 
-    def __init__(self, key: bytes, path: str | Path):
+    def __init__(
+        self,
+        key: bytes,
+        path: str | Path,
+        *,
+        _owned_parent: bool = False,
+    ):
         self.key = key
         self.path = Path(path)
+        self._owned_parent = bool(_owned_parent)
+
+    def _prepare_parent(self) -> None:
+        if self._owned_parent or not self.path.parent.exists():
+            ensure_private_directory(self.path.parent)
+        else:
+            require_private_directory(self.path.parent)
 
     def _read(self) -> dict[str, str]:
+        self._prepare_parent()
         if not self.path.exists():
             return {}
+        ensure_private_file(self.path)
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = json.loads(atomic_read_text(self.path, encoding="utf-8"))
             return data if isinstance(data, dict) else {}
         except json.JSONDecodeError as e:
             # Do NOT silently return {}: a single corrupt/truncated byte would
@@ -88,26 +152,19 @@ class Vault:
             ) from e
 
     def _write(self, blob: dict[str, str]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._prepare_parent()
         data = json.dumps(blob, indent=2).encode("utf-8")
-        # 0600 + atomic replace: the file holds sealed credential blobs; match
-        # the key file's restrictive perms so entry names/sizes/timing aren't
-        # readable by any other local user (the bare write_text inherited the
-        # umask, typically 0644). os.open sets mode only on creation, so write
-        # to a fresh temp then rename over the target.
-        tmp = self.path.with_name(self.path.name + ".tmp")
-        fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            os.write(fd, data)
-        finally:
-            os.close(fd)
-        os.replace(tmp, self.path)
+        # Unique private temp + atomic publication avoids the fixed ``.tmp``
+        # race and applies a protected Windows DACL before any metadata exists.
+        atomic_write_bytes(self.path, data)
 
     def store(self, name: str, data: dict) -> None:
         with _VAULT_LOCK:
-            blob = self._read()
-            blob[name] = encrypt_entry(self.key, data)
-            self._write(blob)
+            self._prepare_parent()
+            with cross_process_lock(self.path, strict=True):
+                blob = self._read()
+                blob[name] = encrypt_entry(self.key, data)
+                self._write(blob)
 
     def load(self, name: str) -> dict:
         blob = self._read()
@@ -120,42 +177,55 @@ class Vault:
 
     def delete(self, name: str) -> bool:
         with _VAULT_LOCK:
-            blob = self._read()
-            if name not in blob:
-                return False
-            del blob[name]
-            self._write(blob)
-            return True
+            self._prepare_parent()
+            with cross_process_lock(self.path, strict=True):
+                blob = self._read()
+                if name not in blob:
+                    return False
+                del blob[name]
+                self._write(blob)
+                return True
 
 
-def resolve_key(key_file: Path = _KEY_FILE) -> bytes:
+def _resolve_key(key_file: Path, *, owned_parent: bool) -> bytes:
+    """Resolve one already-authority-bound key path."""
+    env = os.environ.get("MAVERICK_VAULT_KEY", "").strip()
+    if env:
+        return env.encode("ascii")
+    if owned_parent or not key_file.parent.exists():
+        # The default authority directory (or a missing directory created here)
+        # is Lightwork-owned and may be tightened.
+        ensure_private_directory(key_file.parent)
+    else:
+        # An injected key path is an integrity boundary. Verify its parent but
+        # never revoke permissions on an arbitrary caller-owned directory.
+        require_private_directory(key_file.parent)
+    if key_file.exists():
+        ensure_private_file(key_file)
+        return atomic_read_bytes(key_file).strip()
+    key = generate_key()
+    try:
+        atomic_create_bytes(key_file, key)
+    except FileExistsError:  # lost a create race — read the winner's key
+        ensure_private_file(key_file)
+        return atomic_read_bytes(key_file).strip()
+    return key
+
+
+def resolve_key(key_file: Path | None = None) -> bytes:
     """Key from ``MAVERICK_VAULT_KEY``, else a ``0600`` key file (created once).
 
     The key file is created **atomically** with ``O_CREAT|O_EXCL`` and mode
     ``0600`` so the secret never exists, even briefly, with default-umask
     permissions (a write-then-chmod leaves a TOCTOU window where it's
-    group/world-readable). The parent dir is created/tightened to ``0700``.
+    group/world-readable). When omitted, ``key_file`` is resolved for the
+    active tenant/client and exact principal at call time; no default argument
+    can freeze a previous tenant's path in a long-lived process.
     """
-    env = os.environ.get("MAVERICK_VAULT_KEY", "").strip()
-    if env:
-        return env.encode("ascii")
-    if key_file.exists():
-        return key_file.read_bytes().strip()
-    key = generate_key()
-    key_file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    try:
-        os.chmod(key_file.parent, stat.S_IRWXU)  # 0700 — tighten a pre-existing dir
-    except OSError:  # pragma: no cover -- Windows / unusual fs
-        pass
-    try:
-        fd = os.open(str(key_file), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:  # lost a create race — read the winner's key
-        return key_file.read_bytes().strip()
-    try:
-        os.write(fd, key)
-    finally:
-        os.close(fd)
-    return key
+    if key_file is None:
+        default_key, _ = _default_paths()
+        return _resolve_key(default_key, owned_parent=True)
+    return _resolve_key(Path(key_file), owned_parent=False)
 
 
 _SCHEMA = {
@@ -173,10 +243,18 @@ _SCHEMA = {
 def _run(args: dict) -> str:
     op = args.get("op")
     try:
-        key = resolve_key()
+        key_file, data_file = _default_paths()
+        # Resolve both paths from one captured authority and mark the dedicated
+        # directory private before either key or encrypted metadata exists.
+        ensure_private_directory(key_file.parent)
+        key = _resolve_key(key_file, owned_parent=True)
     except RuntimeError as e:
         return f"ERROR: {e}"
-    vault = Vault(key, _DATA_FILE)
+    except (OSError, UnicodeError, ValueError):
+        # Path/ACL details are host metadata; do not reflect them through a
+        # remotely callable tool response.
+        return "ERROR: browser auth vault storage is unavailable"
+    vault = Vault(key, data_file, _owned_parent=True)
     name = args.get("name") or ""
     try:
         if op == "store":

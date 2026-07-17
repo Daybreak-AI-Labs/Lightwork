@@ -4,10 +4,9 @@ Offline; composes existing seams without touching sandbox backends.
 """
 from __future__ import annotations
 
-import stat
-
 import pytest
 from maverick import containment
+from maverick.file_lock import private_path_is_restricted
 from maverick.tools import ToolRegistry
 
 
@@ -157,7 +156,7 @@ def test_report_contents():
 def test_ephemeral_workdir_created_0700_and_cleanup_removes():
     wd = containment.make_ephemeral_workdir()
     assert wd.path.is_dir()
-    assert stat.S_IMODE(wd.path.stat().st_mode) == 0o700
+    assert private_path_is_restricted(wd.path, 0o700)
     (wd.path / "scratch.txt").write_text("contained", encoding="utf-8")
     wd.cleanup()
     assert not wd.path.exists()

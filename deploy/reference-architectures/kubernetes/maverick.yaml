@@ -33,10 +33,9 @@ metadata:
   labels:
     app: maverick
 spec:
-  # The runtime keeps run state in SQLite under ~/.maverick by default:
-  # exactly one replica per state volume. Scale by sharding tenants, or move
-  # the world model to Postgres ([world_model] backend = "postgres") before
-  # raising replicas.
+  # Keep exactly one dashboard/control-plane replica. Postgres can share the
+  # world model, but flow/A2A/audit/learning/policy stores are not all shared;
+  # scale separate remote workers instead of raising this replica count.
   replicas: 1
   strategy:
     type: Recreate          # RWO volume: tear down before re-attach

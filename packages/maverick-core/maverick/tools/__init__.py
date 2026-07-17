@@ -1388,18 +1388,32 @@ def base_tool_names() -> set[str] | None:
     registered names, or ``None`` if assembly fails (a caller then skips
     tool-existence checks rather than guessing). Never raises.
     """
+    world = None
     try:
         from ..sandbox.local import LocalBackend
         from ..world_model import open_world
 
+        world = open_world(None)
         reg = base_registry(
-            open_world(None), LocalBackend(), _include_generated_tools=False,
+            world, LocalBackend(), _include_generated_tools=False,
         )
         return {t.name for t in reg.all()}
     except Exception as e:  # pragma: no cover -- best-effort introspection
         import logging as _logging
         _logging.getLogger(__name__).debug("base_tool_names unavailable: %s", e)
         return None
+    finally:
+        if world is not None:
+            from ..world_model import close_world_if_owned
+
+            try:
+                close_world_if_owned(world)
+            except Exception:  # pragma: no cover -- introspection never raises
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "base_tool_names world close failed", exc_info=True,
+                )
 
 
 def _register_optional_tools(

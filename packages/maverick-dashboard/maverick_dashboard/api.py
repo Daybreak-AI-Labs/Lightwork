@@ -285,8 +285,7 @@ async def workforce_posture(request: Request) -> dict:
     }
     try:
         from maverick.domain import available_domains
-        from maverick.world_model import DEFAULT_DB, WorldModel
-        wm = WorldModel(DEFAULT_DB)
+        wm = _world()
         cands = graduation_candidates(wm.list_approvals(limit=5000), sorted(available_domains()))
         out["graduation_candidates"] = [
             {"name": c.name, "sample": c.sample, "approve_rate": c.approve_rate,
@@ -6831,14 +6830,14 @@ async def redact_preview(request: Request, payload: RedactIn) -> dict:
 async def watch_glance(request: Request) -> dict:
     """The Apple Watch glance payload (tiny fixed shape; see maverick.glance)."""
     from maverick.glance import build_glance
-    from maverick.world_model import open_world
+    from maverick.world_model import close_world_if_owned, open_world
     world = open_world()
     try:
         return build_glance(world, owner=goal_owner_filter(request))
     finally:
         try:
-            world.close()
-        except Exception:
+            close_world_if_owned(world)
+        except Exception:  # pragma: no cover -- best-effort response teardown
             pass
 
 
@@ -7422,6 +7421,8 @@ async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
             budget_dollars=payload.budget_dollars,
             budget_wall_seconds=payload.budget_wall_seconds,
             overwrite=payload.overwrite,
+            owner=caller_principal(request) or "local",
+            expected_generation=payload.expected_generation,
         )
     except FileExistsError as e:
         # A fresh save (overwrite=false) colliding with an existing template is a
@@ -7429,7 +7430,15 @@ async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"name": tpl.name, "title": tpl.title, "params": tpl.params, "saved": True}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    return {
+        "name": tpl.name,
+        "title": tpl.title,
+        "params": tpl.params,
+        "generation": tpl.generation,
+        "saved": True,
+    }
 
 
 # ---------- continuous-benchmark history ----------

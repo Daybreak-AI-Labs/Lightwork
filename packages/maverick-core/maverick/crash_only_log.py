@@ -181,16 +181,23 @@ class CrashOnlyLog:
         clock: Callable[[], float] = time.time,
     ):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         self._clock = clock
         self._fsync = fsync if fsync is not None else (fsync_policy() == FSYNC_ALWAYS)
         self._lock = threading.Lock()
-        self._fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        from .file_lock import open_private_append
+
+        self._fd = open_private_append(
+            self.path, require_private_parent=True,
+        )
         try:
-            os.chmod(self.path, 0o600)  # pre-existing files get locked down too
-        except OSError:  # pragma: no cover -- exotic filesystems
-            pass
-        self._seq = self._recover()
+            self._seq = self._recover()
+        except BaseException:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = -1
+            raise
 
     def _recover(self) -> int:
         """Seal a torn tail and return the last intact seq (0 for a new file).

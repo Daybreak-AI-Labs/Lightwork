@@ -14,7 +14,7 @@ import importlib.util
 import logging
 import os
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .devcontainer import DevcontainerBackend
 from .docker import DockerBackend
@@ -461,7 +461,9 @@ def build_sandbox(
             )
         return SSHBackend(
             host=host,
-            workdir=Path(full_cfg.get("workdir", "~/maverick-workspace")),
+            workdir=PurePosixPath(
+                str(full_cfg.get("workdir", "~/maverick-workspace"))
+            ),
             timeout=timeout,
             ssh_args=full_cfg.get("ssh_args", []),
             host_key_checking=full_cfg.get("host_key_checking", "accept-new"),

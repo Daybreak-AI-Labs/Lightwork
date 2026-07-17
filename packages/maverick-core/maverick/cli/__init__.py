@@ -499,8 +499,8 @@ def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
     import json as _json
 
     from ..cost.by_tag import gather, render, split_by_tag
-    from ..world_model import DEFAULT_DB, WorldModel
-    w = WorldModel(DEFAULT_DB)
+    from ..world_model import close_world_if_owned, open_world
+    w = open_world()
     total = w.total_spend()
 
     by_goal: dict[int, dict] = {}
@@ -533,6 +533,7 @@ def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
             round(g["cache_read_tokens"] / denom, 4) if denom else None)
 
     tags = split_by_tag(gather(w, tag_field=tag_field, limit=limit))
+    close_world_if_owned(w)
 
     if as_json:
         click.echo(_json.dumps(
@@ -655,11 +656,11 @@ def support(output: str | None) -> None:
     text = _json.dumps(bundle, indent=2, sort_keys=True, default=str)
     if output:
         from pathlib import Path as _P
+
+        from ..file_lock import atomic_write_text as _atomic_write_text
+
         path = _P(output).expanduser()
-        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text + "\n")
+        _atomic_write_text(path, text + "\n", mode=0o600)
         click.echo(f"support bundle written: {path}")
         # Record the export on the signed audit trail — redacted METADATA only
         # (correlation_id / tier / customer / basename; never bundle contents),
@@ -3055,13 +3056,16 @@ def diag_ratelimits(as_json: bool) -> None:
 def diag_health(goal_id: int) -> None:
     """Compute a 0-100 health score for a finished goal from its episode."""
     from ..health_score import compute_health, render
-    from ..world_model import DEFAULT_DB, WorldModel
-    w = WorldModel(DEFAULT_DB)
-    g = w.get_goal(goal_id)
+    from ..world_model import close_world_if_owned, open_world
+    w = open_world()
+    try:
+        g = w.get_goal(goal_id)
+        eps = w.list_episodes(goal_id=goal_id, limit=50) if g is not None else []
+    finally:
+        close_world_if_owned(w)
     if g is None:
         click.echo(f"ERROR: no such goal {goal_id}", err=True)
         sys.exit(2)
-    eps = w.list_episodes(goal_id=goal_id, limit=50)
     in_tok = sum(getattr(e, "input_tokens", 0) for e in eps)
     out_tok = sum(getattr(e, "output_tokens", 0) for e in eps)
     success = g.status == "done"
@@ -3094,8 +3098,12 @@ def diag_cost_by_tag(as_json: bool) -> None:
     import json as _json
 
     from ..cost.by_tag import gather, render
-    from ..world_model import DEFAULT_DB, WorldModel
-    buckets = gather(WorldModel(DEFAULT_DB))
+    from ..world_model import close_world_if_owned, open_world
+    world = open_world()
+    try:
+        buckets = gather(world)
+    finally:
+        close_world_if_owned(world)
     if as_json:
         click.echo(_json.dumps(buckets, indent=2))
         return
@@ -3754,15 +3762,18 @@ def schema_plan_cmd() -> None:
     structural lint.
     """
     from ..schema_migrations import plan, render, validate
-    from ..world_model import DEFAULT_DB, SCHEMA_VERSION, WorldModel
+    from ..world_model import SCHEMA_VERSION, close_world_if_owned, open_world
     problems = validate()
     if problems:
         for pb in problems:
             click.echo(f"LINT: {pb}", err=True)
         sys.exit(1)
     try:
-        w = WorldModel(DEFAULT_DB)
-        current = w.conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()[0]
+        w = open_world()
+        try:
+            current = w.schema_version
+        finally:
+            close_world_if_owned(w)
     except Exception:
         current = SCHEMA_VERSION  # no DB yet -> nothing pending
     click.echo(render(plan(int(current), SCHEMA_VERSION)))
@@ -3824,8 +3835,8 @@ def costs_cmd(limit: int) -> None:
     from datetime import datetime, timezone
 
     from ..cost.report import format_report
-    from ..world_model import DEFAULT_DB, WorldModel
-    w = WorldModel(DEFAULT_DB)
+    from ..world_model import close_world_if_owned, open_world
+    w = open_world()
     rows: list[dict] = []
     try:
         for ep in w.list_episodes(limit=1_000_000):
@@ -3833,7 +3844,7 @@ def costs_cmd(limit: int) -> None:
                 day = datetime.fromtimestamp(ep.ended_at, tz=timezone.utc).strftime("%Y-%m-%d")
                 rows.append({"dollars": ep.cost_dollars, "day": day})
     finally:
-        w.close()
+        close_world_if_owned(w)
     click.echo(format_report(rows, by="day", top=limit))
 
 
@@ -4964,14 +4975,17 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     # addressed on the full prompt -- system + messages include the user's
     # goal text and the model's replies, so the cache retains exactly the
     # PII we just erased. It can't be purged by subject (the key is a hash of
-    # content, not tied to a user), so clear it wholesale; it's a perf cache,
-    # safe to drop. Only when the DB already exists, so a single erase on a
-    # cache-disabled install doesn't create an empty cache file. Best-effort.
+    # content, not tied to a user), so clear every authority in this tenant's
+    # disposable cache. Ordinary cache.clear() is intentionally principal-
+    # scoped and would leave other historical authorities behind. Only when
+    # the dynamically resolved DB already exists, so a cache-disabled install
+    # does not create an empty cache file. Best-effort after the command's
+    # irreversible --yes confirmation above.
     try:
-        from ..cache.llm import DEFAULT_DB as _llm_cache_db
+        from ..cache.llm import LLMCache, default_db_path
+        _llm_cache_db = default_db_path()
         if _llm_cache_db.exists():
-            from ..cache.llm import LLMCache
-            LLMCache().clear()
+            LLMCache().purge_all_authorities_for_erasure(confirmed=True)
     except Exception as exc:  # pragma: no cover - defensive
         click.echo(
             f"warning: erased the database but could not clear the LLM cache "
@@ -5294,18 +5308,68 @@ def gc(ctx, days: int, events_days: int, yes: bool) -> None:
     Tier 1 council finding: retention was "forever" by default; this
     command (plus the systemd timer in deploy/vps/) enforces a policy.
     """
-    world = open_world(ctx.obj["db"])
     if not yes:
         click.echo(
             f"This will prune conversations idle > {days}d and "
             f"goal_events older than {events_days}d."
         )
         click.confirm("Proceed?", abort=True)
-    convs = world.prune_conversations(idle_for_seconds=days * 24 * 3600)
-    events = world.prune_goal_events(older_than_seconds=events_days * 24 * 3600)
-    # Twilio dedup rows accumulate one-per-webhook forever; reap after
-    # 30 days (the retry window is minutes so this is generous).
-    dedup = world.prune_processed_messages(older_than_seconds=30 * 24 * 3600)
+
+    def _prune(world) -> tuple[int, int, int]:
+        convs = world.prune_conversations(idle_for_seconds=days * 24 * 3600)
+        events = world.prune_goal_events(
+            older_than_seconds=events_days * 24 * 3600
+        )
+        # Twilio dedup rows accumulate one-per-webhook forever; reap after
+        # 30 days (the retry window is minutes so this is generous).
+        dedup = world.prune_processed_messages(
+            older_than_seconds=30 * 24 * 3600
+        )
+        return int(convs), int(events), int(dedup)
+
+    from ..world_model import close_world_if_owned
+    from ..world_model_backends import is_postgres_configured
+
+    # An unbound Postgres connection is an administrator read view, never
+    # implicit delete-all authority. Routine GC fans out through each explicit
+    # roster tenant; a true global purge requires a separate purpose-built API.
+    if is_postgres_configured():
+        from ..paths import current_tenant_id, tenant_scope
+        if current_tenant_id() is None:
+            from ..tenant.registry import list_tenants
+            try:
+                tenants = list_tenants()
+            except Exception as exc:
+                raise click.ClickException(
+                    f"cannot resolve tenant roster for Postgres GC: {exc}"
+                ) from exc
+            if not tenants:
+                raise click.ClickException(
+                    "refusing unbound Postgres GC: bind a tenant or provision "
+                    "the tenant roster; global delete is not implicit"
+                )
+            convs = events = dedup = 0
+            for record in tenants:
+                with tenant_scope(tenant=record.id):
+                    world = open_world()
+                    try:
+                        c, e, d = _prune(world)
+                    finally:
+                        close_world_if_owned(world)
+                convs += c
+                events += e
+                dedup += d
+            click.echo(
+                f"pruned {convs} conversation(s), {events} goal_event row(s), "
+                f"{dedup} processed-message row(s) across {len(tenants)} tenant(s)"
+            )
+            return
+
+    world = open_world(ctx.obj["db"])
+    try:
+        convs, events, dedup = _prune(world)
+    finally:
+        close_world_if_owned(world)
     click.echo(
         f"pruned {convs} conversation(s), {events} goal_event row(s), "
         f"{dedup} processed-message row(s)"
@@ -5889,6 +5953,14 @@ def audit_worm_push(dry_run: bool) -> None:
         raise click.ClickException(str(e)) from e
     for name, status in sorted(report.items()):
         click.echo(f"  {name}: {status}")
+    failed = [
+        name for name, status in report.items()
+        if status.startswith(("error", "refused"))
+    ]
+    if failed:
+        raise click.ClickException(
+            f"{len(failed)} day-file(s) were not safely shipped: {sorted(failed)}"
+        )
     shipped = sum(1 for s in report.values()
                   if s.startswith(("pushed", "re-pushed", "would")))
     click.echo(f"{'Would ship' if dry_run else 'Shipped'} {shipped} day-file(s).")

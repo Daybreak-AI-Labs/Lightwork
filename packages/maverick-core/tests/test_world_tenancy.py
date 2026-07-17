@@ -64,6 +64,44 @@ def test_same_tenant_returns_cached_instance(monkeypatch):
     assert world_for_tenant(None) is world_for_tenant(None)
 
 
+def test_unicode_normal_forms_share_one_canonical_world(monkeypatch):
+    import unicodedata
+
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    nfc = unicodedata.normalize("NFC", "café")
+    nfd = unicodedata.normalize("NFD", "café")
+
+    assert nfc != nfd
+    assert world_for_tenant(nfc) is world_for_tenant(nfd)
+
+
+def test_case_alias_cannot_open_or_read_existing_world(monkeypatch):
+    from maverick.paths import TenantNamespaceCollision
+
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    owner = world_for_tenant("Acme")
+    goal_id = owner.create_goal("owner-only", "secret")
+
+    with pytest.raises(TenantNamespaceCollision, match="aliases namespace owned"):
+        world_for_tenant("acme")
+
+    assert owner.get_goal(goal_id).description == "secret"
+
+
+def test_legacy_directory_requires_original_casing(monkeypatch):
+    from maverick.paths import TenantNamespaceCollision
+
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    legacy_root = maverick_home() / "tenants" / "Acme"
+    legacy_root.mkdir(parents=True)
+
+    with pytest.raises(TenantNamespaceCollision, match="existing namespace"):
+        world_for_tenant("acme")
+
+    # Exact-cased legacy data is adopted and receives a durable claim.
+    assert world_for_tenant("Acme").path == legacy_root / "world.db"
+
+
 def test_different_tenants_get_different_worlds(monkeypatch):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     a = world_for_tenant("acme")
@@ -71,6 +109,31 @@ def test_different_tenants_get_different_worlds(monkeypatch):
     assert a is not b
     assert a.path != b.path
     assert world_for_tenant(None) is not a  # shared default distinct from a tenant
+
+
+def test_default_constructor_resolves_tenant_and_home_per_call(tmp_path, monkeypatch):
+    """Import-time defaults must never pin a later request to another tenant."""
+    from maverick import client
+    from maverick.paths import tenant_scope
+    from maverick.world_model import WorldModel
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CLIENT_ID", raising=False)
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    client.reset_client_cache()
+
+    with tenant_scope(tenant="tenant-a"):
+        tenant_world = WorldModel()
+    shared_world = WorldModel()
+    try:
+        assert tenant_world.path == (
+            tmp_path / "tenants" / "tenant-a" / "world.db"
+        )
+        assert shared_world.path == tmp_path / "world.db"
+        assert tenant_world.path != shared_world.path
+    finally:
+        tenant_world.close()
+        shared_world.close()
 
 
 # --- data isolation --------------------------------------------------------
@@ -188,6 +251,22 @@ def test_world_for_tenant_caps_cached_tenant_worlds(monkeypatch):
     assert any(k.endswith("tenant-1/world.db") for k in normalized)  # kept
     assert any(k.endswith("tenant-3/world.db") for k in normalized)  # added
     wm._tenant_worlds.clear()
+
+
+def test_evicted_cache_owned_world_is_not_closed_by_borrower(monkeypatch):
+    import maverick.world_model as wm
+
+    monkeypatch.setattr(wm, "MAX_TENANT_WORLDS", 1)
+    first = world_for_tenant("tenant-1")
+    goal_id = first.create_goal("still in flight")
+    world_for_tenant("tenant-2")  # evicts tenant-1 from LRU membership
+    assert first not in wm._tenant_worlds.values()
+
+    wm.close_world_if_owned(first)
+    try:
+        assert first.get_goal(goal_id).title == "still in flight"
+    finally:
+        first.close()
 
 
 def test_handle_message_rejects_tenant_resolution_failure(monkeypatch):

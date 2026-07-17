@@ -35,6 +35,14 @@ from pathlib import Path
 from typing import Any
 
 from .config import env_flag
+from .file_lock import (
+    atomic_create_text,
+    atomic_read_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+    open_private_append,
+)
 
 log = logging.getLogger(__name__)
 
@@ -221,8 +229,6 @@ def register_agent(agent_id: str, vendor: str, *, description: str = "") -> bool
     path = registry_path()
     source = f"{vendor}:{agent_id}"
     try:
-        from .file_lock import cross_process_lock, ensure_private_directory
-
         ensure_private_directory(path.parent)
         with cross_process_lock(path, strict=True):
             rows = roster()
@@ -240,14 +246,14 @@ def register_agent(agent_id: str, vendor: str, *, description: str = "") -> bool
                     reason="agent_id_already_registered_to_another_vendor",
                 )
                 return False
-            with open(path, "a", encoding="utf-8") as f:
+            fd = open_private_append(path, require_private_parent=True)
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
                 f.write(json.dumps({
                     "ts": time.time(), "source": source, "vendor": vendor,
                     "agent_id": agent_id, "description": str(description)[:200],
                 }) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
-            os.chmod(path, 0o600)
     except (OSError, RuntimeError) as e:
         log.warning("fleet_memory: register failed: %s", e)
         return False
@@ -261,29 +267,30 @@ def roster() -> list[dict]:
         return []
     out: list[dict] = []
     try:
-        with open(path, encoding="utf-8") as f:
-            for raw in f:
-                try:
-                    d = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(d, dict):
-                    continue
-                agent_id = d.get("agent_id")
-                vendor = d.get("vendor")
-                source = d.get("source")
-                if not (
-                    isinstance(agent_id, str)
-                    and isinstance(vendor, str)
-                    and isinstance(source, str)
-                    and _ID_RE.fullmatch(agent_id)
-                    and _ID_RE.fullmatch(vendor)
-                    and source == f"{vendor}:{agent_id}"
-                ):
-                    continue
-                out.append(d)
+        ensure_private_file(path)
+        lines = atomic_read_text(path).splitlines()
     except OSError:
         return []
+    for raw in lines:
+        try:
+            d = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        agent_id = d.get("agent_id")
+        vendor = d.get("vendor")
+        source = d.get("source")
+        if not (
+            isinstance(agent_id, str)
+            and isinstance(vendor, str)
+            and isinstance(source, str)
+            and _ID_RE.fullmatch(agent_id)
+            and _ID_RE.fullmatch(vendor)
+            and source == f"{vendor}:{agent_id}"
+        ):
+            continue
+        out.append(d)
     return out
 
 
@@ -381,11 +388,11 @@ def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
     }
     try:
         inbox = inbox_dir()
-        from .file_lock import atomic_write_text, ensure_private_directory
-
         ensure_private_directory(inbox)
         name = f"{int(time.time() * 1000)}-{uuid.uuid4().hex}-{vendor}-{agent_id}.json"
-        atomic_write_text(inbox / name, json.dumps(row, sort_keys=True))
+        # A fleet event is immutable evidence.  Refuse an already-published
+        # name instead of replacing attacker-planted or collision state.
+        atomic_create_text(inbox / name, json.dumps(row, sort_keys=True))
     except OSError as e:
         log.warning("fleet_memory: ingest write failed: %s", e)
         return False, "write failed"
@@ -486,8 +493,11 @@ def status() -> dict:
     if inbox.is_dir():
         for p in inbox.glob("*.json"):
             try:
-                d = json.loads(p.read_text(encoding="utf-8"))
+                ensure_private_file(p)
+                d = json.loads(atomic_read_text(p))
             except (OSError, ValueError):
+                continue
+            if not isinstance(d, dict):
                 continue
             src = str(d.get("source", "") or "(unknown)")
             by = counts.setdefault(src, {"success": 0, "failure": 0})

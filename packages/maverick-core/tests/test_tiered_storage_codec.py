@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 from maverick import tiered_storage as ts
+from maverick.file_lock import private_path_is_restricted
 
 
 @pytest.fixture(autouse=True)
@@ -83,7 +84,7 @@ def test_write_cold_file_zstd_and_read_back(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_WORLD_COLD_CODEC", "zstd")
     path = ts._write_cold_file(tmp_path, "episodes", "ended_at", _ROWS)
     assert path.name.endswith(".jsonl.zst")
-    assert oct(path.stat().st_mode)[-3:] == "600"
+    assert private_path_is_restricted(path, 0o600)
     back = list(ts.read_cold(tmp_path, "episodes"))
     assert back == _ROWS
 

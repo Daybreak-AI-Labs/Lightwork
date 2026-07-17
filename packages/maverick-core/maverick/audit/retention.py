@@ -25,6 +25,10 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 
+class RetentionScopeError(RuntimeError):
+    """Retention cannot prove which tenant/backend it is authorized to prune."""
+
+
 def _config() -> dict:
     try:
         from ..config import load_config
@@ -140,12 +144,15 @@ def purge_world_episodes(
     """Delete ``episodes`` rows ended before ``days`` ago."""
     if days is None or int(days) <= 0:
         return {"deleted": 0, "reason": "disabled"}
-    from ..world_model import DEFAULT_DB
-    db_path = db_path or DEFAULT_DB
     cutoff_ts = _cutoff_for_days(days, now=now)
-    deleted = _purge_table_by_time(
-        db_path, "episodes", "ended_at", cutoff_ts, dry_run=dry_run,
-    )
+    if db_path is not None:
+        deleted = _purge_table_by_time(
+            db_path, "episodes", "ended_at", cutoff_ts, dry_run=dry_run,
+        )
+    else:
+        deleted = _purge_canonical_world(
+            "purge_episodes_before", cutoff_ts, dry_run=dry_run,
+        )
     log.info("retention: episodes deleted=%d dry_run=%s", deleted, dry_run)
     return {"deleted": deleted, "cutoff_ts": cutoff_ts}
 
@@ -160,14 +167,52 @@ def purge_world_events(
     """Delete ``goal_events`` rows older than ``days``."""
     if days is None or int(days) <= 0:
         return {"deleted": 0, "reason": "disabled"}
-    from ..world_model import DEFAULT_DB
-    db_path = db_path or DEFAULT_DB
     cutoff_ts = _cutoff_for_days(days, now=now)
-    deleted = _purge_table_by_time(
-        db_path, "goal_events", "ts", cutoff_ts, dry_run=dry_run,
-    )
+    if db_path is not None:
+        deleted = _purge_table_by_time(
+            db_path, "goal_events", "ts", cutoff_ts, dry_run=dry_run,
+        )
+    else:
+        deleted = _purge_canonical_world(
+            "purge_goal_events_before", cutoff_ts, dry_run=dry_run,
+        )
     log.info("retention: goal_events deleted=%d dry_run=%s", deleted, dry_run)
     return {"deleted": deleted, "cutoff_ts": cutoff_ts}
+
+
+def _purge_canonical_world(
+    method_name: str, cutoff_ts: float, *, dry_run: bool,
+) -> int:
+    """Run a portable retention primitive on the configured world backend.
+
+    An unbound Postgres connection represents an administrator-wide view.  A
+    retention job must never interpret that as permission to delete every
+    tenant's rows, so callers must either bind a tenant (the fleet coordinator
+    below does this) or provide an explicit SQLite ``db_path``.
+    """
+    from ..paths import current_tenant_id
+    from ..world_model import close_world_if_owned, default_db_path, open_world
+    from ..world_model_backends import is_postgres_configured
+
+    if is_postgres_configured() and current_tenant_id() is None:
+        raise RetentionScopeError(
+            "refusing unscoped Postgres retention; bind a tenant or provision "
+            "the tenant registry so each tenant is pruned explicitly"
+        )
+    # Do not create an empty SQLite database merely because a scheduled
+    # retention job ran before the world was initialized.
+    if not is_postgres_configured() and not default_db_path().exists():
+        return 0
+    world = open_world()
+    try:
+        method = getattr(world, method_name, None)
+        if not callable(method):
+            raise RetentionScopeError(
+                f"configured world backend lacks retention primitive {method_name}"
+            )
+        return int(method(float(cutoff_ts), dry_run=dry_run) or 0)
+    finally:
+        close_world_if_owned(world)
 
 
 def purge_usage_ledger(
@@ -251,6 +296,7 @@ def enforce(
     audit_dir: Path | None = None,
     db_path: Path | None = None,
     now: float | None = None,
+    _fleet_child: bool = False,
 ) -> dict:
     """Apply every configured retention rule. Returns a per-rule report.
 
@@ -265,6 +311,33 @@ def enforce(
     cfg = config if config is not None else _config()
     if not cfg:
         return {"status": "disabled", "reason": "no [retention] in config"}
+
+    # An operator-level `retention enforce` must cover every provisioned
+    # tenant, not whichever shared SQLite file happens to be the process
+    # default.  Explicit paths remain a deliberately single-store maintenance
+    # operation (and are heavily used by recovery/tests).
+    if not _fleet_child and audit_dir is None and db_path is None:
+        from ..paths import current_tenant_id, tenant_scope
+        if current_tenant_id() is None:
+            from ..tenant.registry import list_tenants
+
+            tenants = list_tenants()
+            if tenants:
+                reports: dict[str, dict] = {}
+                for record in tenants:
+                    with tenant_scope(tenant=record.id):
+                        reports[record.id] = enforce(
+                            config=cfg,
+                            dry_run=dry_run,
+                            now=now,
+                            _fleet_child=True,
+                        )
+                return {
+                    "scope": "tenant_fleet",
+                    "dry_run": dry_run,
+                    "tenant_count": len(reports),
+                    "tenants": reports,
+                }
 
     audit_days = cfg.get("audit_days")
     episodes_days = cfg.get("episodes_days")
@@ -297,6 +370,7 @@ def enforce(
 
 
 __all__ = [
+    "RetentionScopeError",
     "enforce",
     "record_retention_marker",
     "purge_audit_files",

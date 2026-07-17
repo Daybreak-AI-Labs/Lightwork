@@ -24,8 +24,12 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import hashlib
+import json
 import os
+import threading
 import unicodedata
+from collections import OrderedDict
 from pathlib import Path
 
 _TENANT: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -47,6 +51,10 @@ class TenantPolicyError(RuntimeError):
     """Tenant isolation policy cannot be resolved without risking data mixing."""
 
 
+class TenantNamespaceCollision(InvalidTenantError):
+    """Two tenant ids would address the same portable filesystem namespace."""
+
+
 def _tenant_segment(tenant: str) -> str:
     # Normalise to NFC first so the same name in different Unicode normal forms
     # (e.g. NFC "josé" vs NFD "josé") maps to ONE on-disk namespace rather
@@ -64,6 +72,198 @@ def _tenant_segment(tenant: str) -> str:
     if len(segment) > MAX_TENANT_SEGMENT_LENGTH:
         raise InvalidTenantError("tenant id is too long")
     return segment
+
+
+# A durable, immutable namespace claim prevents two processes (or two later
+# runs) from assigning differently-cased ids to the same directory on Windows
+# or a default case-insensitive macOS volume. Claims live outside ``tenants/``
+# so deleting a tenant's data cannot release its old name for accidental reuse.
+_TENANT_NAMESPACE_VERSION = 1
+_TENANT_NAMESPACE_DIR = ".tenant-namespaces"
+_TENANT_NAMESPACE_CACHE_MAX = 4096
+_WINDOWS_DEVICE_NAMES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{i}" for i in range(1, 10)}
+    | {f"lpt{i}" for i in range(1, 10)}
+)
+_tenant_namespace_cache: OrderedDict[tuple[str, str], str] = OrderedDict()
+_tenant_namespace_lock = threading.Lock()
+
+
+def canonical_tenant_id(tenant: str) -> str:
+    """Return the portable canonical identity for a named tenant.
+
+    Unicode normal forms are one identity (NFC), while display casing is
+    retained. Casing aliases are rejected by :func:`bind_tenant_namespace`
+    instead of silently changing an operator-facing id.
+    """
+    if not isinstance(tenant, str) or not tenant:
+        raise InvalidTenantError("tenant id is required")
+    canonical = unicodedata.normalize("NFC", tenant)
+    segment = _tenant_segment(canonical)
+    # Win32 strips trailing dots from path components and treats device names
+    # as devices even when an extension is present. Reject these names on every
+    # OS so a deployment can move its data without changing tenant identity.
+    if segment.endswith((".", " ")):
+        raise InvalidTenantError("tenant id cannot end with a dot or space")
+    device_stem = segment.split(".", 1)[0].casefold()
+    if device_stem in _WINDOWS_DEVICE_NAMES:
+        raise InvalidTenantError("tenant id is a reserved filesystem name")
+    return canonical
+
+
+def _tenant_namespace_key(tenant: str) -> str:
+    """Portable comparison key for an encoded tenant path component."""
+    canonical = canonical_tenant_id(tenant)
+    # The segment is ASCII-only: non-ASCII UTF-8 bytes are percent encoded.
+    # casefold therefore exactly captures the case-insensitive path alias that
+    # matters on Windows/default macOS without depending on the host OS.
+    return _tenant_segment(canonical).rstrip(" .").casefold()
+
+
+def _tenant_claim_path(home: Path, namespace_key: str) -> Path:
+    digest = hashlib.sha256(namespace_key.encode("ascii")).hexdigest()
+    # Sharding avoids putting millions of per-user tenant claims in one
+    # directory on long-lived channel/fleet deployments.
+    return home / _TENANT_NAMESPACE_DIR / digest[:2] / f"{digest}.json"
+
+
+def _remember_tenant_namespace(cache_key: tuple[str, str], owner: str) -> None:
+    _tenant_namespace_cache[cache_key] = owner
+    _tenant_namespace_cache.move_to_end(cache_key)
+    while len(_tenant_namespace_cache) > _TENANT_NAMESPACE_CACHE_MAX:
+        _tenant_namespace_cache.popitem(last=False)
+
+
+def _read_tenant_claim(path: Path) -> dict[str, object]:
+    from .file_lock import atomic_read_text, ensure_private_file
+
+    try:
+        ensure_private_file(path)
+        raw = atomic_read_text(path)
+        if len(raw.encode("utf-8")) > 8192:
+            raise ValueError("claim is too large")
+
+        def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+            out: dict[str, object] = {}
+            for key, value in pairs:
+                if key in out:
+                    raise ValueError(f"duplicate key {key!r}")
+                out[key] = value
+            return out
+
+        claim = json.loads(raw, object_pairs_hook=_object)
+        if not isinstance(claim, dict):
+            raise ValueError("claim must be an object")
+        return claim
+    except (OSError, TypeError, ValueError) as exc:
+        raise TenantPolicyError(f"tenant namespace claim is untrusted: {path}") from exc
+
+
+def _tenant_claim_owner(
+    claim: dict[str, object], namespace_key: str, path: Path,
+) -> str:
+    try:
+        raw_owner = claim.get("canonical_id")
+        if not isinstance(raw_owner, str):
+            raise ValueError("canonical_id must be a string")
+        owner = canonical_tenant_id(raw_owner)
+        if (
+            raw_owner != owner
+            or claim.get("version") != _TENANT_NAMESPACE_VERSION
+            or claim.get("namespace_key") != namespace_key
+            or claim.get("segment") != _tenant_segment(owner)
+            or _tenant_namespace_key(owner) != namespace_key
+        ):
+            raise ValueError("claim fields are inconsistent")
+        return owner
+    except (TypeError, ValueError) as exc:
+        raise TenantPolicyError(
+            f"tenant namespace claim does not match its address: {path}"
+        ) from exc
+
+
+def bind_tenant_namespace(tenant: str) -> str:
+    """Atomically reserve and validate a tenant's portable path namespace.
+
+    NFC/NFD spellings of the same id share one claim. A distinct spelling that
+    aliases under case-insensitive or Win32 path rules is refused before any
+    tenant data is opened. Existing exact-cased directories are adopted for
+    backward compatibility; an existing differently-cased legacy directory is
+    treated as a collision and never opened through the new id.
+    """
+    canonical = canonical_tenant_id(tenant)
+    segment = _tenant_segment(canonical)
+    namespace_key = _tenant_namespace_key(canonical)
+    home = maverick_home()
+    home_key = os.path.normcase(os.path.abspath(os.fspath(home))).casefold()
+    cache_key = (home_key, namespace_key)
+
+    with _tenant_namespace_lock:
+        owner = _tenant_namespace_cache.get(cache_key)
+        if owner is not None:
+            if owner != canonical:
+                raise TenantNamespaceCollision(
+                    f"tenant id {tenant!r} aliases namespace owned by {owner!r}"
+                )
+            _tenant_namespace_cache.move_to_end(cache_key)
+            return canonical
+
+        from .file_lock import (
+            atomic_create_text,
+            ensure_private_directory,
+        )
+
+        # The home, tenant roster root, and immutable-claim root are all
+        # Lightwork-owned confidentiality boundaries.
+        ensure_private_directory(home)
+        tenants_root = ensure_private_directory(home / "tenants")
+        ensure_private_directory(home / _TENANT_NAMESPACE_DIR)
+        claim_path = _tenant_claim_path(home, namespace_key)
+
+        if claim_path.exists():
+            claim = _read_tenant_claim(claim_path)
+            owner = _tenant_claim_owner(claim, namespace_key, claim_path)
+            if owner != canonical:
+                raise TenantNamespaceCollision(
+                    f"tenant id {tenant!r} aliases namespace owned by {owner!r}"
+                )
+            _remember_tenant_namespace(cache_key, owner)
+            return canonical
+
+        # Upgrade path for homes created before namespace claims existed. Do
+        # not let a new casing adopt an existing legacy tenant directory.
+        for entry in tenants_root.iterdir():
+            entry_key = entry.name.rstrip(" .").casefold()
+            if entry_key == namespace_key and entry.name != segment:
+                raise TenantNamespaceCollision(
+                    f"tenant id {tenant!r} aliases existing namespace {entry.name!r}"
+                )
+
+        payload = json.dumps(
+            {
+                "canonical_id": canonical,
+                "namespace_key": namespace_key,
+                "segment": segment,
+                "version": _TENANT_NAMESPACE_VERSION,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+        )
+        try:
+            atomic_create_text(claim_path, payload)
+            owner = canonical
+        except FileExistsError:
+            # Another process won the same namespace. Its immutable claim is
+            # authoritative; only the same canonical identity may proceed.
+            claim = _read_tenant_claim(claim_path)
+            owner = _tenant_claim_owner(claim, namespace_key, claim_path)
+        if owner != canonical:
+            raise TenantNamespaceCollision(
+                f"tenant id {tenant!r} aliases namespace owned by {owner!r}"
+            )
+        _remember_tenant_namespace(cache_key, owner)
+        return canonical
 
 
 def explicit_tenant_id() -> str | None:
@@ -91,13 +291,45 @@ def current_tenant_id() -> str | None:
     return client_id()
 
 
-def current_tenant() -> str | None:
-    """The active tenant id (path-encoded), or ``None`` for the shared/legacy root.
+def current_tenant_id_strict() -> str | None:
+    """Resolve tenant identity without the diagnostic hot-path fallback.
 
-    Explicit :func:`set_tenant` scope wins over the ``MAVERICK_TENANT`` env var.
+    Explicitly unbound legacy mode still returns ``None``. Invalid explicit
+    tenant ids and corrupt/invalid client bindings raise, so security-sensitive
+    backends cannot confuse resolution failure with legitimate unbound mode.
     """
+    explicit = explicit_tenant_id()
+    if explicit:
+        _tenant_segment(explicit)  # validate before a backend builds a scope
+        return explicit
+    from .client import strict_client_id
+    return strict_client_id()
+
+
+def current_tenant() -> str | None:
+    """The active tenant id (path-encoded), or ``None`` when truly unbound.
+
+    This is the storage-safe resolver: invalid/corrupt client binding raises
+    rather than silently selecting the shared root. Explicit tenant scope wins.
+    """
+    tenant = current_tenant_id_strict()
+    if not tenant:
+        return None
+    return _tenant_segment(bind_tenant_namespace(tenant))
+
+
+def current_tenant_diagnostic() -> str | None:
+    """Best-effort tenant display for diagnostics; never use for storage."""
     tenant = current_tenant_id()
     return _tenant_segment(tenant) if tenant else None
+
+
+def current_tenant_strict() -> str | None:
+    """Strict path-encoded tenant, or ``None`` only when truly unbound."""
+    tenant = current_tenant_id_strict()
+    if not tenant:
+        return None
+    return _tenant_segment(bind_tenant_namespace(tenant))
 
 
 def set_tenant(tenant: str | None):
@@ -134,6 +366,27 @@ def data_dir(*parts: str, tenant: str | None = "__active__") -> Path:
     """
     if tenant == "__active__":
         segment = current_tenant()
+    else:
+        segment = (
+            _tenant_segment(bind_tenant_namespace(tenant))
+            if tenant
+            else None
+        )
+    base = maverick_home()
+    if segment:
+        base = base / "tenants" / segment
+    return base.joinpath(*parts)
+
+
+def diagnostic_data_dir(*parts: str, tenant: str | None = "__active__") -> Path:
+    """Best-effort path display that performs no storage admission.
+
+    This exists only for doctor/config-lint output when a corrupt client config
+    is itself what the operator needs to diagnose. Code that reads or writes
+    state must use :func:`data_dir`, whose default resolution is fail-closed.
+    """
+    if tenant == "__active__":
+        segment = current_tenant_diagnostic()
     else:
         segment = _tenant_segment(tenant) if tenant else None
     base = maverick_home()
@@ -207,15 +460,22 @@ def tenant_scope(
 
 __all__ = [
     "current_tenant_id",
+    "current_tenant_id_strict",
     "current_tenant",
+    "current_tenant_diagnostic",
+    "current_tenant_strict",
     "set_tenant",
     "reset_tenant",
     "maverick_home",
     "data_dir",
+    "diagnostic_data_dir",
     "InvalidTenantError",
+    "TenantNamespaceCollision",
     "TenantPolicyError",
     "MAX_TENANT_SEGMENT_LENGTH",
     "explicit_tenant_id",
     "tenant_by_user_enabled",
     "tenant_scope",
+    "canonical_tenant_id",
+    "bind_tenant_namespace",
 ]

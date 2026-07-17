@@ -42,8 +42,9 @@ EFS (so redeploys keep `~/.maverick`), secrets from SSM Parameter Store.
 
 ## Notes
 
-- **desired-count stays 1** while the world model is SQLite-on-EFS. For
-  horizontal scale, switch `[world_model] backend = "postgres"` (RDS) first.
+- **desired-count stays 1**, including with a Postgres world model. Workflow,
+  A2A, audit, learning, and policy stores are not all shared yet. Use Postgres
+  (RDS) for database HA/isolation and scale separate remote workers.
 - One-shot goals: `aws ecs run-task` with command
   `["start", "your goal text"]` reuses the same task definition.
 - The execution role needs `ssm:GetParameters` on the parameter and ECR pull;

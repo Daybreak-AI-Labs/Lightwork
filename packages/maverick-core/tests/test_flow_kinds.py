@@ -124,6 +124,32 @@ def test_scope_catches_a_body_failure_and_routes_on_error():
     assert "connector down" in res.data["_error"]
 
 
+def test_scope_redacts_executor_secrets_before_catch_branch():
+    secret = "ghp_" + "Z" * 36  # pragma: allowlist secret
+    flow = Flow.from_dict({
+        "id": "safe-catch", "name": "safe-catch", "start": "scope",
+        "nodes": [
+            {
+                "id": "scope", "kind": "scope", "on_error": "recover",
+                "body": {
+                    "id": "", "name": "body", "start": "boom",
+                    "nodes": [{"id": "boom", "kind": "action", "tool": "web_search"}],
+                },
+            },
+            {"id": "recover", "kind": "agent", "brief": "recover {{_error}}"},
+        ],
+    })
+
+    def broken(node, params, data):
+        raise RuntimeError(f"Authorization: Bearer {secret}")
+
+    result = run_flow(flow, agent_fn=_noop_agent, action_fn=broken)
+
+    assert result.status == STATUS_COMPLETED
+    assert secret not in result.data["_error"]
+    assert "redacted" in result.data["_error"].lower()
+
+
 def test_nested_wait_event_fails_closed_not_open():
     # A wait_event buried in a foreach body cannot pause; it must fail closed
     # (reject) rather than silently continue before the event's data arrives.

@@ -41,6 +41,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from ..file_lock import (
+    atomic_write_text,
+    ensure_private_directory,
+    ensure_private_file,
+    require_private_directory,
+)
 from ..paths import data_dir
 from ..safety.action_evidence import seal_bracketed
 from ..safety.action_gate import browser_action_risk, gate_browser_action
@@ -85,7 +91,12 @@ def _restore_state_arg() -> str | None:
     if not _persist_enabled():
         return None
     p = _state_path()
-    return str(p) if p.exists() else None
+    if not p.exists():
+        return None
+    require_private_directory(p.parent)
+    # Protect state created by older releases before Playwright opens it.
+    ensure_private_file(p)
+    return str(p)
 
 
 _BROWSER_INPUT_SCHEMA: dict[str, Any] = {
@@ -182,12 +193,20 @@ class _BrowserSession:
                 return False
             p = _state_path()
             try:
-                p.parent.mkdir(parents=True, exist_ok=True)
-                self._context.storage_state(path=str(p))
-                try:
-                    os.chmod(p, 0o600)  # cookies are sensitive
-                except OSError:
-                    pass
+                if p.parent.exists():
+                    require_private_directory(p.parent)
+                else:
+                    ensure_private_directory(p.parent)
+                # Ask Playwright for the in-memory representation and publish
+                # it ourselves.  Passing a pathname to Playwright would create
+                # cookies/localStorage with inherited ACLs before we could
+                # protect the file (and chmod is not a DACL boundary on Windows).
+                state = self._context.storage_state()
+                atomic_write_text(
+                    p,
+                    json.dumps(state, separators=(",", ":")),
+                    encoding="utf-8",
+                )
                 return True
             except Exception as e:
                 log.warning("browser save_state: %s", e)

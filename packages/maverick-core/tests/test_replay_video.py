@@ -1,6 +1,8 @@
 """Replay export to MP4: deterministic storyboard + manifest; best-effort encode."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from maverick.replay import video as rv
 from maverick.replay.video import MAX_FRAME_SECONDS, MIN_FRAME_SECONDS, render, storyboard
 
@@ -44,7 +46,7 @@ def test_ffmpeg_command_shape(tmp_path):
 
 def test_render_writes_manifest_and_command(tmp_path):
     out = tmp_path / "replay.mp4"
-    result = render(7, out, events=_evs())
+    result = render(7, out, events=_evs(), retain_staging=True)
     # The manifest (ffconcat) is always written; it lists every frame.
     assert result.concat_path.exists()
     manifest = result.concat_path.read_text()
@@ -61,6 +63,8 @@ def test_render_empty_goal(tmp_path):
     result = render(7, tmp_path / "r.mp4", events=[])
     assert result.frames == 0 and not result.encoded
     assert "no events" in result.detail
+    assert "cleaned" in result.detail
+    assert not result.frame_dir.exists()
 
 
 def test_render_encodes_when_ffmpeg_present(tmp_path, monkeypatch):
@@ -74,11 +78,12 @@ def test_render_encodes_when_ffmpeg_present(tmp_path, monkeypatch):
     out = tmp_path / "replay.mp4"
 
     def fake_sandbox_run(sandbox, argv, **kw):
-        out.write_bytes(b"\x00\x00fake mp4")  # pretend ffmpeg produced it
+        Path(argv[-1]).write_bytes(b"\x00\x00fake mp4")
         return 0, "", ""
 
     monkeypatch.setattr(tools_mod, "sandbox_run", fake_sandbox_run)
     result = render(7, out, events=_evs())
     assert result.encoded is True and out.exists()
-    # PNG frames were rendered.
-    assert len(list(result.frame_dir.glob("frame_*.png"))) == 4
+    # Successful publication removes private staging rather than leaving run
+    # screenshots and manifests behind.
+    assert not result.frame_dir.exists()

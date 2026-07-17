@@ -33,7 +33,7 @@ SDK_VERSION = 2
 
 # Optional capability methods a backend MAY provide; capabilities() reports
 # which are present so callers feature-detect instead of try/except-ing.
-_OPTIONAL = ("put_file", "close", "stop")
+_OPTIONAL = ("put_file", "close", "stop", "exec_authenticated_tests")
 
 
 @runtime_checkable

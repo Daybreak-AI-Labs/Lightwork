@@ -29,8 +29,10 @@ Quick triage for the alerts in `prometheus-rules.yaml`. Pair with
 - A single tenant should NOT be able to starve others — per-tenant ceilings come
   from each tenant's plan (`max_concurrent_goals`). If one tenant is hot, check
   its plan/quota rather than raising the global cap.
-- To scale out you must move the world model to Postgres first (SQLite is
-  single-writer). See `deploy/postgres/README.md`.
+- Do not add dashboard/serve replicas: Postgres shares the world model, but not
+  every durable control-plane store. To add goal-processing capacity, move the
+  world model to Postgres and scale remote workers while keeping exactly one
+  control-plane replica. See `deploy/postgres/README.md`.
 
 ## Alert: MaverickSpendSpike
 

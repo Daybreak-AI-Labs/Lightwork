@@ -13,6 +13,7 @@ and :func:`default_action_runner` supply the production bindings.
 from __future__ import annotations
 
 import contextvars
+import inspect
 from collections.abc import Callable
 from functools import wraps
 from typing import Any
@@ -111,6 +112,26 @@ _active_node: contextvars.ContextVar[tuple[str, str, str, str]] = contextvars.Co
     "_flow_active_node", default=("", "", "", ""))
 
 
+def _runner_accepts_wall(runner: AgentRunner) -> bool:
+    """Inspect the runner contract without executing a stateful call twice."""
+    try:
+        parameters = inspect.signature(runner).parameters.values()
+    except (TypeError, ValueError):
+        # The production contract accepts ``wall``. For opaque callables, make
+        # one contract-compliant invocation and surface any error; never retry a
+        # possibly side-effecting call based on its exception type.
+        return True
+    return any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        or (
+            parameter.name == "wall"
+            and parameter.kind
+            in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+        )
+        for parameter in parameters
+    )
+
+
 def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
                 flow_id: str = "", node_id: str = "", revision: str = "",
                 cohort: str = "") -> tuple:
@@ -122,11 +143,8 @@ def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
     ContextVar so the production runner can attribute its goal's tools to it."""
     token = _active_node.set((flow_id, node_id, revision, cohort))
     try:
-        if wall and wall > 0:
-            try:
-                return runner(brief, data, wall=wall)
-            except TypeError:
-                pass
+        if wall and wall > 0 and _runner_accepts_wall(runner):
+            return runner(brief, data, wall=wall)
         return runner(brief, data)
     finally:
         _active_node.reset(token)

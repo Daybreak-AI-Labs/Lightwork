@@ -2,8 +2,8 @@ apiVersion: v2
 name: maverick
 description: >-
   Lightwork — governed, self-improving AI workforce. Runs the dashboard
-  (web UI + API + webhooks) with persistent state. Single-writer SQLite by
-  default; point [world_model] at Postgres to scale past one replica.
+  (web UI + API + webhooks) with persistent state. The control plane is
+  single-replica; Postgres adds managed world-model HA and tenant isolation.
 type: application
 # Chart version is independent of the app; bump on template changes.
 version: 0.1.0

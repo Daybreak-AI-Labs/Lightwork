@@ -568,11 +568,10 @@ def pending_migrations(
 def _active_tenant() -> str | None:
     """The tenant scoping this call, or ``None`` for the legacy single-tenant
     store. Lazy import keeps this module free of a hard ``paths`` dependency."""
-    try:
-        from ..paths import current_tenant
-        return current_tenant()
-    except Exception:  # pragma: no cover -- tenancy never blocks a query
-        return None
+    # Resolution failures are not equivalent to deliberately unbound legacy
+    # mode: swallowing one here removes every app-layer tenant predicate.
+    from ..paths import current_tenant_strict
+    return current_tenant_strict()
 
 
 def _truthy(value: object) -> bool:
@@ -687,6 +686,20 @@ def _tenant_scope(column: str = "tenant_id") -> tuple[str, list]:
     if _strict_tenant_isolation():
         return f"{column} = %s", [t]
     return f"({column} = %s OR {column} IS NULL)", [t]
+
+
+def _required_retention_tenant(operation: str) -> str:
+    """Concrete tenant for a destructive retention operation.
+
+    Absence of tenant is an administrator read view, not implicit authority to
+    delete every tenant. Legacy NULL rows likewise need a separate, explicit
+    administrator migration API and are never folded into routine retention.
+    """
+    tenant = _active_tenant()
+    if tenant is None:
+        from ..paths import TenantPolicyError
+        raise TenantPolicyError(f"refusing unbound Postgres {operation}")
+    return tenant
 
 
 @dataclass
@@ -2971,17 +2984,17 @@ class PostgresWorldModel:
         """Delete conversations idle for N seconds and their turns. Turns first
         (no ON DELETE CASCADE). Returns conversations removed. Mirrors SQLite."""
         cutoff = time.time() - idle_for_seconds
-        frag, fparams = _tenant_scope()
-        scope = (" AND " + frag) if frag else ""
+        tenant = _required_retention_tenant("conversation retention")
+        scope = " AND tenant_id = %s"
         with self._tx() as cur:
             cur.execute(
                 "DELETE FROM turns WHERE conversation_id IN "
                 f"(SELECT id FROM conversations WHERE last_seen < %s{scope})",
-                tuple([cutoff, *fparams]),
+                (cutoff, tenant),
             )
             cur.execute(
                 f"DELETE FROM conversations WHERE last_seen < %s{scope}",
-                tuple([cutoff, *fparams]),
+                (cutoff, tenant),
             )
             return cur.rowcount
 
@@ -3331,31 +3344,55 @@ class PostgresWorldModel:
 
     # ----- pruning -----
 
+    def purge_episodes_before(
+        self, cutoff_ts: float, *, dry_run: bool = False,
+    ) -> int:
+        """Count or delete old completed episodes in the active tenant."""
+        tenant = _required_retention_tenant("episode retention")
+        predicate = (
+            "ended_at IS NOT NULL AND ended_at < %s "
+            "AND goal_id IN (SELECT id FROM goals WHERE tenant_id = %s)"
+        )
+        params: list = [float(cutoff_ts), tenant]
+        verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
+        with self._tx() as cur:
+            cur.execute(f"{verb} episodes WHERE {predicate}", tuple(params))
+            if dry_run:
+                row = cur.fetchone()
+                return int(row[0] or 0)
+            return int(cur.rowcount or 0)
+
+    def purge_goal_events_before(
+        self, cutoff_ts: float, *, dry_run: bool = False,
+    ) -> int:
+        """Count or delete old goal events in the active tenant."""
+        tenant = _required_retention_tenant("goal-event retention")
+        predicate = (
+            "ts IS NOT NULL AND ts < %s "
+            "AND goal_id IN (SELECT id FROM goals WHERE tenant_id = %s)"
+        )
+        params: list = [float(cutoff_ts), tenant]
+        verb = "SELECT COUNT(*) FROM" if dry_run else "DELETE FROM"
+        with self._tx() as cur:
+            cur.execute(f"{verb} goal_events WHERE {predicate}", tuple(params))
+            if dry_run:
+                row = cur.fetchone()
+                return int(row[0] or 0)
+            return int(cur.rowcount or 0)
+
     def prune_goal_events(self, older_than_seconds: float = 30 * 24 * 3600) -> int:
         cutoff = time.time() - older_than_seconds
-        # goal_events has no tenant_id column; scope via the parent goal so one
-        # tenant's prune never deletes another tenant's rows (SQLite parity: each
-        # tenant has its own DB file).
-        frag, fparams = _tenant_scope("tenant_id")
-        sql = "DELETE FROM goal_events WHERE ts < %s"
-        params: list = [cutoff]
-        if frag:
-            sql += " AND goal_id IN (SELECT id FROM goals WHERE " + frag + ")"
-            params += fparams
-        with self._tx() as cur:
-            cur.execute(sql, tuple(params))
-            return cur.rowcount
+        return self.purge_goal_events_before(cutoff)
 
     def prune_processed_messages(self, older_than_seconds: float = 30 * 24 * 3600) -> int:
         cutoff = time.time() - older_than_seconds
-        frag, fparams = _tenant_scope()
-        sql = "DELETE FROM processed_messages WHERE seen_at < %s"
-        params: list = [cutoff]
-        if frag:
-            sql += " AND " + frag
-            params += fparams
+        tenant = _required_retention_tenant("processed-message retention")
+        sql = (
+            "DELETE FROM processed_messages "
+            "WHERE seen_at < %s AND tenant_id = %s"
+        )
         with self._tx() as cur:
-            cur.execute(sql, tuple(params))
+            cur.execute(sql, (cutoff, tenant))
             return cur.rowcount
 
     # ----- shared rate-limit window (cross-replica goal-creation cap) -----

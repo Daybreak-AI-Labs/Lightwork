@@ -24,6 +24,7 @@ from pathlib import Path
 from maverick.audit.events import AuditEvent, EventKind
 from maverick.audit.writer import AuditLog
 from maverick.dsar import export_subject_data
+from maverick.file_lock import ensure_private_directory
 from maverick.world_model import WorldModel
 
 
@@ -290,7 +291,7 @@ def test_tenant_isolation():
 
     # Tenant 'acme' store: a *different* alice conversation lives here.
     tenant_db = data_dir("world.db", tenant="acme")
-    tenant_db.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_directory(tenant_db.parent)
     tw = WorldModel(tenant_db)
     tconv = tw.get_or_create_conversation("telegram", "alice")
     tw.append_turn(tconv.id, "user", "acme-store-message")

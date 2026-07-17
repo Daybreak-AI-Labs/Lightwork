@@ -139,7 +139,10 @@ class ContextualBandit:
 
     def _load(self) -> None:
         try:
-            raw = json.loads(Path(self.path).read_text(encoding="utf-8"))
+            from ..file_lock import atomic_read_text, ensure_private_file
+
+            ensure_private_file(Path(self.path))
+            raw = json.loads(atomic_read_text(Path(self.path)))
         except (OSError, ValueError):
             return
         for ctx, arms in (raw or {}).items():
@@ -153,13 +156,13 @@ class ContextualBandit:
             return
         try:
             p = Path(self.path)
-            p.parent.mkdir(parents=True, exist_ok=True)
             data = {ctx: {a: {"pulls": v.pulls, "total_reward": v.total_reward}
                           for a, v in arms.items()}
                     for ctx, arms in self._table.items()}
             # Unique temp + os.replace: a fixed ".tmp" collides between two
             # processes' saves (one os.replace moves it out from under the other).
             from ..file_lock import atomic_write_text
+
             atomic_write_text(p, json.dumps(data, sort_keys=True))
         except Exception:  # pragma: no cover -- persistence is best-effort
             log.debug("bandit save failed", exc_info=True)
@@ -177,8 +180,12 @@ def shared() -> ContextualBandit:
     global _shared
     with _shared_lock:
         if _shared is None:
+            from ..file_lock import ensure_private_directory
             from ..paths import data_dir
-            _shared = ContextualBandit(path=data_dir("router_bandit.json"))
+
+            path = data_dir("router_bandit.json")
+            ensure_private_directory(path.parent)
+            _shared = ContextualBandit(path=path)
         return _shared
 
 

@@ -177,6 +177,23 @@ def test_recall_returns_empty_on_empty_world(tmp_path):
         world.close()
 
 
+def test_recall_default_does_not_close_cached_tenant_world(tmp_path, monkeypatch):
+    import maverick.world_model as wm
+    from maverick.paths import tenant_scope
+    from maverick.tools.recall import recall_past_goals
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CLIENT_ID", raising=False)
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    with tenant_scope(tenant="recall-tenant"):
+        cached = wm.world_for_tenant("recall-tenant")
+        assert recall_past_goals("anything") == []
+        assert wm.world_for_tenant("recall-tenant") is cached
+        assert cached.list_goals() == []
+    cached.close()
+    wm._tenant_worlds.pop(str(cached.path), None)
+
+
 def test_recall_tool_factory():
     from maverick.tools.recall import recall
     tool = recall()

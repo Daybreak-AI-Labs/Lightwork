@@ -100,7 +100,7 @@ def run_soak(workdir: Path, *, goals: int = _DEFAULT_GOALS,
             except Exception as e:  # a contention/lock failure is a real finding
                 worker_errors.append(repr(e))
             finally:
-                w.conn.close()
+                w.close()
 
         t_drain = time.time()
         threads = [threading.Thread(target=_worker_loop, name=f"soak-w{i}")
@@ -119,7 +119,7 @@ def run_soak(workdir: Path, *, goals: int = _DEFAULT_GOALS,
                      + len(control_queue.list(status="running", limit=cap)))
         stuck_threads = [t.name for t in threads if t.is_alive()]
     finally:
-        control_world.conn.close()
+        control_world.close()
 
     zero_loss = done == goals and not lost
     # CAVEAT: this proves DB-level exactly-once -- claim() atomically flips

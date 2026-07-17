@@ -1,6 +1,8 @@
 """Tests for governed trajectory capture (Phase 0 data foundation)."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from maverick.trajectory_store import (
     TrajectoryStep,
     TrajectoryStore,
@@ -48,7 +50,8 @@ def test_capture_explicit_opt_out_is_noop(tmp_path, monkeypatch):
 
 
 def test_record_and_iter_roundtrip(tmp_path):
-    store = TrajectoryStore(path=tmp_path / "t.ndjson")
+    path = tmp_path / "t.ndjson"
+    store = TrajectoryStore(path=path)
     assert store.record(_step(step=0, tool="read_file", tool_succeeded=True))
     assert store.record(_step(
         step=1, tool="shell", tool_succeeded=False, error="boom",
@@ -62,6 +65,27 @@ def test_record_and_iter_roundtrip(tmp_path):
     assert steps[1].task_id == "stable-task"
     assert steps[1].outcome_source == "tests"
     assert steps[1].outcome_verified_at == 3.0
+    from maverick.file_lock import private_path_is_restricted
+    assert private_path_is_restricted(path)
+
+
+def test_independent_stores_serialize_appends(tmp_path):
+    path = tmp_path / "t.ndjson"
+    stores = [TrajectoryStore(path=path, max_rows=1_000) for _ in range(20)]
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        results = list(pool.map(
+            lambda pair: pair[1].record(_step(step=pair[0])),
+            enumerate(stores),
+        ))
+    assert all(results)
+    assert TrajectoryStore(path=path).count() == len(stores)
+    assert len(list(TrajectoryStore(path=path).iter_steps())) == len(stores)
+
+
+def test_reader_skips_non_object_json_rows(tmp_path):
+    path = tmp_path / "t.ndjson"
+    path.write_text('[]\n{"goal_id": 7}\n', encoding="utf-8")
+    assert len(list(TrajectoryStore(path=path).iter_steps())) == 1
 
 
 def test_secrets_are_redacted_before_disk(tmp_path):

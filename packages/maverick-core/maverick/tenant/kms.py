@@ -20,16 +20,21 @@ Opt-in and offline-testable. Requires the ``cryptography`` extra (AES-GCM).
 """
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import os
 import secrets
-import tempfile
 import threading
 import time
 from typing import Protocol
 
 from ..crypto_at_rest import EncryptionUnavailable, _have_crypto
+from ..file_lock import (
+    atomic_create_bytes,
+    atomic_read_bytes,
+    atomic_write_bytes,
+    ensure_private_directory,
+    ensure_private_file,
+)
 from ..paths import data_dir
 
 # Monotonic clock for cache expiry (immune to wall-clock jumps).
@@ -258,9 +263,11 @@ def tenant_dek(tenant_id: str | None, *, kms: KMS | None = None) -> bytes:
         # Per-tenant BYOK: resolve THIS tenant's KMS unless one was injected.
         kms = kms or get_kms(tenant_id)
         path = _wrapped_dek_path(tenant_id)
+        ensure_private_directory(path.parent)
         context = _tenant_context(tenant_id, b"dek-wrap")
         if path.exists():
-            dek = kms.unwrap(path.read_bytes(), context=context)
+            ensure_private_file(path)
+            dek = kms.unwrap(atomic_read_bytes(path), context=context)
             if len(dek) != _DEK_BYTES:
                 raise EncryptionUnavailable("unwrapped DEK is malformed")
         else:
@@ -278,17 +285,16 @@ def _generate_and_persist_dek(path, context: bytes, kms: KMS) -> bytes:
     persisted DEK -- otherwise the loser would seal data under a key that was
     never written and is unreadable everywhere else."""
     dek = secrets.token_bytes(_DEK_BYTES)
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    ensure_private_directory(path.parent)
     wrapped = kms.wrap(dek, context=context)
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        atomic_create_bytes(path, wrapped)
     except FileExistsError:
-        winner = kms.unwrap(path.read_bytes(), context=context)
+        ensure_private_file(path)
+        winner = kms.unwrap(atomic_read_bytes(path), context=context)
         if len(winner) != _DEK_BYTES:
             raise EncryptionUnavailable("unwrapped DEK is malformed") from None
         return winner
-    with os.fdopen(fd, "wb") as f:
-        f.write(wrapped)
     return dek
 
 
@@ -319,16 +325,8 @@ def _write_wrapped_dek(path, wrapped: bytes, tenant_id: str | None) -> None:
     of the same tenant can't interleave writes into one file and leave a torn
     blob that neither KEK can unwrap -- each writes its own temp and the last
     os.replace wins atomically."""
-    fd, tmp = tempfile.mkstemp(prefix="dek.", suffix=".tmp", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(wrapped)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+    ensure_private_directory(path.parent)
+    atomic_write_bytes(path, wrapped)
     with _dek_lock:
         _dek_cache.pop(tenant_id or "__default__", None)
 
@@ -337,10 +335,12 @@ def rotate_kek(tenant_id: str | None, *, old_kms: KMS, new_kms: KMS) -> None:
     """Re-wrap the tenant's existing DEK under a new KEK (instant; re-encrypts no
     data). The data-key is unchanged, so already-sealed data stays readable."""
     path = _wrapped_dek_path(tenant_id)
+    ensure_private_directory(path.parent)
     if not path.exists():
         raise EncryptionUnavailable(f"no wrapped DEK for tenant {tenant_id!r} to rotate")
+    ensure_private_file(path)
     context = _tenant_context(tenant_id, b"dek-wrap")
-    dek = old_kms.unwrap(path.read_bytes(), context=context)
+    dek = old_kms.unwrap(atomic_read_bytes(path), context=context)
     if len(dek) != _DEK_BYTES:
         raise EncryptionUnavailable("unwrapped DEK is malformed")
     _write_wrapped_dek(path, new_kms.wrap(dek, context=context), tenant_id)
@@ -352,10 +352,12 @@ def rotate_kek_idempotent(tenant_id: str | None, *, old_kms: KMS, new_kms: KMS) 
     midway finishes cleanly on re-run). Returns ``"rotated"`` or ``"skipped"``;
     raises when neither KEK can open the wrapped DEK (corrupt / foreign key)."""
     path = _wrapped_dek_path(tenant_id)
+    ensure_private_directory(path.parent)
     if not path.exists():
         raise EncryptionUnavailable(f"no wrapped DEK for tenant {tenant_id!r} to rotate")
+    ensure_private_file(path)
     context = _tenant_context(tenant_id, b"dek-wrap")
-    wrapped = path.read_bytes()
+    wrapped = atomic_read_bytes(path)
     try:  # already on the new KEK? -> idempotent skip, no write
         if len(new_kms.unwrap(wrapped, context=context)) == _DEK_BYTES:
             return "skipped"

@@ -1575,6 +1575,7 @@ def test_govern_refuses_untrusted_promotion_policy_source(tmp_path, monkeypatch)
         lambda: {"config.toml": "invalid TOML"},
     )
     keydir = _keys(tmp_path)
+    approve, verifier, public_keys = _external_approval(keydir)
     ledger = PromotionLedger(path=tmp_path / "ledger.json")
     _manifest(tmp_path)
 
@@ -1582,10 +1583,11 @@ def test_govern_refuses_untrusted_promotion_policy_source(tmp_path, monkeypatch)
         tmp_path / "a",
         _cases(),
         score_fn=_genuine_scorer,
-        keys_dir=keydir,
+        approve=approve,
+        approval_verifier=verifier,
+        approval_public_keys=public_keys,
         ledger=ledger,
         store=ar.AdapterStore(root=tmp_path / "store"),
-        unsafe_dev_auto_sign=True,
     )
 
     assert not result.promoted

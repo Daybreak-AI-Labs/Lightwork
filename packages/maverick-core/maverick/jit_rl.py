@@ -42,6 +42,14 @@ from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text_chunks,
+    cross_process_lock,
+    ensure_private_file,
+    open_private_append,
+)
+
 log = logging.getLogger(__name__)
 
 # Defaults for the k-NN estimate. k = neighbourhood size; beta = steering gain
@@ -94,6 +102,7 @@ class JitStore:
         # O(1), so no manual length check on the hot record path.
         self._items: deque[Experience] = deque(maxlen=self.max_experiences)
         self._lock = threading.Lock()
+        self._since_check = 0
         if self.path is not None:
             self._load()
 
@@ -175,24 +184,25 @@ class JitStore:
             return
         out: list[Experience] = []
         try:
-            with open(self.path, encoding="utf-8") as f:
-                for raw in f:
-                    if not raw.strip():
-                        continue
-                    try:
-                        d = json.loads(raw)
-                        if not isinstance(d, dict):
-                            continue
-                        out.append(Experience(
-                            features=tuple(float(x) for x in d.get("features", [])),
-                            action=str(d.get("action", "")),
-                            ret=float(d.get("ret", 0.0)),
-                            ts=float(d.get("ts", 0.0) or 0.0),
-                        ))
-                    except (json.JSONDecodeError, TypeError, ValueError):
-                        continue
+            path = ensure_private_file(self.path)
+            lines = atomic_read_text(path).splitlines()
         except OSError:
             return
+        for raw in lines:
+            if not raw.strip():
+                continue
+            try:
+                d = json.loads(raw)
+                if not isinstance(d, dict):
+                    continue
+                out.append(Experience(
+                    features=tuple(float(x) for x in d.get("features", [])),
+                    action=str(d.get("action", "")),
+                    ret=float(d.get("ret", 0.0)),
+                    ts=float(d.get("ts", 0.0) or 0.0),
+                ))
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
         # deque(iterable, maxlen) keeps only the most recent `maxlen` items.
         self._items = deque(out, maxlen=self.max_experiences)
 
@@ -200,17 +210,36 @@ class JitStore:
         if self.path is None:
             return
         try:
-            from .file_lock import cross_process_lock
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with cross_process_lock(self.path):
-                with open(self.path, "a", encoding="utf-8") as f:
+            with cross_process_lock(self.path, strict=True):
+                fd = open_private_append(self.path)
+                with os.fdopen(fd, "a", encoding="utf-8") as f:
                     f.write(json.dumps(exp.to_dict()) + "\n")
-            try:
-                os.chmod(self.path, 0o600)
-            except OSError:
-                pass
-        except OSError as e:  # pragma: no cover -- persistence is best-effort
+                    f.flush()
+                    os.fsync(f.fileno())
+                self._since_check += 1
+                if self._since_check >= max(1, self.max_experiences // 8):
+                    self._since_check = 0
+                    self._compact_disk()
+        except (OSError, RuntimeError) as e:  # pragma: no cover -- best-effort
             log.debug("jit_rl: experience append failed: %s", e)
+
+    def _compact_disk(self) -> None:
+        """Keep the persistent buffer bounded like the in-memory deque.
+
+        Called with the store's cross-process lock held.  The prior append-only
+        implementation bounded RAM but let the on-disk training corpus grow
+        forever, contrary to the class contract.
+        """
+        if self.path is None or not self.path.exists():
+            return
+        path = ensure_private_file(self.path)
+        lines = atomic_read_text(path).splitlines(keepends=True)
+        if len(lines) <= self.max_experiences:
+            return
+        kept = lines[-self.max_experiences:]
+        atomic_write_text_chunks(
+            path, (line if line.endswith("\n") else line + "\n" for line in kept),
+        )
 
 
 @dataclass
@@ -374,7 +403,13 @@ def build_from_env(*, path: Path | None = None) -> JitAdapter:
     Mirrors :func:`maverick.prm.build_from_env`: a single construction seam the
     live loop can call once the operator has opted in."""
     s = _settings()
-    store_path = path if path is not None else default_store_path()
+    if path is None:
+        from .file_lock import ensure_private_directory
+
+        store_path = default_store_path()
+        ensure_private_directory(store_path.parent)
+    else:
+        store_path = path
     store = JitStore(path=store_path, max_experiences=s["max_experiences"])
     return JitAdapter(store=store, k=s["k"], beta=s["beta"])
 

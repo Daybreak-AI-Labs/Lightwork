@@ -16,7 +16,8 @@ Dockerfile deploy with a persistent volume and env-driven secrets.
 
 ## Notes
 
-- `numReplicas` stays 1 while the world model is SQLite on the volume; move to
-  `[world_model] backend = "postgres"` (Railway Postgres plugin) before scaling.
+- `numReplicas` stays 1, including with a Railway Postgres world model, because
+  the remaining flow/A2A/audit/learning/policy stores are not all shared. Scale
+  separate remote workers instead of the dashboard/control-plane service.
 - One-shot goals: `railway run maverick start "your goal"` executes inside the
   service environment with the same image + secrets.

@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .world_model import DEFAULT_DB, Goal, WorldModel
+from .world_model import Goal, WorldModel
 
 log = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ def render(state: MonitorState) -> str:
 
 
 def monitor_loop(
-    db_path: Path = DEFAULT_DB,
+    db_path: Path | None = None,
     goal_id: int | None = None,
     interval_seconds: float = 1.5,
 ) -> int:
@@ -191,7 +191,7 @@ def monitor_loop(
         state = snapshot(world, goal_id)
         if state is None:
             console.print(
-                f"[yellow]No goals found in {db_path}.[/yellow]\n"
+                f"[yellow]No goals found in {world.path}.[/yellow]\n"
                 "Start one with: maverick start \"your task here\""
             )
             return 2
@@ -224,7 +224,9 @@ def monitor_loop(
         world.close()
 
 
-def _monitor_loop_plain(db_path: Path, goal_id: int | None, interval: float) -> int:
+def _monitor_loop_plain(
+    db_path: Path | None, goal_id: int | None, interval: float,
+) -> int:
     """Fallback when rich isn't installed: print snapshot every N seconds.
 
     Less pretty but works in any terminal. ANSI escape codes for clear.
@@ -240,7 +242,7 @@ def _monitor_loop_plain(db_path: Path, goal_id: int | None, interval: float) -> 
                 sys.stdout.write("\033[2J\033[H")
                 if state is None:
                     sys.stdout.write(
-                        f"No goals found in {db_path}.\n"
+                        f"No goals found in {world.path}.\n"
                         "Start one with: maverick start \"your task here\"\n"
                     )
                 else:

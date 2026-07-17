@@ -35,14 +35,37 @@ import base64
 import hashlib
 import logging
 import os
+import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 
+from . import file_lock
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
 
-DEFAULT_ROOT = data_dir("attachments")
+# ``None`` means resolve the tenant-scoped root at *call time*. A module-level
+# ``data_dir(...)`` result would freeze whichever tenant happened to import this
+# module first in a long-lived dashboard process. Kept as an override hook for
+# embedders/tests that intentionally set one fixed attachment root.
+DEFAULT_ROOT: Path | None = None
+
+# Keep every generated on-disk component portable across supported Windows and
+# POSIX hosts. The stored name reserves 16 hex characters plus ``-`` for the
+# content-address prefix.
+_MAX_COMPONENT_UNITS = 255
+_CONTENT_PREFIX_UNITS = 17
+_CONTENT_NAME_RE = re.compile(r"^(?P<digest>[0-9a-f]{16})-(?P<filename>.+)$")
+_WINDOWS_FORBIDDEN = frozenset('<>:"/\\|?*')
+_WINDOWS_RESERVED = {
+    "CON", "PRN", "AUX", "NUL", "CLOCK$", "CONIN$", "CONOUT$",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+    # Windows also reserves the ISO-8859-1 superscript spellings.
+    "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³",
+}
+_REPARSE_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
 # 25 MiB per file, 100 MiB per goal. Tunable via env so a VPS deployment
 # can raise the cap without a code change.
@@ -232,8 +255,20 @@ class Stored:
 
 
 def _root_for_goal(goal_id: int, root: Path | None = None) -> Path:
-    base = root or DEFAULT_ROOT
-    return base / str(goal_id)
+    if isinstance(goal_id, bool) or not isinstance(goal_id, int) or goal_id < 0:
+        raise AttachmentRejected("goal_id must be a non-negative integer")
+    configured_root = root if root is not None else DEFAULT_ROOT
+    base = Path(configured_root) if configured_root is not None else data_dir("attachments")
+    try:
+        # An injected root may be a caller-owned/shared directory.  Create it
+        # privately when missing, but never seize an existing directory by
+        # rewriting its ACL; require the caller to dedicate a private root.
+        # The per-goal child is always Lightwork-owned once that boundary has
+        # been verified.
+        file_lock.prepare_private_directory(base)
+        return file_lock.ensure_private_directory(base / str(goal_id))
+    except OSError as exc:
+        raise AttachmentRejected("attachment storage directory is not private") from exc
 
 
 # ---- S3 mirror (opt-in) -----------------------------------------------------
@@ -277,7 +312,7 @@ def _s3_key(goal_id: int, name: str) -> str:
     return f"{prefix}{goal_id}/{name}"
 
 
-def _s3_mirror(goal_id: int, dest: Path, mime: str) -> None:
+def _s3_mirror(goal_id: int, dest: Path, mime: str, data: bytes) -> None:
     """Best-effort upload of a stored attachment. Never raises."""
     try:
         client = _s3_client()
@@ -285,15 +320,30 @@ def _s3_mirror(goal_id: int, dest: Path, mime: str) -> None:
         client.put_object(
             Bucket=bucket,
             Key=_s3_key(goal_id, dest.name),
-            Body=dest.read_bytes(),
+            # Mirror the bytes that were hashed and exclusively published,
+            # rather than reopening a path that could have changed.
+            Body=data,
             ContentType=mime or "application/octet-stream",
         )
     except Exception as e:  # noqa: BLE001 -- mirror is fail-open by design
         log.warning("attachment S3 mirror failed (local copy kept): %s", e)
 
 
-def _validate_attachment_name(name: str) -> None:
-    """Reject names that cannot be stored under one goal attachment dir."""
+def _validate_portable_name(
+    name: str,
+    *,
+    reserve_units: int = 0,
+    label: str = "filename",
+) -> None:
+    """Reject one path component that is unsafe on any supported host.
+
+    Windows' ADS syntax, device names and normalization of trailing dots/spaces
+    are enforced even on POSIX so an attachment cannot become dangerous after
+    migration to a Windows worker. The UTF-8 and UTF-16 bounds keep the final
+    content-addressed component below the common 255-unit filesystem limit.
+    """
+    if not isinstance(name, str):
+        raise AttachmentRejected(f"invalid {label}: {name!r}")
     windows_name = PureWindowsPath(name)
     if (
         not name
@@ -304,9 +354,132 @@ def _validate_attachment_name(name: str) -> None:
         or windows_name.is_absolute()
         or windows_name.drive
     ):
-        raise AttachmentRejected(f"invalid attachment name: {name!r}")
+        raise AttachmentRejected(f"invalid {label}: {name!r}")
     if any(ord(c) < 0x20 or ord(c) == 0x7f for c in name):
-        raise AttachmentRejected(f"control character in attachment name: {name!r}")
+        raise AttachmentRejected(f"control character in {label}: {name!r}")
+    if any(c in _WINDOWS_FORBIDDEN for c in name):
+        raise AttachmentRejected(f"invalid {label}: {name!r}")
+    if name.endswith((".", " ")):
+        raise AttachmentRejected(f"invalid {label}: {name!r}")
+    # Win32 trims spaces before applying its device-name rules too (for
+    # example ``CON .txt``); reject those aliases on every host.
+    basename = name.split(".", 1)[0].rstrip(" ").upper()
+    if basename in _WINDOWS_RESERVED:
+        raise AttachmentRejected(f"reserved {label}: {name!r}")
+    try:
+        utf8_units = len(name.encode("utf-8"))
+        utf16_units = len(name.encode("utf-16-le")) // 2
+    except UnicodeEncodeError as exc:
+        raise AttachmentRejected(f"invalid {label}: {name!r}") from exc
+    limit = _MAX_COMPONENT_UNITS - reserve_units
+    if utf8_units > limit or utf16_units > limit:
+        raise AttachmentRejected(
+            f"{label} is too long (portable limit {limit} encoded units)"
+        )
+
+
+def _validate_attachment_name(name: str) -> str:
+    """Validate an on-disk content-addressed attachment name.
+
+    Returns the expected SHA-256 prefix so S3-fetched/local-cached bytes can be
+    bound to the key name before they are trusted.
+    """
+    _validate_portable_name(name, label="attachment name")
+    match = _CONTENT_NAME_RE.fullmatch(name)
+    if match is None:
+        raise AttachmentRejected(f"invalid attachment name: {name!r}")
+    _validate_portable_name(
+        match.group("filename"),
+        reserve_units=_CONTENT_PREFIX_UNITS,
+        label="filename",
+    )
+    return match.group("digest")
+
+
+def _path_is_alias(path: Path, info: os.stat_result) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    return (
+        stat.S_ISLNK(info.st_mode)
+        or bool(getattr(info, "st_file_attributes", 0) & _REPARSE_ATTRIBUTE)
+        or bool(callable(is_junction) and is_junction())
+    )
+
+
+def _attachment_identity(info: os.stat_result) -> tuple[int, int, int, int]:
+    return info.st_dev, info.st_ino, info.st_mode, info.st_nlink
+
+
+def _verify_stored_attachment(path: Path, expected_digest: str) -> None:
+    """Bind a private regular path to its descriptor and content address."""
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        raise AttachmentRejected("stored attachment could not be inspected") from exc
+    if (
+        _path_is_alias(path, before)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_nlink != 1
+        or not file_lock.private_path_is_restricted(path)
+    ):
+        raise AttachmentRejected(
+            "stored attachment is not a private single-link regular file"
+        )
+
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(str(path), flags)
+    except OSError as exc:
+        raise AttachmentRejected("stored attachment could not be opened safely") from exc
+    try:
+        opened = os.fstat(fd)
+        after = path.lstat()
+        if (
+            _path_is_alias(path, after)
+            or not stat.S_ISREG(opened.st_mode)
+            or not stat.S_ISREG(after.st_mode)
+            or opened.st_nlink != 1
+            or after.st_nlink != 1
+            or _attachment_identity(before) != _attachment_identity(opened)
+            or _attachment_identity(opened) != _attachment_identity(after)
+        ):
+            raise AttachmentRejected("stored attachment identity changed")
+        with os.fdopen(fd, "rb") as fh:
+            fd = -1
+            payload = fh.read(MAX_FILE_BYTES + 1)
+    except AttachmentRejected:
+        raise
+    except OSError as exc:
+        raise AttachmentRejected("stored attachment could not be verified") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+    if len(payload) > MAX_FILE_BYTES:
+        raise AttachmentRejected("stored attachment exceeds the file-size limit")
+    actual = hashlib.sha256(payload).hexdigest()
+    if actual != expected_digest and not (
+        len(expected_digest) == 16 and actual.startswith(expected_digest)
+    ):
+        raise AttachmentRejected("stored attachment content-address mismatch")
+
+
+def _publish_attachment(path: Path, data: bytes, expected_digest: str) -> bool:
+    """Exclusively publish bytes, or validate an idempotent winning writer.
+
+    Returns true only when this call created the path. Existing pathnames are
+    never overwritten -- including symlinks, junctions, hard links and planted
+    regular files.
+    """
+    try:
+        file_lock.atomic_create_bytes(path, data)
+        created = True
+    except FileExistsError:
+        created = False
+    except OSError as exc:
+        raise AttachmentRejected("attachment could not be stored securely") from exc
+    _verify_stored_attachment(path, expected_digest)
+    return created
 
 
 def s3_fetch(goal_id: int, name: str, *, root: Path | None = None) -> Path | None:
@@ -318,10 +491,11 @@ def s3_fetch(goal_id: int, name: str, *, root: Path | None = None) -> Path | Non
     """
     if not s3_mirror_enabled():
         return None
-    _validate_attachment_name(name)
+    expected_prefix = _validate_attachment_name(name)
     dest_dir = _root_for_goal(goal_id, root)
     dest = dest_dir / name
-    if dest.exists():
+    if os.path.lexists(dest):
+        _verify_stored_attachment(dest, expected_prefix)
         return dest
     try:
         client = _s3_client()
@@ -348,21 +522,17 @@ def s3_fetch(goal_id: int, name: str, *, root: Path | None = None) -> Path | Non
             )
         if content_type and not mime_allowed(content_type):
             raise AttachmentRejected(f"mime type not allowed: {content_type}")
+        actual_digest = hashlib.sha256(data).hexdigest()
+        if not actual_digest.startswith(expected_prefix):
+            raise AttachmentRejected(
+                "S3 attachment content-address mismatch"
+            )
     except AttachmentRejected:
         raise
     except Exception as e:  # noqa: BLE001 -- absent object / S3 down -> None
         log.warning("attachment S3 fetch failed: %s", e)
         return None
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(dest_dir, 0o700)
-    except OSError:
-        pass
-    dest.write_bytes(data)
-    try:
-        os.chmod(dest, 0o600)
-    except OSError:
-        pass
+    _publish_attachment(dest, data, actual_digest)
     return dest
 
 
@@ -384,13 +554,11 @@ def store(
     """
     if not filename:
         raise AttachmentRejected("filename is required")
-    if "/" in filename or "\\" in filename or filename.startswith("."):
-        raise AttachmentRejected(f"invalid filename: {filename!r}")
-    if any(ord(c) < 0x20 or ord(c) == 0x7f for c in filename):
-        # A null byte truncates the path at the C layer in downstream
-        # consumers; other control chars enable log/terminal injection.
-        # Real filenames never contain them.
-        raise AttachmentRejected(f"control character in filename: {filename!r}")
+    _validate_portable_name(
+        filename,
+        reserve_units=_CONTENT_PREFIX_UNITS,
+        label="filename",
+    )
     if not mime:
         raise AttachmentRejected("mime type is required")
     if _is_companion(filename) and mime == "text/plain" and not generated_companion:
@@ -424,27 +592,13 @@ def store(
 
     sha256 = hashlib.sha256(data).hexdigest()
     dest_dir = _root_for_goal(goal_id, root)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    # Attachment bytes can be private (uploaded docs, screenshots). The
-    # default umask often leaves them world-readable on a shared host, so
-    # lock the goal dir + file to the owner.
-    try:
-        os.chmod(dest_dir, 0o700)
-    except OSError:
-        pass
     # SHA-prefix the on-disk name so two attachments with the same
     # filename don't collide and so a re-upload of the same bytes is a
     # no-op (idempotent).
-    safe_name = filename.replace("/", "_").replace("\\", "_")
-    dest = dest_dir / f"{sha256[:16]}-{safe_name}"
-    if not dest.exists():
-        dest.write_bytes(data)
-        try:
-            os.chmod(dest, 0o600)
-        except OSError:
-            pass
-        if s3_mirror_enabled():
-            _s3_mirror(goal_id, dest, mime)
+    dest = dest_dir / f"{sha256[:16]}-{filename}"
+    created = _publish_attachment(dest, data, sha256)
+    if created and s3_mirror_enabled():
+        _s3_mirror(goal_id, dest, mime, data)
 
     return Stored(
         filename=filename,

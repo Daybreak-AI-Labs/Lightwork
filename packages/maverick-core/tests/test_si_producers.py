@@ -1,6 +1,8 @@
 """Tests for the per-rung self-improvement producers (Phases 1-6 -> one gate)."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from maverick.self_improvement import PromotionLedger, SelfImprovementController
 from maverick.si_producers import (
     ToolOutcomeTracker,
@@ -35,6 +37,18 @@ def test_tool_tracker_persists(tmp_path):
     p = tmp_path / "to.json"
     ToolOutcomeTracker(path=p).record("x", True)
     assert ToolOutcomeTracker(path=p).samples("x") == 1
+    from maverick.file_lock import private_path_is_restricted
+    assert private_path_is_restricted(p)
+
+
+def test_tool_tracker_serializes_independent_writers(tmp_path):
+    path = tmp_path / "to.json"
+    trackers = [ToolOutcomeTracker(path=path) for _ in range(12)]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(lambda tracker: tracker.record("shared", True), trackers))
+    reloaded = ToolOutcomeTracker(path=path)
+    assert reloaded.samples("shared") == len(trackers)
+    assert reloaded.success_rate("shared") == 1.0
 
 
 def test_propose_tool_promotes_when_it_beats_baseline(tmp_path, monkeypatch):

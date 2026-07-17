@@ -295,8 +295,9 @@ def backup_group() -> None:
 
     Snapshots the client-scoped data root (world DB via the SQLite online backup
     API, signed audit chain + keys, memory, fleet, managed trust registry) into
-    a portable ``.tgz`` with an integrity manifest. Restore is fail-closed: it
-    refuses a backup whose client id differs from this deployment's."""
+    a portable ``.tgz`` with an authenticated manifest. Set the same 32-byte
+    ``MAVERICK_BACKUP_SIGNING_KEY`` on the active and standby nodes. Restore is
+    transactional and fail-closed on authenticity, bounds, and client id."""
 
 
 @backup_group.command("create")

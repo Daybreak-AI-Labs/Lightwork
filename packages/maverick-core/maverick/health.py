@@ -350,20 +350,23 @@ def _check_channels(cfg: dict) -> None:
 
 
 def _check_world_db() -> None:
-    # Resolve the SAME db the runtime opens (Workspace.current().db_path, which
-    # the main CLI group uses as the default --db): home- and tenant-aware.
-    # The frozen world_model.DEFAULT_DB always pointed at ~/.maverick/world.db,
-    # so under MAVERICK_HOME or an active tenant doctor reported a path the
-    # runtime never touches (user-testing finding).
+    # Open the SAME configured backend as the runtime.  Inspecting a local
+    # workspace path here used to report a healthy SQLite mirror even when the
+    # deployment's authoritative world was Postgres.
     from .workspace import Workspace
-    from .world_model import WorldModel
-    db_path = Workspace.current().db_path
+    from .world_model import close_world_if_owned, open_world
+    from .world_model_backends import is_postgres_configured
+
+    label = "Postgres" if is_postgres_configured() else str(Workspace.current().db_path)
     try:
-        w = WorldModel(db_path)
-        _row(GREEN, "world-db", f"{db_path} (schema v{w.schema_version})")
+        w = open_world()
+        try:
+            _row(GREEN, "world-db", f"{label} (schema v{w.schema_version})")
+        finally:
+            close_world_if_owned(w)
     except Exception as e:
         _row(RED, "world-db", f"open failed: {e}",
-             fix=f"check permissions on {db_path.parent}, or delete world.db to start fresh")
+             fix="check world-model backend credentials, connectivity, and storage permissions")
 
 
 def _check_shield() -> None:

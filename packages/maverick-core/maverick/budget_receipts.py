@@ -238,13 +238,24 @@ def mint(
     starts = [e.started_at for e in episodes]
     ends = [e.ended_at for e in episodes if e.ended_at is not None]
     chain_path = Path(path) if path is not None else receipts_path()
-    chain_path.parent.mkdir(parents=True, exist_ok=True)
+    if path is None:
+        file_lock.ensure_private_directory(chain_path.parent)
+    else:
+        file_lock.prepare_private_directory(chain_path.parent)
     # The read-prev -> hash-link -> append -> advance-head sequence must be
     # atomic: two concurrent minters reading the same last line would both
     # embed the same prev_receipt_hash, forking the chain (a false tamper
     # alarm in verify_chain on otherwise valid receipts). Serialize within the
     # process and across the sibling processes sharing this data dir.
     with _MINT_LOCK, file_lock.cross_process_lock(chain_path):
+        # Publish a missing chain with a protected Windows DACL (or exact POSIX
+        # mode) before any read. Reopening through the same helper for the
+        # append below revalidates no-follow, regular-file, and single-link
+        # invariants against a pre-existing deployment file.
+        bootstrap_fd = file_lock.open_private_append(
+            chain_path, require_private_parent=True,
+        )
+        os.close(bootstrap_fd)
         pre_mint_count = _line_count(chain_path)
         prev_count = _read_head(chain_path, real_key)
         if prev_count is not None and prev_count < 0:
@@ -293,7 +304,9 @@ def mint(
                           ensure_ascii=False)
         # Append-only, created 0600: the chain is the tamper-evidence, the mode
         # keeps other local users from reading spend data.
-        fd = os.open(chain_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        fd = file_lock.open_private_append(
+            chain_path, require_private_parent=True,
+        )
         try:
             os.write(fd, line.encode("utf-8") + b"\n")
         finally:

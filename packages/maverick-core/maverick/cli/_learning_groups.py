@@ -220,9 +220,12 @@ def workforce_graduation(db_path: str | None) -> None:
     from ..agent_autonomy import graduation_candidates
     from ..domain import available_domains
     try:
-        from ..world_model import DEFAULT_DB, WorldModel
-        wm = WorldModel(db_path or DEFAULT_DB)
-        approvals = wm.list_approvals(limit=5000)
+        from ..world_model import close_world_if_owned, open_world
+        wm = open_world(Path(db_path)) if db_path else open_world()
+        try:
+            approvals = wm.list_approvals(limit=5000)
+        finally:
+            close_world_if_owned(wm)
     except Exception as e:  # pragma: no cover -- no DB / empty install
         raise click.ClickException(f"could not read approvals history: {e}") from e
     names = sorted(available_domains())

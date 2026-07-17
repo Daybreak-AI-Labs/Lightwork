@@ -14,20 +14,26 @@ The image runs as the unprivileged `maverick` user (uid/gid 1000); the chart
 sets a restricted-PSS `securityContext` and an `fsGroup` so the state PVC is
 writable.
 
-## Scaling past one replica
+## Postgres and scaling
 
-The default world-model backend is **SQLite on a ReadWriteOnce volume** — a
-single writer. The chart **refuses to render `replicaCount > 1`** unless you
-move to Postgres:
+The default world-model backend is **SQLite on a ReadWriteOnce volume**. Move
+the world model to Postgres for managed database HA, pooling, and DB-enforced
+tenant isolation:
 
 ```bash
 helm install maverick ./deploy/helm/maverick \
   --set worldModel.backend=postgres \
   --set worldModel.postgres.rls=true \
-  --set replicaCount=3 \
   --set-string secret.data.MAVERICK_PG_DSN=postgres://maverick:***@host:5432/maverick \
   --set-string secret.data.ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+Keep `replicaCount=1` and `autoscaling.enabled=false`. Postgres centralizes the
+world model, but workflow releases/runs, A2A durable task claims, audit and
+learning ledgers, and tenant-local policy state still live in the mounted data
+root. Multiple dashboard/serve pods would split approval and idempotency
+authority. The chart fails closed on that topology; scale remote goal workers
+separately until every control-plane store has a shared transactional backend.
 
 See [`deploy/postgres/README.md`](../postgres/README.md) for provisioning the
 database, row-level-security, pooling, and backups.

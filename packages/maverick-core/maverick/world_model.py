@@ -25,11 +25,24 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from .paths import data_dir
+from .file_lock import (
+    atomic_create_bytes,
+    ensure_private_directory,
+    ensure_private_file,
+    prepare_private_directory,
+)
+from .paths import bind_tenant_namespace, current_tenant_id, data_dir
 
 log = logging.getLogger(__name__)
 
-DEFAULT_DB = data_dir("world.db")
+# ``DEFAULT_DB`` remains a public override hook for embedders and tests, but
+# the built-in default must be resolved at *call time*.  A process can import
+# this module while handling tenant A and later serve tenant B (or the shared
+# single-tenant root); using the import-time path in that later request would
+# cross the tenant boundary.  Identity, rather than equality, distinguishes an
+# intentional override from the untouched compatibility constant.
+_INITIAL_DEFAULT_DB = data_dir("world.db")
+DEFAULT_DB = _INITIAL_DEFAULT_DB
 SCHEMA_VERSION = 28
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
@@ -838,8 +851,35 @@ def _approval_from_row(row) -> Approval:
     return Approval(**_row_for(Approval, d))
 
 
+def default_db_path() -> Path:
+    """Return the active tenant's world path unless explicitly overridden."""
+    if DEFAULT_DB is not _INITIAL_DEFAULT_DB:
+        return Path(DEFAULT_DB).expanduser()
+    tenant = current_tenant_id()
+    if tenant:
+        tenant = bind_tenant_namespace(tenant)
+        return data_dir("world.db", tenant=tenant)
+    return data_dir("world.db", tenant=None)
+
+
+def _resolve_world_path(path: Path | str | None) -> tuple[Path, bool]:
+    if path is None:
+        # The built-in dynamic path is Lightwork-owned. A replaced DEFAULT_DB
+        # is a public embedder/operator override and therefore caller-owned: it
+        # must already have a private parent, never have its ACL seized.
+        return default_db_path(), DEFAULT_DB is _INITIAL_DEFAULT_DB
+    return Path(path), False
+
+
 class WorldModel:
-    def __init__(self, path: Path = DEFAULT_DB):
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        *,
+        _managed_path: bool = False,
+    ):
+        path, default_managed = _resolve_world_path(path)
+        _managed_path = _managed_path or default_managed
         self.path = path
         # Whether this DB already held data before we opened it. Captured BEFORE
         # any file creation below so a brand-new world.db (every fresh
@@ -853,15 +893,21 @@ class WorldModel:
             )
         except OSError:  # pragma: no cover -- stat race; assume fresh
             self._db_preexisted = False
-        path.parent.mkdir(parents=True, exist_ok=True)
         # world.db holds all conversation content, messages, and facts.
         # The audit dir is locked to 0700/0600 but this DB inherited the
         # default umask (often world-readable 0644) — any local user or
         # backup could read everyone's data. Lock the dir + the file.
-        try:
-            os.chmod(path.parent, 0o700)
-        except OSError:
-            pass
+        if str(path) != ":memory:":
+            # Tenant/home context is deliberately resolved at request time.
+            # Treat the current managed default as Lightwork-owned and let the
+            # tenant factory explicitly mark its paths.  A genuinely
+            # caller-supplied parent still goes through
+            # ``prepare_private_directory`` so we never seize its ACLs.
+            current_default = data_dir("world.db")
+            if _managed_path or path == current_default:
+                ensure_private_directory(path.parent)
+            else:
+                prepare_private_directory(path.parent)
         # check_same_thread=False so FastAPI threadpool can share. Combined
         # with WAL + busy_timeout this is safe for the agent+dashboard
         # concurrency pattern (one writer process + many readers).
@@ -893,15 +939,15 @@ class WorldModel:
         # chmod below, briefly exposing all conversation content to co-tenants.
         if str(path) != ":memory:" and not path.exists():
             try:
-                _fd = os.open(str(path), os.O_WRONLY | os.O_CREAT, 0o600)
-                os.close(_fd)
-            except OSError:
-                pass
+                atomic_create_bytes(path, b"")
+            except FileExistsError:
+                # Another opener won the exclusive publication race.
+                ensure_private_file(path)
+        elif str(path) != ":memory:":
+            ensure_private_file(path)
         self.conn = sqlite3.connect(path, check_same_thread=False, timeout=10.0)
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        if str(path) != ":memory:":
+            ensure_private_file(path)
         self.conn.row_factory = sqlite3.Row
         # Arm a short busy handler BEFORE switching journal mode: switching to
         # WAL needs a brief exclusive lock, and when a second connection opens
@@ -933,8 +979,8 @@ class WorldModel:
         if str(path) != ":memory:":
             for _suffix in ("-wal", "-shm"):
                 try:
-                    os.chmod(path.parent / (path.name + _suffix), 0o600)
-                except OSError:
+                    ensure_private_file(path.parent / (path.name + _suffix))
+                except FileNotFoundError:
                     pass
         # synchronous=NORMAL under WAL is safe (no corruption) + much faster
         # than FULL, but a commit acked to the orchestrator can still be lost on
@@ -1248,24 +1294,16 @@ class WorldModel:
                 self.conn.commit()
             except sqlite3.Error:  # pragma: no cover -- best-effort quiesce
                 pass
-            # Pre-create the sensitive backup with private permissions before
-            # SQLite opens it. sqlite3.connect() would otherwise create the file
-            # at the process umask (often 0644), briefly exposing a full world.db
-            # snapshot before the chmod below (or forever if interrupted).
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-            if hasattr(os, "O_NOFOLLOW"):
-                flags |= os.O_NOFOLLOW
-            fd = os.open(str(dest), flags, 0o600)
-            os.close(fd)
+            # Pre-create the sensitive backup with the shared create-time
+            # private ACL and no-follow atomic publication before SQLite opens
+            # it and writes any customer data.
+            atomic_create_bytes(dest, b"")
             bdst = sqlite3.connect(str(dest))
             try:
                 self.conn.backup(bdst)
             finally:
                 bdst.close()  # sqlite3's context manager commits but never closes
-            try:
-                os.chmod(dest, 0o600)
-            except OSError:
-                pass
+            ensure_private_file(dest)
             log.info(
                 "world: wrote pre-migration backup %s (v%s -> v%s)",
                 dest, from_version, SCHEMA_VERSION,
@@ -1996,6 +2034,29 @@ class WorldModel:
         )
         return row is not None
 
+    def purge_episodes_before(
+        self, cutoff_ts: float, *, dry_run: bool = False,
+    ) -> int:
+        """Count or delete completed episodes older than an absolute cutoff.
+
+        This is the backend-portable retention primitive.  Keeping the
+        operation on the world model (instead of opening its SQLite file behind
+        its back) preserves backend selection and transaction ownership.
+        """
+        predicate = "ended_at IS NOT NULL AND ended_at < ?"
+        with self._writing() as conn:
+            if dry_run:
+                row = conn.execute(
+                    f"SELECT COUNT(*) FROM episodes WHERE {predicate}",
+                    (float(cutoff_ts),),
+                ).fetchone()
+                return int(row[0] or 0)
+            cur = conn.execute(
+                f"DELETE FROM episodes WHERE {predicate}",
+                (float(cutoff_ts),),
+            )
+            return int(cur.rowcount or 0)
+
     def total_spend(self, owner: str | None = None) -> dict[str, float]:
         """Aggregate spend. ``owner`` scopes to one principal's runs (join to
         the owning goal); ``None`` is the deployment-wide admin / auth-off view.
@@ -2066,6 +2127,24 @@ class WorldModel:
         with self._writing() as conn:
             cur = conn.execute("DELETE FROM goal_events WHERE ts < ?", (cutoff,))
             return cur.rowcount
+
+    def purge_goal_events_before(
+        self, cutoff_ts: float, *, dry_run: bool = False,
+    ) -> int:
+        """Count or delete goal events older than an absolute cutoff."""
+        predicate = "ts IS NOT NULL AND ts < ?"
+        with self._writing() as conn:
+            if dry_run:
+                row = conn.execute(
+                    f"SELECT COUNT(*) FROM goal_events WHERE {predicate}",
+                    (float(cutoff_ts),),
+                ).fetchone()
+                return int(row[0] or 0)
+            cur = conn.execute(
+                f"DELETE FROM goal_events WHERE {predicate}",
+                (float(cutoff_ts),),
+            )
+            return int(cur.rowcount or 0)
 
     # ----- facts -----
     def upsert_fact(
@@ -2904,8 +2983,8 @@ def open_world(path: Path | None = None) -> Any:
         tid = current_tenant_id()
         if tid:
             return world_for_tenant(tid)
-        path = DEFAULT_DB
-    return WorldModel(path)
+        return WorldModel()
+    return WorldModel(path, _managed_path=Path(path) == data_dir("world.db"))
 
 
 # Per-tenant WorldModel cache. P1 multi-tenancy: each tenant gets its own
@@ -2924,6 +3003,11 @@ MAX_TENANT_WORLDS = 128
 # hard-failing the next one.
 _tenant_worlds: OrderedDict[str, WorldModel] = OrderedDict()
 _tenant_worlds_lock = threading.Lock()
+
+
+def _world_cache_key(path: Path) -> str:
+    """Host-independent key that cannot split a case-insensitive DB path."""
+    return os.path.normcase(os.path.abspath(os.fspath(path))).casefold()
 
 
 class TenantWorldLimitError(RuntimeError):
@@ -2950,11 +3034,11 @@ def world_for_tenant(tenant: str | None = None) -> WorldModel:
     Does NOT consult the Postgres backend -- it is the per-tenant SQLite factory
     the server uses for goal/conversation/turn writes.
     """
-    from .paths import data_dir
-
+    if tenant is not None:
+        tenant = bind_tenant_namespace(tenant)
     path = data_dir("world.db", tenant=tenant)
-    key = str(path)
-    shared_key = str(data_dir("world.db", tenant=None))
+    key = _world_cache_key(path)
+    shared_key = _world_cache_key(data_dir("world.db", tenant=None))
     with _tenant_worlds_lock:
         world = _tenant_worlds.get(key)
         if world is not None:
@@ -2962,20 +3046,24 @@ def world_for_tenant(tenant: str | None = None) -> WorldModel:
             return world
         if tenant is not None and len(_tenant_worlds) >= MAX_TENANT_WORLDS:
             _evict_lru_tenant_world(shared_key)
-        world = WorldModel(path)
+        world = WorldModel(path, _managed_path=True)
+        # Ownership outlives LRU membership: eviction deliberately drops only
+        # the cache reference because an in-flight caller may still hold this
+        # connection. Teardown helpers must therefore never close an instance
+        # merely because another tenant evicted its key in the meantime.
+        world._maverick_cache_owned = True
         _tenant_worlds[key] = world
         _tenant_worlds.move_to_end(key)
         return world
 
 
 def world_is_cached(world: object) -> bool:
-    """Return True when ``world`` is owned by the per-tenant cache.
+    """Return True when ``world`` was created for the per-tenant cache.
 
-    Cached tenant worlds are process-wide singletons shared by dashboard/API and
-    canonical goal-entry paths, so short-lived callers must not close them.
+    Ownership is durable across LRU eviction because in-flight callers can
+    retain an evicted world after it disappears from ``_tenant_worlds``.
     """
-    with _tenant_worlds_lock:
-        return any(cached is world for cached in _tenant_worlds.values())
+    return bool(getattr(world, "_maverick_cache_owned", False))
 
 
 def close_world_if_owned(world: object) -> None:

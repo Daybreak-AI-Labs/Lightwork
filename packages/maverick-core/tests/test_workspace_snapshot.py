@@ -1,6 +1,8 @@
 """Workspace snapshot / restore (ROADMAP 2028 H1)."""
 from __future__ import annotations
 
+import errno
+import os
 import tarfile
 
 import pytest
@@ -17,6 +19,25 @@ class _SB:
 
     def __init__(self, workdir):
         self.workdir = str(workdir)
+
+
+def _symlink_or_skip(link, target, *, target_is_directory=False):
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except NotImplementedError as exc:
+        if os.name == "nt":
+            pytest.skip(f"symlinks are unavailable on this Windows host: {exc}")
+        raise
+    except OSError as exc:
+        # Windows may require Developer Mode or SeCreateSymbolicLinkPrivilege.
+        # Never hide an unexpected POSIX path/filesystem regression as a
+        # capability skip.
+        if os.name == "nt" and (
+            getattr(exc, "winerror", None) == 1314
+            or exc.errno in {errno.EPERM, errno.EACCES}
+        ):
+            pytest.skip(f"Windows symlink privilege is unavailable: {exc}")
+        raise
 
 
 def _src(tmp_path):
@@ -161,7 +182,9 @@ def test_rollback_in_place_with_outward_symlink_completes(tmp_path):
     src = tmp_path / "work"
     src.mkdir()
     (src / "z_important.txt").write_text("ORIGINAL", encoding="utf-8")
-    (src / "00_current").symlink_to("/etc/hostname")  # outward, sorts first
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    _symlink_or_skip(src / "00_current", outside)  # outward, sorts first
     store = tmp_path / "snaps"
     man = create_snapshot(src, store, label="cp")
     # symlink is not restorable, so it must not be counted in the manifest
@@ -200,7 +223,7 @@ def test_restore_blocks_legacy_extract_through_preexisting_symlink(tmp_path, mon
     outside = tmp_path / "outside"
     dest.mkdir()
     outside.mkdir()
-    (dest / "cache").symlink_to(outside, target_is_directory=True)
+    _symlink_or_skip(dest / "cache", outside, target_is_directory=True)
 
     real_extract = tarfile.TarFile.extract
 

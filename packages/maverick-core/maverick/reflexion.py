@@ -36,7 +36,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .file_lock import cross_process_lock
+from .file_lock import (
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+    open_private_append,
+)
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -95,16 +100,6 @@ class Reflexion:
         return asdict(self)
 
 
-def _ensure_file(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.touch()
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
-
-
 def record(
     goal_text: str,
     failure_class: str,
@@ -127,6 +122,7 @@ def record(
     from .learning_guard import learning_write_allowed
     if not learning_write_allowed("reflexion"):
         return False
+    default_store = path is None
     path = path if path is not None else default_path()
     # This is the durable privacy boundary. Callers are numerous and some pass
     # raw provider/exception text, so every free-text field is independently
@@ -163,12 +159,20 @@ def record(
     )
     with _lock:
         try:
-            with cross_process_lock(path):
-                _ensure_file(path)
-                with open(path, "a", encoding="utf-8") as f:
+            if default_store:
+                # The tenant/default data directory is Lightwork-owned.  An
+                # explicit caller path keeps its existing parent ACL.
+                ensure_private_directory(path.parent)
+            with cross_process_lock(path, strict=True):
+                fd = open_private_append(
+                    path, require_private_parent=default_store,
+                )
+                with os.fdopen(fd, "a", encoding="utf-8") as f:
                     f.write(json.dumps(entry.to_dict(), default=str) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
             return True
-        except OSError as e:
+        except (OSError, RuntimeError) as e:
             log.warning("reflexion: write failed: %s", e)
             return False
 
@@ -288,6 +292,7 @@ def recall(
     entries: list[Reflexion] = []
     scan_limit = max(1, scan_cap)
     try:
+        ensure_private_file(path)
         with open(path, encoding="utf-8") as f:
             lines = deque(f, maxlen=scan_limit)
     except OSError:
@@ -296,6 +301,8 @@ def recall(
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
             continue
         try:
             entry = Reflexion(**{
@@ -364,6 +371,7 @@ def list_recent(
     entries: list[Reflexion] = []
     try:
         from collections import deque
+        ensure_private_file(path)
         with open(path, encoding="utf-8") as f:
             # The log is append-ordered and unbounded; only the tail can hold
             # the N most recent entries. 4x headroom absorbs malformed lines
@@ -373,6 +381,8 @@ def list_recent(
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:
+                continue
+            if not isinstance(data, dict):
                 continue
             try:
                 entries.append(Reflexion(**{

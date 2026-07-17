@@ -43,11 +43,23 @@ import json
 import logging
 import os
 import re
+import stat
 import time
+import uuid
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_bytes,
+    atomic_write_text_chunks,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+    open_private_append,
+    prepare_private_directory,
+)
 from .learning_guard import Halted, check_learning_halt
 from .paths import data_dir
 
@@ -464,21 +476,16 @@ def promote_shared_insights(
 
 # ---------- insight store ----------
 
-def _atomic_write_lines(path: Path, lines) -> None:
+def _atomic_write_lines(
+    path: Path, lines, *, private_parent: bool = False,
+) -> None:
     """Write pre-rendered lines (each incl. its trailing newline) to ``path``
-    atomically: a sibling ``.tmp`` is replaced into place and chmod 0600. The
-    tmp/replace/chmod scaffold was copy-pasted across the four NDJSON writers.
+    atomically through a uniquely-named, privately-created sibling. The
+    tmp/replace/chmod scaffold used to be copy-pasted across the NDJSON writers.
     Raises OSError on failure; callers decide how to report it."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        for ln in lines:
-            f.write(ln)
-    os.replace(tmp, path)
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    if private_parent:
+        ensure_private_directory(path.parent)
+    atomic_write_text_chunks(path, lines)
 
 
 def load_insights(path: Path | str | None = None) -> list[DreamInsight]:
@@ -487,34 +494,36 @@ def load_insights(path: Path | str | None = None) -> list[DreamInsight]:
         return []
     out: list[DreamInsight] = []
     try:
-        with open(p, encoding="utf-8") as f:
-            for raw in f:
-                try:
-                    d = json.loads(raw)
-                    # Old stores predate the write-time privacy boundary.
-                    # Re-screen every persisted lesson before it can be
-                    # recalled or copied into a rewritten store. If screening
-                    # is unavailable, drop the row instead of reviving raw
-                    # durable text.
-                    safe_text = _sanitize(str(d.get("text", "")))[:1_000]
-                    if not safe_text:
-                        continue
-                    out.append(DreamInsight(
-                        ts=float(d.get("ts", 0) or 0),
-                        kind=str(d.get("kind", "failure_pattern")),
-                        domain=d.get("domain"),
-                        text=safe_text,
-                        evidence=int(d.get("evidence", 1) or 1),
-                        # Pre-scope insight lines may have been derived from
-                        # channel/user-scoped reflexions, so treat missing
-                        # fields as ambiguous rather than globally unscoped.
-                        channel=d.get("channel")
-                        if "channel" in d else _LEGACY_SCOPE_UNKNOWN,
-                        user_id=d.get("user_id")
-                        if "user_id" in d else _LEGACY_SCOPE_UNKNOWN,
-                    ))
-                except (ValueError, TypeError):
+        ensure_private_file(p)
+        for raw in atomic_read_text(p).splitlines():
+            try:
+                d = json.loads(raw)
+                if not isinstance(d, dict):
                     continue
+                # Old stores predate the write-time privacy boundary.
+                # Re-screen every persisted lesson before it can be
+                # recalled or copied into a rewritten store. If screening
+                # is unavailable, drop the row instead of reviving raw
+                # durable text.
+                safe_text = _sanitize(str(d.get("text", "")))[:1_000]
+                if not safe_text:
+                    continue
+                out.append(DreamInsight(
+                    ts=float(d.get("ts", 0) or 0),
+                    kind=str(d.get("kind", "failure_pattern")),
+                    domain=d.get("domain"),
+                    text=safe_text,
+                    evidence=int(d.get("evidence", 1) or 1),
+                    # Pre-scope insight lines may have been derived from
+                    # channel/user-scoped reflexions, so treat missing
+                    # fields as ambiguous rather than globally unscoped.
+                    channel=d.get("channel")
+                    if "channel" in d else _LEGACY_SCOPE_UNKNOWN,
+                    user_id=d.get("user_id")
+                    if "user_id" in d else _LEGACY_SCOPE_UNKNOWN,
+                ))
+            except (ValueError, TypeError):
+                continue
     except OSError:
         return []
     return out
@@ -530,44 +539,50 @@ def append_insights(
     is lexically contained at/above the threshold. The whole store is
     rewritten atomically so a crash can't leave a torn NDJSON line.
     """
+    default_store = path is None
     path = Path(path) if path is not None else insights_path()
-    existing = load_insights(path)
-    written = 0
-    refreshed = 0
-    for ins in new or []:
-        safe_text = _sanitize(ins.text)[:1_000]
-        if not safe_text:
-            continue
-        ins = replace(ins, text=safe_text)
-        it = _tokens(ins.text)
-        dup = next(
-            (e for e in existing
-             if e.domain == ins.domain
-             and e.channel == ins.channel
-             and e.user_id == ins.user_id
-             and _containment(it, _tokens(e.text)) >= _DEDUP_THRESHOLD),
-            None,
-        )
-        if dup is not None:
-            # Confirmation, not a no-op: the pattern recurred, so the standing
-            # insight is refreshed (newer ts, more evidence) instead of aging
-            # toward expiry while the problem is still live.
-            dup.ts = max(dup.ts, ins.ts)
-            dup.evidence += max(1, ins.evidence)
-            refreshed += 1
-            continue
-        existing.append(ins)
-        written += 1
-    if not (written or refreshed):
-        return 0
-    existing.sort(key=lambda i: i.ts)
-    keep = existing[-max(1, max_insights):]
-    p = Path(path)
     try:
-        _atomic_write_lines(
-            p, (json.dumps(ins.to_dict(), default=str) + "\n" for ins in keep)
-        )
-    except OSError as e:
+        if default_store:
+            ensure_private_directory(path.parent)
+        # Dedup/cap is one read-modify-write transaction.  Without the process
+        # lock two schedulers can both read the same corpus and the later
+        # replace silently drops the other's newly learned insight.
+        with cross_process_lock(path, strict=True):
+            existing = load_insights(path)
+            written = 0
+            refreshed = 0
+            for ins in new or []:
+                safe_text = _sanitize(ins.text)[:1_000]
+                if not safe_text:
+                    continue
+                ins = replace(ins, text=safe_text)
+                it = _tokens(ins.text)
+                dup = next(
+                    (e for e in existing
+                     if e.domain == ins.domain
+                     and e.channel == ins.channel
+                     and e.user_id == ins.user_id
+                     and _containment(it, _tokens(e.text)) >= _DEDUP_THRESHOLD),
+                    None,
+                )
+                if dup is not None:
+                    # Confirmation, not a no-op: the pattern recurred, so the
+                    # standing insight is refreshed instead of aging out.
+                    dup.ts = max(dup.ts, ins.ts)
+                    dup.evidence += max(1, ins.evidence)
+                    refreshed += 1
+                    continue
+                existing.append(ins)
+                written += 1
+            if not (written or refreshed):
+                return 0
+            existing.sort(key=lambda i: i.ts)
+            keep = existing[-max(1, max_insights):]
+            _atomic_write_lines(
+                path,
+                (json.dumps(ins.to_dict(), default=str) + "\n" for ins in keep),
+            )
+    except (OSError, RuntimeError) as e:
         log.warning("dreaming: insight write failed: %s", e)
         return 0
     return written
@@ -640,41 +655,51 @@ def prune_reflexions(
     and cap to the most recent ``keep``. Returns how many lines were dropped.
     Atomic rewrite; any error leaves the original log untouched."""
     from . import reflexion as _r
-    p = Path(path) if path is not None else _r.DEFAULT_PATH
+    default_store = path is None
+    # Resolve the active tenant at call time.  DEFAULT_PATH is deliberately the
+    # legacy shared path and would let a tenant dream cycle prune another
+    # scope's reflexion corpus.
+    p = Path(path) if path is not None else _r.default_path()
     if not p.exists():
         return 0
     try:
-        with open(p, encoding="utf-8") as f:
-            raw_lines = [ln for ln in f if ln.strip()]
-    except OSError:
-        return 0
-    parsed: list[tuple[float, set[str], str]] = []
-    for ln in raw_lines:
-        try:
-            d = json.loads(ln)
-        except json.JSONDecodeError:
-            continue
-        parsed.append((
-            float(d.get("ts", 0) or 0),
-            _tokens(str(d.get("goal_text", "")) + " " + str(d.get("failure_class", ""))),
-            ln if ln.endswith("\n") else ln + "\n",
-        ))
-    # Newest first so the survivor of a duplicate pair is the fresher lesson.
-    parsed.sort(key=lambda t: t[0], reverse=True)
-    kept: list[tuple[float, set[str], str]] = []
-    for entry in parsed:
-        if len(kept) >= max(1, keep):
-            break
-        if any(_jaccard(entry[1], k[1]) >= dedup_threshold for k in kept):
-            continue
-        kept.append(entry)
-    dropped = len(parsed) - len(kept)
-    if dropped <= 0:
-        return 0
-    try:
-        # restore chronological order
-        _atomic_write_lines(p, (ln for _, _, ln in reversed(kept)))
-    except OSError as e:
+        if default_store:
+            ensure_private_directory(p.parent)
+        with cross_process_lock(p, strict=True):
+            ensure_private_file(p)
+            with open(p, encoding="utf-8") as f:
+                raw_lines = [ln for ln in f if ln.strip()]
+            parsed: list[tuple[float, set[str], str]] = []
+            for ln in raw_lines:
+                try:
+                    d = json.loads(ln)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(d, dict):
+                    continue
+                parsed.append((
+                    float(d.get("ts", 0) or 0),
+                    _tokens(
+                        str(d.get("goal_text", "")) + " "
+                        + str(d.get("failure_class", ""))
+                    ),
+                    ln if ln.endswith("\n") else ln + "\n",
+                ))
+            # Newest first so the duplicate survivor is the fresher lesson.
+            parsed.sort(key=lambda t: t[0], reverse=True)
+            kept: list[tuple[float, set[str], str]] = []
+            for entry in parsed:
+                if len(kept) >= max(1, keep):
+                    break
+                if any(_jaccard(entry[1], k[1]) >= dedup_threshold for k in kept):
+                    continue
+                kept.append(entry)
+            dropped = len(parsed) - len(kept)
+            if dropped <= 0:
+                return 0
+            # Restore chronological order through a private atomic rewrite.
+            _atomic_write_lines(p, (ln for _, _, ln in reversed(kept)))
+    except (OSError, RuntimeError) as e:
         log.warning("dreaming: reflexion prune failed: %s", e)
         return 0
     return dropped
@@ -707,16 +732,24 @@ def expire_insights(
     """
     if ttl_days <= 0:
         return 0
+    default_store = path is None
     path = Path(path) if path is not None else insights_path()
-    entries = load_insights(path)
-    if not entries:
+    try:
+        if default_store:
+            ensure_private_directory(path.parent)
+        with cross_process_lock(path, strict=True):
+            entries = load_insights(path)
+            if not entries:
+                return 0
+            cutoff = (now if now is not None else time.time()) - ttl_days * 86400.0
+            keep = [e for e in entries if e.ts >= cutoff]
+            dropped = len(entries) - len(keep)
+            if dropped <= 0:
+                return 0
+            return dropped if _rewrite_insights(keep, path) else 0
+    except (OSError, RuntimeError) as e:
+        log.warning("dreaming: insight expiry failed: %s", e)
         return 0
-    cutoff = (now if now is not None else time.time()) - ttl_days * 86400.0
-    keep = [e for e in entries if e.ts >= cutoff]
-    dropped = len(entries) - len(keep)
-    if dropped <= 0:
-        return 0
-    return dropped if _rewrite_insights(keep, path) else 0
 
 
 def resolve_contradictions(
@@ -732,34 +765,42 @@ def resolve_contradictions(
     jaccard would be diluted by the insight's boilerplate. Returns how many
     insights were retired.
     """
+    default_store = path is None
     path = Path(path) if path is not None else insights_path()
-    entries = load_insights(path)
-    if not entries or not successes:
-        return 0
+    try:
+        if default_store:
+            ensure_private_directory(path.parent)
+        with cross_process_lock(path, strict=True):
+            entries = load_insights(path)
+            if not entries or not successes:
+                return 0
 
-    def _covered(goal: str, ins_tokens: set[str]) -> bool:
-        st = _tokens(goal)
-        if not st:
-            return False
-        return len(st & ins_tokens) / len(st) >= similarity
+            def _covered(goal: str, ins_tokens: set[str]) -> bool:
+                st = _tokens(goal)
+                if not st:
+                    return False
+                return len(st & ins_tokens) / len(st) >= similarity
 
-    keep: list[DreamInsight] = []
-    retired = 0
-    for ins in entries:
-        it = _tokens(ins.text)
-        newer_wins = sum(
-            1 for s in successes
-            if float(s.get("t", 0) or 0) > ins.ts
-            and _covered(str(s.get("goal", "")), it)
-        )
-        if ins.kind in {"failure_pattern", "shared_pattern"} \
-                and newer_wins >= max(1, min_successes):
-            retired += 1
-            continue
-        keep.append(ins)
-    if retired <= 0:
+            keep: list[DreamInsight] = []
+            retired = 0
+            for ins in entries:
+                it = _tokens(ins.text)
+                newer_wins = sum(
+                    1 for s in successes
+                    if float(s.get("t", 0) or 0) > ins.ts
+                    and _covered(str(s.get("goal", "")), it)
+                )
+                if ins.kind in {"failure_pattern", "shared_pattern"} \
+                        and newer_wins >= max(1, min_successes):
+                    retired += 1
+                    continue
+                keep.append(ins)
+            if retired <= 0:
+                return 0
+            return retired if _rewrite_insights(keep, path) else 0
+    except (OSError, RuntimeError) as e:
+        log.warning("dreaming: contradiction resolution failed: %s", e)
         return 0
-    return retired if _rewrite_insights(keep, path) else 0
 
 
 # ---------- fact consolidation ----------
@@ -811,6 +852,7 @@ def retire_stale_skills(
     """
     from .skill import stats as skill_stats
     from .skill.distillation_local import _STORE
+    default_store = store is None
     store_dir = Path(store) if store is not None else _STORE
     if not store_dir.is_dir():
         return []
@@ -841,19 +883,33 @@ def retire_stale_skills(
         if not src.is_file():
             continue
         try:
-            dest.mkdir(parents=True, exist_ok=True)
-            os.replace(src, dest / src.name)
+            if default_store or not dest.exists():
+                # A missing subdirectory is ours to secure.  Never tighten a
+                # pre-existing caller-supplied store directory.
+                ensure_private_directory(dest)
+            else:
+                dest.mkdir(parents=True, exist_ok=True)
+            retired_skill = dest / src.name
+            os.replace(src, retired_skill)
+            ensure_private_file(retired_skill)
             st = skill_stats.get(name, path=stats_path)
-            with open(dest / "retired.ndjson", "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "ts": time.time(), "name": name,
-                    "uses": getattr(st, "uses", 0),
-                    "wins": getattr(st, "wins", 0),
-                    "losses": getattr(st, "losses", 0),
-                    "reason": f"win rate <= {below} after >= {min_uses} uses",
-                }) + "\n")
+            retired_log = dest / "retired.ndjson"
+            with cross_process_lock(retired_log, strict=True):
+                fd = open_private_append(
+                    retired_log, require_private_parent=default_store,
+                )
+                with os.fdopen(fd, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({
+                        "ts": time.time(), "name": name,
+                        "uses": getattr(st, "uses", 0),
+                        "wins": getattr(st, "wins", 0),
+                        "losses": getattr(st, "losses", 0),
+                        "reason": f"win rate <= {below} after >= {min_uses} uses",
+                    }) + "\n")
+                    f.flush()
+                    os.fsync(f.fileno())
             retired.append(name)
-        except OSError as e:
+        except (OSError, RuntimeError) as e:
             log.warning("dreaming: could not retire skill %s: %s", name, e)
     return retired
 
@@ -898,12 +954,16 @@ def build_rehearsal_cases(
 
 def save_rehearsals(cases: list[dict], path: Path | str | None = None) -> int:
     """Replace the rehearsal queue with this cycle's cases (atomic)."""
+    default_store = path is None
     p = Path(path) if path is not None else rehearsals_path()
     try:
-        _atomic_write_lines(
-            p, (json.dumps(c, default=str) + "\n" for c in cases)
-        )
-    except OSError as e:
+        if default_store:
+            ensure_private_directory(p.parent)
+        with cross_process_lock(p, strict=True):
+            _atomic_write_lines(
+                p, (json.dumps(c, default=str) + "\n" for c in cases),
+            )
+    except (OSError, RuntimeError) as e:
         log.warning("dreaming: rehearsal write failed: %s", e)
         return 0
     return len(cases)
@@ -915,19 +975,19 @@ def load_rehearsals(path: Path | str | None = None) -> list[dict]:
         return []
     out: list[dict] = []
     try:
-        with open(p, encoding="utf-8") as f:
-            for raw in f:
-                try:
-                    d = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(d, dict) or not str(d.get("prompt", "")).strip():
-                    continue
-                # Legacy queues did not record whether prompt text came from
-                # a local run or a remote channel/user. Refuse those ambiguous
-                # cases instead of replaying potentially untrusted input.
-                if d.get("scope") == "local":
-                    out.append(d)
+        ensure_private_file(p)
+        for raw in atomic_read_text(p).splitlines():
+            try:
+                d = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(d, dict) or not str(d.get("prompt", "")).strip():
+                continue
+            # Legacy queues did not record whether prompt text came from
+            # a local run or a remote channel/user. Refuse those ambiguous
+            # cases instead of replaying potentially untrusted input.
+            if d.get("scope") == "local":
+                out.append(d)
     except OSError:
         return []
     return out
@@ -1500,63 +1560,305 @@ def snapshots_dir() -> Path:
     return _tenant_path("dreams/snapshots", DEFAULT_DIR / "snapshots")
 
 
+_SNAPSHOT_TRANSACTION = ".learning-state-transaction"
+
+
+@dataclass(frozen=True)
+class LearningRollbackReport:
+    """Per-store evidence for one attempted learned-state restoration."""
+
+    snapshot: str
+    required: tuple[str, ...]
+    restored: tuple[str, ...]
+    failures: dict[str, str]
+
+    @property
+    def complete(self) -> bool:
+        return not self.failures and set(self.required) <= set(self.restored)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "snapshot": self.snapshot,
+            "required": list(self.required),
+            "restored": list(self.restored),
+            "failures": dict(self.failures),
+            "complete": self.complete,
+        }
+
+
+class LearningRollbackError(RuntimeError):
+    """At least one required learned store could not be restored."""
+
+    def __init__(self, report: LearningRollbackReport):
+        self.report = report
+        failed = ", ".join(sorted(report.failures)) or "unknown"
+        super().__init__(
+            f"learning rollback {report.snapshot!r} is incomplete; "
+            f"failed stores: {failed}"
+        )
+
+
+def _path_is_alias(path: Path) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    return path.is_symlink() or bool(callable(is_junction) and is_junction())
+
+
+def _read_stable_private_file(path: Path) -> bytes:
+    """Read one single-link regular file through an identity-bound handle."""
+    ensure_private_file(path)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        visible = path.lstat()
+        reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        if (
+            _path_is_alias(path)
+            or not stat.S_ISREG(opened.st_mode)
+            or not stat.S_ISREG(visible.st_mode)
+            or opened.st_nlink != 1
+            or visible.st_nlink != 1
+            or getattr(opened, "st_file_attributes", 0) & reparse
+            or getattr(visible, "st_file_attributes", 0) & reparse
+            or (opened.st_dev, opened.st_ino) != (visible.st_dev, visible.st_ino)
+        ):
+            raise PermissionError(f"learned store is not a stable private file: {path}")
+        with os.fdopen(fd, "rb") as source:
+            fd = -1
+            data = source.read()
+        after = path.lstat()
+        if (
+            _path_is_alias(path)
+            or not stat.S_ISREG(after.st_mode)
+            or after.st_nlink != 1
+            or getattr(after, "st_file_attributes", 0) & reparse
+            or (opened.st_dev, opened.st_ino) != (after.st_dev, after.st_ino)
+        ):
+            raise PermissionError(f"learned store identity changed while reading: {path}")
+        return data
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _copy_private_snapshot_file(source: str, target: str) -> str:
+    atomic_write_bytes(Path(target), _read_stable_private_file(Path(source)))
+    return target
+
+
+def _prepare_snapshot_base(base: Path, *, default_store: bool) -> Path:
+    """Prepare the integrity boundary without hijacking a caller directory."""
+    if default_store:
+        return ensure_private_directory(base)
+    # A caller-selected existing directory must already be private; never
+    # revoke collaborators' access to unrelated files by tightening it here.
+    return prepare_private_directory(base)
+
+
+def _harden_private_tree(root: Path) -> None:
+    """Verify a snapshot tree contains only private regular files/dirs."""
+    ensure_private_directory(root)
+    for path in sorted(root.rglob("*"), key=lambda p: len(p.parts)):
+        if _path_is_alias(path):
+            raise PermissionError(f"snapshot tree contains an alias: {path}")
+        if path.is_dir():
+            ensure_private_directory(path)
+        elif path.is_file():
+            ensure_private_file(path)
+        else:
+            raise PermissionError(f"snapshot tree contains a special file: {path}")
+
+
+def _snapshot_names_unlocked(base: Path) -> list[str]:
+    if not base.is_dir() or _path_is_alias(base):
+        return []
+    return sorted(
+        p.name for p in base.iterdir()
+        if not p.name.startswith(".") and p.is_dir() and not _path_is_alias(p)
+    )
+
+
+def _validate_store_name(name: str) -> str:
+    safe = str(name)
+    if safe in {"", ".", ".."} or Path(safe).name != safe:
+        raise ValueError(f"invalid learned-store snapshot name: {safe!r}")
+    return safe
+
+
+def _validated_stores(stores: dict[str, Path]) -> dict[str, Path]:
+    out: dict[str, Path] = {}
+    for raw_name, raw_path in stores.items():
+        name = _validate_store_name(raw_name)
+        if name in out:
+            raise ValueError(f"duplicate learned-store snapshot name: {name!r}")
+        out[name] = Path(raw_path)
+    return out
+
+
 def snapshot_learning_state(
     *, keep_last: int = 5, directory: Path | str | None = None,
     stores: dict[str, Path] | None = None, now: float | None = None,
+    publish_empty: bool = False, raise_on_error: bool = False,
 ) -> Path | None:
     """Copy every learned store into ``<snapshots>/<utc-ts>/``.
 
     Learning rollback, half 1: taken before each ``maverick dream`` mutation
     pass so any cycle can be reverted wholesale. Keeps the most recent
-    ``keep_last`` snapshots. Returns the snapshot dir (None when nothing
-    exists to snapshot or the copy failed)."""
+    ``keep_last`` snapshots. Returns the snapshot dir (``None`` when nothing
+    exists to snapshot, unless ``publish_empty`` is true).  The historical
+    fail-soft behavior is retained by default; a transactional caller can set
+    ``raise_on_error`` so an I/O failure cannot be confused with an honestly
+    empty learning state.
+
+    ``publish_empty`` records an explicit empty-state boundary.  It is needed
+    by live rollout: rolling back to a named empty snapshot removes stores
+    created during that rollout, while rolling back to an ambient ``latest``
+    snapshot could restore another concurrent rollout's state.
+    """
     import shutil
+    default_store = directory is None
     base = Path(directory) if directory is not None else snapshots_dir()
-    stores = stores if stores is not None else _live_stores()
+    stores = _validated_stores(stores if stores is not None else _live_stores())
     stamp = time.strftime(
         "%Y%m%dT%H%M%SZ", time.gmtime(now if now is not None else time.time()),
     )
-    dest = base / stamp
-    copied = 0
+    # Second-resolution names used to make two snapshots in the same second
+    # merge into one directory.  The monotonic-width nanosecond + nonce suffix
+    # makes every publication unique while preserving lexical chronology.
+    final = base / f"{stamp}-{time.time_ns():020d}-{uuid.uuid4().hex[:12]}"
+    staging = base / f".snapshot-{uuid.uuid4().hex}.pending"
     try:
-        for name, src in stores.items():
-            src = Path(src)
-            if not src.exists():
-                continue
-            dest.mkdir(parents=True, exist_ok=True)
-            if src.is_dir():
-                shutil.copytree(src, dest / name, dirs_exist_ok=True)
-            else:
-                shutil.copy2(src, dest / name)
-            copied += 1
-        if not copied:
-            return None
-        # Retention: oldest snapshots beyond keep_last are dropped.
-        snaps = sorted(p for p in base.iterdir() if p.is_dir())
-        for old_snap in snaps[:-max(1, keep_last)]:
-            shutil.rmtree(old_snap, ignore_errors=True)
-        return dest
-    except OSError as e:
+        # The lock helper privately creates a missing base before acquiring its
+        # sidecar.  Preparing *inside* the lock avoids a first-use race where a
+        # second process observes the directory before the creator hardens it.
+        with cross_process_lock(base / _SNAPSHOT_TRANSACTION, strict=True):
+            _prepare_snapshot_base(base, default_store=default_store)
+            ensure_private_directory(staging)
+            copied = 0
+            for name, src in stores.items():
+                if _path_is_alias(src):
+                    raise PermissionError(f"learned store is an alias: {src}")
+                if not src.exists():
+                    continue
+                target = staging / name
+                if src.is_dir():
+                    _harden_private_tree(src)
+                    # Preserve aliases instead of following them; the target
+                    # verifier then rejects the snapshot.  This closes the
+                    # check/copy race without reading an external target.
+                    shutil.copytree(
+                        src, target, symlinks=True,
+                        copy_function=_copy_private_snapshot_file,
+                    )
+                    _harden_private_tree(target)
+                else:
+                    # Append-only stores use this same sidecar; take it while
+                    # copying so the snapshot cannot end with half a JSON row.
+                    with cross_process_lock(src, strict=True):
+                        atomic_write_bytes(target, _read_stable_private_file(src))
+                copied += 1
+            if not copied and not publish_empty:
+                shutil.rmtree(staging, ignore_errors=True)
+                return None
+            _harden_private_tree(staging)
+            os.replace(staging, final)
+            _harden_private_tree(final)
+            # Only fully-published, non-hidden snapshots participate in
+            # retention; a crashed staging tree is never selectable as latest.
+            names = _snapshot_names_unlocked(base)
+            for old_name in names[:-max(1, keep_last)]:
+                shutil.rmtree(base / old_name, ignore_errors=True)
+            return final
+    except (OSError, RuntimeError) as e:
         log.warning("dreaming: snapshot failed: %s", e)
-        # A partially-written snapshot must NOT survive. It would be the newest
-        # entry in list_snapshots, so rollback_learning_state("latest") would
-        # restore only the stores it managed to copy and DELETE every live store
-        # absent from it (via _remove_post_snapshot_stores, which treats absence
-        # as "created this cycle") -- destroying learned state on a snapshot that
-        # never completed. Remove the partial dir so None means "no snapshot".
         try:
-            if dest.exists():
-                shutil.rmtree(dest, ignore_errors=True)
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
         except OSError:  # pragma: no cover -- best-effort cleanup
             pass
+        if raise_on_error:
+            raise
         return None
 
 
 def list_snapshots(directory: Path | str | None = None) -> list[str]:
     base = Path(directory) if directory is not None else snapshots_dir()
-    if not base.is_dir():
-        return []
-    return sorted(p.name for p in base.iterdir() if p.is_dir())
+    return _snapshot_names_unlocked(base)
+
+
+def _remove_path(path: Path) -> None:
+    import shutil
+
+    if path.is_dir() and not _path_is_alias(path):
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def _restore_private_directory(src: Path, live: Path) -> None:
+    """Stage a directory restore and recover the incumbent on swap failure."""
+    import shutil
+
+    if not live.parent.exists():
+        ensure_private_directory(live.parent)
+    elif not live.parent.is_dir() or _path_is_alias(live.parent):
+        raise PermissionError(f"learned-store parent is unsafe: {live.parent}")
+    nonce = uuid.uuid4().hex
+    staged = live.with_name(f".{live.name}.rollback-{nonce}.tmp")
+    backup = live.with_name(f".{live.name}.rollback-{nonce}.bak")
+    failed = live.with_name(f".{live.name}.rollback-{nonce}.failed")
+    had_live = live.exists() or _path_is_alias(live)
+    moved_live = False
+    published = False
+    completed = False
+    try:
+        shutil.copytree(
+            src, staged, symlinks=True,
+            copy_function=_copy_private_snapshot_file,
+        )
+        _harden_private_tree(staged)
+        if had_live:
+            if live.is_dir() and not _path_is_alias(live):
+                _harden_private_tree(live)
+            elif live.is_file() and not _path_is_alias(live):
+                ensure_private_file(live)
+            os.replace(live, backup)
+            moved_live = True
+        try:
+            os.replace(staged, live)
+            published = True
+            _harden_private_tree(live)
+        except BaseException:
+            if moved_live:
+                if published and (live.exists() or _path_is_alias(live)):
+                    os.replace(live, failed)
+                os.replace(backup, live)
+                moved_live = False
+                if failed.exists() or _path_is_alias(failed):
+                    _remove_path(failed)
+            elif published and (live.exists() or _path_is_alias(live)):
+                _remove_path(live)
+            raise
+        if moved_live:
+            _remove_path(backup)
+            moved_live = False
+        completed = True
+    finally:
+        if staged.exists() or _path_is_alias(staged):
+            _remove_path(staged)
+        # A failed restoration must put the incumbent back, even if cleanup
+        # itself then reports an error to the caller.
+        if moved_live and not completed:
+            if live.exists() or _path_is_alias(live):
+                os.replace(live, failed)
+            os.replace(backup, live)
+            moved_live = False
+            if failed.exists() or _path_is_alias(failed):
+                _remove_path(failed)
+        elif published and not completed and (live.exists() or _path_is_alias(live)):
+            _remove_path(live)
+        if backup.exists() or _path_is_alias(backup):
+            _remove_path(backup)
 
 
 def rollback_learning_state(
@@ -1568,70 +1870,78 @@ def rollback_learning_state(
     ``snapshot`` is a name from :func:`list_snapshots` or ``"latest"``.
     Stores present in the snapshot replace the live ones (a directory store
     is replaced wholesale, so skills learned after the snapshot disappear --
-    that is the point). Returns the restored store names."""
-    import shutil
+    that is the point). Returns the restored store names only after every
+    required store succeeds. A partial restore raises
+    :class:`LearningRollbackError` with a per-store report."""
+    default_store = directory is None
     base = Path(directory) if directory is not None else snapshots_dir()
-    names = list_snapshots(base)
-    if not names:
+    if not base.exists():
+        if snapshot != "latest":
+            raise ValueError(
+                f"no such snapshot: {snapshot!r} (snapshot store missing)"
+            )
         return []
-    chosen = names[-1] if snapshot == "latest" else snapshot
-    src_dir = base / chosen
-    if not src_dir.is_dir():
-        raise ValueError(f"no such snapshot: {chosen!r} (have: {', '.join(names)})")
-    stores = stores if stores is not None else _live_stores()
-    restored: list[str] = []
-    for name, live in stores.items():
-        src = src_dir / name
-        if not src.exists():
-            continue
-        live = Path(live)
-        # Atomic restore: stage the snapshot into a temp sibling, then
-        # os.replace it into place. The old code did `rmtree(live)` then
-        # `copytree(src, live)`; a copytree that failed partway (disk full,
-        # permission, interrupt) left the live store DELETED or half-copied --
-        # a rollback meant to RESTORE a known-good state instead destroyed it.
-        # Staging first means a failed copy aborts before the live store is
-        # touched, so the on-disk state is either fully restored or unchanged.
-        tmp = live.with_name(live.name + ".rollbacktmp")
-        try:
-            live.parent.mkdir(parents=True, exist_ok=True)
-            # Clear any stale temp left by a prior crashed rollback.
-            if tmp.is_dir():
-                shutil.rmtree(tmp, ignore_errors=True)
-            elif tmp.exists():
-                tmp.unlink()
-            if src.is_dir():
-                shutil.copytree(src, tmp)
-                # os.replace can't overwrite a non-empty dir; swap explicitly.
-                if live.is_dir():
-                    shutil.rmtree(live)
-                elif live.exists():
-                    live.unlink()
-                os.replace(tmp, live)
-            else:
-                shutil.copy2(src, tmp)
-                os.replace(tmp, live)  # atomic over an existing file
-            restored.append(name)
-        except OSError as e:
-            log.warning("dreaming: rollback of %s failed: %s", name, e)
-            # Best-effort cleanup of the staged copy; the live store was not
-            # touched until the (successful) os.replace, so it stays intact.
+    _prepare_snapshot_base(base, default_store=default_store)
+    with cross_process_lock(base / _SNAPSHOT_TRANSACTION, strict=True):
+        names = _snapshot_names_unlocked(base)
+        if not names:
+            if snapshot != "latest":
+                raise ValueError(f"no such snapshot: {snapshot!r} (have: )")
+            return []
+        chosen = names[-1] if snapshot == "latest" else snapshot
+        if chosen not in names:
+            raise ValueError(
+                f"no such snapshot: {chosen!r} (have: {', '.join(names)})"
+            )
+        src_dir = base / chosen
+        _harden_private_tree(src_dir)
+        stores = _validated_stores(stores if stores is not None else _live_stores())
+        restored: list[str] = []
+        failures: dict[str, str] = {}
+        required = [
+            name for name, live in stores.items()
+            if (src_dir / name).exists()
+            or Path(live).exists()
+            or _path_is_alias(Path(live))
+        ]
+        for name, live in stores.items():
+            src = src_dir / name
+            if not src.exists():
+                continue
+            live = Path(live)
             try:
-                if tmp.is_dir():
-                    shutil.rmtree(tmp, ignore_errors=True)
-                elif tmp.exists():
-                    tmp.unlink()
-            except OSError:
-                pass
-    # A store ABSENT from the snapshot but present live now was CREATED during
-    # the cycle being rolled back; remove it so the rollback is a FULL revert
-    # (see _remove_post_snapshot_stores).
-    restored.extend(_remove_post_snapshot_stores(src_dir, stores))
-    return restored
+                if src.is_dir():
+                    _restore_private_directory(src, live)
+                else:
+                    ensure_private_file(src)
+                    with cross_process_lock(live, strict=True):
+                        atomic_write_bytes(live, _read_stable_private_file(src))
+                restored.append(name)
+            except Exception as e:  # noqa: BLE001 -- report all store failures
+                failures[name] = f"{type(e).__name__}: {e}"[:500]
+                log.warning("dreaming: rollback of %s failed: %s", name, e)
+        # A store absent from the snapshot but present live now was created
+        # during the cycle; remove it so rollback remains a full revert.
+        restored.extend(_remove_post_snapshot_stores(
+            src_dir, stores, failures=failures,
+        ))
+        for missing in sorted(set(required) - set(restored) - set(failures)):
+            failures[missing] = "restore produced no completion receipt"
+        if failures:
+            raise LearningRollbackError(LearningRollbackReport(
+                snapshot=chosen,
+                required=tuple(required),
+                restored=tuple(restored),
+                failures=dict(failures),
+            ))
+        return restored
 
 
 def _remove_post_snapshot_stores(
-    src_dir: Path, stores: dict[str, Path],
+    src_dir: Path,
+    stores: dict[str, Path],
+    *,
+    failures: dict[str, str] | None = None,
 ) -> list[str]:
     """Delete live stores absent from the snapshot (created during the cycle).
 
@@ -1643,29 +1953,28 @@ def _remove_post_snapshot_stores(
     (a failed promotion would leave a just-distilled poisoned skill on disk).
     Each is removed via rename-aside so a failure can't half-delete a dir store.
     """
-    import shutil
     removed: list[str] = []
     for name, live in stores.items():
         if (src_dir / name).exists():
             continue  # in the snapshot -> handled by the restore loop
         live = Path(live)
-        if not live.exists():
+        if not live.exists() and not _path_is_alias(live):
             continue
-        tmp = live.with_name(live.name + ".rollbackdel")
+        tombstone = live.with_name(
+            f".{live.name}.rollbackdel-{uuid.uuid4().hex}"
+        )
         try:
-            if tmp.is_dir():
-                shutil.rmtree(tmp, ignore_errors=True)
-            elif tmp.exists():
-                tmp.unlink()
-            os.replace(live, tmp)  # the live store vanishes in one atomic rename
-            if tmp.is_dir():
-                shutil.rmtree(tmp, ignore_errors=True)
-            else:
-                tmp.unlink(missing_ok=True)
+            os.replace(live, tombstone)
+            _remove_path(tombstone)
             removed.append(name)
-        except OSError as e:
+        except Exception as e:  # noqa: BLE001 -- caller needs the full report
+            if failures is not None:
+                failures[name] = f"{type(e).__name__}: {e}"[:500]
             log.warning(
-                "dreaming: rollback could not remove post-snapshot %s: %s", name, e)
+                "dreaming: rollback could not remove post-snapshot %s: %s",
+                name,
+                e,
+            )
     return removed
 
 
@@ -1738,6 +2047,8 @@ __all__ = [
     "benchmark_regressed",
     "snapshot_learning_state",
     "list_snapshots",
+    "LearningRollbackReport",
+    "LearningRollbackError",
     "rollback_learning_state",
     "snapshots_dir",
     "dream_cycle_dry",

@@ -1,8 +1,6 @@
 """Agent fleets: the per-employee roster model + CLI (Layer C)."""
 from __future__ import annotations
 
-import stat
-
 import pytest
 from click.testing import CliRunner
 
@@ -35,9 +33,10 @@ def test_save_load_roundtrip(monkeypatch, tmp_path):
 def test_saved_file_is_0600(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    from maverick.file_lock import private_path_is_restricted
     from maverick.fleet import Fleet, save_fleet
     path = save_fleet(Fleet(name="f1", owner="user:x"))
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert private_path_is_restricted(path, 0o600)
 
 
 def test_save_rejects_bad_name(monkeypatch, tmp_path):

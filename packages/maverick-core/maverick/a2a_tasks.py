@@ -426,19 +426,22 @@ def _default_runner(
     from .llm import LLM
     from .orchestrator import run_goal_sync
     from .sandbox import build_sandbox
-    from .world_model import WorldModel
+    from .world_model import close_world_if_owned, open_world
 
     budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall)
-    world = WorldModel()
-    goal_id = world.create_goal(text[:120] or "a2a task", text)
-    llm = LLM()
-    sandbox = build_sandbox()
-    # A2A goals run under a tool ceiling (default max_risk="medium") so a remote
-    # caller can't reach full local tool access; see _a2a_capability.
-    return run_goal_sync(
-        llm, world, budget, goal_id, sandbox=sandbox, max_depth=max_depth,
-        capability=_a2a_capability(),
-    )
+    world = open_world()
+    try:
+        goal_id = world.create_goal(text[:120] or "a2a task", text)
+        llm = LLM()
+        sandbox = build_sandbox()
+        # A2A goals run under a tool ceiling (default max_risk="medium") so a remote
+        # caller can't reach full local tool access; see _a2a_capability.
+        return run_goal_sync(
+            llm, world, budget, goal_id, sandbox=sandbox, max_depth=max_depth,
+            capability=_a2a_capability(),
+        )
+    finally:
+        close_world_if_owned(world)
 
 
 class _Task:

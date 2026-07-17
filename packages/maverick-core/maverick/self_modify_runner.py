@@ -269,13 +269,17 @@ def _default_evaluate(
         # the stock DGM profile (non-host, no egress/root opt-ins, bounded).
         from .sandbox import build_sandbox
         from .self_modify_eval import require_secure_eval_sandbox
-        return require_secure_eval_sandbox(
-            build_sandbox(
-                workdir=copy_dir,
-                sandbox_config=copy.deepcopy(pinned_sandbox_cfg),
-            ),
-            copy_dir,
+        backend = build_sandbox(
+            workdir=copy_dir,
+            sandbox_config=copy.deepcopy(pinned_sandbox_cfg),
         )
+        try:
+            return require_secure_eval_sandbox(backend, copy_dir)
+        except Exception:
+            close = getattr(backend, "close", None)
+            if callable(close):
+                close()
+            raise
 
     # Resolve the stock security profile before any model proposal can run.
     # This catches the default/local backend and egress/root opt-ins without
@@ -533,11 +537,17 @@ def run(  # noqa: C901 -- orchestration keeps each privileged refusal visible
                     "stock self-modification source capture changed"
                 )
 
+        from .self_modify_eval import EvalSandboxError
         try:
             raw_ev = evaluate or _default_evaluate(
                 tree=stock_tree, sandbox=sandbox, budget=budget, cfg=cfg,
                 require_tracked_source=stock_requires_tracked_source,
                 expected_source_manifest=stock_snapshot,
+            )
+        except EvalSandboxError as exc:
+            return RunSummary(
+                False,
+                reason=f"stock self-modification evaluator blocked: {exc}",
             )
         except Exception:
             return RunSummary(

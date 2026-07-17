@@ -242,31 +242,35 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        from ..world_model import DEFAULT_DB, WorldModel
-        world = WorldModel(DEFAULT_DB)
+        from ..world_model import close_world_if_owned, open_world
+        world = open_world()
     except Exception:
         world = None
 
     count = 0
-    with args.out_file.open("w", encoding="utf-8") as out:
-        for record in load_donations(args.in_dir):
-            events = (
-                fetch_steps_for_goal(world, record.get("goal_id", 0))
-                if world else []
-            )
-            traj = build_trajectory(record, events)
-            out.write(json.dumps(to_klear_jsonl(traj)) + "\n")
-            count += 1
-            # Emit the rejected pre-revision drafts as extra low-reward rows in
-            # the same task_family so DPO can pair them against this accepted run.
-            for rej in build_rejected_trajectories(record):
-                out.write(json.dumps(to_klear_jsonl(rej)) + "\n")
+    try:
+        with args.out_file.open("w", encoding="utf-8") as out:
+            for record in load_donations(args.in_dir):
+                events = (
+                    fetch_steps_for_goal(world, record.get("goal_id", 0))
+                    if world else []
+                )
+                traj = build_trajectory(record, events)
+                out.write(json.dumps(to_klear_jsonl(traj)) + "\n")
                 count += 1
-            # Emit best-of-N candidates as rows scored by objective tests, so a
-            # passing vs failing candidate pairs within the task_family.
-            for cnd in build_candidate_trajectories(record):
-                out.write(json.dumps(to_klear_jsonl(cnd)) + "\n")
-                count += 1
+                # Emit the rejected pre-revision drafts as extra low-reward rows in
+                # the same task_family so DPO can pair them against this accepted run.
+                for rej in build_rejected_trajectories(record):
+                    out.write(json.dumps(to_klear_jsonl(rej)) + "\n")
+                    count += 1
+                # Emit best-of-N candidates as rows scored by objective tests, so a
+                # passing vs failing candidate pairs within the task_family.
+                for cnd in build_candidate_trajectories(record):
+                    out.write(json.dumps(to_klear_jsonl(cnd)) + "\n")
+                    count += 1
+    finally:
+        if world is not None:
+            close_world_if_owned(world)
     print(f"ingested {count} trajectories -> {args.out_file}", file=sys.stderr)
     return 0
 

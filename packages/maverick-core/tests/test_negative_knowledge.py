@@ -29,13 +29,22 @@ def test_mine_orders_by_severity():
 
 
 def test_registry_update_consult_and_roundtrip(tmp_path):
-    reg = nk.GuardrailRegistry(path=tmp_path / "g.json")
+    path = tmp_path / "g.json"
+    reg = nk.GuardrailRegistry(path=path)
     reg.update(nk.mine([_fc("X", -0.5, -0.2)]))
     assert reg.consult("X") is not None and reg.consult("X").action == "X"
     assert reg.consult("never_seen") is None
     # persisted + reloaded
-    reg2 = nk.GuardrailRegistry(path=tmp_path / "g.json")
+    reg2 = nk.GuardrailRegistry(path=path)
     assert reg2.consult("X") is not None
+    from maverick.file_lock import private_path_is_restricted
+    assert private_path_is_restricted(path)
+
+
+def test_registry_ignores_valid_json_with_wrong_shape(tmp_path):
+    path = tmp_path / "g.json"
+    path.write_text("42", encoding="utf-8")
+    assert nk.GuardrailRegistry(path=path).all() == []
 
 
 def test_retriage_drops_a_rule_whose_harm_is_gone(tmp_path):

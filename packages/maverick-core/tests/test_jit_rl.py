@@ -118,6 +118,8 @@ class TestPersistence:
         s2 = JitStore(path=p)
         assert len(s2) == 2
         assert abs(s2.value(_feat(0, 0), k=2) - 0.5) < 1e-9
+        from maverick.file_lock import private_path_is_restricted
+        assert private_path_is_restricted(p)
 
     def test_reload_skips_malformed_lines(self, tmp_path):
         p = tmp_path / "jit.ndjson"
@@ -125,6 +127,18 @@ class TestPersistence:
                      encoding="utf-8")
         s = JitStore(path=p)
         assert len(s) == 1
+
+    def test_persistent_buffer_is_bounded_on_disk(self, tmp_path):
+        p = tmp_path / "jit.ndjson"
+        store = JitStore(path=p, max_experiences=3)
+        for i in range(10):
+            store.record(_feat(i), f"a{i}", float(i))
+        assert len(p.read_text(encoding="utf-8").splitlines()) <= 3
+        reloaded = JitStore(path=p, max_experiences=3)
+        assert len(reloaded) == 3
+        assert [item.action for item in reloaded.neighbors(_feat(9), k=3)] == [
+            "a9", "a8", "a7",
+        ]
 
 
 class TestGate:

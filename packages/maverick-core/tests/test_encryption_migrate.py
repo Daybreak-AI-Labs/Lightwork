@@ -196,9 +196,8 @@ def _all_db_bytes(db):
 
 @requires_crypto
 def test_migrate_backup_true_writes_backup_before_resealing(monkeypatch, tmp_path):
-    import stat as _stat
-
     from maverick.encryption_migrate import migrate_world_db
+    from maverick.file_lock import private_path_is_restricted
     from maverick.world_model import WorldModel
 
     db = tmp_path / "world.db"
@@ -213,7 +212,7 @@ def test_migrate_backup_true_writes_backup_before_resealing(monkeypatch, tmp_pat
     assert len(backups) == 1
     bak = backups[0]
     # Backup is a private (0600) PLAINTEXT snapshot the migration can recover from.
-    assert _stat.S_IMODE(bak.stat().st_mode) == 0o600
+    assert private_path_is_restricted(bak, 0o600)
     assert b"4111111111111111" in bak.read_bytes()
     # ...and it is a usable SQLite DB holding the pre-migration plaintext.
     c = sqlite3.connect(str(bak))

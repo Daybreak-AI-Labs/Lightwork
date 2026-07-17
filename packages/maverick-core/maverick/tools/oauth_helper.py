@@ -30,6 +30,7 @@ import os
 from typing import Any
 from urllib.parse import urlparse
 
+from ..file_lock import atomic_write_text, ensure_private_directory, require_private_directory
 from . import Tool
 from ._ssrf import safe_client
 
@@ -96,12 +97,14 @@ def _persist_tokens(payload: dict, provider: str | None = None) -> str | None:
         return None
     from pathlib import Path
     p = Path(out).expanduser()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    try:
-        os.chmod(p, 0o600)
-    except OSError:
-        pass
+    if p.parent.exists():
+        require_private_directory(p.parent)
+    else:
+        ensure_private_directory(p.parent)
+    # Create the token file with its final private ACL/mode.  Writing first and
+    # chmod'ing afterwards leaves a credential-exposure window and does not
+    # establish an owner-only DACL on Windows.
+    atomic_write_text(p, json.dumps(payload, indent=2), encoding="utf-8")
     return f"written to: {p}"
 
 

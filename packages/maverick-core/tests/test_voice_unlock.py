@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import pytest
+from maverick import file_lock
+from maverick.file_lock import private_path_is_restricted
 from maverick.voice_unlock import DEFAULT_THRESHOLD, VoiceGate
 
 
@@ -69,7 +71,7 @@ def test_store_holds_embeddings_not_audio(gate, tmp_path):
     raw = (tmp_path / "profiles.json").read_bytes()
     assert b"RAW-AUDIO" not in raw          # never raw audio
     assert b"centroid" in raw
-    assert oct((tmp_path / "profiles.json").stat().st_mode)[-3:] == "600"
+    assert private_path_is_restricted(tmp_path / "profiles.json", 0o600)
 
 
 def test_threshold_configurable(tmp_path, monkeypatch):
@@ -86,21 +88,26 @@ def test_store_created_without_readable_temp_window(tmp_path, monkeypatch):
     gate = VoiceGate(_embedder([0.6, 0.8, 0.0]),
                      store_path=tmp_path / "private" / "profiles.json")
 
-    seen_tmp_modes = []
-    real_replace = __import__("os").replace
+    private_before_write = []
+    real_secure_mkstemp = file_lock._secure_mkstemp
 
-    def inspect_tmp_before_replace(src, dst):
-        seen_tmp_modes.append(oct(src.stat().st_mode)[-3:])
-        return real_replace(src, dst)
+    def inspect_private_temp(directory, *, prefix, suffix, mode):
+        fd, tmp = real_secure_mkstemp(
+            directory,
+            prefix=prefix,
+            suffix=suffix,
+            mode=mode,
+        )
+        private_before_write.append(private_path_is_restricted(tmp, mode))
+        return fd, tmp
 
-    monkeypatch.setattr("maverick.voice_unlock.os.replace",
-                        inspect_tmp_before_replace)
+    monkeypatch.setattr(file_lock, "_secure_mkstemp", inspect_private_temp)
 
     gate.enroll("alice", [b"a1", b"a2", b"a3"])
 
-    assert seen_tmp_modes == ["600"]
-    assert oct((tmp_path / "private").stat().st_mode)[-3:] == "700"
-    assert oct((tmp_path / "private" / "profiles.json").stat().st_mode)[-3:] == "600"
+    assert private_before_write == [True]
+    assert private_path_is_restricted(tmp_path / "private", 0o700)
+    assert private_path_is_restricted(tmp_path / "private" / "profiles.json", 0o600)
     assert not list((tmp_path / "private").glob("*.tmp"))
 
 
@@ -121,3 +128,27 @@ def test_concurrent_enroll_does_not_lose_profiles(gate):
         t.join()
 
     assert len(gate.profiles()) == n
+
+
+def test_custom_parent_is_verified_without_acl_takeover(tmp_path, monkeypatch):
+    parent = tmp_path / "caller-owned"
+    parent.mkdir()
+    seen = []
+    monkeypatch.setattr(
+        file_lock,
+        "ensure_private_directory",
+        lambda path: pytest.fail(f"custom parent was mutated: {path}"),
+    )
+    monkeypatch.setattr(
+        file_lock,
+        "require_private_directory",
+        lambda path: seen.append(path),
+    )
+    gate = VoiceGate(
+        _embedder([0.6, 0.8, 0.0]),
+        store_path=parent / "profiles.json",
+    )
+
+    gate._ensure_parent()
+
+    assert seen == [parent]

@@ -1,7 +1,5 @@
 {{- if .Values.autoscaling.enabled }}
-{{- if not (eq .Values.worldModel.backend "postgres") }}
-{{- fail "autoscaling.enabled requires worldModel.backend=postgres: the SQLite backend is single-writer and pins replicaCount to 1, so horizontal autoscaling would corrupt a shared RWO volume. Move the world model to Postgres before enabling the HPA." }}
-{{- end }}
+{{- fail "autoscaling.enabled is not supported for the Lightwork control plane: Postgres does not yet centralize flow/A2A/audit/learning state. Run one dashboard/serve replica and scale remote workers separately." }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:

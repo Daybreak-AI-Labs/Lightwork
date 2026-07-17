@@ -7,6 +7,9 @@ tax_ packs to the same read-only safety envelope as every other suite.
 """
 from __future__ import annotations
 
+import os
+
+import pytest
 from click.testing import CliRunner
 from maverick import tax_prep
 from maverick.cli import main
@@ -557,6 +560,10 @@ class TestReviewPackage:
         assert "nec - forged open item" in text
         assert "note FORGED NOTE" in text
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="Windows forbids control characters in uploaded filenames",
+    )
     def test_cli_sanitizes_uploaded_filenames_in_stdout_and_report(self, tmp_path):
         docs = tmp_path / "docs"
         docs.mkdir()

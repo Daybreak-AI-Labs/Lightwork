@@ -69,6 +69,35 @@ def test_build_runs_hard_sections_and_is_honest(monkeypatch, tmp_path):
     assert not [g for g in guarantees if not g["passed"]]
 
 
+def test_build_releases_only_owned_world_handles(monkeypatch):
+    import maverick.world_model as world_model
+
+    world = _FakeWorld([], [])
+    closed = []
+    monkeypatch.setattr(world_model, "open_world", lambda: world)
+    monkeypatch.setattr(
+        world_model, "close_world_if_owned", lambda candidate: closed.append(candidate)
+    )
+    evidence = proof_pack.Evidence("test", proof_pack.PASS, "ok", hard=True)
+    for name in (
+        "collect_governance",
+        "collect_reliability",
+        "collect_perf_sla",
+        "collect_shield_asr",
+        "collect_benchmarks",
+    ):
+        monkeypatch.setattr(proof_pack, name, lambda: evidence)
+    monkeypatch.setattr(
+        proof_pack,
+        "collect_learning",
+        lambda candidate, *, human_cost=None: evidence,
+    )
+
+    proof_pack.build()
+
+    assert closed == [world]
+
+
 def test_perf_sla_section_retries_a_transient_breach(monkeypatch):
     # A noisy-neighbor p95 breach on the first attempt must not fail the pack
     # when the immediate re-probe passes; a genuine regression (breaching both

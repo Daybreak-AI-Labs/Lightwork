@@ -27,7 +27,12 @@ from pathlib import Path
 from .config import load_config
 from .llm import LLM
 from .sandbox import build_sandbox
-from .world_model import WorldModel, open_world, world_for_tenant
+from .world_model import (
+    WorldModel,
+    close_world_if_owned,
+    open_world,
+    world_for_tenant,
+)
 
 log = logging.getLogger(__name__)
 
@@ -79,11 +84,26 @@ class Server:
         llm: LLM,
         sandbox=None,
         max_depth: int = 3,
+        *,
+        owns_world: bool = False,
+        owns_sandbox: bool | None = None,
     ):
+        created_sandbox = sandbox is None
         self.world = world
         self.llm = llm
-        self.sandbox = sandbox or build_sandbox()
+        self.sandbox = build_sandbox() if sandbox is None else sandbox
         self.max_depth = max_depth
+        # Embedders commonly inject their own world/sandbox and retain their
+        # lifecycle.  ``build_from_config`` opts into ownership explicitly so
+        # the long-lived ``serve`` process can release a Postgres connection or
+        # pool without ever closing a caller-owned dependency.
+        self._owns_world = bool(owns_world)
+        self._owns_sandbox = (
+            created_sandbox if owns_sandbox is None else bool(owns_sandbox)
+        )
+        self._resources_closed = False
+        self._stopping = False
+        self._stopped = False
         self._channels: list = []
         self._tasks: list[asyncio.Task] = []
         self._shield = None
@@ -420,22 +440,67 @@ class Server:
             len(self._channels),
             ", ".join(c.name for c in self._channels),
         )
-        self._tasks = [
-            asyncio.create_task(c.start(), name=f"channel-{c.name}")
-            for c in self._channels
-        ]
-        results = await asyncio.gather(*self._tasks, return_exceptions=True)
-        for c, result in zip(self._channels, results, strict=False):
-            if isinstance(result, Exception):
-                log.error("channel %s crashed: %s", c.name, result)
+        try:
+            # Append incrementally so a later adapter returning an invalid
+            # awaitable cannot orphan tasks already started earlier in the
+            # channel list.
+            self._tasks = []
+            for channel in self._channels:
+                self._tasks.append(
+                    asyncio.create_task(
+                        channel.start(), name=f"channel-{channel.name}",
+                    )
+                )
+            results = await asyncio.gather(*self._tasks, return_exceptions=True)
+            for c, result in zip(self._channels, results, strict=False):
+                if isinstance(result, Exception):
+                    log.error("channel %s crashed: %s", c.name, result)
+        finally:
+            # ``asyncio.run`` cancels this coroutine on Ctrl-C.  Perform the
+            # channel teardown before releasing the server-owned world so no
+            # adapter can race a final callback against a closed Postgres pool.
+            await self.stop()
 
     async def stop(self) -> None:
-        for t in self._tasks:
-            if not t.done():
-                t.cancel()
-        await asyncio.gather(
-            *(c.stop() for c in self._channels), return_exceptions=True,
-        )
+        if self._stopped or self._stopping:
+            return
+        self._stopping = True
+        try:
+            for t in self._tasks:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+            await asyncio.gather(
+                *(c.stop() for c in self._channels), return_exceptions=True,
+            )
+        finally:
+            self.close()
+            self._stopped = True
+            self._stopping = False
+
+    def close(self) -> None:
+        """Release dependencies owned by this server, once.
+
+        This is synchronous so partial construction failures can clean up
+        before an event loop exists.  Cached tenant SQLite worlds remain open
+        by design; :func:`close_world_if_owned` closes only caller-owned SQLite
+        handles and each independently-created Postgres connection/pool.
+        """
+        if self._resources_closed:
+            return
+        self._resources_closed = True
+        if self._owns_sandbox:
+            close = getattr(self.sandbox, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # pragma: no cover -- teardown is best-effort
+                    log.debug("server sandbox close failed", exc_info=True)
+        if self._owns_world:
+            try:
+                close_world_if_owned(self.world)
+            except Exception:  # pragma: no cover -- teardown is best-effort
+                log.debug("server world close failed", exc_info=True)
 
 
 def _wire_telegram(server, cfg):
@@ -716,40 +781,70 @@ def build_from_config() -> Server:
         )
 
     world = open_world()
-    llm = LLM()
-    sandbox_cfg = cfg.get("sandbox", {})
-    backend = sandbox_cfg.get("backend")
-    # Default workdir mirrors config.get_sandbox()'s documented ~/maverick-workspace
-    # default rather than Path.cwd(), so `serve` and the rest of the kernel agree.
-    from .config import get_sandbox
-    workdir = Path(sandbox_cfg.get("workdir", get_sandbox()["workdir"])).expanduser()
-    sandbox = build_sandbox(workdir=workdir, backend=backend)
-    server = Server(world=world, llm=llm, sandbox=sandbox)
-
-    channels_cfg = cfg.get("channels", {})
-    for name, wire in _WIRES.items():
-        ch_cfg = channels_cfg.get(name, {})
-        if not ch_cfg.get("enabled"):
-            continue
-        try:
-            wire(server, ch_cfg)
-            log.info("enabled %s channel", name)
-        except ImportError as e:
-            log.error("channel %s enabled but optional deps missing: %s", name, e)
-        except Exception as e:
-            log.error("channel %s failed to initialize: %s", name, e)
-
-    if not server._channels:
-        raise RuntimeError(
-            "No channels enabled (or all failed to initialize). Edit "
-            "~/.maverick/config.toml and set [channels.<name>] enabled = true."
+    sandbox = None
+    server = None
+    try:
+        llm = LLM()
+        sandbox_cfg = cfg.get("sandbox", {})
+        backend = sandbox_cfg.get("backend")
+        # Default workdir mirrors config.get_sandbox()'s documented
+        # ~/maverick-workspace default rather than Path.cwd(), so `serve` and
+        # the rest of the kernel agree.
+        from .config import get_sandbox
+        workdir = Path(
+            sandbox_cfg.get("workdir", get_sandbox()["workdir"])
+        ).expanduser()
+        sandbox = build_sandbox(workdir=workdir, backend=backend)
+        server = Server(
+            world=world,
+            llm=llm,
+            sandbox=sandbox,
+            owns_world=True,
+            owns_sandbox=True,
         )
 
-    _advise_channel_tenancy(server)
+        channels_cfg = cfg.get("channels", {})
+        for name, wire in _WIRES.items():
+            ch_cfg = channels_cfg.get(name, {})
+            if not ch_cfg.get("enabled"):
+                continue
+            try:
+                wire(server, ch_cfg)
+                log.info("enabled %s channel", name)
+            except ImportError as e:
+                log.error("channel %s enabled but optional deps missing: %s", name, e)
+            except Exception as e:
+                log.error("channel %s failed to initialize: %s", name, e)
 
-    _install_goal_dispatcher()
+        if not server._channels:
+            raise RuntimeError(
+                "No channels enabled (or all failed to initialize). Edit "
+                "~/.maverick/config.toml and set [channels.<name>] enabled = true."
+            )
 
-    return server
+        _advise_channel_tenancy(server)
+
+        _install_goal_dispatcher()
+
+        return server
+    except BaseException:
+        # A bad provider/sandbox/channel configuration can fail after Postgres
+        # has already opened a connection pool.  Construction failures have no
+        # event loop or Server.stop() caller, so release owned resources here.
+        if server is not None:
+            server.close()
+        else:
+            close = getattr(sandbox, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # pragma: no cover -- preserve root error
+                    log.debug("startup sandbox close failed", exc_info=True)
+            try:
+                close_world_if_owned(world)
+            except Exception:  # pragma: no cover -- preserve root error
+                log.debug("startup world close failed", exc_info=True)
+        raise
 
 
 def _install_goal_dispatcher() -> None:

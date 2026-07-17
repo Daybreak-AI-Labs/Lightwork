@@ -43,13 +43,20 @@ def test_data_dir_walls_tenants():
 
 
 def test_distinct_ids_never_collide_on_segment():
-    # The sanitizer must not collapse two distinct tenant ids onto one dir
-    # (that would silently merge their data).
+    # Non-aliasing ids retain distinct portable namespaces.
     seen = set()
-    for tid in ("acme", "ACME", "ac/me", "ac me", "acme.", "acme-1", "acme_1", "a.c.m.e"):
+    for tid in ("acme", "ac/me", "ac me", "acme-1", "acme_1", "a.c.m.e"):
         seg = str(data_dir(tenant=tid))
         assert seg not in seen, f"{tid!r} collided onto an existing segment"
         seen.add(seg)
+
+    # Case aliases and Win32 trailing-dot aliases are rejected rather than
+    # being allowed to address the same physical directory.
+    from maverick.paths import InvalidTenantError, TenantNamespaceCollision
+    with pytest.raises(TenantNamespaceCollision):
+        data_dir(tenant="ACME")
+    with pytest.raises(InvalidTenantError, match="cannot end"):
+        data_dir(tenant="acme.")
 
 
 def test_active_tenant_scope_restores():
@@ -329,6 +336,79 @@ def test_tenant_world_cache_never_evicts_shared(monkeypatch, tmp_path):
     world_model.world_for_tenant("t3")
 
     from maverick.paths import data_dir
-    shared_key = str(data_dir("world.db", tenant=None))
+    shared_key = world_model._world_cache_key(data_dir("world.db", tenant=None))
     assert shared_key in world_model._tenant_worlds  # shared never evicted
     world_model._tenant_worlds.clear()
+
+
+def test_cli_gc_refuses_implicit_global_postgres_delete(monkeypatch):
+    import maverick.cli as cli_mod
+    import maverick.world_model_backends as backends
+    from click.testing import CliRunner
+    from maverick.tenant import registry
+
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.delenv("MAVERICK_CLIENT_ID", raising=False)
+    monkeypatch.setattr(backends, "is_postgres_configured", lambda: True)
+    monkeypatch.setattr(registry, "list_tenants", list)
+    monkeypatch.setattr(
+        cli_mod,
+        "open_world",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unbound Postgres world must not open")
+        ),
+    )
+
+    result = CliRunner().invoke(cli_mod.main, ["gc", "--yes"])
+    assert result.exit_code != 0
+    assert "refusing unbound Postgres GC" in result.output
+
+
+def test_cli_gc_fans_out_through_explicit_tenants(monkeypatch):
+    from types import SimpleNamespace
+
+    import maverick.cli as cli_mod
+    import maverick.world_model_backends as backends
+    from click.testing import CliRunner
+    from maverick.paths import current_tenant_id
+    from maverick.tenant import registry
+
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.delenv("MAVERICK_CLIENT_ID", raising=False)
+    monkeypatch.setattr(backends, "is_postgres_configured", lambda: True)
+    monkeypatch.setattr(
+        registry,
+        "list_tenants",
+        lambda: [SimpleNamespace(id="alpha"), SimpleNamespace(id="beta")],
+    )
+    seen: list[tuple[str, str | None]] = []
+
+    class _World:
+        def prune_conversations(self, **kwargs):
+            seen.append(("conversations", current_tenant_id()))
+            return 1
+
+        def prune_goal_events(self, **kwargs):
+            seen.append(("events", current_tenant_id()))
+            return 2
+
+        def prune_processed_messages(self, **kwargs):
+            seen.append(("dedup", current_tenant_id()))
+            return 3
+
+        def close(self):
+            seen.append(("close", current_tenant_id()))
+
+    monkeypatch.setattr(cli_mod, "open_world", lambda *args, **kwargs: _World())
+    result = CliRunner().invoke(cli_mod.main, ["gc", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert "across 2 tenant(s)" in result.output
+    assert [(kind, tenant) for kind, tenant in seen if kind != "close"] == [
+        ("conversations", "alpha"),
+        ("events", "alpha"),
+        ("dedup", "alpha"),
+        ("conversations", "beta"),
+        ("events", "beta"),
+        ("dedup", "beta"),
+    ]

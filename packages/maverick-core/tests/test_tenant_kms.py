@@ -81,6 +81,7 @@ def test_sealed_data_is_authenticated_to_tenant_id(monkeypatch):
 
 @requires_crypto
 def test_dek_is_persisted_wrapped_not_plaintext(tmp_path):
+    from maverick.file_lock import private_path_is_restricted
     from maverick.tenant import kms as k
     dek = k.tenant_dek("acme")
     wrapped_path = tmp_path / "tenants" / "acme" / "keys" / "dek.wrapped"
@@ -89,6 +90,8 @@ def test_dek_is_persisted_wrapped_not_plaintext(tmp_path):
     # The stored DEK is wrapped (magic header) and never the raw DEK.
     assert on_disk.startswith(b"MVKDEK1\n")
     assert dek not in on_disk
+    assert private_path_is_restricted(wrapped_path)
+    assert private_path_is_restricted(wrapped_path.parent, 0o700)
 
 
 @requires_crypto

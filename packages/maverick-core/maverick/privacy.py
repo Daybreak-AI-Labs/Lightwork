@@ -51,19 +51,29 @@ def _anon_salt() -> bytes:
         if _anon_salt_cache is not None:
             return _anon_salt_cache
         try:
+            from .file_lock import (
+                atomic_read_bytes,
+                atomic_write_bytes,
+                cross_process_lock,
+                ensure_private_directory,
+                ensure_private_file,
+            )
             from .paths import data_dir
+
             p = data_dir("keys", "anon.salt", tenant=None)
-            if p.exists():
-                existing = p.read_bytes()
+            ensure_private_directory(p.parent)
+            with cross_process_lock(p):
+                try:
+                    ensure_private_file(p)
+                    existing = atomic_read_bytes(p)
+                except FileNotFoundError:
+                    existing = b""
                 if len(existing) >= 16:
                     _anon_salt_cache = existing
                     return _anon_salt_cache
-            p.parent.mkdir(parents=True, exist_ok=True)
-            salt = os.urandom(32)
-            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "wb") as f:
-                f.write(salt)
-            _anon_salt_cache = salt
+                salt = os.urandom(32)
+                atomic_write_bytes(p, salt)
+                _anon_salt_cache = salt
         except Exception:  # pragma: no cover -- read-only fs / unwritable home
             _anon_salt_cache = os.urandom(32)
         return _anon_salt_cache

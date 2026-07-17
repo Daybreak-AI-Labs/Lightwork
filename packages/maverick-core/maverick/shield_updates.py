@@ -34,7 +34,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -195,55 +194,51 @@ def apply_update(
         pubkey_hex = get_update_config()["update_pubkey"]
     version, rules = verify_bundle(bundle, pubkey_hex)
 
-    p = path or rules_path()
-    cur = current_version(p)
-    if cur is not None and version < cur:
-        raise UpdateRefused(f"version downgrade refused: bundle v{version} < staged v{cur}")
-    if cur is not None and version == cur:
-        return UpdateResult(
-            applied=False,
-            reason=f"already at v{cur}",
-            version=version,
-            previous_version=cur,
-            path=str(p),
-        )
-
-    old_ids = {_rule_id(r) for r in _staged_rules(p)}
+    p = Path(path) if path is not None else rules_path()
     new_ids = {_rule_id(r) for r in rules}
     staged = {"version": version, "rules": rules, "sig": bundle["sig"]}
     content = json.dumps(staged, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
 
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    # Mode set AT creation (matching audit key handling): no window where the
-    # staged rules are world-readable, and os.replace keeps the swap atomic.
-    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, p)
-    finally:
-        if tmp.exists():
-            try:
-                tmp.unlink()
-            except OSError:  # pragma: no cover -- best-effort cleanup
-                pass
-    try:
-        os.chmod(p, 0o600)
-    except OSError:  # pragma: no cover -- exotic FS
-        pass
-
-    result = UpdateResult(
-        applied=True,
-        reason="ok",
-        version=version,
-        previous_version=cur,
-        added=sorted(new_ids - old_ids),
-        removed=sorted(old_ids - new_ids),
-        path=str(p),
+    from .file_lock import (
+        atomic_write_text,
+        cross_process_lock,
+        ensure_private_directory,
+        prepare_private_directory,
     )
+
+    if path is None:
+        ensure_private_directory(p.parent)
+    else:
+        prepare_private_directory(p.parent)
+    # Anti-rollback is a read-check-write transaction. Without one stable
+    # cross-process lock, concurrent signed v3/v2 updates can both observe v1,
+    # then publish in reverse order and leave the deployment downgraded to v2.
+    with cross_process_lock(p, strict=True):
+        cur = current_version(p)
+        if cur is not None and version < cur:
+            raise UpdateRefused(
+                f"version downgrade refused: bundle v{version} < staged v{cur}"
+            )
+        if cur is not None and version == cur:
+            return UpdateResult(
+                applied=False,
+                reason=f"already at v{cur}",
+                version=version,
+                previous_version=cur,
+                path=str(p),
+            )
+
+        old_ids = {_rule_id(r) for r in _staged_rules(p)}
+        atomic_write_text(p, content)
+        result = UpdateResult(
+            applied=True,
+            reason="ok",
+            version=version,
+            previous_version=cur,
+            added=sorted(new_ids - old_ids),
+            removed=sorted(old_ids - new_ids),
+            path=str(p),
+        )
     log.info("shield rules update: %s", result.summary())
     return result
 

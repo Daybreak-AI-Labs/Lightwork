@@ -47,6 +47,10 @@ class TestMissingKernelGuidance:
         assert "build-rootfs.sh" in res.stderr
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Firecracker deployment scripts require a POSIX shell",
+)
 class TestFirecrackerArtifactIntegrity:
     def test_fetch_kernel_requires_sha256(self, tmp_path):
         import subprocess

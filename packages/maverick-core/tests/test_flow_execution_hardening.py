@@ -33,6 +33,30 @@ def _noop_agent(brief, data):
     return ("ok", 1.0)
 
 
+def test_agent_runner_runtime_type_error_is_never_retried():
+    calls = []
+
+    def side_effecting_runner(brief, data, *, wall=None):
+        calls.append((brief, wall))
+        raise TypeError("runner failed after creating its goal")
+
+    with pytest.raises(TypeError, match="after creating"):
+        execution._call_agent(side_effecting_runner, "work", {}, 10)
+
+    assert calls == [("work", 10)]
+
+
+def test_two_argument_agent_runner_is_detected_before_invocation():
+    calls = []
+
+    def two_argument_runner(brief, data):
+        calls.append(brief)
+        return ("ok", 0.0)
+
+    assert execution._call_agent(two_argument_runner, "work", {}, 10) == ("ok", 0.0)
+    assert calls == ["work"]
+
+
 def test_status_sets_keep_resume_active_and_ambiguity_quarantined():
     assert STATUS_CLAIMED in ACTIVE_STATUSES
     assert STATUS_RESUMING in ACTIVE_STATUSES

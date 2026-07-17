@@ -40,9 +40,10 @@ def test_run_builds_command_with_grants(tmp_path, have_wasmtime):
     })
     cmd = sb.commands[0]
     assert cmd.startswith("wasmtime run")
-    assert "--dir" in cmd and "/data" in cmd
+    assert "--dir" in cmd and str((tmp_path / "data").resolve()) in cmd
     assert "--env MODE=fast" in cmd
-    assert "calc.wasm -- 6 7" in cmd
+    assert str((tmp_path / "calc.wasm").resolve()) in cmd
+    assert "-- 6 7" in cmd
     assert out.strip() == "42"
 
 

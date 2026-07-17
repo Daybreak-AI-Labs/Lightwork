@@ -3,18 +3,21 @@ the client data root, round-trip restore, the cross-client fail-closed guard,
 and path-traversal-safe extraction."""
 from __future__ import annotations
 
+import io
+import os
 import sqlite3
 import tarfile
 from pathlib import Path
 
 import pytest
-from maverick import backup, client
+from maverick import backup, client, file_lock
 
 
 @pytest.fixture(autouse=True)
 def _bound_client(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
+    monkeypatch.setenv("MAVERICK_BACKUP_SIGNING_KEY", bytes(range(32)).hex())
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     client.reset_client_cache()
     yield
@@ -40,6 +43,7 @@ def test_create_and_restore_round_trip():
     _seed(root)
     tar = backup.create_backup()
     assert tar.exists()
+    assert file_lock.private_path_is_restricted(tar)
 
     # Wipe + restore.
     (root / "world.db").unlink()
@@ -50,6 +54,8 @@ def test_create_and_restore_round_trip():
     assert con.execute("SELECT v FROM t").fetchone()[0] == "secret-data"
     con.close()
     assert (root / "agent_trust.json").read_text() == '[{"id":"vega"}]'
+    assert file_lock.private_path_is_restricted(root / "world.db")
+    assert file_lock.private_path_is_restricted(root / "agent_trust.json")
 
 
 def test_manifest_records_client():
@@ -57,7 +63,7 @@ def test_manifest_records_client():
     _seed(data_dir())
     tar = backup.create_backup()
     m = backup.read_manifest(tar)
-    assert m["client_id"] == "acme" and m["schema"] == 1
+    assert m["client_id"] == "acme" and m["schema"] == backup.SCHEMA
     assert "world.db" in m["files"]
 
 
@@ -108,7 +114,7 @@ def test_restore_rejects_path_traversal(tmp_path):
         tar.add(manifest, arcname="manifest.json")
         tar.add(payload / "x", arcname="data/../../escape")
     with pytest.raises(backup.BackupError):
-        backup.restore_backup(bad)
+        backup.restore_backup(bad, allow_unsigned=True)
 
 
 def test_backup_excludes_prior_backups(monkeypatch):
@@ -127,7 +133,7 @@ def test_backup_excludes_prior_backups(monkeypatch):
     assert "data/world.db" in members
 
 
-def _repack(src_tar, dst_tar, *, mutate_manifest=None, mutate_data=None):
+def _repack(src_tar, dst_tar, *, mutate_manifest=None, mutate_data=None, resign=False):
     """Rebuild a backup tarball, optionally mutating the manifest dict or a
     named data file's bytes — to forge corrupt / schema-incompatible backups."""
     import io
@@ -138,6 +144,10 @@ def _repack(src_tar, dst_tar, *, mutate_manifest=None, mutate_data=None):
     manifest = json.loads(blobs["manifest.json"].decode())
     if mutate_manifest:
         mutate_manifest(manifest)
+    if resign:
+        manifest.pop("authentication", None)
+        key = backup._operator_key(required=True)
+        manifest = backup._authenticate_for_write(manifest, key)
     blobs["manifest.json"] = json.dumps(manifest).encode()
     if mutate_data:
         name, data = mutate_data
@@ -158,7 +168,8 @@ def test_restore_refuses_forward_schema(tmp_path, monkeypatch):
     tar = backup.create_backup()
     forward = tmp_path / "forward.tgz"
     _repack(tar, forward,
-            mutate_manifest=lambda m: m.update(world_schema_version=SCHEMA_VERSION + 5))
+            mutate_manifest=lambda m: m.update(world_schema_version=SCHEMA_VERSION + 5),
+            resign=True)
     (data_dir() / "world.db").unlink()
     with pytest.raises(backup.BackupError, match="newer than this binary"):
         backup.restore_backup(forward)
@@ -304,3 +315,399 @@ def test_cli_backup_create_info_restore():
     r = runner.invoke(main, ["backup", "restore", tarball])
     assert r.exit_code == 0 and "restored into" in r.output
     assert (data_dir() / "world.db").exists()
+
+
+def test_create_requires_operator_key_by_default(monkeypatch):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    monkeypatch.delenv("MAVERICK_BACKUP_SIGNING_KEY")
+
+    with pytest.raises(backup.BackupError, match="requires MAVERICK_BACKUP_SIGNING_KEY"):
+        backup.create_backup()
+
+
+def test_unsigned_compatibility_requires_explicit_opt_in(monkeypatch):
+    from maverick.paths import data_dir
+
+    root = data_dir()
+    _seed(root)
+    monkeypatch.delenv("MAVERICK_BACKUP_SIGNING_KEY")
+    archive = backup.create_backup(allow_unsigned=True)
+
+    with pytest.raises(backup.BackupError, match="unsigned"):
+        backup.read_manifest(archive)
+    manifest = backup.read_manifest(archive, allow_unsigned=True)
+    assert manifest["authentication"] == {"algorithm": "none"}
+
+    (root / "agent_trust.json").unlink()
+    with pytest.raises(backup.BackupError, match="unsigned"):
+        backup.restore_backup(archive)
+    backup.restore_backup(archive, allow_unsigned=True)
+    assert (root / "agent_trust.json").read_text() == '[{"id":"vega"}]'
+
+
+def test_legacy_schema_one_restore_is_explicitly_unsigned(tmp_path):
+    from maverick.paths import data_dir
+
+    root = data_dir()
+    _seed(root)
+    archive = backup.create_backup()
+    legacy = tmp_path / "legacy-schema-one.tgz"
+
+    def _to_legacy(manifest):
+        manifest["schema"] = 1
+        manifest["files"] = {
+            name: record["sha256"] for name, record in manifest["files"].items()
+        }
+        manifest.pop("authentication", None)
+
+    _repack(archive, legacy, mutate_manifest=_to_legacy)
+    (root / "agent_trust.json").unlink()
+
+    with pytest.raises(backup.BackupError, match="unsigned"):
+        backup.restore_backup(legacy)
+    backup.restore_backup(legacy, allow_unsigned=True)
+    assert (root / "agent_trust.json").exists()
+
+
+def test_manifest_tamper_is_rejected_even_with_force(tmp_path):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    archive = backup.create_backup()
+    tampered = tmp_path / "tampered-manifest.tgz"
+    _repack(
+        archive,
+        tampered,
+        mutate_manifest=lambda manifest: manifest.update(client_id="attacker"),
+    )
+
+    with pytest.raises(backup.BackupError, match="signature verification failed"):
+        backup.restore_backup(tampered, force=True)
+
+
+def test_wrong_operator_key_cannot_verify_archive(monkeypatch):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    archive = backup.create_backup()
+    monkeypatch.setenv(
+        "MAVERICK_BACKUP_SIGNING_KEY",
+        bytes(reversed(range(32))).hex(),
+    )
+
+    with pytest.raises(backup.BackupError, match="configured operator key"):
+        backup.read_manifest(archive)
+
+
+def test_restore_rejects_symlink_archive_member(tmp_path):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    archive = backup.create_backup()
+    malicious = tmp_path / "symlink-member.tgz"
+    with tarfile.open(archive, "r:gz") as source, tarfile.open(malicious, "w:gz") as out:
+        for member in source.getmembers():
+            out.addfile(member, source.extractfile(member) if member.isfile() else None)
+        link = tarfile.TarInfo("data/linked-secret")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../../outside"
+        out.addfile(link)
+
+    with pytest.raises(backup.BackupError, match="unsupported archive member type"):
+        backup.restore_backup(malicious)
+
+
+def test_restore_rejects_duplicate_archive_member(tmp_path):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    archive = backup.create_backup()
+    malicious = tmp_path / "duplicate-member.tgz"
+    with tarfile.open(archive, "r:gz") as source:
+        members = source.getmembers()
+        blobs = {
+            member.name: source.extractfile(member).read()
+            for member in members
+            if member.isfile()
+        }
+    with tarfile.open(malicious, "w:gz") as out:
+        for member in members:
+            out.addfile(member, io.BytesIO(blobs[member.name]) if member.isfile() else None)
+        duplicate = tarfile.TarInfo("data/agent_trust.json")
+        duplicate.size = len(blobs["data/agent_trust.json"])
+        out.addfile(duplicate, io.BytesIO(blobs["data/agent_trust.json"]))
+
+    with pytest.raises(backup.BackupError, match="duplicate"):
+        backup.restore_backup(malicious)
+
+
+@pytest.mark.parametrize(
+    "member_name",
+    [
+        "data/report:alternate-stream.txt",
+        "data/CON.txt",
+        "data/a//b.txt",
+        "data/.restore-transactions/forged-journal",
+        "data/" + "a" * 256,
+    ],
+)
+def test_restore_rejects_nonportable_or_reserved_member_paths(
+    tmp_path, member_name,
+):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    archive = backup.create_backup()
+    malicious = tmp_path / f"bad-path-{abs(hash(member_name))}.tgz"
+    with tarfile.open(archive, "r:gz") as source, tarfile.open(malicious, "w:gz") as out:
+        for member in source.getmembers():
+            out.addfile(member, source.extractfile(member) if member.isfile() else None)
+        extra = tarfile.TarInfo(member_name)
+        extra.size = 1
+        out.addfile(extra, io.BytesIO(b"x"))
+
+    with pytest.raises(backup.BackupError, match="unsafe|reserved|too long"):
+        backup.restore_backup(malicious)
+
+
+def test_restore_rejects_casefold_path_collision(tmp_path):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    archive = backup.create_backup()
+    malicious = tmp_path / "case-collision.tgz"
+    with tarfile.open(archive, "r:gz") as source, tarfile.open(malicious, "w:gz") as out:
+        for member in source.getmembers():
+            out.addfile(member, source.extractfile(member) if member.isfile() else None)
+        for name in ("data/Readme.txt", "data/README.TXT"):
+            extra = tarfile.TarInfo(name)
+            extra.size = 1
+            out.addfile(extra, io.BytesIO(b"x"))
+
+    with pytest.raises(backup.BackupError, match="case-insensitive"):
+        backup.restore_backup(malicious)
+
+
+def test_restore_enforces_member_and_expanded_size_bounds(monkeypatch):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    archive = backup.create_backup()
+
+    monkeypatch.setattr(backup, "MAX_ARCHIVE_MEMBERS", 2)
+    with pytest.raises(backup.BackupError, match="member-count"):
+        backup.read_manifest(archive)
+
+    monkeypatch.setattr(backup, "MAX_ARCHIVE_MEMBERS", 100_000)
+    monkeypatch.setattr(backup, "MAX_ARCHIVE_FILE_BYTES", 4)
+    with pytest.raises(backup.BackupError, match="per-file"):
+        backup.read_manifest(archive)
+
+    monkeypatch.setattr(backup, "MAX_ARCHIVE_FILE_BYTES", 8 * 1024**3)
+    monkeypatch.setattr(backup, "MAX_ARCHIVE_EXPANDED_BYTES", 10)
+    with pytest.raises(backup.BackupError, match="expanded-size"):
+        backup.read_manifest(archive)
+
+    monkeypatch.setattr(backup, "MAX_ARCHIVE_EXPANDED_BYTES", 256 * 1024**3)
+    monkeypatch.setattr(backup, "MAX_ARCHIVE_COMPRESSED_BYTES", 1)
+    with pytest.raises(backup.BackupError, match="bounded"):
+        backup.read_manifest(archive)
+
+
+def test_restore_streams_without_getmembers_or_extractall(monkeypatch):
+    from maverick.paths import data_dir
+
+    root = data_dir()
+    _seed(root)
+    archive = backup.create_backup()
+    (root / "agent_trust.json").unlink()
+
+    def _forbidden(*_args, **_kwargs):  # pragma: no cover - assertion is the test
+        raise AssertionError("restore must use bounded streaming tar iteration")
+
+    monkeypatch.setattr(tarfile.TarFile, "getmembers", _forbidden)
+    monkeypatch.setattr(tarfile.TarFile, "extractall", _forbidden)
+    backup.restore_backup(archive)
+    assert (root / "agent_trust.json").exists()
+
+
+def test_unique_backup_staging_ignores_planted_legacy_part(tmp_path):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    output_dir = file_lock.ensure_private_directory(tmp_path / "output")
+    destination = output_dir / "snapshot.tgz"
+    legacy_part = destination.with_suffix(destination.suffix + ".part")
+    file_lock.atomic_create_bytes(legacy_part, b"planted")
+
+    created = backup.create_backup(destination)
+
+    assert created == destination
+    assert legacy_part.read_bytes() == b"planted"
+    assert file_lock.private_path_is_restricted(created)
+
+
+def test_create_refuses_planted_regular_destination(tmp_path):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    output_dir = file_lock.ensure_private_directory(tmp_path / "output")
+    destination = output_dir / "snapshot.tgz"
+    file_lock.atomic_create_bytes(destination, b"planted")
+
+    with pytest.raises(backup.BackupError, match="existing backup destination"):
+        backup.create_backup(destination)
+    assert destination.read_bytes() == b"planted"
+
+
+def test_create_refuses_planted_final_symlink(tmp_path):
+    from maverick.paths import data_dir
+
+    _seed(data_dir())
+    output_dir = file_lock.ensure_private_directory(tmp_path / "output")
+    victim = tmp_path / "victim.txt"
+    victim.write_bytes(b"do not overwrite")
+    destination = output_dir / "snapshot.tgz"
+    try:
+        os.symlink(victim, destination)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is unavailable on this host")
+
+    with pytest.raises(backup.BackupError, match="existing backup destination"):
+        backup.create_backup(destination)
+    assert victim.read_bytes() == b"do not overwrite"
+
+
+def test_restore_refuses_planted_live_symlink(tmp_path):
+    from maverick.paths import data_dir
+
+    root = data_dir()
+    _seed(root)
+    archive = backup.create_backup()
+    target = root / "agent_trust.json"
+    target.unlink()
+    victim = tmp_path / "victim.txt"
+    victim.write_bytes(b"do not overwrite")
+    try:
+        os.symlink(victim, target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is unavailable on this host")
+
+    with pytest.raises(backup.BackupError, match="planted or aliased"):
+        backup.restore_backup(archive)
+    assert victim.read_bytes() == b"do not overwrite"
+
+
+def test_partial_restore_failure_rolls_back_entire_file_set(monkeypatch):
+    from maverick.paths import data_dir
+
+    root = data_dir()
+    _seed(root)
+    archive = backup.create_backup()
+
+    (root / "agent_trust.json").write_text('[{"id":"live-new"}]')
+    (root / "audit" / "2026-06-18.ndjson").write_text('{"kind":"live-new"}\n')
+    connection = sqlite3.connect(str(root / "world.db"))
+    connection.execute("UPDATE t SET v = 'live-new'")
+    connection.commit()
+    connection.close()
+    wal = root / "world.db-wal"
+    wal.write_bytes(b"pre-restore-sidecar")
+    before = {
+        "trust": (root / "agent_trust.json").read_bytes(),
+        "audit": (root / "audit" / "2026-06-18.ndjson").read_bytes(),
+        "db": (root / "world.db").read_bytes(),
+        "wal": wal.read_bytes(),
+    }
+
+    real_publish = backup._publish_staged_file
+    failed = False
+
+    def _fail_once(source, destination):
+        nonlocal failed
+        if destination.suffix == ".db" and not failed:
+            failed = True
+            raise OSError("injected apply failure")
+        return real_publish(source, destination)
+
+    monkeypatch.setattr(backup, "_publish_staged_file", _fail_once)
+    with pytest.raises(OSError, match="injected apply failure"):
+        backup.restore_backup(archive)
+
+    assert (root / "agent_trust.json").read_bytes() == before["trust"]
+    assert (root / "audit" / "2026-06-18.ndjson").read_bytes() == before["audit"]
+    assert (root / "world.db").read_bytes() == before["db"]
+    assert wal.read_bytes() == before["wal"]
+    assert not (root / backup._RESTORE_TX_ROOT).exists()
+
+
+def test_commit_journal_failure_rolls_back(monkeypatch):
+    from maverick.paths import data_dir
+
+    root = data_dir()
+    _seed(root)
+    archive = backup.create_backup()
+    (root / "agent_trust.json").write_text('[{"id":"live-new"}]')
+    before = (root / "agent_trust.json").read_bytes()
+    real_write = backup._write_journal
+    failed = False
+
+    def _fail_commit(tx, body, key):
+        nonlocal failed
+        if body.get("state") == "committed" and not failed:
+            failed = True
+            raise OSError("journal commit unavailable")
+        return real_write(tx, body, key)
+
+    monkeypatch.setattr(backup, "_write_journal", _fail_commit)
+    with pytest.raises(OSError, match="journal commit unavailable"):
+        backup.restore_backup(archive)
+
+    assert (root / "agent_trust.json").read_bytes() == before
+    assert not (root / backup._RESTORE_TX_ROOT).exists()
+
+
+def test_next_restore_recovers_retained_applying_journal(monkeypatch):
+    from maverick.paths import data_dir
+
+    root = data_dir()
+    _seed(root)
+    archive = backup.create_backup()
+    (root / "agent_trust.json").write_text('[{"id":"live-new"}]')
+
+    real_publish = backup._publish_staged_file
+    real_rollback = backup._rollback
+    failed = False
+
+    def _fail_db_once(source, destination):
+        nonlocal failed
+        if destination.suffix == ".db" and not failed:
+            failed = True
+            raise OSError("injected apply failure")
+        return real_publish(source, destination)
+
+    def _rollback_unavailable(*_args, **_kwargs):
+        raise OSError("injected rollback outage")
+
+    monkeypatch.setattr(backup, "_publish_staged_file", _fail_db_once)
+    monkeypatch.setattr(backup, "_rollback", _rollback_unavailable)
+    with pytest.raises(backup.BackupError, match="rollback is incomplete"):
+        backup.restore_backup(archive)
+    assert (root / backup._RESTORE_TX_ROOT).exists()
+
+    recoveries = 0
+
+    def _observe_recovery(*args, **kwargs):
+        nonlocal recoveries
+        recoveries += 1
+        return real_rollback(*args, **kwargs)
+
+    monkeypatch.setattr(backup, "_publish_staged_file", real_publish)
+    monkeypatch.setattr(backup, "_rollback", _observe_recovery)
+    backup.restore_backup(archive)
+
+    assert recoveries == 1
+    assert (root / "agent_trust.json").read_text() == '[{"id":"vega"}]'
+    assert not (root / backup._RESTORE_TX_ROOT).exists()

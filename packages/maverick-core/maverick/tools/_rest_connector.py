@@ -26,6 +26,45 @@ from . import Tool, as_bool
 
 _WRITE_OPS = {"post", "put", "patch", "delete"}
 _GQL_MUTATION_TOKEN = re.compile(r"(?<![A-Za-z0-9_])mutation(?![A-Za-z0-9_])")
+_ENV_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
+
+
+class _ConnectorConfigError(RuntimeError):
+    """A configuration failure whose public detail is safe to return.
+
+    Arbitrary ``RuntimeError`` text at the connector boundary may contain an
+    active credential reflected by an HTTP client or provider.  This narrower
+    type carries only validated environment-variable identifiers or one of the
+    fixed policy explanations below, so operators keep actionable remediation
+    without reopening that value-disclosure path.
+    """
+
+    def __init__(self, *env_names: str, reason: str = "missing"):
+        if reason == "scoped_connection":
+            message = (
+                "connector requires a principal-authorized saved connection in "
+                "authenticated enterprise execution; ambient environment "
+                "credentials are not permitted"
+            )
+        elif reason == "ambient_extra_header":
+            message = (
+                "ambient extra-header credentials are unavailable in "
+                "authenticated enterprise execution"
+            )
+        elif (
+            reason == "missing"
+            and env_names
+            and len(env_names) <= 4
+            and all(
+                isinstance(name, str) and _ENV_IDENTIFIER.fullmatch(name)
+                for name in env_names
+            )
+        ):
+            message = f"connector requires {' + '.join(env_names)}"
+        else:
+            # Never reflect an invalid/developer-controlled identifier.
+            message = "connector configuration is incomplete"
+        super().__init__(message)
 
 
 def _capability_egress_denial(url: str, args: dict[str, Any], *, name: str) -> str | None:
@@ -90,11 +129,7 @@ def _credential_config(
         base = (str(conn[0]).strip().rstrip("/") if conn else "") or default_base_url
         tok = str(conn[1]).strip() if conn else ""
         if not base or not tok:
-            raise RuntimeError(
-                f"{name} requires a principal-authorized saved connection in "
-                "authenticated enterprise execution; ambient environment "
-                "credentials are not permitted."
-            )
+            raise _ConnectorConfigError(reason="scoped_connection")
         return base, tok
 
     base = (
@@ -106,9 +141,12 @@ def _credential_config(
         base = base or str(conn[0]).rstrip("/")
         tok = tok or conn[1]
     if not base or not tok:
-        raise RuntimeError(
-            f"{name} requires {base_url_env} + {token_env} "
-            f"(or a saved '{name}' connection).")
+        missing = tuple(
+            env_name
+            for value, env_name in ((base, base_url_env), (tok, token_env))
+            if not value
+        )
+        raise _ConnectorConfigError(*missing)
     return base, tok
 
 
@@ -134,10 +172,7 @@ def _build_auth_headers(
         val = os.environ.get(env_name, "").strip()
         if val:
             if _requires_scoped_connection():
-                raise RuntimeError(
-                    "ambient extra-header credentials are unavailable in "
-                    "authenticated enterprise execution"
-                )
+                raise _ConnectorConfigError(reason="ambient_extra_header")
             h[hdr] = val
     return h
 
@@ -251,6 +286,8 @@ def _rest_execute(
             # be recognized reliably by a pattern-only secret detector.
             return f"ERROR: {op} ({r.status_code}): upstream request failed"
         return json.dumps(data, default=str)[:4000]
+    except _ConnectorConfigError as e:
+        return f"ERROR: {e}"
     except RuntimeError:
         return "ERROR: connector configuration or request failed (RuntimeError)"
     except Exception as e:  # noqa: BLE001
@@ -317,7 +354,7 @@ def make_rest_tool(
         base = (os.environ.get(base_url_env, "").strip().rstrip("/")
                 or (default_base_url or ""))
         if not base:
-            raise RuntimeError(f"{name} requires {base_url_env}.")
+            raise _ConnectorConfigError(base_url_env)
         return base, ""
 
     def _headers(tok: str) -> dict[str, str]:
@@ -591,6 +628,8 @@ def make_graphql_tool(
             if r.status_code >= 400 or (isinstance(data, dict) and data.get("errors")):
                 return f"ERROR: graphql ({r.status_code}): upstream request failed"
             return json.dumps(data.get("data", data), default=str)[:4000]
+        except _ConnectorConfigError as e:
+            return f"ERROR: {e}"
         except RuntimeError:
             return "ERROR: connector configuration or request failed (RuntimeError)"
         except Exception as e:  # noqa: BLE001

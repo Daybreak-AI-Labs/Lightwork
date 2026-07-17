@@ -151,8 +151,12 @@ def _erase_system_data(system_id: str, erase_scope: dict | None) -> dict:  # pra
     world_subject = scope.get("world_subject")
     if world_subject:
         try:
-            from .world_model import open_world
-            keys = open_world().delete_facts_matching(str(world_subject))
+            from .world_model import close_world_if_owned, open_world
+            world = open_world()
+            try:
+                keys = world.delete_facts_matching(str(world_subject))
+            finally:
+                close_world_if_owned(world)
             details["world_facts_deleted"] = len(keys)
         except Exception as e:
             log.warning("retire: world erase for %r failed (%s)", system_id, e)

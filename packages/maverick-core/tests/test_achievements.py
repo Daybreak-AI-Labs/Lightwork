@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from maverick.achievements import CATALOG, evaluate, render, unlocked
+from maverick.file_lock import private_path_is_restricted
 from maverick.world_model import WorldModel
 
 
@@ -65,7 +66,7 @@ def test_store_is_0600(tmp_path):
     w.set_goal_status(gid, "done")
     store = tmp_path / "a.json"
     evaluate(w, path=store)
-    assert oct(store.stat().st_mode)[-3:] == "600"
+    assert private_path_is_restricted(store)
     w.close()
 
 

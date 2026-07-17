@@ -26,8 +26,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -46,10 +44,20 @@ _MACROS_LOCK = threading.Lock()
 def _locked(path: Path | None):
     from contextlib import ExitStack
 
-    from .file_lock import cross_process_lock
+    from .file_lock import (
+        cross_process_lock,
+        ensure_private_directory,
+        prepare_private_directory,
+    )
+
+    target = path if path is not None else macros_path()
+    if path is None:
+        ensure_private_directory(target.parent)
+    else:
+        prepare_private_directory(target.parent)
     stack = ExitStack()
     stack.enter_context(_MACROS_LOCK)
-    stack.enter_context(cross_process_lock(path if path is not None else macros_path()))
+    stack.enter_context(cross_process_lock(target))
     return stack
 
 MAX_STEPS = 16
@@ -68,8 +76,19 @@ def load_macros(path: Path | None = None) -> dict[str, list[str]]:
     """Load the macro store; fail-soft to ``{}`` on a missing/corrupt file."""
     p = path if path is not None else macros_path()
     try:
-        with open(p, encoding="utf-8") as f:
-            data = json.load(f)
+        from .file_lock import (
+            atomic_read_text,
+            ensure_private_directory,
+            ensure_private_file,
+            require_private_directory,
+        )
+
+        if path is None:
+            ensure_private_directory(p.parent)
+        else:
+            require_private_directory(p.parent)
+        ensure_private_file(p)
+        data = json.loads(atomic_read_text(p))
     except FileNotFoundError:
         return {}
     except (OSError, ValueError) as e:
@@ -85,21 +104,19 @@ def load_macros(path: Path | None = None) -> dict[str, list[str]]:
 
 
 def save_macros(macros: dict[str, list[str]], path: Path | None = None) -> None:
-    """Atomic, private write: unique temp file + ``chmod 0600`` + ``os.replace``."""
+    """Atomic, private write through the shared no-follow file helper."""
     p = path if path is not None else macros_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".voice_macros-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(macros, f, indent=2)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, p)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    from .file_lock import (
+        atomic_write_text,
+        ensure_private_directory,
+        prepare_private_directory,
+    )
+
+    if path is None:
+        ensure_private_directory(p.parent)
+    else:
+        prepare_private_directory(p.parent)
+    atomic_write_text(p, json.dumps(macros, indent=2))
 
 
 def record_macro(name: str, steps: list[str], path: Path | None = None) -> dict[str, list[str]]:

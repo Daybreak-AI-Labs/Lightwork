@@ -15,6 +15,7 @@ from maverick import learning_guard
 from maverick import self_improvement as si
 from maverick import self_modify as sm
 from maverick import self_modify_runner as runner
+from maverick.self_modify_eval import EvalSandboxError
 from maverick.self_modify_loop import Proposal
 
 
@@ -326,6 +327,38 @@ class TestRun:
         assert "challenge corpus" in summ.reason
         assert "eval_tests" in summ.reason
 
+    def test_stock_evaluator_reports_evidence_contract_and_closes_backend(
+        self, tmp_path, monkeypatch,
+    ):
+        closed = []
+
+        class BooleanOnlySandbox:
+            host_visible_fs = False
+            allow_network = False
+            allow_root = False
+            pids_limit = 32
+            memory = "256m"
+            bounded_output = True
+            authenticated_test_results = True
+
+            def close(self):
+                closed.append(True)
+
+        monkeypatch.setattr(runner, "_work_root", lambda: str(tmp_path))
+        monkeypatch.setattr(
+            "maverick.sandbox.build_sandbox",
+            lambda **_kwargs: BooleanOnlySandbox(),
+        )
+        with pytest.raises(EvalSandboxError) as caught:
+            runner._default_evaluate(
+                tree=tmp_path,
+                cfg={"eval_tests": ["tests/test_x.py::a", "tests/test_x.py::b"]},
+            )
+        message = str(caught.value)
+        assert "exec_authenticated_tests" in message
+        assert "controller-owned runner/sidecar" in message
+        assert closed == [True]
+
     def test_stock_evaluator_refuses_non_git_source_before_candidate_exec(
         self, tmp_path, monkeypatch,
     ):
@@ -342,10 +375,15 @@ class TestRun:
             memory = "256m"
             bounded_output = True
             authenticated_test_results = True
+            test_evidence_protocol = "maverick.test-evidence.v1"
+            test_evidence_authority = "runner-test-controller-key-1"
 
             def exec(self, *_args, **_kwargs):
                 calls.append("candidate-exec")
                 raise AssertionError("non-Git source must fail before execution")
+
+            def exec_authenticated_tests(self, request, timeout=None):
+                raise AssertionError("non-Git source must fail before tests")
 
             def close(self):
                 pass
@@ -389,6 +427,11 @@ class TestRun:
             memory = "256m"
             bounded_output = True
             authenticated_test_results = True
+            test_evidence_protocol = "maverick.test-evidence.v1"
+            test_evidence_authority = "runner-test-controller-key-1"
+
+            def exec_authenticated_tests(self, request, timeout=None):
+                raise AssertionError("mock corpus owns evaluation")
 
             def close(self):
                 pass

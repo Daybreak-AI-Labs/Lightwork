@@ -47,10 +47,15 @@ __all__ = [
     "cross_process_lock",
     "atomic_read_text",
     "atomic_read_bytes",
+    "atomic_create_text",
+    "atomic_create_bytes",
     "atomic_write_text",
     "atomic_write_text_chunks",
     "atomic_write_bytes",
+    "open_private_append",
     "ensure_private_directory",
+    "prepare_private_directory",
+    "require_private_directory",
     "ensure_private_file",
     "harden_path_permissions",
     "private_path_is_restricted",
@@ -65,6 +70,7 @@ __all__ = [
 # process.
 _LOCAL_LOCK_STRIPES = tuple(threading.RLock() for _ in range(64))
 _THREAD_LOCK_STATE = threading.local()
+_WINDOWS_LOCK_INITIALIZATION_SECONDS = 2.0
 
 
 def _canonical_lock_path(path: Path) -> str:
@@ -132,6 +138,38 @@ def _validate_existing_lock_path(path: Path) -> os.stat_result:
     return info
 
 
+def _initialize_windows_lock_file(path: Path, fd: int) -> None:
+    """Initialize a newly O_EXCL-created Windows byte-range lock file.
+
+    Only the creator may write the byte. If every contender independently
+    checked ``st_size == 0`` and wrote, a creator that had already acquired the
+    mandatory byte-range lock could make a later contender's initialization
+    write fail with ``PermissionError``.
+    """
+    if os.name != "nt":
+        return
+    _validate_open_lock_file(path, fd)
+    written = os.write(fd, b"\0")
+    if written != 1:
+        raise OSError(f"could not initialize lock byte for {path}")
+    os.fsync(fd)
+    os.lseek(fd, 0, os.SEEK_SET)
+
+
+def _wait_for_windows_lock_initialization(path: Path, fd: int) -> None:
+    """Wait boundedly for an O_EXCL creator to publish the lock byte."""
+    if os.name != "nt":
+        return
+    deadline = time.monotonic() + _WINDOWS_LOCK_INITIALIZATION_SECONDS
+    delay = 0.001
+    while os.fstat(fd).st_size < 1:
+        if time.monotonic() >= deadline:
+            raise PermissionError(f"lock file was never initialized: {path}")
+        time.sleep(delay)
+        delay = min(delay * 1.5, 0.025)
+    os.lseek(fd, 0, os.SEEK_SET)
+
+
 def _open_lock_file(path: Path) -> int:
     """Open/create a sidecar without ever creating a link's referent."""
     try:
@@ -149,17 +187,35 @@ def _open_lock_file(path: Path) -> int:
         # No O_CREAT for an existing pathname: if it is swapped to a dangling
         # link after validation, the open fails without creating the referent.
         # Other replacements are caught by descriptor/path identity binding.
-        return os.open(str(path), flags)
+        fd = os.open(str(path), flags)
+        try:
+            _wait_for_windows_lock_initialization(path, fd)
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
     try:
         # O_EXCL makes the lstat/open creation gap safe even on the Windows CRT:
         # a sidecar (including a dangling link) planted after lstat produces
         # EEXIST instead of being followed.
-        return os.open(str(path), flags | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = os.open(str(path), flags | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         # A racer published a sidecar. Re-enter through the existing-object
         # path without O_CREAT, so a dangling link's referent cannot be created.
         _validate_existing_lock_path(path)
-        return os.open(str(path), flags)
+        fd = os.open(str(path), flags)
+        try:
+            _wait_for_windows_lock_initialization(path, fd)
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+    try:
+        _initialize_windows_lock_file(path, fd)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
 
 
 def _local_lock_for(path: Path) -> threading.RLock:
@@ -416,10 +472,90 @@ def ensure_private_directory(path: str | Path) -> Path:
     """Create/tighten a directory to an owner-only security boundary."""
     path = Path(path)
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        raise PermissionError(f"directory could not be inspected: {path}") from exc
+    if _unsafe_lock_alias(path, before) or not stat.S_ISDIR(before.st_mode):
+        raise PermissionError(f"private directory path is an alias: {path}")
     harden_path_permissions(path, 0o700)
+    try:
+        after = path.lstat()
+    except OSError as exc:
+        raise PermissionError(f"directory could not be verified: {path}") from exc
+    if (
+        _unsafe_lock_alias(path, after)
+        or not stat.S_ISDIR(after.st_mode)
+        or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+    ):
+        raise PermissionError(f"private directory identity changed: {path}")
     if not private_path_is_restricted(path, 0o700):
         raise PermissionError(f"directory could not be made private: {path}")
     return path
+
+
+def require_private_directory(path: str | Path) -> Path:
+    """Require an existing owner-only directory without changing its ACL.
+
+    Integrity-sensitive state (for example replay nonces and append-only audit
+    ledgers) cannot trust a file whose parent is writable by another principal:
+    that principal could replace or delete the private file.  Caller-supplied
+    directories are therefore *verified*, never silently claimed by changing
+    their mode or DACL.
+    """
+    path = Path(path)
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise PermissionError(
+            f"parent directory must already be private: {path}"
+        ) from exc
+    if (
+        _unsafe_lock_alias(path, info)
+        or not stat.S_ISDIR(info.st_mode)
+        or not private_path_is_restricted(path, 0o700)
+    ):
+        raise PermissionError(f"parent directory must already be private: {path}")
+    return path
+
+
+def _prepare_parent_directory(path: str | Path) -> Path:
+    """Create a missing private parent, but never mutate an existing parent.
+
+    Generic persistence helpers accept caller-selected paths.  Tightening a
+    pre-existing parent would revoke access to unrelated files and services in
+    that directory.  A parent created by this call is Lightwork-owned and may
+    be hardened; an existing (or concurrently-created) parent is only checked
+    for a safe directory type.
+    """
+    path = Path(path)
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=False)
+    except FileExistsError:
+        try:
+            info = path.lstat()
+        except OSError as exc:
+            raise PermissionError(
+                f"parent directory could not be inspected: {path}"
+            ) from exc
+        if _unsafe_lock_alias(path, info) or not stat.S_ISDIR(info.st_mode):
+            raise PermissionError(
+                f"parent directory path is an alias: {path}"
+            ) from None
+        return path
+    return ensure_private_directory(path)
+
+
+def prepare_private_directory(path: str | Path) -> Path:
+    """Create a missing private directory or verify an existing one.
+
+    Unlike :func:`ensure_private_directory`, this never tightens a directory
+    that was already present.  It is the safe boundary for caller-selected
+    integrity-sensitive storage: a missing dedicated directory may become
+    Lightwork-owned, while a shared existing directory is refused unchanged.
+    """
+    prepared = _prepare_parent_directory(path)
+    return require_private_directory(prepared)
 
 
 def ensure_private_file(path: str | Path, mode: int = 0o600) -> Path:
@@ -434,9 +570,24 @@ def ensure_private_file(path: str | Path, mode: int = 0o600) -> Path:
     """
     path = Path(path)
     info = path.lstat()
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+    if (
+        _unsafe_lock_alias(path, info)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+    ):
         raise PermissionError(f"sensitive state path is not a regular file: {path}")
     harden_path_permissions(path, mode)
+    try:
+        after = path.lstat()
+    except OSError as exc:
+        raise PermissionError(f"file could not be verified: {path}") from exc
+    if (
+        _unsafe_lock_alias(path, after)
+        or not stat.S_ISREG(after.st_mode)
+        or after.st_nlink != 1
+        or (info.st_dev, info.st_ino) != (after.st_dev, after.st_ino)
+    ):
+        raise PermissionError(f"sensitive state file identity changed: {path}")
     if not private_path_is_restricted(path, mode):
         raise PermissionError(f"file could not be made private: {path}")
     return path
@@ -445,8 +596,14 @@ def ensure_private_file(path: str | Path, mode: int = 0o600) -> Path:
 def private_path_is_restricted(path: str | Path, mode: int = 0o600) -> bool:
     """Verify the effective owner-only posture used by security tests/health."""
     path = Path(path)
+    try:
+        info = path.lstat()
+    except OSError:
+        return False
+    if _unsafe_lock_alias(path, info):
+        return False
     if os.name != "nt":
-        return (path.stat().st_mode & 0o777) == (mode & 0o777)
+        return (info.st_mode & 0o777) == (mode & 0o777)
     try:
         sddl, owner_sid = _windows_private_sddl(path)
     except (OSError, ValueError):
@@ -502,7 +659,12 @@ def _replace_with_retry(source: str | Path, target: str | Path) -> None:
         delay = min(delay * 1.5, 0.05)
 
 
-def _windows_replace_open_fd(fd: int, target: str | Path) -> None:
+def _windows_replace_open_fd(
+    fd: int,
+    target: str | Path,
+    *,
+    replace: bool = True,
+) -> None:
     """Rename the still-open source object, binding publication to its handle.
 
     A path-based rename after closing the temp lets a writer on the parent
@@ -530,7 +692,7 @@ def _windows_replace_open_fd(fd: int, target: str | Path) -> None:
         ]
 
     info = FILE_RENAME_INFO()
-    info.ReplaceIfExists = True
+    info.ReplaceIfExists = replace
     info.RootDirectory = None
     info.FileNameLength = len(encoded_destination)
     info.FileName = destination
@@ -552,6 +714,12 @@ def _windows_replace_open_fd(fd: int, target: str | Path) -> None:
     delay = 0.002
     while not set_info(handle, 3, ctypes.byref(info), ctypes.sizeof(info)):
         error = ctypes.get_last_error()
+        if (
+            not replace
+            and error in {5, 32, 33, 80, 183}
+            and os.path.lexists(destination)
+        ):
+            raise FileExistsError(error, "destination already exists", destination)
         if error not in {5, 32, 33} or time.monotonic() >= deadline:
             raise ctypes.WinError(error)
         time.sleep(delay)
@@ -608,6 +776,148 @@ def atomic_read_bytes(
     )
 
 
+def _publish_new_private_temp(fd: int, tmp: str, path: Path) -> None:
+    """Publish the open private temp only when ``path`` is still absent."""
+    if os.name == "nt":
+        _windows_replace_open_fd(fd, path, replace=False)
+        return
+    os.link(tmp, path, follow_symlinks=False)
+    os.unlink(tmp)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    parent_fd = os.open(str(path.parent), flags)
+    try:
+        os.fsync(parent_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def atomic_create_text(
+    path: str | Path,
+    text: str,
+    *,
+    mode: int = 0o600,
+    encoding: str = "utf-8",
+) -> None:
+    """Create a private text file atomically, refusing an existing pathname.
+
+    The unpublished temp receives its POSIX mode or protected Windows DACL in
+    the creation syscall. Publication is exclusive, so a planted regular file,
+    hard link, symlink, or reparse point is never opened or overwritten.
+    """
+    path = Path(path)
+    _prepare_parent_directory(path.parent)
+    fd, tmp = _secure_mkstemp(
+        path.parent,
+        prefix=f".{path.name}-",
+        suffix=".tmp",
+        mode=mode,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            fd = -1
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+            _publish_new_private_temp(f.fileno(), tmp, path)
+    except BaseException:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def atomic_create_bytes(
+    path: str | Path,
+    data: bytes,
+    *,
+    mode: int = 0o600,
+) -> None:
+    """Byte-for-byte sibling of :func:`atomic_create_text`."""
+    path = Path(path)
+    _prepare_parent_directory(path.parent)
+    fd, tmp = _secure_mkstemp(
+        path.parent,
+        prefix=f".{path.name}-",
+        suffix=".tmp",
+        mode=mode,
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            fd = -1
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+            _publish_new_private_temp(f.fileno(), tmp, path)
+    except BaseException:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def open_private_append(
+    path: str | Path,
+    *,
+    mode: int = 0o600,
+    require_private_parent: bool = False,
+) -> int:
+    """Open a private single-link regular file for append without following.
+
+    A missing file is first published with :func:`atomic_create_bytes`, which
+    prevents the inherited-DACL exposure created by ``O_CREAT`` on Windows.
+    Existing state is tightened before opening, and the returned descriptor is
+    identity-bound to the inspected pathname before any caller can append.
+    """
+    path = Path(path)
+    if require_private_parent:
+        prepare_private_directory(path.parent)
+    else:
+        _prepare_parent_directory(path.parent)
+    try:
+        atomic_create_bytes(path, b"", mode=mode)
+    except FileExistsError:
+        pass
+    ensure_private_file(path, mode)
+    flags = os.O_WRONLY | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_BINARY", 0)
+    fd = os.open(str(path), flags)
+    try:
+        visible = path.lstat()
+        opened = os.fstat(fd)
+        if (
+            _unsafe_lock_alias(path, visible)
+            or _unsafe_lock_alias(path, opened)
+            or not stat.S_ISREG(visible.st_mode)
+            or not stat.S_ISREG(opened.st_mode)
+            or visible.st_nlink != 1
+            or opened.st_nlink != 1
+            or (visible.st_dev, visible.st_ino) != (opened.st_dev, opened.st_ino)
+        ):
+            raise PermissionError(
+                f"append path is not a stable single-link regular file: {path}"
+            )
+        if os.name != "nt":
+            os.fchmod(fd, mode)
+        if not private_path_is_restricted(path, mode):
+            raise PermissionError(f"append file could not be made private: {path}")
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 @contextmanager
 def cross_process_lock(target: str | Path, *, strict: bool = False):
     """Advisory exclusive lock serializing a read-modify-write of ``target``.
@@ -643,7 +953,7 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
                 held[canonical] = (count, process_safe)
             return
 
-        target.parent.mkdir(parents=True, exist_ok=True)
+        _prepare_parent_directory(target.parent)
         # Failure to create/open the coordination primitive must not silently
         # disable serialization for security-sensitive read-modify-write state.
         fd = _open_lock_file(lock_path)
@@ -695,8 +1005,6 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
             elif os.name == "nt":
                 import msvcrt
 
-                if os.fstat(fd).st_size == 0:
-                    os.write(fd, b"\0")
                 os.lseek(fd, 0, os.SEEK_SET)
                 msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
                 backend = "msvcrt"
@@ -739,7 +1047,7 @@ def atomic_write_text(path: str | Path, text: str, *, mode: int = 0o600,
     up on any failure so a crashed write leaves no stray files.
     """
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _prepare_parent_directory(path.parent)
     fd, tmp = _secure_mkstemp(
         path.parent,
         prefix=f".{path.name}-",
@@ -785,7 +1093,7 @@ def atomic_write_text_chunks(
     of chunks written.
     """
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _prepare_parent_directory(path.parent)
     fd, tmp = _secure_mkstemp(
         path.parent,
         prefix=f".{path.name}-",
@@ -824,7 +1132,7 @@ def atomic_write_bytes(path: str | Path, data: bytes, *, mode: int = 0o600) -> N
     (e.g. an at-rest-sealed blob): unique temp in the same directory, then
     ``os.replace`` into position; the temp is cleaned up on any failure."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _prepare_parent_directory(path.parent)
     fd, tmp = _secure_mkstemp(
         path.parent,
         prefix=f".{path.name}-",

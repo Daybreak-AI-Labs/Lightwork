@@ -5,8 +5,8 @@
 #   fly secrets set ANTHROPIC_API_KEY=... MAVERICK_DASHBOARD_TOKEN=...
 #   fly deploy
 #
-# The dashboard/control plane is single-writer on SQLite; keep one machine
-# (or move [world_model] to Postgres before scaling out).
+# Keep one dashboard/control-plane machine, including with Postgres: flow, A2A,
+# audit, learning, and policy stores are not all shared. Scale remote workers.
 app = "maverick"
 primary_region = "iad"
 

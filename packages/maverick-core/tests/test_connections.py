@@ -117,6 +117,31 @@ def test_authenticated_enterprise_principal_cannot_borrow_env_credentials(
             _rest_connector._env_config("acme", "ACME_BASE_URL", "ACME_TOKEN")
 
 
+def test_scoped_connector_error_is_actionable_without_ambient_details(monkeypatch):
+    from maverick.tools._rest_connector import make_rest_tool
+
+    monkeypatch.setattr("maverick.enterprise.enterprise_enabled", lambda: True)
+    operator_base = "https://operator-private.acme"
+    operator_token = "operator-low-entropy-secret"  # pragma: allowlist secret
+    monkeypatch.setenv("ACME_BASE_URL", operator_base)
+    monkeypatch.setenv("ACME_TOKEN", operator_token)
+    connections.set_connection(
+        "acme", connector="acme", base_url="https://alice.acme",
+        token="alice-secret", owner="user:alice",
+    )
+    tool = make_rest_tool(
+        name="acme", base_url_env="ACME_BASE_URL", token_env="ACME_TOKEN",
+        description="Acme test connector",
+    )
+
+    with connections.bind_principal("user:mallory"):
+        out = tool.fn({"op": "get", "path": "/things"})
+
+    assert "principal-authorized saved connection" in out
+    assert "ACME_BASE_URL" not in out and "ACME_TOKEN" not in out
+    assert operator_base not in out and operator_token not in out
+
+
 def test_authenticated_enterprise_uses_its_saved_grant_not_env(monkeypatch):
     from maverick.tools import _rest_connector
 
