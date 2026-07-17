@@ -1147,6 +1147,15 @@ async def close_dsar_request(request: Request, request_id: str) -> dict:
     return record
 
 
+@router.get("/privacy/report")
+async def privacy_program_report(request: Request) -> dict:
+    """The board-pack aggregate over every register -- computed from the
+    records themselves, nothing estimated."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    return await run_in_threadpool(ops.program_report)
+
+
 @router.get("/privacy/incidents")
 async def list_privacy_incidents(request: Request) -> dict:
     require_permission(request, "operate")

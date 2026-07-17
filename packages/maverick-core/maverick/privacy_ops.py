@@ -885,10 +885,115 @@ def list_incidents() -> list[dict]:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Program report -- the board-pack aggregate over every register
+# --------------------------------------------------------------------------- #
+
+def program_report(assessment_types: set | None = None) -> dict:
+    """One deterministic aggregate over the whole privacy program: the
+    assessment worklist posture, DSAR SLA performance, the incident log,
+    DPA coverage, AI Act tiers, and the Art. 30 register. Everything is
+    computed from the records themselves -- nothing estimated."""
+    from collections import Counter
+
+    from .assessment import list_saved
+
+    types = assessment_types or {"pia", "aira", "vendor_risk", "hipaa",
+                                 "soc2", "pci_dss"}
+    rows = [s for s in list_saved() if s.get("type") in types]
+    status = Counter(r["status"] for r in rows)
+    residual = Counter(r["residual_risk"] for r in rows)
+    now = time.time()
+    open_rows = [r for r in rows
+                 if r["status"] in ("pending_review", "needs_more")]
+    assessments = {
+        "total": len(rows),
+        "by_status": dict(status),
+        "by_residual": dict(residual),
+        "review_due": sum(1 for r in rows if r.get("review_due")),
+        "open": len(open_rows),
+        "oldest_open_days": (max(int((now - float(r.get("created_at") or now))
+                                     // 86400) for r in open_rows)
+                             if open_rows else 0),
+    }
+
+    dsars = list_dsars()
+    closed_like = [d for d in dsars if d["status"] in ("fulfilled", "closed",
+                                                       "awaiting_erasure")]
+    on_time = sum(1 for d in closed_like
+                  if float(d.get("fulfilled_at")
+                           or d.get("closed_at")
+                           or d.get("created_at") or 0)
+                  <= float(d.get("due_at") or 0))
+    dsar = {
+        "total": len(dsars),
+        "open": sum(1 for d in dsars if d["status"] == "open"),
+        "overdue": sum(1 for d in dsars if d.get("overdue")),
+        "by_kind": dict(Counter(d["kind"] for d in dsars)),
+        "handled": len(closed_like),
+        "handled_on_time": on_time,
+    }
+
+    incidents = list_incidents()
+    incident = {
+        "total": len(incidents),
+        "open": sum(1 for i in incidents
+                    if i["status"] in ("open", "notify")),
+        "past_72h_undecided": sum(1 for i in incidents
+                                  if i.get("clock_breached")),
+        "notified": sum(1 for i in incidents
+                        if (i.get("notification") or {}).get("notifiable")),
+        "documented_no_notify": sum(
+            1 for i in incidents
+            if i.get("notification") is not None
+            and not i["notification"].get("notifiable")),
+    }
+
+    dpas = list_dpa_reviews()
+    clause_gaps: Counter = Counter()
+    for summary in dpas:
+        full = get_dpa_review(summary["id"]) or {}
+        for c in full.get("clauses", []):
+            if c.get("status") != "present":
+                clause_gaps[c.get("requirement", c.get("key", "?"))] += 1
+    dpa = {
+        "total": len(dpas),
+        "avg_clauses_present": (round(sum(d.get("clauses_present", 0)
+                                          for d in dpas) / len(dpas), 1)
+                                if dpas else 0.0),
+        "high_residual": sum(1 for d in dpas
+                             if d.get("residual_risk") == "high"),
+        "top_gaps": [{"requirement": k, "reviews_missing_it": v}
+                     for k, v in clause_gaps.most_common(5)],
+    }
+
+    ai = {"total": 0, "by_tier": {}}
+    systems = list_ai_systems()
+    ai["total"] = len(systems)
+    ai["by_tier"] = dict(Counter(s.get("tier", "?") for s in systems))
+
+    ropa_rows = list_ropa()
+    ropa = {
+        "total": len(ropa_rows),
+        "with_transfers": sum(
+            1 for r in ropa_rows
+            if (r.get("transfers") or "").strip().lower()
+            not in ("", "none", "none declared", "n/a")),
+        "from_assessments": sum(1 for r in ropa_rows
+                                if str(r.get("source", "")).startswith(
+                                    "assessment:")),
+        "from_onetrust": sum(1 for r in ropa_rows
+                             if r.get("source") == "onetrust"),
+    }
+
+    return {"generated_at": now, "assessments": assessments, "dsar": dsar,
+            "incidents": incident, "dpa": dpa, "ai": ai, "ropa": ropa}
+
+
 __all__ = [
     "AI_ACT_NOTE", "BREACH_NOTIFY_HOURS", "DPA_CHECKLIST", "DSAR_DUE_DAYS",
     "DSAR_KINDS", "close_incident", "decide_incident_notification",
-    "list_incidents", "open_incident",
+    "list_incidents", "open_incident", "program_report",
     "ROPA_FIELDS", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
     "detect_dsar", "fulfill_dsar", "get_ai_system", "get_dpa_review",
