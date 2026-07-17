@@ -652,6 +652,7 @@ _DPA = _RecordStore("dpa_reviews", "DPA")
 _AI = _RecordStore("ai_registry", "AI")
 _ROPA = _RecordStore("ropa", "ROPA")
 _DSAR = _RecordStore("dsar_requests", "DSAR")
+_INCIDENT = _RecordStore("privacy_incidents", "INC")
 
 
 def _actor_label(actor: str = "") -> str:
@@ -787,6 +788,7 @@ def retry_pending_audits(*, limit: int = 100) -> int:
         ("ai_system", _AI),
         ("ropa", _ROPA),
         ("dsar", _DSAR),
+        ("incident", _INCIDENT),
     )
     with _AUDIT_RETRY_STATE_LOCK:
         start = _AUDIT_RETRY_STORE_OFFSET % len(stores)
@@ -2269,15 +2271,24 @@ def _write_dsar_export_artifact(path: Path, intent: dict, bundle: dict) -> str:
     return digest
 
 
-def open_dsar(subject_id: str, kind: str, *, channel: str = "",
-              opened_by: str = "") -> dict:
+def open_dsar(
+    subject_id: str,
+    kind: str,
+    *,
+    channel: str = "",
+    opened_by: str = "",
+    _intake: dict | None = None,
+) -> dict:
     kind = (kind or "").strip().lower()
     if kind not in DSAR_KINDS:
         raise ValueError(f"kind must be one of {DSAR_KINDS}")
     now = time.time()
+    subject = (subject_id or "").strip()[:200]
+    if not subject:
+        raise ValueError("subject_id is required")
     record = {
         "id": _DSAR.new_id(),
-        "subject_id": (subject_id or "").strip()[:200],
+        "subject_id": subject,
         "channel": (channel or "").strip()[:64],
         "kind": kind,
         "opened_by": _actor_label(opened_by),
@@ -2286,6 +2297,20 @@ def open_dsar(subject_id: str, kind: str, *, channel: str = "",
         "status": "open",
         "fulfillment": None,
     }
+    if _intake is not None:
+        signals = _intake.get("signals") if isinstance(_intake, dict) else None
+        excerpt = _intake.get("excerpt") if isinstance(_intake, dict) else None
+        if (
+            not isinstance(signals, list)
+            or not signals
+            or not all(isinstance(signal, str) for signal in signals)
+            or not isinstance(excerpt, str)
+        ):
+            raise ValueError("DSAR intake provenance is invalid")
+        record["intake"] = {
+            "signals": [signal[:200] for signal in signals[:16]],
+            "excerpt": excerpt[:300],
+        }
     _queue_audit(record, "open", opened_by)
     saved = _DSAR.save(record, expected_revision=0)
     return _audit_mutation(_DSAR, "dsar", saved)
@@ -2351,13 +2376,16 @@ def open_dsar_from_message(text: str, *, channel: str = "",
     hit = detect_dsar(text, sender=sender)
     if hit is None or not hit["subject_id"]:
         return None
-    record = open_dsar(hit["subject_id"], hit["kind"], channel=channel,
-                       opened_by=opened_by)
-
-    def _prov(r: dict) -> None:
-        r["intake"] = {"signals": hit["signals"],
-                       "excerpt": (text or "").strip()[:300]}
-    return _DSAR.update(record["id"], _prov)
+    return open_dsar(
+        hit["subject_id"],
+        hit["kind"],
+        channel=channel,
+        opened_by=opened_by,
+        _intake={
+            "signals": hit["signals"],
+            "excerpt": (text or "").strip()[:300],
+        },
+    )
 
 
 def list_dsars() -> list[dict]:
@@ -2499,8 +2527,6 @@ def close_dsar(request_id: str, *, closed_by: str = "") -> dict | None:
 # Privacy incident / breach register -- Art. 33/34
 # --------------------------------------------------------------------------- #
 
-_INCIDENT = _RecordStore("privacy_incidents", "INC")
-
 INCIDENT_SEVERITIES = ("low", "medium", "high")
 BREACH_NOTIFY_HOURS = 72  # Art. 33(1): without undue delay, within 72h
 
@@ -2523,7 +2549,7 @@ def open_incident(title: str, *, severity: str = "medium",
         "categories": (categories or "").strip()[:500],
         "affected_estimate": (affected_estimate or "").strip()[:100],
         "severity": severity,
-        "reported_by": reported_by,
+        "reported_by": _actor_label(reported_by),
         "created_at": now,
         "notify_deadline_at": now + BREACH_NOTIFY_HOURS * 3600,
         "status": "open",
@@ -2531,7 +2557,9 @@ def open_incident(title: str, *, severity: str = "medium",
     }
     if not record["title"]:
         raise ValueError("title is required")
-    return _INCIDENT.save(record)
+    _queue_audit(record, "open", reported_by)
+    saved = _INCIDENT.save(record, expected_revision=0)
+    return _audit_mutation(_INCIDENT, "incident", saved)
 
 
 def decide_incident_notification(incident_id: str, notifiable: bool, *,
@@ -2541,27 +2569,58 @@ def decide_incident_notification(incident_id: str, notifiable: bool, *,
     marks the record ``notify`` (the operator runs the actual notification
     through their authority's channel); ``False`` documents WHY not --
     Art. 33(5) requires documenting non-notified breaches too."""
+    if not isinstance(notifiable, bool):
+        raise ValueError("notifiable must be a boolean")
+    decision_rationale = (rationale or "").strip()[:2000]
+    if not decision_rationale:
+        raise ValueError("notification rationale is required")
+    changed = False
+
     def _mut(r: dict) -> None:
+        nonlocal changed
+        if r.get("status") == "closed":
+            raise RecordConflict("closed privacy incident cannot be changed")
         r["notification"] = {
-            "notifiable": bool(notifiable),
-            "rationale": (rationale or "").strip()[:2000],
-            "decided_by": decided_by,
+            "notifiable": notifiable,
+            "rationale": decision_rationale,
+            "decided_by": _actor_label(decided_by),
             "decided_at": time.time(),
         }
-        if r.get("status") == "open":
-            r["status"] = "notify" if notifiable else "documented"
-    return _INCIDENT.update(incident_id, _mut)
+        r["status"] = "notify" if notifiable else "documented"
+        _queue_audit(r, "notification_decision", decided_by)
+        changed = True
+
+    saved = _INCIDENT.update(incident_id, _mut)
+    if saved is not None and (
+        changed or isinstance(saved.get("_audit_pending"), (dict, list))
+    ):
+        saved = _audit_mutation(_INCIDENT, "incident", saved)
+    return saved
 
 
 def close_incident(incident_id: str, *, closed_by: str = "") -> dict | None:
+    changed = False
+
     def _mut(r: dict) -> None:
+        nonlocal changed
+        if r.get("status") == "closed":
+            return
         r["status"] = "closed"
         r["closed_at"] = time.time()
-        r["closed_by"] = closed_by
-    return _INCIDENT.update(incident_id, _mut)
+        r["closed_by"] = _actor_label(closed_by)
+        _queue_audit(r, "close", closed_by)
+        changed = True
+
+    saved = _INCIDENT.update(incident_id, _mut)
+    if saved is not None and (
+        changed or isinstance(saved.get("_audit_pending"), (dict, list))
+    ):
+        saved = _audit_mutation(_INCIDENT, "incident", saved)
+    return saved
 
 
 def list_incidents() -> list[dict]:
+    retry_pending_audits()
     now = time.time()
     out = []
     for r in _INCIDENT.list():

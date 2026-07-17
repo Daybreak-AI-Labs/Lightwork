@@ -460,11 +460,50 @@ def test_privacy_mutations_bind_actor_and_signed_audit(monkeypatch):
     assert closed.status_code == 200
     assert closed.json()["closed_by"] == "user:alice"
 
+    detected = client.post(
+        "/api/v1/privacy/dsar/from-message",
+        headers=_as("alice"),
+        json={
+            "text": "Article 17: delete my data -- subject@example.com",
+            "channel": "email",
+        },
+    )
+    assert detected.status_code == 201
+    assert detected.json()["opened_by"] == "user:alice"
+
+    incident = client.post(
+        "/api/v1/privacy/incidents",
+        headers=_as("alice"),
+        json={"title": "Misdirected export", "severity": "high"},
+    )
+    assert incident.status_code == 201
+    incident_id = incident.json()["id"]
+    assert incident.json()["reported_by"] == "user:alice"
+    decision = client.post(
+        f"/api/v1/privacy/incidents/{incident_id}/notification",
+        headers=_as("alice"),
+        json={"notifiable": True, "rationale": "personal data disclosed"},
+    )
+    assert decision.status_code == 200
+    assert decision.json()["notification"]["decided_by"] == "user:alice"
+    incident_closed = client.post(
+        f"/api/v1/privacy/incidents/{incident_id}/close",
+        headers=_as("alice"),
+    )
+    assert incident_closed.status_code == 200
+    assert incident_closed.json()["closed_by"] == "user:alice"
+    immutable = client.post(
+        f"/api/v1/privacy/incidents/{incident_id}/notification",
+        headers=_as("alice"),
+        json={"notifiable": False, "rationale": "too late to revise"},
+    )
+    assert immutable.status_code == 409
+
     events = [
         event for event in default_audit_log().tail(20)
         if event.get("kind") == EventKind.PRIVACY_RECORD_CHANGED
     ]
-    assert len(events) >= 5
+    assert len(events) >= 9
     assert all(event["actor"] == "user:alice" for event in events)
     assert all(event.get("event_id") for event in events)
     serialized = str(events)

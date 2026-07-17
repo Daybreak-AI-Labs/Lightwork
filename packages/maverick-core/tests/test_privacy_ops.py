@@ -1057,11 +1057,15 @@ class TestIncidentRegister:
 
     def test_notification_decision_documents_both_ways(self):
         r = privacy_ops.open_incident("Lost badge with cached emails")
+        assert r["revision"] == 1
+        assert "_audit_pending" not in r
         doc = privacy_ops.decide_incident_notification(
             r["id"], False, rationale="device encrypted, remotely wiped; "
             "no risk to rights and freedoms", decided_by="dpo")
         assert doc["status"] == "documented"
+        assert doc["revision"] == 2
         assert doc["notification"]["notifiable"] is False
+        assert doc["notification"]["decided_by"] == "dpo"
         assert "encrypted" in doc["notification"]["rationale"]
         r2 = privacy_ops.open_incident("Processor breach at Initech",
                                        severity="high")
@@ -1071,7 +1075,15 @@ class TestIncidentRegister:
         assert notify["status"] == "notify"
         closed = privacy_ops.close_incident(r2["id"], closed_by="dpo")
         assert closed["status"] == "closed"
-        assert privacy_ops.decide_incident_notification("nope", True) is None
+        assert closed["closed_by"] == "dpo"
+        with pytest.raises(privacy_ops.RecordConflict, match="closed"):
+            privacy_ops.decide_incident_notification(
+                r2["id"], False, rationale="changed after closure",
+                decided_by="dpo",
+            )
+        assert privacy_ops.decide_incident_notification(
+            "nope", True, rationale="not found",
+        ) is None
 
     def test_clock_breach_flags_only_undecided_open_incidents(self, monkeypatch):
         import time as _t

@@ -1304,7 +1304,7 @@ async def open_dsar_from_message(request: Request,
     ops = _privacy_ops_or_403()
     record = await run_in_threadpool(
         ops.open_dsar_from_message, body.text, channel=body.channel,
-        sender=body.sender)
+        sender=body.sender, opened_by=_request_actor(request))
     if record is None:
         raise HTTPException(
             status_code=422,
@@ -1370,13 +1370,8 @@ async def open_privacy_incident(request: Request, body: IncidentIn) -> dict:
     record = await run_in_threadpool(
         ops.open_incident, body.title, severity=body.severity,
         description=body.description, categories=body.categories,
-        affected_estimate=body.affected_estimate)
-    try:
-        from maverick.audit import record as audit_record
-        audit_record("PRIVACY_INCIDENT_OPENED", agent="operator",
-                     incident=record["id"], severity=body.severity)
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
+        affected_estimate=body.affected_estimate,
+        reported_by=_request_actor(request))
     return record
 
 
@@ -1387,17 +1382,18 @@ async def decide_privacy_incident(request: Request, incident_id: str,
     Audited either way."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(
-        ops.decide_incident_notification, incident_id[:64], body.notifiable,
-        rationale=body.rationale)
+    try:
+        record = await run_in_threadpool(
+            ops.decide_incident_notification,
+            incident_id[:64],
+            body.notifiable,
+            rationale=body.rationale,
+            decided_by=_request_actor(request),
+        )
+    except ops.RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="no such incident")
-    try:
-        from maverick.audit import record as audit_record
-        audit_record("PRIVACY_INCIDENT_DECISION", agent="operator",
-                     incident=incident_id[:64], notifiable=body.notifiable)
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
     return record
 
 
@@ -1406,7 +1402,11 @@ async def close_privacy_incident(request: Request,
                                  incident_id: str) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(ops.close_incident, incident_id[:64])
+    record = await run_in_threadpool(
+        ops.close_incident,
+        incident_id[:64],
+        closed_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(status_code=404, detail="no such incident")
     return record
