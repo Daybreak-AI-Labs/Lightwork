@@ -185,6 +185,12 @@
           ? (days ? 'Approved — next review in ' + days + ' days.' : 'Approved.')
           : 'Rejected.';
         render(rec);
+        // Let the host page react — on /approvals the linked approval-gate
+        // row decides itself from this (the reviewer shouldn't have to click
+        // twice for one decision).
+        document.dispatchEvent(new CustomEvent('mv-assessment-decided', {
+          detail: { id: currentId, decision: decision }
+        }));
       } catch (e) {
         statusEl.textContent = 'Could not record decision: ' + e.message;
       } finally {

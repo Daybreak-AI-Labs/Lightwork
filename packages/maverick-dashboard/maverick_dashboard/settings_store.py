@@ -57,6 +57,34 @@ CAPABILITY_DEFAULTS = {
 }
 FEATURE_DEFAULTS = {"skills": True, "world_model": True, "streaming": True}
 
+# What each toggle actually turns on -- shown next to the checkbox so an
+# admin knows what they are selecting before they select it.
+CAPABILITY_INFO = {
+    "computer_use": "Agents drive a real desktop inside the sandbox — click, "
+                    "type, read the screen. The highest-impact capability; "
+                    "enable only for workflows that genuinely need a GUI.",
+    "browser": "Headless web browsing for agents: open pages, follow links, "
+               "read rendered content. Governed by the egress policy.",
+    "web_search": "Live web search for research tasks; results flow into the "
+                  "agent's context with their sources.",
+    "mobile_tools": "Drive Android/iOS devices through the mobile toolchain "
+                    "(taps, swipes, screen reads) for app testing and flows.",
+    "ros": "Robot Operating System bridge — agents publish/subscribe to ROS "
+           "topics. Only for robotics deployments.",
+    "code_exec": "Agents run the code they write, inside the governed "
+                 "sandbox (every shell call goes through sandbox.exec with "
+                 "its allowlists and audit).",
+}
+FEATURE_INFO = {
+    "skills": "Reusable learned procedures agents can load mid-task — the "
+              "skill library built by the learning loop.",
+    "world_model": "The shared operating record: goals, episodes, approvals, "
+                   "and memory live in one governed store. Turning this off "
+                   "disables cross-run state.",
+    "streaming": "Live token streaming to the dashboard chat and goal "
+                 "timelines (off = responses arrive only when complete).",
+}
+
 # The self-learning loop's subsystems -- ONE source of truth shared by the
 # one-click toggle (set_learning writes each (section, config_key) to the
 # overlay, which load_config deep-merges so every subsystem's enabled() sees it)
@@ -715,11 +743,13 @@ def state() -> dict:
     ov_caps = overlay.get("capabilities") or {}
     ov_feats = overlay.get("features") or {}
     capabilities = [
-        {"name": k, "enabled": bool(caps_eff.get(k, v)), "overridden": k in ov_caps}
+        {"name": k, "enabled": bool(caps_eff.get(k, v)),
+         "overridden": k in ov_caps, "info": CAPABILITY_INFO.get(k, "")}
         for k, v in CAPABILITY_DEFAULTS.items()
     ]
     features = [
-        {"name": k, "enabled": bool(feats_eff.get(k, v)), "overridden": k in ov_feats}
+        {"name": k, "enabled": bool(feats_eff.get(k, v)),
+         "overridden": k in ov_feats, "info": FEATURE_INFO.get(k, "")}
         for k, v in FEATURE_DEFAULTS.items()
     ]
     return {"providers": providers, "capabilities": capabilities, "features": features}
@@ -760,7 +790,8 @@ def channels_state() -> list[dict]:
 
 
 __all__ = [
-    "PROVIDERS", "CAPABILITY_DEFAULTS", "FEATURE_DEFAULTS", "CHANNELS",
+    "PROVIDERS", "CAPABILITY_DEFAULTS", "CAPABILITY_INFO",
+    "FEATURE_DEFAULTS", "FEATURE_INFO", "CHANNELS",
     "LEARNING_SUBSYSTEMS", "load_overlay", "set_provider", "clear_provider",
     "set_dgm", "set_ekko",
     "set_toggle", "set_learning", "set_flow_autonomy", "state", "set_channel", "clear_channel",
