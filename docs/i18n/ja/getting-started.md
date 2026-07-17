@@ -1,4 +1,4 @@
-<!-- これは docs/getting-started.md（翻訳元コミット: 00d6097）のコミュニティによって維持されている翻訳です。英語版が正式版です。 -->
+<!-- これは docs/getting-started.md（翻訳元コミット: a7b9cee）のコミュニティによって維持されている翻訳です。英語版が正式版です。 -->
 
 # はじめに
 
@@ -118,6 +118,24 @@ maverick onboard
 ```
 
 承認すると、`onboard` はパックをプロビジョニングするようになりました。ワークフローに必要なカタログスキルをインストールし、ビルトインではない宣言済みツールを合成するので、承認されたばかりのスペシャリストは最初の実行からその仕事をこなす準備が整っています。（このステップは `[self_learning]` / `provision_packs` の設定を尊重し、パックの制限された範囲を広げることは決してありません。）
+
+## 音声入力(内蔵・オフライン)
+
+ダッシュボードのマイクボタンと `transcribe_audio` ツールは、ローカルの
+Whisper モデルによりプロバイダーの API キーなしで動作します:
+
+```bash
+maverick voice setup    # チェックサム検証済みモデルを取得(約148 MB)
+maverick voice status   # 利用可能な音声認識バックエンドを確認
+maverick voice transcribe clip.wav   # パイプラインの動作確認
+```
+
+`whisper.cpp` バイナリをインストールすれば(`brew install whisper-cpp`、
+または github.com/ggml-org/whisper.cpp のリリース)、Lightwork が PATH 上で
+自動検出します。`[voice] stt_backend = "local"` を設定すると、OpenAI/Groq の
+キーがあっても音声はマシンの外に出ません。`[voice] auto_fetch_model = true`
+(ウィザードのオプトイン)を有効にすると、事前ではなく初回利用時にモデルを
+取得します。
 
 ## モデルやプロバイダーの変更
 

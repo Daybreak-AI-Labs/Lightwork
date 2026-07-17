@@ -1,4 +1,4 @@
-<!-- docs/getting-started.md(원본 커밋: 00d6097)의 커뮤니티가 관리하는 번역본입니다 — 영어 버전이 공식 버전입니다. -->
+<!-- docs/getting-started.md(원본 커밋: a7b9cee)의 커뮤니티가 관리하는 번역본입니다 — 영어 버전이 공식 버전입니다. -->
 
 # 시작하기
 
@@ -127,6 +127,23 @@ maverick onboard
 설치하고, 기본 제공되지 않는 선언된 도구를 합성하므로, 갓 승인된 전문 에이전트는 첫
 실행부터 자기 일을 할 수 있도록 갖춰집니다. (이 단계는 `[self_learning]` /
 `provision_packs` 설정을 따르며, 팩의 제한된 범위를 결코 넓히지 않습니다.)
+
+## 음성 입력(내장, 오프라인)
+
+대시보드의 마이크 버튼과 `transcribe_audio` 도구는 로컬 Whisper 모델
+덕분에 공급자 키 없이 동작합니다:
+
+```bash
+maverick voice setup    # 체크섬 검증된 모델 다운로드(약 148 MB)
+maverick voice status   # 사용 가능한 음성 인식 백엔드 확인
+maverick voice transcribe clip.wav   # 파이프라인 동작 테스트
+```
+
+`whisper.cpp` 바이너리를 설치하면(`brew install whisper-cpp` 또는
+github.com/ggml-org/whisper.cpp 릴리스) Lightwork가 PATH에서 자동으로
+찾습니다. `[voice] stt_backend = "local"`을 설정하면 OpenAI/Groq 키가
+있어도 오디오가 머신 밖으로 나가지 않습니다. `[voice] auto_fetch_model =
+true`(마법사 옵트인)를 켜면 모델을 미리 받지 않고 첫 사용 시 가져옵니다.
 
 ## 모델 또는 공급자 변경
 

@@ -1,4 +1,4 @@
-<!-- यह docs/getting-started.md (स्रोत कमिट: 00d6097) का समुदाय-अनुरक्षित अनुवाद है — अंग्रेज़ी संस्करण ही आधिकारिक है। -->
+<!-- यह docs/getting-started.md (स्रोत कमिट: a7b9cee) का समुदाय-अनुरक्षित अनुवाद है — अंग्रेज़ी संस्करण ही आधिकारिक है। -->
 
 # शुरुआत करें
 
@@ -129,6 +129,24 @@ maverick onboard
 मौजूद नहीं है, ताकि एक नया-मंज़ूर किया गया विशेषज्ञ पहले ही रन से अपना काम करने के लिए
 तैयार रहे। (यह चरण `[self_learning]` / `provision_packs` कॉन्फ़िगरेशन का सम्मान करता है और
 पैक के क्लैंप्ड दायरे को कभी नहीं बढ़ाता।)
+
+## वॉइस इनपुट (बिल्ट-इन, ऑफ़लाइन)
+
+डैशबोर्ड का माइक बटन और `transcribe_audio` टूल लोकल Whisper मॉडल की मदद से
+बिना किसी प्रोवाइडर key के काम करते हैं:
+
+```bash
+maverick voice setup    # checksum-सत्यापित मॉडल डाउनलोड करें (~148 MB)
+maverick voice status   # देखें कि कौन से speech-to-text backend उपलब्ध हैं
+maverick voice transcribe clip.wav   # पाइपलाइन का त्वरित परीक्षण
+```
+
+`whisper.cpp` बाइनरी इंस्टॉल करें (`brew install whisper-cpp`, या
+github.com/ggml-org/whisper.cpp से कोई release) — Lightwork उसे PATH में खोज
+लेता है। `[voice] stt_backend = "local"` सेट करने पर OpenAI/Groq keys
+कॉन्फ़िगर होने पर भी ऑडियो मशीन से बाहर नहीं जाता; `[voice] auto_fetch_model
+= true` (विज़ार्ड ऑप्ट-इन) मॉडल को पहले से नहीं, बल्कि पहली बार उपयोग होने पर
+लाता है।
 
 ## मॉडल या प्रोवाइडर बदलना
 
