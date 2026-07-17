@@ -2890,7 +2890,8 @@ async def voice_transcribe(
     The chat composer's mic button records audio in the browser and posts it
     here; the transcript goes back into the goal field so the user can review
     before submitting (speech never starts a goal unreviewed). Reuses the
-    kernel STT backends (OpenAI / Groq Whisper, local faster-whisper) via
+    kernel STT backends (OpenAI / Groq Whisper, local faster-whisper, local
+    whisper.cpp — the built-in offline path, `maverick voice setup`) via
     ``maverick.tools.voice``; 503 with a setup hint when none is configured,
     which the client treats as "fall back to browser speech recognition".
     """
@@ -2951,8 +2952,9 @@ async def voice_transcribe(
         raise HTTPException(
             status_code=503,
             detail=(
-                "no speech-to-text backend available. Set OPENAI_API_KEY or "
-                "GROQ_API_KEY, or install faster-whisper "
+                "no speech-to-text backend available. Run `maverick voice "
+                "setup` for the built-in local engine (whisper.cpp), set "
+                "OPENAI_API_KEY / GROQ_API_KEY, or install faster-whisper "
                 "(python -m pip install -e './packages/maverick-core[voice]')."
             ),
         )

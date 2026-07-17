@@ -52,6 +52,29 @@ def test_advanced_all_off_persists_default_on_learning_opt_out(tmp_path, monkeyp
     assert tomllib.loads(cfg)["reflexion"]["enable"] is False
 
 
+def test_voice_optins_share_one_voice_table(tmp_path, monkeypatch):
+    """voice_commands=False + voice_local_stt=True must merge into ONE [voice]
+    table (two would be a duplicate-key TOML error) with both knobs set."""
+    cfg = _write(tmp_path, monkeypatch, {
+        "voice_commands": False, "voice_local_stt": True,
+    })
+    assert cfg.count("[voice]") == 1
+    parsed = tomllib.loads(cfg)
+    assert parsed["voice"]["dashboard_commands"] is False
+    assert parsed["voice"]["auto_fetch_model"] is True
+
+
+def test_voice_local_stt_alone_writes_auto_fetch(tmp_path, monkeypatch):
+    cfg = _write(tmp_path, monkeypatch, {"voice_local_stt": True})
+    parsed = tomllib.loads(cfg)
+    assert parsed["voice"] == {"auto_fetch_model": True}
+
+
+def test_voice_defaults_write_no_voice_table(tmp_path, monkeypatch):
+    cfg = _write(tmp_path, monkeypatch, {"voice_commands": True})
+    assert "[voice]" not in cfg
+
+
 def test_pg_rls_writes_world_model_section_with_prep_reminder(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {"pg_rls": True})
     assert "[world_model]" in cfg
