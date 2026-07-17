@@ -114,7 +114,7 @@ def test_fill_form_stops_at_batch_deadline(monkeypatch):
     page = _FakePage()
     _use(monkeypatch, page)
     times = iter([0.0, 0.0, 6.0])
-    monkeypatch.setattr(browser_mod.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(browser_mod, "_monotonic", lambda: next(times))
     out = browser_mod._run_browser_action({
         "action": "fill_form",
         "fields": {"#a": "1", "#b": "2", "#c": "3"},

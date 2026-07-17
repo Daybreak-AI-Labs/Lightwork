@@ -61,6 +61,10 @@ _MAX_FILL_FORM_SELECTOR_LENGTH = 500
 _MAX_FILL_FORM_VALUE_LENGTH = 10_000
 _MAX_FILL_FORM_FIELD_TIMEOUT_MS = 1_000
 _MAX_FILL_FORM_TOTAL_TIMEOUT_MS = 5_000
+# Bound at import: tests drive the fill_form batch deadline through this
+# module-local clock; patching time.monotonic itself is process-global, and
+# the consent-gate audit path consumes ticks before the batch loop runs.
+_monotonic = time.monotonic
 
 # Bounds for the read-only ``observe`` snapshot so it never floods the context.
 _MAX_OBSERVE_ELEMENTS = 100
@@ -392,7 +396,7 @@ def _browser_fill_form(page, args, timeout) -> str:
     errors: list[str] = []
     field_timeout = min(timeout, _MAX_FILL_FORM_FIELD_TIMEOUT_MS)
     total_timeout = min(timeout, _MAX_FILL_FORM_TOTAL_TIMEOUT_MS)
-    deadline = time.monotonic() + (total_timeout / 1000)
+    deadline = _monotonic() + (total_timeout / 1000)
 
     for selector, value in fields.items():
         selector = str(selector)
@@ -404,7 +408,7 @@ def _browser_fill_form(page, args, timeout) -> str:
             errors.append(f"{selector}: value too long")
             continue
 
-        remaining_ms = int((deadline - time.monotonic()) * 1000)
+        remaining_ms = int((deadline - _monotonic()) * 1000)
         if remaining_ms <= 0:
             errors.append("batch timeout")
             break
