@@ -241,3 +241,54 @@ class TestDepthHooks:
         # Imported rows land in the same register the CSV export reads.
         assert {e["activity"] for e in privacy_ops.export_ropa_art30()} == {
             "CRM marketing", "Payroll"}
+
+
+class TestPdfExtraction:
+    """DPA review straight from a digital PDF — the format DPAs actually
+    arrive in. Scanned PDFs still refuse honestly."""
+
+    @staticmethod
+    def _pdf(lines, compress=False):
+        import zlib
+        body = "\n".join(
+            f"BT /F1 10 Tf 54 700 Td ({ln}) Tj ET" for ln in lines).encode()
+        if compress:
+            comp = zlib.compress(body)
+            return (b"%PDF-1.4\n1 0 obj\n<< /Length "
+                    + str(len(comp)).encode()
+                    + b" /Filter /FlateDecode >>\nstream\n" + comp
+                    + b"\nendstream\nendobj\n%%EOF")
+        return (b"%PDF-1.4\n1 0 obj\n<< /Length " + str(len(body)).encode()
+                + b" >>\nstream\n" + body + b"\nendstream\nendobj\n%%EOF")
+
+    def test_review_dpa_from_pdf_compressed_and_not(self, monkeypatch):
+        from maverick import doc_discovery
+        lines = [ln for ln in GOOD_DPA.splitlines() if ln]
+        for compress in (False, True):
+            pdf = self._pdf(lines, compress=compress)
+            monkeypatch.setattr(doc_discovery, "fetch",
+                                lambda *a, _p=pdf, **k: (_p,
+                                                         "application/pdf"))
+            r = privacy_ops.review_dpa_from_document(
+                "Acme Corp", "msgraph", "d1", document_name="acme-dpa.pdf")
+            assert r["clauses_present"] >= 9, (compress, r)
+
+    def test_tj_arrays_and_hex_strings(self):
+        s = (b"BT [(Standard )(Contractual )(Clauses )(cover )(the )"
+             b"(international )(transfers )(of )(personal )(data.)] TJ ET "
+             b"BT <41756469742072696768747320616e6420726574656e74696f6e2073"
+             b"6368656475"
+             b"6c6520646566696e65642e> Tj ET")
+        txt = privacy_ops._pdf_text(b"%PDF-1.4\nstream\n" + s + b"\nendstream")
+        assert ("Standard Contractual Clauses cover the international "
+                "transfers of personal data.") in txt
+        assert "Audit rights and retention schedule defined." in txt
+
+    def test_scanned_pdf_still_refuses(self, monkeypatch):
+        from maverick import doc_discovery
+        monkeypatch.setattr(
+            doc_discovery, "fetch",
+            lambda *a, **k: (b"%PDF-1.4\nstream\n\x00\x89PNG\x01\x02"
+                             b"\nendstream", "application/pdf"))
+        with pytest.raises(ValueError, match="cannot extract text"):
+            privacy_ops.review_dpa_from_document("Acme", "msgraph", "scan")
