@@ -57,6 +57,7 @@ from .api_schemas import (
     DocDiscoverIn,
     DpaFromDocumentIn,
     DpaReviewIn,
+    DsarFromMessageIn,
     DsarIn,
     EventTriggerIn,
     EventTriggerOut,
@@ -1098,6 +1099,26 @@ async def open_dsar_request(request: Request, body: DsarIn) -> dict:
     ops = _privacy_ops_or_403()
     return await run_in_threadpool(
         ops.open_dsar, body.subject_id, body.kind, channel=body.channel)
+
+
+@router.post("/privacy/dsar/from-message", status_code=201)
+async def open_dsar_from_message(request: Request,
+                                 body: DsarFromMessageIn) -> dict:
+    """Triage an inbound message into a tracked request. The record keeps
+    the matched phrases and an excerpt as provenance; a message that does
+    not read as a data-subject request (or names no subject) is a 422, not
+    a silently-opened case."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(
+        ops.open_dsar_from_message, body.text, channel=body.channel,
+        sender=body.sender)
+    if record is None:
+        raise HTTPException(
+            status_code=422,
+            detail="no data-subject request detected (or no subject "
+                   "address found) — open it manually if you disagree")
+    return record
 
 
 @router.post("/privacy/dsar/{request_id}/fulfill")

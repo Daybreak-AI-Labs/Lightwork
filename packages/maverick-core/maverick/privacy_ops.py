@@ -672,6 +672,75 @@ def open_dsar(subject_id: str, kind: str, *, channel: str = "",
     return _DSAR.save(record)
 
 
+# What an inbound data-subject request sounds like. Deterministic and
+# explainable, same as every engine here: each kind carries its trigger
+# patterns; a hit records WHICH phrase matched so the reviewer can verify.
+_DSAR_INTENTS = (
+    ("erasure", (
+        r"delete (?:my|all my) (?:data|account|information|records)",
+        r"right to be forgotten", r"right to erasure",
+        r"erase (?:my|all my) (?:data|information)",
+        r"remove (?:my|all my) (?:personal )?(?:data|information)",
+        r"art(?:icle)?\.? ?17",
+    )),
+    ("portability", (
+        r"data portability", r"port my data",
+        r"transfer my data to", r"machine.?readable",
+        r"art(?:icle)?\.? ?20",
+    )),
+    ("access", (
+        r"copy of (?:my|all) (?:personal )?data",
+        r"what (?:data|information) (?:do )?you (?:hold|have|store)",
+        r"(?:subject )?access request", r"\bsar\b",
+        r"access to my (?:personal )?data",
+        r"art(?:icle)?\.? ?15",
+    )),
+)
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def detect_dsar(text: str, *, sender: str = "") -> dict | None:
+    """Classify an inbound message as a data-subject request (or not).
+
+    Returns ``{"kind", "subject_id", "signals"}`` when the message reads as
+    a DSAR, else ``None``. ``subject_id`` is the sender when given,
+    otherwise the first email address found in the body. Deterministic --
+    a triage aid; opening the request stays an explicit step."""
+    low = (text or "")[:20000].lower()
+    if not low.strip():
+        return None
+    for kind, patterns in _DSAR_INTENTS:
+        signals = [m.group(0) for pat in patterns
+                   for m in [re.search(pat, low)] if m]
+        if signals:
+            subject = (sender or "").strip()[:200]
+            if not subject:
+                found = _EMAIL_RE.search(text or "")
+                subject = found.group(0)[:200] if found else ""
+            return {"kind": kind, "subject_id": subject, "signals": signals}
+    return None
+
+
+def open_dsar_from_message(text: str, *, channel: str = "",
+                           sender: str = "", opened_by: str = "") -> dict | None:
+    """Open a tracked request from an inbound message (email/chat/web form).
+
+    Detection is deterministic; the created record carries the matched
+    signals and an excerpt of the message for provenance. Returns ``None``
+    when the message doesn't read as a request or names no subject."""
+    hit = detect_dsar(text, sender=sender)
+    if hit is None or not hit["subject_id"]:
+        return None
+    record = open_dsar(hit["subject_id"], hit["kind"], channel=channel,
+                       opened_by=opened_by)
+
+    def _prov(r: dict) -> None:
+        r["intake"] = {"signals": hit["signals"],
+                       "excerpt": (text or "").strip()[:300]}
+    return _DSAR.update(record["id"], _prov)
+
+
 def list_dsars() -> list[dict]:
     now = time.time()
     out = []
@@ -737,8 +806,8 @@ __all__ = [
     "AI_ACT_NOTE", "DPA_CHECKLIST", "DSAR_DUE_DAYS", "DSAR_KINDS",
     "ROPA_FIELDS", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
-    "fulfill_dsar", "get_ai_system", "get_dpa_review",
-    "import_onetrust_ropa", "list_ai_systems",
+    "detect_dsar", "fulfill_dsar", "get_ai_system", "get_dpa_review",
+    "import_onetrust_ropa", "list_ai_systems", "open_dsar_from_message",
     "list_dpa_reviews", "list_dsars", "list_ropa", "open_dsar",
     "register_ai_system", "register_ai_system_from_assessment",
     "review_dpa", "review_dpa_from_document", "upsert_ropa",

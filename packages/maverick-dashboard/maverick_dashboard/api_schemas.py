@@ -662,6 +662,15 @@ class DsarIn(BaseModel):
     channel: str = Field("", max_length=64)
 
 
+class DsarFromMessageIn(BaseModel):
+    """An inbound message (email/chat/web form) to triage into a tracked
+    data-subject request. Detection is deterministic; no request is opened
+    unless the message reads as one and names a subject."""
+    text: str = Field(..., min_length=1, max_length=20000)
+    sender: str = Field("", max_length=200)
+    channel: str = Field("", max_length=64)
+
+
 class FollowupsIn(BaseModel):
     """Reviewer follow-up questions to send back to an assessment's
     respondent (the pop-out's 'needs more detail' path)."""

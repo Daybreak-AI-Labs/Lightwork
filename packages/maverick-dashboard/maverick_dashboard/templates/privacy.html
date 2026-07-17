@@ -229,6 +229,17 @@
           <span class="pw-form-err" role="alert"></span>
         </div>
       </form>
+      <form class="pw-form" data-endpoint="/api/v1/privacy/dsar/from-message">
+        <label><span>…or paste an inbound message</span>
+          <textarea class="ctl" name="text" rows="3" required
+            placeholder='e.g. "Under Article 17 please delete my data. — sam@example.com" — the tracker detects the kind and subject and keeps the matched phrases as provenance.'></textarea></label>
+        <div class="pw-form-actions">
+          <label style="flex:1;"><span>Sender (optional — detected from the message when present)</span>
+            <input class="ctl" name="sender" maxlength="200" placeholder="sam@example.com"></label>
+          <button class="btn" type="submit">Detect &amp; open request</button>
+          <span class="pw-form-err" role="alert"></span>
+        </div>
+      </form>
       {% if records.dsar %}
       <div class="pw-scroll">
       <table>
@@ -239,7 +250,7 @@
           {% for r in records.dsar %}
           <tr>
             <td><code>{{ r.id }}</code></td>
-            <td>{{ r.subject_id }}</td>
+            <td>{{ r.subject_id }}{% if r.intake %}<br><span class="muted" style="font-size:var(--text-xs);" title="matched: {{ r.intake.signals | join('; ') }}">via message intake</span>{% endif %}</td>
             <td>{{ r.kind }}</td>
             <td>
               <span class="badge {{ 'done' if r.status == 'fulfilled' else 'warn' if r.status == 'awaiting_erasure' else 'info' if r.status == 'open' else '' }}">{{ r.status | replace('_', ' ') }}</span>

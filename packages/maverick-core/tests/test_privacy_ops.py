@@ -292,3 +292,49 @@ class TestPdfExtraction:
                              b"\nendstream", "application/pdf"))
         with pytest.raises(ValueError, match="cannot extract text"):
             privacy_ops.review_dpa_from_document("Acme", "msgraph", "scan")
+
+
+class TestDsarIntake:
+    """Inbound messages become tracked requests — deterministically, with
+    the matched phrases kept as provenance."""
+
+    def test_detects_each_kind_with_signals(self):
+        erase = privacy_ops.detect_dsar(
+            "Hi, under GDPR Article 17 please delete my data and confirm.",
+            sender="sam@example.com")
+        assert erase["kind"] == "erasure"
+        assert erase["subject_id"] == "sam@example.com"
+        assert any("delete my data" in s for s in erase["signals"])
+        access = privacy_ops.detect_dsar(
+            "I would like a copy of my personal data you hold on me. "
+            "Regards, jordan.ellis@example.com")
+        assert access["kind"] == "access"
+        assert access["subject_id"] == "jordan.ellis@example.com"
+        port = privacy_ops.detect_dsar(
+            "Please transfer my data to my new provider (data portability).",
+            sender="pat@example.com")
+        assert port["kind"] == "portability"
+        # Erasure phrasing wins over an access-ish word later in the text.
+        both = privacy_ops.detect_dsar(
+            "Right to be forgotten: erase my data. I previously made an "
+            "access request.", sender="x@example.com")
+        assert both["kind"] == "erasure"
+
+    def test_ordinary_mail_is_not_a_request(self):
+        assert privacy_ops.detect_dsar(
+            "Hey team, the Q3 report deletes the old slide deck.") is None
+        assert privacy_ops.detect_dsar("") is None
+
+    def test_open_from_message_carries_provenance(self):
+        rec = privacy_ops.open_dsar_from_message(
+            "Subject: please erase my account\n\nUnder Article 17 I ask "
+            "you to remove my personal data.\n-- casey@example.com",
+            channel="email")
+        assert rec["kind"] == "erasure"
+        assert rec["subject_id"] == "casey@example.com"
+        assert rec["status"] == "open"
+        assert rec["intake"]["signals"]
+        assert "erase my account" in rec["intake"]["excerpt"]
+        # No subject anywhere -> no request opened.
+        assert privacy_ops.open_dsar_from_message(
+            "please delete my data thanks") is None
