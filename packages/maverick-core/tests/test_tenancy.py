@@ -5,6 +5,7 @@ legacy ~/.maverick locations (single-tenant unchanged). With a tenant, the
 cross-session memory store is isolated so one tenant cannot read another's.
 """
 import maverick.paths as paths
+import pytest
 from maverick.paths import current_tenant, data_dir, reset_tenant, set_tenant
 
 # --- tenant resolution -----------------------------------------------------
@@ -60,6 +61,16 @@ def test_tenant_segment_nfc_normalised(monkeypatch):
     assert nfc != nfd  # distinct byte sequences pre-normalisation
     # ...but the same on-disk namespace, so one tenant's data isn't split in two.
     assert data_dir("memory", tenant=nfc) == data_dir("memory", tenant=nfd)
+
+
+def test_data_dir_refuses_case_alias_before_any_store_access(monkeypatch):
+    from maverick.paths import TenantNamespaceCollision
+
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    owner_path = data_dir("memory", tenant="Acme")
+    with pytest.raises(TenantNamespaceCollision, match="aliases namespace owned"):
+        data_dir("memory", tenant="acme")
+    assert owner_path == paths.maverick_home() / "tenants" / "Acme" / "memory"
 
 
 # --- data_dir --------------------------------------------------------------
@@ -145,6 +156,28 @@ def test_memory_isolated_across_tenants(monkeypatch, tmp_path):
         assert "a-secret" in out
     finally:
         reset_tenant(tok)
+
+
+def test_memory_store_cannot_be_reopened_through_case_alias(monkeypatch, tmp_path):
+    from maverick.paths import TenantNamespaceCollision
+    from maverick.tools.memory import _run
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_MEMORY_DIR", raising=False)
+    owner = set_tenant("Acme")
+    try:
+        assert "wrote" in _run(
+            {"command": "create", "path": "private.md", "file_text": "secret"}
+        )
+    finally:
+        reset_tenant(owner)
+
+    alias = set_tenant("acme")
+    try:
+        with pytest.raises(TenantNamespaceCollision):
+            _run({"command": "view", "path": "private.md"})
+    finally:
+        reset_tenant(alias)
 
 
 def test_memory_isolated_for_previously_colliding_tenants(monkeypatch, tmp_path):

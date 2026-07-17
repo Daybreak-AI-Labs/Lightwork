@@ -45,6 +45,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .self_modify_evidence import (
+    AuthenticatedTestCounts,
+    AuthenticatedTestEvidence,
+    AuthenticatedTestRequest,
+    evidence_backend_readiness,
+    validate_test_evidence,
+)
+
 log = logging.getLogger(__name__)
 
 # Directories never worth copying into a throwaway eval tree (VCS + build/test
@@ -134,25 +142,6 @@ class Score:
 
     value: float
     samples: int = 0
-
-
-@dataclass(frozen=True)
-class AuthenticatedTestCounts:
-    """Backend-authenticated terminal test outcomes.
-
-    Candidate stdout is untrusted and is never parsed into a score. A backend
-    may attach this exact controller-side type to ``ExecResult`` as
-    ``authenticated_test_counts`` only when it independently authenticates the
-    terminal runner event and advertises ``authenticated_test_results = True``.
-    Skips and collection/runtime errors remain in the denominator so a candidate
-    cannot improve its score by suppressing outcomes.
-    """
-
-    passed: int
-    failed: int
-    skipped: int = 0
-    errors: int = 0
-    terminal: bool = True
 
 
 @dataclass(frozen=True)
@@ -273,29 +262,29 @@ def require_secure_eval_sandbox(sandbox, workdir: Path):
     operable runner always uses this stricter boundary.
     """
     sb = resolve_eval_sandbox(sandbox, workdir)
+    problems: list[str] = []
     if _host_visible(sb):
-        raise EvalSandboxError(
-            "stock self-modification evaluation requires a non-host sandbox")
+        problems.append("requires a non-host sandbox")
     allow_network = getattr(sb, "allow_network", None)
     network = getattr(sb, "network", None)
     if allow_network is not False and network != "egress-deny":
-        raise EvalSandboxError(
-            "stock self-modification evaluation requires enforceable egress denial")
+        problems.append("requires enforceable egress denial")
     if bool(getattr(sb, "allow_root", False)):
-        raise EvalSandboxError(
-            "stock self-modification evaluation refuses root-enabled sandboxes")
+        problems.append("refuses root-enabled sandboxes")
     if hasattr(sb, "pids_limit") and not sb.pids_limit:
-        raise EvalSandboxError(
-            "stock self-modification evaluation requires a process limit")
+        problems.append("requires a process limit")
     if hasattr(sb, "memory") and not sb.memory:
-        raise EvalSandboxError(
-            "stock self-modification evaluation requires a memory limit")
+        problems.append("requires a memory limit")
     if getattr(sb, "bounded_output", None) is not True:
+        problems.append("requires bounded host-output capture")
+    evidence_readiness = evidence_backend_readiness(sb)
+    if not evidence_readiness.ready:
+        problems.append(evidence_readiness.message)
+    if problems:
         raise EvalSandboxError(
-            "stock self-modification evaluation requires bounded host-output capture")
-    if getattr(sb, "authenticated_test_results", None) is not True:
-        raise EvalSandboxError(
-            "stock self-modification evaluation requires authenticated test results")
+            "stock self-modification evaluation is not ready: "
+            + "; ".join(problems),
+        )
     return sb
 
 
@@ -639,6 +628,52 @@ def _budgeted_exec(sb, command: str, *, budget=None, timeout: float | None = Non
     return sb.exec(command, timeout=effective_timeout)
 
 
+def _budgeted_authenticated_test_exec(
+    sb,
+    request: AuthenticatedTestRequest,
+    *,
+    budget=None,
+    timeout: float | None = None,
+):
+    """Execute tests only through the backend's controller-evidence channel.
+
+    This mirrors :func:`_budgeted_exec`'s accounting without routing the test
+    command through ordinary ``exec``.  Generic exec results are candidate-
+    controlled diagnostics and are never a production DGM score.
+    """
+    readiness = evidence_backend_readiness(sb)
+    if not readiness.ready:
+        raise EvalSandboxError(readiness.message)
+    effective_timeout = timeout
+    if budget is not None:
+        record = getattr(budget, "record_tool_call", None)
+        if callable(record):
+            record()
+        else:
+            budget.check()
+        remaining_fn = getattr(budget, "remaining_wall", None)
+        if callable(remaining_fn):
+            try:
+                remaining = float(remaining_fn())
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise TimeoutError(
+                    "invalid remaining evaluation wall budget",
+                ) from exc
+            if not math.isfinite(remaining) or remaining <= 0.0:
+                raise TimeoutError("evaluation wall-clock budget exhausted")
+            try:
+                requested = float(
+                    getattr(sb, "timeout", remaining)
+                    if effective_timeout is None else effective_timeout
+                )
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise TimeoutError("invalid evaluation timeout") from exc
+            if not math.isfinite(requested) or requested <= 0.0:
+                raise TimeoutError("invalid evaluation timeout")
+            effective_timeout = min(requested, remaining)
+    return sb.exec_authenticated_tests(request, timeout=effective_timeout)
+
+
 # --- seam 3: score (deterministic offline default) ---------------------------
 
 def _default_score(workdir: Path) -> Score:
@@ -650,35 +685,34 @@ def _default_score(workdir: Path) -> Score:
     return Score(value=float(n), samples=n)
 
 
-def _authenticated_test_score(sb, result) -> Score:
-    """Convert only backend-authenticated structured outcomes into a score."""
-    if getattr(sb, "authenticated_test_results", None) is not True:
+def _authenticated_test_score(
+    sb, request: AuthenticatedTestRequest, evidence: object,
+) -> Score:
+    """Convert only exact, request-bound controller evidence into a score."""
+    counts = validate_test_evidence(sb, request, evidence)
+    if counts is None:
         return Score(0.0, 0)
-    try:
-        counts = result.authenticated_test_counts
-    except Exception:
-        return Score(0.0, 0)
-    if type(counts) is not AuthenticatedTestCounts or counts.terminal is not True:
-        return Score(0.0, 0)
-    outcomes = (counts.passed, counts.failed, counts.skipped, counts.errors)
-    if any(type(value) is not int or value < 0 for value in outcomes):
-        return Score(0.0, 0)
-    total = sum(outcomes)
-    if total <= 0 or total > 1_000_000:
-        return Score(0.0, 0)
+    total = counts.passed + counts.failed + counts.skipped + counts.errors
     return Score(value=counts.passed / total, samples=total)
 
 
 def pytest_score(
     *, sandbox=None, command: str = "python3 -m pytest -q",
     timeout: float = 600.0, budget=None,
+    subject_sha256: str | None = None,
+    execution_context_sha256: str | None = None,
 ) -> Callable[[Path], Score]:
     """Build a ``score_fn`` that runs a test command in the sandbox and scores by
-    backend-authenticated terminal outcomes. Candidate stdout/stderr is never
-    parsed. The backend must advertise ``authenticated_test_results = True`` and
-    attach an exact :class:`AuthenticatedTestCounts`; otherwise the result is
-    ``0/0`` and the evidence gate refuses it. The command is NOT hard-coded to a
+    controller-authenticated terminal outcomes. The backend must implement the
+    nonce-bound ``maverick.test-evidence.v1`` protocol; otherwise the result is
+    ``0/0`` and the evidence gate refuses it. Candidate stdout/stderr, JUnit
+    files, and same-process pytest plugins are never parsed. The command is NOT
+    hard-coded to a
     package — the caller points it at the surface under evaluation.
+
+    ``subject_sha256`` must bind the exact evaluated artifact/workspace and
+    ``execution_context_sha256`` must bind its sandbox policy, identity, and
+    arm. Missing or malformed bindings produce ``0/0``.
 
     Isolation (Gap 4): when no ``sandbox`` is given the backend is resolved
     through :func:`resolve_eval_sandbox`, which REFUSES host exec under
@@ -692,12 +726,19 @@ def pytest_score(
             log.warning("self_modify_eval: %s", e)
             return Score(0.0, 0)
         try:
-            res = _budgeted_exec(sb, command, budget=budget, timeout=timeout)
+            request = AuthenticatedTestRequest.issue(
+                command,
+                subject_sha256=subject_sha256 or "",
+                execution_context_sha256=execution_context_sha256 or "",
+            )
+            evidence = _budgeted_authenticated_test_exec(
+                sb, request, budget=budget, timeout=timeout,
+            )
         except Exception as e:  # pragma: no cover -- exec failure is a 0 score
             log.warning(
                 "self_modify_eval: test command failed (%s)", type(e).__name__)
             return Score(0.0, 0)
-        return _authenticated_test_score(sb, res)
+        return _authenticated_test_score(sb, request, evidence)
     return _score
 
 
@@ -786,7 +827,8 @@ def evaluate_patch(
 
 
 __all__ = [
-    "Score", "AuthenticatedTestCounts", "ApplyResult", "EvalResult",
+    "Score", "AuthenticatedTestCounts", "AuthenticatedTestRequest",
+    "AuthenticatedTestEvidence", "ApplyResult", "EvalResult",
     "EvalSandboxError",
     "container_required", "resolve_eval_sandbox", "require_secure_eval_sandbox",
     "run_git_apply", "git_apply", "pytest_score", "evaluate_patch",

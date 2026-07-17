@@ -92,21 +92,22 @@ def write_pins(path: str | Path | None = None, *, now: datetime | None = None) -
     ``now`` injects the timestamp for deterministic tests. Returns the path.
     """
     p = Path(path) if path is not None else _default_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
+    from .file_lock import (
+        atomic_write_text,
+        ensure_private_directory,
+        prepare_private_directory,
+    )
+
+    if path is None:
+        ensure_private_directory(p.parent)
+    else:
+        prepare_private_directory(p.parent)
     ts = (now or datetime.now(timezone.utc)).isoformat()
     body = json.dumps(
         {"generated_at": ts, "pins": dict(sorted(snapshot().items()))},
         indent=2,
     ) + "\n"
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(body)
-    os.replace(tmp, p)
-    try:
-        os.chmod(p, 0o600)  # a pre-existing pins file keeps 0600 too
-    except OSError:  # pragma: no cover -- exotic filesystems
-        pass
+    atomic_write_text(p, body)
     return p
 
 

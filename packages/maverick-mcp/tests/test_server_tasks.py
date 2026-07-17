@@ -69,7 +69,7 @@ def test_per_owner_task_quota_isolates_sessions():
         assert a1.status == "working" and a2.status == "working"
         # A's 3rd active task is rejected by the per-owner quota, even though the
         # global cap (100) is nowhere near full.
-        with pytest.raises(TaskError, match="too many active tasks for this session"):
+        with pytest.raises(TaskError, match="too many active tasks for this caller"):
             store.create("maverick_start", {}, {}, owner="A")
         # A different session B is unaffected by A's saturation.
         assert store.create("maverick_start", {}, {}, owner="B").status == "working"
@@ -95,7 +95,7 @@ def test_per_owner_quota_counts_cancelled_tasks_until_future_drains():
         attacker = store.create("maverick_start", {}, {"ttl": 60000}, owner="attacker")
         store.cancel(attacker.id, owner="attacker")
 
-        with pytest.raises(TaskError, match="too many active tasks for this session"):
+        with pytest.raises(TaskError, match="too many active tasks for this caller"):
             store.create("maverick_start", {}, {"ttl": 60000}, owner="attacker")
 
         victim = store.create("maverick_start", {}, {"ttl": 60000}, owner="victim")

@@ -26,6 +26,7 @@ recording verdicts to the audit chain are separate, deliberate steps.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -53,6 +54,10 @@ class Decision(str, Enum):
     ALLOW = "allow"
     DENY = "deny"
     REQUIRE_HUMAN = "require_human"
+
+
+class GovernancePolicyError(RuntimeError):
+    """The configured governance policy cannot be trusted or interpreted."""
 
 
 @dataclass(frozen=True)
@@ -140,6 +145,87 @@ def _amount_table(value: object) -> dict[str, float]:
     return out
 
 
+def _governance_config() -> dict:
+    """One trusted ``[governance]`` snapshot; absence is intentionally empty."""
+    try:
+        from .config import config_source_errors, load_config
+
+        snapshot = load_config()
+        source_errors = config_source_errors()
+    except Exception as exc:
+        raise GovernancePolicyError(
+            "governance policy source is unavailable"
+        ) from exc
+    if source_errors:
+        raise GovernancePolicyError("governance policy source is invalid")
+    if not isinstance(snapshot, dict):
+        raise GovernancePolicyError("governance config root must be a table")
+    if "governance" not in snapshot:
+        return {}
+    cfg = snapshot.get("governance")
+    if not isinstance(cfg, dict):
+        raise GovernancePolicyError("[governance] must be a configuration table")
+    return cfg
+
+
+def _policy_names(cfg: dict, key: str) -> frozenset[str]:
+    if key not in cfg:
+        return frozenset()
+    value = cfg.get(key)
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
+        raise GovernancePolicyError(
+            f"governance.{key} must be a list of non-empty strings"
+        )
+    return frozenset(item.strip() for item in value)
+
+
+def _policy_floor(cfg: dict, key: str) -> str | None:
+    if key not in cfg:
+        return None
+    value = cfg.get(key)
+    if not isinstance(value, str):
+        raise GovernancePolicyError(
+            f"governance.{key} must be a risk-level string"
+        )
+    return _risk_floor(value)
+
+
+def _policy_thresholds(cfg: dict, key: str) -> dict[str, float]:
+    if key not in cfg:
+        return {}
+    value = cfg.get(key)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        amount = float(value)
+        if math.isfinite(amount) and amount >= 0.0:
+            return {"*": amount}
+        raise GovernancePolicyError(
+            f"governance.{key} threshold must be finite and non-negative"
+        )
+    if not isinstance(value, dict):
+        raise GovernancePolicyError(
+            f"governance.{key} must be a number or threshold table"
+        )
+    out: dict[str, float] = {}
+    for action, raw_amount in value.items():
+        if not isinstance(action, str) or not action.strip():
+            raise GovernancePolicyError(
+                f"governance.{key} action names must be non-empty strings"
+            )
+        if (
+            not isinstance(raw_amount, (int, float))
+            or isinstance(raw_amount, bool)
+            or not math.isfinite(float(raw_amount))
+            or float(raw_amount) < 0.0
+        ):
+            raise GovernancePolicyError(
+                f"governance.{key}.{action} must be a finite non-negative number"
+            )
+        out[action.strip()] = float(raw_amount)
+    return out
+
+
 @dataclass(frozen=True)
 class Policy:
     """Org-level action policy, layered on top of per-principal capabilities.
@@ -175,27 +261,29 @@ class Policy:
 
     @classmethod
     def from_config(cls) -> Policy:
-        """Build the policy from the ``[governance]`` config table (opt-in)."""
-        try:
-            from .config import load_config
-            cfg = (load_config() or {}).get("governance") or {}
-        except Exception:
-            cfg = {}
+        """Build the policy from the ``[governance]`` config table (opt-in).
 
-        def _names(key: str) -> frozenset[str]:
-            v = cfg.get(key)
-            if isinstance(v, (list, tuple, set)):
-                return frozenset(str(x) for x in v if str(x))
-            return frozenset()
+        Absence is the documented default-open community posture. A present
+        malformed policy or an unreadable active config source is different:
+        raise so the live tool chokepoint can refuse the action instead of
+        mistaking policy loss for an intentionally empty policy.
+        """
+        cfg = _governance_config()
+
+        fresh = cfg.get("require_fresh_human_approval", False)
+        if not isinstance(fresh, bool):
+            raise GovernancePolicyError(
+                "governance.require_fresh_human_approval must be a boolean"
+            )
 
         base = cls(
-            deny_actions=_names("deny_actions"),
-            require_human_actions=_names("require_human_actions"),
-            deny_min_risk=_risk_floor(cfg.get("deny_min_risk")),
-            require_human_min_risk=_risk_floor(cfg.get("require_human_min_risk")),
-            deny_above=_amount_table(cfg.get("deny_above")),
-            require_human_above=_amount_table(cfg.get("require_human_above")),
-            require_fresh_human_approval=bool(cfg.get("require_fresh_human_approval")),
+            deny_actions=_policy_names(cfg, "deny_actions"),
+            require_human_actions=_policy_names(cfg, "require_human_actions"),
+            deny_min_risk=_policy_floor(cfg, "deny_min_risk"),
+            require_human_min_risk=_policy_floor(cfg, "require_human_min_risk"),
+            deny_above=_policy_thresholds(cfg, "deny_above"),
+            require_human_above=_policy_thresholds(cfg, "require_human_above"),
+            require_fresh_human_approval=fresh,
         )
         # Compliance mode profiles (e.g. [compliance] profiles = ["hipaa"]) tighten
         # the live policy strictest-wins. No profiles configured -> base unchanged,
@@ -204,14 +292,24 @@ class Policy:
         try:
             from . import compliance_profiles
             profiles = compliance_profiles.configured_profiles()
-        except Exception:  # pragma: no cover -- config never blocks policy build
-            profiles = []
+        except Exception as exc:
+            raise GovernancePolicyError(
+                "compliance governance policy is unavailable"
+            ) from exc
         if not profiles:
             return base
-        from dataclasses import replace
+        try:
+            from dataclasses import replace
 
-        from .finance.regimes import union_policies
-        merged = union_policies([base, compliance_profiles.compile_policy(profiles)])
+            from .finance.regimes import union_policies
+            merged = union_policies([
+                base,
+                compliance_profiles.compile_policy(profiles),
+            ])
+        except Exception as exc:
+            raise GovernancePolicyError(
+                "compliance governance policy could not be compiled"
+            ) from exc
         # union_policies doesn't carry the fresh-approval flag; preserve it.
         return replace(merged, require_fresh_human_approval=base.require_fresh_human_approval)
 
@@ -312,4 +410,6 @@ def evaluate(
     return Verdict(Decision.ALLOW, "permitted", "default")
 
 
-__all__ = ["Decision", "Verdict", "Policy", "evaluate"]
+__all__ = [
+    "Decision", "GovernancePolicyError", "Verdict", "Policy", "evaluate",
+]

@@ -41,8 +41,11 @@ def test_exchange_summarises_never_echoes(monkeypatch, tmp_path):
     assert "tokens.json" in out
     assert captured["data"]["code_verifier"] == "v1"
     import json
+
+    from maverick.file_lock import private_path_is_restricted
     saved = json.loads((tmp_path / "tokens.json").read_text())
     assert saved["access_token"] == "supersecrettoken123"
+    assert private_path_is_restricted(tmp_path / "tokens.json")
 
 
 def test_exchange_without_outfile_hints(monkeypatch):

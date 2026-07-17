@@ -63,8 +63,10 @@ from .base import (
     Channel,
     IncomingMessage,
     add_webhook_body_limit,
+    claim_processed_message,
     is_allowed,
     normalize_allowlist,
+    release_processed_message,
 )
 
 log = logging.getLogger(__name__)
@@ -243,17 +245,18 @@ class RcsChannel(Channel):
 
         # Claim the messageId atomically BEFORE processing so Google's
         # redelivery can't double-run a goal (same pattern as whatsapp_cloud).
-        wm = None
+        claimed = False
         if msg_id:
             try:
-                from maverick.world_model import DEFAULT_DB, WorldModel
-                wm = WorldModel(DEFAULT_DB)
-                if not wm.mark_message_processed("rcs", msg_id):
+                claimed = claim_processed_message("rcs", msg_id)
+                if not claimed:
                     log.info("rcs message %s already claimed; skipping", msg_id)
                     return {"status": "ok"}
-            except Exception:  # pragma: no cover
-                log.warning("rcs dedup claim failed; processing anyway")
-                wm = None
+            except Exception as exc:  # pragma: no cover
+                log.exception("rcs dedup claim failed; asking provider to retry")
+                raise HTTPException(
+                    status_code=503, detail="message claim store unavailable"
+                ) from exc
 
         incoming = IncomingMessage(
             user_id=sender, text=text, channel="rcs", message_id=msg_id or None,
@@ -262,11 +265,13 @@ class RcsChannel(Channel):
             reply = await self.dispatch_text(incoming)
         except Exception:
             log.exception("handler error")
-            if wm is not None and msg_id:
+            if claimed:
                 try:
-                    wm.release_processed_message("rcs", msg_id)
+                    release_processed_message("rcs", msg_id)
                 except Exception:  # pragma: no cover
-                    log.warning("rcs dedup release failed")
+                    # The claim remains durable, so a provider retry cannot
+                    # execute this failed delivery a second time.
+                    log.exception("rcs dedup release failed; claim remains held")
             # Generic user-facing text; raw exception detail (which can embed a
             # secret) stays in the log only.
             reply = "⚠ An internal error occurred."

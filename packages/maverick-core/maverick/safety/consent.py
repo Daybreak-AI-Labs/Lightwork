@@ -26,15 +26,32 @@ fully-opt-in behavior.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import logging
+import math
 import os
+import secrets
 import sys
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..paths import TenantPolicyError, current_tenant_id, data_dir
+from ..file_lock import (
+    atomic_create_bytes,
+    atomic_read_bytes,
+    atomic_read_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+    open_private_append,
+    require_private_directory,
+)
+from ..paths import TenantPolicyError, current_tenant_id_strict, data_dir
 
 log = logging.getLogger(__name__)
 
@@ -63,8 +80,14 @@ def _resolve_ledger_path(path: Path | None = None) -> Path:
     a stale process-wide override must never turn into a shared-grant fallback
     in a long-lived multi-tenant worker.
     """
-    if current_tenant_id() is not None:
-        active = data_dir("consent.ledger")
+    # Standing consent is an authorization boundary, so diagnostic identity
+    # resolution is not sufficient here: corrupt client configuration must not
+    # become indistinguishable from legitimate legacy/unbound mode. Resolve the
+    # strict identity once and thread that exact value into path construction to
+    # avoid a second lookup disagreeing with the admission decision.
+    tenant = current_tenant_id_strict()
+    if tenant is not None:
+        active = data_dir("consent.ledger", tenant=tenant)
         if path is not None and not _same_ledger_path(Path(path), active):
             raise TenantPolicyError(
                 "explicit consent ledger path does not match the active tenant"
@@ -101,9 +124,21 @@ class ConsentDecision:
     source: str           # "ledger" | "auto" | "prompt" | "non-tty-deny"
     risk: str             # "low" | "medium" | "high" | "critical"
     ts: float
+    actor: str = ""        # authenticated dashboard approver when available
 
 
 _prompt_lock = threading.Lock()
+_ledger_lock = threading.RLock()
+
+_LEDGER_VERSION = 2
+_MAX_LEDGER_BYTES = 4 * 1024 * 1024
+_MAX_LEDGER_RECORDS = 10_000
+_MAX_ACTION_CHARS = 256
+_MAX_SCOPE_CHARS = 4096
+
+
+class ConsentLedgerError(RuntimeError):
+    """The standing-consent authority could not be verified safely."""
 
 
 def _resolve_mode(risk: str | None = None) -> str:
@@ -133,38 +168,255 @@ def _resolve_mode(risk: str | None = None) -> str:
     return "auto-approve"
 
 
-def _ledger_lines(path: Path | None = None) -> list[str]:
-    path = _resolve_ledger_path(path)
+def _validate_ledger_field(value: str, *, name: str, limit: int, empty: bool) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"consent {name} must be a string")
+    if (not empty and not value) or len(value) > limit:
+        qualifier = f"1..{limit}" if not empty else f"0..{limit}"
+        raise ValueError(f"consent {name} must contain {qualifier} characters")
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError(f"consent {name} cannot contain control characters")
+    return value
+
+
+def _validated_key(action: str, scope: str | None) -> tuple[str, str]:
+    return (
+        _validate_ledger_field(
+            action, name="action", limit=_MAX_ACTION_CHARS, empty=False,
+        ),
+        _validate_ledger_field(
+            scope or "", name="scope", limit=_MAX_SCOPE_CHARS, empty=True,
+        ),
+    )
+
+
+def _principal_binding() -> str:
+    try:
+        from ..connections import current_principal
+
+        principal = str(current_principal() or "local")
+    except Exception:  # pragma: no cover - context lookup cannot widen authority
+        principal = "local"
+    return hashlib.sha256(principal.encode("utf-8")).hexdigest()
+
+
+def _policy_binding() -> str:
+    try:
+        from ..enterprise import enterprise_enabled
+
+        enterprise = bool(enterprise_enabled())
+    except Exception:
+        enterprise = False
+    try:
+        from ..security_defaults import secure_by_default
+
+        secure = bool(secure_by_default())
+    except Exception:
+        secure = True
+    policy = {
+        "enterprise": enterprise,
+        "secure_defaults": secure,
+        "version": _LEDGER_VERSION,
+    }
+    raw = json.dumps(policy, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _authority_binding() -> tuple[str, str, str]:
+    return (
+        str(current_tenant_id_strict() or "shared"),
+        _principal_binding(),
+        _policy_binding(),
+    )
+
+
+def _is_default_ledger_path(path: Path) -> bool:
+    return _same_ledger_path(path, data_dir("consent.ledger"))
+
+
+def _prepare_ledger_parent(path: Path) -> None:
+    if _is_default_ledger_path(path) or not path.parent.exists():
+        ensure_private_directory(path.parent)
+    else:
+        # A caller-selected standing-authorization store is an integrity
+        # boundary. Never claim a shared directory by changing its ACL.
+        require_private_directory(path.parent)
+
+
+@contextmanager
+def _locked_ledger(path: Path | None = None) -> Iterator[Path]:
+    resolved = _resolve_ledger_path(path)
+    _prepare_ledger_parent(resolved)
+    with _ledger_lock:
+        with cross_process_lock(resolved, strict=True):
+            yield resolved
+
+
+def _key_path(path: Path) -> Path:
+    return path.with_name(path.name + ".key")
+
+
+def _ledger_key(path: Path, *, create: bool) -> bytes | None:
+    key_path = _key_path(path)
+    if key_path.exists():
+        ensure_private_file(key_path)
+        key = atomic_read_bytes(key_path)
+        if len(key) != 32:
+            raise ConsentLedgerError("consent ledger signing key is malformed")
+        return key
+    if not create:
+        return None
+    if path.exists() and path.stat().st_size:
+        raise ConsentLedgerError(
+            "unsigned or legacy consent ledger cannot authorize actions; "
+            "move it aside and re-authorize standing grants"
+        )
+    key = secrets.token_bytes(32)
+    try:
+        atomic_create_bytes(key_path, key)
+    except FileExistsError:
+        ensure_private_file(key_path)
+        key = atomic_read_bytes(key_path)
+        if len(key) != 32:
+            raise ConsentLedgerError("consent ledger signing key is malformed") from None
+    return key
+
+
+def _canonical_record(record: dict) -> bytes:
+    return json.dumps(
+        record, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def _record_mac(key: bytes, unsigned: dict) -> str:
+    return hmac.new(key, _canonical_record(unsigned), hashlib.sha256).hexdigest()
+
+
+def _load_records_unlocked(path: Path, key: bytes | None) -> list[dict]:
     if not path.exists():
         return []
-    try:
-        return path.read_text().splitlines()
-    except OSError:
+    ensure_private_file(path)
+    size = path.stat().st_size
+    if size > _MAX_LEDGER_BYTES:
+        raise ConsentLedgerError("consent ledger exceeds its bounded size")
+    if size == 0:
         return []
-
-
-def _append_ledger(line: str, path: Path | None = None) -> None:
-    path = _resolve_ledger_path(path)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+    if key is None:
+        raise ConsentLedgerError("consent ledger has no signing key")
+    text = atomic_read_text(path, encoding="utf-8")
+    if not text.endswith("\n"):
+        raise ConsentLedgerError("consent ledger contains a partial record")
+    lines = text.splitlines()
+    if len(lines) > _MAX_LEDGER_RECORDS:
+        raise ConsentLedgerError("consent ledger contains too many records")
+    records: list[dict] = []
+    previous = "0" * 64
+    expected_fields = {
+        "action", "mac", "op", "policy", "prev", "principal", "scope",
+        "seq", "tenant", "ts", "v",
+    }
+    for expected_seq, line in enumerate(lines, start=1):
         try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
-    except OSError as e:
-        log.warning("consent: cannot append to ledger: %s", e)
+            record = json.loads(line)
+        except (json.JSONDecodeError, UnicodeError) as exc:
+            raise ConsentLedgerError("consent ledger contains invalid JSON") from exc
+        if not isinstance(record, dict) or set(record) != expected_fields:
+            raise ConsentLedgerError("consent ledger record shape is invalid")
+        if record["v"] != _LEDGER_VERSION or record["seq"] != expected_seq:
+            raise ConsentLedgerError("consent ledger sequence is invalid")
+        if record["op"] not in {"grant", "revoke"} or record["prev"] != previous:
+            raise ConsentLedgerError("consent ledger chain is invalid")
+        _validate_ledger_field(
+            record["action"], name="action", limit=_MAX_ACTION_CHARS, empty=False,
+        )
+        _validate_ledger_field(
+            record["scope"], name="scope", limit=_MAX_SCOPE_CHARS, empty=True,
+        )
+        if not all(
+            isinstance(record[field], str)
+            and 0 < len(record[field]) <= 256
+            for field in ("tenant", "principal", "policy", "prev", "mac")
+        ):
+            raise ConsentLedgerError("consent ledger authority binding is invalid")
+        if (
+            isinstance(record["ts"], bool)
+            or not isinstance(record["ts"], (int, float))
+            or not math.isfinite(record["ts"])
+            or record["ts"] < 0
+        ):
+            raise ConsentLedgerError("consent ledger timestamp is invalid")
+        unsigned = {name: value for name, value in record.items() if name != "mac"}
+        if not hmac.compare_digest(record["mac"], _record_mac(key, unsigned)):
+            raise ConsentLedgerError("consent ledger signature is invalid")
+        previous = record["mac"]
+        records.append(record)
+    return records
+
+
+def _active_grants(records: list[dict]) -> dict[tuple[str, str], None]:
+    tenant, principal, policy = _authority_binding()
+    active: dict[tuple[str, str], None] = {}
+    for record in records:
+        if (
+            record["tenant"] != tenant
+            or record["principal"] != principal
+            or record["policy"] != policy
+        ):
+            continue
+        key = (record["action"], record["scope"])
+        if record["op"] == "grant":
+            active[key] = None
+        else:
+            active.pop(key, None)
+    return active
+
+
+def _append_record_unlocked(
+    path: Path, key: bytes, records: list[dict], *, op: str,
+    action: str, scope: str,
+) -> None:
+    if len(records) >= _MAX_LEDGER_RECORDS:
+        raise ConsentLedgerError("consent ledger contains too many records")
+    tenant, principal, policy = _authority_binding()
+    unsigned = {
+        "action": action,
+        "op": op,
+        "policy": policy,
+        "prev": records[-1]["mac"] if records else "0" * 64,
+        "principal": principal,
+        "scope": scope,
+        "seq": len(records) + 1,
+        "tenant": tenant,
+        "ts": time.time(),
+        "v": _LEDGER_VERSION,
+    }
+    record = {**unsigned, "mac": _record_mac(key, unsigned)}
+    encoded = _canonical_record(record) + b"\n"
+    current_size = path.stat().st_size if path.exists() else 0
+    if current_size + len(encoded) > _MAX_LEDGER_BYTES:
+        raise ConsentLedgerError("consent ledger exceeds its bounded size")
+    fd = open_private_append(path, require_private_parent=True)
+    try:
+        with os.fdopen(fd, "ab") as stream:
+            fd = -1
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def _check_ledger(action: str, scope: str | None, path: Path | None = None) -> bool:
-    """True if a prior ``grant`` for ``(action, scope)`` is recorded."""
-    key = f"grant\t{action}\t{scope or ''}"
-    # Compare the stored record verbatim. ``_ledger_lines`` already stripped the
-    # line terminator via splitlines(); a blanket .strip() here ate the trailing
-    # TAB of a scope-less grant (``grant\taction\t``), so a scope-less
-    # grant_persistent() never matched and was silently re-prompted forever.
-    return any(line.split("|", 1)[-1] == key for line in _ledger_lines(path))
+    """True only for an intact grant bound to this tenant/principal/policy."""
+    try:
+        key_tuple = _validated_key(action, scope)
+        with _locked_ledger(path) as resolved:
+            key = _ledger_key(resolved, create=False)
+            return key_tuple in _active_grants(_load_records_unlocked(resolved, key))
+    except (ConsentLedgerError, OSError, PermissionError, ValueError) as exc:
+        log.warning("consent: standing grants unavailable: %s", exc)
+        return False
 
 
 def grant_persistent(
@@ -174,40 +426,48 @@ def grant_persistent(
 
     Use sparingly; the more we ledger, the less the prompts matter.
     """
-    ts = time.time()
-    _append_ledger(f"{ts}|grant\t{action}\t{scope or ''}", path)
+    action, normalized_scope = _validated_key(action, scope)
+    with _locked_ledger(path) as resolved:
+        key = _ledger_key(resolved, create=True)
+        assert key is not None
+        records = _load_records_unlocked(resolved, key)
+        if (action, normalized_scope) not in _active_grants(records):
+            _append_record_unlocked(
+                resolved, key, records, op="grant",
+                action=action, scope=normalized_scope,
+            )
 
 
 def revoke(
     action: str, scope: str | None = None, *, path: Path | None = None,
 ) -> bool:
     """Remove all matching grants. Returns True if anything was removed."""
-    path = _resolve_ledger_path(path)
-    lines = _ledger_lines(path)
-    if not lines:
-        return False
-    key = f"grant\t{action}\t{scope or ''}"
-    kept = [line for line in lines if line.split("|", 1)[-1] != key]
-    if len(kept) == len(lines):
-        return False
+    action, normalized_scope = _validated_key(action, scope)
     try:
-        path.write_text("\n".join(kept) + "\n" if kept else "")
-        os.chmod(path, 0o600)
-        return True
-    except OSError as e:
-        log.warning("consent: cannot rewrite ledger: %s", e)
+        with _locked_ledger(path) as resolved:
+            key = _ledger_key(resolved, create=False)
+            records = _load_records_unlocked(resolved, key)
+            if key is None or (action, normalized_scope) not in _active_grants(records):
+                return False
+            _append_record_unlocked(
+                resolved, key, records, op="revoke",
+                action=action, scope=normalized_scope,
+            )
+            return True
+    except (ConsentLedgerError, OSError, PermissionError) as exc:
+        log.warning("consent: cannot revoke standing grant: %s", exc)
         return False
 
 
 def list_grants(*, path: Path | None = None) -> list[tuple[str, str]]:
     """Return [(action, scope), ...] of all current grants."""
-    out: list[tuple[str, str]] = []
-    for line in _ledger_lines(path):
-        body = line.split("|", 1)[-1]
-        parts = body.split("\t")
-        if len(parts) >= 3 and parts[0] == "grant":
-            out.append((parts[1], parts[2]))
-    return out
+    try:
+        with _locked_ledger(path) as resolved:
+            key = _ledger_key(resolved, create=False)
+            return list(_active_grants(_load_records_unlocked(resolved, key)))
+    except (ConsentLedgerError, OSError, PermissionError) as exc:
+        log.warning("consent: cannot list standing grants: %s", exc)
+        return []
 
 
 def require_consent(
@@ -347,7 +607,7 @@ def _decide_via_dashboard(
     the interactive/non-tty path (fail-open per the kernel contract).
     """
     try:
-        from ..world_model import open_world
+        from ..world_model import close_world_if_owned, open_world
         wm = open_world()  # client/tenant-floored: the same DB the dashboard reads
     except Exception as e:  # world model missing/unwritable -> fail-open
         log.warning("consent: dashboard mode unavailable, falling back: %s", e)
@@ -379,6 +639,7 @@ def _decide_via_dashboard(
         )
     except Exception as e:
         log.warning("consent: cannot queue approval, falling back: %s", e)
+        close_world_if_owned(wm)
         return None
 
     # monotonic for the elapsed-time window: a wall-clock jump must not collapse
@@ -389,11 +650,21 @@ def _decide_via_dashboard(
         try:
             row = wm.get_approval(approval_id)
         except Exception:
+            close_world_if_owned(wm)
             return None
         if row is not None and row.status != "pending":
             granted = row.status == "approved"
-            return ConsentDecision(granted, "dashboard", risk, time.time())
+            decision = ConsentDecision(
+                granted,
+                "dashboard",
+                risk,
+                time.time(),
+                actor=str(getattr(row, "decided_by", "") or ""),
+            )
+            close_world_if_owned(wm)
+            return decision
         time.sleep(1.0)
+    close_world_if_owned(wm)
     return None  # timed out: caller falls back
 
 
@@ -429,6 +700,7 @@ def _emit(
             action=action,
             decision="approve" if decision.granted else "deny",
             source=decision.source,
+            decided_by=decision.actor,
         )
     except Exception:  # pragma: no cover -- never crash on audit
         pass
@@ -438,6 +710,7 @@ def _emit(
 __all__ = [
     "ConsentDecision",
     "ConsentDenied",
+    "ConsentLedgerError",
     "require_consent",
     "grant_persistent",
     "revoke",

@@ -174,16 +174,33 @@ def cacheable(tool: Any) -> bool:
     return getattr(tool, "parallel_safe", False) is True
 
 
-def _key(tool_name: str, args: dict[str, Any]) -> str:
+def _key(
+    tool_name: str,
+    args: dict[str, Any],
+    *,
+    namespace: str = "",
+) -> str:
     try:
         canon = json.dumps(args or {}, sort_keys=True, default=str)
     except (TypeError, ValueError):
         canon = repr(args)
     digest = hashlib.sha256(canon.encode("utf-8")).hexdigest()[:24]
-    return f"{tool_name}:{digest}"
+    if not namespace:
+        # Preserve the legacy key form for direct callers in the shared,
+        # unauthenticated namespace and for old warm-cache snapshots.
+        return f"{tool_name}:{digest}"
+    # Hash the scope before persisting it in the optional warm-cache snapshot:
+    # user and tenant identifiers are authorization metadata, not cache data.
+    scope = hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:24]
+    return f"{tool_name}:{scope}:{digest}"
 
 
-def get_cached(tool: Any, args: dict[str, Any]) -> tuple[bool, str | None]:
+def get_cached(
+    tool: Any,
+    args: dict[str, Any],
+    *,
+    namespace: str = "",
+) -> tuple[bool, str | None]:
     """Return ``(hit, value)``. ``(False, None)`` when disabled / not cacheable /
     missing / expired."""
     global _hits, _misses
@@ -192,7 +209,7 @@ def get_cached(tool: Any, args: dict[str, Any]) -> tuple[bool, str | None]:
     if not _warmed:
         warm_on_start()
     name = getattr(tool, "name", "")
-    k = _key(name, args)
+    k = _key(name, args, namespace=namespace)
     ttl = _ttl_s()
     with _lock:
         entry = _store.get(k)
@@ -209,14 +226,20 @@ def get_cached(tool: Any, args: dict[str, Any]) -> tuple[bool, str | None]:
         return (True, value)
 
 
-def store_cached(tool: Any, args: dict[str, Any], value: str) -> None:
+def store_cached(
+    tool: Any,
+    args: dict[str, Any],
+    value: str,
+    *,
+    namespace: str = "",
+) -> None:
     """Memoize a successful, non-error result for a cacheable tool."""
     if not enabled() or not cacheable(tool):
         return
     if not isinstance(value, str) or value.startswith("ERROR:"):
         return
     name = getattr(tool, "name", "")
-    k = _key(name, args)
+    k = _key(name, args, namespace=namespace)
     cap = _maxsize()
     with _lock:
         _store[k] = (value, time.monotonic(), time.time())

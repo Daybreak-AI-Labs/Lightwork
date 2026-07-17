@@ -42,8 +42,8 @@ _SPEND_SCHEMA: dict[str, Any] = {
 
 
 def _world():
-    from ..world_model import WorldModel
-    return WorldModel()
+    from ..world_model import open_world
+    return open_world()
 
 
 def _episodes(limit: int = 200) -> list[dict]:
@@ -53,6 +53,9 @@ def _episodes(limit: int = 200) -> list[dict]:
     except Exception as e:
         log.warning("spend_report: cannot list episodes: %s", e)
         return []
+    finally:
+        from ..world_model import close_world_if_owned
+        close_world_if_owned(w)
 
 
 def _cost(ep) -> float:

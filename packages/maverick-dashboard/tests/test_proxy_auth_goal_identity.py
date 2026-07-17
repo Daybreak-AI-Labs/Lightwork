@@ -66,3 +66,29 @@ def test_chat_goal_creation_passes_proxy_user_to_runner(monkeypatch, tmp_path):
     assert calls
     assert calls[0][1]["channel"] == "dashboard"
     assert calls[0][1]["user_id"] == "bob"
+
+
+def test_proxy_mode_without_require_auth_never_falls_back_to_local_admin(
+    monkeypatch, tmp_path,
+):
+    import maverick_dashboard.auth as auth
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_REQUIRE_AUTH", raising=False)
+    _enable_proxy_identity(monkeypatch)
+    app = _isolated_app(monkeypatch, tmp_path)
+    client = TestClient(app, headers={"Origin": "http://testserver"})
+
+    assert client.get("/api/v1/providers").status_code == 401
+    assert client.get(
+        "/api/v1/providers", headers={"X-Forwarded-User": "alice "}
+    ).status_code == 401
+
+    monkeypatch.setattr(auth, "proxy_trusts", lambda _host: False)
+    assert client.get(
+        "/api/v1/providers", headers={"X-Forwarded-User": "attacker"}
+    ).status_code == 401
+
+    monkeypatch.setattr(auth, "proxy_trusts", lambda _host: True)
+    assert client.get(
+        "/api/v1/providers", headers={"X-Forwarded-User": "alice"}
+    ).status_code == 200

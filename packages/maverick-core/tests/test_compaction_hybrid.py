@@ -6,8 +6,6 @@ ledger, or weights file must always yield a usable strategy, never a raise.
 from __future__ import annotations
 
 import json
-import os
-import stat
 from random import Random
 
 from maverick.compaction.hybrid import (
@@ -25,6 +23,7 @@ from maverick.compaction.hybrid import (
     pick_strategy,
     save_weights,
 )
+from maverick.file_lock import private_path_is_restricted
 
 
 def _window(n=30, *, tool_chars=0, code=False, tools=(), span=0.0):
@@ -113,7 +112,7 @@ def test_ledger_learns_and_persists_0600(tmp_path):
     strategy, reason = picker.pick(msgs)
     assert strategy == "summarize"
     assert "ledger" in reason
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert private_path_is_restricted(path)
 
     # A fresh picker over the same ledger file exploits the same knowledge.
     again = HybridPicker(epsilon=0.0, rng=Random(0), ledger_path=path)
@@ -160,7 +159,8 @@ def test_fit_pure_python_weights_roundtrip(tmp_path):
 
     wpath = tmp_path / "weights.json"
     save_weights(weights, wpath)
-    assert stat.S_IMODE(os.stat(wpath).st_mode) == 0o600
+    assert private_path_is_restricted(wpath)
+    assert private_path_is_restricted(wpath.parent, 0o700)
     assert load_weights(wpath) is not None
 
     # A picker consulting the weights separates the two shapes (epsilon=0).

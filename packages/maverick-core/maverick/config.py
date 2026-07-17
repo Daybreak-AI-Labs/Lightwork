@@ -906,11 +906,13 @@ def get_governed_connectors() -> dict:
 
     Routing a live system-of-record write through a governed Action
     (simulate -> approve -> commit -> lineage) instead of a bare confirm-gated
-    tool call is OFF by default: it changes how enterprise writes are authorized
-    (they hit the approval floor) and records a tamper-evident lineage link, so
-    the operator opts in. ``connectors`` selects which reference REST connectors
-    to register (see :data:`maverick.governed_rest.GOVERNED_REST_FACTORIES`).
-    Env override: ``MAVERICK_GOVERNED_CONNECTORS``.
+    tool call is OFF by default in the standard profile: it changes how writes
+    are authorized and records tamper-evident transaction receipts, so a
+    standard operator opts in. Enterprise mode treats governance as a mandatory
+    runtime floor even when this stored default is false. ``connectors`` selects
+    reference REST connectors to register (see
+    :data:`maverick.governed_rest.GOVERNED_REST_FACTORIES`). Env override:
+    ``MAVERICK_GOVERNED_CONNECTORS`` (standard mode only).
     """
     cfg = load_config().get("governed_connectors", {}) or {}
     raw = cfg.get("connectors", [])
@@ -1095,8 +1097,20 @@ def get_self_harness() -> dict:
         if risk_limited and raw_calibration_age > 0.0
         else (24.0 if risk_limited else raw_calibration_age)
     )
-    raw_eval_budget = _factor(
+    raw_eval_budget_value = cfg.get(
         "eval_budget_dollars", 5.0 if risk_limited else None)
+    eval_budget_valid = True
+    if "eval_budget_dollars" in cfg:
+        eval_budget_valid = (
+            isinstance(raw_eval_budget_value, (int, float))
+            and not isinstance(raw_eval_budget_value, bool)
+            and math.isfinite(float(raw_eval_budget_value))
+        )
+    raw_eval_budget = (
+        float(raw_eval_budget_value)
+        if eval_budget_valid and raw_eval_budget_value is not None
+        else (5.0 if risk_limited else None)
+    )
     if risk_limited:
         eval_budget = (
             min(raw_eval_budget, 5.0)
@@ -1114,7 +1128,10 @@ def get_self_harness() -> dict:
         # `maverick dream` (the nightly learning beat), so the harness operates
         # itself without a second cron entry. A pristine deployment defaults on;
         # an existing partial section retains its historical off default.
-        "auto_run": _strict_config_bool(cfg, "auto_run", pristine_default),
+        "auto_run": (
+            _strict_config_bool(cfg, "auto_run", pristine_default)
+            and eval_budget_valid
+        ),
         "min_support": (
             max(3, _num("min_support", 3, int)) if risk_limited
             else max(1, _num("min_support", 3, int))),
@@ -1235,6 +1252,7 @@ def get_self_harness() -> dict:
         # the historical behavior. An exhausted budget fails the evaluation
         # CLOSED -- candidates are rejected, never promoted on partial scores.
         "eval_budget_dollars": eval_budget,
+        "eval_budget_valid": eval_budget_valid,
     }
 
 
@@ -1288,13 +1306,22 @@ def get_workforce() -> dict:
        high = "human"            # ...but high-risk actions stay human-in-loop
        onboarding = false        # graduated past the supervised phase``
 
-    Returns ``{"levels": bool, "agents": {name: {default, low, medium, high,
-    onboarding}}}`` with only the keys an operator set (the resolver layers them
-    over each pack's declared ``[autonomy]`` default). Never raises.
+    Returns ``{"levels": bool, "data_grounding": bool,
+    "auto_graduate": bool, "agents": {name: {default, low, medium, high,
+    onboarding}}}``. Agent overrides contain only keys an operator set (the
+    resolver layers them over each pack's declared ``[autonomy]`` default).
+    Authority-widening booleans are strict: a present non-boolean value never
+    enables autonomy, connector grants, automatic graduation, or removal of the
+    onboarding clamp. Never raises.
     """
     cfg = load_config().get("workforce", {})
     if not isinstance(cfg, dict):
-        return {"levels": False, "agents": {}}
+        return {
+            "levels": False,
+            "data_grounding": False,
+            "auto_graduate": False,
+            "agents": {},
+        }
     agents: dict[str, dict] = {}
     raw = cfg.get("agents")
     if isinstance(raw, list):
@@ -1304,14 +1331,25 @@ def get_workforce() -> dict:
             name = str(entry.get("name") or "").strip()
             if not name:
                 continue
-            agents[name] = {
+            override = {
                 k: entry[k] for k in ("default", "low", "medium", "high", "onboarding")
                 if k in entry
             }
-    out = {"levels": bool(cfg.get("levels", False)), "agents": agents}
-    if "data_grounding" in cfg:
-        out["data_grounding"] = bool(cfg.get("data_grounding"))
-    return out
+            if "onboarding" in override and not isinstance(
+                override["onboarding"], bool
+            ):
+                # Malformed supervision policy tightens to onboarding. In
+                # particular, ``0`` must not silently graduate an agent.
+                override["onboarding"] = True
+            agents[name] = override
+    return {
+        "levels": _strict_config_bool(cfg, "levels", False),
+        "data_grounding": _strict_config_bool(
+            cfg, "data_grounding", True, invalid=False),
+        "auto_graduate": _strict_config_bool(
+            cfg, "auto_graduate", False, invalid=False),
+        "agents": agents,
+    }
 
 
 def get_calibration() -> dict:
@@ -1623,6 +1661,18 @@ def get_self_improvement() -> dict:
     """
     cfg = load_config().get("self_improvement", {})
 
+    raw_margin = cfg.get("min_improvement", 0.0)
+    margin_valid = (
+        isinstance(raw_margin, (int, float))
+        and not isinstance(raw_margin, bool)
+        and math.isfinite(float(raw_margin))
+        and 0.0 <= float(raw_margin) <= 1.0
+    )
+    # A negative sentinel is intentionally outside the controller's accepted
+    # domain.  A present malformed policy must freeze promotion, never collapse
+    # to the permissive zero-margin default used only when the key is absent.
+    min_improvement = float(raw_margin) if margin_valid else -1.0
+
     def _ratio(key: str, default: float) -> float:
         try:
             return max(0.0, float(cfg.get(key, default)))
@@ -1630,14 +1680,32 @@ def get_self_improvement() -> dict:
             return default
 
     raw_keys = cfg.get("approver_keys")
+    keys_valid = (
+        "approver_keys" not in cfg
+        or (
+            isinstance(raw_keys, list)
+            and all(isinstance(key, str) for key in raw_keys)
+        )
+    )
     approver_keys = (
-        [str(k).strip() for k in raw_keys if str(k).strip()]
-        if isinstance(raw_keys, list) else [])
+        [key.strip() for key in raw_keys if key.strip()]
+        if keys_valid and isinstance(raw_keys, list) else [])
+    raw_keys_dir = cfg.get("approver_keys_dir")
+    keys_dir_valid = (
+        "approver_keys_dir" not in cfg
+        or raw_keys_dir is None
+        or isinstance(raw_keys_dir, str)
+    )
+    require_signed_valid = (
+        "require_signed_approval" not in cfg
+        or isinstance(cfg.get("require_signed_approval"), bool)
+    )
 
     return {
         "enable": _strict_config_bool(
             cfg, "enable", governed_learning_default()),
-        "min_improvement": _ratio("min_improvement", 0.0),
+        "min_improvement": min_improvement,
+        "promotion_policy_valid": margin_valid,
         "max_auto_rung": str(cfg.get("max_auto_rung", "policy")).strip().lower() or "policy",
         # Phase-0 capture fuels the default-on flywheel. Raw-text donation and
         # provider egress remain separate opt-ins.
@@ -1673,7 +1741,13 @@ def get_self_improvement() -> dict:
         # requires a signed approval even before keys are provisioned. Empty
         # (default) keeps the legacy self-settable boolean-approval path.
         "approver_keys": approver_keys,
-        "approver_keys_dir": str(cfg.get("approver_keys_dir") or "") or None,
+        "approver_keys_dir": (
+            raw_keys_dir.strip() or None
+            if isinstance(raw_keys_dir, str) else None
+        ),
+        "approval_policy_valid": (
+            keys_valid and keys_dir_valid and require_signed_valid
+        ),
         "require_signed_approval": _strict_config_bool(
             cfg, "require_signed_approval", False, invalid=True),
     }
@@ -1768,12 +1842,13 @@ def get_adapter_rung() -> dict:
     (real QLoRA via the [training] extra)."""
     cfg = load_config().get("adapter_rung", {})
     return {
-        "enable": bool(cfg.get("enable", False)),
+        "enable": _strict_config_bool(cfg, "enable", False),
         "base_model": (str(cfg.get("base_model", "")).strip() or None),
         "store_dir": (str(cfg.get("store_dir", "")).strip() or None),
         "trainer": (str(cfg.get("trainer", "")).strip() or "stub"),
-        "allow_synthetic": bool(cfg.get("allow_synthetic", False)),
-        "allow_model_output": bool(cfg.get("allow_model_output", False)),
+        "allow_synthetic": _strict_config_bool(cfg, "allow_synthetic", False),
+        "allow_model_output": _strict_config_bool(
+            cfg, "allow_model_output", False),
     }
 
 

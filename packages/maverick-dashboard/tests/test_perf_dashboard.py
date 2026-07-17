@@ -104,6 +104,7 @@ def test_glance_endpoint_shape(client):
 
 def test_glance_endpoint_applies_owner_scope(client, monkeypatch):
     seen = {}
+    closed = []
 
     class _World:
         def list_goals(self, *, owner=None, limit=None):
@@ -115,9 +116,14 @@ def test_glance_endpoint_applies_owner_scope(client, monkeypatch):
             pass
 
     monkeypatch.setattr(api_mod, "goal_owner_filter", lambda request: "user:alice")
-    monkeypatch.setattr(world_model, "open_world", lambda: _World())
+    world = _World()
+    monkeypatch.setattr(world_model, "open_world", lambda: world)
+    monkeypatch.setattr(
+        world_model, "close_world_if_owned", lambda candidate: closed.append(candidate)
+    )
 
     r = client.get("/api/v1/glance")
 
     assert r.status_code == 200, r.text
     assert seen == {"owner": "user:alice", "limit": 10_000}
+    assert closed == [world]

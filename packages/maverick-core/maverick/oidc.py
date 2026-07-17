@@ -46,6 +46,9 @@ from ._envparse import is_truthy
 # config, so a misconfigured `[auth.oidc].algorithms` can never reopen the
 # alg-confusion hole.
 DEFAULT_ALGORITHMS = ["RS256", "ES256"]
+_USER_PRINCIPAL_PREFIX = "user:"
+_MAX_PRINCIPAL_LENGTH = 256
+MAX_SUBJECT_LENGTH = _MAX_PRINCIPAL_LENGTH - len(_USER_PRINCIPAL_PREFIX)
 _ALLOWED_ASYMMETRIC = frozenset(
     {"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512", "EdDSA"}
 )
@@ -56,6 +59,23 @@ class OIDCError(Exception):
     success). Callers MUST treat this as "unauthenticated" — there is no
     code path that both raises this and returns a principal.
     """
+
+
+def validate_subject(value: object) -> str:
+    """Validate and return an exact subject shared by every auth boundary.
+
+    Subjects are opaque after this check. Edge whitespace is rejected rather
+    than normalized so no SSO surface can alias two external identities onto a
+    downstream store that historically strips its keys.
+    """
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= MAX_SUBJECT_LENGTH
+        or not value.isprintable()
+        or value != value.strip()
+    ):
+        raise ValueError("invalid authenticated subject")
+    return value
 
 
 @dataclass(frozen=True)
@@ -74,7 +94,7 @@ class VerifiedPrincipal:
 
     @property
     def principal(self) -> str:
-        return f"user:{self.sub}"
+        return f"{_USER_PRINCIPAL_PREFIX}{self.sub}"
 
 
 @dataclass(frozen=True)
@@ -449,11 +469,16 @@ def verify_oidc_token(
     except Exception as e:  # defensive: never leak a non-OIDCError to callers
         raise OIDCError(f"token verification failed: {e}") from e
 
-    sub = claims.get("sub")
-    if not isinstance(sub, str) or not sub:
-        # `require` already enforces presence, but a non-string/empty sub would
-        # yield a bogus `user:` principal — reject explicitly.
-        raise OIDCError("token 'sub' claim is missing or invalid")
+    try:
+        sub = validate_subject(claims.get("sub"))
+    except ValueError:
+        # ``require`` already enforces presence, but it does not give us a
+        # bounded, log-safe identity domain. Validate the signed value exactly
+        # once at this trust boundary, then preserve it character-for-character
+        # as an opaque subject. Never silently strip/case-fold it: padding is
+        # rejected because downstream identity stores historically normalize
+        # edge whitespace and must not collapse two IdP subjects onto one owner.
+        raise OIDCError("token 'sub' claim is missing or invalid") from None
 
     return VerifiedPrincipal(
         sub=sub,
@@ -468,6 +493,8 @@ __all__ = [
     "OIDCConfig",
     "VerifiedPrincipal",
     "DEFAULT_ALGORITHMS",
+    "MAX_SUBJECT_LENGTH",
+    "validate_subject",
     "oidc_enabled",
     "login_enabled",
     "load_oidc_config",

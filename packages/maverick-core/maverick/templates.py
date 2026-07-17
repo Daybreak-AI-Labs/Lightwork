@@ -75,6 +75,8 @@ class Template:
     sig: str | None = None
     pubkey: str | None = None
     verified: bool = False
+    owner: str = ""
+    generation: int = 0
 
     @classmethod
     def parse(cls, text: str, name: str, path: Path | None = None) -> Template:
@@ -102,6 +104,15 @@ class Template:
                     f"template {name!r}: [{key}] must be a number, got {raw!r}"
                 ) from None
 
+        try:
+            generation = int(meta.get("generation", 0))
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"template {name!r}: [generation] must be an integer"
+            ) from None
+        if generation < 0:
+            raise ValueError(f"template {name!r}: [generation] cannot be negative")
+
         return cls(
             name=name,
             title=str(meta.get("title", name)),
@@ -112,6 +123,8 @@ class Template:
             path=path,
             sig=meta.get("sig") if isinstance(meta.get("sig"), str) else None,
             pubkey=meta.get("pubkey") if isinstance(meta.get("pubkey"), str) else None,
+            owner=meta.get("owner") if isinstance(meta.get("owner"), str) else "",
+            generation=generation,
         )
 
     def render(self, **params: str) -> tuple[str, str]:
@@ -227,6 +240,9 @@ def save_user_template(
     budget_dollars: float = 5.0,
     budget_wall_seconds: float = 3600.0,
     overwrite: bool = True,
+    owner: str | None = None,
+    expected_generation: int | None = None,
+    admin_override: bool = False,
 ) -> Template:
     """Persist a user-authored (or AI-drafted) workflow as a user template.
 
@@ -242,6 +258,20 @@ def save_user_template(
     False.
     """
     _validate_template_name(name)
+    owner = str(owner or "local").strip()
+    if (
+        not owner
+        or len(owner) > 256
+        or any(ord(char) < 32 or ord(char) == 127 for char in owner)
+    ):
+        raise ValueError("template owner must be a bounded printable principal")
+    if expected_generation is not None:
+        try:
+            expected_generation = int(expected_generation)
+        except (TypeError, ValueError):
+            raise ValueError("expected_generation must be an integer") from None
+        if expected_generation < 0:
+            raise ValueError("expected_generation cannot be negative")
     title = " ".join((title or name).split()) or name
     body = (body or "").strip()
     if not body:
@@ -271,11 +301,6 @@ def save_user_template(
     bd = min(max(bd, 0.5), 100.0)
     bw = min(max(bw, 1.0), 86400.0)
 
-    front = [f"title: {title}", f"budget_dollars: {bd}", f"budget_wall_seconds: {bw}"]
-    if clean_params:
-        front.append("params:")
-        front.extend(f"  - {p}" for p in clean_params)
-    content = "---\n" + "\n".join(front) + "\n---\n" + body + "\n"
     dest = user_templates_dir() / f"{name}.md"
     from .file_lock import (
         atomic_write_text,
@@ -290,6 +315,48 @@ def save_user_template(
     with cross_process_lock(dest, strict=True):
         if dest.exists() and not overwrite:
             raise FileExistsError(f"template {name!r} already exists")
+        generation = 1
+        if dest.exists():
+            from .file_lock import atomic_read_text, ensure_private_file
+
+            ensure_private_file(dest)
+            existing = Template.parse(
+                atomic_read_text(dest, encoding="utf-8"), name, path=dest,
+            )
+            if not admin_override:
+                if existing.owner and existing.owner != owner:
+                    raise PermissionError(
+                        f"template {name!r} is owned by another principal"
+                    )
+                if not existing.owner and owner != "local":
+                    raise PermissionError(
+                        f"legacy template {name!r} requires an administrator migration"
+                    )
+            if (
+                expected_generation is not None
+                and existing.generation != expected_generation
+            ):
+                raise FileExistsError(
+                    f"template {name!r} changed since generation "
+                    f"{expected_generation}; current generation is {existing.generation}"
+                )
+            generation = existing.generation + 1
+        elif expected_generation not in (None, 0):
+            raise FileExistsError(
+                f"template {name!r} does not exist at generation "
+                f"{expected_generation}"
+            )
+        front = [
+            f"title: {title}",
+            f"budget_dollars: {bd}",
+            f"budget_wall_seconds: {bw}",
+            f"owner: {owner}",
+            f"generation: {generation}",
+        ]
+        if clean_params:
+            front.append("params:")
+            front.extend(f"  - {p}" for p in clean_params)
+        content = "---\n" + "\n".join(front) + "\n---\n" + body + "\n"
         atomic_write_text(dest, content)
     return Template.parse(content, name, path=dest)
 

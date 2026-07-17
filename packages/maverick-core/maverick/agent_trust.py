@@ -62,8 +62,6 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ._envparse import is_truthy
-
 if TYPE_CHECKING:  # import only for type-checkers/IDEs; never at runtime
     from .capability import Capability
 
@@ -102,10 +100,6 @@ class AgentTrustError(ValueError):
 
 def valid_agent_id(agent_id: object) -> bool:
     return isinstance(agent_id, str) and bool(_ID_RE.fullmatch(agent_id))
-
-
-def _truthy(value: object) -> bool:
-    return is_truthy(str(value))
 
 
 def _risk(value: object) -> str | None:
@@ -337,20 +331,39 @@ def agent_trust_enforced(cfg: dict | None = None) -> bool:
     """
     env = os.environ.get("MAVERICK_AGENT_TRUST")
     if env is not None and env.strip() != "":
-        return _truthy(env)
+        normalized = env.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        raise AgentTrustError(
+            "MAVERICK_AGENT_TRUST must be a recognized boolean"
+        )
     try:
         from .enterprise import enterprise_enabled
         if enterprise_enabled():
             return True
-    except Exception:  # pragma: no cover - enterprise read never blocks
-        pass
-    try:
-        if cfg is None:
-            from .config import load_config
-            cfg = load_config() or {}
-        return _truthy((cfg.get("agent_trust") or {}).get("enforce"))
-    except Exception:
+    except Exception as exc:
+        raise AgentTrustError("enterprise trust policy is unavailable") from exc
+    if cfg is None:
+        from .config import config_source_errors, load_config
+
+        cfg = load_config() or {}
+        if config_source_errors():
+            raise AgentTrustError("agent trust config source is unreadable")
+    if not isinstance(cfg, dict):
+        raise AgentTrustError("agent trust config root must be a table")
+    trust_cfg = cfg.get("agent_trust")
+    if trust_cfg is None:
         return False
+    if not isinstance(trust_cfg, dict):
+        raise AgentTrustError("agent_trust config section must be a table")
+    if "enforce" not in trust_cfg:
+        return False
+    enforce = trust_cfg.get("enforce")
+    if not isinstance(enforce, bool):
+        raise AgentTrustError("agent_trust.enforce must be a boolean")
+    return enforce
 
 
 def load_trust_state() -> tuple[bool, dict[str, TrustedAgent]]:
@@ -711,13 +724,19 @@ def agent_for_token(
         return None
     reg = load_registry() if registry is None else registry
     matched: TrustedAgent | None = None
+    active_matches = 0
     for agent in reg.values():
         configured = getattr(agent, attr, "")
         if configured and hmac.compare_digest(configured.encode(), presented):
             active, _ = agent.is_active()
             if active and agent.permits_inbound():
-                matched = matched or agent
-    return matched
+                active_matches += 1
+                matched = agent
+    # A bearer is an identity, not merely a shared secret.  If two active
+    # inbound principals carry the same surface token there is no unambiguous
+    # authenticated caller, so reject it instead of silently picking whichever
+    # registry entry happened to be iterated first.
+    return matched if active_matches == 1 else None
 
 
 def agent_for_a2a_token(

@@ -3,10 +3,16 @@ dying in a folder, and the follow-up cycle re-opens it."""
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+from threading import Barrier
 
 import pytest
 from maverick.assessment import (
+    AssessmentConflict,
     AssessmentSession,
+    AssessmentStateError,
     add_followups,
     answer_followup,
     decide_assessment,
@@ -83,3 +89,189 @@ def test_unknown_id_and_bad_decision():
         decide_assessment(s.id, "maybe")
     # The failed decision left no partial write behind.
     assert load_saved(s.id).get("status", "pending_review") == "pending_review"
+
+
+def test_cannot_approve_unanswered_required_followups():
+    s = _saved()
+    pending = add_followups(s.id, ["Provide the countersigned DPA."], asked_by="dpo")
+    with pytest.raises(AssessmentStateError, match="unanswered follow-ups"):
+        decide_assessment(
+            s.id, "approved", decided_by="dpo",
+            expected_revision=pending["revision"],
+        )
+    unchanged = load_saved(s.id)
+    assert unchanged["revision"] == pending["revision"]
+    assert unchanged["status"] == "needs_more"
+
+
+def test_concurrent_decisions_have_one_cas_winner():
+    s = _saved()
+    revision = load_saved(s.id)["revision"]
+    barrier = Barrier(2)
+
+    def decide(value: str):
+        barrier.wait()
+        try:
+            return decide_assessment(
+                s.id, value, decided_by=f"user:{value}",
+                expected_revision=revision,
+            )
+        except AssessmentConflict as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(decide, ["approved", "rejected"]))
+    assert sum(isinstance(value, AssessmentConflict) for value in outcomes) == 1
+    assert sum(isinstance(value, dict) for value in outcomes) == 1
+    saved = load_saved(s.id)
+    assert saved["revision"] == revision + 1
+    assert saved["status"] in {"approved", "rejected"}
+
+
+def test_unknown_followup_answer_is_a_true_noop():
+    s = _saved()
+    pending = add_followups(s.id, ["Question?"], asked_by="dpo")
+    before = load_saved(s.id)
+    assert answer_followup(
+        s.id, "does-not-exist", "answer", answered_by="respondent",
+        expected_revision=pending["revision"],
+    ) is None
+    after = load_saved(s.id)
+    assert after == before
+
+
+def test_unknown_followup_is_noop_even_if_status_is_inconsistent():
+    import maverick.assessment as assessment
+
+    s = _saved()
+    pending = add_followups(s.id, ["Question?"], asked_by="dpo")
+    followup_id = pending["followups"][0]["id"]
+    answered = answer_followup(
+        s.id,
+        followup_id,
+        "Answered",
+        answered_by="respondent",
+        expected_revision=pending["revision"],
+    )
+    assessment._rewrite_saved(
+        s.id,
+        lambda record: record.update(status="needs_more"),
+        expected_revision=answered["revision"],
+    )
+    before = load_saved(s.id)
+
+    assert answer_followup(
+        s.id,
+        "does-not-exist",
+        "answer",
+        answered_by="respondent",
+        expected_revision=before["revision"],
+    ) is None
+    assert load_saved(s.id) == before
+
+
+@pytest.mark.parametrize("revision", [False, "1", 1.5, -1])
+def test_persisted_assessment_rejects_non_monotonic_revision(revision):
+    import maverick.assessment as assessment
+
+    session = _saved()
+    path = assessment._assessment_path(session.id)
+    record = assessment._load_saved_raw(session.id)
+    record["revision"] = revision
+    assessment._write_saved_path_unlocked(path, record)
+    corrupt_bytes = path.read_bytes()
+
+    with pytest.raises(AssessmentStateError, match="revision is invalid"):
+        load_saved(session.id)
+    with pytest.raises(AssessmentStateError, match="revision is invalid"):
+        decide_assessment(
+            session.id,
+            "rejected",
+            expected_revision=1,
+        )
+    assert path.read_bytes() == corrupt_bytes
+
+
+@pytest.mark.parametrize("outbox", [False, 0, "", {}])
+def test_persisted_assessment_rejects_falsey_wrong_shaped_audit_outbox(outbox):
+    import maverick.assessment as assessment
+
+    session = _saved()
+    path = assessment._assessment_path(session.id)
+    record = assessment._load_saved_raw(session.id)
+    record["_audit_pending"] = outbox
+    assessment._write_saved_path_unlocked(path, record)
+
+    with pytest.raises(AssessmentStateError, match="audit outbox is invalid"):
+        load_saved(session.id)
+
+
+def test_failed_decision_audit_retries_on_exact_read(monkeypatch):
+    import maverick.assessment as assessment
+
+    s = _saved()
+    attempts = 0
+
+    def fail_once(_receipt):
+        nonlocal attempts
+        attempts += 1
+        return attempts > 1
+
+    monkeypatch.setattr(assessment, "_deliver_audit", fail_once)
+    decide_assessment(
+        s.id, "approved", decided_by="user:dpo",
+        expected_revision=load_saved(s.id)["revision"],
+    )
+    assert assessment._load_saved_raw(s.id)["_audit_pending"]
+    assert load_saved(s.id)["status"] == "approved"
+    assert assessment._load_saved_raw(s.id)["_audit_pending"] == []
+    assert attempts == 2
+
+
+def test_demo_seeder_rewrite_compatibility_keeps_revision(monkeypatch):
+    s = _saved()
+    before = load_saved(s.id)
+    script = (Path(__file__).parents[3] / "demo" / "pia-concierge"
+              / "seed_workspace.py")
+    spec = spec_from_file_location("pia_seed_workspace_test", script)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "NOW", time.time() - 10)
+    module._backdate_assessment(s.id, created_days_ago=30)
+    after = load_saved(s.id)
+    assert after["created_at"] < before["created_at"]
+    assert after["revision"] == before["revision"] + 1
+
+
+def test_full_assessment_audit_outbox_blocks_then_read_recovery(monkeypatch):
+    import maverick.assessment as assessment
+
+    s = _saved()
+    raw = assessment._load_saved_raw(s.id)
+    raw["_audit_pending"] = [
+        {
+            "event_id": f"event-{i}", "kind": "ASSESSMENT_TEST",
+            "actor": "user:dpo", "payload": {}, "created_at": 1.0,
+        }
+        for i in range(assessment._AUDIT_OUTBOX_LIMIT)
+    ]
+    path = assessment._assessment_path(s.id)
+    assessment._write_saved_path_unlocked(path, raw)
+    before = path.read_bytes()
+    monkeypatch.setattr(assessment, "_deliver_audit", lambda _receipt: False)
+    with pytest.raises(assessment.AssessmentAuditBackpressure):
+        decide_assessment(
+            s.id, "rejected", decided_by="user:dpo",
+            expected_revision=raw["revision"],
+        )
+    assert path.read_bytes() == before
+
+    monkeypatch.setattr(assessment, "_deliver_audit", lambda _receipt: True)
+    assert load_saved(s.id)["revision"] == raw["revision"]
+    assert assessment._load_saved_raw(s.id)["_audit_pending"] == []
+    recovered = decide_assessment(
+        s.id, "rejected", decided_by="user:dpo",
+        expected_revision=raw["revision"],
+    )
+    assert recovered["revision"] == raw["revision"] + 1

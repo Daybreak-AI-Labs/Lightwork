@@ -5,7 +5,7 @@ Importing here changes no behavior: these are pure data schemas.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class WorkflowStepIn(BaseModel):
@@ -371,19 +371,41 @@ class ConnectionIn(BaseModel):
     connector: str = Field("", max_length=64)
     base_url: str = Field("", max_length=2048)
     token: str = Field("", max_length=8192)
+    # Credential use is separate from credential management. Owner is the
+    # least-privilege default; tenant sharing must be explicit, and named grants
+    # can admit selected principals without exposing the token itself.
+    access: str = Field("owner", pattern="^(owner|tenant)$")
+    allowed_principals: list[str] = Field(default_factory=list, max_length=100)
 
 
 class FlowSaveIn(BaseModel):
-    """A flow definition (a graph of typed nodes) to create or replace."""
+    """A draft flow definition (a graph of typed nodes) to create or replace."""
     flow: dict
 
 
-class FlowRunIn(BaseModel):
-    """Start a flow run with optional initial data (the trigger payload).
+class FlowDryRunIn(BaseModel):
+    """Safely execute the submitted unsaved draft with mock runners.
 
-    ``dry_run`` exercises the graph with MOCK executors -- no real goal, no real
-    connector call, and no grounded outcome recorded -- so a flow can be tested
-    with sample input before it's wired to a live trigger."""
+    The graph is part of the request on purpose: a dry run must exercise what is
+    currently on the canvas, not save it and then rediscover it from mutable
+    definition state.
+    """
+    flow: dict
+    data: dict = Field(default_factory=dict)
+
+
+class FlowPublishIn(BaseModel):
+    """Activate the exact draft revision the operator reviewed."""
+    version: int = Field(..., ge=1)
+    revision: str = Field(..., min_length=1, max_length=128)
+
+
+class FlowRunIn(BaseModel):
+    """Start a real run of the exact published release with optional initial data.
+
+    ``dry_run`` is retained only for compatibility and is rejected by this
+    route. Safe tests submit the unsaved graph itself to ``/flows/dry-run`` so
+    testing cannot accidentally save or activate canvas state."""
     data: dict = Field(default_factory=dict)
     dry_run: bool = False
     # Optional caller-supplied dedup key: a repeat POST with the same key returns
@@ -398,8 +420,9 @@ class FlowResumeIn(BaseModel):
     verdict may be one of the node's declared ``choices`` (the runner validates
     against them; an unlisted verdict pauses again). A paused_event run ignores
     the decision -- the event's ``inputs`` are the point."""
-    decision: str = Field(default="approved", max_length=40,
-                          pattern=r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$")
+    # Empty remains representable for non-approval pauses, but approval routes
+    # reject it explicitly.  Never turn a missing request field into consent.
+    decision: str = Field(default="", max_length=40)
     inputs: dict = Field(default_factory=dict)
 
 
@@ -424,11 +447,15 @@ class FlowChatIn(BaseModel):
 class FlowApplyIn(BaseModel):
     """Apply a self-rewrite proposal: swap one node between agent and action.
 
-    Hardening to an action needs ``tool``; softening to an agent needs ``brief``
-    (else the node's existing brief/label is used). Produces a new flow version."""
+    Hardening to an action needs ``tool`` and an explicit reviewed ``params``
+    binding (including ``{}`` for a genuinely no-argument action); softening to
+    an agent needs ``brief`` (else the existing brief/label is used)."""
     node_id: str = Field(..., min_length=1, max_length=120)
     to_kind: str = Field(..., pattern="^(agent|action)$")
     tool: str = Field(default="", max_length=120)
+    # ``None`` means no binding evidence was supplied. An explicit ``{}`` is a
+    # reviewed no-argument binding and remains distinguishable from omission.
+    params: dict | None = None
     brief: str = Field(default="", max_length=4000)
     version: int | None = Field(default=None, ge=1)
     revision: str = Field(default="", max_length=128)
@@ -562,6 +589,7 @@ class WorkflowSaveIn(BaseModel):
     budget_dollars: float = Field(5.0, ge=0.0, le=100.0)
     budget_wall_seconds: float = Field(3600.0, ge=1.0, le=86400.0)
     overwrite: bool = False
+    expected_generation: int | None = Field(None, ge=0)
 
 
 class TenantCreateIn(BaseModel):
@@ -626,6 +654,7 @@ class RopaIn(BaseModel):
     """Create or update one Art. 30(1) record of processing activity. Only
     fields present are changed on update."""
     ropa_id: str = Field("", max_length=64)
+    revision: int | None = Field(None, ge=1)
     activity: str | None = Field(None, max_length=2000)
     purpose: str | None = Field(None, max_length=2000)
     controller: str | None = Field(None, max_length=2000)
@@ -635,6 +664,12 @@ class RopaIn(BaseModel):
     transfers: str | None = Field(None, max_length=2000)
     retention: str | None = Field(None, max_length=2000)
     security_measures: str | None = Field(None, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_update_revision(self):
+        if self.ropa_id and self.revision is None:
+            raise ValueError("revision is required when ropa_id is provided")
+        return self
     assessment_id: str = Field("", max_length=64)
 
 
@@ -693,6 +728,7 @@ class FollowupsIn(BaseModel):
     """Reviewer follow-up questions to send back to an assessment's
     respondent (the pop-out's 'needs more detail' path)."""
     questions: list[str] = Field(..., min_length=1, max_length=20)
+    expected_revision: int = Field(..., ge=0)
 
 
 class TemplateQuestionIn(BaseModel):
@@ -706,14 +742,20 @@ class TemplateQuestionIn(BaseModel):
 
 
 class TemplateIn(BaseModel):
-    """Author or edit an assessment questionnaire. Saving under a built-in
-    type overrides it (deleting the override restores the built-in)."""
+    """Publish an immutable assessment-questionnaire release.
+
+    The revision+digest pair binds the admin's write to the exact release they
+    reviewed and prevents stale/ABA publication.
+    """
     title: str = Field(..., min_length=1, max_length=120)
     framework: str = Field(..., min_length=1, max_length=200)
     department: str = Field("privacy", pattern="^(privacy|finance)$")
     description: str = Field("", max_length=500)
     questions: list[TemplateQuestionIn] = Field(..., min_length=1,
                                                 max_length=60)
+    expected_revision: int = Field(..., ge=0)
+    expected_digest: str = Field(..., max_length=64,
+                                 pattern="^([0-9a-f]{64})?$")
 
 
 class AssessmentDecideIn(BaseModel):
@@ -723,6 +765,7 @@ class AssessmentDecideIn(BaseModel):
     decision: str = Field(..., pattern="^(approved|rejected)$")
     cadence_days: int | None = Field(default=365, ge=0, le=3650)
     note: str = Field("", max_length=4000)
+    expected_revision: int = Field(..., ge=0)
 
 
 class DocDiscoverIn(BaseModel):

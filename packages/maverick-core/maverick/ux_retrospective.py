@@ -121,10 +121,13 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     p = argparse.ArgumentParser(prog="maverick.ux_retrospective")
     p.add_argument("--since-days", type=float, default=365.0)
     args = p.parse_args(argv)
-    from .world_model import open_world
+    from .world_model import close_world_if_owned, open_world
     world = open_world()
-    end = time.time()
-    print(render(collect(world, end - args.since_days * 86400.0, end)))
+    try:
+        end = time.time()
+        print(render(collect(world, end - args.since_days * 86400.0, end)))
+    finally:
+        close_world_if_owned(world)
     return 0
 
 

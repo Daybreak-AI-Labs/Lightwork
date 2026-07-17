@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+from .file_lock import atomic_read_text, atomic_write_text, ensure_private_file
 
 log = logging.getLogger(__name__)
 
@@ -100,8 +101,11 @@ class GuardrailRegistry:
 
     def _load(self) -> None:
         try:
-            raw = json.loads(Path(self.path).read_text(encoding="utf-8"))
+            path = ensure_private_file(Path(self.path))
+            raw = json.loads(atomic_read_text(path))
         except (OSError, ValueError):
+            return
+        if not isinstance(raw, list):
             return
         for d in (raw or []):
             try:
@@ -115,16 +119,12 @@ class GuardrailRegistry:
         if self.path is None:
             return
         try:
-            p = Path(self.path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(".tmp")
-            tmp.write_text(json.dumps([g.to_dict() for g in self._rails.values()],
-                                      sort_keys=True), encoding="utf-8")
-            os.replace(tmp, p)
-            try:
-                os.chmod(p, 0o600)
-            except OSError:
-                pass
+            atomic_write_text(
+                Path(self.path),
+                json.dumps(
+                    [g.to_dict() for g in self._rails.values()], sort_keys=True,
+                ),
+            )
         except Exception:  # pragma: no cover -- persistence is best-effort
             log.debug("guardrail registry save failed", exc_info=True)
 
@@ -134,12 +134,16 @@ _shared_lock = threading.Lock()
 
 
 def shared() -> GuardrailRegistry:
+    from .file_lock import ensure_private_directory
     from .paths import data_dir
 
     path = data_dir("guardrails.json")
     with _shared_lock:
         reg = _shared.get(path)
         if reg is None:
+            # The default data root is Lightwork-owned.  Explicit registry
+            # paths retain their caller-managed parent ACL.
+            ensure_private_directory(path.parent)
             reg = GuardrailRegistry(path=path)
             _shared[path] = reg
         return reg

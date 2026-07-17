@@ -60,6 +60,8 @@ def test_harden_proposal_carries_the_inferred_tool(tmp_path, monkeypatch):
     p = props[0]
     assert p.from_kind == NODE_AGENT and p.to_kind == NODE_ACTION
     assert p.inferred_tool == "summarize_tool"
+    assert p.applicable is False
+    assert "parameters" in p.blocking_reason
     assert "summarize_tool" in p.reason
 
 
@@ -76,7 +78,9 @@ def test_harden_proposal_without_capture_has_no_inferred_tool(tmp_path, monkeypa
 def test_apply_harden_with_inferred_tool_produces_the_action(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
-    changed = evolve.apply_proposal(_agent_flow(), "a", NODE_ACTION, tool="summarize_tool")
+    changed = evolve.apply_proposal(
+        _agent_flow(), "a", NODE_ACTION, tool="summarize_tool", params={},
+    )
     n = changed.nodes["a"]
     assert n.kind == NODE_ACTION and n.tool == "summarize_tool" and n.brief == ""
 
@@ -96,7 +100,7 @@ def test_driver_publishes_the_active_node_to_the_runner(tmp_path, monkeypatch):
         return ("ok", 1.0)
     execution.execute(_agent_flow(), agent_runner=runner,
                       action_runner=lambda t, p, d: ("", None))
-    assert seen["node"] == ("f", "a", "")             # flow, node, definition generation
+    assert seen["node"] == ("f", "a", "", "")
 
 
 def test_tool_capture_records_only_on_success_not_per_retry(tmp_path, monkeypatch):
@@ -117,7 +121,7 @@ def test_tool_capture_records_only_on_success_not_per_retry(tmp_path, monkeypatc
         return "ok"
     monkeypatch.setattr("maverick.runner.run_goal_in_thread", succeed)
     run = execution.default_agent_runner(w)
-    token = execution._active_node.set(("f", "a", ""))
+    token = execution._active_node.set(("f", "a", "", ""))
     try:
         run("brief", {})                              # two successful runs -> two rows
         run("brief", {})

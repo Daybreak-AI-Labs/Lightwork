@@ -18,12 +18,53 @@ import base64
 import fnmatch
 import json
 import os
+import re
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from . import Tool, as_bool
 
 _WRITE_OPS = {"post", "put", "patch", "delete"}
+_GQL_MUTATION_TOKEN = re.compile(r"(?<![A-Za-z0-9_])mutation(?![A-Za-z0-9_])")
+_ENV_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}\Z")
+
+
+class _ConnectorConfigError(RuntimeError):
+    """A configuration failure whose public detail is safe to return.
+
+    Arbitrary ``RuntimeError`` text at the connector boundary may contain an
+    active credential reflected by an HTTP client or provider.  This narrower
+    type carries only validated environment-variable identifiers or one of the
+    fixed policy explanations below, so operators keep actionable remediation
+    without reopening that value-disclosure path.
+    """
+
+    def __init__(self, *env_names: str, reason: str = "missing"):
+        if reason == "scoped_connection":
+            message = (
+                "connector requires a principal-authorized saved connection in "
+                "authenticated enterprise execution; ambient environment "
+                "credentials are not permitted"
+            )
+        elif reason == "ambient_extra_header":
+            message = (
+                "ambient extra-header credentials are unavailable in "
+                "authenticated enterprise execution"
+            )
+        elif (
+            reason == "missing"
+            and env_names
+            and len(env_names) <= 4
+            and all(
+                isinstance(name, str) and _ENV_IDENTIFIER.fullmatch(name)
+                for name in env_names
+            )
+        ):
+            message = f"connector requires {' + '.join(env_names)}"
+        else:
+            # Never reflect an invalid/developer-controlled identifier.
+            message = "connector configuration is incomplete"
+        super().__init__(message)
 
 
 def _capability_egress_denial(url: str, args: dict[str, Any], *, name: str) -> str | None:
@@ -46,9 +87,11 @@ def _capability_egress_denial(url: str, args: dict[str, Any], *, name: str) -> s
 
 
 def _connection_fallback(name: str) -> tuple[str, str] | None:
-    """A dashboard-created named connection credentialing ``name``, used only
-    when the env vars are unset (purely additive -- env always wins). Best-effort
-    and gated: returns None unless the connections feature is on and one exists."""
+    """An authorized dashboard-created credential for ``name``, if present.
+
+    Standard/local calls use this as an env fallback. Authenticated enterprise
+    calls require it and never borrow ambient process credentials.
+    """
     try:
         from maverick import connections
         return connections.resolve(name)
@@ -56,26 +99,60 @@ def _connection_fallback(name: str) -> tuple[str, str] | None:
         return None
 
 
-def _env_config(name: str, base_url_env: str, token_env: str) -> tuple[str, str]:
-    """Resolve (base_url, token) from env or raise a loud, consistent error.
-    Shared by the REST and GraphQL factories so they can't drift. Falls back to
-    a sealed named connection when the env vars aren't set."""
-    base = os.environ.get(base_url_env, "").strip().rstrip("/")
+def _requires_scoped_connection() -> bool:
+    """Whether ambient process credentials are forbidden for this request."""
+    try:
+        from maverick import connections
+        from maverick.enterprise import enterprise_enabled
+
+        return bool(enterprise_enabled() and connections.current_principal())
+    except Exception:  # pragma: no cover -- policy lookup fails closed elsewhere
+        return False
+
+
+def _credential_config(
+    name: str,
+    base_url_env: str,
+    token_env: str,
+    *,
+    default_base_url: str = "",
+) -> tuple[str, str]:
+    """Resolve a credential without crossing principal authorization scopes.
+
+    Standard/operator execution retains the legacy per-field env precedence.
+    Authenticated enterprise execution may use only a saved connection that
+    admits the current principal; operator-global env credentials are ambient
+    authority and therefore unavailable to tenant users and agents.
+    """
+    conn = _connection_fallback(name)
+    if _requires_scoped_connection():
+        base = (str(conn[0]).strip().rstrip("/") if conn else "") or default_base_url
+        tok = str(conn[1]).strip() if conn else ""
+        if not base or not tok:
+            raise _ConnectorConfigError(reason="scoped_connection")
+        return base, tok
+
+    base = (
+        os.environ.get(base_url_env, "").strip().rstrip("/")
+        or default_base_url
+    )
     tok = os.environ.get(token_env, "").strip()
+    if (not base or not tok) and conn:
+        base = base or str(conn[0]).rstrip("/")
+        tok = tok or conn[1]
     if not base or not tok:
-        conn = _connection_fallback(name)
-        if conn:
-            # PER-FIELD precedence: a set env var always wins; the connection
-            # only fills a field the env left unset. So a sandbox base_url in
-            # env is never silently swapped for the connection's production URL
-            # just because the token env happens to be unset.
-            base = base or str(conn[0]).rstrip("/")
-            tok = tok or conn[1]
-    if not base or not tok:
-        raise RuntimeError(
-            f"{name} requires {base_url_env} + {token_env} "
-            f"(or a saved '{name}' connection).")
+        missing = tuple(
+            env_name
+            for value, env_name in ((base, base_url_env), (tok, token_env))
+            if not value
+        )
+        raise _ConnectorConfigError(*missing)
     return base, tok
+
+
+def _env_config(name: str, base_url_env: str, token_env: str) -> tuple[str, str]:
+    """Resolve ``(base_url, token)`` under the active credential policy."""
+    return _credential_config(name, base_url_env, token_env)
 
 
 def _build_auth_headers(
@@ -94,6 +171,8 @@ def _build_auth_headers(
     for hdr, env_name in (extra_headers_env or {}).items():
         val = os.environ.get(env_name, "").strip()
         if val:
+            if _requires_scoped_connection():
+                raise _ConnectorConfigError(reason="ambient_extra_header")
             h[hdr] = val
     return h
 
@@ -195,19 +274,24 @@ def _rest_execute(
             with safe_client(url, timeout=30.0) as client:
                 r = client.request(op.upper(), url, headers=headers(tok),
                                    params=params or None, json=body)
-        except BlockedHost as e:
-            return f"ERROR: blocked host (SSRF guard): {e}"
+        except BlockedHost:
+            return "ERROR: blocked host (SSRF guard)"
         try:
             data = r.json()
         except ValueError:
-            data = (r.text or "")[:1500]
+            data = r.text or ""
         if r.status_code >= 400:
-            return f"ERROR: {op} ({r.status_code}): {data}"
+            # Never echo a credentialed upstream failure body: providers often
+            # reflect headers/query params, and arbitrary active tokens cannot
+            # be recognized reliably by a pattern-only secret detector.
+            return f"ERROR: {op} ({r.status_code}): upstream request failed"
         return json.dumps(data, default=str)[:4000]
-    except RuntimeError as e:
+    except _ConnectorConfigError as e:
         return f"ERROR: {e}"
+    except RuntimeError:
+        return "ERROR: connector configuration or request failed (RuntimeError)"
     except Exception as e:  # noqa: BLE001
-        return f"ERROR: {name} request failed: {type(e).__name__}: {e}"
+        return f"ERROR: {name} request failed ({type(e).__name__[:120]})"
 
 
 def make_rest_tool(
@@ -262,18 +346,16 @@ def make_rest_tool(
     """
 
     def _config() -> tuple[str, str]:
-        if not (keyless or query_auth or default_base_url):
-            return _env_config(name, base_url_env, token_env)
+        if not keyless:
+            return _credential_config(
+                name, base_url_env, token_env,
+                default_base_url=default_base_url or "",
+            )
         base = (os.environ.get(base_url_env, "").strip().rstrip("/")
                 or (default_base_url or ""))
         if not base:
-            raise RuntimeError(f"{name} requires {base_url_env}.")
-        if keyless:
-            return base, ""
-        tok = os.environ.get(token_env, "").strip()
-        if not tok:
-            raise RuntimeError(f"{name} requires {token_env}.")
-        return base, tok
+            raise _ConnectorConfigError(base_url_env)
+        return base, ""
 
     def _headers(tok: str) -> dict[str, str]:
         if keyless or query_auth:
@@ -346,7 +428,10 @@ def _is_gql_name_char(ch: str) -> bool:
 def _skip_gql_ignored(text: str, pos: int) -> int:
     while pos < len(text):
         ch = text[pos]
-        if ch.isspace() or ch == ",":
+        # GraphQL permits a leading UTF-8 BOM as ignored input. Python's
+        # ``isspace`` does not include U+FEFF, so handle it explicitly or a
+        # BOM-prefixed mutation is misclassified as a read.
+        if ch.isspace() or ch in {",", "\ufeff"}:
             pos += 1
             continue
         if ch == "#":
@@ -370,8 +455,23 @@ def _gql_word_at(text: str, pos: int, word: str) -> bool:
 
 def _skip_gql_string(text: str, pos: int) -> int:
     if text.startswith('"""', pos):
-        end = text.find('"""', pos + 3)
-        return len(text) if end == -1 else end + 3
+        search = pos + 3
+        while True:
+            end = text.find('"""', search)
+            if end == -1:
+                return len(text)
+            # GraphQL block strings spell an embedded triple quote as \""".
+            # Only an even number of immediately preceding backslashes closes
+            # the block. A naive find stops early and can hide a later mutation
+            # inside what governance incorrectly thinks is ignored syntax.
+            slashes = 0
+            cursor = end - 1
+            while cursor >= pos and text[cursor] == "\\":
+                slashes += 1
+                cursor -= 1
+            if slashes % 2 == 0:
+                return end + 3
+            search = end + 3
 
     pos += 1
     while pos < len(text):
@@ -432,6 +532,13 @@ def _skip_gql_definition(text: str, pos: int) -> int:
 
 def _graphql_has_mutation(text: str) -> bool:
     """Return whether a GraphQL document contains a mutation operation."""
+    # Security floor: GraphQL's operation keyword is a literal name token and
+    # cannot be escaped. Conservatively flag it anywhere, even in a comment or
+    # string (a harmless false positive), so parser edge cases can never turn a
+    # real mutation into a read. The structural walk below preserves existing
+    # behavior for ordinary documents and remains defense in depth.
+    if _GQL_MUTATION_TOKEN.search(text):
+        return True
     pos = 0
     while True:
         pos = _skip_gql_ignored(text, pos)
@@ -512,19 +619,21 @@ def make_graphql_tool(
                 with safe_client(base, timeout=30.0) as client:
                     r = client.post(base, headers=headers,
                                     json={"query": q, "variables": variables})
-            except BlockedHost as e:
-                return f"ERROR: blocked host (SSRF guard): {e}"
+            except BlockedHost:
+                return "ERROR: blocked host (SSRF guard)"
             try:
                 data = r.json()
             except ValueError:
-                return f"ERROR: graphql ({r.status_code}): {(r.text or '')[:500]}"
+                return f"ERROR: graphql ({r.status_code}): invalid upstream response"
             if r.status_code >= 400 or (isinstance(data, dict) and data.get("errors")):
-                return f"ERROR: graphql ({r.status_code}): {data.get('errors', data)}"
+                return f"ERROR: graphql ({r.status_code}): upstream request failed"
             return json.dumps(data.get("data", data), default=str)[:4000]
-        except RuntimeError as e:
+        except _ConnectorConfigError as e:
             return f"ERROR: {e}"
+        except RuntimeError:
+            return "ERROR: connector configuration or request failed (RuntimeError)"
         except Exception as e:  # noqa: BLE001
-            return f"ERROR: {name} request failed: {type(e).__name__}: {e}"
+            return f"ERROR: {name} request failed ({type(e).__name__[:120]})"
 
     return Tool(name=name, description=description, input_schema=_GQL_SCHEMA, fn=_run)
 

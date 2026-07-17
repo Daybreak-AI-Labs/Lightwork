@@ -28,7 +28,7 @@ def test_tool_registry_emits_tool_metric(monkeypatch):
                       fn=_boom))
     asyncio.run(reg.run("echo", {}))
     asyncio.run(reg.run("boom", {}))
-    assert ("tool_calls", {"tool": "echo", "status": "ok"}) in calls
+    assert ("tool_calls", {"tool": "echo", "status": "succeeded"}) in calls
     assert ("tool_calls", {"tool": "boom", "status": "error"}) in calls
 
 

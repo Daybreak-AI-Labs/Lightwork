@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 
 import pytest
 from maverick import shield_updates
 from maverick.audit import signing
+from maverick.file_lock import private_path_is_restricted
 from maverick.shield_updates import (
     UpdateRefused,
     apply_update,
@@ -119,8 +121,8 @@ def test_apply_stages_rules_file_0600(keypair, rules_file):
     assert result.added == ["block-curl-pipe-sh"] and result.removed == []
     staged = json.loads(rules_file.read_text(encoding="utf-8"))
     assert staged["version"] == 1 and staged["rules"] == RULES_V1 and staged["sig"]
-    assert (rules_file.stat().st_mode & 0o777) == 0o600
-    assert not rules_file.with_name(rules_file.name + ".tmp").exists()
+    assert private_path_is_restricted(rules_file, 0o600)
+    assert not list(rules_file.parent.glob(f".{rules_file.name}-*.tmp"))
 
 
 def test_apply_reports_what_changed(keypair, rules_file):
@@ -151,6 +153,56 @@ def test_same_version_is_noop(keypair, rules_file):
     apply_update(sign_bundle(2, RULES_V1, priv), pubkey_hex=pub, path=rules_file)
     result = apply_update(sign_bundle(2, RULES_V1, priv), pubkey_hex=pub, path=rules_file)
     assert not result.applied and "already at v2" in result.reason
+
+
+def test_concurrent_updates_cannot_publish_lower_version_last(
+    keypair, rules_file, monkeypatch,
+):
+    """The anti-rollback read and final publish share one process-safe lock."""
+    priv, pub = keypair
+    apply_update(sign_bundle(1, RULES_V1, priv), pubkey_hex=pub, path=rules_file)
+    real_current_version = shield_updates.current_version
+    lower_checked_v1 = threading.Event()
+    release_lower = threading.Event()
+    higher_reached_check = threading.Event()
+    errors: list[BaseException] = []
+
+    def controlled_current_version(path):
+        version = real_current_version(path)
+        if threading.current_thread().name == "apply-v2":
+            lower_checked_v1.set()
+            if not release_lower.wait(timeout=10):
+                raise TimeoutError("lower update was not released")
+        elif threading.current_thread().name == "apply-v3":
+            higher_reached_check.set()
+        return version
+
+    monkeypatch.setattr(shield_updates, "current_version", controlled_current_version)
+
+    def apply(version, rules):
+        try:
+            apply_update(
+                sign_bundle(version, rules, priv),
+                pubkey_hex=pub,
+                path=rules_file,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    lower = threading.Thread(target=apply, args=(2, RULES_V1), name="apply-v2")
+    higher = threading.Thread(target=apply, args=(3, RULES_V2), name="apply-v3")
+    lower.start()
+    assert lower_checked_v1.wait(timeout=10)
+    higher.start()
+    reached_check_before_release = higher_reached_check.wait(timeout=0.2)
+    release_lower.set()
+    lower.join(timeout=10)
+    higher.join(timeout=10)
+
+    assert not lower.is_alive() and not higher.is_alive()
+    assert not reached_check_before_release
+    assert not errors
+    assert real_current_version(rules_file) == 3
 
 
 def test_current_version_fails_open_on_corrupt_file(rules_file):

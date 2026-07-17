@@ -115,3 +115,44 @@ def test_config_file_kill_switch_withholds_the_grant(monkeypatch):
     cap = domain_capability(p, None, f"agent:{name}-1")
     assert not cap.permits("openfda")
     assert cap.permits("knowledge_search")
+
+
+def test_malformed_data_grounding_booleans_fail_closed(monkeypatch):
+    import maverick.config as config
+    from maverick.domain import data_grounding_enabled
+
+    monkeypatch.delenv("MAVERICK_WORKFORCE_DATA_GROUNDING", raising=False)
+    monkeypatch.setattr(config, "config_source_errors", dict)
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda *a, **k: {"workforce": {"data_grounding": "false"}},
+    )
+    assert data_grounding_enabled() is False
+
+    monkeypatch.setenv("MAVERICK_WORKFORCE_DATA_GROUNDING", "not-a-bool")
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda *a, **k: {"workforce": {"data_grounding": True}},
+    )
+    assert data_grounding_enabled() is False
+
+
+def test_data_grounding_policy_loss_blocks_positive_override(monkeypatch):
+    import maverick.config as config
+    from maverick.domain import data_grounding_enabled
+
+    monkeypatch.setenv("MAVERICK_WORKFORCE_DATA_GROUNDING", "on")
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda *a, **k: {"workforce": {"data_grounding": True}},
+    )
+    monkeypatch.setattr(
+        config,
+        "config_source_errors",
+        lambda: {"config.toml": "invalid TOML"},
+    )
+
+    assert data_grounding_enabled() is False

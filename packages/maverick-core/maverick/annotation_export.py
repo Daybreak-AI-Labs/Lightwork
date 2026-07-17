@@ -136,8 +136,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", default=None, help="world DB path (default: ~/.maverick/world.db)")
     args = p.parse_args(argv)
 
-    from .world_model import DEFAULT_DB, WorldModel
-    world = WorldModel(Path(args.db) if args.db else DEFAULT_DB)
+    from .world_model import close_world_if_owned, open_world
+    world = open_world(Path(args.db)) if args.db else open_world()
     try:
         try:
             print(export_annotations(world, args.goal_id, fmt=args.format), end="")
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         return 0
     finally:
-        world.close()
+        close_world_if_owned(world)
 
 
 __all__ = ["to_markdown", "to_srt", "export_annotations", "main"]

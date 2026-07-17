@@ -41,6 +41,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from ..file_lock import (
+    atomic_write_text,
+    ensure_private_directory,
+    ensure_private_file,
+    require_private_directory,
+)
 from ..paths import data_dir
 from ..safety.action_evidence import seal_bracketed
 from ..safety.action_gate import browser_action_risk, gate_browser_action
@@ -55,6 +61,10 @@ _MAX_FILL_FORM_SELECTOR_LENGTH = 500
 _MAX_FILL_FORM_VALUE_LENGTH = 10_000
 _MAX_FILL_FORM_FIELD_TIMEOUT_MS = 1_000
 _MAX_FILL_FORM_TOTAL_TIMEOUT_MS = 5_000
+# Bound at import: tests drive the fill_form batch deadline through this
+# module-local clock; patching time.monotonic itself is process-global, and
+# the consent-gate audit path consumes ticks before the batch loop runs.
+_monotonic = time.monotonic
 
 # Bounds for the read-only ``observe`` snapshot so it never floods the context.
 _MAX_OBSERVE_ELEMENTS = 100
@@ -85,7 +95,12 @@ def _restore_state_arg() -> str | None:
     if not _persist_enabled():
         return None
     p = _state_path()
-    return str(p) if p.exists() else None
+    if not p.exists():
+        return None
+    require_private_directory(p.parent)
+    # Protect state created by older releases before Playwright opens it.
+    ensure_private_file(p)
+    return str(p)
 
 
 _BROWSER_INPUT_SCHEMA: dict[str, Any] = {
@@ -182,12 +197,20 @@ class _BrowserSession:
                 return False
             p = _state_path()
             try:
-                p.parent.mkdir(parents=True, exist_ok=True)
-                self._context.storage_state(path=str(p))
-                try:
-                    os.chmod(p, 0o600)  # cookies are sensitive
-                except OSError:
-                    pass
+                if p.parent.exists():
+                    require_private_directory(p.parent)
+                else:
+                    ensure_private_directory(p.parent)
+                # Ask Playwright for the in-memory representation and publish
+                # it ourselves.  Passing a pathname to Playwright would create
+                # cookies/localStorage with inherited ACLs before we could
+                # protect the file (and chmod is not a DACL boundary on Windows).
+                state = self._context.storage_state()
+                atomic_write_text(
+                    p,
+                    json.dumps(state, separators=(",", ":")),
+                    encoding="utf-8",
+                )
                 return True
             except Exception as e:
                 log.warning("browser save_state: %s", e)
@@ -373,7 +396,7 @@ def _browser_fill_form(page, args, timeout) -> str:
     errors: list[str] = []
     field_timeout = min(timeout, _MAX_FILL_FORM_FIELD_TIMEOUT_MS)
     total_timeout = min(timeout, _MAX_FILL_FORM_TOTAL_TIMEOUT_MS)
-    deadline = time.monotonic() + (total_timeout / 1000)
+    deadline = _monotonic() + (total_timeout / 1000)
 
     for selector, value in fields.items():
         selector = str(selector)
@@ -385,7 +408,7 @@ def _browser_fill_form(page, args, timeout) -> str:
             errors.append(f"{selector}: value too long")
             continue
 
-        remaining_ms = int((deadline - time.monotonic()) * 1000)
+        remaining_ms = int((deadline - _monotonic()) * 1000)
         if remaining_ms <= 0:
             errors.append("batch timeout")
             break

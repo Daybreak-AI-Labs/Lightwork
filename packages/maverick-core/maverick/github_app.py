@@ -349,21 +349,24 @@ async def process_issue(
     from .llm import LLM
     from .orchestrator import run_goal
     from .sandbox import build_sandbox
-    from .world_model import WorldModel
+    from .world_model import close_world_if_owned, open_world
 
-    world = WorldModel()
-    llm = LLM()
-    sandbox = build_sandbox(workdir=str(workdir))
-    gid = world.create_goal(
-        f"gh:{payload.repo_full_name}#{payload.issue_number}",
-        build_brief(payload),
-    )
-    summary = await run_goal(
-        llm, world, Budget(
-            max_dollars=max_dollars, max_wall_seconds=max_wall_seconds,
-        ),
-        gid, sandbox=sandbox, max_depth=3,
-    )
+    world = open_world()
+    try:
+        llm = LLM()
+        sandbox = build_sandbox(workdir=str(workdir))
+        gid = world.create_goal(
+            f"gh:{payload.repo_full_name}#{payload.issue_number}",
+            build_brief(payload),
+        )
+        summary = await run_goal(
+            llm, world, Budget(
+                max_dollars=max_dollars, max_wall_seconds=max_wall_seconds,
+            ),
+            gid, sandbox=sandbox, max_depth=3,
+        )
+    finally:
+        close_world_if_owned(world)
 
     # If the agent committed anything, push + open PR. A hung git here must not
     # wedge the handler forever -- time-box each call and surface a timeout as a

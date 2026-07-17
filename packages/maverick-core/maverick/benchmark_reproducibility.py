@@ -157,14 +157,10 @@ def _safe_name(name: str) -> str:
 
 
 def _write_json_0600(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-    os.replace(tmp, path)
-    try:
-        os.chmod(path, 0o600)
-    except OSError:  # pragma: no cover
-        pass
+    from .file_lock import atomic_write_text, prepare_private_directory
+
+    prepare_private_directory(path.parent)
+    atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
 
 
 def record_with_manifest(

@@ -15,6 +15,7 @@ from maverick import learning_guard
 from maverick import self_improvement as si
 from maverick import self_modify as sm
 from maverick import self_modify_runner as runner
+from maverick.self_modify_eval import EvalSandboxError
 from maverick.self_modify_loop import Proposal
 
 
@@ -326,6 +327,38 @@ class TestRun:
         assert "challenge corpus" in summ.reason
         assert "eval_tests" in summ.reason
 
+    def test_stock_evaluator_reports_evidence_contract_and_closes_backend(
+        self, tmp_path, monkeypatch,
+    ):
+        closed = []
+
+        class BooleanOnlySandbox:
+            host_visible_fs = False
+            allow_network = False
+            allow_root = False
+            pids_limit = 32
+            memory = "256m"
+            bounded_output = True
+            authenticated_test_results = True
+
+            def close(self):
+                closed.append(True)
+
+        monkeypatch.setattr(runner, "_work_root", lambda: str(tmp_path))
+        monkeypatch.setattr(
+            "maverick.sandbox.build_sandbox",
+            lambda **_kwargs: BooleanOnlySandbox(),
+        )
+        with pytest.raises(EvalSandboxError) as caught:
+            runner._default_evaluate(
+                tree=tmp_path,
+                cfg={"eval_tests": ["tests/test_x.py::a", "tests/test_x.py::b"]},
+            )
+        message = str(caught.value)
+        assert "exec_authenticated_tests" in message
+        assert "controller-owned runner/sidecar" in message
+        assert closed == [True]
+
     def test_stock_evaluator_refuses_non_git_source_before_candidate_exec(
         self, tmp_path, monkeypatch,
     ):
@@ -342,10 +375,15 @@ class TestRun:
             memory = "256m"
             bounded_output = True
             authenticated_test_results = True
+            test_evidence_protocol = "maverick.test-evidence.v1"
+            test_evidence_authority = "runner-test-controller-key-1"
 
             def exec(self, *_args, **_kwargs):
                 calls.append("candidate-exec")
                 raise AssertionError("non-Git source must fail before execution")
+
+            def exec_authenticated_tests(self, request, timeout=None):
+                raise AssertionError("non-Git source must fail before tests")
 
             def close(self):
                 pass
@@ -389,6 +427,11 @@ class TestRun:
             memory = "256m"
             bounded_output = True
             authenticated_test_results = True
+            test_evidence_protocol = "maverick.test-evidence.v1"
+            test_evidence_authority = "runner-test-controller-key-1"
+
+            def exec_authenticated_tests(self, request, timeout=None):
+                raise AssertionError("mock corpus owns evaluation")
 
             def close(self):
                 pass
@@ -618,10 +661,57 @@ def test_self_modify_cli_refusal_is_nonzero(monkeypatch):
     assert "safety posture refused" in result.output
 
 
-def test_negative_min_promotions_is_clamped():
-    # A negative min_promotions must not sort a non-empty tier ahead of tier-0
-    # (which would make the rollback-freeze unlock a wide surface).
-    pol = runner.build_policy({"tiers": [
-        {"name": "evil", "editable_paths": ["**"], "min_promotions": -5}]})
-    assert pol.tiers[0].editable_globs == ()          # narrowest tier stays empty
-    assert all(t.min_promotions >= 0 for t in pol.tiers)
+@pytest.mark.parametrize("threshold", [-5, "0", 0.0, False, None])
+def test_invalid_min_promotions_can_never_unlock_a_surface(threshold):
+    policy = runner.build_policy({
+        "tiers": [{
+            "name": "invalid",
+            "editable_paths": ["**"],
+            "min_promotions": threshold,
+        }],
+        # A present tier policy owns the decision; invalid entries must not
+        # fall through to this legacy zero-proof allowlist.
+        "editable_paths": ["**"],
+    })
+
+    assert [tier.name for tier in policy.tiers] == ["none"]
+    assert policy.earned(
+        promotions=1_000_000,
+        had_rollback=False,
+    ).editable_globs == ()
+
+
+@pytest.mark.parametrize("editable_paths", ["**", ["**", 1], {"all": "**"}])
+def test_malformed_tier_editable_paths_cannot_fall_through(editable_paths):
+    policy = runner.build_policy({
+        "tiers": [{
+            "name": "invalid",
+            "editable_paths": editable_paths,
+            "min_promotions": 0,
+        }],
+        "editable_paths": ["**"],
+    })
+
+    assert [tier.name for tier in policy.tiers] == ["none"]
+    assert policy.earned(
+        promotions=1_000_000,
+        had_rollback=False,
+    ).editable_globs == ()
+
+
+@pytest.mark.parametrize("tiers", [{"name": "not-a-list"}, "not-a-list", True])
+def test_malformed_tier_container_cannot_fall_through(tiers):
+    policy = runner.build_policy({"tiers": tiers, "editable_paths": ["**"]})
+
+    assert [tier.name for tier in policy.tiers] == ["none"]
+    assert policy.earned(
+        promotions=1_000_000,
+        had_rollback=False,
+    ).editable_globs == ()
+
+
+@pytest.mark.parametrize("editable_paths", ["**", ["**", 1], {"all": "**"}])
+def test_malformed_legacy_editable_paths_grant_nothing(editable_paths):
+    policy = runner.build_policy({"editable_paths": editable_paths})
+
+    assert [tier.name for tier in policy.tiers] == ["none"]

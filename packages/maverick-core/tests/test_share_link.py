@@ -1,8 +1,34 @@
 """Share links + device handoff: signed, expiring, one-time semantics."""
 from __future__ import annotations
 
+import os
+import subprocess
+
 import pytest
 from maverick import share_link as sl
+from maverick.file_lock import private_path_is_restricted
+
+
+def _make_shared_directory(path):
+    path.mkdir(mode=0o777)
+    if os.name == "nt":
+        subprocess.run(
+            ["icacls", str(path), "/grant", "*S-1-1-0:(OI)(CI)RX"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        path.chmod(0o755)
+    assert not private_path_is_restricted(path, 0o700)
+
+
+def _security_snapshot(path):
+    if os.name == "nt":
+        import maverick.file_lock as file_lock
+
+        return file_lock._windows_private_sddl(path)[0]
+    return path.stat().st_mode & 0o777
 
 
 @pytest.fixture(autouse=True)
@@ -51,6 +77,25 @@ def test_handoff_roundtrip_and_one_time(tmp_path):
         sl.claim_handoff(code, now=1020.0, nonce_path=nonces)
 
 
+def test_handoff_unsafe_injected_parent_refuses_without_mutation(tmp_path):
+    shared = tmp_path / "shared"
+    _make_shared_directory(shared)
+    unrelated = shared / "team-file.txt"
+    unrelated.write_text("keep-access", encoding="utf-8")
+    before = _security_snapshot(shared)
+    nonce_path = shared / "nonces.json"
+    code = sl.pack_handoff({"goal_id": 7}, now=1000.0)
+
+    with pytest.raises(PermissionError, match="must already be private"):
+        sl.claim_handoff(code, now=1001.0, nonce_path=nonce_path)
+
+    assert _security_snapshot(shared) == before
+    assert not private_path_is_restricted(shared, 0o700)
+    assert unrelated.read_text(encoding="utf-8") == "keep-access"
+    assert not nonce_path.exists()
+    assert not (shared / "nonces.json.lock").exists()
+
+
 def test_handoff_expiry(tmp_path):
     code = sl.pack_handoff({"goal_id": 1}, ttl_seconds=300, now=1000.0)
     with pytest.raises(ValueError, match="expired"):
@@ -73,8 +118,21 @@ def test_handoff_nonce_store_pruned(tmp_path):
     c2 = sl.pack_handoff({"goal_id": 2}, ttl_seconds=10, now=5000.0)
     sl.claim_handoff(c2, now=5001.0, nonce_path=nonces)
     import json
-    stored = json.loads(nonces.read_text())
+    stored = json.loads(nonces.read_text(encoding="utf-8"))
     assert len(stored) == 1  # only c2's nonce kept
+
+    from maverick.file_lock import private_path_is_restricted
+
+    assert private_path_is_restricted(nonces)
+
+
+def test_handoff_corrupt_nonce_store_fails_closed(tmp_path):
+    nonces = tmp_path / "n.json"
+    nonces.write_text("not-json", encoding="utf-8")
+    code = sl.pack_handoff({"goal_id": 2}, now=1000.0)
+
+    with pytest.raises(ValueError, match="nonce store is corrupt"):
+        sl.claim_handoff(code, now=1001.0, nonce_path=nonces)
 
 
 def test_handoff_rejects_invalid_signature_before_json_parse(tmp_path):

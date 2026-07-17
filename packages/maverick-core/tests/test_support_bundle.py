@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from maverick import support_bundle
+from maverick.file_lock import private_path_is_restricted
 
 
 def test_redacts_secret_named_keys():
@@ -92,7 +93,7 @@ def test_cli_support_tightens_existing_output_file_permissions(tmp_path, monkeyp
     r = CliRunner().invoke(main, ["support", "-o", str(out)])
 
     assert r.exit_code == 0, r.output
-    assert out.stat().st_mode & 0o777 == 0o600
+    assert private_path_is_restricted(out, 0o600)
     assert "sk-LEAKME" not in out.read_text()
 
 

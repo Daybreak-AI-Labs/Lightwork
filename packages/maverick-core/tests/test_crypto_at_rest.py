@@ -6,6 +6,7 @@ import importlib.util
 
 import pytest
 from maverick import crypto_at_rest as car
+from maverick import file_lock
 
 # AES-GCM needs the optional 'cryptography' extra; skip only the tests that
 # exercise encryption where it is absent, matching the audit-signing tests
@@ -124,57 +125,68 @@ def test_injected_key_wrong_size_fails(monkeypatch):
 def test_generated_key_persists_and_chmod(monkeypatch):
     blob = car.seal(b"persist me")
     assert car._KEY_PATH.exists()
-    assert (car._KEY_PATH.stat().st_mode & 0o777) == 0o600
-    assert (car._KEY_PATH.parent.stat().st_mode & 0o777) == 0o700
+    assert file_lock.private_path_is_restricted(car._KEY_PATH)
+    assert file_lock.private_path_is_restricted(car._KEY_PATH.parent, 0o700)
     # A second seal reuses the same on-disk key, so unseal still works.
     assert car.unseal(blob) == b"persist me"
 
 
 def test_generated_key_is_created_private_atomically(monkeypatch):
-    original_open = car.os.open
+    original_create = file_lock.atomic_create_text
     observed = {}
 
-    def checked_open(path, flags, mode=0o777, *args, **kwargs):
-        observed["exclusive_create"] = bool(flags & car.os.O_EXCL)
+    def checked_create(path, text, *, mode=0o600, encoding="utf-8"):
+        observed["target_absent"] = not car._KEY_PATH.exists()
         observed["requested_mode"] = mode
-        observed["parent_mode_before_create"] = (
-            car._KEY_PATH.parent.stat().st_mode & 0o777
+        observed["parent_private_before_create"] = (
+            file_lock.private_path_is_restricted(car._KEY_PATH.parent, 0o700)
         )
-        return original_open(path, flags, mode, *args, **kwargs)
+        return original_create(path, text, mode=mode, encoding=encoding)
 
-    monkeypatch.setattr(car.os, "open", checked_open)
+    monkeypatch.setattr(file_lock, "atomic_create_text", checked_create)
 
     car._load_or_create_key()
 
     assert observed == {
-        "exclusive_create": True,
+        "target_absent": True,
         "requested_mode": 0o600,
-        "parent_mode_before_create": 0o700,
+        "parent_private_before_create": True,
     }
-    assert (car._KEY_PATH.stat().st_mode & 0o777) == 0o600
+    assert file_lock.private_path_is_restricted(car._KEY_PATH)
+    before = car._KEY_PATH.read_text(encoding="utf-8")
+    monkeypatch.setattr(file_lock, "atomic_create_text", original_create)
+    with pytest.raises(FileExistsError):
+        car._write_new_key_file(b"z" * 32)
+    assert car._KEY_PATH.read_text(encoding="utf-8") == before
+    assert not list(car._KEY_PATH.parent.glob(".at_rest.key-*.tmp"))
 
 
 def test_existing_key_permissions_are_repaired_before_read(monkeypatch):
     car._KEY_PATH.parent.mkdir(parents=True)
-    car._KEY_PATH.parent.chmod(0o755)
     car._KEY_PATH.write_text((b"k" * 32).hex(), encoding="utf-8")
-    car._KEY_PATH.chmod(0o644)
+    if car.os.name != "nt":
+        car._KEY_PATH.parent.chmod(0o755)
+        car._KEY_PATH.chmod(0o644)
     path_type = type(car._KEY_PATH)
     original_read_text = path_type.read_text
     observed = {}
 
     def checked_read_text(self, *args, **kwargs):
         if self == car._KEY_PATH:
-            observed["key_mode_before_read"] = self.stat().st_mode & 0o777
-            observed["parent_mode_before_read"] = self.parent.stat().st_mode & 0o777
+            observed["key_private_before_read"] = (
+                file_lock.private_path_is_restricted(self)
+            )
+            observed["parent_private_before_read"] = (
+                file_lock.private_path_is_restricted(self.parent, 0o700)
+            )
         return original_read_text(self, *args, **kwargs)
 
     monkeypatch.setattr(path_type, "read_text", checked_read_text)
 
     assert car._load_or_create_key() == b"k" * 32
     assert observed == {
-        "key_mode_before_read": 0o600,
-        "parent_mode_before_read": 0o700,
+        "key_private_before_read": True,
+        "parent_private_before_read": True,
     }
 
 
@@ -605,38 +617,32 @@ def test_v2_blob_with_unknown_keyid_fails_closed():
 
 @requires_crypto
 def test_rotated_key_file_is_private(monkeypatch):
-    import stat as _stat
     car.rotate_at_rest_key()
     for p in car._keyring_dir().glob("*.key"):
-        mode = _stat.S_IMODE(p.stat().st_mode)
-        assert mode & 0o077 == 0, f"{p} is group/world accessible ({oct(mode)})"
+        assert file_lock.private_path_is_restricted(p), f"key is not private: {p}"
 
 
 @requires_crypto
 def test_rotation_secures_keyring_parent_with_permissive_umask():
-    import stat as _stat
-
     old_umask = car.os.umask(0)
     try:
         car.rotate_at_rest_key()
     finally:
         car.os.umask(old_umask)
 
-    assert _stat.S_IMODE(car._KEY_PATH.parent.stat().st_mode) == 0o700
-    assert _stat.S_IMODE(car._keyring_dir().stat().st_mode) == 0o700
+    assert file_lock.private_path_is_restricted(car._KEY_PATH.parent, 0o700)
+    assert file_lock.private_path_is_restricted(car._keyring_dir(), 0o700)
 
 
 @requires_crypto
 def test_rotation_repairs_existing_writable_keyring_parent():
-    import stat as _stat
-
     car._KEY_PATH.parent.mkdir(parents=True)
     car._KEY_PATH.parent.chmod(0o777)
 
     car.rotate_at_rest_key()
 
-    assert _stat.S_IMODE(car._KEY_PATH.parent.stat().st_mode) == 0o700
-    assert _stat.S_IMODE(car._keyring_dir().stat().st_mode) == 0o700
+    assert file_lock.private_path_is_restricted(car._KEY_PATH.parent, 0o700)
+    assert file_lock.private_path_is_restricted(car._keyring_dir(), 0o700)
 
 
 # --- key durability: generation warning + escrow backup -----------------------
@@ -662,8 +668,8 @@ def test_backup_key_material_copies_primary_and_keyring(monkeypatch, tmp_path):
     names = sorted(p.name for p in written)
     assert "at_rest.key" in names
     assert any(n.endswith(".key") and n != "at_rest.key" for n in names)
-    import stat as _stat
-    assert all(_stat.S_IMODE(p.stat().st_mode) == 0o600 for p in written)
+    assert all(file_lock.private_path_is_restricted(p) for p in written)
+    assert file_lock.private_path_is_restricted(dest, 0o700)
     # The escrowed primary key matches the live one (usable for recovery).
     assert (dest / "at_rest.key").read_text() == car._KEY_PATH.read_text()
 
@@ -689,7 +695,12 @@ def test_backup_key_material_refuses_destination_symlink(monkeypatch, tmp_path):
     dest.mkdir()
     leaked = tmp_path / "leaked.key"
     leaked.write_text("attacker controlled", encoding="utf-8")
-    (dest / "at_rest.key").symlink_to(leaked)
+    try:
+        (dest / "at_rest.key").symlink_to(leaked)
+    except OSError as exc:
+        if car.os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
 
     with pytest.raises(car.EncryptionUnavailable, match="cannot copy key"):
         car.backup_key_material(dest)
@@ -703,7 +714,12 @@ def test_backup_key_material_refuses_directory_symlink(monkeypatch, tmp_path):
     real_dest = tmp_path / "real-escrow"
     real_dest.mkdir()
     dest = tmp_path / "escrow-link"
-    dest.symlink_to(real_dest, target_is_directory=True)
+    try:
+        dest.symlink_to(real_dest, target_is_directory=True)
+    except OSError as exc:
+        if car.os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
 
     with pytest.raises(car.EncryptionUnavailable, match="cannot prepare key backup dir"):
         car.backup_key_material(dest)

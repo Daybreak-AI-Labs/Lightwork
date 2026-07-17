@@ -16,7 +16,7 @@ _STATE = "/home/maverick/.maverick"
 
 
 def test_compose_invariants():
-    text = (_DC / "docker-compose.yml").read_text()
+    text = (_DC / "docker-compose.yml").read_text(encoding="utf-8")
     # The three services and the canonical dashboard contract.
     for service in ("seed:", "dashboard:", "proxy:"):
         assert service in text
@@ -35,7 +35,7 @@ def test_compose_invariants():
 
 
 def test_nginx_template_is_a_path_allowlist_proxy():
-    text = (_DC / "nginx.conf.template").read_text()
+    text = (_DC / "nginx.conf.template").read_text(encoding="utf-8")
     assert "location = /demo" in text
     assert "location = /healthz" in text
     assert "return 302 /demo" in text
@@ -48,7 +48,7 @@ def test_nginx_template_is_a_path_allowlist_proxy():
 
 def test_seed_script_compiles_and_uses_the_real_world_model_api():
     path = _DC / "seed_demo.py"
-    source = path.read_text()
+    source = path.read_text(encoding="utf-8")
     compile(source, str(path), "exec")  # raises on syntax errors
     assert "from maverick.world_model import" in source
     assert "create_goal" in source and "set_goal_status" in source
@@ -60,7 +60,7 @@ def test_seed_script_compiles_and_uses_the_real_world_model_api():
 
 
 def test_k8s_manifest_invariants():
-    text = (_DC / "k8s.yaml").read_text()
+    text = (_DC / "k8s.yaml").read_text(encoding="utf-8")
     docs = [d for d in text.split("\n---\n") if d.strip()]
     # PVC + nginx ConfigMap + Deployment + Service. (The seed ConfigMap is
     # created from seed_demo.py via kubectl, see the header comment.)
@@ -83,7 +83,7 @@ def test_k8s_manifest_invariants():
 
 
 def test_readme_documents_the_honest_posture():
-    text = (_DC / "README.md").read_text()
+    text = (_DC / "README.md").read_text(encoding="utf-8")
     # The blueprint's core honesty: no global read-only flag exists, so the
     # deny-proxy carries the posture, and DNS/TLS is a maintainer act.
     assert "no global read-only flag" in text
@@ -94,7 +94,9 @@ def test_readme_documents_the_honest_posture():
 
 
 def test_dashboard_public_demo_route_is_redacted():
-    text = (_REPO_ROOT / "packages" / "maverick-dashboard" / "maverick_dashboard" / "app.py").read_text()
+    text = (
+        _REPO_ROOT / "packages" / "maverick-dashboard" / "maverick_dashboard" / "app.py"
+    ).read_text(encoding="utf-8")
     assert '@app.get("/demo", response_class=HTMLResponse)' in text
     assert 'owner="demo"' in text
     route = text[text.index('async def public_demo'):text.index('@app.get("/overview", response_class=HTMLResponse)')]
@@ -107,4 +109,4 @@ def test_no_baked_secrets_in_demo_cluster():
     suspicious = re.compile(r"sk-ant-[a-zA-Z0-9]{8,}|AKIA[A-Z0-9]{16}")
     for path in _DC.rglob("*"):
         if path.is_file():
-            assert not suspicious.search(path.read_text(errors="ignore")), path
+            assert not suspicious.search(path.read_text(encoding="utf-8", errors="ignore")), path

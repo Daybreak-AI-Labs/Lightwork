@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from maverick import failure_telemetry as ft
 from maverick.budget import BudgetExceeded
 from maverick.cli import main
+from maverick.file_lock import private_path_is_restricted
 
 
 def test_classify_exception():
@@ -38,7 +39,59 @@ def test_record_and_summarize_when_enabled(tmp_path, monkeypatch):
     assert s["by_mode"]["budget"] == 2
     assert s["by_mode"]["auth"] == 1
     assert s["by_mode"]["error"] == 1
-    assert oct(p.stat().st_mode)[-3:] == "600"
+    assert private_path_is_restricted(p, 0o600)
+
+
+def test_record_appends_without_reading_or_rewriting_prior_jsonl(
+    tmp_path, monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    monkeypatch.setenv("MAVERICK_FAILURE_TELEMETRY", "1")
+    monkeypatch.setattr(
+        file_lock,
+        "atomic_read_text",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("full read")),
+    )
+    monkeypatch.setattr(
+        file_lock,
+        "atomic_write_text",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("full rewrite")),
+    )
+    path = tmp_path / "failure-modes.jsonl"
+
+    assert ft.record("budget", path=path)
+    assert ft.record("auth", path=path)
+    assert [json.loads(line)["mode"] for line in path.read_text().splitlines()] == [
+        "budget",
+        "auth",
+    ]
+
+
+def test_concurrent_records_append_complete_lines(tmp_path, monkeypatch):
+    import threading
+
+    monkeypatch.setenv("MAVERICK_FAILURE_TELEMETRY", "1")
+    path = tmp_path / "failure-modes.jsonl"
+    count = 32
+    barrier = threading.Barrier(count)
+    outcomes: list[bool] = []
+
+    def worker(i):
+        barrier.wait()
+        outcomes.append(ft.record("timeout", goal_id=i, path=path))
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert outcomes == [True] * count
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    assert len(records) == count
+    assert {record["goal_id"] for record in records} == set(range(count))
 
 
 def test_record_failure_from_exception(tmp_path, monkeypatch):

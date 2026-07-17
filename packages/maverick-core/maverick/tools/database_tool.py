@@ -55,8 +55,17 @@ _SCHEMA: dict[str, Any] = {
     "required": ["op", "sql"],
 }
 
-_READ_KEYWORDS = {"select", "show", "describe", "desc", "pragma", "values"}
+# PRAGMA is not generally read-only: SQLite accepts assignments such as
+# ``PRAGMA user_version = 7`` and ``PRAGMA journal_mode=WAL``. Gate every
+# PRAGMA rather than maintaining an engine/version-specific safe subset.
+_READ_KEYWORDS = {"select", "show", "describe", "desc", "values"}
 _TOKEN_RE = re.compile(r"[a-zA-Z_]+")
+_SELECT_EFFECT_RE = re.compile(
+    r"\b(?:into|for\s+(?:no\s+key\s+)?update|lock\s+in\s+share\s+mode|"
+    r"pg_advisory_(?:xact_)?lock|pg_try_advisory_(?:xact_)?lock|nextval|setval|"
+    r"get_lock|release_lock|sleep|benchmark|lo_import|lo_export)\b",
+    re.IGNORECASE,
+)
 
 
 def _leading_keyword(sql: str) -> str:
@@ -79,7 +88,10 @@ def _leading_keyword(sql: str) -> str:
             # MySQL/MariaDB executable comments (`/*! ... */` and versioned
             # forms like `/*!80000 ... */`) are parsed and executed by the
             # server, so treating them as ordinary comments can hide writes.
-            if sql.startswith("/*!", idx):
+            if (
+                sql.startswith("/*!", idx)
+                or sql[idx:idx + 4].lower() == "/*m!"
+            ):
                 return ""
             end = sql.find("*/", idx + 2)
             if end == -1:
@@ -99,7 +111,16 @@ def _is_read_sql(sql: str) -> bool:
     execute mutating statements behind those prefixes (for example
     ``WITH ... DELETE`` or ``EXPLAIN ANALYZE``).
     """
-    return _leading_keyword(sql) in _READ_KEYWORDS
+    keyword = _leading_keyword(sql)
+    if keyword not in _READ_KEYWORDS:
+        return False
+    # A leading SELECT is not proof of purity. At minimum, SELECT ... INTO can
+    # create tables or write OUTFILE/DUMPFILE, FOR UPDATE acquires write-class
+    # locks, and several built-ins mutate sequence/advisory-lock/server state.
+    # Gate those known forms. Governed connector execution treats *all* SQL as
+    # consequential because a generic lexical parser cannot prove stored or
+    # volatile functions side-effect-free across dialects.
+    return keyword != "select" or _SELECT_EFFECT_RE.search(sql) is None
 
 
 def _denial(host: str) -> str:

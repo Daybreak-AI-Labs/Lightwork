@@ -19,7 +19,12 @@ def _one_event_with_secret(monkeypatch):
         "content": f"calling the API with key={_SECRET}",
     }]
     monkeypatch.setattr(
-        rx, "_iter_events_for_goal", lambda gid, files=None: iter(events),
+        rx,
+        "load_goal_events",
+        lambda gid, files=None: (
+            events,
+            {"status": "unsigned", "anchors": "unavailable_unsigned", "files": []},
+        ),
     )
 
 

@@ -130,7 +130,10 @@ def _config() -> dict:
         from .config import get_self_improvement
         return get_self_improvement()
     except Exception:  # pragma: no cover
-        return {"enable": False, "min_improvement": 0.0, "max_auto_rung": "policy"}
+        # Invalid margin freezes the controller if a direct caller constructs it
+        # despite the disabled master switch. Never turn config loss into the
+        # permissive zero-margin policy.
+        return {"enable": False, "min_improvement": -1.0, "max_auto_rung": "policy"}
 
 
 @dataclass
@@ -457,6 +460,11 @@ class SelfImprovementController:
     audit_fn: Callable[..., None] = _default_audit_fn
     ledger: PromotionLedger | None = None
     now: Callable[[], float] = time.time
+    # Optional request-scoped verifier for deployments whose approval trust
+    # root is tenant-bound.  Keeping this on the controller avoids mutating
+    # process-global environment variables while another tenant is evaluating
+    # a candidate.  It returns the trusted approver id or ``None``.
+    approval_verifier: Callable[[Candidate], str | None] | None = None
     rung_policy: dict[str, dict[str, Any]] = field(
         default_factory=lambda: {k: dict(v) for k, v in _RUNG_POLICY.items()})
 
@@ -584,18 +592,22 @@ class SelfImprovementController:
         """
         if not needs_human:
             return True, None, ""
-        enforced = False
+        enforced = self.approval_verifier is not None
         approver: str | None = None
         try:
-            from . import approval_signing
-            enforced = approval_signing.signing_enforced()
-            if enforced:
-                approver = approval_signing.verify_candidate(cand)
-        except Exception:  # pragma: no cover -- consult failure => decide below
-            # If the approval subsystem errored while enforced, `approver` stays
-            # None and we fail closed; if it was not enforced, fall through to
-            # the boolean path.
-            pass
+            if self.approval_verifier is not None:
+                approver = self.approval_verifier(cand)
+            else:
+                from . import approval_signing
+                enforced = approval_signing.signing_enforced()
+                if enforced:
+                    approver = approval_signing.verify_candidate(cand)
+        except Exception:
+            # Whether signing is configured is itself security policy. If that
+            # policy or its trust roots cannot be resolved, we cannot prove that
+            # the legacy boolean path is authorized, so refuse the promotion.
+            return (False, None,
+                    f"{cand.rung} promotion approval policy is unavailable")
         if enforced:
             if approver:
                 return True, approver, ""
@@ -974,14 +986,35 @@ def _exclusive_ledger_lock(journal: Path):
             flags = os.O_CREAT | os.O_RDWR
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW
-            fd = os.open(os.fspath(lock_path), flags, 0o600)
+            created = False
+            if os.name == "nt":
+                try:
+                    fd = os.open(
+                        os.fspath(lock_path), flags | os.O_EXCL, 0o600)
+                    created = True
+                except FileExistsError:
+                    fd = os.open(os.fspath(lock_path), flags, 0o600)
+            else:
+                fd = os.open(os.fspath(lock_path), flags, 0o600)
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise PromotionLedgerError("promotion ledger lock must be a regular file")
             if os.name == "nt":
                 import msvcrt
 
-                if os.fstat(fd).st_size == 0:
+                if created:
                     os.write(fd, b"\0")
+                else:
+                    # Only the O_EXCL creator initializes the lock byte. The
+                    # old check-then-write let two fresh processes both observe
+                    # size zero; one could lock the byte before the other wrote,
+                    # turning a valid idempotent retry into PermissionError.
+                    for _ in range(1_000):
+                        if os.fstat(fd).st_size >= 1:
+                            break
+                        time.sleep(0.001)
+                    else:
+                        raise PromotionLedgerError(
+                            "promotion ledger lock is uninitialized")
                 os.lseek(fd, 0, os.SEEK_SET)
                 msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
                 kind = "msvcrt"

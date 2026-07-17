@@ -181,9 +181,12 @@ def test_claim_released_on_handler_failure(monkeypatch):
 
 
 def test_claim_infra_failure_skips_fail_closed(monkeypatch):
-    """Unlike the webhook adapters (which process anyway when the dedup store
-    is down), the polling adapter must SKIP: with no cursor, processing
-    anyway would re-run the same goal every poll_seconds."""
+    """A polling adapter must defer when the claim store is unavailable.
+
+    Like the webhook adapters, it never processes without an authoritative
+    claim. Polling needs no HTTP retry response because the next poll sees the
+    same reply again.
+    """
     ch = _channel()
     ch.send = AsyncMock()
     monkeypatch.setattr(
@@ -196,6 +199,33 @@ def test_claim_infra_failure_skips_fail_closed(monkeypatch):
 
     assert not ch.handler.await_count
     assert not ch.send.await_count
+
+
+def test_release_failure_holds_claim_and_prevents_second_execution(monkeypatch, caplog):
+    ch = _channel(handler=AsyncMock(side_effect=RuntimeError("handler failed")))
+    ch.send = AsyncMock()
+    claimed = set()
+    wm = MagicMock()
+
+    def _mark(channel, ext_id):
+        key = (channel, ext_id)
+        if key in claimed:
+            return False
+        claimed.add(key)
+        return True
+
+    wm.mark_message_processed.side_effect = _mark
+    wm.release_processed_message.side_effect = RuntimeError("release store offline")
+    monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
+    _install_httpx(monkeypatch, [], _responder_with([_reply()]))
+
+    with caplog.at_level("ERROR"):
+        asyncio.run(_cycle(ch))
+        asyncio.run(_cycle(ch))
+
+    assert ch.handler.await_count == 1
+    assert wm.mark_message_processed.call_count == 2
+    assert any("claim remains held" in record.message for record in caplog.records)
 
 
 def test_two_step_publish_payloads(monkeypatch):

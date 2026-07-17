@@ -1,17 +1,22 @@
-# Lightwork on Postgres — scaling past single-writer SQLite
+# Lightwork on Postgres — managed world-model state
 
 By default Lightwork keeps run state in SQLite under `~/.maverick/world.db`:
 simple, zero-dependency, and a **single writer**. That caps a deployment at one
-replica per state volume. To run multiple replicas (HA, horizontal scale, or
-many tenants on shared infra), move the world model to Postgres.
+control-plane replica per state volume. Postgres provides managed HA, pooling,
+and DB-enforced isolation for the world model, but does not yet centralize every
+file-backed Lightwork control-plane store.
 
 ## When to switch
 
 Switch to Postgres when **any** of these is true:
 
-- you need more than one dashboard/serve replica;
 - you want managed backups / PITR (RDS, Cloud SQL, Azure Database);
 - you run many tenants and want DB-enforced isolation (row-level security).
+
+The dashboard/serve control plane must still run as one replica. Workflow
+releases/runs, A2A durable claims, audit/learning ledgers, and tenant-local
+policy files are not yet all Postgres-backed. Scale remote workers separately;
+do not use Postgres as evidence that `replicaCount > 1` is safe.
 
 Until then, SQLite is the right default — don't add a database you don't need.
 
@@ -59,8 +64,9 @@ Any Postgres 14+ works. Recommended baseline for a managed instance:
   compact.
 - **HA**: multi-AZ / zone-redundant for production.
 - **Backups**: automated daily + point-in-time recovery (retain ≥ 7 days).
-- **Connection pooling**: front with PgBouncer (transaction pooling) when you
-  run many replicas — each Lightwork process opens a small pool.
+- **Connection pooling**: front with PgBouncer (transaction pooling) when
+  remote workers and the control plane share the database; each process opens
+  a small pool.
 - **TLS**: require `sslmode=verify-full` in the DSN for networked databases.
 
 Create the role and database:

@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -77,7 +76,8 @@ class VoiceGate:
                  threshold: float = DEFAULT_THRESHOLD):
         self._embed = embedder
         self._threshold = float(threshold)
-        if store_path is None:
+        self._owns_parent = store_path is None
+        if self._owns_parent:
             from .paths import data_dir
             store_path = data_dir("voice_profiles.json")
         self._path = Path(store_path)
@@ -89,14 +89,12 @@ class VoiceGate:
         # The profile dir holds biometric data: it must be 0700. Create it here
         # so it exists at 0700 BEFORE the lock sidecar / temp land in it -- the
         # lock's own mkdir would otherwise create it at the default 0755.
-        parent = self._path.parent
-        parent_existed = parent.exists()
-        parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-        if not parent_existed:
-            try:
-                os.chmod(parent, 0o700)
-            except OSError:  # pragma: no cover
-                pass
+        from .file_lock import ensure_private_directory, require_private_directory
+
+        if self._owns_parent or not self._path.parent.exists():
+            ensure_private_directory(self._path.parent)
+        else:
+            require_private_directory(self._path.parent)
 
     def _locked(self):
         from contextlib import ExitStack
@@ -105,41 +103,25 @@ class VoiceGate:
         self._ensure_parent()
         stack = ExitStack()
         stack.enter_context(self._lock)
-        stack.enter_context(cross_process_lock(self._path))
+        stack.enter_context(cross_process_lock(self._path, strict=True))
         return stack
 
     # -- store --------------------------------------------------------------
 
     def _load(self) -> dict:
         try:
-            return json.loads(self._path.read_text(encoding="utf-8"))
+            from .file_lock import atomic_read_text, ensure_private_file
+
+            ensure_private_file(self._path)
+            return json.loads(atomic_read_text(self._path))
         except (OSError, ValueError):
             return {}
 
     def _save(self, data: dict) -> None:
         self._ensure_parent()
-        parent = self._path.parent
-        fd, tmp_name = tempfile.mkstemp(
-            dir=parent,
-            prefix=f".{self._path.name}.",
-            suffix=".tmp",
-            text=True,
-        )
-        tmp = Path(tmp_name)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(data, fh)
-            os.replace(tmp, self._path)
-            try:
-                os.chmod(self._path, 0o600)
-            except OSError:  # pragma: no cover
-                pass
-        except Exception:
-            try:
-                tmp.unlink()
-            except OSError:  # pragma: no cover
-                pass
-            raise
+        from .file_lock import atomic_write_text
+
+        atomic_write_text(self._path, json.dumps(data))
 
     # -- enrollment ----------------------------------------------------------
 

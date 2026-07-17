@@ -4,6 +4,8 @@ governance gating on federation delegation (DENY + fail-closed REQUIRE_HUMAN),
 and channel/marketplace federation gating by registered origin."""
 from __future__ import annotations
 
+import asyncio
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -111,6 +113,48 @@ def test_a2a_capability_uses_caller_ceiling(monkeypatch):
         assert cap.allow_tools == frozenset({"read_file"})
     finally:
         _caller_agent.reset(cv)
+
+
+def test_queued_a2a_execution_reuses_admission_trust_snapshot(monkeypatch):
+    from maverick import a2a_tasks as a2at
+    from maverick import config
+
+    registry = {
+        "vega": TrustedAgent(id="vega", max_risk="low"),
+    }
+    loads = 0
+
+    def _state():
+        nonlocal loads
+        loads += 1
+        if loads > 1:
+            raise OSError("policy changed after execution admission")
+        return True, registry
+
+    monkeypatch.setattr(agent_trust, "load_trust_state", _state)
+    monkeypatch.setattr(config, "load_config", dict)
+    monkeypatch.setattr(config, "config_source_errors", lambda **_k: {})
+    observed = {}
+
+    def _runner(_text, **_limits):
+        observed["risk"] = a2at._a2a_capability().max_risk
+        return "ok"
+
+    engine = a2at.TaskEngine(runner=_runner)
+    monkeypatch.setattr(engine, "_shield_block", lambda _text: None)
+    params = {
+        "message": {
+            "role": "user",
+            "parts": [{"kind": "text", "text": "run"}],
+            "messageId": str(uuid.uuid4()),
+        },
+    }
+
+    task = asyncio.run(engine.send(params, principal="agent:vega"))
+
+    assert task["status"]["state"] == "completed"
+    assert observed == {"risk": "low"}
+    assert loads == 1
 
 
 def test_external_agent_allowlist_does_not_implicitly_gain_coordination():
@@ -225,6 +269,28 @@ def test_token_surface_isolation():
     assert agent_trust.agent_for_token("g", "mcp", registry=reg) is None
     assert agent_trust.agent_for_token("g", "a2a", registry=reg) is None
     assert agent_trust.agent_for_token("m", "mcp", registry=reg).id == "vega"
+
+
+def test_duplicate_active_surface_token_is_not_an_identity():
+    reg = {
+        "vega": TrustedAgent(id="vega", mcp_token="duplicate"),
+        "sirius": TrustedAgent(id="sirius", mcp_token="duplicate"),
+    }
+
+    assert agent_trust.agent_for_token("duplicate", "mcp", registry=reg) is None
+
+
+def test_duplicate_token_ignores_inactive_entries():
+    reg = {
+        "vega": TrustedAgent(id="vega", grpc_token="duplicate"),
+        "revoked": TrustedAgent(
+            id="revoked", grpc_token="duplicate", revoked=True,
+        ),
+    }
+
+    assert agent_trust.agent_for_token(
+        "duplicate", "grpc", registry=reg,
+    ).id == "vega"
 
 
 # ---- gRPC goal API gating -------------------------------------------------

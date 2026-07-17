@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 
 import pytest
+from maverick.file_lock import private_path_is_restricted
 from maverick.privacy import _hash_id, anonymize_field
 
 
@@ -51,4 +52,5 @@ def test_anon_salt_persisted_0600(tmp_path):
     anonymize_field("user_id", "alice123")  # triggers salt creation
     from maverick.paths import data_dir
     p = data_dir("keys", "anon.salt", tenant=None)
-    assert p.exists() and (p.stat().st_mode & 0o777) == 0o600
+    assert p.exists() and private_path_is_restricted(p)
+    assert private_path_is_restricted(p.parent, 0o700)

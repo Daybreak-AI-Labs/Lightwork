@@ -8,9 +8,8 @@ files, Google Drive) for documents related to the assessment subject and lets
 the caller pull one down and attach it as evidence, instead of making the
 respondent go hunt for files.
 
-Credentials resolve per source, env var first then a named
-:mod:`maverick.connections` record (the citizen-user path -- wired from the
-dashboard, sealed at rest, never code):
+Credentials resolve per source from a named :mod:`maverick.connections` record
+or, for local/standard operator execution, the legacy environment variables:
 
   ==========  =========================  ==================  ============
   source      env token                  env base override   connection
@@ -29,17 +28,12 @@ attachment limit so discovery can't smuggle in what a direct upload couldn't.
 Gated by ``[assessments] doc_discovery`` (default on -- it only activates when
 a source is actually configured).
 
-Trust model (stated, not accidental): searches and fetches run under the
-ORG-LEVEL credential, the same model as every other platform connector
-(msgraph_tool, gdrive_tool, ...). Any dashboard principal holding
-``operate`` can therefore reach whatever that credential can read -- scope
-the token accordingly (a read-only, sites-selected Graph app registration,
-not a global-reader). Per-user delegated fetch (each caller's own OAuth
-identity) is the tightening path if per-document ACL fidelity is required.
-Client-supplied ids/refs are hardened at the transport layer: path segments
-are fully percent-encoded and a Slack ``download_url`` must live on the
-configured tenant's host, so a crafted request cannot re-point the
-credential at another URL.
+Authenticated enterprise calls are different: they may use only a saved
+connection that admits the bound caller principal and never borrow ambient
+process credentials. Every outbound hop is held to the enterprise egress
+policy and an SSRF-safe, DNS-pinned transport; redirects are revalidated and
+credentials are dropped on a cross-origin redirect. Client-supplied ids/refs
+are additionally hardened at the path layer.
 """
 from __future__ import annotations
 
@@ -111,26 +105,75 @@ _DEFAULT_BASES = {
 }
 
 
-def _creds(source: str) -> tuple[str, str] | None:
-    """(base_url, token) for a source, or None when unconfigured."""
+def _bound_principal(principal: str | None = None) -> str | None:
+    """Return an explicit or dispatch-bound credential-use principal."""
+    explicit = str(principal or "")
+    if explicit:
+        return explicit
+    try:
+        from . import connections
+
+        return connections.current_principal()
+    except Exception:  # pragma: no cover - optional connections layer
+        return None
+
+
+def _requires_scoped_connection(principal: str | None) -> bool:
+    """Whether ambient process credentials are forbidden for this call."""
+    # Authentication itself is the authority boundary. Configuration/profile
+    # parsing must never decide whether an authenticated caller may borrow an
+    # operator-global environment credential: only genuine local auth-off calls
+    # (principal=None) retain that legacy behavior.
+    return bool(principal)
+
+
+def _creds(
+    source: str,
+    *,
+    principal: str | None = None,
+    allow_ambient_credentials: bool = False,
+) -> tuple[str, str] | None:
+    """Return an authorized ``(base_url, token)`` or ``None``.
+
+    Standard/local execution retains the historical env-first precedence.
+    Authenticated enterprise execution must use a saved connection whose use
+    grant admits the bound principal; neither its token nor base URL may come
+    from ambient process state.
+    """
+    caller = _bound_principal(principal)
+    if caller is None and not allow_ambient_credentials:
+        return None
+    conn = None
+    try:
+        from . import connections
+
+        conn = connections.resolve(source, principal=caller)
+    except Exception:  # pragma: no cover - an unreadable store is unconfigured
+        conn = None
+
+    if _requires_scoped_connection(caller):
+        if not conn or not str(conn[1]).strip():
+            return None
+        base = str(conn[0]).strip().rstrip("/") or _DEFAULT_BASES.get(source, "")
+        parsed = urllib.parse.urlsplit(base)
+        if parsed.scheme.lower() != "https" or not parsed.hostname:
+            return None
+        return (base, str(conn[1]).strip())
+
     token = ""
     for var in _ENV_TOKENS.get(source, ()):
         token = os.environ.get(var, "").strip()
         if token:
             break
     base = os.environ.get(_ENV_BASES.get(source, ""), "").strip()
-    if not token:
-        try:
-            from . import connections
-            rec = connections.resolve(source)
-        except Exception:  # pragma: no cover -- connections layer optional
-            rec = None
-        if rec:
-            base = base or rec[0]
-            token = rec[1]
+    if not token and conn:
+        base = base or conn[0]
+        token = conn[1]
     if not token:
         return None
-    return (base or _DEFAULT_BASES[source]).rstrip("/"), token
+    default = _DEFAULT_BASES.get(source, "")
+    resolved_base = (base or default).rstrip("/")
+    return (resolved_base, token) if resolved_base else None
 
 
 def get_assessments_sources() -> list[str]:
@@ -139,16 +182,41 @@ def get_assessments_sources() -> list[str]:
     return get_assessments()["sources"]
 
 
-def configured_sources() -> list[str]:
+def configured_sources(
+    *,
+    principal: str | None = None,
+    allow_ambient_credentials: bool = False,
+) -> list[str]:
     """Sources that currently have credentials, in stable order."""
-    return [s for s in get_assessments_sources() if _creds(s) is not None]
+    return [
+        s for s in get_assessments_sources()
+        if _creds(
+            s,
+            principal=principal,
+            allow_ambient_credentials=allow_ambient_credentials,
+        ) is not None
+    ]
+
+
+def _guarded_client(url: str, **kwargs):
+    """Return a policy-checked, DNS-pinned client for one exact URL."""
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("document source URL credentials are not permitted")
+    from .enterprise import enterprise_egress_denial
+
+    if enterprise_egress_denial(url, tool="doc_discovery"):
+        raise PermissionError("document source egress is not permitted")
+    from .tools._ssrf import safe_client
+
+    return safe_client(url, **kwargs)
 
 
 def _get(url: str, token: str, params: dict | None = None,
          *, auth: str = "bearer") -> tuple[int, object]:
-    import httpx
     headers = {"Authorization": f"Bearer {token}"} if auth == "bearer" else {}
-    r = httpx.get(url, headers=headers, params=params or {}, timeout=_TIMEOUT)
+    with _guarded_client(url, timeout=_TIMEOUT) as client:
+        r = client.get(url, headers=headers, params=params or {})
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -156,10 +224,13 @@ def _get(url: str, token: str, params: dict | None = None,
 
 
 def _post(url: str, token: str, body: dict) -> tuple[int, object]:
-    import httpx
-    r = httpx.post(url, headers={"Authorization": f"Bearer {token}",
-                                 "Content-Type": "application/json"},
-                   json=body, timeout=_TIMEOUT)
+    with _guarded_client(url, timeout=_TIMEOUT) as client:
+        r = client.post(
+            url,
+            headers={"Authorization": f"Bearer {token}",
+                     "Content-Type": "application/json"},
+            json=body,
+        )
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -168,20 +239,49 @@ def _post(url: str, token: str, body: dict) -> tuple[int, object]:
 
 def _download(url: str, token: str, max_bytes: int) -> tuple[bytes, str]:
     """Stream a document body, aborting past ``max_bytes`` -- a discovered
-    file must not be able to balloon server memory before the size check."""
-    import httpx
-    buf = bytearray()
-    with httpx.stream("GET", url,
-                      headers={"Authorization": f"Bearer {token}"},
-                      timeout=_TIMEOUT, follow_redirects=True) as r:
-        r.raise_for_status()
-        mime = r.headers.get("content-type", "application/octet-stream")
-        for chunk in r.iter_bytes():
-            buf += chunk
-            if len(buf) > max_bytes:
-                raise ValueError(
-                    f"document too large: > {max_bytes} bytes")
-    return bytes(buf), mime
+    file must not be able to balloon server memory before the size check.
+
+    Each redirect target gets a fresh egress + SSRF validation. Authorization
+    is retained only for a same-origin redirect; cross-origin signed download
+    URLs receive no bearer credential.
+    """
+    current = url
+    headers = {"Authorization": f"Bearer {token}"}
+    for _ in range(5):
+        with _guarded_client(current, timeout=_TIMEOUT) as client:
+            with client.stream("GET", current, headers=headers) as r:
+                if r.status_code in {301, 302, 303, 307, 308}:
+                    location = str(r.headers.get("location") or "").strip()
+                    if not location:
+                        raise ValueError("document source returned an invalid redirect")
+                    target = urllib.parse.urljoin(current, location)
+                    old = urllib.parse.urlsplit(current)
+                    new = urllib.parse.urlsplit(target)
+                    if (
+                        old.scheme.lower() == "https"
+                        and new.scheme.lower() != "https"
+                    ):
+                        raise PermissionError(
+                            "document download scheme downgrade is not permitted"
+                        )
+                    if (
+                        old.scheme.lower(), old.hostname, old.port
+                    ) != (
+                        new.scheme.lower(), new.hostname, new.port
+                    ):
+                        headers = {}
+                    current = target
+                    continue
+                r.raise_for_status()
+                mime = r.headers.get("content-type", "application/octet-stream")
+                buf = bytearray()
+                for chunk in r.iter_bytes():
+                    buf += chunk
+                    if len(buf) > max_bytes:
+                        raise ValueError(
+                            f"document too large: > {max_bytes} bytes")
+                return bytes(buf), mime
+    raise ValueError("document source returned too many redirects")
 
 
 # --------------------------------------------------------------------------- #
@@ -199,7 +299,7 @@ def _search_msgraph(base: str, token: str, query: str, limit: int) -> list[DocHi
         }],
     })
     if status != 200 or not isinstance(data, dict):
-        log.debug("doc_discovery msgraph search %s: %s", status, data)
+        log.debug("doc_discovery msgraph search failed with HTTP %s", status)
         return []
     hits: list[DocHit] = []
     for value in data.get("value", []):
@@ -237,7 +337,7 @@ def _search_slack(base: str, token: str, query: str, limit: int) -> list[DocHit]
     status, data = _get(f"{base}/search.files", token,
                         {"query": query, "count": limit})
     if status != 200 or not isinstance(data, dict) or not data.get("ok"):
-        log.debug("doc_discovery slack search %s: %s", status, data)
+        log.debug("doc_discovery slack search failed with HTTP %s", status)
         return []
     hits: list[DocHit] = []
     for f in ((data.get("files") or {}).get("matches") or [])[:limit]:
@@ -292,7 +392,7 @@ def _search_gdrive(base: str, token: str, query: str, limit: int) -> list[DocHit
         "fields": "files(id,name,mimeType,size,webViewLink)",
     })
     if status != 200 or not isinstance(data, dict):
-        log.debug("doc_discovery gdrive search %s: %s", status, data)
+        log.debug("doc_discovery gdrive search failed with HTTP %s", status)
         return []
     return [DocHit(
         source="gdrive", doc_id=str(f.get("id", "")),
@@ -333,7 +433,9 @@ def _rank(hit: DocHit, subject_tokens: set[str]) -> float:
 
 
 def discover(subject: str, *, keywords: tuple[str, ...] | None = None,
-             sources: list[str] | None = None, limit: int = 8) -> list[DocHit]:
+             sources: list[str] | None = None, limit: int = 8,
+             principal: str | None = None,
+             allow_ambient_credentials: bool = False) -> list[DocHit]:
     """Search every configured source for documents related to ``subject``.
 
     Returns ranked, deduped hits (best first), at most ``limit``. Never
@@ -348,7 +450,14 @@ def discover(subject: str, *, keywords: tuple[str, ...] | None = None,
     except Exception:  # pragma: no cover
         allowed = list(_SEARCHERS)
     if sources is None:
-        use = [s for s in allowed if _creds(s) is not None]
+        use = [
+            s for s in allowed
+            if _creds(
+                s,
+                principal=principal,
+                allow_ambient_credentials=allow_ambient_credentials,
+            ) is not None
+        ]
     else:
         # Caller preference filters WITHIN the operator's allowlist -- a
         # request body must not be able to widen [assessments] sources.
@@ -359,7 +468,11 @@ def discover(subject: str, *, keywords: tuple[str, ...] | None = None,
     seen: set[tuple[str, str]] = set()
     out: list[DocHit] = []
     for source in use:
-        creds = _creds(source)
+        creds = _creds(
+            source,
+            principal=principal,
+            allow_ambient_credentials=allow_ambient_credentials,
+        )
         searcher = _SEARCHERS.get(source)
         if creds is None or searcher is None:
             continue
@@ -371,7 +484,9 @@ def discover(subject: str, *, keywords: tuple[str, ...] | None = None,
         try:
             found = searcher(base, token, query, max(limit, 8))
         except Exception as e:  # noqa: BLE001 -- one source must not kill discovery
-            log.warning("doc_discovery: %s search failed: %s", source, e)
+            log.warning(
+                "doc_discovery: %s search failed (%s)", source, type(e).__name__,
+            )
             continue
         for h in found:
             key = (h.source, h.doc_id)
@@ -398,7 +513,9 @@ def resolve_mime(name: str, mime: str) -> str:
 
 
 def fetch(source: str, doc_id: str, ref: dict | None = None,
-          *, max_bytes: int | None = None) -> tuple[bytes, str]:
+          *, max_bytes: int | None = None,
+          principal: str | None = None,
+          allow_ambient_credentials: bool = False) -> tuple[bytes, str]:
     """Download one discovered document's content: ``(bytes, mime)``.
 
     Raises ValueError on an unknown/unconfigured source, a download URL
@@ -406,7 +523,11 @@ def fetch(source: str, doc_id: str, ref: dict | None = None,
     enforced WHILE streaming (never after buffering), and defaults to the
     attachment limit so discovery can't smuggle in what a direct upload
     couldn't."""
-    creds = _creds(source)
+    creds = _creds(
+        source,
+        principal=principal,
+        allow_ambient_credentials=allow_ambient_credentials,
+    )
     fetcher = _FETCHERS.get(source)
     if creds is None or fetcher is None:
         raise ValueError(f"source {source!r} is not configured")

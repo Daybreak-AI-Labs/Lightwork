@@ -25,9 +25,12 @@ each hop themselves.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import ipaddress
 import os
 import socket
+from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -37,6 +40,48 @@ if TYPE_CHECKING:  # pragma: no cover
 
 class BlockedHost(Exception):
     """Raised when a URL's host won't resolve or resolves to a non-public IP."""
+
+
+_scoped_private_hosts: contextvars.ContextVar[frozenset[str]] = contextvars.ContextVar(
+    "maverick_scoped_private_hosts",
+    default=frozenset(),
+)
+
+
+def _normalized_host(host: str) -> str:
+    normalized = str(host or "").lower().rstrip(".")
+    try:
+        return str(ipaddress.ip_address(normalized))
+    except ValueError:
+        return normalized
+
+
+@contextlib.contextmanager
+def allow_private_hosts(hosts: Iterable[str]) -> Iterator[None]:
+    """Temporarily admit exact loopback IP literals in the current context.
+
+    This is narrower than the process-global on-prem escape hatch: it propagates
+    through ``asyncio.to_thread`` but not into concurrent request contexts, and
+    cannot authorize a hostname that DNS could rebind or a private network range.
+    It exists for isolated in-process simulators such as the PIA demo.
+    """
+    normalized: set[str] = set()
+    for raw in hosts:
+        host = _normalized_host(raw)
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError as exc:
+            raise ValueError("scoped private hosts must be loopback IP literals") from exc
+        if not address.is_loopback:
+            raise ValueError("scoped private hosts must be loopback IP literals")
+        normalized.add(host)
+    if not normalized:
+        raise ValueError("at least one loopback host is required")
+    token = _scoped_private_hosts.set(frozenset(normalized))
+    try:
+        yield
+    finally:
+        _scoped_private_hosts.reset(token)
 
 
 def _ip_is_blocked(ip_str: str) -> bool:
@@ -74,7 +119,20 @@ def resolve_pinned_ip(host: str) -> str:
     ips = [info[4][0] for info in infos if info[4]]
     if not ips:
         raise BlockedHost(f"no addresses for {host!r}")
-    if not _allow_private():
+    normalized_host = _normalized_host(host)
+    scoped_private = normalized_host in _scoped_private_hosts.get()
+    if scoped_private:
+        expected = ipaddress.ip_address(normalized_host)
+        for ip in ips:
+            try:
+                actual = ipaddress.ip_address(ip)
+            except ValueError as exc:
+                raise BlockedHost(f"invalid address for scoped host {host!r}") from exc
+            if actual != expected or not actual.is_loopback:
+                raise BlockedHost(
+                    f"scoped host {host!r} resolved outside its exact loopback literal"
+                )
+    elif not _allow_private():
         for ip in ips:
             if _ip_is_blocked(ip):
                 raise BlockedHost(
@@ -232,6 +290,7 @@ def safe_async_client(url: str, **client_kwargs: Any) -> httpx.AsyncClient:
 
 __all__ = [
     "BlockedHost",
+    "allow_private_hosts",
     "resolve_pinned_ip",
     "safe_client",
     "safe_async_client",

@@ -17,7 +17,6 @@ another.
 from __future__ import annotations
 
 import json
-import os
 import re
 import threading
 import time
@@ -132,14 +131,15 @@ def save_fleet(fleet: Fleet, *, tenant: str | None = "__active__") -> Path:
     """Persist a fleet (0600). Raises ValueError on an invalid name."""
     if not valid_name(fleet.name):
         raise ValueError(f"invalid fleet name: {fleet.name!r}")
+    from .file_lock import atomic_write_text, ensure_private_directory
+
     d = fleets_dir(tenant=tenant)
-    d.mkdir(parents=True, exist_ok=True)
+    ensure_private_directory(d)
     path = d / f"{fleet.name}.json"
-    # 0600 from creation: a roster names principals + roles.
-    import os as _os
-    fd = _os.open(path, _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
-    with _os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(fleet.to_dict(), f, indent=2, sort_keys=True)
+    atomic_write_text(
+        path,
+        json.dumps(fleet.to_dict(), indent=2, sort_keys=True),
+    )
     return path
 
 
@@ -209,25 +209,15 @@ def record_run(
     same fleet never lose each other's entries to a read-modify-write race."""
     if not valid_name(name):
         raise ValueError(f"invalid fleet name: {name!r}")
-    with _runs_lock:
+    from .file_lock import atomic_write_text, cross_process_lock, ensure_private_directory
+
+    d = fleets_dir(tenant=tenant)
+    ensure_private_directory(d)
+    path = runs_path(name, tenant=tenant)
+    with _runs_lock, cross_process_lock(path):
         runs = load_runs(name, tenant=tenant)
         runs.append({"agent": agent, "goal_id": goal_id, "ts": time.time()})
-        d = fleets_dir(tenant=tenant)
-        d.mkdir(parents=True, exist_ok=True)
-        path = runs_path(name, tenant=tenant)
-        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        # 0600 from creation: the index names principals + their work. Write to a
-        # temp file then atomically replace, so a reader never sees a torn write.
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(runs, f, indent=2)
-            os.replace(tmp, path)
-        finally:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+        atomic_write_text(path, json.dumps(runs, indent=2))
 
 
 def governance_enabled() -> bool:

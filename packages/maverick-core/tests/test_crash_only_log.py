@@ -8,9 +8,33 @@ from __future__ import annotations
 
 import json
 import os
-import stat
+import subprocess
 
+import pytest
 from maverick import crash_only_log as col
+from maverick.file_lock import private_path_is_restricted
+
+
+def _make_shared_directory(path):
+    path.mkdir(mode=0o777)
+    if os.name == "nt":
+        subprocess.run(
+            ["icacls", str(path), "/grant", "*S-1-1-0:(OI)(CI)RX"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        path.chmod(0o755)
+    assert not private_path_is_restricted(path, 0o700)
+
+
+def _security_snapshot(path):
+    if os.name == "nt":
+        import maverick.file_lock as file_lock
+
+        return file_lock._windows_private_sddl(path)[0]
+    return path.stat().st_mode & 0o777
 
 
 def _log(tmp_path, **kw):
@@ -115,7 +139,41 @@ def test_replay_missing_file_is_empty(tmp_path):
 def test_log_file_created_0600(tmp_path):
     log = _log(tmp_path)
     log.append("a")
-    assert stat.S_IMODE(log.path.stat().st_mode) == 0o600
+    assert private_path_is_restricted(log.path)
+    assert private_path_is_restricted(log.path.parent, 0o700)
+
+
+def test_log_refuses_shared_parent_without_mutating_it(tmp_path):
+    shared = tmp_path / "shared"
+    _make_shared_directory(shared)
+    unrelated = shared / "team-file.txt"
+    unrelated.write_text("keep-access", encoding="utf-8")
+    before = _security_snapshot(shared)
+
+    with pytest.raises(PermissionError, match="must already be private"):
+        col.CrashOnlyLog(shared / "events.jsonl")
+
+    assert _security_snapshot(shared) == before
+    assert not private_path_is_restricted(shared, 0o700)
+    assert unrelated.read_text(encoding="utf-8") == "keep-access"
+    assert not (shared / "events.jsonl").exists()
+
+
+def test_constructor_closes_append_fd_when_recovery_raises(tmp_path, monkeypatch):
+    import maverick.file_lock as file_lock
+
+    raw_path = tmp_path / "opened.jsonl"
+    fd = os.open(str(raw_path), os.O_WRONLY | os.O_CREAT, 0o600)
+    monkeypatch.setattr(file_lock, "open_private_append", lambda *a, **kw: fd)
+
+    def _fail_recovery(self):
+        raise RuntimeError("simulated recovery failure")
+
+    monkeypatch.setattr(col.CrashOnlyLog, "_recover", _fail_recovery)
+    with pytest.raises(RuntimeError, match="recovery failure"):
+        col.CrashOnlyLog(tmp_path / "events.jsonl")
+    with pytest.raises(OSError):
+        os.fstat(fd)
 
 
 def test_fsync_always_by_default(tmp_path, monkeypatch):
@@ -141,9 +199,10 @@ def test_fsync_never_via_env(tmp_path, monkeypatch):
     calls: list[int] = []
     monkeypatch.setattr(os, "fsync", lambda fd: calls.append(fd))
     log = _log(tmp_path)
+    before = len(calls)  # private file publication may durably fsync once
     log.append("a")
     log.append("b")
-    assert calls == []
+    assert len(calls) == before
     # Format/recovery are unchanged in throughput mode.
     assert [r["kind"] for r in col.replay(log.path)] == ["a", "b"]
 
@@ -153,8 +212,9 @@ def test_fsync_constructor_override_beats_policy(tmp_path, monkeypatch):
     calls: list[int] = []
     monkeypatch.setattr(os, "fsync", lambda fd: calls.append(fd))
     log = _log(tmp_path, fsync=False)
+    before = len(calls)  # private file publication may durably fsync once
     log.append("a")
-    assert calls == []
+    assert len(calls) == before
 
 
 def test_fsync_policy_env_wins_over_config(tmp_path, monkeypatch):

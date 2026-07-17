@@ -189,20 +189,27 @@ def test_real_flow_surface_reports_flownode_tool_and_approval():
     save_flow(Flow(
         id="risky_flow",
         name="Risky flow",
-        start="run_shell",
+        start="approve",
         nodes={
-            "run_shell": FlowNode(id="run_shell", kind="action", tool="shell", next="approve"),
-            "approve": FlowNode(id="approve", kind="approval"),
+            "approve": FlowNode(
+                id="approve", kind="approval", prompt="Approve send?", next="send",
+            ),
+            "send": FlowNode(id="send", kind="action", tool="email"),
         },
     ))
 
     surface = A.flow_surface("risky_flow")
 
     assert surface is not None
-    assert surface["allow_tools"] == ["shell"]
-    assert surface["max_risk"] == "medium"
+    assert surface["allow_tools"] == ["email"]
+    assert surface["max_risk"] == "high"
     assert surface["has_human_gate"] is True
+    assert surface["analysis_complete"] is True
+    assert surface["approval_gaps"] == []
 
     draft = A.auto_draft("flow", "risky_flow", template="security_only", now=1.0)
     findings = draft["lenses"]["security"]["findings"]
-    assert any(f["control"] == "Arbitrary code / shell execution" and f["severity"] == "high" for f in findings)
+    assert any(
+        f["control"] == "Risk ceiling" and f["severity"] == "high"
+        for f in findings
+    )

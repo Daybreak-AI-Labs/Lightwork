@@ -4,7 +4,7 @@ from __future__ import annotations
 import shlex
 import shutil
 import subprocess
-from pathlib import Path
+from pathlib import PurePosixPath
 
 import pytest
 from maverick.sandbox import build_sandbox
@@ -170,7 +170,7 @@ def test_factory_selects_ssh_backend(monkeypatch):
 
     assert isinstance(backend, SSHBackend)
     assert backend.host == "me@example.com"
-    assert backend.workdir == Path("/remote/ws")
+    assert backend.workdir == PurePosixPath("/remote/ws")
     assert backend.timeout == 99.0
     assert backend.ssh_args == ["-i", "key"]
 

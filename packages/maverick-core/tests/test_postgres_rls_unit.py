@@ -15,6 +15,13 @@ class RecordingCursor:
         self.calls.append((sql, params))
 
 
+class RetentionCursor(RecordingCursor):
+    rowcount = 2
+
+    def fetchone(self):
+        return (2,)
+
+
 def test_rls_sets_fail_closed_sentinel_without_active_tenant(monkeypatch):
     monkeypatch.setattr(postgres, "_active_tenant", lambda: None)
     world = PostgresWorldModel.__new__(PostgresWorldModel)
@@ -26,6 +33,42 @@ def test_rls_sets_fail_closed_sentinel_without_active_tenant(monkeypatch):
     assert cur.calls == [
         ("SELECT set_config('maverick.tenant', %s, true)", ("__maverick_no_tenant__",))
     ]
+
+
+@pytest.mark.parametrize(
+    "method,table",
+    [
+        ("purge_episodes_before", "episodes"),
+        ("purge_goal_events_before", "goal_events"),
+    ],
+)
+def test_retention_purge_uses_exact_active_tenant(monkeypatch, method, table):
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = RetentionCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+
+    assert getattr(world, method)(123.0, dry_run=True) == 2
+    sql, params = cur.calls[0]
+    assert f"FROM {table}" in sql
+    assert "tenant_id = %s" in sql
+    assert "IS NULL" not in sql
+    assert params == (123.0, "acme")
+
+
+def test_retention_purge_rejects_missing_active_tenant(monkeypatch):
+    from maverick.paths import TenantPolicyError
+
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: None)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+
+    with pytest.raises(TenantPolicyError, match="refusing unbound Postgres"):
+        world.purge_goal_events_before(123.0)
 
 
 def test_rls_policy_does_not_allow_unset_tenant_bypass():

@@ -231,11 +231,23 @@ def _config_approval() -> dict:
     """The normalised ``[self_improvement]`` section via config.get_self_improvement,
     which owns the ``approver_keys`` / ``approver_keys_dir`` /
     ``require_signed_approval`` schema (one documented home for the section)."""
-    try:
-        from .config import get_self_improvement
-        return get_self_improvement()
-    except Exception:  # pragma: no cover -- config never blocks the gate
-        return {}
+    from .config import config_source_errors, get_self_improvement
+
+    cfg = get_self_improvement()
+    if config_source_errors() or cfg.get("approval_policy_valid") is not True:
+        raise RuntimeError("approver trust policy is unavailable or invalid")
+    return cfg
+
+
+def _trusted_approver_keys(cfg: dict) -> list[str]:
+    """Resolve trusted keys from one already-validated policy snapshot."""
+    keys = list(_keys_from_env())
+    cfg_keys = cfg.get("approver_keys")
+    if isinstance(cfg_keys, list):
+        keys.extend(str(k).strip() for k in cfg_keys if str(k).strip())
+    keys.extend(_keys_from_dir(os.environ.get("MAVERICK_APPROVER_KEYS_DIR")
+                               or cfg.get("approver_keys_dir")))
+    return list(dict.fromkeys(k for k in keys if k))
 
 
 def trusted_approver_keys() -> list[str]:
@@ -245,15 +257,8 @@ def trusted_approver_keys() -> list[str]:
     ``[self_improvement] approver_keys`` (config list), and any ``*.pub`` under
     ``MAVERICK_APPROVER_KEYS_DIR`` / ``[self_improvement] approver_keys_dir``.
     Empty (the default) means no cryptographic approval is configured."""
-    keys = list(_keys_from_env())
     cfg = _config_approval()
-    cfg_keys = cfg.get("approver_keys")
-    if isinstance(cfg_keys, list):
-        keys.extend(str(k).strip() for k in cfg_keys if str(k).strip())
-    keys.extend(_keys_from_dir(os.environ.get("MAVERICK_APPROVER_KEYS_DIR")
-                               or cfg.get("approver_keys_dir")))
-    # De-dup preserving insertion order (dict keeps order since 3.7).
-    return list(dict.fromkeys(k for k in keys if k))
+    return _trusted_approver_keys(cfg)
 
 
 def signing_enforced() -> bool:
@@ -265,16 +270,31 @@ def signing_enforced() -> bool:
     before keys are provisioned -- which then fails closed until they are).
     False by default, so a deployment that has not opted in keeps the legacy
     boolean-approval behaviour untouched."""
-    try:
-        from .config import env_flag
-        v = env_flag("MAVERICK_REQUIRE_SIGNED_APPROVAL")
-        if v is not None:
-            return v or bool(trusted_approver_keys())
-    except Exception:  # pragma: no cover -- env parsing never blocks the gate
-        pass
-    if bool(trusted_approver_keys()):
+    from .config import env_flag
+
+    cfg = _config_approval()
+    keys = _trusted_approver_keys(cfg)
+    env_name = "MAVERICK_REQUIRE_SIGNED_APPROVAL"
+    value = env_flag(env_name)
+    # A configured trust source is enforcement intent even when it currently
+    # yields no usable key (missing/unreadable directory, malformed key bytes).
+    # That condition must lock promotion, not reactivate boolean approval.
+    trust_source_configured = bool(
+        keys
+        or os.environ.get("MAVERICK_APPROVER_KEYS", "").strip()
+        or os.environ.get("MAVERICK_APPROVER_KEYS_DIR", "").strip()
+        or cfg.get("approver_keys")
+        or cfg.get("approver_keys_dir")
+    )
+    if value is not None:
+        # Preserve the documented environment override, except that configured
+        # keys always keep signature verification armed.
+        return value or trust_source_configured
+    if env_name in os.environ:
+        # Present but malformed boolean: uncertainty tightens to enforcement.
         return True
-    return bool(_config_approval().get("require_signed_approval", False))
+    return trust_source_configured or bool(
+        cfg.get("require_signed_approval", False))
 
 
 __all__ = [

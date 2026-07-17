@@ -75,7 +75,8 @@ def _fire_flow(trig, events, owner, fire_flow, summary) -> None:
         for k, v in event.items():   # a flow takes ALL event fields as data (no declared set)
             data[str(k)] = v if isinstance(v, (int, float, bool)) else str(v)[:2000]
         run_id = fire_flow(flow_id, data, owner, _event_key(trig["name"], event),
-                           f"event:{trig['name']}")
+                           f"event:{trig['name']}",
+                           expected_revision=str(trig.get("flow_revision") or ""))
         if run_id:
             summary["fired_flows"].append(run_id)
 
@@ -94,7 +95,12 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
 
         from maverick_dashboard.auth import auth_genuinely_off
 
-        flow = flow_store.load_flow(trig["flow"])
+        try:
+            published = flow_store.load_published_bundle(trig["flow"])
+        except flow_store.FlowSnapshotError:
+            published = None
+        flow = published[0] if published is not None else None
+        release = published[1] if published is not None else None
         expected_owner = str(trig.get("flow_owner") or "")
         expected_revision = str(trig.get("flow_revision") or "")
         stale = flow is None or (
@@ -102,7 +108,9 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
         )
         if flow is not None and expected_revision:
             stale = stale or (
-                flow.owner != expected_owner or flow.revision != expected_revision
+                flow.owner != expected_owner
+                or release is None
+                or str(release.get("release_id") or "") != expected_revision
             )
         if stale:
             summary["notes"].append("flow unavailable: binding is stale")

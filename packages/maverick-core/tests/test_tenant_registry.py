@@ -26,6 +26,36 @@ def test_create_duplicate_rejected():
         tr.create_tenant("acme")
 
 
+def test_create_rejects_casefold_namespace_alias(tmp_path):
+    from maverick.paths import TenantNamespaceCollision
+
+    tr.create_tenant("Acme")
+    with pytest.raises((ValueError, TenantNamespaceCollision), match="alias"):
+        tr.create_tenant("acme")
+    assert [record.id for record in tr.list_tenants()] == ["Acme"]
+    assert (tmp_path / "tenants" / "Acme").is_dir()
+
+
+def test_create_normalizes_nfd_and_rejects_duplicate_identity():
+    import unicodedata
+
+    nfc = unicodedata.normalize("NFC", "café")
+    nfd = unicodedata.normalize("NFD", "café")
+    assert tr.create_tenant(nfd).id == nfc
+    assert tr.get_tenant(nfd).id == nfc
+    with pytest.raises(ValueError, match="already exists"):
+        tr.create_tenant(nfc)
+
+
+def test_deleted_namespace_claim_prevents_case_alias_reuse():
+    from maverick.paths import TenantNamespaceCollision
+
+    tr.create_tenant("Acme")
+    assert tr.delete_tenant("Acme", purge=True)
+    with pytest.raises(TenantNamespaceCollision, match="aliases namespace owned"):
+        tr.create_tenant("acme")
+
+
 def test_create_blank_id_rejected():
     with pytest.raises(ValueError):
         tr.create_tenant("  ")
@@ -139,6 +169,30 @@ def test_save_is_atomic_0600_no_temp(tmp_path):
     assert "acme" in {t["id"] for t in json.loads(path.read_text())["tenants"]}
     # No stray temp droppings from the atomic write.
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_create_tenant_provisions_private_workspace():
+    from maverick.file_lock import private_path_is_restricted
+    from maverick.workspace import Workspace
+
+    tr.create_tenant("private-acme")
+    root = Workspace("private-acme").root
+    assert root.is_dir()
+    assert private_path_is_restricted(root, 0o700)
+
+
+def test_failed_workspace_provision_never_publishes_active_tenant(tmp_path):
+    blocked = tmp_path / "tenants" / "blocked"
+    blocked.parent.mkdir()
+    blocked.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(OSError):
+        tr.create_tenant("blocked")
+    assert tr.get_tenant("blocked") is None
+
+    blocked.unlink()
+    rec = tr.create_tenant("blocked")
+    assert rec.active
 
 
 def test_concurrent_creates_do_not_lose_tenants():

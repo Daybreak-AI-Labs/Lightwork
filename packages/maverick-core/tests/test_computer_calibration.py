@@ -2,7 +2,8 @@
 target grid, atomic 0600 persistence (ROADMAP 2028 H1). No screen needed."""
 from __future__ import annotations
 
-import stat
+import os
+import subprocess
 
 import pytest
 from maverick.computer_calibration import (
@@ -14,6 +15,29 @@ from maverick.computer_calibration import (
     residual_report,
     save_calibration,
 )
+from maverick.file_lock import private_path_is_restricted
+
+
+def _make_shared_directory(path):
+    path.mkdir(mode=0o777)
+    if os.name == "nt":
+        subprocess.run(
+            ["icacls", str(path), "/grant", "*S-1-1-0:(OI)(CI)RX"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        path.chmod(0o755)
+    assert not private_path_is_restricted(path, 0o700)
+
+
+def _security_snapshot(path):
+    if os.name == "nt":
+        import maverick.file_lock as file_lock
+
+        return file_lock._windows_private_sddl(path)[0]
+    return path.stat().st_mode & 0o777
 
 
 def _pairs(transform_to_model, targets):
@@ -130,9 +154,25 @@ def test_save_load_roundtrip_atomic_0600(tmp_path):
     saved_to = save_calibration(t, path)
     assert saved_to == path
     assert load_calibration(path) == t
-    mode = stat.S_IMODE(path.stat().st_mode)
-    assert mode == 0o600
+    assert private_path_is_restricted(path)
+    assert private_path_is_restricted(path.parent, 0o700)
     assert list(tmp_path.rglob("*.tmp")) == []  # no temp-file litter
+
+
+def test_injected_calibration_path_preserves_shared_parent_access(tmp_path):
+    shared = tmp_path / "shared"
+    _make_shared_directory(shared)
+    unrelated = shared / "team-report.txt"
+    unrelated.write_text("still shared", encoding="utf-8")
+    before = _security_snapshot(shared)
+
+    path = shared / "calibration.json"
+    save_calibration(CalibrationTransform(offset_x=4.0), path)
+
+    assert _security_snapshot(shared) == before
+    assert not private_path_is_restricted(shared, 0o700)
+    assert unrelated.read_text(encoding="utf-8") == "still shared"
+    assert private_path_is_restricted(path)
 
 
 def test_load_missing_or_corrupt_fails_open(tmp_path):

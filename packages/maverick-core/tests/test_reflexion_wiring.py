@@ -105,6 +105,14 @@ class TestReflexionStorageRoundtrip:
         _, entry = hits[0]
         assert entry.failure_class == "agent_error"
         assert "read_file" in entry.tools_used
+        from maverick.file_lock import private_path_is_restricted
+        assert private_path_is_restricted(path)
+
+    def test_readers_skip_valid_json_with_wrong_shape(self, tmp_path):
+        path = tmp_path / "reflexions.ndjson"
+        path.write_text('[]\n"text"\n', encoding="utf-8")
+        assert reflexion.recall("anything", path=path) == []
+        assert reflexion.list_recent(path=path) == []
 
 
 class TestReflexionPromptSafety:

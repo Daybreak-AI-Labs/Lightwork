@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import types
 
+import pytest
+
 
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -20,13 +22,32 @@ def _reset_aq(monkeypatch, aq):
     monkeypatch.setattr(aq, "_worker_threads", [])
 
 
-def _save_flow(fid="digest", schedule=""):
+def _save_flow(fid="digest", schedule="", *, publish=True):
     from maverick.flow import store
     from maverick.flow.ir import Flow, FlowNode
     f = Flow(id=fid, name="Digest", start="a",
              nodes={"a": FlowNode(id="a", kind="agent", brief="daily digest")})
     f.schedule = schedule
-    return store.save_flow(f)
+    saved = store.save_flow(f)
+    if publish:
+        store.publish_flow(
+            fid,
+            expected_version=saved.version,
+            expected_revision=saved.revision,
+        )
+    return saved
+
+
+def _cron_payload(fid="digest"):
+    from maverick.flow import store
+
+    flow, release = store.load_published_bundle(fid)
+    return {
+        "flow_id": fid,
+        "__cron__": flow.schedule,
+        "__tz__": flow.timezone,
+        "__flow_revision__": release["release_id"],
+    }
 
 
 def test_reconcile_arms_one_cron_per_scheduled_flow(monkeypatch, tmp_path):
@@ -70,7 +91,17 @@ def test_reconcile_reseeds_when_expression_changes(monkeypatch, tmp_path):
     _reset_aq(monkeypatch, aq)
     _save_flow("digest", "0 9 * * *")
     aq._reconcile_flow_crons()
-    _save_flow("digest", "0 17 * * *")          # changed cadence
+    draft = _save_flow("digest", "0 17 * * *", publish=False)
+    aq._reconcile_flow_crons()
+    # Saving is authoring, not activation: the old release stays armed.
+    crons = aq._pending(aq.FLOW_CRON_KIND)
+    assert len(crons) == 1 and crons[0].payload["__cron__"] == "0 9 * * *"
+    from maverick.flow import store
+    store.publish_flow(
+        draft.id,
+        expected_version=draft.version,
+        expected_revision=draft.revision,
+    )
     aq._reconcile_flow_crons()
     crons = aq._pending(aq.FLOW_CRON_KIND)
     assert len(crons) == 1 and crons[0].payload["__cron__"] == "0 17 * * *"
@@ -80,7 +111,14 @@ def test_reconcile_skips_unarmable_schedule(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
-    _save_flow("digest", "0 0 31 2 *")
+    draft = _save_flow("digest", "0 0 31 2 *", publish=False)
+    from maverick.flow import store
+    with pytest.raises(store.FlowSnapshotError, match="cannot be published"):
+        store.publish_flow(
+            draft.id,
+            expected_version=draft.version,
+            expected_revision=draft.revision,
+        )
     aq._reconcile_flow_crons()
     assert aq._pending(aq.FLOW_CRON_KIND) == []
 
@@ -90,7 +128,7 @@ def test_handle_flow_cron_enqueues_a_fresh_run(monkeypatch, tmp_path):
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
     _save_flow("digest", "0 9 * * *")
-    job = types.SimpleNamespace(payload={"flow_id": "digest", "__cron__": "0 9 * * *"})
+    job = types.SimpleNamespace(payload=_cron_payload())
     aq._handle_flow_cron(job)
     runs = aq._pending(aq.FLOW_RUN_KIND)
     assert len(runs) == 1 and runs[0].payload["flow_id"] == "digest"
@@ -102,7 +140,9 @@ def test_handle_flow_cron_noops_on_stale_schedule(monkeypatch, tmp_path):
     from maverick_dashboard import automation_queue as aq
     _reset_aq(monkeypatch, aq)
     _save_flow("digest", "0 17 * * *")
-    job = types.SimpleNamespace(payload={"flow_id": "digest", "__cron__": "0 9 * * *"})
+    stale = _cron_payload()
+    stale["__cron__"] = "0 9 * * *"
+    job = types.SimpleNamespace(payload=stale)
     aq._handle_flow_cron(job)
     assert aq._pending(aq.FLOW_RUN_KIND) == []
 

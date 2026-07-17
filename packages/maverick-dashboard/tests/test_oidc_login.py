@@ -209,6 +209,23 @@ def test_session_cookie_authenticates_gated_route(login_env, client, monkeypatch
     assert resp.status_code == 200
 
 
+@pytest.mark.parametrize("subject", ["alice ", "alice\n", "x" * 252])
+def test_signed_browser_session_rejects_invalid_subject_domain(login_env, subject):
+    import time
+    from types import SimpleNamespace
+
+    from maverick.web_session import sign_session
+
+    now = int(time.time())
+    raw = sign_session(
+        {"sub": subject, "iat": now, "exp": now + 3600},
+        SESSION_SECRET,
+    )
+    request = SimpleNamespace(cookies={ol.SESSION_COOKIE: raw})
+
+    assert ol._principal_from_request_session(request) is None
+
+
 # ---- callback: state mismatch (CSRF) ------------------------------------------
 
 

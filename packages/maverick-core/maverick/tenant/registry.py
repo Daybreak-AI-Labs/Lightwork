@@ -29,7 +29,12 @@ from ..file_lock import (
     cross_process_lock,
     ensure_private_directory,
 )
-from ..paths import _tenant_segment, maverick_home
+from ..paths import (
+    _tenant_namespace_key,
+    bind_tenant_namespace,
+    canonical_tenant_id,
+    maverick_home,
+)
 
 log = logging.getLogger(__name__)
 
@@ -115,7 +120,7 @@ class TenantRecord:
         tenant_id = d["id"]
         if tenant_id != tenant_id.strip():
             raise ValueError("tenant id must be trimmed")
-        _validate_id(tenant_id)
+        tenant_id = _validate_id(tenant_id)
         status = d.get("status", ACTIVE)
         if not isinstance(status, str):
             raise ValueError("tenant status must be a string")
@@ -148,10 +153,13 @@ def _validate_id(tenant_id: str) -> str:
     tid = (tenant_id or "").strip()
     if not tid:
         raise ValueError("tenant id is required")
-    # Reuse the path encoder's guard so a registry id is always a safe segment
-    # (it raises InvalidTenantError on an over-long id).
-    _tenant_segment(tid)
-    return tid
+    # Persist one canonical Unicode spelling and enforce portable path rules.
+    return canonical_tenant_id(tid)
+
+
+def _lookup_id(tenant_id: str | None) -> str:
+    tid = (tenant_id or "").strip()
+    return canonical_tenant_id(tid) if tid else ""
 
 
 def _load() -> dict[str, TenantRecord]:
@@ -174,6 +182,7 @@ def _load() -> dict[str, TenantRecord]:
             "tenant registry corrupt: top-level object must contain a tenants list"
         )
     out: dict[str, TenantRecord] = {}
+    namespace_owners: dict[str, str] = {}
     for d in raw["tenants"]:
         try:
             rec = TenantRecord.from_dict(d)
@@ -181,6 +190,14 @@ def _load() -> dict[str, TenantRecord]:
             raise TenantRegistryError(f"tenant registry corrupt: {exc}") from exc
         if rec.id in out:
             raise TenantRegistryError(f"tenant registry corrupt: duplicate tenant {rec.id!r}")
+        namespace_key = _tenant_namespace_key(rec.id)
+        prior = namespace_owners.get(namespace_key)
+        if prior is not None and prior != rec.id:
+            raise TenantRegistryError(
+                "tenant registry corrupt: tenant ids "
+                f"{prior!r} and {rec.id!r} alias the same filesystem namespace"
+            )
+        namespace_owners[namespace_key] = rec.id
         out[rec.id] = rec
     return out
 
@@ -239,7 +256,7 @@ def list_tenants() -> list[TenantRecord]:
 
 
 def get_tenant(tenant_id: str) -> TenantRecord | None:
-    return _load().get((tenant_id or "").strip())
+    return _load().get(_lookup_id(tenant_id))
 
 
 def create_tenant(
@@ -266,6 +283,19 @@ def create_tenant(
         records = _load()
         if tid in records:
             raise ValueError(f"tenant already exists: {tid!r}")
+        namespace_key = _tenant_namespace_key(tid)
+        for existing in records:
+            if _tenant_namespace_key(existing) == namespace_key:
+                raise ValueError(
+                    f"tenant id {tid!r} aliases existing tenant {existing!r}"
+                )
+        # Reserve the portable name and provision the confidentiality boundary
+        # BEFORE publishing an active roster entry. The registry lock keeps the
+        # admission check, claim, directory creation, and publication atomic to
+        # other provisioning processes.
+        bind_tenant_namespace(tid)
+        from ..workspace import Workspace
+        ensure_private_directory(Workspace(tid).root)
         now = time.time()
         rec = TenantRecord(
             id=tid, status=ACTIVE, plan=plan, display_name=display_name,
@@ -274,14 +304,11 @@ def create_tenant(
         )
         records[tid] = rec
         _save(records)
-    # Materialize the workspace home so the tenant's data dir exists.
-    from ..workspace import Workspace
-    Workspace(tid).root.mkdir(parents=True, exist_ok=True)
     return rec
 
 
 def _mutate(tenant_id: str, **changes) -> TenantRecord:
-    tid = (tenant_id or "").strip()
+    tid = _lookup_id(tenant_id)
     with _locked():
         records = _load()
         rec = records.get(tid)
@@ -334,7 +361,7 @@ def set_plan(tenant_id: str, plan: str) -> TenantRecord:
 def delete_tenant(tenant_id: str, *, purge: bool = False) -> bool:
     """Remove a tenant from the registry. With ``purge=True`` also delete its
     data directory (irreversible). Returns False if the tenant was unknown."""
-    tid = (tenant_id or "").strip()
+    tid = _lookup_id(tenant_id)
     with _locked():
         records = _load()
         if tid not in records:
@@ -360,7 +387,7 @@ def is_active(tenant_id: str | None) -> bool:
     exists, only provisioned active tenants may do work; unknown tenant IDs
     include deleted tenants and are refused.
     """
-    tid = (tenant_id or "").strip()
+    tid = _lookup_id(tenant_id)
     if not tid:
         return True
     try:
@@ -377,7 +404,7 @@ def assert_tenant_active(tenant_id: str | None) -> None:
     No-op for None / deployments without a registry, so existing flows are
     unchanged until tenant provisioning is enabled.
     """
-    tid = (tenant_id or "").strip()
+    tid = _lookup_id(tenant_id)
     if not tid:
         return
     path = _registry_path()
@@ -401,10 +428,11 @@ def tenant_spend_today(tenant_id: str) -> float:
     UTC day. An unreadable/corrupt ledger counts as infinite spend so a policy
     outage cannot reset a capped tenant's apparent usage to zero.
     """
+    tid = _lookup_id(tenant_id)
     from ..paths import data_dir
     from ..quotas import UsageLedger, _today
     try:
-        ledger = UsageLedger(data_dir("usage", "ledger.json", tenant=tenant_id))
+        ledger = UsageLedger(data_dir("usage", "ledger.json", tenant=tid))
         data = ledger._load()
         day = _today()
         return sum(
@@ -413,7 +441,7 @@ def tenant_spend_today(tenant_id: str) -> float:
         )
     except Exception as e:
         log.error("tenant_spend_today: unreadable usage ledger for %r: %s; "
-                  "treating spend as over cap", tenant_id, e)
+                  "treating spend as over cap", tid, e)
         return float("inf")
 
 
@@ -462,7 +490,7 @@ def tenant_over_quota(tenant_id: str | None) -> str | None:
     ``maverick tenant quota``); 0/unset, an unprovisioned tenant, or no
     roster all mean "no cap" — enforcement is opt-in per tenant.
     """
-    tid = (tenant_id or "").strip()
+    tid = _lookup_id(tenant_id)
     if not tid:
         return None
     if _load().get(tid) is None:
@@ -482,7 +510,7 @@ def _tenant_daily_cap(tenant_id: str) -> float:
     falling back to the plan entitlement cap when plan-cap enforcement is on.
     ``0`` means no cap. Shared by :func:`tenant_over_quota` and
     :func:`tenant_remaining_today` so both read the same ceiling."""
-    rec = _load().get((tenant_id or "").strip())
+    rec = _load().get(_lookup_id(tenant_id))
     if rec is None:
         return 0.0
     cap = rec.max_daily_dollars
@@ -579,7 +607,7 @@ def _live_reservations(data: dict, now: float) -> dict:
 
 def _outstanding_reservations(tenant_id: str | None, *, now: float | None = None) -> float:
     """Sum of a tenant's outstanding (non-expired) in-flight dollar holds."""
-    tid = (tenant_id or "").strip()
+    tid = _lookup_id(tenant_id)
     if not tid:
         return 0.0
     at = time.time() if now is None else now
@@ -598,7 +626,7 @@ def reserve_tenant_dollars(tenant_id: str | None, amount: float,
     flock + temp-file replace) that also prunes expired holds. A blank tenant/id
     or a non-positive amount is a no-op. Callers wrap this (it must never raise
     into the run path)."""
-    tid = (tenant_id or "").strip()
+    tid = _lookup_id(tenant_id)
     if not tid or not reservation_id:
         return
     try:
@@ -643,7 +671,7 @@ def reserve_tenant_budget(
     spend plus the hold, the new spend plus the hold, or the new spend after
     release -- never neither.
     """
-    tid = (tenant_id or "").strip()
+    tid = _lookup_id(tenant_id)
     if not tid:
         return None
     if not reservation_id or reservation_id != reservation_id.strip():
@@ -697,7 +725,7 @@ def release_tenant_reservation(tenant_id: str | None, reservation_id: str) -> bo
     has recorded its actual spend, so it isn't double-counted against the cap for
     the rest of its TTL). Also prunes expired holds. Returns True if the id was
     present; a no-op returning False for a blank tenant/id."""
-    tid = (tenant_id or "").strip()
+    tid = _lookup_id(tenant_id)
     if not tid or not reservation_id:
         return False
     now = time.time()
@@ -725,7 +753,7 @@ def tenant_remaining_today(tenant_id: str | None) -> float | None:
     clamping to the full remainder. Coordinates the per-run cap with the
     per-tenant cap; without it the over-quota gate only fires *between* runs,
     after the overshoot."""
-    tid = (tenant_id or "").strip()
+    tid = _lookup_id(tenant_id)
     if not tid:
         return None
     cap = _tenant_daily_cap(tid)

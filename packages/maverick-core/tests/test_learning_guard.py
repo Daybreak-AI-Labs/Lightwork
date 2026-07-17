@@ -144,7 +144,10 @@ def test_halt_cache_uses_monotonic_time_and_refreshes_after_clock_regression(
             raise FileNotFoundError
 
     ticks = iter((10.0, 9.0))
-    monkeypatch.setattr(killswitch.time, "monotonic", lambda: next(ticks))
+    # The autouse kill-switch cleanup also reads the monotonic clock during
+    # teardown. Keep returning the regressed value after the two assertions so
+    # the fixture cannot fail merely because this test exhausted its samples.
+    monkeypatch.setattr(killswitch.time, "monotonic", lambda: next(ticks, 9.0))
     monkeypatch.setattr(
         killswitch.time, "time",
         lambda: (_ for _ in ()).throw(AssertionError("wall clock used")),
@@ -396,9 +399,13 @@ def test_rollout_halt_after_deploy_rolls_back_before_constraints(
         evaluated += 1
         return True, "healthy"
 
+    def rollback(candidate: str) -> bool:
+        rolled_back.append(candidate)
+        return True
+
     result = run_rollout(
         "skill-v2", [Stage("canary", 0.1), Stage("full", 1.0)], [constraint],
-        deploy=deploy, rollback=rolled_back.append)
+        deploy=deploy, rollback=rollback)
 
     assert deployed == [0.1]
     assert evaluated == 0

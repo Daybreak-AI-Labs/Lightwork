@@ -305,7 +305,13 @@ def _principal_from_request_session(request: Request):
     absent, or the cookie fails verification (tampered/expired/wrong-secret).
     """
     if not login_enabled():
-        return None
+        try:
+            from .saml import saml_enabled
+
+            if not saml_enabled():
+                return None
+        except Exception:  # pragma: no cover - unavailable SAML is not a session
+            return None
     raw = request.cookies.get(SESSION_COOKIE)
     if not raw:
         return None
@@ -315,8 +321,10 @@ def _principal_from_request_session(request: Request):
     payload = verify_session(raw, cfg.session_secret)
     if not payload:
         return None
-    sub = payload.get("sub")
-    if not isinstance(sub, str) or not sub:
+    from maverick.oidc import validate_subject
+    try:
+        sub = validate_subject(payload.get("sub"))
+    except ValueError:
         return None
     # Revocation: a session minted before the principal's revocation epoch
     # ("log out everywhere" / SCIM deprovision) is rejected even though its HMAC

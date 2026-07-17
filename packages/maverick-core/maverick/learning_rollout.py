@@ -20,6 +20,7 @@ import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .learning_guard import Halted, check_learning_halt
 
@@ -29,7 +30,6 @@ log = logging.getLogger(__name__)
 # (ok, name) -- a health/eval check (success-rate >= baseline, no correctness
 # regression, error-rate under ceiling, ...). Pure/injected.
 Constraint = Callable[[str, float], "tuple[bool, str]"]
-Rollback = Callable[[str], bool | None]
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,18 @@ class DeploymentReceipt:
     candidate: str
     fraction: float
     revision: str
+
+
+@dataclass(frozen=True)
+class RollbackReceipt:
+    """Verified rollback outcome, including partial per-store evidence."""
+
+    complete: bool
+    restored: tuple[str, ...] = ()
+    failures: dict[str, str] = field(default_factory=dict)
+
+
+Rollback = Callable[[str], bool | RollbackReceipt]
 
 
 # Canary first, then half, then everyone -- the classic safe ramp.
@@ -68,6 +80,8 @@ class RolloutResult:
     rolled_back: bool = False
     completed: bool = False
     reason: str = ""
+    rollback_restored: list[str] = field(default_factory=list)
+    rollback_failures: dict[str, str] = field(default_factory=dict)
 
     @property
     def reached_fraction(self) -> float:
@@ -140,8 +154,37 @@ def _attempt_rollback(
     except Exception as exc:
         result.reason = f"{reason}; rollback failed ({type(exc).__name__})"
         return result
-    if restored is False:
-        result.reason = f"{reason}; rollback reported failure"
+    if isinstance(restored, RollbackReceipt):
+        try:
+            valid_restored = (
+                isinstance(restored.restored, tuple)
+                and all(isinstance(name, str) and name for name in restored.restored)
+            )
+            valid_failures = (
+                isinstance(restored.failures, dict)
+                and all(
+                    isinstance(name, str)
+                    and name
+                    and isinstance(detail, str)
+                    and detail
+                    for name, detail in restored.failures.items()
+                )
+            )
+            if not valid_restored or not valid_failures:
+                raise TypeError("malformed rollback receipt")
+            result.rollback_restored = list(restored.restored)
+            result.rollback_failures = dict(restored.failures)
+        except Exception as exc:
+            result.reason = (
+                f"{reason}; invalid rollback receipt ({type(exc).__name__})"
+            )
+            return result
+        if restored.complete is not True or restored.failures:
+            failed = ", ".join(sorted(restored.failures)) or "unverified restore"
+            result.reason = f"{reason}; rollback incomplete ({failed})"
+            return result
+    elif restored is not True:
+        result.reason = f"{reason}; rollback returned no verified success receipt"
         return result
     result.rolled_back = True
     result.reason = f"{reason}; rolled back"
@@ -265,15 +308,18 @@ def promote_skill_live(
             reason="deployment and rollback backends are required",
         )
 
-    # The snapshot is what makes the promotion reversible. If it RAISES (disk
-    # full, permission), there is no reliable rollback -- so ABORT rather than
-    # proceed into a promotion we can't cleanly undo (the docstring's "never a
-    # half-applied promotion"). A None return is the legitimate empty-state case
-    # (nothing yet to snapshot); rollback's remove-post-snapshot path still
-    # reverts anything this rollout adds, so that case proceeds.
+    # The snapshot is what makes the promotion reversible.  Publish even an
+    # empty state so rollback has an exact transaction boundary, and request
+    # exception semantics so an I/O failure cannot masquerade as that empty
+    # state.  The returned name is retained: using ambient "latest" would let a
+    # concurrent rollout redirect this rollback to the wrong snapshot.
     try:
         check_learning_halt("learning_rollout", "snapshot")
-        dreaming.snapshot_learning_state()
+        snapshot = dreaming.snapshot_learning_state(
+            publish_empty=True, raise_on_error=True,
+        )
+        if not isinstance(snapshot, Path):
+            raise RuntimeError("snapshot publisher returned no transaction boundary")
     except Halted as exc:
         return RolloutResult(candidate=candidate, completed=False, reason=str(exc))
     except Exception as e:
@@ -302,24 +348,51 @@ def promote_skill_live(
         except Exception:
             pass
 
-    def rollback(cand: str) -> bool:
+    def rollback(cand: str) -> RollbackReceipt:
+        failures: dict[str, str] = {}
+        restored: tuple[str, ...] = ()
+        deployment_complete = False
+        learning_state_complete = False
         try:
-            if rollback_backend(cand) is not True:
-                return False
+            if rollback_backend(cand) is True:
+                deployment_complete = True
+            else:
+                failures["deployment"] = "backend returned no success receipt"
         except Exception as e:
             log.warning("rollout: deployment rollback failed (%s)", e)
-            return False
+            failures["deployment"] = f"{type(e).__name__}: {e}"[:500]
         try:
-            dreaming.rollback_learning_state("latest")
+            restore_result = dreaming.rollback_learning_state(snapshot.name)
+            if not isinstance(restore_result, list) or not all(
+                isinstance(name, str) and name for name in restore_result
+            ):
+                raise TypeError("learning-state rollback returned an invalid receipt")
+            restored = tuple(restore_result)
+            learning_state_complete = True
+        except dreaming.LearningRollbackError as e:
+            log.warning("rollout: learning-state rollback incomplete (%s)", e)
+            restored = tuple(e.report.restored)
+            failures.update(e.report.failures)
+            if not e.report.failures:
+                failures["learning_state"] = "rollback reported incomplete state"
         except Exception as e:
             log.warning("rollout: rollback failed (%s)", e)
-            return False
-        return True
+            failures["learning_state"] = f"{type(e).__name__}: {e}"[:500]
+        return RollbackReceipt(
+            complete=(
+                deployment_complete
+                and learning_state_complete
+                and not failures
+            ),
+            restored=restored,
+            failures=failures,
+        )
 
     return run_rollout(candidate, stages, constraints, deploy=deploy, rollback=rollback)
 
 
 __all__ = [
-    "Stage", "DeploymentReceipt", "StageResult", "RolloutResult", "Constraint",
-    "DEFAULT_STAGES", "run_rollout", "threshold_constraint", "promote_skill_live",
+    "Stage", "DeploymentReceipt", "RollbackReceipt", "StageResult",
+    "RolloutResult", "Constraint", "DEFAULT_STAGES", "run_rollout",
+    "threshold_constraint", "promote_skill_live",
 ]

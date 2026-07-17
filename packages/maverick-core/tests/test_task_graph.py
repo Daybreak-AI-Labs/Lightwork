@@ -177,6 +177,52 @@ def test_tool_add_is_concurrency_safe(tmp_path, monkeypatch):
     assert len(g.tasks) == n, f"lost updates: only {len(g.tasks)} of {n} survived"
 
 
+def test_tool_graphs_are_principal_scoped(tmp_path, monkeypatch):
+    import maverick.task_graph as tg
+    from maverick.connections import bind_principal
+
+    monkeypatch.setattr(tg, "_STORE", tmp_path)
+    tool = tg.task_graph()
+    with bind_principal("user:alice"):
+        assert "added" in tool.fn({"op": "add", "task": "alice-only"})
+        assert "alice-only" in tool.fn({"op": "list"})
+    with bind_principal("user:bob"):
+        assert tool.fn({"op": "list"}) == "(empty)"
+    with bind_principal("user:alice"):
+        assert "alice-only" in tool.fn({"op": "list"})
+
+
+def test_tool_principal_resolution_failure_never_uses_shared_graph(
+    tmp_path, monkeypatch,
+):
+    import maverick.connections as connections
+    import maverick.task_graph as tg
+
+    monkeypatch.setattr(tg, "_STORE", tmp_path)
+
+    def _broken_authority():
+        raise RuntimeError("authority unavailable")
+
+    monkeypatch.setattr(connections, "current_principal", _broken_authority)
+    with pytest.raises(RuntimeError, match="authority unavailable"):
+        tg.task_graph().fn({"op": "add", "task": "must-not-land"})
+    assert not list(tmp_path.rglob("*.json"))
+
+
+def test_tool_store_resolves_active_tenant_per_call(tmp_path, monkeypatch):
+    import maverick.task_graph as tg
+    from maverick.paths import tenant_scope
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setattr(tg, "_STORE", tg._INITIAL_STORE)
+    tool = tg.task_graph()
+    with tenant_scope(tenant="acme"):
+        tool.fn({"op": "add", "task": "acme-only"})
+        assert "acme-only" in tool.fn({"op": "list"})
+    with tenant_scope(tenant="globex"):
+        assert tool.fn({"op": "list"}) == "(empty)"
+
+
 # ---- DoS: deep chains must not blow the Python stack ----
 
 def test_deep_chain_does_not_recurse_or_crash():

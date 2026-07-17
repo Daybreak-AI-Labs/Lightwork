@@ -160,9 +160,11 @@ Notes:
 - **Schema migrations are forward-only and idempotent**, applied on first
   connect. Restoring an older dump and starting a newer Lightwork re-applies any
   pending migrations automatically (see `world_model_backends/postgres.py`).
-- **HA:** the world model on Postgres is shared across replicas, so failover is
-  a Postgres concern (a standby / managed failover), not a Lightwork one. The
-  single-node `maverick backup` cold-standby model is for the SQLite default.
+- **Database HA:** managed Postgres can fail over the shared world model. The
+  Lightwork dashboard/serve control plane must still run as one replica because
+  other durable stores remain file-backed; replace that replica against the
+  same persistent data root instead of running active-active control-plane pods.
+  The single-node `maverick backup` cold-standby model is for the SQLite default.
 
 ## Learning-state operations
 

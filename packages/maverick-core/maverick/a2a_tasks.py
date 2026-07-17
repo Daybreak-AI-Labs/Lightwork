@@ -53,6 +53,13 @@ log = logging.getLogger(__name__)
 # contextvar so it propagates into the worker thread (asyncio.to_thread copies
 # the context) without threading it through the fixed Runner signature.
 _caller_agent: ContextVar[str | None] = ContextVar("a2a_caller_agent", default=None)
+# The exact trust-policy snapshot used for the execution-time admission check.
+# It is propagated into ``asyncio.to_thread`` with the caller id so the
+# capability ceiling cannot observe a different registry/config generation
+# after a queued task has already crossed the gate.
+_caller_trust_state: ContextVar[tuple[bool, dict[str, Any]] | None] = ContextVar(
+    "a2a_caller_trust_state", default=None,
+)
 
 
 def _agent_id_of(principal: str | None) -> str | None:
@@ -313,10 +320,18 @@ def _a2a_capability() -> Any:
     from .safety.tool_risk import RISK_LEVELS
 
     try:
-        from .config import load_config
-        cfg = (load_config() or {}).get("a2a") or {}
-    except Exception:
-        cfg = {}
+        from .config import config_source_errors, load_config
+
+        loaded = load_config() or {}
+        if config_source_errors():
+            raise RuntimeError("A2A capability config source is unreadable")
+        cfg = loaded.get("a2a") or {}
+        if not isinstance(cfg, dict):
+            raise RuntimeError("A2A capability policy must be a table")
+    except Exception as e:
+        # Losing an allowlist/denylist while executing a remote task can widen
+        # access even though the generic risk ceiling remains "medium".
+        raise RuntimeError("A2A capability policy unavailable") from e
 
     raw = os.environ.get("MAVERICK_A2A_MAX_RISK")
     if raw is None:
@@ -335,7 +350,9 @@ def _a2a_capability() -> Any:
             vals = os.environ.get(env_key, "").split(",")
         if isinstance(vals, str):
             vals = [vals]
-        return frozenset(str(v).strip() for v in vals if str(v).strip())
+        if not isinstance(vals, list) or not all(isinstance(v, str) for v in vals):
+            raise RuntimeError(f"A2A {cfg_key} policy must be a list of names")
+        return frozenset(v.strip() for v in vals if v.strip())
 
     cap = Capability(
         principal="a2a",
@@ -350,11 +367,16 @@ def _a2a_capability() -> Any:
     # "a2a" entry. Admission itself is gated separately by _a2a_trust_block.
     try:
         from . import agent_trust
-        if agent_trust.agent_trust_enforced():
+
+        trust_state = _caller_trust_state.get()
+        if trust_state is None:
+            trust_state = agent_trust.load_trust_state()
+        enforced, registry = trust_state
+        if enforced:
             caller = _caller_agent.get()
-            entry = agent_trust.lookup(caller) if caller else None
+            entry = agent_trust.lookup(caller, registry=registry) if caller else None
             if entry is None:
-                entry = agent_trust.lookup("a2a")
+                entry = agent_trust.lookup("a2a", registry=registry)
             if entry is not None:
                 cap = cap.intersect(entry.capability(principal="a2a"),
                                     principal="a2a")
@@ -366,7 +388,11 @@ def _a2a_capability() -> Any:
     return cap
 
 
-def _a2a_trust_block(principal: str = "anon") -> str | None:
+def _a2a_trust_block(
+    principal: str = "anon",
+    *,
+    trust_state: tuple[bool, dict[str, Any]] | None = None,
+) -> str | None:
     """Default-deny admission for the A2A surface when the plane is engaged.
 
     Gates on the CALLER's registry entry: a per-caller bearer (principal
@@ -377,7 +403,9 @@ def _a2a_trust_block(principal: str = "anon") -> str | None:
     """
     try:
         from . import agent_trust
-        enforced, registry = agent_trust.load_trust_state()
+        if trust_state is None:
+            trust_state = agent_trust.load_trust_state()
+        enforced, registry = trust_state
     except Exception:
         return "agent trust policy unavailable"
     if not enforced:
@@ -398,19 +426,22 @@ def _default_runner(
     from .llm import LLM
     from .orchestrator import run_goal_sync
     from .sandbox import build_sandbox
-    from .world_model import WorldModel
+    from .world_model import close_world_if_owned, open_world
 
     budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall)
-    world = WorldModel()
-    goal_id = world.create_goal(text[:120] or "a2a task", text)
-    llm = LLM()
-    sandbox = build_sandbox()
-    # A2A goals run under a tool ceiling (default max_risk="medium") so a remote
-    # caller can't reach full local tool access; see _a2a_capability.
-    return run_goal_sync(
-        llm, world, budget, goal_id, sandbox=sandbox, max_depth=max_depth,
-        capability=_a2a_capability(),
-    )
+    world = open_world()
+    try:
+        goal_id = world.create_goal(text[:120] or "a2a task", text)
+        llm = LLM()
+        sandbox = build_sandbox()
+        # A2A goals run under a tool ceiling (default max_risk="medium") so a remote
+        # caller can't reach full local tool access; see _a2a_capability.
+        return run_goal_sync(
+            llm, world, budget, goal_id, sandbox=sandbox, max_depth=max_depth,
+            capability=_a2a_capability(),
+        )
+    finally:
+        close_world_if_owned(world)
 
 
 class _Task:
@@ -1548,7 +1579,14 @@ class TaskEngine:
         if not text:
             self._reject_task(task, "empty message: no text parts to act on")
             return
-        tblock = _a2a_trust_block(task.principal)
+        try:
+            from . import agent_trust
+
+            trust_state = agent_trust.load_trust_state()
+        except Exception:
+            self._reject_task(task, "refused: agent trust policy unavailable")
+            return
+        tblock = _a2a_trust_block(task.principal, trust_state=trust_state)
         if tblock:
             self._reject_task(task, f"refused by agent trust plane: {tblock}")
             return
@@ -1562,6 +1600,7 @@ class TaskEngine:
         # Bind the caller id so _a2a_capability applies THIS caller's ceiling
         # (the contextvar copies into the worker thread).
         cv = _caller_agent.set(_agent_id_of(task.principal))
+        trust_cv = _caller_trust_state.set(trust_state)
         try:
             # Cap concurrently executing goals so one caller can't saturate the
             # process-wide default ThreadPoolExecutor (asyncio.to_thread) for up
@@ -1600,6 +1639,7 @@ class TaskEngine:
             self._fail_task(task, f"task failed: {detail}")
             return
         finally:
+            _caller_trust_state.reset(trust_cv)
             _caller_agent.reset(cv)
         # Completion and cancellation arbitration are atomic under the engine
         # lock, so a concurrent tasks/cancel cannot be resurrected to completed.
@@ -1650,8 +1690,19 @@ class TaskEngine:
                 return
             text = _message_text(task.messages[0])
             block = None if text else "empty message"
+            trust_state = None
             if not block:
-                block = _a2a_trust_block(task.principal) or self._shield_block(text)
+                try:
+                    from . import agent_trust
+
+                    trust_state = agent_trust.load_trust_state()
+                except Exception:
+                    block = "refused: agent trust policy unavailable"
+            if not block:
+                block = (
+                    _a2a_trust_block(task.principal, trust_state=trust_state)
+                    or self._shield_block(text)
+                )
             if block:
                 self._reject_task(task)
                 yield _status_event(task, final=True)
@@ -1671,6 +1722,7 @@ class TaskEngine:
             # 3. run.
             limits = self._limits(task)
             cv = _caller_agent.set(_agent_id_of(task.principal))
+            trust_cv = _caller_trust_state.set(trust_state)
             try:
                 async with _run_slot():
                     # A tasks/cancel request may have landed while this stream
@@ -1706,6 +1758,7 @@ class TaskEngine:
                 await self._fire_push(task)
                 return
             finally:
+                _caller_trust_state.reset(trust_cv)
                 _caller_agent.reset(cv)
             if task.cancel_requested:
                 self._cancel_task(task)

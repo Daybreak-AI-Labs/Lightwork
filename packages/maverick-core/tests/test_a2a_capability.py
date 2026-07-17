@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import importlib
 
+import pytest
+
 
 def _write_a2a_config(tmp_path, body: str = "") -> None:
     cfg_dir = tmp_path / ".maverick"
@@ -95,6 +97,17 @@ def test_allowlist_and_deny_from_env(tmp_path, monkeypatch):
     assert cap.permits("read_file")
     assert not cap.permits("web_search")   # deny wins over allow
     assert not cap.permits("shell")        # not on the allowlist
+
+
+@pytest.mark.parametrize("key", ["tools", "deny_tools"])
+def test_malformed_tool_policy_fails_closed(tmp_path, monkeypatch, key):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    _clear_env(monkeypatch)
+    _write_a2a_config(tmp_path, f"[a2a]\n{key} = true\n")
+    from maverick.a2a_tasks import _a2a_capability
+
+    with pytest.raises(RuntimeError, match="policy must be a list"):
+        _a2a_capability()
 
 
 # --- the runner wires it through --------------------------------------------

@@ -163,7 +163,9 @@ class Workflow:
             t0 = time.monotonic()
             try:
                 raw = _drive(registry.run(step.tool, args))
-                ok = not str(raw).startswith("ERROR:")
+                from .tool_results import tool_result_failed
+
+                ok = not tool_result_failed(raw)
                 err = "" if ok else str(raw)
             except Exception as e:
                 raw = ""

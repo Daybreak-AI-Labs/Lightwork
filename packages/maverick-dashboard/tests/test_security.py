@@ -1,7 +1,9 @@
 """Council security pass — dashboard auth + CSRF + headers + skill-install gate."""
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
+from maverick.oidc import OIDCError, VerifiedPrincipal
 
 
 def _client():
@@ -129,6 +131,197 @@ def test_api_v1_mutation_allows_matching_origin(monkeypatch, tmp_path):
         headers={"Origin": "http://testserver"},
     )
     assert resp.status_code == 204
+
+
+def test_oidc_bearer_api_mutation_does_not_require_browser_origin(
+    monkeypatch, tmp_path,
+):
+    """An explicit verified bearer is API authority, not an ambient CSRF risk."""
+    from maverick import world_model
+    from maverick_dashboard import auth as auth_mod
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(auth_mod, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        auth_mod,
+        "verify_oidc_token",
+        lambda _token: VerifiedPrincipal(
+            sub="api-client",
+            issuer="https://issuer.example",
+            audience="lightwork",
+            claims={"iat": 1},
+        ),
+    )
+    monkeypatch.setattr(auth_mod, "_enforce_scim_active", lambda _principal: None)
+    monkeypatch.setattr(auth_mod, "_pin_tenant_from_principal", lambda *_args: None)
+    monkeypatch.setattr(auth_mod, "role_for_principal", lambda _principal: "operator")
+
+    response = _client().post(
+        "/api/v1/facts",
+        json={"key": "api", "value": "authorized"},
+        headers={"Authorization": "Bearer valid-oidc-token"},
+    )
+
+    assert response.status_code == 204
+
+
+def test_invalid_oidc_bearer_without_origin_is_401_not_cookie_fallback(
+    monkeypatch, tmp_path,
+):
+    """CSRF bypass is conditional on the bearer dependency authenticating it."""
+    from maverick import world_model
+    from maverick_dashboard import auth as auth_mod
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.setattr(auth_mod, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        auth_mod,
+        "_session_principal",
+        lambda _request: VerifiedPrincipal(
+            sub="ambient-cookie-user",
+            issuer="browser-session",
+            audience="lightwork",
+            claims={"via": "session", "iat": 1},
+        ),
+    )
+
+    def _reject(_token):
+        raise OIDCError("invalid token")
+
+    monkeypatch.setattr(auth_mod, "verify_oidc_token", _reject)
+
+    response = _client().post(
+        "/api/v1/facts",
+        json={"key": "api", "value": "rejected"},
+        headers={"Authorization": "Bearer invalid-oidc-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid OIDC token"
+
+
+@pytest.mark.parametrize("identity_kind", ["oidc_session", "proxy", "saml", "invite"])
+def test_static_token_composes_with_ambient_identity(
+    monkeypatch, tmp_path, identity_kind,
+):
+    """A recovery/operator token must not disable configured enterprise SSO."""
+    from maverick import world_model
+    from maverick_dashboard import auth as auth_mod
+    from maverick_dashboard import invites, saml
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-operator-token")
+    monkeypatch.setattr(auth_mod, "oidc_enabled", lambda: False)
+    monkeypatch.setattr(auth_mod, "proxy_auth_enabled", lambda: False)
+    monkeypatch.setattr(auth_mod, "_session_principal", lambda _request: None)
+    monkeypatch.setattr(auth_mod, "_invite_session_principal", lambda _request: None)
+    monkeypatch.setattr(auth_mod, "_saml_policy_configured", lambda: False)
+    monkeypatch.setattr(invites, "invites_enabled", lambda: False)
+    monkeypatch.setattr(saml, "saml_enabled", lambda: False)
+    monkeypatch.setattr(auth_mod, "_enforce_scim_active", lambda _principal: None)
+    monkeypatch.setattr(auth_mod, "_pin_tenant_from_principal", lambda *_args: None)
+    monkeypatch.setattr(auth_mod, "role_for_principal", lambda _principal: "operator")
+
+    principal = VerifiedPrincipal(
+        sub=f"{identity_kind}-user",
+        issuer="https://issuer.example",
+        audience="lightwork",
+        claims={"via": "invite" if identity_kind == "invite" else "session", "iat": 1},
+    )
+    headers = {"Origin": "http://testserver"}
+    if identity_kind == "oidc_session":
+        monkeypatch.setattr(auth_mod, "oidc_enabled", lambda: True)
+        monkeypatch.setattr(auth_mod, "_session_principal", lambda _request: principal)
+    elif identity_kind == "proxy":
+        monkeypatch.setattr(auth_mod, "proxy_auth_enabled", lambda: True)
+        monkeypatch.setattr(auth_mod, "proxy_trusts", lambda _host: True)
+        monkeypatch.setattr(auth_mod, "proxy_header_name", lambda: "X-Forwarded-User")
+        headers["X-Forwarded-User"] = "proxy-user"
+    elif identity_kind == "saml":
+        monkeypatch.setattr(saml, "saml_enabled", lambda: True)
+        monkeypatch.setattr(auth_mod, "_session_principal", lambda _request: principal)
+    else:
+        monkeypatch.setattr(invites, "invites_enabled", lambda: True)
+        monkeypatch.setattr(auth_mod, "_invite_session_principal", lambda _request: principal)
+
+    response = _client().post(
+        "/api/v1/facts",
+        json={"key": identity_kind, "value": "authorized"},
+        headers=headers,
+    )
+
+    assert response.status_code == 204
+
+
+def test_static_token_composes_with_explicit_oidc_bearer_without_origin(
+    monkeypatch, tmp_path,
+):
+    """Either valid explicit credential works in a mixed static/OIDC deploy."""
+    from maverick import world_model
+    from maverick_dashboard import auth as auth_mod
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-operator-token")
+    monkeypatch.setattr(auth_mod, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        auth_mod,
+        "verify_oidc_token",
+        lambda _token: VerifiedPrincipal(
+            sub="api-client",
+            issuer="https://issuer.example",
+            audience="lightwork",
+            claims={"iat": 1},
+        ),
+    )
+    monkeypatch.setattr(auth_mod, "_enforce_scim_active", lambda _principal: None)
+    monkeypatch.setattr(auth_mod, "_pin_tenant_from_principal", lambda *_args: None)
+    monkeypatch.setattr(auth_mod, "role_for_principal", lambda _principal: "operator")
+
+    response = _client().post(
+        "/api/v1/facts",
+        json={"key": "mixed", "value": "authorized"},
+        headers={"Authorization": "Bearer valid-oidc-token"},
+    )
+
+    assert response.status_code == 204
+
+
+def test_invalid_explicit_bearer_cannot_fall_back_in_mixed_auth(
+    monkeypatch, tmp_path,
+):
+    """A bad explicit credential overrides, rather than borrowing, a cookie."""
+    from maverick import world_model
+    from maverick_dashboard import auth as auth_mod
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "static-operator-token")
+    monkeypatch.setattr(auth_mod, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(
+        auth_mod,
+        "_session_principal",
+        lambda _request: VerifiedPrincipal(
+            sub="ambient-cookie-user",
+            issuer="browser-session",
+            audience="lightwork",
+            claims={"via": "session", "iat": 1},
+        ),
+    )
+
+    def _reject(_token):
+        raise OIDCError("invalid token")
+
+    monkeypatch.setattr(auth_mod, "verify_oidc_token", _reject)
+
+    response = _client().post(
+        "/api/v1/facts",
+        json={"key": "mixed", "value": "rejected"},
+        headers={"Authorization": "Bearer invalid-explicit-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid OIDC token"
 
 
 # ---------- no-token mode refuses proxied requests (launch review) ----------

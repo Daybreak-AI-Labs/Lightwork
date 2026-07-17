@@ -90,7 +90,10 @@ def unlocked(path: Path | None = None) -> dict[str, float]:
     """``{key: unlocked_at}`` for everything earned so far."""
     p = path or _store_path()
     try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
+        from .file_lock import atomic_read_text, ensure_private_file
+
+        ensure_private_file(p)
+        raw = json.loads(atomic_read_text(p))
         return {str(k): float(v) for k, v in raw.items()}
     except (OSError, ValueError):
         return {}
@@ -117,7 +120,13 @@ def evaluate(world, *, path: Path | None = None,
         # run's unlocks: two concurrent evaluate()s would otherwise both load
         # the old set and the second save would drop the first's unlocks.
         # Re-stamping a key another process already unlocked is idempotent.
-        from .file_lock import atomic_write_text, cross_process_lock
+        from .file_lock import (
+            atomic_write_text,
+            cross_process_lock,
+            ensure_private_directory,
+        )
+        if path is None:
+            ensure_private_directory(p.parent)
         with cross_process_lock(p):
             earned = unlocked(p)
             for ach in fresh:

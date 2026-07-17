@@ -60,17 +60,16 @@ def test_restore_arg_requires_explicit_state(monkeypatch, tmp_path):
 
 class _FakeContext:
     def __init__(self):
-        self.saved_to = None
+        self.calls = 0
 
-    def storage_state(self, path):
-        self.saved_to = path
-        # Mimic playwright: write a valid state file.
-        from pathlib import Path
-        Path(path).write_text('{"cookies": [], "origins": []}')
+    def storage_state(self):
+        self.calls += 1
+        # Playwright returns the state mapping when no path is supplied.
+        return {"cookies": [], "origins": []}
 
 
 def test_save_state_writes_file_with_secure_perms(monkeypatch, tmp_path):
-    import stat
+    from maverick.file_lock import private_path_is_restricted
     target = tmp_path / "sub" / "state.json"
     monkeypatch.setenv("MAVERICK_BROWSER_STATE", str(target))
     monkeypatch.delenv("MAVERICK_BROWSER_NO_PERSIST", raising=False)
@@ -79,9 +78,7 @@ def test_save_state_writes_file_with_secure_perms(monkeypatch, tmp_path):
     sess._context = _FakeContext()
     assert sess.save_state() is True
     assert target.exists()
-    import os
-    if os.name != "nt":  # NTFS reports 0o666 regardless of chmod
-        assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert private_path_is_restricted(target)
 
 
 def test_save_state_noop_without_context(monkeypatch, tmp_path):

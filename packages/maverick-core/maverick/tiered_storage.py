@@ -208,7 +208,9 @@ def _write_cold_file(cold_dir: Path, table: str, ts_col: str, rows: list[dict]) 
     lo = _yyyymmdd(min(r[ts_col] for r in rows))
     hi = _yyyymmdd(max(r[ts_col] for r in rows))
     ext, writer = _choose_format(_cold_codec())
-    cold_dir.mkdir(parents=True, exist_ok=True)
+    from .file_lock import ensure_private_file, require_private_directory
+
+    require_private_directory(cold_dir)
     # Write the whole file to a UNIQUE temp first (read_cold skips ".tmp"), then
     # atomically publish it under a never-clobber name. A fixed ".tmp" derived
     # from the final name would also collide between two same-range archivers.
@@ -217,11 +219,10 @@ def _write_cold_file(cold_dir: Path, table: str, ts_col: str, rows: list[dict]) 
     os.close(fd)
     tmp = Path(tmp_name)
     try:
+        # The temp is still empty here. Tighten its Windows DACL / POSIX mode
+        # before a writer places any archived customer content in it.
+        ensure_private_file(tmp)
         writer(rows, tmp)
-        try:
-            os.chmod(tmp, 0o600)  # same posture as world.db: content may be sensitive
-        except OSError:
-            pass
         path = _publish_unique(cold_dir, f"{table}-{lo}-{hi}", ext, tmp)
     except BaseException:
         try:
@@ -263,11 +264,9 @@ def archive(
         raise TypeError("archive() requires the SQLite WorldModel backend")
     cutoff = cutoff_epoch(older_than_days)
     cold = Path(cold_dir).expanduser()
-    cold.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(cold, 0o700)  # cold rows carry the content world.db protects
-    except OSError:
-        pass
+    from .file_lock import prepare_private_directory
+
+    prepare_private_directory(cold)
     rows_archived: dict[str, int] = {}
     files: list[Path] = []
     for table in tables:

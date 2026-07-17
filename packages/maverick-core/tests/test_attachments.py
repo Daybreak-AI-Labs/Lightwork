@@ -1,7 +1,12 @@
 """File + image attachment storage."""
 from __future__ import annotations
 
+import hashlib
+import os
+
 import pytest
+from maverick import file_lock
+from maverick import paths as maverick_paths
 from maverick.attachments import (
     MAX_FILE_BYTES,
     MAX_GOAL_BYTES,
@@ -28,6 +33,116 @@ def test_store_text_writes_to_disk(tmp_path):
     assert out.path.read_bytes() == data
     # sha-prefixed dest avoids name collisions.
     assert out.path.name.startswith(out.sha256[:16] + "-")
+    assert file_lock.private_path_is_restricted(out.path.parent, 0o700)
+    assert file_lock.private_path_is_restricted(out.path)
+
+
+def test_default_attachment_root_resolves_per_tenant_context(tmp_path, monkeypatch):
+    import maverick.attachments as attachment_module
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setattr(attachment_module, "DEFAULT_ROOT", None)
+
+    first_token = maverick_paths.set_tenant("tenant-a")
+    try:
+        first = store(1, "report.txt", "text/plain", b"tenant a")
+    finally:
+        maverick_paths.reset_tenant(first_token)
+
+    second_token = maverick_paths.set_tenant("tenant-b")
+    try:
+        second = store(1, "report.txt", "text/plain", b"tenant b")
+    finally:
+        maverick_paths.reset_tenant(second_token)
+
+    assert first.path != second.path
+    assert tmp_path / "tenants" / "tenant-a" / "attachments" in first.path.parents
+    assert tmp_path / "tenants" / "tenant-b" / "attachments" in second.path.parents
+    assert first.path.read_bytes() == b"tenant a"
+    assert second.path.read_bytes() == b"tenant b"
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "report:secret.txt",  # NTFS alternate data stream
+        "report?.txt",
+        "report*.txt",
+        "report|notes.txt",
+        'report"notes.txt',
+        "report<old>.txt",
+        "CON",
+        "con.txt",
+        "CON .txt",
+        "LPT9.csv",
+        "COM¹.log",
+        "trailing-dot.",
+        "trailing-space ",
+    ],
+)
+def test_store_rejects_portability_filename_attacks(tmp_path, filename):
+    with pytest.raises(AttachmentRejected):
+        store(
+            goal_id=1,
+            filename=filename,
+            mime="text/plain",
+            data=b"safe text",
+            root=tmp_path,
+        )
+
+
+def test_store_rejects_filename_that_overflows_content_address_component(tmp_path):
+    with pytest.raises(AttachmentRejected, match="too long"):
+        store(
+            goal_id=1,
+            filename="a" * 239,
+            mime="text/plain",
+            data=b"safe text",
+            root=tmp_path,
+        )
+
+
+def test_store_refuses_planted_content_address_without_overwriting(tmp_path):
+    data = b"expected content"
+    digest = hashlib.sha256(data).hexdigest()
+    goal_dir = file_lock.ensure_private_directory(tmp_path / "7")
+    planted = goal_dir / f"{digest[:16]}-report.txt"
+    file_lock.atomic_create_bytes(planted, b"attacker content")
+
+    with pytest.raises(AttachmentRejected, match="content-address mismatch"):
+        store(
+            goal_id=7,
+            filename="report.txt",
+            mime="text/plain",
+            data=data,
+            root=tmp_path,
+        )
+
+    assert planted.read_bytes() == b"attacker content"
+
+
+def test_store_refuses_planted_symlink_without_touching_referent(tmp_path):
+    data = b"expected content"
+    digest = hashlib.sha256(data).hexdigest()
+    goal_dir = file_lock.ensure_private_directory(tmp_path / "7")
+    referent = tmp_path / "referent.txt"
+    referent.write_bytes(b"do not overwrite")
+    planted = goal_dir / f"{digest[:16]}-report.txt"
+    try:
+        os.symlink(referent, planted)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation is unavailable on this host")
+
+    with pytest.raises(AttachmentRejected, match="single-link regular file"):
+        store(
+            goal_id=7,
+            filename="report.txt",
+            mime="text/plain",
+            data=data,
+            root=tmp_path,
+        )
+
+    assert referent.read_bytes() == b"do not overwrite"
 
 
 def test_store_rejects_unknown_mime(tmp_path):

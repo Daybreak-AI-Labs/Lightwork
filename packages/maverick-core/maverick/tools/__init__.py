@@ -288,8 +288,13 @@ class ToolRegistry:
     # Deferred-loading meta-tool name (see enable_deferred / find_tools.py).
     META_TOOL = "find_tools"
 
-    def __init__(self):
+    def __init__(self, *, principal: str | None = None):
         self._tools: dict[str, Tool] = {}
+        # Authenticated execution identity used by credential-bearing tools.
+        # Stored on the registry and rebound with a ContextVar per invocation so
+        # sync tools running in worker threads cannot borrow another run's saved
+        # SaaS connection.
+        self._principal = str(principal or "").strip() or None
         self._acl_allowed: set[str] = set()
         self._acl_denied: set[str] = set()
         self._acl_max_risk: str | None = None
@@ -442,12 +447,27 @@ class ToolRegistry:
                 # repeated read doesn't re-do the work. Never caches writes
                 # or error results. See tool_cache.py.
                 _tool = self._tools[name]
+                if denial := _ambient_credential_denial(name, self._principal):
+                    return denial
+                # Cache identity is an authorization boundary. Resolve it
+                # before lookup (the connector ContextVar is bound only while
+                # invoking the function) and include both tenant and principal
+                # so two users or clients cannot share a credential-bearing
+                # read result merely because the tool arguments match.
+                from ..paths import current_tenant_id
+
+                _cache_namespace = (
+                    f"tenant={current_tenant_id() or '<shared>'}\0"
+                    f"principal={self._principal or '<anonymous>'}"
+                )
                 try:
                     from ..cache.tool import get_cached, store_cached
                 except ImportError:  # pragma: no cover
                     get_cached = store_cached = None  # type: ignore[assignment]
                 if get_cached is not None:
-                    _hit, _cached = get_cached(_tool, args)
+                    _hit, _cached = get_cached(
+                        _tool, args, namespace=_cache_namespace,
+                    )
                     if _hit:
                         try:
                             from ..observability import record_metric as _rm
@@ -463,18 +483,26 @@ class ToolRegistry:
                 except ImportError:
                     pass
                 async def _invoke() -> str:
-                    return await _execute_tool_fn(
-                        self._tools[name].fn, args,
-                        lambda chunk: _forward_chunk(self._chunk_listener, name, chunk),
-                    )
+                    from ..connections import bind_principal
+
+                    with bind_principal(self._principal):
+                        return await _execute_tool_fn(
+                            self._tools[name].fn, args,
+                            lambda chunk: _forward_chunk(self._chunk_listener, name, chunk),
+                        )
 
                 # One shared reliability policy: transient upstream failures
                 # on retry-safe (non-high-risk) tools are retried with backoff.
                 from ..tool_reliability import run_with_retry
                 result = await run_with_retry(name, _invoke)
-                if store_cached is not None:
+                from ..tool_results import ToolResultState, classify_tool_result
+                result_state = classify_tool_result(result)
+                if store_cached is not None and result_state is ToolResultState.SUCCEEDED:
                     try:
-                        store_cached(_tool, args, result)
+                        store_cached(
+                            _tool, args, result,
+                            namespace=_cache_namespace,
+                        )
                         # A side-effectful tool may have changed what any
                         # cached read returned; drop stale reads.
                         from ..cache.tool import note_side_effect
@@ -483,7 +511,7 @@ class ToolRegistry:
                         pass
                 try:
                     from ..observability import record_metric as _rm
-                    _rm("tool_calls", labels={"tool": name, "status": "ok"})
+                    _rm("tool_calls", labels={"tool": name, "status": result_state.value})
                 except Exception:  # pragma: no cover
                     pass
                 return result
@@ -558,6 +586,42 @@ AMBIENT_CRED_TOOL_NAMES = frozenset({
     "airtable", "asana", "clickup", "lambda", "dynamodb", "vercel", "gdrive",
 })
 
+# Hand-written connectors that still read operator-global environment
+# credentials directly. They are safe for the anonymous/local operator path,
+# but cannot enforce per-principal grants. Authenticated enterprise execution
+# therefore refuses them until each is migrated to the sealed connection
+# resolver. Generic REST/GraphQL connectors are intentionally absent: their
+# resolver enforces principal-scoped saved connections at credential use.
+AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES = AMBIENT_CRED_TOOL_NAMES | frozenset({
+    "bigquery", "bitbucket", "calendar", "calendly", "cloudflare",
+    "confluence", "database", "databricks", "datadog", "discord_bot",
+    "discord_slash", "dropbox", "dynamics", "elasticsearch", "email", "erp_read",
+    "ga4", "github_actions", "github_issues", "gitlab", "gitlab_issues",
+    "geocode", "github_repo_search", "github_search", "gmail", "home_assistant",
+    "hubspot", "huggingface", "jira", "linear", "mixpanel",
+    "mongodb", "msgraph", "newsapi", "notion", "onetrust", "oracle",
+    "pagerduty", "plaid", "plausible", "posthog", "reddit", "redis",
+    "replicate", "s3", "salesforce", "sap", "sentry", "servicenow", "ses",
+    "semantic_scholar", "shopify", "slack_bot", "slack_workflow", "snowflake",
+    "sns", "speak", "spotify", "stripe", "teams", "transcribe_audio", "translate",
+    "trello", "truelayer", "twilio", "vertex", "wolfram", "workday", "zoom",
+})
+
+
+def _ambient_credential_denial(name: str, principal: str | None) -> str | None:
+    if not principal or name not in AUTHENTICATED_AMBIENT_CRED_TOOL_NAMES:
+        return None
+    from ..enterprise import enterprise_enabled
+
+    if not enterprise_enabled():
+        return None
+    return (
+        "REFUSED (credentials): authenticated enterprise execution cannot use "
+        f"operator-global environment credentials for connector {name!r}. This "
+        "connector must be migrated to a principal-authorized saved connection "
+        "before tenant users or agents can run it."
+    )
+
 
 def _deferred_loading_enabled() -> bool:
     """Whether deferred tool loading is on (default off -- unchanged behavior).
@@ -623,7 +687,21 @@ def base_registry(
     from .shell import shell
     from .str_edit import str_replace_editor
 
-    reg = ToolRegistry()
+    principal = str(user_id or "").strip()
+    if principal and not principal.startswith("user:"):
+        principal = f"user:{principal}"
+    if not principal:
+        # Network adapters (notably the MCP server) bind the authenticated
+        # execution principal before they enter the orchestrator.  The agent's
+        # human-facing ``user_id`` remains optional, but connector resolution
+        # and the output-cache namespace must still retain the remote caller's
+        # identity.  Copy the ContextVar value onto the registry so worker
+        # threads cannot lose it and nested/child agents inherit the same
+        # authorization boundary.
+        from ..connections import current_principal
+
+        principal = str(current_principal() or "").strip()
+    reg = ToolRegistry(principal=principal or None)
     # SSHBackend executes shell commands remotely, but filesystem tools
     # are local pathlib operations. Registering read/write/list for SSH
     # would access the Lightwork host filesystem instead of the remote
@@ -1285,14 +1363,17 @@ def base_registry(
     _apply_tool_acl(reg, channel=channel, user_id=user_id)
     _apply_deferred_loading(reg)
 
-    # Opt-in: route configured enterprise-connector WRITES through GovernedActions
-    # (preview + approval-gate). Off by default; no-op unless
-    # [governed_connectors] enable. Done last so it wraps the final tool objects.
+    # Route external connector WRITES through durable governed transactions.
+    # Standard mode is opt-in; enterprise mode is a mandatory fail-closed floor.
+    # Done last so it wraps the final tool objects.
     try:
         from ..governed_tools import apply_governed_connectors
-        apply_governed_connectors(reg)
-    except Exception:  # pragma: no cover -- governance must never break assembly
-        pass
+        apply_governed_connectors(reg, goal_id=goal_id)
+    except Exception:
+        from ..enterprise import enterprise_enabled
+
+        if enterprise_enabled():
+            raise
 
     return reg
 
@@ -1307,18 +1388,32 @@ def base_tool_names() -> set[str] | None:
     registered names, or ``None`` if assembly fails (a caller then skips
     tool-existence checks rather than guessing). Never raises.
     """
+    world = None
     try:
         from ..sandbox.local import LocalBackend
         from ..world_model import open_world
 
+        world = open_world(None)
         reg = base_registry(
-            open_world(None), LocalBackend(), _include_generated_tools=False,
+            world, LocalBackend(), _include_generated_tools=False,
         )
         return {t.name for t in reg.all()}
     except Exception as e:  # pragma: no cover -- best-effort introspection
         import logging as _logging
         _logging.getLogger(__name__).debug("base_tool_names unavailable: %s", e)
         return None
+    finally:
+        if world is not None:
+            from ..world_model import close_world_if_owned
+
+            try:
+                close_world_if_owned(world)
+            except Exception:  # pragma: no cover -- introspection never raises
+                import logging as _logging
+
+                _logging.getLogger(__name__).debug(
+                    "base_tool_names world close failed", exc_info=True,
+                )
 
 
 def _register_optional_tools(

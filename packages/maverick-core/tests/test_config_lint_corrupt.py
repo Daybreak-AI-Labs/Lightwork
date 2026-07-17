@@ -10,6 +10,10 @@ guards this by parsing the raw file; config-lint now does the same.)
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 from click.testing import CliRunner
 
 
@@ -28,6 +32,31 @@ def test_corrupt_toml_fails(tmp_path, monkeypatch):
     assert "config OK" not in res.output
     low = res.output.lower()
     assert "toml" in low or "parse" in low or "invalid" in low or "syntax" in low
+
+
+def test_corrupt_toml_is_reported_from_fresh_cli_process(tmp_path):
+    """CLI import and group setup must not admit storage before diagnostics."""
+    cfg = tmp_path / "config.toml"
+    cfg.write_text("[budget\nmax_dollars = \n", encoding="utf-8")
+    env = os.environ.copy()
+    env.update(
+        MAVERICK_CONFIG=str(cfg),
+        MAVERICK_HOME=str(tmp_path / "home"),
+    )
+    env.pop("MAVERICK_CLIENT_ID", None)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "maverick.cli", "config-lint"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+        check=False,
+    )
+
+    rendered = (result.stdout + result.stderr).lower()
+    assert result.returncode == 1, rendered
+    assert "toml" in rendered or "parse" in rendered or "invalid" in rendered
 
 
 def test_valid_config_still_ok(tmp_path, monkeypatch):

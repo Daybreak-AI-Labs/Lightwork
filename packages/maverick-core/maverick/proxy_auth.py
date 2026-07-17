@@ -119,9 +119,10 @@ def principal_from_proxy(value: str):
     conventions; ``claims`` records that this identity came via the proxy (not a
     signed ID token) so downstream code can tell them apart.
     """
-    from .oidc import VerifiedPrincipal
+    from .oidc import VerifiedPrincipal, validate_subject
+    subject = validate_subject(value)
     return VerifiedPrincipal(
-        sub=value, issuer="proxy", audience="", claims={"via": "proxy"},
+        sub=subject, issuer="proxy", audience="", claims={"via": "proxy"},
     )
 
 

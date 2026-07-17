@@ -71,8 +71,8 @@ def run_one(
         outcome = "ok" if proc.returncode == 0 else f"exit-{proc.returncode}"
 
         # Read the most recent episode from the world model.
-        from maverick.world_model import DEFAULT_DB, WorldModel
-        wm = WorldModel(db_path or DEFAULT_DB)
+        from maverick.world_model import WorldModel
+        wm = WorldModel(db_path)
         eps = wm.list_episodes(limit=1)
         if eps:
             cost = eps[0].cost_dollars

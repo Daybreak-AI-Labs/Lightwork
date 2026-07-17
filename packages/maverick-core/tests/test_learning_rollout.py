@@ -1,6 +1,8 @@
 """Governed rollout of learning: staged promotion with auto-rollback."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from maverick.learning_rollout import (
     DEFAULT_STAGES,
@@ -14,7 +16,12 @@ from maverick.learning_rollout import (
 def _recorder():
     deployed: list = []
     rolled: list = []
-    return deployed, rolled, (lambda c, f: deployed.append((c, f))), (lambda c: rolled.append(c))
+
+    def rollback(candidate):
+        rolled.append(candidate)
+        return True
+
+    return deployed, rolled, (lambda c, f: deployed.append((c, f))), rollback
 
 
 def test_all_constraints_pass_completes_full_rollout():
@@ -67,10 +74,14 @@ def test_deploy_error_is_caught_and_rolled_back():
         deployed.append((candidate, fraction))
         raise RuntimeError("partial deploy")
 
+    def rollback(candidate):
+        rolled.append(candidate)
+        return True
+
     res = run_rollout(
         "x", [Stage("canary", 0.1), Stage("full", 1.0)],
         [lambda _c, _f: (True, "ok")],
-        deploy=deploy, rollback=rolled.append,
+        deploy=deploy, rollback=rollback,
     )
     assert deployed == [("x", 0.1)] and rolled == ["x"]
     assert res.rolled_back and not res.completed
@@ -88,6 +99,16 @@ def test_rollback_error_is_caught_and_never_claimed():
     )
     assert not res.rolled_back and not res.completed
     assert "rollback failed (RuntimeError)" in res.reason
+
+
+def test_unverified_rollback_return_is_never_claimed():
+    res = run_rollout(
+        "x", [Stage("canary", 0.1), Stage("full", 1.0)],
+        [lambda _c, _f: (False, "health")],
+        deploy=lambda _c, _f: None, rollback=lambda _candidate: None,
+    )
+    assert not res.rolled_back and not res.completed
+    assert "no verified success receipt" in res.reason
 
 
 @pytest.mark.parametrize(
@@ -137,8 +158,12 @@ def test_promote_skill_live_audits_each_stage_and_completes(monkeypatch):
     # LEARNING_UPDATE per stage (the call that was silently wrong), no rollback.
     from maverick import learning_rollout as lr
     calls = {"snapshot": 0, "audit": []}
-    monkeypatch.setattr("maverick.dreaming.snapshot_learning_state",
-                        lambda *a, **k: calls.__setitem__("snapshot", calls["snapshot"] + 1))
+    def _snapshot(*args, **kwargs):
+        calls["snapshot"] += 1
+        assert kwargs == {"publish_empty": True, "raise_on_error": True}
+        return Path("snapshots/exact-snapshot")
+
+    monkeypatch.setattr("maverick.dreaming.snapshot_learning_state", _snapshot)
     monkeypatch.setattr("maverick.dreaming.rollback_learning_state",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not roll back")))
     monkeypatch.setattr("maverick.audit.record",
@@ -173,11 +198,39 @@ def test_promote_skill_live_requires_real_deployment_backends():
     assert "backends are required" in res.reason
 
 
+def test_promote_skill_live_aborts_without_exact_snapshot(monkeypatch):
+    from maverick import learning_rollout as lr
+
+    deployed = []
+    monkeypatch.setattr(
+        "maverick.dreaming.snapshot_learning_state", lambda *a, **k: None,
+    )
+    res = lr.promote_skill_live(
+        "sk", [lambda _c, _f: (True, "ok")],
+        deploy_backend=lambda c, f: deployed.append((c, f)),
+        rollback_backend=lambda _candidate: True,
+    )
+    assert not res.completed and not res.rolled_back
+    assert deployed == []
+    assert "snapshot failed" in res.reason
+
+
 def test_promote_skill_live_rolls_back_on_failure(monkeypatch):
     from maverick import learning_rollout as lr
     rolled, remote_rolled = [], []
-    monkeypatch.setattr("maverick.dreaming.snapshot_learning_state", lambda *a, **k: None)
-    monkeypatch.setattr("maverick.dreaming.rollback_learning_state", lambda *a, **k: rolled.append(1))
+
+    def restore(snapshot, *args, **kwargs):
+        rolled.append(snapshot)
+        return ["insights.ndjson"]
+
+    monkeypatch.setattr(
+        "maverick.dreaming.snapshot_learning_state",
+        lambda *a, **k: Path("snapshots/snapshot-for-this-rollout"),
+    )
+    monkeypatch.setattr(
+        "maverick.dreaming.rollback_learning_state",
+        restore,
+    )
     monkeypatch.setattr("maverick.audit.record", lambda *a, **k: None)
     bad = lr.threshold_constraint("h", lambda c, f: 0.0, floor=0.5)
     res = lr.promote_skill_live(
@@ -185,13 +238,18 @@ def test_promote_skill_live_rolls_back_on_failure(monkeypatch):
         deploy_backend=lambda c, f: DeploymentReceipt(c, f, "rev-1"),
         rollback_backend=lambda candidate: not remote_rolled.append(candidate),
     )
-    assert res.rolled_back and rolled == [1] and remote_rolled == ["sk"]
+    assert res.rolled_back
+    assert rolled == ["snapshot-for-this-rollout"]
+    assert remote_rolled == ["sk"]
 
 
 def test_promote_skill_live_never_claims_failed_restore(monkeypatch):
     from maverick import learning_rollout as lr
 
-    monkeypatch.setattr("maverick.dreaming.snapshot_learning_state", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "maverick.dreaming.snapshot_learning_state",
+        lambda *a, **k: Path("snapshots/exact-snapshot"),
+    )
     monkeypatch.setattr(
         "maverick.dreaming.rollback_learning_state",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk failed")),
@@ -204,4 +262,87 @@ def test_promote_skill_live_never_claims_failed_restore(monkeypatch):
         rollback_backend=lambda _candidate: True,
     )
     assert not res.rolled_back and not res.completed
-    assert "rollback reported failure" in res.reason
+    assert res.rollback_failures == {"learning_state": "RuntimeError: disk failed"}
+    assert "rollback incomplete (learning_state)" in res.reason
+
+
+def test_live_rollback_attempts_local_restore_after_deployment_failure(monkeypatch):
+    from maverick import learning_rollout as lr
+
+    restored = []
+    monkeypatch.setattr(
+        "maverick.dreaming.snapshot_learning_state",
+        lambda *a, **k: Path("snapshots/exact-snapshot"),
+    )
+
+    def restore(snapshot):
+        restored.append(snapshot)
+        return ["insights.ndjson"]
+
+    monkeypatch.setattr("maverick.dreaming.rollback_learning_state", restore)
+    monkeypatch.setattr("maverick.audit.record", lambda *a, **k: None)
+    bad = lr.threshold_constraint("h", lambda _c, _f: 0.0, floor=0.5)
+    result = lr.promote_skill_live(
+        "sk", [bad],
+        stages=[lr.Stage("canary", 0.1), lr.Stage("full", 1.0)],
+        deploy_backend=lambda c, f: DeploymentReceipt(c, f, "rev-1"),
+        rollback_backend=lambda _candidate: False,
+    )
+
+    assert restored == ["exact-snapshot"]
+    assert not result.completed and not result.rolled_back
+    assert result.rollback_restored == ["insights.ndjson"]
+    assert result.rollback_failures == {
+        "deployment": "backend returned no success receipt",
+    }
+
+
+def test_live_rollout_reports_partial_store_restore_and_leaves_no_false_success(
+    tmp_path, monkeypatch,
+):
+    from maverick import dreaming
+    from maverick import learning_rollout as lr
+
+    live = tmp_path / "live"
+    live.mkdir()
+    insights = live / "insights.ndjson"
+    skills = live / "learned-skills"
+    insights.write_text("trusted\n", encoding="utf-8")
+    skills.mkdir()
+    (skills / "trusted.md").write_text("trusted", encoding="utf-8")
+    stores = {"insights.ndjson": insights, "learned-skills": skills}
+    snapdir = tmp_path / "snapshots"
+
+    monkeypatch.setattr(dreaming, "_live_stores", lambda: stores)
+    monkeypatch.setattr(dreaming, "snapshots_dir", lambda: snapdir)
+    original_restore = dreaming._restore_private_directory
+
+    def fail_skill_restore(src, destination):
+        if destination == skills:
+            raise OSError("simulated learned-skills restore failure")
+        return original_restore(src, destination)
+
+    monkeypatch.setattr(dreaming, "_restore_private_directory", fail_skill_restore)
+    monkeypatch.setattr("maverick.audit.record", lambda *a, **k: None)
+
+    def deploy(_candidate, fraction):
+        insights.write_text(f"poison-{fraction}\n", encoding="utf-8")
+        (skills / "poison.md").write_text("poison", encoding="utf-8")
+        return DeploymentReceipt("sk", fraction, f"rev-{fraction}")
+
+    bad = lr.threshold_constraint("h", lambda _c, _f: 0.0, floor=0.5)
+    result = lr.promote_skill_live(
+        "sk", [bad],
+        stages=[lr.Stage("canary", 0.1), lr.Stage("full", 1.0)],
+        deploy_backend=deploy,
+        rollback_backend=lambda _candidate: True,
+    )
+
+    assert not result.completed and not result.rolled_back
+    assert result.rollback_restored == ["insights.ndjson"]
+    assert "simulated learned-skills restore failure" in (
+        result.rollback_failures["learned-skills"]
+    )
+    assert "rollback incomplete (learned-skills)" in result.reason
+    assert insights.read_text(encoding="utf-8") == "trusted\n"
+    assert (skills / "poison.md").read_text(encoding="utf-8") == "poison"

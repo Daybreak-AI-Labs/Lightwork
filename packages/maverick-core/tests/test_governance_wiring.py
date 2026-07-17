@@ -37,6 +37,7 @@ def _agent(tmp_path):
 
 def _gov(monkeypatch, policy: dict):
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {"governance": policy})
+    monkeypatch.setattr("maverick.config.config_source_errors", dict)
 
 
 @pytest.mark.asyncio
@@ -141,6 +142,38 @@ async def test_eval_error_open_when_no_policy(monkeypatch, tmp_path):
     monkeypatch.setattr(gov, "evaluate", _boom)
     out = await _agent(tmp_path)._run_tool("ping", {})
     assert "pong" in out
+
+
+@pytest.mark.asyncio
+async def test_policy_source_loss_fails_closed(monkeypatch, tmp_path):
+    # Establish the already-running agent before simulating loss of its policy
+    # source. Constructing new storage after configuration becomes invalid is
+    # correctly rejected by the independent client-binding boundary; this test
+    # specifically proves that an existing agent cannot keep executing tools
+    # when its governance policy disappears at runtime.
+    agent = _agent(tmp_path)
+    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr(
+        "maverick.config.config_source_errors",
+        lambda: {"config.toml": "invalid TOML"},
+    )
+
+    out = await agent._run_tool("ping", {})
+
+    assert "pong" not in out
+    assert "DENIED by org policy" in out
+    assert "policy_unavailable" in out
+
+
+@pytest.mark.asyncio
+async def test_malformed_policy_field_fails_closed(monkeypatch, tmp_path):
+    _gov(monkeypatch, {"deny_above": {"ping": "5000"}})
+
+    out = await _agent(tmp_path)._run_tool("ping", {"amount": 6000})
+
+    assert "pong" not in out
+    assert "DENIED by org policy" in out
+    assert "policy_unavailable" in out
 
 
 @pytest.mark.asyncio

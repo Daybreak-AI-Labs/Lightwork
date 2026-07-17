@@ -125,6 +125,15 @@ def parse_level(value: object, default: AutonomyLevel | None = None) -> Autonomy
     return default
 
 
+def _onboarding_value(value: object, *, default: bool) -> bool:
+    """Strict supervision flag: malformed input can only restore the clamp."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return True
+
+
 @dataclass(frozen=True)
 class AutonomyProfile:
     """A hire's authority dial: a baseline rung + per-risk overrides + phase.
@@ -163,7 +172,7 @@ class AutonomyProfile:
             low=parse_level(low, self.low),
             medium=parse_level(medium, self.medium),
             high=parse_level(high, self.high),
-            onboarding=self.onboarding if onboarding is None else bool(onboarding),
+            onboarding=_onboarding_value(onboarding, default=self.onboarding),
         )
 
     @classmethod
@@ -178,7 +187,7 @@ class AutonomyProfile:
             low=parse_level(raw.get("low")),
             medium=parse_level(raw.get("medium")),
             high=parse_level(raw.get("high")),
-            onboarding=True if onboarding is None else bool(onboarding),
+            onboarding=_onboarding_value(onboarding, default=True),
         )
 
 
@@ -332,13 +341,21 @@ def levels_enabled() -> bool:
     ``[workforce] levels`` config either way. Never raises."""
     import os
     env = os.environ.get("MAVERICK_WORKFORCE_LEVELS", "").strip().lower()
-    if env in {"1", "true", "yes", "on"}:
-        return True
     if env in {"0", "false", "no", "off"}:
         return False
     try:
-        from .config import get_workforce
-        return bool(get_workforce().get("levels", False))
+        from .config import config_source_errors, get_workforce
+
+        settings = get_workforce()
+        if config_source_errors():
+            return False
+        if env in {"1", "true", "yes", "on"}:
+            return True
+        if env:
+            # A present malformed override cannot fall through to a permissive
+            # config value and accidentally turn the authority dial on.
+            return False
+        return settings.get("levels") is True
     except Exception:  # pragma: no cover -- config must never block a run
         return False
 
@@ -396,8 +413,10 @@ def decide(
 # predictive_approvals learns from -- the human decisions on THIS agent's gated
 # actions -- and reports whether the agent has earned graduation. Advisory by
 # default (the client lifts onboarding in [workforce.agents], matching the
-# suggestion-only contract of predictive_approvals); opt-in auto-graduation
-# ([workforce] auto_graduate) lets it lift itself once the record is strong.
+# suggestion-only contract of predictive_approvals). The parsed
+# ``[workforce] auto_graduate`` intent remains advisory until graduation is
+# backed by tenant/owner-scoped durable evidence plus explicit approval and
+# revocation semantics; the runtime does not lift authority from it today.
 
 # Earn graduation only after this many decided actions, at/above this approval
 # share -- mirrors predictive_approvals' _MIN_SAMPLE / _DOMINANCE philosophy but
@@ -506,11 +525,19 @@ def _coerce_approvals(history) -> list[dict]:
 
 
 def auto_graduate_enabled() -> bool:
-    """Whether a strong clean record lifts onboarding automatically. Opt-in
-    (``[workforce] auto_graduate``); default off -- the client graduates."""
+    """The client's strictly parsed auto-graduation intent (advisory only).
+
+    Default off. Runtime authority is not raised from this flag until a scoped,
+    durable approval/revocation design is wired; clients still graduate agents
+    explicitly today.
+    """
     try:
-        from .config import get_workforce
-        return bool(get_workforce().get("auto_graduate", False))
+        from .config import config_source_errors, get_workforce
+
+        settings = get_workforce()
+        if config_source_errors():
+            return False
+        return settings.get("auto_graduate") is True
     except Exception:  # pragma: no cover
         return False
 

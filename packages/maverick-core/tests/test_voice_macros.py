@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import json
-import os
-import stat
 
 import pytest
 from maverick.conversational_supervisor import parse_utterance
+from maverick.file_lock import private_path_is_restricted
 from maverick.voice_macros import (
     MAX_STEPS,
     delete_macro,
@@ -33,8 +32,7 @@ def test_record_and_load_roundtrip(store):
 
 def test_store_file_is_0600_and_valid_json(store):
     record_macro("morning routine", ["status report"], path=store)
-    mode = stat.S_IMODE(os.stat(store).st_mode)
-    assert mode == 0o600
+    assert private_path_is_restricted(store, 0o600)
     assert json.loads(store.read_text()) == {"morning routine": ["status report"]}
     # No stray temp files left behind by the atomic write. (The cross-process
     # lock's ".lock" sidecar is an expected, persistent artifact.)

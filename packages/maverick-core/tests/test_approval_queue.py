@@ -73,7 +73,9 @@ def test_consent_dashboard_mode_blocks_until_decided(tmp_path, monkeypatch):
         for _ in range(100):
             pending = wm.pending_approvals()
             if pending:
-                wm.decide_approval(pending[0].id, "approved")
+                wm.decide_approval(
+                    pending[0].id, "approved", decided_by="user:operator"
+                )
                 return
             import time as _t
             _t.sleep(0.05)
@@ -85,6 +87,7 @@ def test_consent_dashboard_mode_blocks_until_decided(tmp_path, monkeypatch):
 
     assert d.granted is True
     assert d.source == "dashboard"
+    assert d.actor == "user:operator"
 
 
 def test_consent_dashboard_mode_denied(tmp_path, monkeypatch):

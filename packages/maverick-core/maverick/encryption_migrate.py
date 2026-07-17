@@ -16,7 +16,6 @@ Exposed as ``maverick encryption migrate [--dry-run] [--backup]``.
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 import time
 from pathlib import Path
@@ -27,6 +26,7 @@ from .crypto_at_rest import (
     is_sealed_str,
     seal_to_str,
 )
+from .file_lock import atomic_create_bytes, ensure_private_file, prepare_private_directory
 
 log = logging.getLogger(__name__)
 
@@ -71,8 +71,12 @@ def backup_world_db(db_path: Path) -> Path:
     while dest.exists():  # avoid clobbering a same-second backup
         dest = db_path.with_name(f"{db_path.name}.pre-encrypt-{ts}.{n}.bak")
         n += 1
-    # Create the destination privately *before* any plaintext lands in it.
-    os.close(os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    # SQLite needs a pathname to back up into. Publish an empty, private regular
+    # file with the shared no-follow atomic writer before any plaintext lands,
+    # and require a private parent so SQLite sidecars inherit that boundary.
+    # ``db_path`` is caller-selected; never silently change its parent ACL.
+    prepare_private_directory(dest.parent)
+    atomic_create_bytes(dest, b"")
     src = sqlite3.connect(str(db_path))
     try:
         dst = sqlite3.connect(str(dest))
@@ -82,10 +86,7 @@ def backup_world_db(db_path: Path) -> Path:
             dst.close()
     finally:
         src.close()
-    try:
-        os.chmod(dest, 0o600)
-    except OSError:  # pragma: no cover - best effort on exotic filesystems
-        pass
+    ensure_private_file(dest)
     return dest
 
 

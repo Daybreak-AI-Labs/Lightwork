@@ -86,7 +86,14 @@ def record(mode: str, *, goal_id=None, detail: str = "",
         return False
     try:
         p = Path(path) if path is not None else _path()
-        p.parent.mkdir(parents=True, exist_ok=True)
+        from .file_lock import (
+            cross_process_lock,
+            ensure_private_directory,
+            open_private_append,
+        )
+
+        if path is None:
+            ensure_private_directory(p.parent)
         rec = {
             "ts": now if now is not None else time.time(),
             "mode": mode if mode in MODES else "error",
@@ -97,12 +104,21 @@ def record(mode: str, *, goal_id=None, detail: str = "",
             # secret can't survive by being split across the 200-char cut.
             "detail": _scrub_detail(detail)[:200],
         }
-        with open(p, "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec) + "\n")
-        try:
-            os.chmod(p, 0o600)
-        except OSError:
-            pass
+        line = (json.dumps(rec) + "\n").encode("utf-8")
+        # Serialize and append directly. Re-reading/replacing the full JSONL on
+        # every event made N records O(N^2) bytes of I/O. The append helper
+        # creates privately and identity-binds an existing regular file.
+        with cross_process_lock(p):
+            fd = open_private_append(p)
+            try:
+                offset = 0
+                while offset < len(line):
+                    written = os.write(fd, line[offset:])
+                    if written <= 0:
+                        raise OSError("failure telemetry append made no progress")
+                    offset += written
+            finally:
+                os.close(fd)
         return True
     except Exception:  # pragma: no cover -- telemetry never breaks a run
         return False

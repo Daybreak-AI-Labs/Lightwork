@@ -10,7 +10,6 @@ Offline (no live LLM): the actual swarm run is monkeypatched out.
 from __future__ import annotations
 
 import json
-import stat
 from types import SimpleNamespace
 
 from click.testing import CliRunner
@@ -233,12 +232,13 @@ def test_fleet_run_creates_goal_and_run_index(monkeypatch, tmp_path):
     assert g is not None and g.title == "Summarize the Q3 report"
 
     # ...and recorded in the per-fleet run index, under the agent.
+    from maverick.file_lock import private_path_is_restricted
     from maverick.fleet import load_runs, runs_path
     runs = load_runs("acme")
     assert len(runs) == 1
     assert runs[0]["agent"] == "researcher"
     assert runs[0]["goal_id"] == seen["goal_id"]
-    assert stat.S_IMODE(runs_path("acme").stat().st_mode) == 0o600
+    assert private_path_is_restricted(runs_path("acme"), 0o600)
 
 
 def test_fleet_run_rejects_undefined_role(monkeypatch, tmp_path):

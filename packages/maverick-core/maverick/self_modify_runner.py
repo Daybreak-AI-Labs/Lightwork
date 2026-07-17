@@ -132,23 +132,36 @@ def build_policy(cfg: dict | None = None) -> WideningPolicy:
         for t in raw_tiers:
             if not isinstance(t, dict):
                 continue
-            globs = tuple(str(g).strip() for g in (t.get("editable_paths") or [])
-                          if str(g).strip())
+            raw_globs = t.get("editable_paths")
+            if not isinstance(raw_globs, list) or not all(
+                isinstance(glob, str) for glob in raw_globs
+            ):
+                continue
+            globs = tuple(glob.strip() for glob in raw_globs if glob.strip())
             if not globs:
                 continue
-            try:
-                minp = int(t.get("min_promotions", 0))
-            except (TypeError, ValueError):
-                minp = 0
-            # Clamp to >= 0: a negative min_promotions would sort a NON-empty
-            # tier ahead of the empty tier-0, so the rollback-freeze (which
-            # returns the lowest tier) would freeze to a wide surface instead of
-            # to nothing. Keep the empty tier the narrowest.
-            minp = max(0, minp)
+            raw_minp = t.get("min_promotions", 0)
+            if (
+                not isinstance(raw_minp, int)
+                or isinstance(raw_minp, bool)
+                or raw_minp < 0
+            ):
+                # A malformed proof threshold must make this tier unreachable,
+                # never normalize it to zero and unlock a wider code surface.
+                continue
+            minp = raw_minp
             tiers.append(SurfaceTier(str(t.get("name") or f"tier{minp}"), globs, minp))
     else:
-        globs = tuple(str(g).strip() for g in (cfg.get("editable_paths") or [])
-                      if str(g).strip())
+        # A present malformed tiers policy must not fall through to an ungated
+        # legacy allowlist.  The fallback is only for true absence/empty tiers.
+        if raw_tiers not in (None, []):
+            return WideningPolicy(tiers=tuple(tiers))
+        raw_globs = cfg.get("editable_paths") or []
+        if not isinstance(raw_globs, list) or not all(
+            isinstance(glob, str) for glob in raw_globs
+        ):
+            return WideningPolicy(tiers=tuple(tiers))
+        globs = tuple(glob.strip() for glob in raw_globs if glob.strip())
         if globs:
             tiers.append(SurfaceTier("configured", globs, 0))
     return WideningPolicy(tiers=tuple(tiers))
@@ -256,13 +269,17 @@ def _default_evaluate(
         # the stock DGM profile (non-host, no egress/root opt-ins, bounded).
         from .sandbox import build_sandbox
         from .self_modify_eval import require_secure_eval_sandbox
-        return require_secure_eval_sandbox(
-            build_sandbox(
-                workdir=copy_dir,
-                sandbox_config=copy.deepcopy(pinned_sandbox_cfg),
-            ),
-            copy_dir,
+        backend = build_sandbox(
+            workdir=copy_dir,
+            sandbox_config=copy.deepcopy(pinned_sandbox_cfg),
         )
+        try:
+            return require_secure_eval_sandbox(backend, copy_dir)
+        except Exception:
+            close = getattr(backend, "close", None)
+            if callable(close):
+                close()
+            raise
 
     # Resolve the stock security profile before any model proposal can run.
     # This catches the default/local backend and egress/root opt-ins without
@@ -520,11 +537,17 @@ def run(  # noqa: C901 -- orchestration keeps each privileged refusal visible
                     "stock self-modification source capture changed"
                 )
 
+        from .self_modify_eval import EvalSandboxError
         try:
             raw_ev = evaluate or _default_evaluate(
                 tree=stock_tree, sandbox=sandbox, budget=budget, cfg=cfg,
                 require_tracked_source=stock_requires_tracked_source,
                 expected_source_manifest=stock_snapshot,
+            )
+        except EvalSandboxError as exc:
+            return RunSummary(
+                False,
+                reason=f"stock self-modification evaluator blocked: {exc}",
             )
         except Exception:
             return RunSummary(

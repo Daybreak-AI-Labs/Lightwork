@@ -1,6 +1,7 @@
 """SSRF-safe fetch: resolve-once + connection pinning (DNS-rebind defense)."""
 from __future__ import annotations
 
+import asyncio
 import socket
 
 import pytest
@@ -51,6 +52,59 @@ def test_allow_private_override(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.1"))
     # With the override the loopback IP is returned (and still pinned).
     assert _ssrf.resolve_pinned_ip("localhost") == "127.0.0.1"
+
+
+def test_scoped_private_host_is_exact_and_resets(monkeypatch):
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.1"))
+
+    with _ssrf.allow_private_hosts({"127.0.0.1"}):
+        assert _ssrf.resolve_pinned_ip("127.0.0.1") == "127.0.0.1"
+        with pytest.raises(_ssrf.BlockedHost):
+            _ssrf.resolve_pinned_ip("localhost")
+
+    with pytest.raises(_ssrf.BlockedHost):
+        _ssrf.resolve_pinned_ip("127.0.0.1")
+
+
+def test_scoped_private_literal_rejects_mismatched_resolver_answer(monkeypatch):
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.2"))
+
+    with _ssrf.allow_private_hosts({"127.0.0.1"}):
+        with pytest.raises(_ssrf.BlockedHost, match="exact loopback literal"):
+            _ssrf.resolve_pinned_ip("127.0.0.1")
+
+
+def test_scoped_private_host_propagates_to_worker_but_not_concurrent_task(monkeypatch):
+    monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("127.0.0.1"))
+
+    async def _run():
+        entered = asyncio.Event()
+
+        async def admitted():
+            with _ssrf.allow_private_hosts({"127.0.0.1"}):
+                entered.set()
+                await asyncio.sleep(0)
+                return await asyncio.to_thread(_ssrf.resolve_pinned_ip, "127.0.0.1")
+
+        async def denied():
+            await entered.wait()
+            with pytest.raises(_ssrf.BlockedHost):
+                await asyncio.to_thread(_ssrf.resolve_pinned_ip, "127.0.0.1")
+
+        allowed, _ = await asyncio.gather(admitted(), denied())
+        return allowed
+
+    assert asyncio.run(_run()) == "127.0.0.1"
+
+
+@pytest.mark.parametrize("host", ["localhost", "10.0.0.1", "169.254.169.254"])
+def test_scoped_private_host_rejects_non_loopback_literals(host):
+    with pytest.raises(ValueError, match="loopback IP literals"):
+        with _ssrf.allow_private_hosts({host}):
+            pass
 
 
 def test_safe_client_rejects_bad_scheme():

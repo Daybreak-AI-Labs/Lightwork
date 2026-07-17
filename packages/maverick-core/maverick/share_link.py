@@ -20,7 +20,6 @@ unsigned mode. Nonce store injectable (defaults to a data_dir JSON, 0600).
 """
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import hmac
 import json
@@ -28,6 +27,15 @@ import os
 import secrets as _secrets
 import time
 from pathlib import Path
+
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+    prepare_private_directory,
+)
 
 _MAX_HANDOFF_BODY_BYTES = 4096
 
@@ -100,41 +108,23 @@ def _nonce_store_path() -> Path:
 
 def _load_nonces(path: Path) -> dict:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        ensure_private_file(path)
+        loaded = json.loads(atomic_read_text(path))
+    except FileNotFoundError:
         return {}
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
+        raise ValueError("handoff nonce store is corrupt") from exc
+    if not isinstance(loaded, dict):
+        raise ValueError("handoff nonce store is corrupt")
+    return loaded
 
 
 def _save_nonces(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
-    os.replace(tmp, path)
-    try:
-        os.chmod(path, 0o600)
-    except OSError:  # pragma: no cover
-        pass
+    atomic_write_text(path, json.dumps(data, sort_keys=True, separators=(",", ":")))
 
 
-@contextlib.contextmanager
 def _nonce_store_lock(path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    with lock_path.open("a+", encoding="utf-8") as lock_file:
-        try:
-            os.chmod(lock_path, 0o600)
-        except OSError:  # pragma: no cover
-            pass
-        try:
-            import fcntl
-
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            yield
-        finally:
-            try:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-            except (NameError, OSError):  # pragma: no cover
-                pass
+    return cross_process_lock(path, strict=True)
 
 
 def pack_handoff(session: dict, *, ttl_seconds: float = 300.0,
@@ -184,6 +174,10 @@ def claim_handoff(code: str, *, now: float | None = None,
         raise ValueError("handoff code expired")
     nonce = str(payload.get("nonce") or "")
     path = nonce_path or _nonce_store_path()
+    if nonce_path is None:
+        ensure_private_directory(path.parent)
+    else:
+        prepare_private_directory(path.parent)
     ts = float(now if now is not None else time.time())
     with _nonce_store_lock(path):
         used = _load_nonces(path)

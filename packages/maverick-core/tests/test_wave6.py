@@ -2,6 +2,8 @@
 hardening, EU AI Act Article 50 disclosure, hooks lifecycle."""
 from __future__ import annotations
 
+import os
+
 import pytest
 
 # ---------- Cross-family verifier guard ----------
@@ -188,6 +190,10 @@ class TestMCPPinSha256:
         assert captured["program"] == str(exe)
 
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="this test exercises POSIX command-name semantics",
+    )
     def test_pin_posix_backslash_command_uses_path_lookup(
         self, tmp_path, monkeypatch,
     ):

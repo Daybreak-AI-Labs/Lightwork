@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 
+import pytest
 from maverick.file_lock import private_path_is_restricted
 from maverick.replay.trace import TraceWriter, read_trace, replay
 
@@ -78,7 +79,7 @@ def test_trace_writer_locks_down_trace_permissions(tmp_path):
     assert read_trace(path)[0]["content"] == "SECRET_TOKEN=topsecret"
 
 
-def test_trace_writer_repairs_permissive_existing_permissions(tmp_path):
+def test_trace_writer_refuses_permissive_caller_parent_without_taking_it_over(tmp_path):
     trace_dir = tmp_path / "traces"
     trace_dir.mkdir()
     trace_dir.chmod(0o755)
@@ -86,9 +87,8 @@ def test_trace_writer_repairs_permissive_existing_permissions(tmp_path):
     path.write_text("", encoding="utf-8")
     path.chmod(0o644)
 
-    with TraceWriter(path) as w:
-        w.record("observation", content="still private")
+    with pytest.raises(PermissionError, match="parent directory must already be private"):
+        TraceWriter(path)
 
-    assert private_path_is_restricted(trace_dir, 0o700)
-    assert private_path_is_restricted(path, 0o600)
-    assert read_trace(path)[0]["content"] == "still private"
+    assert not private_path_is_restricted(trace_dir, 0o700)
+    assert path.read_text(encoding="utf-8") == ""

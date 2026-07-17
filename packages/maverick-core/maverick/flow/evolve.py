@@ -41,6 +41,8 @@ class NodeProposal:
     n: int
     mean: float
     inferred_tool: str = ""   # for a harden proposal: the tool the node has been calling
+    applicable: bool = True
+    blocking_reason: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -48,6 +50,8 @@ class NodeProposal:
             "to_kind": self.to_kind, "reason": self.reason,
             "n": self.n, "mean": round(self.mean, 3),
             "inferred_tool": self.inferred_tool,
+            "applicable": self.applicable,
+            "blocking_reason": self.blocking_reason,
         }
 
 
@@ -81,8 +85,21 @@ def propose(flow: Flow, *, min_support: int = _DEFAULT_MIN_SUPPORT,
                       "is predictable enough to harden into a deterministic action")
             if tool:
                 reason += f", and it consistently calls `{tool}`"
+            reason += "; canonical parameter bindings still need review or replay evidence"
             out.append(NodeProposal(
-                node_id, NODE_AGENT, NODE_ACTION, reason, s["n"], mean, inferred_tool=tool))
+                node_id,
+                NODE_AGENT,
+                NODE_ACTION,
+                reason,
+                s["n"],
+                mean,
+                inferred_tool=tool,
+                applicable=False,
+                blocking_reason=(
+                    "tool-name telemetry does not prove the parameters needed to replay "
+                    "this behavior"
+                ),
+            ))
         elif node.kind == NODE_ACTION and mean < _SOFTEN_THRESHOLD:
             out.append(NodeProposal(
                 node_id, NODE_ACTION, NODE_AGENT,
@@ -114,7 +131,8 @@ def maybe_propose(flow: Flow, *, min_support: int = _DEFAULT_MIN_SUPPORT) -> lis
 
 
 def apply_proposal(flow: Flow, node_id: str, to_kind: str, *,
-                   tool: str = "", brief: str = "") -> Flow:
+                   tool: str = "", params: dict | None = None,
+                   brief: str = "") -> Flow:
     """Return a COPY of ``flow`` with ``node_id`` swapped to ``to_kind`` (does not
     persist). Hardening to an ``action`` needs a ``tool``; softening to an
     ``agent`` needs a ``brief`` (falls back to the node's existing brief/label).
@@ -139,9 +157,14 @@ def apply_proposal(flow: Flow, node_id: str, to_kind: str, *,
     if to_kind == NODE_ACTION:
         n.tool = (tool or n.tool).strip()
         n.brief = ""
-        n.params = {}
         if not n.tool:
             raise ValueError("hardening to an action needs a tool name")
+        if params is None:
+            raise ValueError(
+                "hardening to an action needs reviewed parameter bindings; "
+                "tool-name-only evidence is not replayable"
+            )
+        n.params = dict(params)
     else:  # NODE_AGENT
         n.brief = (brief or n.brief or n.label or "").strip()
         n.tool = ""
@@ -182,23 +205,65 @@ def revert_node(flow: Flow, node_id: str, prior: FlowNode) -> Flow:
     new = flow.copy()
     n = new.nodes[node_id]
     n.kind, n.tool, n.params, n.brief = prior.kind, prior.tool, dict(prior.params), prior.brief
+    n.retries = int(prior.retries)
     return new
+
+
+def same_work_definition(left: FlowNode, right: FlowNode) -> bool:
+    """Whether a later save preserved the exact work implementation.
+
+    Routing, labels, layout, and other node metadata may legitimately change
+    after a rewrite. Automatic regression rollback may cross those later saves
+    only while the applied kind/tool/params/brief/retry behavior is untouched.
+    """
+    return (
+        left.kind == right.kind
+        and left.tool == right.tool
+        and dict(left.params) == dict(right.params)
+        and left.brief == right.brief
+        and int(left.retries) == int(right.retries)
+    )
 
 
 def _mean(vals: list[float]) -> float | None:
     return sum(vals) / len(vals) if vals else None
 
 
-def measure(flow_id: str, node_id: str, since_ts: float, *,
-            series: list[tuple[float, float]] | None = None) -> dict:
-    """Score a node's grounded outcomes BEFORE vs. AT/AFTER ``since_ts`` (the moment
-    a rewrite was applied). Returns ``{before, after, delta, improved}`` where each
-    side is ``{n, mean}`` (mean ``None`` with no data). ``delta`` is
-    ``after.mean - before.mean`` when both exist; ``improved`` is ``delta > 0``.
-    This is the proof step -- without it "self-improving" is unfalsifiable."""
-    rows = series if series is not None else node_outcomes.series(flow_id, node_id)
-    before = [v for ts, v in rows if ts < since_ts]
-    after = [v for ts, v in rows if ts >= since_ts]
+def measure(
+    flow_id: str,
+    node_id: str,
+    since_ts: float | None = None,
+    *,
+    before_revision: str = "",
+    after_revision: str = "",
+    series: list[tuple[float, float]] | None = None,
+) -> dict:
+    """Compare explicit immutable definition cohorts for an applied rewrite.
+
+    ``before_revision`` and ``after_revision`` are the authoritative production
+    path. ``since_ts`` plus an injected ``series`` remains as a compatibility
+    seam for deterministic callers/tests written before definition cohorts were
+    persisted; wall-clock partitioning is never used by the autonomous driver.
+    """
+    if before_revision and after_revision:
+        before = [
+            value
+            for _ts, value in node_outcomes.series(
+                flow_id, node_id, cohort=before_revision,
+            )
+        ]
+        after = [
+            value
+            for _ts, value in node_outcomes.series(
+                flow_id, node_id, cohort=after_revision,
+            )
+        ]
+    else:
+        if since_ts is None:
+            raise ValueError("measurement needs explicit before/after revisions")
+        rows = series if series is not None else node_outcomes.series(flow_id, node_id)
+        before = [v for ts, v in rows if ts < since_ts]
+        after = [v for ts, v in rows if ts >= since_ts]
     bmean, amean = _mean(before), _mean(after)
     delta = (amean - bmean) if (bmean is not None and amean is not None) else None
     return {
@@ -206,8 +271,10 @@ def measure(flow_id: str, node_id: str, since_ts: float, *,
         "after": {"n": len(after), "mean": amean},
         "delta": delta,
         "improved": (delta is not None and delta > 0),
+        "before_revision": str(before_revision),
+        "after_revision": str(after_revision),
     }
 
 
 __all__ = ["NodeProposal", "propose", "maybe_propose", "apply_proposal",
-           "measure", "regressed", "revert_node"]
+           "measure", "regressed", "revert_node", "same_work_definition"]

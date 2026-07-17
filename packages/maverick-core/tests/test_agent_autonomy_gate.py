@@ -61,6 +61,7 @@ def _enable(monkeypatch, agents=None):
     )
     # no org governance policy configured
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("maverick.config.config_source_errors", dict)
 
 
 @pytest.mark.asyncio
@@ -79,6 +80,30 @@ async def test_auto_runs(monkeypatch, tmp_path, _high_risk_act):
     agent = _agent(tmp_path, AutonomyProfile(default=AutonomyLevel.AUTO, onboarding=False))
     out = await agent._run_tool("act", {})
     assert "done" in out
+
+
+@pytest.mark.asyncio
+async def test_enabled_autonomy_evaluation_error_fails_closed(
+    monkeypatch, tmp_path, _high_risk_act
+):
+    import maverick.agent_autonomy as aa
+
+    _enable(monkeypatch)
+
+    def _broken_decision(*args, **kwargs):
+        raise RuntimeError("profile evaluator unavailable")
+
+    monkeypatch.setattr(aa, "decide", _broken_decision)
+    agent = _agent(
+        tmp_path,
+        AutonomyProfile(default=AutonomyLevel.AUTO, onboarding=False),
+    )
+
+    out = await agent._run_tool("act", {})
+
+    assert "done" not in out
+    assert "DENIED" in out
+    assert "evaluation was unavailable" in out
 
 
 @pytest.mark.asyncio

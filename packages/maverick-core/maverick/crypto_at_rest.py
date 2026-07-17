@@ -49,9 +49,9 @@ import hashlib
 import logging
 import os
 import secrets
-import stat
 from pathlib import Path
 
+from . import file_lock
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -219,8 +219,7 @@ def _decode_injected_key(raw: str) -> bytes:
 def _secure_key_dir() -> None:
     """Ensure the on-disk key directory is private before touching key material."""
     try:
-        _KEY_PATH.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(_KEY_PATH.parent, 0o700)
+        file_lock.ensure_private_directory(_KEY_PATH.parent)
     except OSError as e:
         raise EncryptionUnavailable(
             f"cannot secure at-rest key directory {_KEY_PATH.parent}: {e}"
@@ -230,25 +229,16 @@ def _secure_key_dir() -> None:
 def _ensure_private_key_file() -> None:
     """Tighten existing key-file permissions before loading it."""
     try:
-        st = _KEY_PATH.stat()
+        file_lock.ensure_private_file(_KEY_PATH)
     except OSError as e:
-        raise EncryptionUnavailable(f"cannot stat at-rest key {_KEY_PATH}: {e}") from e
-    if not stat.S_ISREG(st.st_mode):
-        raise EncryptionUnavailable(f"at-rest key {_KEY_PATH} is not a regular file")
-    if st.st_mode & 0o077:
-        try:
-            os.chmod(_KEY_PATH, 0o600)
-        except OSError as e:
-            raise EncryptionUnavailable(
-                f"cannot secure at-rest key {_KEY_PATH}: {e}"
-            ) from e
+        raise EncryptionUnavailable(f"cannot secure at-rest key {_KEY_PATH}: {e}") from e
 
 
 def _read_key_file() -> bytes:
     _secure_key_dir()
     _ensure_private_key_file()
     try:
-        key = bytes.fromhex(_KEY_PATH.read_text().strip())
+        key = bytes.fromhex(file_lock.atomic_read_text(_KEY_PATH).strip())
     except (OSError, ValueError) as e:
         raise EncryptionUnavailable(f"cannot read at-rest key {_KEY_PATH}: {e}") from e
     if len(key) != _KEY_BYTES:
@@ -258,17 +248,10 @@ def _read_key_file() -> bytes:
 
 def _write_new_key_file(key: bytes) -> None:
     _secure_key_dir()
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     try:
-        fd = os.open(_KEY_PATH, flags, 0o600)
+        file_lock.atomic_create_text(_KEY_PATH, key.hex())
     except FileExistsError:
         raise
-    except OSError as e:
-        raise EncryptionUnavailable(f"cannot write at-rest key {_KEY_PATH}: {e}") from e
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(key.hex())
-        os.chmod(_KEY_PATH, 0o600)
     except OSError as e:
         raise EncryptionUnavailable(f"cannot write at-rest key {_KEY_PATH}: {e}") from e
 
@@ -331,13 +314,10 @@ def backup_key_material(dest_dir: Path) -> list[Path]:
             "MAVERICK_ENCRYPTION_KEY and not stored on disk)."
         )
     try:
-        dest_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        file_lock.ensure_private_directory(dest_dir)
         dest_stat = dest_dir.lstat()
-        if stat.S_ISLNK(dest_stat.st_mode) or not stat.S_ISDIR(dest_stat.st_mode):
-            raise OSError("backup destination must be a real directory")
         if hasattr(os, "geteuid") and dest_stat.st_uid != os.geteuid():
             raise OSError("backup destination must be owned by the current user")
-        os.chmod(dest_dir, 0o700)
     except OSError as e:
         raise EncryptionUnavailable(
             f"cannot prepare key backup dir {dest_dir}: {e}"
@@ -346,20 +326,8 @@ def backup_key_material(dest_dir: Path) -> list[Path]:
     for src in sources:
         dst = dest_dir / src.name
         try:
-            with src.open("rb") as src_f:
-                fd = os.open(
-                    dst,
-                    os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                    0o600,
-                )
-                try:
-                    with os.fdopen(fd, "wb") as dst_f:
-                        fd = -1
-                        for chunk in iter(lambda: src_f.read(1024 * 1024), b""):
-                            dst_f.write(chunk)
-                finally:
-                    if fd != -1:
-                        os.close(fd)
+            file_lock.ensure_private_file(src)
+            file_lock.atomic_create_bytes(dst, file_lock.atomic_read_bytes(src))
         except OSError as e:
             raise EncryptionUnavailable(
                 f"cannot copy key {src} -> {dst}: {e}"
@@ -388,10 +356,8 @@ def _keyring_dir() -> Path:
 
 def _read_keyring_key(path: Path) -> bytes:
     try:
-        st = path.stat()
-        if st.st_mode & 0o077:
-            os.chmod(path, 0o600)
-        key = bytes.fromhex(path.read_text().strip())
+        file_lock.ensure_private_file(path)
+        key = bytes.fromhex(file_lock.atomic_read_text(path).strip())
     except (OSError, ValueError) as e:
         raise EncryptionUnavailable(f"cannot read at-rest key {path}: {e}") from e
     if len(key) != _KEY_BYTES:
@@ -445,18 +411,14 @@ def rotate_at_rest_key() -> str:
     _secure_key_dir()
     d = _keyring_dir()
     try:
-        d.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(d, 0o700)
+        file_lock.ensure_private_directory(d)
     except OSError as e:
         raise EncryptionUnavailable(f"cannot secure keyring dir {d}: {e}") from e
     key = secrets.token_bytes(_KEY_BYTES)
     keyid = _key_fingerprint(key)
     path = d / (keyid.hex() + ".key")
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(key.hex())
-        os.chmod(path, 0o600)
+        file_lock.atomic_create_text(path, key.hex())
     except FileExistsError:  # astronomically unlikely id collision; caller retries
         raise EncryptionUnavailable("key-id collision; retry rotation") from None
     except OSError as e:

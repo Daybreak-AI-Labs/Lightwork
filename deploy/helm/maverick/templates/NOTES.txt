@@ -1,7 +1,7 @@
 Lightwork is deploying as {{ include "maverick.fullname" . }}.
 
 Image:    {{ include "maverick.image" . }}
-Backend:  {{ .Values.worldModel.backend }}{{ if eq .Values.worldModel.backend "sqlite" }} (single replica — move to Postgres to scale out){{ end }}
+Backend:  {{ .Values.worldModel.backend }} (world model; control plane remains single replica)
 Replicas: {{ .Values.replicaCount }}
 
 1. Watch rollout:

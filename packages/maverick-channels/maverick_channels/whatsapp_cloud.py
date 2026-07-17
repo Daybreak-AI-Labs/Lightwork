@@ -45,8 +45,10 @@ from .base import (
     Channel,
     IncomingMessage,
     add_webhook_body_limit,
+    claim_processed_message,
     is_allowed,
     normalize_allowlist,
+    release_processed_message,
 )
 
 log = logging.getLogger(__name__)
@@ -204,17 +206,20 @@ class WhatsAppCloudChannel(Channel):
 
             # Claim the message id atomically BEFORE processing so Meta's
             # redelivery can't double-run a goal (same pattern as Twilio).
-            wm = None
+            claimed = False
             if msg_id:
                 try:
-                    from maverick.world_model import DEFAULT_DB, WorldModel
-                    wm = WorldModel(DEFAULT_DB)
-                    if not wm.mark_message_processed("whatsapp_cloud", msg_id):
+                    claimed = claim_processed_message("whatsapp_cloud", msg_id)
+                    if not claimed:
                         log.info("whatsapp-cloud message %s already claimed; skipping", msg_id)
                         continue
-                except Exception:  # pragma: no cover
-                    log.warning("whatsapp-cloud dedup claim failed; processing anyway")
-                    wm = None
+                except Exception as exc:  # pragma: no cover
+                    log.exception(
+                        "whatsapp-cloud dedup claim failed; asking Meta to retry"
+                    )
+                    raise HTTPException(
+                        status_code=503, detail="message claim store unavailable"
+                    ) from exc
 
             incoming = IncomingMessage(
                 user_id=sender, text=text, channel="whatsapp_cloud", message_id=msg_id or None,
@@ -223,11 +228,15 @@ class WhatsAppCloudChannel(Channel):
                 reply = await self.dispatch_text(incoming)
             except Exception:  # pragma: no cover
                 log.exception("handler error")
-                if wm is not None and msg_id:
+                if claimed:
                     try:
-                        wm.release_processed_message("whatsapp_cloud", msg_id)
+                        release_processed_message("whatsapp_cloud", msg_id)
                     except Exception:  # pragma: no cover
-                        log.warning("whatsapp-cloud dedup release failed")
+                        # The claim remains durable, so a Meta retry cannot
+                        # execute this failed delivery a second time.
+                        log.exception(
+                            "whatsapp-cloud dedup release failed; claim remains held"
+                        )
                 # Don't echo the raw exception to the external sender (it can
                 # carry internal paths/detail); the full error is logged above.
                 # Matches the generic reply sms.py / rcs.py already use.

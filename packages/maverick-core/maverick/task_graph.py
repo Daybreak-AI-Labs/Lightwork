@@ -12,6 +12,7 @@ named graph per file under ``~/.maverick/task_graphs/``.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from .paths import data_dir
 
 _STATUSES = ("pending", "running", "done", "failed", "blocked")
 _STORE = data_dir("task_graphs")
+_INITIAL_STORE = _STORE
 # Cap the node count of a single persisted graph. The graph is built by an
 # agent-callable tool and persisted, so without a bound an agent (steerable by
 # prompt-injection in tool output) could grow an arbitrarily large graph that
@@ -235,16 +237,44 @@ class TaskGraph:
     @classmethod
     def load(cls, path: str | Path) -> TaskGraph:
         p = Path(path)
-        if not p.exists():
+        from .file_lock import atomic_read_text
+
+        try:
+            raw = atomic_read_text(p)
+        except FileNotFoundError:
             return cls()
-        return cls.from_dict(json.loads(p.read_text(encoding="utf-8")))
+        return cls.from_dict(json.loads(raw))
 
 
 # --- tool surface ----------------------------------------------------------
 
+def _store_root() -> Path:
+    # Preserve explicit test/integration overrides while resolving the active
+    # tenant on every real call instead of freezing the import-time tenant.
+    if _STORE != _INITIAL_STORE:
+        return Path(_STORE)
+    return data_dir("task_graphs")
+
+
+def _principal_namespace() -> str:
+    from .connections import current_principal
+
+    # ``None`` deliberately preserves the legacy single-user graph.  A broken
+    # authority lookup is materially different: let it fail closed rather than
+    # collapsing an authenticated caller into the tenant-shared namespace.
+    principal = str(current_principal() or "").strip()
+    if not principal:
+        return ""
+    return hashlib.sha256(principal.encode("utf-8")).hexdigest()[:24]
+
+
 def _graph_path(name: str) -> Path:
     safe = "".join(c for c in (name or "default") if c.isalnum() or c in "-_") or "default"
-    return _STORE / f"{safe}.json"
+    root = _store_root()
+    principal = _principal_namespace()
+    if principal:
+        root = root / "principals" / principal
+    return root / f"{safe}.json"
 
 
 _SCHEMA = {
@@ -267,14 +297,17 @@ _SCHEMA = {
 def _run(args: dict) -> str:
     op = args.get("op")
     path = _graph_path(args.get("graph") or "default")
-    from .file_lock import cross_process_lock
+    from .file_lock import cross_process_lock, ensure_private_directory
+    ensure_private_directory(_store_root())
+    if path.parent != _store_root():
+        ensure_private_directory(path.parent)
     try:
         # Mutating ops do a load-modify-save: hold a cross-process lock across
         # the whole thing so two concurrent add/status ops (dashboard + serve +
         # a swarm scheduler are separate processes) can't both load the same
         # graph and have the second save clobber the first's status transition.
         if op in ("add", "status"):
-            with cross_process_lock(path):
+            with cross_process_lock(path, strict=True):
                 g = TaskGraph.load(path)
                 if op == "add":
                     g.add_task(args.get("task") or "", args.get("title") or "",

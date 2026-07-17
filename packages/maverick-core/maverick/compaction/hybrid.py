@@ -296,14 +296,9 @@ def fit(ledger: ContextualBandit | dict | Path | str, *,
 
 def save_weights(weights: dict, path: Path | str) -> None:
     p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(weights, sort_keys=True), encoding="utf-8")
-    os.replace(tmp, p)
-    try:
-        os.chmod(p, 0o600)
-    except OSError:  # pragma: no cover
-        pass
+    from ..file_lock import atomic_write_text
+
+    atomic_write_text(p, json.dumps(weights, sort_keys=True))
 
 
 def load_weights(path: Path | str | None) -> dict | None:
@@ -414,6 +409,9 @@ def pick_strategy(messages: list[dict], picker: HybridPicker | None = None
             feats = extract_features(messages)
             return default_strategy(feats), "hybrid disabled: rule ladder"
         if picker is None:
+            from ..file_lock import ensure_private_directory
+
+            ensure_private_directory(default_ledger_path().parent)
             picker = HybridPicker(ledger_path=default_ledger_path(),
                                   weights_path=default_weights_path())
         return picker.pick(messages)

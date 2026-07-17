@@ -2,10 +2,16 @@
 remains the source of truth and the mirror is fail-open."""
 from __future__ import annotations
 
+import hashlib
 import sys
 from unittest.mock import MagicMock
 
 from maverick import attachments as att
+from maverick import file_lock
+
+
+def _content_name(data: bytes, filename: str = "zz.txt") -> str:
+    return f"{hashlib.sha256(data).hexdigest()[:16]}-{filename}"
 
 
 def _fake_boto3(monkeypatch):
@@ -53,14 +59,18 @@ def test_s3_fetch_pulls_missing_file(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_ATTACH_S3_PREFIX", raising=False)
     client = _fake_boto3(monkeypatch)
     body = MagicMock()
-    body.read.return_value = b"bytes-from-s3"
+    data = b"bytes-from-s3"
+    name = _content_name(data)
+    body.read.return_value = data
     client.get_object.return_value = {"Body": body}
-    p = att.s3_fetch(9, "abcd1234-zz.txt", root=tmp_path)
-    assert p is not None and p.read_bytes() == b"bytes-from-s3"
-    client.get_object.assert_called_once_with(Bucket="b", Key="9/abcd1234-zz.txt")
+    p = att.s3_fetch(9, name, root=tmp_path)
+    assert p is not None and p.read_bytes() == data
+    assert file_lock.private_path_is_restricted(p.parent, 0o700)
+    assert file_lock.private_path_is_restricted(p)
+    client.get_object.assert_called_once_with(Bucket="b", Key=f"9/{name}")
     # Second fetch short-circuits on the local file.
     client.get_object.reset_mock()
-    assert att.s3_fetch(9, "abcd1234-zz.txt", root=tmp_path) == p
+    assert att.s3_fetch(9, name, root=tmp_path) == p
     assert not client.get_object.called
 
 
@@ -72,7 +82,7 @@ def test_s3_fetch_when_off_or_missing(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ATTACH_S3_BUCKET", "b")
     client = _fake_boto3(monkeypatch)
     client.get_object.side_effect = RuntimeError("NoSuchKey")
-    assert att.s3_fetch(1, "x.txt", root=tmp_path) is None
+    assert att.s3_fetch(1, "0" * 16 + "-x.txt", root=tmp_path) is None
 
 
 def test_s3_fetch_rejects_unsafe_names_before_s3(monkeypatch, tmp_path):
@@ -100,7 +110,7 @@ def test_s3_fetch_enforces_file_size_limit(monkeypatch, tmp_path):
     client.get_object.return_value = {"Body": body}
 
     try:
-        att.s3_fetch(9, "abcd1234-zz.txt", root=tmp_path)
+        att.s3_fetch(9, "0" * 16 + "-zz.txt", root=tmp_path)
     except att.AttachmentRejected:
         pass
     else:  # pragma: no cover - keeps the assertion message useful
@@ -121,12 +131,12 @@ def test_s3_fetch_denies_executable_bytes(monkeypatch, tmp_path):
     client.get_object.return_value = {"Body": body}
 
     try:
-        att.s3_fetch(9, "abcd1234-evil.txt", root=tmp_path)
+        att.s3_fetch(9, "0" * 16 + "-evil.txt", root=tmp_path)
     except att.AttachmentRejected:
         pass
     else:  # pragma: no cover
         raise AssertionError("accepted archive bytes from S3")
-    assert not (tmp_path / "9" / "abcd1234-evil.txt").exists()
+    assert not (tmp_path / "9" / ("0" * 16 + "-evil.txt")).exists()
 
 
 def test_s3_fetch_denies_disallowed_content_type(monkeypatch, tmp_path):
@@ -140,9 +150,27 @@ def test_s3_fetch_denies_disallowed_content_type(monkeypatch, tmp_path):
     }
 
     try:
-        att.s3_fetch(9, "abcd1234-blob.txt", root=tmp_path)
+        att.s3_fetch(9, "0" * 16 + "-blob.txt", root=tmp_path)
     except att.AttachmentRejected:
         pass
     else:  # pragma: no cover
         raise AssertionError("accepted disallowed ContentType from S3")
-    assert not (tmp_path / "9" / "abcd1234-blob.txt").exists()
+    assert not (tmp_path / "9" / ("0" * 16 + "-blob.txt")).exists()
+
+
+def test_s3_fetch_rejects_content_address_mismatch(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_ATTACH_S3_BUCKET", "b")
+    client = _fake_boto3(monkeypatch)
+    body = MagicMock()
+    body.read.return_value = b"bucket object was replaced"
+    client.get_object.return_value = {"Body": body, "ContentType": "text/plain"}
+    name = "0" * 16 + "-report.txt"
+
+    try:
+        att.s3_fetch(9, name, root=tmp_path)
+    except att.AttachmentRejected as exc:
+        assert "content-address mismatch" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("accepted an S3 object under the wrong content address")
+
+    assert not (tmp_path / "9" / name).exists()

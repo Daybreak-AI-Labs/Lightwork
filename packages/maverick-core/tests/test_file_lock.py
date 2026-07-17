@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -15,6 +16,7 @@ import time
 
 import pytest
 from maverick.file_lock import (
+    atomic_create_text,
     atomic_read_bytes,
     atomic_read_text,
     atomic_write_bytes,
@@ -22,8 +24,36 @@ from maverick.file_lock import (
     atomic_write_text_chunks,
     cross_process_lock,
     ensure_private_file,
+    open_private_append,
     private_path_is_restricted,
 )
+
+
+def _make_shared_directory(path):
+    path.mkdir(mode=0o777)
+    if os.name == "nt":
+        subprocess.run(
+            [
+                "icacls",
+                str(path),
+                "/grant",
+                "*S-1-1-0:(OI)(CI)RX",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        path.chmod(0o755)
+    assert not private_path_is_restricted(path, 0o700)
+
+
+def _directory_security_snapshot(path):
+    if os.name == "nt":
+        import maverick.file_lock as file_lock
+
+        return file_lock._windows_private_sddl(path)[0]
+    return path.stat().st_mode & 0o777
 
 
 def test_atomic_write_replaces_whole_file(tmp_path):
@@ -38,6 +68,46 @@ def test_atomic_write_creates_parent_dirs(tmp_path):
     p = tmp_path / "nested" / "deep" / "s.txt"
     atomic_write_text(p, "hello")
     assert p.read_text() == "hello"
+
+
+def test_private_file_helpers_do_not_claim_existing_shared_parent(tmp_path):
+    shared = tmp_path / "shared"
+    _make_shared_directory(shared)
+    unrelated = shared / "unrelated.txt"
+    unrelated.write_text("keep-access", encoding="utf-8")
+    parent_security = _directory_security_snapshot(shared)
+    unrelated_security = (
+        _directory_security_snapshot(unrelated)
+        if os.name == "nt"
+        else unrelated.stat().st_mode & 0o777
+    )
+
+    created = shared / "created.txt"
+    appended = shared / "events.jsonl"
+    atomic_create_text(created, "secret")
+    fd = open_private_append(appended)
+    try:
+        os.write(fd, b'{"event":"ok"}\n')
+    finally:
+        os.close(fd)
+
+    assert _directory_security_snapshot(shared) == parent_security
+    assert not private_path_is_restricted(shared, 0o700)
+    assert unrelated.read_text(encoding="utf-8") == "keep-access"
+    if os.name == "nt":
+        assert _directory_security_snapshot(unrelated) == unrelated_security
+    else:
+        assert unrelated.stat().st_mode & 0o777 == unrelated_security
+    assert private_path_is_restricted(created)
+    assert private_path_is_restricted(appended)
+
+
+def test_private_file_helper_owns_and_hardens_missing_parent(tmp_path):
+    parent = tmp_path / "owned-state"
+    target = parent / "secret.txt"
+    atomic_create_text(target, "secret")
+    assert private_path_is_restricted(parent, 0o700)
+    assert private_path_is_restricted(target)
 
 
 def test_atomic_write_supports_non_bmp_windows_path(tmp_path):
@@ -100,6 +170,189 @@ def test_ensure_private_file_hardens_existing_file(tmp_path):
     assert p.read_text(encoding="utf-8") == "secret"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows DACL fast path")
+def test_ensure_private_file_does_not_reharden_already_private_file(
+    tmp_path, monkeypatch,
+):
+    """A verified private live database must not receive chmod/DACL churn."""
+    import maverick.file_lock as file_lock
+
+    path = tmp_path / "already-private.db"
+    atomic_create_text(path, "private")
+    assert private_path_is_restricted(path)
+
+    def _unexpected_hardening(*_args, **_kwargs):
+        raise AssertionError("already-private file was hardened again")
+
+    monkeypatch.setattr(file_lock, "harden_path_permissions", _unexpected_hardening)
+    assert ensure_private_file(path) == path
+    assert path.read_text(encoding="utf-8") == "private"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-bound DACL fast path")
+def test_ensure_private_file_rejects_aba_swap_during_private_fast_path(
+    tmp_path, monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    path = tmp_path / "sensitive.txt"
+    displaced = tmp_path / "displaced.txt"
+    replacement = tmp_path / "replacement.txt"
+    replacement_displaced = tmp_path / "replacement-displaced.txt"
+    atomic_create_text(path, "original")
+    atomic_create_text(replacement, "attacker replacement")
+    real_open = file_lock._windows_open_security_handle
+
+    def _open_during_aba(candidate):
+        os.replace(candidate, displaced)
+        os.replace(replacement, candidate)
+        fd, handle = real_open(candidate)
+        # Restore the initial object before the verifier's final lstat. A
+        # path-based ACL query would see a private file and accept this ABA.
+        os.replace(candidate, replacement_displaced)
+        os.replace(displaced, candidate)
+        return fd, handle
+
+    monkeypatch.setattr(file_lock, "_windows_open_security_handle", _open_during_aba)
+    with pytest.raises(PermissionError, match="identity changed"):
+        ensure_private_file(path)
+
+    assert path.read_text(encoding="utf-8") == "original"
+    assert replacement_displaced.read_text(encoding="utf-8") == "attacker replacement"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-bound DACL fast path")
+def test_ensure_private_file_repairs_acl_broadened_during_fast_path(
+    tmp_path, monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    path = tmp_path / "sensitive.txt"
+    atomic_create_text(path, "original")
+    real_query = file_lock._windows_handle_private_sddl
+    real_harden = file_lock.harden_path_permissions
+    queries = 0
+    harden_calls = 0
+
+    def _broaden_after_first_query(handle):
+        nonlocal queries
+        result = real_query(handle)
+        queries += 1
+        if queries == 1:
+            subprocess.run(
+                ["icacls", str(path), "/grant", "*S-1-1-0:R"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        return result
+
+    def _record_hardening(candidate, mode=0o600):
+        nonlocal harden_calls
+        harden_calls += 1
+        return real_harden(candidate, mode)
+
+    monkeypatch.setattr(
+        file_lock,
+        "_windows_handle_private_sddl",
+        _broaden_after_first_query,
+    )
+    monkeypatch.setattr(file_lock, "harden_path_permissions", _record_hardening)
+    assert ensure_private_file(path) == path
+
+    assert queries == 2
+    assert harden_calls == 1
+    assert private_path_is_restricted(path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-bound DACL fast path")
+def test_ensure_private_file_rejects_hardlink_added_during_fast_path(
+    tmp_path, monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    path = tmp_path / "sensitive.txt"
+    alias = tmp_path / "late-hardlink.txt"
+    atomic_create_text(path, "original")
+    real_query = file_lock._windows_handle_private_sddl
+    queries = 0
+
+    def _link_after_first_query(handle):
+        nonlocal queries
+        result = real_query(handle)
+        queries += 1
+        if queries == 1:
+            os.link(path, alias)
+        return result
+
+    monkeypatch.setattr(
+        file_lock,
+        "_windows_handle_private_sddl",
+        _link_after_first_query,
+    )
+    with pytest.raises(PermissionError, match="identity changed"):
+        ensure_private_file(path)
+
+    assert path.stat().st_nlink == 2
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DOS write posture")
+def test_ensure_private_file_does_not_fast_return_for_wrong_windows_mode(tmp_path):
+    path = tmp_path / "read-only.txt"
+    atomic_create_text(path, "private", mode=0o600)
+
+    assert ensure_private_file(path, mode=0o400) == path
+    assert not path.stat().st_mode & stat.S_IWRITE
+    assert private_path_is_restricted(path, mode=0o400)
+
+
+def test_windows_restricted_acl_requires_trusted_owner_and_allow_only(monkeypatch):
+    import maverick.file_lock as file_lock
+
+    current = "S-1-5-21-1-2-3-1001"
+    monkeypatch.setattr(file_lock, "_windows_current_user_sid", lambda: current)
+
+    private = "D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)"
+    assert file_lock._windows_acl_is_restricted(private, current)
+    assert not file_lock._windows_acl_is_restricted(
+        private,
+        "S-1-5-21-9-9-9-1002",
+    )
+    assert not file_lock._windows_acl_is_restricted(
+        "D:P(A;;FA;;;OW)(A;;FR;;;WD)",
+        current,
+    )
+    assert not file_lock._windows_acl_is_restricted(
+        "D:P(D;;FA;;;OW)(A;;FA;;;SY)",
+        current,
+    )
+
+
+def test_ensure_private_file_rejects_identity_swap_during_hardening(
+    tmp_path, monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    path = tmp_path / "sensitive.txt"
+    replacement = tmp_path / "replacement.txt"
+    displaced = tmp_path / "displaced.txt"
+    path.write_text("original", encoding="utf-8")
+    replacement.write_text("attacker replacement", encoding="utf-8")
+    real_harden = file_lock.harden_path_permissions
+
+    def _swap_after_hardening(candidate, mode=0o600):
+        real_harden(candidate, mode)
+        os.replace(candidate, displaced)
+        os.replace(replacement, candidate)
+
+    monkeypatch.setattr(file_lock, "harden_path_permissions", _swap_after_hardening)
+    with pytest.raises(PermissionError, match="identity changed"):
+        ensure_private_file(path)
+
+    assert path.read_text(encoding="utf-8") == "attacker replacement"
+    assert displaced.read_text(encoding="utf-8") == "original"
+
+
 def test_ensure_private_file_rejects_non_regular_path(tmp_path):
     with pytest.raises(PermissionError, match="not a regular file"):
         ensure_private_file(tmp_path)
@@ -117,6 +370,54 @@ def test_ensure_private_file_rejects_symlink(tmp_path):
         raise
     with pytest.raises(PermissionError, match="not a regular file"):
         ensure_private_file(link)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX link/unlink publication window")
+def test_ensure_private_file_waits_for_atomic_create_publication(tmp_path):
+    """A verifier may observe link(temp, target) before unlink(temp)."""
+    target = tmp_path / "world.db"
+    temp = tmp_path / ".world.db-publication.tmp"
+    temp.write_bytes(b"")
+    temp.chmod(0o600)
+    os.link(temp, target, follow_symlinks=False)
+
+    removed = threading.Event()
+
+    def _finish_publication():
+        time.sleep(0.02)
+        temp.unlink()
+        removed.set()
+
+    publisher = threading.Thread(target=_finish_publication)
+    publisher.start()
+    try:
+        assert ensure_private_file(target) == target
+    finally:
+        publisher.join(timeout=2)
+
+    assert removed.is_set()
+    assert target.stat().st_nlink == 1
+    assert private_path_is_restricted(target)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX link/unlink publication window")
+def test_ensure_private_file_never_accepts_persistent_publication_hardlink(
+    tmp_path,
+    monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    target = tmp_path / "world.db"
+    temp = tmp_path / ".world.db-attacker.tmp"
+    temp.write_bytes(b"sensitive")
+    temp.chmod(0o600)
+    os.link(temp, target, follow_symlinks=False)
+    monkeypatch.setattr(file_lock, "_PRIVATE_FILE_PUBLICATION_RETRY_SECONDS", 0)
+
+    with pytest.raises(PermissionError, match="not a regular file"):
+        ensure_private_file(target)
+
+    assert target.stat().st_nlink == 2
 
 
 def test_atomic_write_leaves_no_temp_files(tmp_path):
@@ -365,6 +666,81 @@ for _ in range(20):
     assert json.loads(p.read_text())["c"] == 80
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows byte-range lock regression")
+def test_windows_lock_creator_alone_initializes_byte(tmp_path):
+    """A contender waits for the O_EXCL creator; it never writes the lock byte."""
+    target = tmp_path / "creator-race.json"
+    creator_ready = tmp_path / "creator-ready"
+    contender_ready = tmp_path / "contender-ready"
+    release = tmp_path / "release-creator"
+    code = r"""
+import sys
+import time
+from pathlib import Path
+import maverick.file_lock as file_lock
+
+mode, target_raw, marker_raw, release_raw = sys.argv[1:]
+target = Path(target_raw)
+marker = Path(marker_raw)
+release = Path(release_raw)
+if mode == "creator":
+    real_write = file_lock.os.write
+    def delayed_creator_write(fd, data):
+        marker.write_text("ready", encoding="utf-8")
+        deadline = time.monotonic() + 10.0
+        while not release.exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("creator was not released")
+            time.sleep(0.005)
+        return real_write(fd, data)
+    file_lock.os.write = delayed_creator_write
+else:
+    real_wait = file_lock._wait_for_windows_lock_initialization
+    def marked_wait(path, fd):
+        marker.write_text("ready", encoding="utf-8")
+        return real_wait(path, fd)
+    file_lock._wait_for_windows_lock_initialization = marked_wait
+
+with file_lock.cross_process_lock(target, strict=True):
+    pass
+"""
+
+    def wait_for(path):
+        deadline = time.monotonic() + 10.0
+        while not path.exists():
+            if time.monotonic() >= deadline:
+                pytest.fail(f"subprocess did not reach marker {path.name}")
+            time.sleep(0.005)
+
+    creator = subprocess.Popen(
+        [
+            sys.executable, "-c", code, "creator", str(target),
+            str(creator_ready), str(release),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    wait_for(creator_ready)
+    contender = subprocess.Popen(
+        [
+            sys.executable, "-c", code, "contender", str(target),
+            str(contender_ready), str(release),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    wait_for(contender_ready)
+    assert contender.poll() is None
+    release.write_text("go", encoding="utf-8")
+
+    for process in (creator, contender):
+        stdout, stderr = process.communicate(timeout=30)
+        assert process.returncode == 0, (stdout, stderr)
+    assert (tmp_path / "creator-race.json.lock").read_bytes() == b"\0"
+
+
 def test_cross_process_lock_fails_closed_when_dir_unwritable(tmp_path):
     # An impossible lock dir must raise rather than silently running an
     # unserialized security-sensitive read-modify-write.
@@ -374,3 +750,41 @@ def test_cross_process_lock_fails_closed_when_dir_unwritable(tmp_path):
     with pytest.raises(OSError), cross_process_lock(bogus):
         pytest.fail("lock acquisition unexpectedly succeeded")
     assert not os.path.exists(str(bogus) + ".lock")
+
+
+def test_cross_process_lock_rejects_dangling_sidecar_symlink(tmp_path):
+    target = tmp_path / "state.json"
+    lock_path = tmp_path / "state.json.lock"
+    outside = tmp_path / "outside" / "created-by-followed-link"
+    try:
+        lock_path.symlink_to(outside)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
+
+    with pytest.raises((OSError, PermissionError)):
+        with cross_process_lock(target, strict=True):
+            pytest.fail("a dangling lock alias was followed")
+
+    # In particular, Windows O_CREAT must not follow the dangling sidecar and
+    # create its outside referent before post-open validation can run.
+    assert not outside.exists()
+    assert lock_path.is_symlink()
+
+
+def test_cross_process_lock_rejects_hardlinked_sidecar(tmp_path):
+    target = tmp_path / "state.json"
+    lock_path = tmp_path / "state.json.lock"
+    outside = tmp_path / "outside-lock"
+    outside.write_bytes(b"do-not-lock-or-mutate")
+    try:
+        lock_path.hardlink_to(outside)
+    except OSError:
+        pytest.skip("hardlinks are unavailable on this host")
+
+    with pytest.raises(PermissionError, match="single-link regular file"):
+        with cross_process_lock(target, strict=True):
+            pytest.fail("a hardlinked lock sidecar was accepted")
+
+    assert outside.read_bytes() == b"do-not-lock-or-mutate"

@@ -45,6 +45,7 @@ _CLIENT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 # reset via reset_client_cache().
 _UNSET = object()
 _cached: object = _UNSET
+_strict_cached: object = _UNSET
 
 
 class ClientBindingError(RuntimeError):
@@ -53,8 +54,9 @@ class ClientBindingError(RuntimeError):
 
 def reset_client_cache() -> None:
     """Forget the cached client id (test hook; the id is immutable in prod)."""
-    global _cached
+    global _cached, _strict_cached
     _cached = _UNSET
+    _strict_cached = _UNSET
 
 
 def _raw_client_id() -> str:
@@ -86,8 +88,7 @@ def _resolve() -> str | None:
         raw = _raw_client_id()
     except ClientBindingError:
         # Resilient on the hot path: a corrupt/unreadable config source must not
-        # crash path resolution (every ``data_dir`` call, including
-        # ``world_model``'s import-time ``DEFAULT_DB``) or a diagnostic like
+        # crash an explicitly diagnostic-only binding lookup or a command like
         # ``maverick config-lint`` whose whole job is to REPORT that corrupt
         # file. Production still fails closed at the startup guard
         # ``require_client_binding()``, which calls ``_raw_client_id()``
@@ -97,10 +98,8 @@ def _resolve() -> str | None:
     if not raw:
         return None
     if not _CLIENT_RE.fullmatch(raw):
-        # Resilient on the hot path (every data_dir call): an invalid id resolves
-        # to None here so diagnostics/tests don't crash. Production fails closed
-        # at the startup guard require_client_binding(), which raises rather than
-        # let a misconfigured floor silently serve from the shared root.
+        # Diagnostic resolution reports an invalid id as unbound. Storage path
+        # resolution uses strict_client_id() and therefore still fails closed.
         log.warning("[client] id %r is invalid (want %s); ignoring it",
                     raw, _CLIENT_RE.pattern)
         return None
@@ -116,6 +115,35 @@ def client_id() -> str | None:
     if _cached is _UNSET:
         _cached = _resolve()
     return _cached  # type: ignore[return-value]
+
+
+def strict_client_id() -> str | None:
+    """Resolve the binding without turning errors into unbound legacy mode.
+
+    ``client_id()`` intentionally remains resilient for diagnostics and path
+    display. A database predicate is a security boundary, however, so corrupt
+    or invalid configured identity must raise instead of becoming ``None``.
+    """
+    global _cached, _strict_cached
+    if _strict_cached is not _UNSET:
+        return _strict_cached  # type: ignore[return-value]
+    if _cached is not _UNSET and _cached is not None:
+        _strict_cached = _cached
+        return _cached  # type: ignore[return-value]
+    raw = _raw_client_id()
+    if not raw:
+        _strict_cached = None
+        return None
+    if not _CLIENT_RE.fullmatch(raw):
+        raise ClientBindingError(
+            f"[client] id {raw!r} is invalid: must match {_CLIENT_RE.pattern} "
+            "(lowercase letters, digits, '.', '_', '-'; lowercase is required so "
+            "the data directory can't collide with a differently-cased id on a "
+            "case-insensitive filesystem). Refusing to continue unscoped."
+        )
+    _cached = raw
+    _strict_cached = raw
+    return raw
 
 
 def client_binding_enforced() -> bool:
@@ -148,19 +176,9 @@ def require_client_binding() -> str | None:
     un-scoped shared root by accident. A no-op (returns ``None``) when binding
     is not enforced.
     """
-    raw = _raw_client_id()
-    if raw and not _CLIENT_RE.fullmatch(raw):
-        # A configured-but-invalid id is an unambiguous misconfiguration of the
-        # immutable binding (e.g. uppercase letters that would collide on a
-        # case-insensitive filesystem). Fail closed at startup rather than
-        # silently fall back to the shared root — regardless of enforce.
-        raise ClientBindingError(
-            f"[client] id {raw!r} is invalid: must match {_CLIENT_RE.pattern} "
-            "(lowercase letters, digits, '.', '_', '-'; lowercase is required so "
-            "the data directory can't collide with a differently-cased id on a "
-            "case-insensitive filesystem). Refusing to start."
-        )
-    cid = client_id()
+    # A configured-but-invalid id is an unambiguous misconfiguration of the
+    # immutable binding. Reject it regardless of the enforcement toggle.
+    cid = strict_client_id()
     if cid:
         return cid
     if client_binding_enforced():
@@ -175,8 +193,8 @@ def require_client_binding() -> str | None:
 
 def data_root():
     """The resolved data root for this deployment (for doctor/diagnostics)."""
-    from .paths import data_dir
-    return data_dir()
+    from .paths import diagnostic_data_dir
+    return diagnostic_data_dir()
 
 
 def erase_client(*, keep_audit: bool = False) -> dict:
@@ -241,6 +259,7 @@ def status() -> dict:
 __all__ = [
     "ClientBindingError",
     "client_id",
+    "strict_client_id",
     "client_binding_enforced",
     "require_client_binding",
     "reset_client_cache",

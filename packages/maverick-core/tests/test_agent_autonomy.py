@@ -63,6 +63,18 @@ def test_profile_from_toml_per_risk():
     assert p.level_for("high") is AutonomyLevel.SUGGEST
 
 
+@pytest.mark.parametrize("malformed", [0, 1, "false", "true", [], {}])
+def test_profile_malformed_onboarding_keeps_supervision(malformed):
+    p = AutonomyProfile.from_toml(
+        {"default": "auto", "onboarding": malformed}
+    )
+    assert p.onboarding is True
+    assert resolve(p, risk="low", levels_enabled=True).decision == "require_human"
+
+    graduated = AutonomyProfile(default=AutonomyLevel.AUTO, onboarding=False)
+    assert graduated.with_overrides(onboarding=malformed).onboarding is True
+
+
 # -- resolution ------------------------------------------------------------
 
 def test_disabled_always_suggests():
@@ -194,6 +206,77 @@ def test_effective_profile_applies_config_override(monkeypatch):
     assert eff.onboarding is False
     # an agent with no override keeps the pack profile
     assert aa.effective_profile("other", pack).default is AutonomyLevel.SUGGEST
+
+
+def test_workforce_widening_booleans_are_strict(monkeypatch):
+    import maverick.agent_autonomy as aa
+    import maverick.config as config
+
+    monkeypatch.delenv("MAVERICK_WORKFORCE_LEVELS", raising=False)
+    monkeypatch.setattr(config, "config_source_errors", dict)
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda *a, **k: {
+            "workforce": {
+                "levels": "false",
+                "data_grounding": "false",
+                "auto_graduate": "true",
+                "agents": [
+                    {
+                        "name": "clerk",
+                        "default": "auto",
+                        "onboarding": 0,
+                    }
+                ],
+            }
+        },
+    )
+
+    settings = config.get_workforce()
+    assert settings["levels"] is False
+    assert settings["data_grounding"] is False
+    assert settings["auto_graduate"] is False
+    assert settings["agents"]["clerk"]["onboarding"] is True
+    assert aa.levels_enabled() is False
+    assert aa.auto_graduate_enabled() is False
+
+
+def test_workforce_auto_graduate_is_wired(monkeypatch):
+    import maverick.agent_autonomy as aa
+    import maverick.config as config
+
+    monkeypatch.setattr(config, "config_source_errors", dict)
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda *a, **k: {"workforce": {"auto_graduate": True}},
+    )
+
+    assert config.get_workforce()["auto_graduate"] is True
+    assert aa.auto_graduate_enabled() is True
+
+
+def test_workforce_policy_loss_and_malformed_env_disable_levels(monkeypatch):
+    import maverick.agent_autonomy as aa
+    import maverick.config as config
+
+    monkeypatch.setattr(
+        config,
+        "get_workforce",
+        lambda: {"levels": True, "agents": {}},
+    )
+    monkeypatch.setattr(config, "config_source_errors", dict)
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "not-a-bool")
+    assert aa.levels_enabled() is False
+
+    monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "true")
+    monkeypatch.setattr(
+        config,
+        "config_source_errors",
+        lambda: {"config.toml": "invalid TOML"},
+    )
+    assert aa.levels_enabled() is False
 
 
 def test_decide_off_by_default(monkeypatch):

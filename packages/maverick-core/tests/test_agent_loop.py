@@ -505,6 +505,9 @@ class TestToolFailureClassification:
         assert _tool_call_failed("⚠ BLOCKED by Shield (high): x. Not executed.") is True
         assert _tool_call_failed("⚠ BLOCKED by hook. The tool was not executed.") is True
         assert _tool_call_failed("BLOCKED by Shield") is True
+        assert _tool_call_failed("REFUSED (governed): approval missing") is True
+        assert _tool_call_failed("DRY RUN: would mutate without confirm") is True
+        assert _tool_call_failed("INDETERMINATE: receipt lost") is True
         assert _tool_call_failed("") is False
         assert _tool_call_failed("the answer is 42") is False
 

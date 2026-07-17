@@ -34,6 +34,44 @@ def is_allowed(user_id, allowlist) -> bool:
     return uid in allowlist
 
 
+def claim_processed_message(channel: str, external_id: str) -> bool:
+    """Atomically claim an inbound id in the canonical world backend.
+
+    Channel dedup is part of the same control plane as goal execution. Going
+    through ``open_world`` keeps it on Postgres when configured and on the
+    active tenant's SQLite world otherwise. The ownership-aware close leaves
+    process-cached tenant worlds alive while releasing per-call backends.
+    """
+    from maverick.world_model import close_world_if_owned, open_world
+
+    world = open_world()
+    try:
+        return bool(world.mark_message_processed(channel, external_id))
+    finally:
+        try:
+            close_world_if_owned(world)
+        except Exception:  # pragma: no cover -- claim result remains authoritative
+            logging.getLogger(__name__).exception(
+                "channel dedup world teardown failed after claim"
+            )
+
+
+def release_processed_message(channel: str, external_id: str) -> None:
+    """Release a failed inbound claim through the canonical world backend."""
+    from maverick.world_model import close_world_if_owned, open_world
+
+    world = open_world()
+    try:
+        world.release_processed_message(channel, external_id)
+    finally:
+        try:
+            close_world_if_owned(world)
+        except Exception:  # pragma: no cover -- release result remains authoritative
+            logging.getLogger(__name__).exception(
+                "channel dedup world teardown failed after release"
+            )
+
+
 def public_url_for(request) -> str:
     """Reconstruct the PUBLIC URL Twilio signed, not the loopback URL the
     reverse proxy forwarded to. Twilio signs the https URL it was configured

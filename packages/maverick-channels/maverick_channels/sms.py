@@ -27,9 +27,11 @@ from .base import (
     Channel,
     IncomingMessage,
     add_webhook_body_limit,
+    claim_processed_message,
     is_allowed,
     normalize_allowlist,
     public_url_for,
+    release_processed_message,
 )
 
 log = logging.getLogger(__name__)
@@ -135,17 +137,18 @@ class SMSChannel(Channel):
         # retry that raced a still-running handler passed the check too and
         # spawned a second goal + second spend. Claiming first makes the racing
         # retry a no-op.
-        wm = None
+        claimed = False
         if MessageSid:
             try:
-                from maverick.world_model import DEFAULT_DB, WorldModel
-                wm = WorldModel(DEFAULT_DB)
-                if not wm.mark_message_processed("sms", MessageSid):
+                claimed = claim_processed_message("sms", MessageSid)
+                if not claimed:
                     log.info("SMS MessageSid %s already claimed; skipping", MessageSid)
                     return Response(content="", media_type="text/xml")
-            except Exception:  # pragma: no cover
-                log.warning("SMS dedup claim failed; processing anyway")
-                wm = None
+            except Exception as exc:  # pragma: no cover
+                log.exception("SMS dedup claim failed; asking Twilio to retry")
+                raise HTTPException(
+                    status_code=503, detail="message claim store unavailable"
+                ) from exc
 
         msg = IncomingMessage(user_id=From, text=Body, channel="sms")
         try:
@@ -154,11 +157,13 @@ class SMSChannel(Channel):
             log.exception("handler error")
             # The goal didn't complete -- release the claim so Twilio's retry
             # re-processes instead of being deduped against a failed run.
-            if wm is not None and MessageSid:
+            if claimed:
                 try:
-                    wm.release_processed_message("sms", MessageSid)
+                    release_processed_message("sms", MessageSid)
                 except Exception:  # pragma: no cover
-                    log.warning("SMS dedup release failed")
+                    # The claim remains durable, so a Twilio retry cannot
+                    # execute this failed delivery a second time.
+                    log.exception("SMS dedup release failed; claim remains held")
             try:
                 # Generic text only; the raw exception (possible secret) is
                 # logged above, never sent back to the handset.

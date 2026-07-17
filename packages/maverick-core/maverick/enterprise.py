@@ -123,33 +123,55 @@ def enterprise_enabled() -> bool:
     requires the egress lock keeps the enterprise boundary closed even if the
     standalone enterprise knob is absent or false. Otherwise, a recognized
     ``MAVERICK_ENTERPRISE`` env value wins over ``[enterprise] mode`` in config;
-    an *unrecognized* env value is ignored (with a warning) rather than silently
-    disabling the control. When neither is set, the named deployment profile
-    decides (``profile = "enterprise"`` turns it on; see :mod:`maverick.profile`).
-    Off by default (the default profile is ``standard``).
+    an *unrecognized* security flag, unreadable source, or malformed present
+    policy fails closed to enterprise-on. When neither is set, the named
+    deployment profile decides (``profile = "enterprise"`` turns it on; see
+    :mod:`maverick.profile`). Off by default only after the policy sources are
+    read successfully (the default profile is ``standard``).
     """
     try:
         from .compliance_profiles import FLOOR_EGRESS_LOCK, requires_floor
         if requires_floor(FLOOR_EGRESS_LOCK):
             return True
     except Exception:
-        pass
+        log.exception(
+            "enterprise: compliance floor is unavailable; failing closed",
+        )
+        return True
     env = os.environ.get("MAVERICK_ENTERPRISE")
     if env is not None and env.strip() != "":
         decided = _env_tristate(env)
         if decided is not None:
             return decided
-        log.warning("MAVERICK_ENTERPRISE=%r is not a recognized boolean "
-                    "(use 1/0/true/false); ignoring it and reading config", env)
+        log.error(
+            "MAVERICK_ENTERPRISE=%r is not a recognized boolean; failing "
+            "closed to enterprise mode",
+            env,
+        )
+        return True
     try:
-        from .config import load_config
-        val = ((load_config() or {}).get("enterprise") or {}).get("mode")
+        from .config import config_source_errors, load_config
+
+        cfg = load_config() or {}
+        if config_source_errors():
+            log.error("enterprise: config source is unreadable; failing closed")
+            return True
     except Exception:
-        return False
-    if isinstance(val, str):
-        return _truthy(val)
+        log.exception("enterprise: config policy is unavailable; failing closed")
+        return True
+    if not isinstance(cfg, dict):
+        log.error("enterprise: config root is malformed; failing closed")
+        return True
+    section = cfg.get("enterprise")
+    if section is not None and not isinstance(section, dict):
+        log.error("enterprise: policy section is malformed; failing closed")
+        return True
+    val = (section or {}).get("mode")
     if val is not None:
-        return bool(val)
+        if isinstance(val, bool):
+            return val
+        log.error("enterprise.mode must be a boolean; failing closed")
+        return True
     # No explicit [enterprise] mode and no env override: the named deployment
     # profile decides. profile="enterprise" turns the boundary on by default;
     # "standard" (the default) leaves it off. Any explicit knob above still wins.
@@ -157,7 +179,8 @@ def enterprise_enabled() -> bool:
         from .profile import is_enterprise_profile
         return is_enterprise_profile()
     except Exception:
-        return False
+        log.exception("enterprise: deployment profile is unavailable; failing closed")
+        return True
 
 
 def _configured_openai_compatible_base_url() -> str | None:

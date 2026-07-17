@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import promotion_effect as pe
+from .file_lock import atomic_read_text, atomic_write_text, ensure_private_file
 
 log = logging.getLogger(__name__)
 
@@ -132,8 +132,11 @@ class MemoryStore:
 
     def _load(self) -> None:
         try:
-            raw = json.loads(Path(self.path).read_text(encoding="utf-8"))
+            path = ensure_private_file(Path(self.path))
+            raw = json.loads(atomic_read_text(path))
         except (OSError, ValueError):
+            return
+        if not isinstance(raw, list):
             return
         for d in (raw or []):
             try:
@@ -146,16 +149,12 @@ class MemoryStore:
         if self.path is None:
             return
         try:
-            p = Path(self.path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(".tmp")
-            tmp.write_text(json.dumps([m.to_dict() for m in self._mem.values()],
-                                      sort_keys=True), encoding="utf-8")
-            os.replace(tmp, p)
-            try:
-                os.chmod(p, 0o600)
-            except OSError:
-                pass
+            atomic_write_text(
+                Path(self.path),
+                json.dumps(
+                    [m.to_dict() for m in self._mem.values()], sort_keys=True,
+                ),
+            )
         except Exception:  # pragma: no cover -- best-effort
             log.debug("procedural memory save failed", exc_info=True)
 
@@ -165,12 +164,16 @@ _shared_lock = threading.Lock()
 
 
 def shared() -> MemoryStore:
+    from .file_lock import ensure_private_directory
     from .paths import data_dir
 
     path = data_dir("procedural_memory.json")
     with _shared_lock:
         store = _shared.get(path)
         if store is None:
+            # This is a Lightwork-owned default directory.  Caller-injected
+            # MemoryStore parents are deliberately left untouched.
+            ensure_private_directory(path.parent)
             store = MemoryStore(path=path)
             _shared[path] = store
         return store

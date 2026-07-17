@@ -16,9 +16,11 @@ service:
   port: 80
   targetPort: 8765
 
-# Replicas. IMPORTANT: SQLite is single-writer on a RWO volume, so keep this at
-# 1 unless you have moved the world model to Postgres (see worldModel below).
-# The chart refuses to render >1 replica without worldModel.backend=postgres.
+# Control-plane replicas. Keep this at exactly 1. Postgres centralizes the
+# world model, but flow releases/runs, A2A task claims, audit/learning ledgers,
+# and tenant-local policy state are still file-backed. The chart refuses to
+# split those approval/idempotency authorities across dashboard/serve pods.
+# Scale remote goal workers separately.
 replicaCount: 1
 
 # Persistent state (~/.maverick). Required for the default SQLite backend.
@@ -30,8 +32,9 @@ persistence:
   # Mounted at the non-root user's home; do not change unless the image does.
   mountPath: /home/maverick/.maverick
 
-# World-model backend. "sqlite" (default) pins replicaCount to 1. Set to
-# "postgres" + provide a DSN (via secret) to scale horizontally.
+# World-model backend. Postgres provides managed HA, pooling, and DB-enforced
+# tenant isolation for world-model rows. It does not by itself make every
+# Lightwork control-plane store replica-safe; replicaCount remains 1.
 worldModel:
   backend: sqlite      # sqlite | postgres
   # When backend=postgres, the DSN is read from env MAVERICK_PG_DSN, sourced
@@ -110,16 +113,15 @@ probes:
 terminationGracePeriodSeconds: 30
 
 # PodDisruptionBudget. Gates voluntary disruptions (node drains, upgrades). With
-# the default single replica + Recreate strategy a PDB cannot prevent downtime,
-# so it is off by default; enable it once you run multiple replicas on Postgres.
+# the supported single control-plane replica + Recreate strategy, a PDB cannot
+# prevent downtime, so it remains off until the control plane is replica-safe.
 podDisruptionBudget:
   enabled: false
   minAvailable: 1
 
-# Horizontal Pod Autoscaler. Off by default and only valid on the Postgres
-# backend: the default SQLite backend is single-writer on a RWO volume, so the
-# chart hard-fails if you enable this without worldModel.backend=postgres. When
-# enabled the Deployment stops pinning replicas (the HPA owns the count).
+# Horizontal Pod Autoscaler. Reserved for a future fully transactional shared
+# control plane. The chart currently fails closed when this is enabled, even on
+# Postgres; scale remote workers instead of the dashboard/serve process.
 autoscaling:
   enabled: false
   minReplicas: 2

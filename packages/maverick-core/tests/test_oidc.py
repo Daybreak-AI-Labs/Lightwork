@@ -169,6 +169,28 @@ def test_valid_token_with_public_key_object(rsa_keys):
     assert principal.principal == f"user:{SUB}"
 
 
+@requires_crypto
+@pytest.mark.parametrize("subject", [" alice", "alice "])
+def test_edge_whitespace_subject_is_rejected_not_canonicalized(rsa_keys, subject):
+    priv_pem, pub_pem, _ = rsa_keys
+    token = _mint(priv_pem, sub=subject)
+
+    with pytest.raises(OIDCError, match="sub"):
+        verify_oidc_token(token, config=_config(), signing_key=pub_pem)
+
+
+@requires_crypto
+def test_subject_at_principal_length_boundary_is_accepted(rsa_keys):
+    priv_pem, pub_pem, _ = rsa_keys
+    subject = "x" * 251
+    principal = verify_oidc_token(
+        _mint(priv_pem, sub=subject), config=_config(), signing_key=pub_pem,
+    )
+
+    assert principal.sub == subject
+    assert len(principal.principal) == 256
+
+
 # ---- (2) expired --------------------------------------------------------------
 
 
@@ -274,6 +296,19 @@ def test_missing_sub_rejected(rsa_keys):
     priv_pem, pub_pem, _ = rsa_keys
     token = _mint(priv_pem, sub=None)  # drop the sub claim
     with pytest.raises(OIDCError):
+        verify_oidc_token(token, config=_config(), signing_key=pub_pem)
+
+
+@requires_crypto
+@pytest.mark.parametrize(
+    "invalid_sub",
+    ["x" * 252, "alice\n", "alice\x7f", "alice\u0085"],
+    ids=["overlong", "newline", "delete-control", "unicode-control"],
+)
+def test_non_printable_or_overlong_sub_rejected(rsa_keys, invalid_sub):
+    priv_pem, pub_pem, _ = rsa_keys
+    token = _mint(priv_pem, sub=invalid_sub)
+    with pytest.raises(OIDCError, match="sub"):
         verify_oidc_token(token, config=_config(), signing_key=pub_pem)
 
 

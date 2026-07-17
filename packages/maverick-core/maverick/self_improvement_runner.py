@@ -771,13 +771,17 @@ def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
 def _eval_budget(settings: dict):
     """A ``Budget`` capping ONE auto-evaluated cycle's LLM spend, from
     ``[self_harness] eval_budget_dollars`` -- or ``None`` (uncapped, the
-    historical behavior) when the knob is unset/<=0. The runner and judge share
+    historical behavior) when the knob is unset/<=0. A present malformed cap
+    raises so the enclosing governed operation refuses to run rather than
+    becoming uncapped. The runner and judge share
     the pot (kernel rule 3: an unattended evaluation must not have unbounded
     spend). Dollars is the BINDING cap: the token/tool ceilings are raised far
     above any eval pass so the operator's dollar figure is what trips (``Budget``
     enforces every cap at record time, so its defaults -- sized for one agent
     run -- would otherwise trip first); the default 1h wall clock stays as a hang
-    backstop. Never raises."""
+    backstop."""
+    if settings.get("eval_budget_valid") is False:
+        raise ValueError("self-harness evaluation budget policy is invalid")
     try:
         dollars = settings.get("eval_budget_dollars")
         if not dollars or float(dollars) <= 0:
@@ -786,9 +790,9 @@ def _eval_budget(settings: dict):
         big = 10**9
         return Budget(max_dollars=float(dollars), max_input_tokens=big,
                       max_output_tokens=big, max_tool_calls=big)
-    except Exception:  # pragma: no cover -- a bad knob can't block the cycle
-        log.debug("self-harness eval budget construction failed", exc_info=True)
-        return None
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            "self-harness evaluation budget policy is invalid") from exc
 
 
 def _build_holdout_authorizer(

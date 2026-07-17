@@ -11,6 +11,7 @@ from maverick import client
 def _bound(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
+    monkeypatch.setenv("MAVERICK_BACKUP_SIGNING_KEY", bytes(range(32)).hex())
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     client.reset_client_cache()
     yield

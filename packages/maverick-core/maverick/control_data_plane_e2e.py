@@ -47,7 +47,7 @@ def _stub_execute(world_db: Path, goal_id: int) -> None:
     try:
         w.set_goal_status(goal_id, "done", result="executed by data-plane worker")
     finally:
-        w.conn.close()
+        w.close()
 
 
 def run_e2e(workdir: Path, *, execute=None) -> dict:
@@ -92,7 +92,10 @@ def run_e2e(workdir: Path, *, execute=None) -> dict:
         done_jobs = queue.list(status="done")
         status_after_run = world.get_goal(goal_id).status
     finally:
-        world.conn.close()
+        # ``get_goal`` opens a per-thread reader in addition to the writer.
+        # Close the full WorldModel, not only ``conn``, so Windows can remove
+        # the evidence harness's temporary database after the proof finishes.
+        world.close()
 
     # --- Proof ---------------------------------------------------------------
     control_did_not_execute = status_after_enqueue == status_initial == "pending"

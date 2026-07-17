@@ -35,6 +35,14 @@ from pathlib import Path
 from typing import Any
 
 from .config import env_flag
+from .file_lock import (
+    atomic_create_text,
+    atomic_read_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+    open_private_append,
+)
 
 log = logging.getLogger(__name__)
 
@@ -99,6 +107,31 @@ def _authorize_claim(agent_id: str) -> str | None:
     if enforced:
         return ("shared-token caller cannot act as a specific fleet agent while "
                 "the agent trust plane is engaged; use a per-caller mcp_token")
+    return None
+
+
+def _registration_denial(agent_id: str, vendor: str) -> str | None:
+    """Return why a claimed fleet identity is not uniquely registered.
+
+    Agent Trust authenticates the stable ``agent_id`` while fleet provenance is
+    ``vendor:agent_id``.  Allowing one id under two vendors would therefore let
+    the same credential select either provenance label and its audit/data scope.
+    Treat agent ids as globally unique and fail closed on ambiguous legacy
+    rosters as well as on new registrations.
+    """
+    source = f"{vendor}:{agent_id}"
+    sources = {
+        str(row.get("source"))
+        for row in roster()
+        if row.get("agent_id") == agent_id
+    }
+    if source not in sources:
+        return f"unregistered fleet agent {source!r}: register it first"
+    if sources != {source}:
+        return (
+            f"ambiguous fleet agent id {agent_id!r}: an agent_id may belong to "
+            "exactly one vendor"
+        )
     return None
 
 
@@ -180,22 +213,48 @@ def _audit(event: str, **payload) -> None:
 
 
 def register_agent(agent_id: str, vendor: str, *, description: str = "") -> bool:
-    """Add an external agent to the fleet roster (idempotent)."""
-    if not (_ID_RE.match(agent_id or "") and _ID_RE.match(vendor or "")):
+    """Add an external agent to the fleet roster (idempotent).
+
+    ``agent_id`` is globally unique because it is also the authenticated trust
+    principal.  Registering that principal under a second vendor would create
+    two selectable provenance identities for one credential.
+    """
+    if not (
+        isinstance(agent_id, str)
+        and isinstance(vendor, str)
+        and _ID_RE.fullmatch(agent_id)
+        and _ID_RE.fullmatch(vendor)
+    ):
         return False
     path = registry_path()
     source = f"{vendor}:{agent_id}"
-    if any(row.get("source") == source for row in roster()):
-        return True
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "ts": time.time(), "source": source, "vendor": vendor,
-                "agent_id": agent_id, "description": str(description)[:200],
-            }) + "\n")
-        os.chmod(path, 0o600)
-    except OSError as e:
+        ensure_private_directory(path.parent)
+        with cross_process_lock(path, strict=True):
+            rows = roster()
+            registrations = {
+                str(row.get("source"))
+                for row in rows
+                if row.get("agent_id") == agent_id
+            }
+            if registrations:
+                if registrations == {source}:
+                    return True
+                _audit(
+                    "register_blocked",
+                    source=source,
+                    reason="agent_id_already_registered_to_another_vendor",
+                )
+                return False
+            fd = open_private_append(path, require_private_parent=True)
+            with os.fdopen(fd, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "ts": time.time(), "source": source, "vendor": vendor,
+                    "agent_id": agent_id, "description": str(description)[:200],
+                }) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+    except (OSError, RuntimeError) as e:
         log.warning("fleet_memory: register failed: %s", e)
         return False
     _audit("register", source=source)
@@ -208,16 +267,30 @@ def roster() -> list[dict]:
         return []
     out: list[dict] = []
     try:
-        with open(path, encoding="utf-8") as f:
-            for raw in f:
-                try:
-                    d = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(d, dict) and d.get("source"):
-                    out.append(d)
+        ensure_private_file(path)
+        lines = atomic_read_text(path).splitlines()
     except OSError:
         return []
+    for raw in lines:
+        try:
+            d = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        agent_id = d.get("agent_id")
+        vendor = d.get("vendor")
+        source = d.get("source")
+        if not (
+            isinstance(agent_id, str)
+            and isinstance(vendor, str)
+            and isinstance(source, str)
+            and _ID_RE.fullmatch(agent_id)
+            and _ID_RE.fullmatch(vendor)
+            and source == f"{vendor}:{agent_id}"
+        ):
+            continue
+        out.append(d)
     return out
 
 
@@ -243,8 +316,9 @@ def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
     if not (_ID_RE.match(agent_id) and _ID_RE.match(vendor)):
         return False, "invalid agent_id or vendor (must match the registered id format)"
     source = f"{vendor}:{agent_id}"
-    if not any(r.get("source") == source for r in roster()):
-        return False, f"unregistered fleet agent {source!r}: register it first"
+    registration_denial = _registration_denial(agent_id, vendor)
+    if registration_denial:
+        return False, registration_denial
     denial = _authorize_claim(agent_id)
     if denial:
         _audit("ingest_blocked", source=source, reason=denial)
@@ -314,11 +388,11 @@ def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
     }
     try:
         inbox = inbox_dir()
-        from .file_lock import atomic_write_text, ensure_private_directory
-
         ensure_private_directory(inbox)
         name = f"{int(time.time() * 1000)}-{uuid.uuid4().hex}-{vendor}-{agent_id}.json"
-        atomic_write_text(inbox / name, json.dumps(row, sort_keys=True))
+        # A fleet event is immutable evidence.  Refuse an already-published
+        # name instead of replacing attacker-planted or collision state.
+        atomic_create_text(inbox / name, json.dumps(row, sort_keys=True))
     except OSError as e:
         log.warning("fleet_memory: ingest write failed: %s", e)
         return False, "write failed"
@@ -342,8 +416,9 @@ def recall(
     if not (_ID_RE.match(agent_id or "") and _ID_RE.match(vendor or "")):
         return "", "invalid agent_id or vendor"
     source = f"{vendor}:{agent_id}"
-    if not any(r.get("source") == source for r in roster()):
-        return "", f"unregistered fleet agent {source!r}"
+    registration_denial = _registration_denial(agent_id, vendor)
+    if registration_denial:
+        return "", registration_denial
     denial = _authorize_claim(agent_id)
     if denial:
         _audit("recall_blocked", source=source, reason=denial)
@@ -418,8 +493,11 @@ def status() -> dict:
     if inbox.is_dir():
         for p in inbox.glob("*.json"):
             try:
-                d = json.loads(p.read_text(encoding="utf-8"))
+                ensure_private_file(p)
+                d = json.loads(atomic_read_text(p))
             except (OSError, ValueError):
+                continue
+            if not isinstance(d, dict):
                 continue
             src = str(d.get("source", "") or "(unknown)")
             by = counts.setdefault(src, {"success": 0, "failure": 0})

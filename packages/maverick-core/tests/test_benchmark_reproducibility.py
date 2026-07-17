@@ -5,8 +5,6 @@ Offline: temp history files, no benchmark harness runs.
 from __future__ import annotations
 
 import json
-import os
-import stat
 
 import pytest
 from maverick import continuous_benchmark as cb
@@ -21,6 +19,7 @@ from maverick.benchmark_reproducibility import (
     record_with_manifest,
     verify_reproduction,
 )
+from maverick.file_lock import private_path_is_restricted
 
 
 @pytest.fixture
@@ -74,7 +73,8 @@ def test_record_writes_history_via_real_path_plus_manifest(tmp_path, fixtures):
     # Manifest next to the result, atomic 0600.
     assert manifest_path is not None
     assert manifest_path.parent == history.parent / "manifests"
-    assert stat.S_IMODE(os.stat(manifest_path).st_mode) == 0o600
+    assert private_path_is_restricted(manifest_path)
+    assert private_path_is_restricted(manifest_path.parent, 0o700)
     m = json.loads(manifest_path.read_text())
     assert m["schema"] == SCHEMA and m["suite"] == "swe-mini"
     assert m["results"] == {"score": 0.41, "commit": "abc123"}

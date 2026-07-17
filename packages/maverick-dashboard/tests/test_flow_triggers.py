@@ -29,8 +29,24 @@ def _reset_aq(monkeypatch, aq):
 def _save_flow(fid="onboard"):
     from maverick.flow import store
     from maverick.flow.ir import Flow, FlowNode
-    store.save_flow(Flow(id=fid, name="Onboard", start="a",
-                         nodes={"a": FlowNode(id="a", kind="agent", brief="welcome {{email}}")}))
+    saved = store.save_flow(Flow(
+        id=fid,
+        name="Onboard",
+        start="a",
+        nodes={
+            "a": FlowNode(
+                id="a",
+                kind="agent",
+                brief="welcome {{email}}",
+            )
+        },
+    ))
+    store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    return saved
 
 
 def test_create_flow_target_trigger(monkeypatch, tmp_path):
@@ -76,6 +92,9 @@ def test_poll_fires_a_flow_run_with_event_data(monkeypatch, tmp_path):
         "flow": "onboard", "source": "http_json",
         "config": {"url": "https://x", "items_path": "items", "id_field": "id"}})
     c.post("/api/v1/event-triggers/poll")                       # baseline: nothing new
+    draft = flow_store.load_flow("onboard")
+    draft.nodes["a"].brief = "unpublished {{email}}"
+    flow_store.save_flow(draft, expected_version=draft.version)
     box[0] = {"items": [{"id": "2", "email": "new@b.com"}, {"id": "1", "email": "a@b.com"}]}
     out = c.post("/api/v1/event-triggers/poll").json()
     # a flow run was queued for the new event
@@ -84,6 +103,9 @@ def test_poll_fires_a_flow_run_with_event_data(monkeypatch, tmp_path):
     run = flow_store.load_run(fired[0])
     assert run.flow_id == "onboard"
     assert run.data.get("email") == "new@b.com"                # event field became flow data
+    snapshot = flow_store.load_flow_snapshot(run.definition_digest)
+    assert run.definition_version == 1
+    assert snapshot.nodes["a"].brief == "welcome {{email}}"
 
 
 def test_flow_fire_is_logged_in_history_with_run_ids(monkeypatch, tmp_path):
@@ -158,18 +180,23 @@ def test_event_trigger_rejects_deleted_recreated_flow_binding(monkeypatch, tmp_p
         },
     ).status_code == 201
     binding = event_triggers_store.get_trigger("bound")
-    original = flow_store.load_flow("onboard")
-    assert binding["flow_revision"] == original.revision
+    _published, release = flow_store.load_published_bundle("onboard")
+    assert binding["flow_revision"] == release["release_id"]
     client.post("/api/v1/event-triggers/poll")  # establish cursor
 
     assert flow_store.delete_flow("onboard") is True
-    flow_store.save_flow(Flow(
+    replacement = flow_store.save_flow(Flow(
         id="onboard",
         name="Replacement",
         owner="user:bob",
         start="a",
         nodes={"a": FlowNode(id="a", kind="agent", brief="replacement")},
     ))
+    flow_store.publish_flow(
+        replacement.id,
+        expected_version=replacement.version,
+        expected_revision=replacement.revision,
+    )
     box[0] = {
         "items": [
             {"id": "2", "email": "new@example.com"},
@@ -214,7 +241,12 @@ def test_event_flow_queue_restores_trigger_tenant(monkeypatch, tmp_path):
     store.save_flow(shared)
     tok = set_tenant("tenant-a")
     try:
-        store.save_flow(tenant)
+        saved_tenant = store.save_flow(tenant)
+        store.publish_flow(
+            saved_tenant.id,
+            expected_version=saved_tenant.version,
+            expected_revision=saved_tenant.revision,
+        )
         run_id = aq.enqueue_flow_run("same", {"secret": "TENANT_DATA"}, owner="alice")
         jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RUN_KIND]
         assert jobs[-1].payload["tenant"] == "tenant-a"

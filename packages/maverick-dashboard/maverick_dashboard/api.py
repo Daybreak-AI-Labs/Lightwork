@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import difflib
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -70,6 +72,8 @@ from .api_schemas import (
     FlowAutonomyIn,
     FlowChatIn,
     FlowDraftIn,
+    FlowDryRunIn,
+    FlowPublishIn,
     FlowResumeIn,
     FlowRollbackIn,
     FlowRunIn,
@@ -124,6 +128,7 @@ from .api_schemas import (
 )
 from .auth import (
     assert_goal_access,
+    auth_genuinely_off,
     caller_principal,
     caller_suites,
     can_access_goal,
@@ -280,8 +285,7 @@ async def workforce_posture(request: Request) -> dict:
     }
     try:
         from maverick.domain import available_domains
-        from maverick.world_model import DEFAULT_DB, WorldModel
-        wm = WorldModel(DEFAULT_DB)
+        wm = _world()
         cands = graduation_candidates(wm.list_approvals(limit=5000), sorted(available_domains()))
         out["graduation_candidates"] = [
             {"name": c.name, "sample": c.sample, "approve_rate": c.approve_rate,
@@ -834,6 +838,118 @@ async def upload_attachment(
     )
 
 
+def _privacy_auth_genuinely_off() -> bool:
+    """Strict auth-off decision for privacy credential and mutation boundaries."""
+    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+        return False
+    try:
+        from maverick.config import config_source_errors, load_config
+
+        config = load_config() or {}
+        if config_source_errors():
+            return False
+    except Exception:
+        return False
+    if not isinstance(config, dict):
+        return False
+
+    def _env_override(name: str) -> bool | None:
+        raw = os.environ.get(name)
+        if raw is None or not raw.strip():
+            return None
+        value = raw.strip().lower()
+        if value in {"1", "true", "yes", "on"}:
+            return True
+        if value in {"0", "false", "no", "off"}:
+            return False
+        # Invalid auth policy is uncertainty, never permission to use ambient
+        # credentials or mint an unattributed privacy mutation.
+        return True
+
+    dashboard = config.get("dashboard") or {}
+    auth = config.get("auth") or {}
+    if not isinstance(dashboard, dict) or not isinstance(auth, dict):
+        return False
+
+    configured = []
+    for env_name, section_value in (
+        ("MAVERICK_DASHBOARD_REQUIRE_AUTH", dashboard.get("require_auth", False)),
+        ("MAVERICK_DASHBOARD_INVITES", dashboard.get("invites", False)),
+    ):
+        override = _env_override(env_name)
+        if override is None:
+            if not isinstance(section_value, bool):
+                return False
+            configured.append(section_value)
+        else:
+            configured.append(override)
+
+    oidc = auth.get("oidc") or {}
+    proxy = auth.get("proxy") or {}
+    saml = auth.get("saml") or {}
+    if not all(isinstance(section, dict) for section in (oidc, proxy, saml)):
+        return False
+    for env_name, section in (
+        ("MAVERICK_OIDC_ENABLED", oidc),
+        ("MAVERICK_PROXY_AUTH", proxy),
+    ):
+        override = _env_override(env_name)
+        if override is None:
+            enabled = section.get("enabled", False)
+            if not isinstance(enabled, bool):
+                return False
+            configured.append(enabled)
+        else:
+            configured.append(override)
+    # SAML has no enable flag: any configured surface is an auth mechanism;
+    # a partial section is still uncertainty and therefore denies ambient use.
+    configured.append(bool(saml))
+    return not any(configured)
+
+
+def _request_identity(request: Request) -> str | None:
+    """Verified identity; ``None`` only in genuine local auth-off mode."""
+    principal = str(caller_principal(request) or "")
+    if principal:
+        return principal
+    expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN", "")
+    if expected:
+        authorization = request.headers.get("authorization", "")
+        supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
+        if supplied and hmac.compare_digest(supplied, expected):
+            return "auth:dashboard-token"
+        raise HTTPException(
+            status_code=401,
+            detail="authenticated caller identity required",
+        )
+    if _privacy_auth_genuinely_off():
+        return None
+    raise HTTPException(
+        status_code=401,
+        detail="authenticated caller identity required",
+    )
+
+
+def _request_actor(request: Request) -> str:
+    """Stable attributable actor for dashboard-originated durable writes."""
+    identity = _request_identity(request) or "local:dashboard"
+    if len(identity) <= 256:
+        return identity
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"{identity[:183]}#sha256:{digest}"
+
+
+def _document_source_principal(request: Request) -> str | None:
+    """Credential-use principal; local auth-off keeps operator semantics."""
+    principal = _request_identity(request)
+    if principal is not None and len(principal) > 256:
+        raise HTTPException(
+            status_code=403,
+            detail="authenticated principal is too long for connection grants",
+        )
+    return principal
+
+
 @router.post("/docs/discover")
 async def discover_documents(request: Request, body: DocDiscoverIn) -> dict:
     """Search the CONNECTED document sources (Microsoft Graph, Slack, Google
@@ -850,12 +966,21 @@ async def discover_documents(request: Request, body: DocDiscoverIn) -> dict:
         raise HTTPException(status_code=403,
                             detail="doc discovery is disabled ([assessments] "
                                    "doc_discovery)")
-    configured = await run_in_threadpool(doc_discovery.configured_sources)
+    principal = _document_source_principal(request)
+    allow_ambient = principal is None
+    configured = await run_in_threadpool(
+        doc_discovery.configured_sources,
+        principal=principal,
+        allow_ambient_credentials=allow_ambient,
+    )
     hits = await run_in_threadpool(
         doc_discovery.discover, body.subject,
         sources=(body.sources if body.sources is not None
                  else configured or None),
-        limit=body.limit)
+        limit=body.limit,
+        principal=principal,
+        allow_ambient_credentials=allow_ambient,
+    )
     return {
         "configured_sources": configured,
         "hits": [h.to_dict() for h in hits],
@@ -886,9 +1011,16 @@ async def attach_from_source(
 
     from maverick import doc_discovery
     from maverick.attachments import AttachmentRejected, store
+    principal = _document_source_principal(request)
     try:
         data, mime = await run_in_threadpool(
-            doc_discovery.fetch, body.source, body.doc_id, body.ref)
+            doc_discovery.fetch,
+            body.source,
+            body.doc_id,
+            body.ref,
+            principal=principal,
+            allow_ambient_credentials=principal is None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001 -- a source outage is a 502, not a 500
@@ -945,7 +1077,9 @@ async def create_dpa_review(request: Request, body: DpaReviewIn) -> dict:
     ops = _privacy_ops_or_403()
     return await run_in_threadpool(
         ops.review_dpa, body.vendor, body.text,
-        document_name=body.document_name)
+        document_name=body.document_name,
+        reviewed_by=_request_actor(request),
+    )
 
 
 @router.get("/privacy/dpa-reviews/{review_id}")
@@ -968,11 +1102,22 @@ async def search_dpa_documents(request: Request, vendor: str = "") -> dict:
     # "enabled" means it can actually search: feature on AND >=1 source
     # holds credentials — otherwise the UI says "connect a source", not
     # "no matching documents".
-    if not doc_discovery.enabled() or not doc_discovery.configured_sources():
+    principal = _document_source_principal(request)
+    allow_ambient = principal is None
+    configured = await run_in_threadpool(
+        doc_discovery.configured_sources,
+        principal=principal,
+        allow_ambient_credentials=allow_ambient,
+    )
+    if not doc_discovery.enabled() or not configured:
         return {"enabled": False, "hits": []}
     hits = await run_in_threadpool(
         doc_discovery.discover, vendor[:200],
-        keywords=("dpa", "data processing", "agreement", "contract"))
+        keywords=("dpa", "data processing", "agreement", "contract"),
+        sources=configured,
+        principal=principal,
+        allow_ambient_credentials=allow_ambient,
+    )
     return {"enabled": True, "hits": [h.to_dict() for h in hits]}
 
 
@@ -981,12 +1126,24 @@ async def create_dpa_review_from_document(request: Request,
                                           body: DpaFromDocumentIn) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
+    principal = _document_source_principal(request)
     try:
         return await run_in_threadpool(
             ops.review_dpa_from_document, body.vendor, body.source,
-            body.doc_id, ref=body.ref, document_name=body.document_name)
+            body.doc_id,
+            ref=body.ref,
+            document_name=body.document_name,
+            reviewed_by=_request_actor(request),
+            principal=principal,
+            allow_ambient_credentials=principal is None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 - source failures are status-only
+        raise HTTPException(
+            status_code=502,
+            detail="document source request failed",
+        ) from e
 
 
 @router.get("/privacy/ai-systems")
@@ -1005,7 +1162,9 @@ async def register_ai_system(request: Request, body: AiSystemIn) -> dict:
     return await run_in_threadpool(
         ops.register_ai_system, body.name, body.purpose,
         provider=body.provider, owner=body.owner,
-        assessment_id=body.assessment_id)
+        assessment_id=body.assessment_id,
+        registered_by=_request_actor(request),
+    )
 
 
 @router.post("/privacy/ai-systems/from-assessment/{assessment_id}",
@@ -1017,7 +1176,10 @@ async def register_ai_system_from_assessment(request: Request,
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     record = await run_in_threadpool(
-        ops.register_ai_system_from_assessment, assessment_id[:64])
+        ops.register_ai_system_from_assessment,
+        assessment_id[:64],
+        registered_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
     return record
@@ -1036,8 +1198,17 @@ async def upsert_ropa(request: Request, body: RopaIn) -> dict:
     ops = _privacy_ops_or_403()
     payload = body.model_dump(exclude_none=True)
     ropa_id = payload.pop("ropa_id", "")
-    record = await run_in_threadpool(ops.upsert_ropa, payload,
-                                     ropa_id=ropa_id)
+    revision = payload.pop("revision", None)
+    try:
+        record = await run_in_threadpool(
+            ops.upsert_ropa,
+            payload,
+            ropa_id=ropa_id,
+            updated_by=_request_actor(request),
+            expected_revision=revision,
+        )
+    except ops.RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="no such activity")
     return record
@@ -1050,7 +1221,10 @@ async def ropa_from_assessment(request: Request, assessment_id: str) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     record = await run_in_threadpool(
-        ops.draft_ropa_from_assessment, assessment_id[:64])
+        ops.draft_ropa_from_assessment,
+        assessment_id[:64],
+        created_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
     return record
@@ -1062,10 +1236,20 @@ async def import_onetrust(request: Request, body: OneTrustImportIn) -> dict:
     comes in with source provenance and stays editable here."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    imported = await run_in_threadpool(ops.import_onetrust_ropa,
-                                       body.csv_text)
+    imported = await run_in_threadpool(
+        ops.import_onetrust_ropa,
+        body.csv_text,
+        imported_by=_request_actor(request),
+    )
     return {"imported": len(imported),
             "activities": [e["activity"] for e in imported]}
+
+
+def _csv_formula_safe(value: object) -> object:
+    """Neutralize spreadsheet formulas while preserving ordinary CSV values."""
+    from maverick.tools.spreadsheet import _neutralize_formula
+
+    return _neutralize_formula(value)
 
 
 @router.get("/privacy/ropa/export.csv")
@@ -1081,7 +1265,7 @@ async def export_ropa_csv(request: Request) -> Response:
     w = csv.DictWriter(buf, fieldnames=fields)
     w.writeheader()
     for r in rows:
-        w.writerow(r)
+        w.writerow({field: _csv_formula_safe(r.get(field, "")) for field in fields})
     return Response(
         content=buf.getvalue(), media_type="text/csv",
         headers={"Content-Disposition":
@@ -1100,7 +1284,12 @@ async def open_dsar_request(request: Request, body: DsarIn) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     return await run_in_threadpool(
-        ops.open_dsar, body.subject_id, body.kind, channel=body.channel)
+        ops.open_dsar,
+        body.subject_id,
+        body.kind,
+        channel=body.channel,
+        opened_by=_request_actor(request),
+    )
 
 
 @router.post("/privacy/dsar/from-message", status_code=201)
@@ -1114,7 +1303,7 @@ async def open_dsar_from_message(request: Request,
     ops = _privacy_ops_or_403()
     record = await run_in_threadpool(
         ops.open_dsar_from_message, body.text, channel=body.channel,
-        sender=body.sender)
+        sender=body.sender, opened_by=_request_actor(request))
     if record is None:
         raise HTTPException(
             status_code=422,
@@ -1125,12 +1314,16 @@ async def open_dsar_from_message(request: Request,
 
 @router.post("/privacy/dsar/{request_id}/fulfill")
 async def fulfill_dsar_request(request: Request, request_id: str) -> dict:
-    """Access/portability run the REAL subject-data export; erasure records
-    the exact `maverick erase` invocation for a deliberate operator run --
-    never destructive from the API."""
+    """Access/portability run the real subject-data export. Erasure returns a
+    structured argv handoff for a deliberate authenticated operator workflow;
+    the API never constructs or executes a shell command."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(ops.fulfill_dsar, request_id[:64])
+    record = await run_in_threadpool(
+        ops.fulfill_dsar,
+        request_id[:64],
+        fulfilled_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(status_code=404,
                             detail="no such open request")
@@ -1141,7 +1334,11 @@ async def fulfill_dsar_request(request: Request, request_id: str) -> dict:
 async def close_dsar_request(request: Request, request_id: str) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(ops.close_dsar, request_id[:64])
+    record = await run_in_threadpool(
+        ops.close_dsar,
+        request_id[:64],
+        closed_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(status_code=404, detail="no such request")
     return record
@@ -1172,13 +1369,8 @@ async def open_privacy_incident(request: Request, body: IncidentIn) -> dict:
     record = await run_in_threadpool(
         ops.open_incident, body.title, severity=body.severity,
         description=body.description, categories=body.categories,
-        affected_estimate=body.affected_estimate)
-    try:
-        from maverick.audit import record as audit_record
-        audit_record("PRIVACY_INCIDENT_OPENED", agent="operator",
-                     incident=record["id"], severity=body.severity)
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
+        affected_estimate=body.affected_estimate,
+        reported_by=_request_actor(request))
     return record
 
 
@@ -1189,17 +1381,18 @@ async def decide_privacy_incident(request: Request, incident_id: str,
     Audited either way."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(
-        ops.decide_incident_notification, incident_id[:64], body.notifiable,
-        rationale=body.rationale)
+    try:
+        record = await run_in_threadpool(
+            ops.decide_incident_notification,
+            incident_id[:64],
+            body.notifiable,
+            rationale=body.rationale,
+            decided_by=_request_actor(request),
+        )
+    except ops.RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="no such incident")
-    try:
-        from maverick.audit import record as audit_record
-        audit_record("PRIVACY_INCIDENT_DECISION", agent="operator",
-                     incident=incident_id[:64], notifiable=body.notifiable)
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
     return record
 
 
@@ -1208,7 +1401,11 @@ async def close_privacy_incident(request: Request,
                                  incident_id: str) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    record = await run_in_threadpool(ops.close_incident, incident_id[:64])
+    record = await run_in_threadpool(
+        ops.close_incident,
+        incident_id[:64],
+        closed_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(status_code=404, detail="no such incident")
     return record
@@ -1222,9 +1419,22 @@ async def list_assessment_templates(request: Request) -> dict:
     from maverick.assessment import list_templates
     return {"templates": [
         {"type": t.type, "title": t.title, "framework": t.framework,
-         "questions": len(t.questions)}
+         "questions": len(t.questions), "revision": t.revision,
+         "digest": t.digest, "custom": t.custom}
         for t in list_templates()
     ]}
+
+
+@router.get("/assess/template-state/{assessment_type}")
+async def get_assessment_template_state(request: Request,
+                                        assessment_type: str) -> dict:
+    """CAS identity, including a deleted custom-only questionnaire tombstone."""
+    require_permission(request, "view")
+    from maverick.assessment import template_state
+    try:
+        return await run_in_threadpool(template_state, assessment_type[:64])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/assess/templates/{assessment_type}")
@@ -1232,11 +1442,7 @@ async def get_assessment_template(request: Request,
                                   assessment_type: str) -> dict:
     """One template in full (questions included) for the catalog editor."""
     require_permission(request, "view")
-    from maverick.assessment import (
-        custom_template_records,
-        get_template,
-        template_department,
-    )
+    from maverick.assessment import get_template, template_department
     tpl = get_template(assessment_type[:64])
     if tpl is None:
         raise HTTPException(status_code=404, detail="no such template")
@@ -1244,7 +1450,9 @@ async def get_assessment_template(request: Request,
         "type": tpl.type, "title": tpl.title, "framework": tpl.framework,
         "description": tpl.description,
         "department": template_department(tpl.type),
-        "custom": tpl.type in custom_template_records(),
+        "custom": tpl.custom,
+        "revision": tpl.revision,
+        "digest": tpl.digest,
         "questions": [{"id": q.id, "section": q.section, "text": q.text,
                        "risk_answer": q.risk_answer, "severity": q.severity,
                        "guidance": q.guidance} for q in tpl.questions],
@@ -1254,40 +1462,66 @@ async def get_assessment_template(request: Request,
 @router.put("/assess/templates/{assessment_type}")
 async def put_assessment_template(request: Request, assessment_type: str,
                                   body: TemplateIn) -> dict:
-    """Author or edit a questionnaire from the workspace catalog. Templates
-    are data, not code -- saving under a built-in type overrides it; the
-    override is a file an operator can delete to restore the original."""
-    require_permission(request, "operate")
-    from maverick.assessment import save_custom_template
+    """Admin-publish one immutable questionnaire release with pointer CAS."""
+    require_permission(request, "admin")
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        save_custom_template,
+    )
+    values = body.model_dump()
+    expected_revision = values.pop("expected_revision")
+    expected_digest = values.pop("expected_digest")
     try:
         tpl = await run_in_threadpool(
             save_custom_template,
-            {"type": assessment_type[:64], **body.model_dump()})
+            {"type": assessment_type[:64], **values},
+            expected_revision=expected_revision,
+            expected_digest=expected_digest,
+            actor=_request_actor(request),
+        )
+    except AssessmentConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    try:
-        from maverick.audit import record as audit_record
-        audit_record("TEMPLATE_SAVED", agent="operator",
-                     template=tpl.type, questions=len(tpl.questions))
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
     return {"type": tpl.type, "title": tpl.title,
-            "questions": len(tpl.questions), "custom": True}
+            "questions": len(tpl.questions), "custom": True,
+            "revision": tpl.revision, "digest": tpl.digest}
 
 
 @router.delete("/assess/templates/{assessment_type}")
 async def delete_assessment_template(request: Request,
-                                     assessment_type: str) -> dict:
-    """Remove a custom template / override (built-ins are restored, never
-    deleted)."""
-    require_permission(request, "operate")
-    from maverick.assessment import TEMPLATES, delete_custom_template
-    removed = await run_in_threadpool(delete_custom_template,
-                                      assessment_type[:64])
+                                     assessment_type: str,
+                                     expected_revision: int,
+                                     expected_digest: str) -> dict:
+    """Admin-unpublish a custom release; immutable history is retained."""
+    require_permission(request, "admin")
+    from maverick.assessment import (
+        TEMPLATES,
+        AssessmentConflict,
+        AssessmentStateError,
+        delete_custom_template,
+        template_state,
+    )
+    try:
+        removed = await run_in_threadpool(
+            delete_custom_template, assessment_type[:64],
+            expected_revision=expected_revision,
+            expected_digest=expected_digest,
+            actor=_request_actor(request),
+        )
+    except AssessmentConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     if not removed:
         raise HTTPException(status_code=404, detail="no custom template")
+    state = await run_in_threadpool(template_state, assessment_type[:64])
     return {"deleted": assessment_type[:64],
-            "builtin_restored": assessment_type[:64] in TEMPLATES}
+            "builtin_restored": assessment_type[:64] in TEMPLATES,
+            "revision": state["revision"], "digest": state["digest"]}
 
 
 @router.get("/assess/sessions")
@@ -1306,13 +1540,13 @@ async def get_assessment_session(request: Request, assessment_id: str) -> dict:
     respondent's notes, scored findings, rating, and the follow-up thread.
     This is what the review pop-out renders."""
     require_permission(request, "operate")
-    from maverick.assessment import get_template, load_saved
+    from maverick.assessment import load_saved, template_for_saved_record
     record = await run_in_threadpool(load_saved, assessment_id[:64])
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
     # Enrich with the template's question text + section so the pop-out
     # shows real questions, never raw ids like "pia_necessity".
-    tpl = get_template(str(record.get("type", "")))
+    tpl = template_for_saved_record(record)
     if tpl is not None:
         record["question_text"] = {
             q.id: {"text": q.text, "section": q.section} for q in tpl.questions
@@ -1328,25 +1562,24 @@ async def add_assessment_followups(
     ``needs_more`` until every follow-up is answered; the respondent-facing
     harness (intake portal) picks them up and re-interviews. Audited."""
     require_permission(request, "operate")
-    from maverick.assessment import add_followups
-    who = ""
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        add_followups,
+    )
+    who = _request_actor(request)
     try:
-        principal = getattr(request.state, "principal", None)
-        who = str(getattr(principal, "id", "") or "") if principal else ""
-    except Exception:  # pragma: no cover -- attribution is best-effort
-        who = ""
-    record = await run_in_threadpool(
-        add_followups, assessment_id[:64], body.questions, who or "reviewer")
+        record = await run_in_threadpool(
+            add_followups, assessment_id[:64], body.questions, who,
+            expected_revision=body.expected_revision,
+        )
+    except AssessmentConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     if record is None:
         raise HTTPException(status_code=404,
                             detail="no such assessment (or empty questions)")
-    try:
-        from maverick.audit import record as audit_record
-        audit_record("ASSESSMENT_FOLLOWUP", agent=who or "reviewer",
-                     assessment=assessment_id[:64],
-                     questions=len(body.questions))
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
     return record
 
 
@@ -1358,26 +1591,26 @@ async def decide_assessment_session(
     next review -- the workspace surfaces the record again when it comes due,
     and the follow-up cycle re-opens it. Audited."""
     require_permission(request, "operate")
-    from maverick.assessment import decide_assessment
-    who = ""
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        AssessmentTransitionError,
+        decide_assessment,
+    )
+    who = _request_actor(request)
     try:
-        principal = getattr(request.state, "principal", None)
-        who = str(getattr(principal, "id", "") or "") if principal else ""
-    except Exception:  # pragma: no cover -- attribution is best-effort
-        who = ""
-    record = await run_in_threadpool(
-        decide_assessment, assessment_id[:64], body.decision,
-        decided_by=who or "reviewer", note=body.note,
-        cadence_days=body.cadence_days)
+        record = await run_in_threadpool(
+            decide_assessment, assessment_id[:64], body.decision,
+            decided_by=who, note=body.note,
+            cadence_days=body.cadence_days,
+            expected_revision=body.expected_revision,
+        )
+    except (AssessmentConflict, AssessmentTransitionError) as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
-    try:
-        from maverick.audit import record as audit_record
-        audit_record("ASSESSMENT_DECIDED", agent=who or "reviewer",
-                     assessment=assessment_id[:64], decision=body.decision,
-                     cadence_days=body.cadence_days or 0)
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
     return record
 
 
@@ -1700,7 +1933,7 @@ async def list_connections_endpoint(request: Request) -> dict:
     require_permission(request, "operate")
     _require_connections()
     from maverick import connections
-    return {"connections": connections.list_connections(owner=goal_owner_filter(request))}
+    return {"connections": connections.list_connections(owner=_request_identity(request))}
 
 
 @router.post("/connections", status_code=201)
@@ -1716,10 +1949,12 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
         # Owner-scope like triggers: a non-admin can't overwrite another
         # tenant's connection by reusing its name. Enforced INSIDE the store
         # lock (expected_owner) so the check and the write are atomic.
+        owner = _request_identity(request)
         rec = connections.set_connection(
             payload.name, connector=payload.connector, base_url=payload.base_url,
-            token=payload.token, owner=caller_principal(request) or "",
-            expected_owner=goal_owner_filter(request))
+            token=payload.token, owner=owner or "",
+            expected_owner=owner, access=payload.access,
+            allowed_principals=payload.allowed_principals)
     except PermissionError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
@@ -1740,16 +1975,40 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     # Owner-scope like list/delete/create: a non-admin can only test their own
     # connection (else a name-guess is a cross-owner reachability oracle AND
     # sends another owner's token). A 404 (not 403) so it can't confirm the name.
-    owner_filter = goal_owner_filter(request)
+    owner_filter = _request_identity(request)
     if rec is None or (owner_filter is not None and rec.get("owner", "") != owner_filter):
         raise HTTPException(status_code=404, detail="no such connection")
+    probe_revision = str(rec.get("revision") or "")
+
+    def _persist_probe(result: dict) -> None:
+        try:
+            connections.record_test_result(
+                name,
+                reachable=bool(result.get("reachable")),
+                authenticated=bool(result.get("authenticated")),
+                status=result.get("status"),
+                expected_owner=owner_filter,
+                expected_revision=probe_revision,
+            )
+        except connections.ConnectionVersionConflict as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="connection changed while its readiness probe was running",
+            ) from exc
+
     base = str(rec.get("base_url") or "").rstrip("/")
     if not base:
-        return {"ok": False, "detail": "no base URL set"}
+        result = {"ok": False, "reachable": False, "authenticated": False,
+                  "detail": "no base URL set"}
+        _persist_probe(result)
+        return result
 
     def _probe() -> dict:
+        import secrets
+
+        from maverick.tools import _ssrf
+
         try:
-            from maverick.tools import _ssrf
             from maverick.tools.enterprise_connectors import auth_headers_for
             # Speak the connector's saved-token auth dialect (basic / custom
             # scheme), but do not include operator environment-backed auxiliary
@@ -1764,16 +2023,62 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
             # follow_redirects=False, so a base_url or a 3xx can't turn this into
             # an internal-network probe or forward the token to another host.
             r = _ssrf.safe_get(base, headers=headers, timeout=10.0)
-            # 2xx/3xx or 401/403 all mean "reachable"; only a connect error is a hard fail.
-            ok = r.status_code < 500
-            return {"ok": ok, "status": r.status_code,
-                    "detail": ("authenticated" if r.status_code < 400
-                               else f"reachable but returned {r.status_code}")}
+            # Any HTTP status proves network reachability. It does NOT prove
+            # authentication/readiness: 401/403 are explicit auth failures and
+            # a generic 404/4xx/5xx cannot substantiate a successful credential
+            # test. Keep these concepts separate for authoring preflight.
+            # A redirect commonly points to an interactive login page; it proves
+            # reachability, not that this credential authenticated. A 2xx alone
+            # is also insufficient because many API roots are public. Challenge
+            # the same endpoint with a fresh invalid credential and require an
+            # explicit 401/403 control response before asserting that the saved
+            # token made the difference. No response body or header is retained.
+            actual_ok = 200 <= r.status_code < 300
+            ready = False
+            if actual_ok and rec.get("token"):
+                invalid_headers = auth_headers_for(
+                    str(rec.get("connector") or ""),
+                    "invalid-readiness-probe-" + secrets.token_urlsafe(32),
+                    include_extra_headers_env=False,
+                )
+                try:
+                    control = _ssrf.safe_get(
+                        base, headers=invalid_headers, timeout=10.0,
+                    )
+                except Exception as exc:  # token worked; control evidence did not
+                    return {
+                        "ok": False,
+                        "reachable": True,
+                        "authenticated": False,
+                        "status": r.status_code,
+                        "detail": (
+                            "reachable, but the invalid-credential control could "
+                            f"not be completed ({type(exc).__name__})"
+                        ),
+                    }
+                ready = control.status_code in (401, 403)
+            if r.status_code in (401, 403):
+                detail = f"authentication refused ({r.status_code})"
+            elif ready:
+                detail = "authenticated (invalid-credential control was refused)"
+            elif actual_ok:
+                detail = (
+                    "reachable, but the endpoint did not prove that the saved "
+                    "credential was required"
+                )
+            else:
+                detail = f"reachable but readiness probe returned {r.status_code}"
+            return {"ok": ready, "reachable": True, "authenticated": ready,
+                    "status": r.status_code, "detail": detail}
         except _ssrf.BlockedHost:
-            return {"ok": False, "detail": "base URL host is not permitted"}
+            return {"ok": False, "reachable": False, "authenticated": False,
+                    "detail": "base URL host is not permitted"}
         except Exception as e:  # pragma: no cover -- network varies
-            return {"ok": False, "detail": f"could not reach host: {type(e).__name__}"}
-    return await run_in_threadpool(_probe)
+            return {"ok": False, "reachable": False, "authenticated": False,
+                    "detail": f"could not reach host: {type(e).__name__}"}
+    result = await run_in_threadpool(_probe)
+    _persist_probe(result)
+    return result
 
 
 @router.delete("/connections/{name}")
@@ -1781,7 +2086,7 @@ async def delete_connection_endpoint(request: Request, name: str) -> dict:
     require_permission(request, "admin")  # managing credentials is admin-only
     _require_connections()
     from maverick import connections
-    if not connections.delete_connection(name, owner=goal_owner_filter(request)):
+    if not connections.delete_connection(name, owner=_request_identity(request)):
         raise HTTPException(status_code=404, detail="no connection with that name")
     return {"deleted": connections.normalize_name(name)}
 
@@ -1822,7 +2127,7 @@ async def export_assessments_endpoint(request: Request, format: str = "json") ->
         w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         for r in rows:
-            w.writerow(r)
+            w.writerow({col: _csv_formula_safe(r.get(col, "")) for col in cols})
         return Response(content=buf.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": "attachment; filename=assessments.csv"})
     return JSONResponse({"rows": rows})
@@ -1932,6 +2237,30 @@ def _assert_flow_access(request: Request, flow) -> None:
         raise HTTPException(status_code=404, detail="no such flow")
 
 
+def _flow_publication_fields(flow_id: str) -> dict:
+    """Small activation-state projection for authoring/list responses."""
+    from maverick.flow import store
+
+    try:
+        published = store.load_published_bundle(flow_id)
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409, detail="published flow release failed integrity checks"
+        ) from exc
+    if published is None:
+        return {
+            "published": False,
+            "published_version": None,
+            "published_revision": "",
+        }
+    _flow, release = published
+    return {
+        "published": True,
+        "published_version": int(release["definition_version"]),
+        "published_revision": str(release["release_id"]),
+    }
+
+
 @router.get("/flows")
 async def list_flows_endpoint(request: Request) -> dict:
     """The saved flow definitions (a summary per flow)."""
@@ -1941,7 +2270,7 @@ async def list_flows_endpoint(request: Request) -> dict:
     return {"flows": [
         {"id": f.id, "name": f.name, "nodes": len(f.nodes),
          "single_agent": f.is_single_agent(), "schedule": f.schedule,
-         "inputs": f.inputs}
+         "inputs": f.inputs, **_flow_publication_fields(f.id)}
         for f in store.list_flows()
         if _can_access_flow(request, f)
     ]}
@@ -1991,7 +2320,82 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
         "nodes": len(flow.nodes),
         "version": flow.version,
         "revision": flow.revision,
+        **_flow_publication_fields(flow.id),
     }
+
+
+@router.post("/flows/{flow_id}/publish")
+async def publish_flow_endpoint(
+    request: Request, flow_id: str, payload: FlowPublishIn,
+) -> dict:
+    """Activate one immutable draft revision for real runs/triggers/schedules."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+
+    current = store.load_flow(flow_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, current)
+    try:
+        release = store.publish_flow(
+            flow_id,
+            expected_version=payload.version,
+            expected_revision=payload.revision,
+        )
+    except store.FlowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Make schedule activation responsive to an explicit publish. The periodic
+    # reconcile remains the crash/restart repair path.
+    from maverick_dashboard import automation_queue
+
+    try:
+        automation_queue._reconcile_flow_crons()
+    except Exception:
+        # Publication already committed. Report that authoritative state and
+        # let the periodic reconciler repair scheduling instead of returning a
+        # false failure that might induce a duplicate operator retry.
+        log.exception("flow cron reconcile failed after publishing %s", flow_id)
+    return {
+        "id": flow_id,
+        "published": True,
+        "published_version": int(release["definition_version"]),
+        "published_revision": str(release["release_id"]),
+    }
+
+
+@router.post("/flows/{flow_id}/unpublish")
+async def unpublish_flow_endpoint(
+    request: Request, flow_id: str, payload: FlowPublishIn,
+) -> dict:
+    """Deactivate a release while retaining its draft and immutable history."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+
+    current = store.load_flow(flow_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, current)
+    try:
+        store.unpublish_flow(
+            flow_id,
+            expected_version=payload.version,
+            expected_revision=payload.revision,
+        )
+    except store.FlowVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    from maverick_dashboard import automation_queue
+
+    try:
+        automation_queue._reconcile_flow_crons()
+    except Exception:
+        # The handler re-checks publication before firing, so a stale queued
+        # cron is inert while the periodic reconciler repairs cancellation.
+        log.exception("flow cron reconcile failed after unpublishing %s", flow_id)
+    return {"id": flow_id, "published": False}
 
 
 # Common connector tools to bias the NL drafter toward real action nodes; the
@@ -2258,6 +2662,8 @@ def _run_out(run) -> dict:
     # Definitions may contain literal connector parameters from older/user-made
     # flows, so never echo the pinned graph through run polling or SSE.
     d.pop("definition_digest", None)
+    d.pop("release_digest", None)
+    d.pop("release_id", None)
     d.pop("definition_version", None)
     d.pop("subflow_digests", None)
     return d
@@ -2373,12 +2779,40 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     if run.status not in PAUSED_STATUSES:
         raise HTTPException(status_code=409,
                             detail=f"run is not paused (status {run.status})")
+    decided_by = ""
+    if run.status == "paused_approval":
+        if not str(payload.decision or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="an explicit approval decision is required",
+            )
+        decided_by = caller_principal(request) or ""
+        if not decided_by and auth_genuinely_off():
+            decided_by = "local:dashboard"
+        if not decided_by:
+            raise HTTPException(
+                status_code=403,
+                detail="an authenticated approver identity is required",
+            )
+    from maverick.flow import store
+
     from maverick_dashboard import automation_queue as aq
-    resume_payload = {
-        "flow_id": run.flow_id, "run_id": run_id, "decision": payload.decision,
-        "inputs": dict(payload.inputs or {}), "owner": run.owner}
-    resume_payload.update(aq._job_tenant_payload())
-    aq.queue().enqueue(aq.FLOW_RESUME_KIND, resume_payload)
+    try:
+        aq.enqueue_flow_resume(
+            run.flow_id,
+            run_id,
+            payload.decision,
+            run.owner,
+            decided_by=decided_by,
+            inputs=dict(payload.inputs or {}),
+        )
+    except store.FlowSnapshotError as exc:
+        if "approver" in str(exc) or "approval decision" in str(exc):
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409,
+            detail="run release is no longer active",
+        ) from exc
     return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
 
 
@@ -2425,10 +2859,18 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
                 status_code=409,
                 detail="only a failed run with a recorded failure node can be "
                        "resumed from its failure; use a plain retry instead")
-        retry_payload = {"flow_id": run.flow_id, "run_id": run_id, "owner": run.owner,
-                        "from_failure": True}
-        retry_payload.update(aq._job_tenant_payload())
-        aq.queue().enqueue(aq.FLOW_RESUME_KIND, retry_payload)
+        try:
+            aq.enqueue_flow_resume(
+                run.flow_id,
+                run_id,
+                owner=run.owner,
+                from_failure=True,
+            )
+        except store.FlowSnapshotError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="run release is no longer active",
+            ) from exc
         return {"run_id": run_id, "status": "resuming", "from_node": run.cursor}
     # Runs written before immutable definition snapshots have no pin fields at
     # all.  A user-requested retry is explicitly a fresh run against the current
@@ -2449,18 +2891,56 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
                 "run from the current flow instead"
             ),
         )
-    new_id = aq.enqueue_flow_run(
-        run.flow_id,
-        dict(run.input_data or {}),
-        run.owner,
-        origin=f"retry:{run_id}",
-        dry_run=bool(run.dry_run),
-        channel=run.execution_channel or None,
-        user_id=run.execution_user_id or None,
-        allowed_suites=(
+    identity = {
+        "channel": run.execution_channel or None,
+        "user_id": run.execution_user_id or None,
+        "allowed_suites": (
             frozenset(run.allowed_suites) if run.allowed_suites is not None else None
         ),
-    )
+    }
+    if run.dry_run:
+        if legacy_unpinned:
+            raise HTTPException(
+                status_code=409,
+                detail="legacy dry run has no immutable definition to retry safely",
+            )
+        new_id = aq.enqueue_flow_run(
+            run.flow_id,
+            dict(run.input_data or {}),
+            run.owner,
+            origin=f"retry:{run_id}",
+            dry_run=True,
+            definition_digest=run.definition_digest,
+            release_digest=run.release_digest,
+            release_id=run.release_id,
+            definition_version=run.definition_version,
+            definition_revision=run.definition_revision,
+            subflow_digests=dict(run.subflow_digests or {}),
+            **identity,
+        )
+    else:
+        try:
+            published = store.load_published_bundle(run.flow_id)
+        except store.FlowSnapshotError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="published flow release failed integrity checks",
+            ) from exc
+        if published is None:
+            raise HTTPException(
+                status_code=409,
+                detail="flow is not published; publish a reviewed draft before retrying",
+            )
+        published_flow, release = published
+        _assert_flow_access(request, published_flow)
+        new_id = aq.enqueue_published_flow_run(
+            run.flow_id,
+            dict(run.input_data or {}),
+            run.owner,
+            origin=f"retry:{run_id}",
+            expected_revision=str(release["release_id"]),
+            **identity,
+        )
     return {"run_id": new_id, "status": "queued", "retried_from": run_id}
 
 
@@ -2605,12 +3085,93 @@ async def flow_insights_endpoint(request: Request) -> dict:
             changes.append({
                 "node_id": node_id, "to_kind": last.get("to_kind"),
                 "source": last.get("source"),
-                "impact": evolve.measure(f.id, node_id, float(last.get("ts") or 0.0))})
+                "impact": evolve.measure(
+                    f.id,
+                    node_id,
+                    float(last.get("ts") or 0.0),
+                    before_revision=str(last.get("before_revision") or ""),
+                    after_revision=str(last.get("after_revision") or ""),
+                )})
         if proposals or changes:
             flows_out.append({"flow_id": f.id, "name": f.name,
                               "proposals": proposals, "changes": changes})
         proposal_count += len(proposals)
     return {"flows": flows_out, "proposal_count": proposal_count}
+
+
+@router.post("/flows/dry-run")
+async def dry_run_flow_draft_endpoint(
+    request: Request, payload: FlowDryRunIn,
+) -> dict:
+    """Run exactly the submitted unsaved graph with side-effect-free executors.
+
+    This endpoint intentionally never calls ``save_flow`` or ``publish_flow``.
+    It writes only the immutable execution object and durable dry-run row needed
+    to execute/watch the test. A schedule present on the draft is inert.
+    """
+    require_permission(request, "operate")
+    _require_flows()
+    from uuid import uuid4
+
+    from maverick.flow import Flow, store
+    from maverick.flow.ir import coerce_inputs
+
+    try:
+        draft = Flow.from_dict(payload.flow)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"invalid flow: {exc}") from exc
+    if not draft.id:
+        raise HTTPException(status_code=400, detail="flow needs an 'id'")
+    prior = store.load_flow(draft.id)
+    if prior is not None:
+        _assert_flow_access(request, prior)
+        draft.owner = prior.owner
+        draft.version = int(prior.version) + 1
+        draft.revision = prior.revision
+    else:
+        draft.owner = caller_principal(request) or ""
+        draft.version = 1
+        # Never accept a client-selected generation token as provenance.
+        draft.revision = uuid4().hex
+    errors = draft.validate()
+    if errors:
+        raise HTTPException(
+            status_code=400, detail="invalid flow: " + "; ".join(errors[:5])
+        )
+    data, input_errors = coerce_inputs(draft, dict(payload.data or {}))
+    if input_errors:
+        raise HTTPException(status_code=400, detail="; ".join(input_errors))
+    try:
+        digest, version, subflows = store.snapshot_flow_bundle(draft)
+        from maverick_dashboard import automation_queue as aq
+
+        run_id, deduplicated = aq.enqueue_flow_run_once(
+            draft.id,
+            data,
+            _supervisor(request),
+            "",
+            origin="manual-dry-run",
+            dry_run=True,
+            channel="api" if execution_user_id_from_request(request) else None,
+            user_id=execution_user_id_from_request(request),
+            allowed_suites=caller_suites(request),
+            definition_digest=digest,
+            definition_version=version,
+            definition_revision=draft.revision,
+            subflow_digests=subflows,
+        )
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="draft or its immutable execution plan is unavailable",
+        ) from exc
+    run = store.load_run(run_id)
+    return {
+        "run_id": run_id,
+        "status": run.status if run else "queued",
+        "dry_run": True,
+        "deduplicated": deduplicated,
+    }
 
 
 @router.get("/flows/{flow_id}")
@@ -2622,7 +3183,7 @@ async def get_flow_endpoint(request: Request, flow_id: str) -> dict:
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
     _assert_flow_access(request, f)
-    return f.to_dict()
+    return {**f.to_dict(), **_flow_publication_fields(flow_id)}
 
 
 @router.delete("/flows/{flow_id}", status_code=204)
@@ -2642,21 +3203,44 @@ async def delete_flow_endpoint(request: Request, flow_id: str) -> None:
         )
     except store.FlowVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="flow could not be safely revoked; its draft was not deleted",
+        ) from exc
     if not deleted:
         raise HTTPException(status_code=409, detail="flow changed while it was being deleted")
 
 
 @router.post("/flows/{flow_id}/run")
 async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dict:
-    """Start a flow run as a durable job (agent nodes become goals, action nodes
-    tool calls). Returns the run id to poll; the run may pause on an approval."""
+    """Start the exact active release as a durable live run."""
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
     from maverick.flow.ir import coerce_inputs
-    flow = store.load_flow(flow_id)
-    if flow is None:
+    draft = store.load_flow(flow_id)
+    if draft is None:
         raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, draft)
+    if payload.dry_run:
+        raise HTTPException(
+            status_code=400,
+            detail="submit the unsaved graph to /flows/dry-run for a safe test",
+        )
+    try:
+        published = store.load_published_bundle(flow_id)
+    except store.FlowSnapshotError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="published flow release failed integrity checks",
+        ) from exc
+    if published is None:
+        raise HTTPException(
+            status_code=409,
+            detail="flow is not published; publish the reviewed draft before a live run",
+        )
+    flow, release = published
     _assert_flow_access(request, flow)
     owner = _supervisor(request)
     # Validate/coerce the payload against the flow's declared inputs (a no-op when
@@ -2670,12 +3254,14 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
     idem = (payload.idempotency_key or "").strip()
     from maverick_dashboard import automation_queue as aq
     try:
-        run_id, deduplicated = aq.enqueue_flow_run_once(
-            flow_id, data, owner, "" if payload.dry_run else idem,
-            origin="manual", dry_run=bool(payload.dry_run),
+        run_id, deduplicated = aq.enqueue_published_flow_run_once(
+            flow_id, data, owner, idem,
+            origin="manual",
             channel="api" if execution_user_id_from_request(request) else None,
             user_id=execution_user_id_from_request(request),
-            allowed_suites=caller_suites(request))
+            allowed_suites=caller_suites(request),
+            expected_revision=str(release["release_id"]),
+        )
     except store.FlowSnapshotError as exc:
         # Snapshot internals may include object paths/digests. The caller only
         # needs to know that the definition changed or cannot be pinned safely.
@@ -2685,7 +3271,7 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
         ) from exc
     run = store.load_run(run_id)
     return {"run_id": run_id, "status": run.status if run else "queued",
-            "dry_run": bool(payload.dry_run), "deduplicated": deduplicated}
+            "dry_run": False, "deduplicated": deduplicated}
 
 
 @router.get("/flows/{flow_id}/proposals")
@@ -2757,8 +3343,14 @@ async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
                             detail=f"node is already a {payload.to_kind}")
     from_kind = node.kind
     try:
-        new_flow = evolve.apply_proposal(f, payload.node_id, payload.to_kind,
-                                         tool=payload.tool, brief=payload.brief)
+        new_flow = evolve.apply_proposal(
+            f,
+            payload.node_id,
+            payload.to_kind,
+            tool=payload.tool,
+            params=payload.params,
+            brief=payload.brief,
+        )
     except (KeyError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     errs = new_flow.validate()
@@ -2774,7 +3366,9 @@ async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
     except store.FlowVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     evolution_log.record_apply(flow_id, payload.node_id, from_kind,
-                               payload.to_kind, saved.version, source="manual")
+                               payload.to_kind, saved.version, source="manual",
+                               before_revision=store.flow_cohort(f),
+                               after_revision=store.flow_cohort(saved))
     return {"id": flow_id, "version": saved.version, "node_id": payload.node_id,
             "from_kind": from_kind, "to_kind": payload.to_kind}
 
@@ -2850,7 +3444,13 @@ async def flow_node_impact_endpoint(request: Request, flow_id: str,
     last = evolution_log.last_apply(flow_id, node_id)
     if last is None:
         return {"node_id": node_id, "changed": False, "applied": None, "impact": None}
-    impact = evolve.measure(flow_id, node_id, float(last.get("ts") or 0.0))
+    impact = evolve.measure(
+        flow_id,
+        node_id,
+        float(last.get("ts") or 0.0),
+        before_revision=str(last.get("before_revision") or ""),
+        after_revision=str(last.get("after_revision") or ""),
+    )
     return {"node_id": node_id, "changed": True,
             "applied": {"from_kind": last.get("from_kind"), "to_kind": last.get("to_kind"),
                         "version": last.get("version"), "ts": last.get("ts"),
@@ -4094,7 +4694,6 @@ async def export_deliverable_csv(request: Request, goal_id: int) -> Response:
     import io as _io
 
     from maverick.deliverable import render_deliverable
-    from maverick.tools.spreadsheet import _neutralize_formula
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
@@ -4117,9 +4716,9 @@ async def export_deliverable_csv(request: Request, goal_id: int) -> Response:
     writer = csv.writer(buf)
     # Neutralize spreadsheet formulas so an opened CSV can't execute injected
     # formula cells (=, +, -, @) in Excel/Sheets.
-    writer.writerow([_neutralize_formula(cell) for cell in rendered.table.headers])
+    writer.writerow([_csv_formula_safe(cell) for cell in rendered.table.headers])
     writer.writerows(
-        [_neutralize_formula(cell) for cell in row] for row in rendered.table.rows
+        [_csv_formula_safe(cell) for cell in row] for row in rendered.table.rows
     )
     return Response(
         content=buf.getvalue(),
@@ -4502,17 +5101,29 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
         raise HTTPException(
             status_code=400, detail="set exactly one of 'template' or 'flow'")
     target_flow = None
+    target_flow_release = None
     target_template = None
     if payload.flow:
         # A flow target: the flow engine must be on and the flow must exist, so
         # a trigger can't be armed against a missing graph.
         _require_flows()
         from maverick.flow import store as flow_store
-        target_flow = flow_store.load_flow(payload.flow)
-        if target_flow is None:
+        draft = flow_store.load_flow(payload.flow)
+        if draft is None:
             raise HTTPException(
                 status_code=404, detail=f"flow not found: {payload.flow!r}")
-        _assert_flow_access(request, target_flow)
+        _assert_flow_access(request, draft)
+        try:
+            published = flow_store.load_published_bundle(payload.flow)
+        except flow_store.FlowSnapshotError as exc:
+            raise HTTPException(
+                status_code=409, detail="published flow release is unavailable"
+            ) from exc
+        if published is None:
+            raise HTTPException(
+                status_code=409, detail="publish the flow before arming a trigger"
+            )
+        target_flow, target_flow_release = published
     else:
         # Validate now: the template must exist and render with the given
         # defaults, so a trigger can't be armed against a missing/incompatible
@@ -4549,7 +5160,10 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
             owner=durable_automation_owner(request), flow=payload.flow,
             tenant=current_tenant_id() or "",
             flow_owner=(target_flow.owner if target_flow is not None else ""),
-            flow_revision=(target_flow.revision if target_flow is not None else ""),
+            flow_revision=(
+                str(target_flow_release["release_id"])
+                if target_flow_release is not None else ""
+            ),
             template_snapshot=(
                 triggers_store.snapshot_from_template(target_template)
                 if target_template is not None
@@ -4660,6 +5274,7 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
         raise HTTPException(status_code=400,
                             detail="set exactly one of 'template' or 'flow'")
     target_flow = None
+    target_flow_release = None
     target_template = None
     if flow:
         from maverick import flow as flow_mod
@@ -4670,10 +5285,21 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
                 detail=("Flows aren't enabled on this server yet — an "
                         "administrator can switch on the flow engine ([flows] "
                         "in the server configuration, or MAVERICK_FLOWS=1)."))
-        target_flow = flow_store.load_flow(flow)
-        if target_flow is None:
+        draft = flow_store.load_flow(flow)
+        if draft is None:
             raise HTTPException(status_code=404, detail=f"flow not found: {flow!r}")
-        _assert_flow_access(request, target_flow)
+        _assert_flow_access(request, draft)
+        try:
+            published = flow_store.load_published_bundle(flow)
+        except flow_store.FlowSnapshotError as exc:
+            raise HTTPException(
+                status_code=409, detail="published flow release is unavailable"
+            ) from exc
+        if published is None:
+            raise HTTPException(
+                status_code=409, detail="publish the flow before arming a trigger"
+            )
+        target_flow, target_flow_release = published
     else:
         # The template must EXIST, but -- unlike a webhook trigger -- we don't
         # require it to render with the current defaults: each polled event fills
@@ -4705,7 +5331,10 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
             config=payload.config or {}, params=payload.params or {},
             owner=durable_automation_owner(request), flow=flow,
             flow_owner=(target_flow.owner if target_flow is not None else ""),
-            flow_revision=(target_flow.revision if target_flow is not None else ""),
+            flow_revision=(
+                str(target_flow_release["release_id"])
+                if target_flow_release is not None else ""
+            ),
             template_snapshot=(
                 event_triggers_store.snapshot_from_template(target_template)
                 if target_template is not None
@@ -4774,14 +5403,14 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         )
 
     def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "",
-                   origin: str = "manual") -> str:
+                   origin: str = "manual", expected_revision: str = "") -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
         # The idempotency key dedups a re-delivered event; origin records the trigger.
         from maverick_dashboard import automation_queue
         identity_owner, user_id, allowed_suites = stored_automation_identity(owner)
 
-        return automation_queue.enqueue_flow_run(
+        return automation_queue.enqueue_published_flow_run(
             flow_id,
             data,
             identity_owner,
@@ -4790,6 +5419,7 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
             channel="api" if user_id else None,
             user_id=user_id,
             allowed_suites=allowed_suites,
+            expected_revision=expected_revision,
         )
 
     results = await run_in_threadpool(
@@ -6134,9 +6764,15 @@ async def compliance_report_csv(framework: str = "all") -> Response:
     writer = csv.writer(buf)
     writer.writerow(["framework", "control", "regulation", "status", "detail"])
     for c in checks:
-        writer.writerow([c.framework, c.control, c.regulation, c.status, c.detail])
+        writer.writerow([
+            _csv_formula_safe(value)
+            for value in (c.framework, c.control, c.regulation, c.status, c.detail)
+        ])
     writer.writerow([])
-    writer.writerow(["disclaimer", COMPLIANCE_DISCLAIMER])
+    writer.writerow([
+        _csv_formula_safe("disclaimer"),
+        _csv_formula_safe(COMPLIANCE_DISCLAIMER),
+    ])
     fname = f"lightwork-compliance-{framework}.csv"
     return Response(
         content=buf.getvalue(),
@@ -6194,14 +6830,14 @@ async def redact_preview(request: Request, payload: RedactIn) -> dict:
 async def watch_glance(request: Request) -> dict:
     """The Apple Watch glance payload (tiny fixed shape; see maverick.glance)."""
     from maverick.glance import build_glance
-    from maverick.world_model import open_world
+    from maverick.world_model import close_world_if_owned, open_world
     world = open_world()
     try:
         return build_glance(world, owner=goal_owner_filter(request))
     finally:
         try:
-            world.close()
-        except Exception:
+            close_world_if_owned(world)
+        except Exception:  # pragma: no cover -- best-effort response teardown
             pass
 
 
@@ -6785,6 +7421,8 @@ async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
             budget_dollars=payload.budget_dollars,
             budget_wall_seconds=payload.budget_wall_seconds,
             overwrite=payload.overwrite,
+            owner=caller_principal(request) or "local",
+            expected_generation=payload.expected_generation,
         )
     except FileExistsError as e:
         # A fresh save (overwrite=false) colliding with an existing template is a
@@ -6792,7 +7430,15 @@ async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"name": tpl.name, "title": tpl.title, "params": tpl.params, "saved": True}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    return {
+        "name": tpl.name,
+        "title": tpl.title,
+        "params": tpl.params,
+        "generation": tpl.generation,
+        "saved": True,
+    }
 
 
 # ---------- continuous-benchmark history ----------

@@ -7,6 +7,7 @@ tmp_path stores — no LLM, no real ~/.maverick state.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from maverick import dreaming, reflexion
@@ -134,6 +135,13 @@ class TestInsightStore:
         )
         assert dreaming.append_insights([other_dept], path=path) == 1
         assert len(dreaming.load_insights(path)) == 2
+        from maverick.file_lock import private_path_is_restricted
+        assert private_path_is_restricted(path)
+
+    def test_non_object_json_rows_are_ignored(self, tmp_path):
+        path = tmp_path / "insights.ndjson"
+        path.write_text('[]\n"text"\n', encoding="utf-8")
+        assert dreaming.load_insights(path) == []
 
     def test_legacy_insights_without_scope_are_not_recalled(self, tmp_path):
         path = tmp_path / "insights.ndjson"
@@ -559,6 +567,8 @@ class TestRehearsal:
         cases = dreaming.build_rehearsal_cases(self._failures(), min_cluster=2)
         assert dreaming.save_rehearsals(cases, path=path) == 1
         assert dreaming.load_rehearsals(path)[0]["prompt"] == cases[0]["prompt"]
+        from maverick.file_lock import private_path_is_restricted
+        assert private_path_is_restricted(path)
 
     def test_legacy_queue_without_scope_is_refused(self, tmp_path):
         path = tmp_path / "rehearsals.ndjson"
@@ -828,6 +838,65 @@ class TestLearningGovernance:
             )
         assert len(dreaming.list_snapshots(snapdir)) == 2
 
+    def test_empty_snapshot_is_explicit_rollback_boundary(self, tmp_path):
+        live = tmp_path / "live"
+        live.mkdir()
+        stores = {"new-insights.ndjson": live / "new-insights.ndjson"}
+        snapdir = tmp_path / "snaps"
+
+        snap = dreaming.snapshot_learning_state(
+            directory=snapdir,
+            stores=stores,
+            publish_empty=True,
+            raise_on_error=True,
+        )
+        assert snap is not None
+        stores["new-insights.ndjson"].write_text("poison\n", encoding="utf-8")
+
+        restored = dreaming.rollback_learning_state(
+            snap.name, directory=snapdir, stores=stores,
+        )
+        assert restored == ["new-insights.ndjson"]
+        assert not stores["new-insights.ndjson"].exists()
+
+    def test_transactional_snapshot_surfaces_publication_failure(
+        self, tmp_path, monkeypatch,
+    ):
+        import shutil as _shutil
+
+        stores = self._stores(tmp_path)
+        monkeypatch.setattr(
+            _shutil, "copytree",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")),
+        )
+        with pytest.raises(OSError, match="disk full"):
+            dreaming.snapshot_learning_state(
+                directory=tmp_path / "snaps",
+                stores=stores,
+                publish_empty=True,
+                raise_on_error=True,
+            )
+        assert dreaming.list_snapshots(tmp_path / "snaps") == []
+
+    def test_same_second_snapshots_are_unique_and_private(self, tmp_path):
+        stores = self._stores(tmp_path)
+        snapdir = tmp_path / "snaps"
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first, second = list(pool.map(
+                lambda _: dreaming.snapshot_learning_state(
+                    directory=snapdir, stores=stores, now=1000.0,
+                ),
+                range(2),
+            ))
+        assert first is not None and second is not None and first != second
+        assert len(dreaming.list_snapshots(snapdir)) == 2
+        from maverick.file_lock import private_path_is_restricted
+        assert private_path_is_restricted(first, 0o700)
+        assert private_path_is_restricted(first / "insights.ndjson")
+        assert private_path_is_restricted(
+            first / "learned-skills" / "a-skill.md",
+        )
+
     def test_unknown_snapshot_raises(self, tmp_path):
         stores = self._stores(tmp_path)
         snapdir = tmp_path / "snaps"
@@ -849,7 +918,9 @@ class TestLearningGovernance:
             directory=snapdir, stores=stores, now=1000.0,
         )
         assert snap is not None
+        trusted_insights = stores["insights.ndjson"].read_text(encoding="utf-8")
         # Mutate live so we can prove the rollback did NOT partially apply.
+        stores["insights.ndjson"].write_text("poison\n", encoding="utf-8")
         (stores["learned-skills"] / "post-snap.md").write_text(
             "# post", encoding="utf-8")
         live_skills = stores["learned-skills"]
@@ -863,11 +934,16 @@ class TestLearningGovernance:
             raise OSError("simulated disk-full during restore")
 
         monkeypatch.setattr(_shutil, "copytree", boom_copytree)
-        restored = dreaming.rollback_learning_state(
-            "latest", directory=snapdir, stores=stores,
-        )
-        # The dir store failed to restore...
-        assert "learned-skills" not in restored
+        with pytest.raises(dreaming.LearningRollbackError) as caught:
+            dreaming.rollback_learning_state(
+                "latest", directory=snapdir, stores=stores,
+            )
+        report = caught.value.report
+        assert report.complete is False
+        assert report.snapshot == snap.name
+        assert report.required == ("insights.ndjson", "learned-skills")
+        assert report.restored == ("insights.ndjson",)
+        assert "simulated disk-full" in report.failures["learned-skills"]
         # ...but the live store is fully intact -- NOT deleted or half-restored.
         assert live_skills.is_dir()
         assert (live_skills / "a-skill.md").read_text(encoding="utf-8") == "# a"
@@ -876,7 +952,9 @@ class TestLearningGovernance:
         assert not live_skills.with_name(
             live_skills.name + ".rollbacktmp").exists()
         # And the file store (which copies fine) still rolled back cleanly.
-        assert "insights.ndjson" in restored
+        assert stores["insights.ndjson"].read_text(
+            encoding="utf-8",
+        ) == trusted_insights
         monkeypatch.undo()
 
     def test_dry_run_reports_without_writing(self, tmp_path, monkeypatch):
@@ -958,6 +1036,27 @@ class TestTenantIsolation:
         )
         monkeypatch.delenv("MAVERICK_TENANT")
         assert "tenants" not in str(dreaming.insights_path())
+
+    def test_default_prune_only_touches_active_tenant(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+        shared = tmp_path / "reflexions.ndjson"
+        shared.write_text(
+            '{"ts":1,"goal_text":"shared one","failure_class":"x"}\n'
+            '{"ts":2,"goal_text":"shared two","failure_class":"y"}\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("MAVERICK_TENANT", "acme")
+        for message in ("old", "new"):
+            assert reflexion.record(
+                goal_text="duplicate tenant lesson",
+                failure_class="agent_error",
+                failure_msg=message,
+                reflection=message,
+            )
+        tenant_path = reflexion.default_path()
+        assert dreaming.prune_reflexions(keep=10) == 1
+        assert len(reflexion.list_recent(path=tenant_path)) == 1
+        assert len(shared.read_text(encoding="utf-8").splitlines()) == 2
 
 
 class _FakeGoal:

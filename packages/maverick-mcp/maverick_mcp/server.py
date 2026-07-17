@@ -3,17 +3,23 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import hashlib
+import hmac
 import json
 import logging
 import math
 import os
+import secrets
 import sys
 import threading
+from dataclasses import dataclass
 from typing import Any
 
 from .tasks import TaskError
 
 log = logging.getLogger(__name__)
+
+_MAX_TOOL_ERROR_CHARS = 500
 
 _RESOURCE_SUBSCRIPTIONS_CTX: contextvars.ContextVar[set[str] | None] = contextvars.ContextVar(
     "maverick_mcp_resource_subscriptions", default=None
@@ -28,6 +34,57 @@ _NO_OVERRIDE = object()
 _STRUCTURED_OVERRIDE_CTX: contextvars.ContextVar[object] = contextvars.ContextVar(
     "maverick_mcp_structured_override", default=_NO_OVERRIDE
 )
+
+
+@dataclass(frozen=True)
+class _TaskExecutionContext:
+    """Non-secret authority that survives a tools/call -> task handoff.
+
+    The credential itself is deliberately absent.  Its keyed fingerprint lets
+    the worker detect rotation/revocation without retaining a reusable bearer.
+    The frozen capability is only an upper bound: execution re-loads Agent
+    Trust and intersects this snapshot with the caller's current capability.
+    """
+
+    caller_identity: str | None
+    trust_principal: str
+    credential_kind: str
+    credential_fingerprint: str
+    capability: object | None
+
+
+# Process-local keying makes credential fingerprints useful for equality while
+# preventing an offline dictionary attack against a leaked task/session record.
+# HTTP task and resource state is process-local too, so rotation on restart is
+# both expected and desirable.
+_CREDENTIAL_FINGERPRINT_KEY = secrets.token_bytes(32)
+
+
+def _credential_fingerprint(credential: str) -> str:
+    """Return a stable-in-process, non-reusable fingerprint for a bearer."""
+    return hmac.new(
+        _CREDENTIAL_FINGERPRINT_KEY,
+        credential.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+@contextlib.contextmanager
+def _canonical_world():
+    """Yield the configured, tenant-aware world and release only owned handles.
+
+    ``open_world`` is the single backend-selection boundary for SQLite and
+    Postgres.  A no-path SQLite world may be owned by the process-wide tenant
+    cache, while a Postgres world is normally a per-call handle; delegating the
+    teardown decision to ``close_world_if_owned`` preserves both contracts.
+    """
+    from maverick.world_model import close_world_if_owned, open_world
+
+    world = open_world()
+    try:
+        yield world
+    finally:
+        close_world_if_owned(world)
 
 def _configure_mcp_logging() -> None:
     """Apply Lightwork's shared logging config (honors MAVERICK_LOG_FORMAT=json,
@@ -388,6 +445,10 @@ class MCPServer:
     # Resources a client may subscribe to, and which mutating tool dirties
     # each -- after such a tool call we push notifications/resources/updated.
     RESOURCE_URIS = ("maverick://goals", "maverick://skills")
+    _RESOURCE_READ_TOOL = {
+        "maverick://goals": "maverick_status",
+        "maverick://skills": "maverick_skills_list",
+    }
     _TOOL_RESOURCE = {
         "maverick_start": "maverick://goals",
         "maverick_resume": "maverick://goals",
@@ -504,12 +565,32 @@ class MCPServer:
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
         }
 
-    def handle_tools_list(self, params: dict) -> dict:
-        return {"tools": TOOLS}
+    def handle_tools_list(
+        self,
+        params: dict,
+        *,
+        caller_trust_principal: str | None = None,
+        capability=None,
+    ) -> dict:
+        """List only tools the authenticated caller can actually invoke."""
+        if not self._principal_permits(caller_trust_principal):
+            return {"tools": []}
+        return {
+            "tools": [
+                tool for tool in TOOLS
+                if self._capability_permits(capability, tool["name"])
+            ]
+        }
 
     # ---- 2025-11-25 Resources -----------------------------------------
 
-    def handle_resources_list(self, params: dict) -> dict:
+    def handle_resources_list(
+        self,
+        params: dict,
+        *,
+        caller_trust_principal: str | None = None,
+        capability=None,
+    ) -> dict:
         """Expose Lightwork state as MCP Resources.
 
         - maverick://goals          — list of active/recent goals
@@ -527,9 +608,25 @@ class MCPServer:
                 "mimeType": "application/json",
             },
         ]
-        return {"resources": resources}
+        return {
+            "resources": [
+                resource for resource in resources
+                if self._resource_access_permits(
+                    capability,
+                    caller_trust_principal,
+                    self._RESOURCE_READ_TOOL[resource["uri"]],
+                )
+            ]
+        }
 
-    def handle_resources_read(self, params: dict) -> dict:
+    def handle_resources_read(
+        self,
+        params: dict,
+        *,
+        caller_identity: str | None = None,
+        caller_trust_principal: str | None = None,
+        capability=None,
+    ) -> dict:
         uri = params.get("uri", "")
         # A client can send a non-string `uri` (number/list, or `null` which
         # overrides the "" default); `.startswith` then raises and escapes as a
@@ -537,14 +634,38 @@ class MCPServer:
         # the non-dict `arguments` guard in handle_tools_call.
         if not isinstance(uri, str) or not uri.startswith("maverick://"):
             raise _ProtocolError(-32602, f"unsupported uri scheme: {uri!r}")
+        read_tool = self._RESOURCE_READ_TOOL.get(uri)
+        if read_tool is None:
+            raise _ProtocolError(-32602, f"unknown resource path: {uri}")
+        if not self._resource_access_permits(
+            capability,
+            caller_trust_principal,
+            read_tool,
+        ):
+            self._record_capability_denial(
+                capability,
+                caller_identity,
+                read_tool,
+            )
+            # Match the unknown-resource response so the hidden resource is not
+            # an authorization oracle for a scoped caller.
+            raise _ProtocolError(-32602, f"unknown resource path: {uri}")
         path = uri[len("maverick://"):]
-        from maverick.world_model import DEFAULT_DB, WorldModel
-        wm = WorldModel(DEFAULT_DB)
 
         if path == "goals":
+            owner = self._connector_principal(
+                caller_identity,
+                caller_trust_principal,
+                capability,
+            )
+            with _canonical_world() as wm:
+                goals = (
+                    wm.list_goals(owner=owner)
+                    if owner is not None else wm.list_goals()
+                )
             data = [
                 {"id": g.id, "status": g.status, "title": g.title}
-                for g in wm.list_goals()[-20:]
+                for g in goals[-20:]
             ]
         elif path == "skills":
             try:
@@ -560,12 +681,37 @@ class MCPServer:
             raise _ProtocolError(-32602, f"unknown resource path: {uri}")
 
         from maverick.fastjson import dumps_compact
+        text = dumps_compact(data)
+        required = self._shield_required()
+        try:
+            from maverick.secrets import scrub
+
+            text = scrub(text)
+        except Exception as e:
+            log.error("MCP resource output scrubbing failed: %s", e)
+            if required:
+                raise _ProtocolError(
+                    -32603,
+                    "resource output blocked by safety policy",
+                ) from None
+        if self._shield_scan_reason(
+            text,
+            output=True,
+            required=required,
+        ) is not None:
+            # Never echo scanner reasons here: a detector may include the
+            # sensitive span that caused the block, turning its denial into the
+            # very resource-data leak it was meant to prevent.
+            raise _ProtocolError(
+                -32603,
+                "resource output blocked by safety policy",
+            )
         return {
             "contents": [{
                 "uri": uri,
                 "mimeType": "application/json",
                 # compact: this JSON re-enters a client LLM's context
-                "text": dumps_compact(data),
+                "text": text,
             }],
         }
 
@@ -606,10 +752,31 @@ class MCPServer:
     def _resource_pending_updates(self) -> list[str] | None:
         return _RESOURCE_PENDING_UPDATES_CTX.get()
 
-    def handle_resources_subscribe(self, params: dict) -> dict:
+    def handle_resources_subscribe(
+        self,
+        params: dict,
+        *,
+        caller_identity: str | None = None,
+        caller_trust_principal: str | None = None,
+        capability=None,
+    ) -> dict:
         """Track a client's interest in a resource (2025-11-25 subscribe)."""
         uri = params.get("uri", "")
         if uri not in self.RESOURCE_URIS:
+            raise _ProtocolError(
+                -32602, f"cannot subscribe to unknown resource: {uri!r}"
+            )
+        read_tool = self._RESOURCE_READ_TOOL[uri]
+        if not self._resource_access_permits(
+            capability,
+            caller_trust_principal,
+            read_tool,
+        ):
+            self._record_capability_denial(
+                capability,
+                caller_identity,
+                read_tool,
+            )
             raise _ProtocolError(
                 -32602, f"cannot subscribe to unknown resource: {uri!r}"
             )
@@ -727,30 +894,317 @@ class MCPServer:
             }],
         }
 
-    def _shield_block_or_none(self, payload: str) -> dict | None:
-        """Scan tool output through the Shield. Returns an isError response dict
-        if blocked, else None. Fails open (kernel rule 1) when the Shield raises
-        or is absent."""
+    @staticmethod
+    def _capability_permits(capability, tool_name: str) -> bool:
+        """Fail-closed capability + revocation decision using core policy."""
+        if capability is None:
+            return True
+        try:
+            from maverick.revocation import revoked_principal
+
+            principals = (
+                capability.revocation_principals()
+                if hasattr(capability, "revocation_principals")
+                else (getattr(capability, "principal", ""),)
+            )
+            if revoked_principal(principals) is not None:
+                return False
+            # Capability.permits resolves max_risk through the same
+            # maverick.safety.tool_risk authority used by the kernel registry.
+            return bool(capability.permits(tool_name))
+        except Exception as e:  # malformed/unavailable policy must not widen
+            log.error("MCP capability evaluation failed for %s: %s", tool_name, e)
+            return False
+
+    @staticmethod
+    def _principal_permits(principal: str | None) -> bool:
+        """Fail closed when the authenticated transport principal is revoked."""
+        if not principal:
+            return True
+        try:
+            from maverick.revocation import revoked_principal
+
+            candidates = (principal,)
+            if not principal.startswith("agent:"):
+                candidates = (f"agent:{principal}", principal)
+            return revoked_principal(candidates) is None
+        except Exception as e:
+            log.error("MCP principal revocation evaluation failed: %s", e)
+            return False
+
+    @classmethod
+    def _resource_access_permits(
+        cls,
+        capability,
+        caller_trust_principal: str | None,
+        read_tool: str,
+    ) -> bool:
+        return cls._principal_permits(
+            caller_trust_principal
+        ) and cls._capability_permits(capability, read_tool)
+
+    @staticmethod
+    def _capability_principal(capability, caller_identity: str | None) -> str:
+        if caller_identity:
+            return caller_identity
+        principal = str(getattr(capability, "principal", "") or "")
+        return principal.removeprefix("agent:") or "mcp"
+
+    @staticmethod
+    def _connector_principal(
+        caller_identity: str | None,
+        caller_trust_principal: str | None,
+        capability,
+    ) -> str | None:
+        """Canonical authenticated principal for downstream connectors.
+
+        HTTP per-agent credentials carry an unprefixed Agent Trust id while
+        connection grants use the canonical ``agent:<id>`` form.  The legacy
+        shared bearer is still an authenticated surface principal (``mcp``),
+        so it must not collapse into the unscoped local/operator path.  An
+        in-process capability supplies the final fallback for callers that do
+        not traverse the HTTP transport.
+        """
+        transport_identity = str(
+            caller_identity or caller_trust_principal or "",
+        ).strip()
+        if transport_identity:
+            # HTTP identities come exclusively from Agent Trust (including the
+            # shared ``mcp`` surface). Always add the namespace at this trust
+            # boundary: a future relaxation of the agent-id grammar must not
+            # let an id like ``user:alice`` or ``agent:peer`` alias an existing
+            # principal.
+            return f"agent:{transport_identity}"
+        principal = str(getattr(capability, "principal", "") or "").strip()
+        if not principal:
+            return None
+        if principal.startswith(("agent:", "user:")):
+            return principal
+        return f"agent:{principal}"
+
+    @classmethod
+    @contextlib.contextmanager
+    def _bind_connector_principal(
+        cls,
+        caller_identity: str | None,
+        caller_trust_principal: str | None,
+        capability,
+    ):
+        """Bind authenticated connector authority without clearing local scope."""
+        principal = cls._connector_principal(
+            caller_identity,
+            caller_trust_principal,
+            capability,
+        )
+        if not principal:
+            # Stdio/local embedding retains an already-bound outer principal;
+            # do not replace it with the unscoped local identity.
+            yield
+            return
+        from maverick.connections import bind_principal
+
+        with bind_principal(principal):
+            yield
+
+    def _record_capability_denial(
+        self,
+        capability,
+        caller_identity: str | None,
+        tool_name: str,
+    ) -> None:
+        try:
+            from maverick.agent_trust import record_denied
+
+            principal = self._capability_principal(capability, caller_identity)
+            record_denied(
+                principal,
+                direction="inbound",
+                rule="capability",
+                reason=f"MCP tool {tool_name!r} is outside the caller capability",
+            )
+        except Exception:  # pragma: no cover - audit is fail-safe
+            pass
+
+    @staticmethod
+    def _task_execution_context(
+        *,
+        caller_identity: str | None,
+        trust_principal: str | None,
+        credential_kind: str | None,
+        credential_fingerprint: str | None,
+        capability,
+    ) -> _TaskExecutionContext | None:
+        """Build a complete task authority snapshot or fail closed."""
+        if trust_principal or credential_kind:
+            if not (trust_principal and credential_kind and credential_fingerprint):
+                raise _ProtocolError(-32603, "incomplete task authorization context")
+            return _TaskExecutionContext(
+                caller_identity=caller_identity,
+                trust_principal=trust_principal,
+                credential_kind=credential_kind,
+                credential_fingerprint=credential_fingerprint,
+                capability=capability,
+            )
+        if capability is not None or caller_identity:
+            # Non-HTTP callers may supply an in-process capability. HTTP always
+            # supplies refreshable credential metadata through the branch above.
+            return _TaskExecutionContext(
+                caller_identity=caller_identity,
+                trust_principal="",
+                credential_kind="in_process",
+                credential_fingerprint="",
+                capability=capability,
+            )
+        return None
+
+    @staticmethod
+    def _shield_required() -> bool:
+        # Enterprise is a floor, not an overrideable default. The shared core
+        # policy preserves a local env override for compatibility, but a
+        # network-reachable MCP deployment must not let
+        # MAVERICK_REQUIRE_SHIELD=0 disable the enterprise boundary.
+        try:
+            from maverick.enterprise import enterprise_enabled
+
+            if enterprise_enabled():
+                return True
+        except Exception as e:
+            log.error("MCP enterprise policy unavailable; requiring Shield: %s", e)
+            return True
+        try:
+            from maverick.shield_policy import shield_required
+
+            return bool(shield_required())
+        except Exception as e:  # policy resolution failed at a security boundary
+            log.error("MCP Shield policy unavailable; requiring scan: %s", e)
+            return True
+
+    def _shield_scan_reason(
+        self,
+        payload: str,
+        *,
+        output: bool,
+        required: bool | None = None,
+    ) -> str | None:
+        """Return a block reason while preserving explicit local/dev posture.
+
+        Missing or failing Shield remains fail-open in ordinary local mode.
+        Enterprise mode and ``require_shield`` fail closed, including scanner
+        exceptions.
+        """
+        # Callers that make a multi-step decision can pass one policy snapshot
+        # so a transient config read cannot make preflight observe both
+        # "required" and "optional" for the same request.
+        if required is None:
+            required = self._shield_required()
         if self._shield is None:
+            if required:
+                return "safety shield is required but unavailable"
             return None
         try:
-            verdict = self._shield.scan_output(payload)
-        except Exception:  # pragma: no cover -- fail open (kernel rule 1)
+            scan = self._shield.scan_output if output else self._shield.scan_input
+            verdict = scan(payload)
+        except Exception as e:
+            if required:
+                log.warning("MCP Shield scan failed (blocking): %s", e)
+                return "safety shield scan error"
+            log.warning("MCP Shield scan failed (local/dev fail-open): %s", e)
             return None
         if getattr(verdict, "allowed", True):
             return None
-        reasons = "; ".join(getattr(verdict, "reasons", []) or []) or "blocked by Shield"
+        return "; ".join(getattr(verdict, "reasons", []) or []) or "blocked by Shield"
+
+    def _shield_block_or_none(self, payload: str) -> dict | None:
+        """Scan tool output and return a protocol tool-error when blocked."""
+        reasons = self._shield_scan_reason(payload, output=True)
+        if reasons is None:
+            return None
         return {
             "isError": True,
             "content": [{"type": "text", "text": f"⚠ Output blocked: {reasons}"}],
         }
 
-    def handle_tools_call(self, params: dict, *, task_owner: str | None = None) -> dict:
+    def _tool_exception_result(self, exc: Exception) -> dict:
+        """Return one bounded, scrubbed, Shield-gated tool failure."""
+        try:
+            from maverick.secrets import scrub
+
+            detail = scrub(f"{type(exc).__name__}: {exc}")
+        except Exception:  # scrubbing failure must not expose the raw error
+            detail = type(exc).__name__
+        detail = detail[:_MAX_TOOL_ERROR_CHARS]
+        if self._shield_scan_reason(detail, output=True) is not None:
+            # Scanner reasons can contain the matched span. Keep the exception
+            # path generic so a denial cannot echo non-regex secret material.
+            return {
+                "isError": True,
+                "content": [{
+                    "type": "text",
+                    "text": "Output blocked by safety policy",
+                }],
+            }
+        return {
+            "isError": True,
+            "content": [{"type": "text", "text": detail}],
+        }
+
+    def _required_shield_input_block_or_none(
+        self,
+        tool_name: str,
+        arguments: dict,
+    ) -> dict | None:
+        """Preflight required Shield before any network-triggered side effect.
+
+        In ordinary local/dev mode the existing targeted scans retain their
+        fail-open behavior.  When Shield is required, every MCP call is scanned
+        before task creation or tool dispatch so a missing/broken scanner cannot
+        execute a mutation and merely hide its output afterward.
+        """
+        required = self._shield_required()
+        if not required:
+            return None
+        payload = json.dumps(
+            {"tool": tool_name, "arguments": arguments},
+            default=str,
+            sort_keys=True,
+        )
+        reasons = self._shield_scan_reason(
+            payload,
+            output=False,
+            required=required,
+        )
+        if reasons is None:
+            return None
+        return {
+            "isError": True,
+            "content": [{"type": "text", "text": f"⚠ Input blocked: {reasons}"}],
+        }
+
+    def handle_tools_call(
+        self,
+        params: dict,
+        *,
+        task_owner: str | None = None,
+        task_quota_owner: str | None = None,
+        caller_identity: str | None = None,
+        caller_trust_principal: str | None = None,
+        caller_credential_kind: str | None = None,
+        caller_credential_fingerprint: str | None = None,
+        capability=None,
+    ) -> dict:
         name = params.get("name")
         # A non-hashable `name` (list/dict) raises TypeError on the set-membership
         # test below, escaping as a scrubbed -32603; coerce to -32602 like the
         # `arguments` guard just below.
         if not isinstance(name, str) or name not in _TOOL_NAMES:
+            raise _ProtocolError(-32602, f"unknown tool: {name!r}")
+        if not (
+            self._principal_permits(caller_trust_principal)
+            and self._capability_permits(capability, name)
+        ):
+            self._record_capability_denial(capability, caller_identity, name)
+            # Match the unknown-tool response so a scoped caller cannot use
+            # direct calls to enumerate tools hidden from tools/list.
             raise _ProtocolError(-32602, f"unknown tool: {name!r}")
         arguments = params.get("arguments", {}) or {}
         # A client can send `arguments` as a non-object (number/bool/string/
@@ -766,6 +1220,9 @@ class MCPServer:
         missing = [r for r in required if r not in arguments]
         if missing:
             raise _ProtocolError(-32602, f"missing required argument(s) for {name}: {missing}")
+        blocked_input = self._required_shield_input_block_or_none(name, arguments)
+        if blocked_input is not None:
+            return blocked_input
         # MCP task augmentation: a tools/call carrying a `task` field runs async
         # when the tool opts in (execution.taskSupport) and this transport has
         # tasks enabled. Returns a CreateTaskResult immediately; the worker runs
@@ -777,8 +1234,21 @@ class MCPServer:
             if not _tool_supports_tasks(tool_spec):
                 raise _ProtocolError(
                     -32601, f"tool {name!r} does not support task augmentation")
+            task_context = self._task_execution_context(
+                caller_identity=caller_identity,
+                trust_principal=caller_trust_principal,
+                credential_kind=caller_credential_kind,
+                credential_fingerprint=caller_credential_fingerprint,
+                capability=capability,
+            )
             task = self._task_store().create(
-                name, arguments, task_param, owner=task_owner)
+                name,
+                arguments,
+                task_param,
+                owner=task_owner,
+                quota_owner=task_quota_owner,
+                context=task_context,
+            )
             # The frozen creation snapshot: a CreateTaskResult always reports the
             # initial `working` status, even if a fast tool already finished.
             return {"task": task.create_result}
@@ -791,33 +1261,45 @@ class MCPServer:
             self._pending_updates = []
         else:
             pending.clear()
-        try:
-            result = self._dispatch_tool(name, arguments)
-        except (_ProtocolError, TaskError):
-            # Control-flow errors carry an explicit JSON-RPC (code, message) and
-            # MUST surface as a structured protocol error -- both transports
-            # convert them (stdio _dispatch_stdio_message, http _exception_to_
-            # error_response). Collapsing them into an isError envelope here (the
-            # blanket catch did) broke the documented -32602 contract for typed
-            # clients AND leaked the internal class name ("_ProtocolError: ...")
-            # into the tool-result text. Re-raise; only genuine tool crashes
-            # below become isError.
-            raise
-        except Exception as e:
-            return {
-                "isError": True,
-                "content": [{"type": "text", "text": f"{type(e).__name__}: {e}"}],
-            }
-        # Phase 2 elicitation: if the run parked questions and the (stdio)
-        # client advertised elicitation, surface them as protocol forms now,
-        # record the answers, and resume -- so the caller gets the finished
-        # answer in one round trip instead of the start -> answer -> resume
-        # dance. A no-op for HTTP clients or those without the capability,
-        # leaving the async ask_user / maverick_answer flow unchanged.
-        if name in ("maverick_start", "maverick_resume"):
-            elicited = self._maybe_elicit_open_questions(arguments)
-            if elicited is not None:
-                result = elicited
+        with self._bind_connector_principal(
+            caller_identity,
+            caller_trust_principal,
+            capability,
+        ):
+            try:
+                if capability is not None and name in (
+                    "maverick_start", "maverick_resume",
+                ):
+                    result = self._dispatch_tool(
+                        name, arguments, capability=capability)
+                else:
+                    result = self._dispatch_tool(name, arguments)
+            except (_ProtocolError, TaskError):
+                # Control-flow errors carry an explicit JSON-RPC (code, message) and
+                # MUST surface as a structured protocol error -- both transports
+                # convert them (stdio _dispatch_stdio_message, http _exception_to_
+                # error_response). Collapsing them into an isError envelope here (the
+                # blanket catch did) broke the documented -32602 contract for typed
+                # clients AND leaked the internal class name ("_ProtocolError: ...")
+                # into the tool-result text. Re-raise; only genuine tool crashes
+                # below become isError.
+                raise
+            except Exception as e:
+                # Genuine tool failures are still model-visible output. Scrub known
+                # credential shapes, cap amplification, and run the same required
+                # Shield output gate as a successful tool result before returning.
+                return self._tool_exception_result(e)
+            # Phase 2 elicitation: if the run parked questions and the (stdio)
+            # client advertised elicitation, surface them as protocol forms now,
+            # record the answers, and resume -- so the caller gets the finished
+            # answer in one round trip instead of the start -> answer -> resume
+            # dance. A no-op for HTTP clients or those without the capability,
+            # leaving the async ask_user / maverick_answer flow unchanged.
+            if name in ("maverick_start", "maverick_resume"):
+                elicited = self._maybe_elicit_open_questions(
+                    arguments, capability=capability)
+                if elicited is not None:
+                    result = elicited
         blocked = self._shield_block_or_none(result)
         if blocked is not None:
             return blocked
@@ -840,7 +1322,16 @@ class MCPServer:
                 # model.
                 structured = self._structured_override
                 if structured is None:
-                    structured = self._structured_result(name)
+                    # Query results are re-derived after synchronous dispatch,
+                    # outside its connector ContextVar scope. Rebind here so
+                    # the typed status payload cannot enumerate objects that
+                    # the text status correctly hid.
+                    with self._bind_connector_principal(
+                        caller_identity,
+                        caller_trust_principal,
+                        capability,
+                    ):
+                        structured = self._structured_result(name)
             except Exception:  # pragma: no cover -- structured form is best-effort
                 structured = None
             if structured is not None:
@@ -855,13 +1346,21 @@ class MCPServer:
         self._queue_resource_update(name)
         return response
 
-    def _dispatch_tool(self, name: str, args: dict) -> str:
+    def _dispatch_tool(self, name: str, args: dict, *, capability=None) -> str:
         # Single dispatch table (the no-arg query tools ignore `args`). Keeping
         # one mapping prevents drift between this and _structured_result.
+        start = (
+            (lambda a: self._tool_start(a, capability=capability))
+            if capability is not None else self._tool_start
+        )
+        resume = (
+            (lambda a: self._tool_resume(a, capability=capability))
+            if capability is not None else self._tool_resume
+        )
         handlers = {
-            "maverick_start": lambda a: self._tool_start(a),
+            "maverick_start": start,
             "maverick_status": lambda a: self._tool_status(),
-            "maverick_resume": lambda a: self._tool_resume(a),
+            "maverick_resume": resume,
             "maverick_answer": lambda a: self._tool_answer(a),
             "maverick_skill_install": lambda a: self._tool_skill_install(a),
             "maverick_skills_list": lambda a: self._tool_skills_list(),
@@ -896,17 +1395,26 @@ class MCPServer:
 
         Re-derives from the world model so the text handlers in _dispatch_tool
         stay untouched; returns None for tools without an outputSchema."""
-        from maverick.world_model import WorldModel
         if name == "maverick_status":
-            w = WorldModel()
+            with _canonical_world() as w:
+                owner = self._current_object_principal()
+                goals = (
+                    w.list_goals(owner=owner)
+                    if owner is not None else w.list_goals()
+                )
+                goal_ids = {goal.id for goal in goals}
+                questions = [
+                    question for question in w.open_questions()
+                    if owner is None or question.goal_id in goal_ids
+                ]
             return {
                 "goals": [
                     {"id": g.id, "status": g.status, "title": g.title}
-                    for g in w.list_goals()[-10:]
+                    for g in goals[-10:]
                 ],
                 "open_questions": [
                     {"id": q.id, "goal_id": q.goal_id, "question": q.question}
-                    for q in w.open_questions()
+                    for q in questions
                 ],
             }
         if name == "maverick_skills_list":
@@ -918,27 +1426,39 @@ class MCPServer:
                 ],
             }
         if name == "maverick_facts_get":
-            return {"facts": dict(WorldModel().get_facts())}
+            with _canonical_world() as w:
+                return {"facts": dict(w.get_facts())}
         return None
 
-    def _tool_start(self, args: dict) -> str:
+    @staticmethod
+    def _current_object_principal() -> str | None:
+        """Principal whose persisted MCP objects are visible in this call."""
+        from maverick.connections import current_principal
+
+        return current_principal()
+
+    @staticmethod
+    def _goal_for_principal(world, goal_id: int, principal: str | None):
+        """Return an authorized goal, hiding foreign ids as nonexistent."""
+        goal = world.get_goal(goal_id)
+        if goal is None:
+            raise _ProtocolError(-32602, "goal not found")
+        if principal is not None and (getattr(goal, "owner", "") or "") != principal:
+            raise _ProtocolError(-32602, "goal not found")
+        return goal
+
+    def _tool_start(self, args: dict, *, capability=None) -> str:
         from maverick.deployment import require_enterprise_or_die
         require_enterprise_or_die()
         from maverick.budget import Budget
         from maverick.llm import LLM
         from maverick.orchestrator import run_goal_sync
         from maverick.sandbox import build_sandbox
-        from maverick.world_model import WorldModel
         title = args["title"]
         description = args.get("description", "")
-        if self._shield is not None:
-            try:
-                verdict = self._shield.scan_input(f"{title}\n{description}")
-                if not getattr(verdict, "allowed", True):
-                    reasons = "; ".join(getattr(verdict, "reasons", []) or []) or "blocked by Shield"
-                    return f"⚠ Blocked: {reasons}"
-            except Exception:  # pragma: no cover -- fail open (kernel rule 1)
-                pass
+        reasons = self._shield_scan_reason(f"{title}\n{description}", output=False)
+        if reasons is not None:
+            return f"⚠ Blocked: {reasons}"
         # Clamp client-supplied limits to operator ceilings. Over the HTTP
         # transport the budget is 100% client-controlled, so without a cap
         # any authenticated caller could pass max_dollars=10000 and burn the
@@ -961,73 +1481,97 @@ class MCPServer:
             ceiling=os.environ.get("MAVERICK_MCP_MAX_DEPTH", 3),
         )
         budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall)
-        world = WorldModel()
-        goal_id = world.create_goal(title, description)
-        llm = LLM()
-        sandbox = build_sandbox()
-        answer = run_goal_sync(
-            llm, world, budget, goal_id, sandbox=sandbox, max_depth=max_depth,
-        )
+        with _canonical_world() as world:
+            goal_id = world.create_goal(
+                title,
+                description,
+                owner=self._current_object_principal() or "",
+            )
+            llm = LLM()
+            sandbox = build_sandbox()
+            run_kwargs = {"sandbox": sandbox, "max_depth": max_depth}
+            if capability is not None:
+                run_kwargs["capability"] = capability
+            answer = run_goal_sync(llm, world, budget, goal_id, **run_kwargs)
         self._structured_override = {"goal_id": goal_id, "answer": answer}
         return answer
 
     def _tool_status(self) -> str:
-        from maverick.world_model import WorldModel
-        w = WorldModel()
-        goals = w.list_goals()
-        if not goals:
-            return "no goals yet"
-        lines = [f"#{g.id} [{g.status}] {g.title}" for g in goals[-10:]]
-        for q in w.open_questions():
-            lines.append(f"  open question #{q.id} (goal {q.goal_id}): {q.question}")
-        return "\n".join(lines)
+        with _canonical_world() as w:
+            owner = self._current_object_principal()
+            goals = (
+                w.list_goals(owner=owner)
+                if owner is not None else w.list_goals()
+            )
+            if not goals:
+                return "no goals yet"
+            lines = [f"#{g.id} [{g.status}] {g.title}" for g in goals[-10:]]
+            goal_ids = {goal.id for goal in goals}
+            questions = [
+                question for question in w.open_questions()
+                if owner is None or question.goal_id in goal_ids
+            ]
+            for q in questions:
+                lines.append(
+                    f"  open question #{q.id} (goal {q.goal_id}): {q.question}"
+                )
+            return "\n".join(lines)
 
-    def _tool_resume(self, args: dict) -> str:
+    def _tool_resume(self, args: dict, *, capability=None) -> str:
         from maverick.budget import Budget
         from maverick.llm import LLM
         from maverick.orchestrator import run_goal_sync
         from maverick.sandbox import build_sandbox
-        from maverick.world_model import WorldModel
-        w = WorldModel()
-        goal_id = args.get("goal_id")
-        if goal_id is None:
-            g = w.active_goal()
-            if not g:
-                return "no active or blocked goal to resume"
-            goal_id = g.id
-        else:
-            try:
-                goal_id = int(goal_id)
-            except (TypeError, ValueError, OverflowError):
-                raise _ProtocolError(-32602, f"invalid goal_id: {goal_id!r}") from None
-        # Clamp to the same operator ceilings as _tool_start. Over HTTP the
-        # budget is client-controlled; a bare Budget() let a resume bypass
-        # the MAVERICK_MCP_MAX_* caps that _tool_start enforces.
-        max_dollars = _bounded_float(
-            args.get("max_dollars", 5.0),
-            default=5.0,
-            ceiling=os.environ.get("MAVERICK_MCP_MAX_DOLLARS", 5.0),
-        )
-        max_wall = _bounded_float(
-            args.get("max_wall_seconds", 3600),
-            default=3600.0,
-            ceiling=os.environ.get("MAVERICK_MCP_MAX_WALL_SECONDS", 3600.0),
-        )
-        max_depth = _bounded_int(
-            args.get("max_depth", 3),
-            default=3,
-            ceiling=os.environ.get("MAVERICK_MCP_MAX_DEPTH", 3),
-        )
-        budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall)
-        answer = run_goal_sync(
-            LLM(), w, budget, goal_id,
-            sandbox=build_sandbox(), max_depth=max_depth,
-        )
+        with _canonical_world() as w:
+            owner = self._current_object_principal()
+            goal_id = args.get("goal_id")
+            if goal_id is None:
+                if owner is None:
+                    g = w.active_goal()
+                else:
+                    active = [
+                        goal for goal in w.list_goals(owner=owner)
+                        if goal.status in ("active", "blocked")
+                    ]
+                    g = max(active, key=lambda goal: goal.updated_at, default=None)
+                if not g:
+                    return "no active or blocked goal to resume"
+                goal_id = g.id
+            else:
+                try:
+                    goal_id = int(goal_id)
+                except (TypeError, ValueError, OverflowError):
+                    raise _ProtocolError(
+                        -32602, f"invalid goal_id: {goal_id!r}"
+                    ) from None
+            self._goal_for_principal(w, goal_id, owner)
+            # Clamp to the same operator ceilings as _tool_start. Over HTTP the
+            # budget is client-controlled; a bare Budget() let a resume bypass
+            # the MAVERICK_MCP_MAX_* caps that _tool_start enforces.
+            max_dollars = _bounded_float(
+                args.get("max_dollars", 5.0),
+                default=5.0,
+                ceiling=os.environ.get("MAVERICK_MCP_MAX_DOLLARS", 5.0),
+            )
+            max_wall = _bounded_float(
+                args.get("max_wall_seconds", 3600),
+                default=3600.0,
+                ceiling=os.environ.get("MAVERICK_MCP_MAX_WALL_SECONDS", 3600.0),
+            )
+            max_depth = _bounded_int(
+                args.get("max_depth", 3),
+                default=3,
+                ceiling=os.environ.get("MAVERICK_MCP_MAX_DEPTH", 3),
+            )
+            budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall)
+            run_kwargs = {"sandbox": build_sandbox(), "max_depth": max_depth}
+            if capability is not None:
+                run_kwargs["capability"] = capability
+            answer = run_goal_sync(LLM(), w, budget, goal_id, **run_kwargs)
         self._structured_override = {"goal_id": goal_id, "answer": answer}
         return answer
 
     def _tool_answer(self, args: dict) -> str:
-        from maverick.world_model import WorldModel
         # A bad id is an invalid-params protocol error (-32602), not a tool
         # execution error -- mirror _tool_resume so typed clients can tell them
         # apart (the old `int(...)` surfaced an isError tool result instead).
@@ -1039,16 +1583,17 @@ class MCPServer:
         # An answer to an open question is fed straight back into the agent loop
         # as the user's reply -- equally attacker-influenced as a fact over the
         # network-reachable HTTP transport. Scan it like _tool_fact_set does.
-        if self._shield is not None:
-            try:
-                v = self._shield.scan_input(answer)
-                if not getattr(v, "allowed", True):
-                    reasons = "; ".join(getattr(v, "reasons", []) or []) or "blocked by Shield"
-                    return f"⚠ answer rejected by Shield: {reasons}"
-            except Exception:  # pragma: no cover -- fail open (kernel rule 1)
-                pass
-        w = WorldModel()
-        w.answer(qid, answer)
+        reasons = self._shield_scan_reason(answer, output=False)
+        if reasons is not None:
+            return f"⚠ answer rejected by Shield: {reasons}"
+        with _canonical_world() as w:
+            owner = self._current_object_principal()
+            answered = (
+                w.answer(qid, answer, expected_owner=owner)
+                if owner is not None else w.answer(qid, answer)
+            )
+        if not answered:
+            raise _ProtocolError(-32602, "question not found")
         self._structured_override = {"question_id": qid}
         return f"answered #{qid}"
 
@@ -1079,14 +1624,10 @@ class MCPServer:
         # future run, so a malicious fact set over MCP is a persistent prompt
         # injection. Scan the value before storing (the orchestrator also
         # redacts/re-scans facts at read time as defense-in-depth).
-        if self._shield is not None:
-            try:
-                v = self._shield.scan_input(f"{args['key']}: {args['value']}")
-                if not getattr(v, "allowed", True):
-                    reasons = "; ".join(getattr(v, "reasons", []) or []) or "blocked by Shield"
-                    return f"⚠ fact rejected by Shield: {reasons}"
-            except Exception:  # pragma: no cover -- fail open (kernel rule 1)
-                pass
+        reasons = self._shield_scan_reason(
+            f"{args['key']}: {args['value']}", output=False)
+        if reasons is not None:
+            return f"⚠ fact rejected by Shield: {reasons}"
         # Memory Guard (OWASP ASI06): an MCP client is an untrusted author, so
         # stamp the fact TOOL-trust (not the upsert default of first-party) and
         # run it through the guard's injection tripwire before storing -- the
@@ -1098,19 +1639,17 @@ class MCPServer:
         _mg.audit_write(args["key"], prov, decision)
         if not decision.allowed:
             return f"⚠ fact rejected by Memory Guard: {decision.reason}"
-        from maverick.world_model import WorldModel
-        w = WorldModel()
-        w.upsert_fact(
-            args["key"], args["value"], source=prov.source,
-            trust_tier=int(prov.trust), sensitivity=prov.sensitivity.value,
-        )
+        with _canonical_world() as w:
+            w.upsert_fact(
+                args["key"], args["value"], source=prov.source,
+                trust_tier=int(prov.trust), sensitivity=prov.sensitivity.value,
+            )
         self._structured_override = {"key": args["key"]}
         return f"set {args['key']}"
 
     def _tool_facts_get(self) -> str:
-        from maverick.world_model import WorldModel
-        w = WorldModel()
-        facts = w.get_facts()
+        with _canonical_world() as w:
+            facts = w.get_facts()
         if not facts:
             return "no facts known"
         # Bounded: this string re-enters the calling LLM's context, and the
@@ -1291,7 +1830,12 @@ class MCPServer:
                     return None
         return src.readline()
 
-    def _maybe_elicit_open_questions(self, original_args: dict | None = None) -> str | None:
+    def _maybe_elicit_open_questions(
+        self,
+        original_args: dict | None = None,
+        *,
+        capability=None,
+    ) -> str | None:
         """Resolve questions the just-finished run parked, via elicitation.
 
         For an elicitation-capable stdio client: elicit each open question for
@@ -1305,32 +1849,47 @@ class MCPServer:
         goal_id = (self._structured_override or {}).get("goal_id")
         if goal_id is None:
             return None
-        from maverick.world_model import WorldModel
-        world = WorldModel()
-        max_rounds = _bounded_int(
-            os.environ.get("MAVERICK_MCP_MAX_ELICIT_ROUNDS", 8),
-            default=8, ceiling=64,
-        )
-        resume_args = {"goal_id": goal_id}
-        for limit_name in ("max_dollars", "max_wall_seconds", "max_depth"):
-            if original_args and limit_name in original_args:
-                resume_args[limit_name] = original_args[limit_name]
-        final_answer: str | None = None
-        for _ in range(max_rounds):
-            questions = [q for q in world.open_questions() if q.goal_id == goal_id]
-            if not questions:
-                break
-            answered = False
-            for q in questions:
-                reply = self._elicit_question(q.question)
-                if reply is None:
-                    return final_answer  # declined / blocked / timed out
-                world.answer(q.id, reply)
-                answered = True
-            if not answered:
-                break
-            final_answer = self._tool_resume(dict(resume_args))
-        return final_answer
+        with _canonical_world() as world:
+            owner = self._current_object_principal()
+            if owner is not None:
+                try:
+                    self._goal_for_principal(world, goal_id, owner)
+                except _ProtocolError:
+                    return None
+            max_rounds = _bounded_int(
+                os.environ.get("MAVERICK_MCP_MAX_ELICIT_ROUNDS", 8),
+                default=8, ceiling=64,
+            )
+            resume_args = {"goal_id": goal_id}
+            for limit_name in ("max_dollars", "max_wall_seconds", "max_depth"):
+                if original_args and limit_name in original_args:
+                    resume_args[limit_name] = original_args[limit_name]
+            final_answer: str | None = None
+            for _ in range(max_rounds):
+                questions = [q for q in world.open_questions() if q.goal_id == goal_id]
+                if not questions:
+                    break
+                answered = False
+                for q in questions:
+                    reply = self._elicit_question(q.question)
+                    if reply is None:
+                        return final_answer  # declined / blocked / timed out
+                    if owner is not None:
+                        if not world.answer(q.id, reply, expected_owner=owner):
+                            return final_answer
+                    else:
+                        # Preserve the local/stdio duck-typed WorldModel contract:
+                        # older embeddings recorded the answer but returned None.
+                        world.answer(q.id, reply)
+                    answered = True
+                if not answered:
+                    break
+                if capability is None:
+                    final_answer = self._tool_resume(dict(resume_args))
+                else:
+                    final_answer = self._tool_resume(
+                        dict(resume_args), capability=capability)
+            return final_answer
 
     def _elicit_question(self, question: str) -> str | None:
         """Elicit one free-text answer, shield-screening both legs.
@@ -1374,6 +1933,7 @@ class MCPServer:
             from .tasks import TaskStore
             self._tasks = TaskStore(
                 lambda name, arguments: self._task_runner(name, arguments),
+                context_runner=self._task_runner,
                 on_status_change=self._emit_task_status)
         return self._tasks
 
@@ -1388,21 +1948,147 @@ class MCPServer:
         if not self._tasks_enabled:
             raise _ProtocolError(-32601, "tasks capability not enabled on this transport")
 
-    def handle_tasks_get(self, params: dict, *, task_owner: str | None = None) -> dict:
-        self._require_tasks_enabled()
-        return self._task_store().get(params.get("taskId"), owner=task_owner)
+    def _task_authorizer(
+        self,
+        capability,
+        caller_identity: str | None,
+        caller_trust_principal: str | None,
+        *,
+        audit_denial: bool,
+        refresh_context: _TaskExecutionContext | None = None,
+    ):
+        if capability is None and caller_trust_principal is None:
+            return None
 
-    def handle_tasks_result(self, params: dict, *, task_owner: str | None = None) -> dict:
-        self._require_tasks_enabled()
-        return self._task_store().result(params.get("taskId"), owner=task_owner)
+        def _authorize(tool_name: str) -> bool:
+            current_capability = capability
+            if refresh_context is not None:
+                try:
+                    current_capability = self._refresh_task_capability(
+                        refresh_context
+                    )
+                except PermissionError:
+                    if audit_denial:
+                        self._record_capability_denial(
+                            capability,
+                            caller_identity,
+                            tool_name,
+                        )
+                    return False
+            allowed = self._principal_permits(
+                caller_trust_principal
+            ) and self._capability_permits(current_capability, tool_name)
+            if not allowed and audit_denial:
+                self._record_capability_denial(
+                    current_capability,
+                    caller_identity,
+                    tool_name,
+                )
+            return allowed
 
-    def handle_tasks_cancel(self, params: dict, *, task_owner: str | None = None) -> dict:
-        self._require_tasks_enabled()
-        return self._task_store().cancel(params.get("taskId"), owner=task_owner)
+        return _authorize
 
-    def handle_tasks_list(self, params: dict, *, task_owner: str | None = None) -> dict:
+    def handle_tasks_get(
+        self,
+        params: dict,
+        *,
+        task_owner: str | None = None,
+        caller_identity: str | None = None,
+        caller_trust_principal: str | None = None,
+        capability=None,
+    ) -> dict:
         self._require_tasks_enabled()
-        return self._task_store().list(params.get("cursor"), owner=task_owner)
+        return self._task_store().get(
+            params.get("taskId"),
+            owner=task_owner,
+            authorize=self._task_authorizer(
+                capability,
+                caller_identity,
+                caller_trust_principal,
+                audit_denial=True,
+            ),
+        )
+
+    def handle_tasks_result(
+        self,
+        params: dict,
+        *,
+        task_owner: str | None = None,
+        caller_identity: str | None = None,
+        caller_trust_principal: str | None = None,
+        caller_credential_kind: str | None = None,
+        caller_credential_fingerprint: str | None = None,
+        capability=None,
+    ) -> dict:
+        self._require_tasks_enabled()
+        refresh_context = None
+        if caller_credential_kind is not None or caller_credential_fingerprint is not None:
+            refresh_context = self._task_execution_context(
+                caller_identity=caller_identity,
+                trust_principal=caller_trust_principal,
+                credential_kind=caller_credential_kind,
+                credential_fingerprint=caller_credential_fingerprint,
+                capability=capability,
+            )
+        return self._task_store().result(
+            params.get("taskId"),
+            owner=task_owner,
+            authorize=self._task_authorizer(
+                capability,
+                caller_identity,
+                caller_trust_principal,
+                audit_denial=True,
+            ),
+            reauthorize=self._task_authorizer(
+                capability,
+                caller_identity,
+                caller_trust_principal,
+                audit_denial=True,
+                refresh_context=refresh_context,
+            ),
+        )
+
+    def handle_tasks_cancel(
+        self,
+        params: dict,
+        *,
+        task_owner: str | None = None,
+        caller_identity: str | None = None,
+        caller_trust_principal: str | None = None,
+        capability=None,
+    ) -> dict:
+        self._require_tasks_enabled()
+        return self._task_store().cancel(
+            params.get("taskId"),
+            owner=task_owner,
+            authorize=self._task_authorizer(
+                capability,
+                caller_identity,
+                caller_trust_principal,
+                audit_denial=True,
+            ),
+        )
+
+    def handle_tasks_list(
+        self,
+        params: dict,
+        *,
+        task_owner: str | None = None,
+        caller_identity: str | None = None,
+        caller_trust_principal: str | None = None,
+        capability=None,
+    ) -> dict:
+        self._require_tasks_enabled()
+        return self._task_store().list(
+            params.get("cursor"),
+            owner=task_owner,
+            authorize=self._task_authorizer(
+                capability,
+                caller_identity,
+                caller_trust_principal,
+                audit_denial=False,
+            ),
+        )
 
     def _emit_task_status(self, task) -> None:
         """Push a notifications/tasks/status when a task changes status.
@@ -1423,7 +2109,89 @@ class MCPServer:
             "params": task.to_dict(),
         })
 
-    def _task_runner(self, name: str, arguments: dict) -> dict:
+    @staticmethod
+    def _refresh_task_capability(context: _TaskExecutionContext):
+        """Re-authorize queued network work and return its narrowed grant.
+
+        Authentication at task creation is not durable authorization: an
+        operator can revoke/rotate the credential or narrow the registry entry
+        while the request waits in the executor.  Re-read the trust state at
+        worker pickup, verify the credential's keyed fingerprint, and
+        intersect the frozen grant with the current one.  Every error is a
+        denial; a queued task must never execute under stale authority.
+        """
+        if context.credential_kind == "in_process":
+            return context.capability
+        if context.credential_kind not in {"agent", "shared"}:
+            raise PermissionError("task authorization is no longer valid")
+        try:
+            from maverick import agent_trust
+
+            enforced, registry = agent_trust.load_trust_state()
+            if context.credential_kind == "agent":
+                current_agent = registry.get(context.trust_principal)
+                current_credential = (
+                    current_agent.mcp_token if current_agent is not None else ""
+                )
+                # A per-agent bearer is an explicitly governed credential even
+                # when default-deny admission is currently disengaged.
+                decision = agent_trust.decide_inbound(
+                    context.trust_principal,
+                    registry=registry,
+                    enforced=True,
+                )
+            else:
+                current_credential = os.environ.get("MAVERICK_MCP_TOKEN", "")
+                # The legacy shared bearer remains unscoped in local/dev while
+                # Agent Trust is disengaged. If policy became enforced while
+                # queued, the current `mcp` entry becomes mandatory.
+                decision = agent_trust.decide_inbound(
+                    context.trust_principal,
+                    registry=registry,
+                    enforced=enforced,
+                )
+            credential_matches = bool(current_credential) and hmac.compare_digest(
+                _credential_fingerprint(current_credential),
+                context.credential_fingerprint,
+            )
+            if not credential_matches:
+                agent_trust.record_denied(
+                    context.trust_principal,
+                    direction="inbound",
+                    rule="credential_rotated",
+                    reason="queued MCP task credential was removed or rotated",
+                )
+                raise PermissionError("task authorization is no longer valid")
+            if decision.denied:
+                agent_trust.record_denied(
+                    context.trust_principal,
+                    decision,
+                    direction="inbound",
+                )
+                raise PermissionError("task authorization is no longer valid")
+
+            frozen = context.capability
+            current = decision.capability
+            if frozen is None:
+                return current
+            if current is None:
+                return frozen
+            # Preserve the authenticated principal while taking the strict
+            # intersection; current policy can narrow but never broaden the
+            # capability accepted at task creation.
+            return frozen.intersect(current, principal=frozen.principal)
+        except PermissionError:
+            raise
+        except Exception as e:
+            log.error("queued MCP task re-authorization failed closed: %s", e)
+            raise PermissionError("task authorization is unavailable") from None
+
+    def _task_runner(
+        self,
+        name: str,
+        arguments: dict,
+        context: _TaskExecutionContext | None = None,
+    ) -> dict:
         """Execute a task's tool on a FRESH server instance.
 
         Isolation matters: a background worker must not touch the main server's
@@ -1433,7 +2201,22 @@ class MCPServer:
         the CallToolResult the client later fetches via ``tasks/result``."""
         worker = MCPServer()
         worker._shield = self._shield  # reuse the (stateless) shield scanner
-        return worker.handle_tools_call({"name": name, "arguments": arguments})
+        caller_identity = context.caller_identity if context is not None else None
+        capability = (
+            self._refresh_task_capability(context)
+            if context is not None else None
+        )
+        from maverick.fleet_memory import bind_caller
+
+        with bind_caller(caller_identity):
+            return worker.handle_tools_call(
+                {"name": name, "arguments": arguments},
+                caller_identity=caller_identity,
+                caller_trust_principal=(
+                    context.trust_principal if context is not None else None
+                ),
+                capability=capability,
+            )
 
     def _dispatch_stdio_message(self, method, request_id, params, is_notification) -> None:
         """Route one parsed stdio JSON-RPC message to its handler and send the

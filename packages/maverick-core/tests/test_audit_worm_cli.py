@@ -30,6 +30,16 @@ def test_push_shows_shipped_count(monkeypatch):
     assert "Shipped 1 day-file(s)." in res.output
 
 
+def test_push_refusal_exits_nonzero(monkeypatch):
+    monkeypatch.setattr(
+        worm, "push_closed_dayfiles",
+        lambda **k: {"2020-01-01.ndjson": "error (retention proof unavailable)"},
+    )
+    res = CliRunner().invoke(main, ["audit", "worm", "push"])
+    assert res.exit_code != 0
+    assert "not safely shipped" in res.output
+
+
 def test_verify_ok_exits_zero(monkeypatch):
     monkeypatch.setattr(worm, "verify", lambda **k: {"2020-01-01.ndjson": "ok"})
     res = CliRunner().invoke(main, ["audit", "worm", "verify"])

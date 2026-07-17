@@ -206,6 +206,21 @@ def test_list_episodes_owner_scope_matches_sqlite(world):
     assert owners == {alice_gid: alice, bob_gid: bob, legacy_gid: ""}
 
 
+def test_goal_reads_are_owner_scoped(world):
+    import uuid
+
+    token = uuid.uuid4().hex
+    alpha = f"agent:alpha:{token}"
+    bravo = f"agent:bravo:{token}"
+    alpha_gid = world.create_goal("alpha private", owner=alpha)
+    bravo_gid = world.create_goal("bravo private", owner=bravo)
+
+    assert world.get_goal(alpha_gid).owner == alpha
+    assert {g.id for g in world.list_goals(owner=alpha)} == {alpha_gid}
+    assert {g.id for g in world.list_goals(owner=bravo)} == {bravo_gid}
+    assert world.list_goals(owner=f"agent:nobody:{token}") == []
+
+
 def test_ask_answer_open_questions(world):
     gid = world.create_goal("needs input")
     qid = world.ask("which region?", goal_id=gid)
@@ -231,6 +246,15 @@ def test_ask_answer_open_questions(world):
 def test_answer_unknown_question_id_returns_false(world):
     # #394 parity: a typo'd id is reported, not a false success.
     assert world.answer(987_654_321, "nope") is False
+
+
+def test_answer_is_atomically_scoped_to_goal_owner(world):
+    gid = world.create_goal("owned question", owner="agent:alpha")
+    qid = world.ask("private?", goal_id=gid)
+
+    assert world.answer(qid, "stolen", expected_owner="agent:bravo") is False
+    assert [q.id for q in world.open_questions(gid)] == [qid]
+    assert world.answer(qid, "mine", expected_owner="agent:alpha") is True
 
 
 def test_approval_queue_lifecycle(world):
@@ -407,20 +431,26 @@ def test_list_conversations_filter_by_channel(world):
 
 
 def test_prune_conversations_removes_idle_and_their_turns(world):
-    conv = world.get_or_create_conversation("email", "prune-me")
-    world.append_turn(conv.id, "user", "old message")
-    # idle_for_seconds=0 -> the just-touched conversation counts as idle.
-    removed = world.prune_conversations(idle_for_seconds=0)
-    assert removed >= 1
-    # Its turns are gone too (no orphans).
-    assert world.recent_turns(conv.id) == []
-    assert not any(c.id == conv.id for c in world.list_conversations())
+    from maverick.paths import tenant_scope
+
+    with tenant_scope(tenant="retention-test"):
+        conv = world.get_or_create_conversation("email", "prune-me")
+        world.append_turn(conv.id, "user", "old message")
+        # idle_for_seconds=0 -> the just-touched conversation counts as idle.
+        removed = world.prune_conversations(idle_for_seconds=0)
+        assert removed >= 1
+        # Its turns are gone too (no orphans).
+        assert world.recent_turns(conv.id) == []
+        assert not any(c.id == conv.id for c in world.list_conversations())
 
 
 def test_prune_conversations_keeps_fresh(world):
-    conv = world.get_or_create_conversation("email", "keep-me")
-    world.prune_conversations(idle_for_seconds=3600)  # 1h window
-    assert any(c.id == conv.id for c in world.list_conversations())
+    from maverick.paths import tenant_scope
+
+    with tenant_scope(tenant="retention-test"):
+        conv = world.get_or_create_conversation("email", "keep-me")
+        world.prune_conversations(idle_for_seconds=3600)  # 1h window
+        assert any(c.id == conv.id for c in world.list_conversations())
 
 
 # ---------- #469: messages, attachments, dedup, pruning (final batch) ----------
@@ -470,18 +500,24 @@ def test_lookup_processed_message_null_goal_returns_zero(world):
 
 
 def test_prune_goal_events(world):
-    g = world.create_goal("eventful-prune")
-    world.append_event(g, "orch", "note", "old")
-    removed = world.prune_goal_events(older_than_seconds=0)
-    assert removed >= 1
-    assert world.goal_events(g) == []
+    from maverick.paths import tenant_scope
+
+    with tenant_scope(tenant="retention-test"):
+        g = world.create_goal("eventful-prune")
+        world.append_event(g, "orch", "note", "old")
+        removed = world.prune_goal_events(older_than_seconds=0)
+        assert removed >= 1
+        assert world.goal_events(g) == []
 
 
 def test_prune_processed_messages(world):
-    world.mark_message_processed("sms", "to-prune")
-    removed = world.prune_processed_messages(older_than_seconds=0)
-    assert removed >= 1
-    assert world.is_processed_message("sms", "to-prune") is False
+    from maverick.paths import tenant_scope
+
+    with tenant_scope(tenant="retention-test"):
+        world.mark_message_processed("sms", "to-prune")
+        removed = world.prune_processed_messages(older_than_seconds=0)
+        assert removed >= 1
+        assert world.is_processed_message("sms", "to-prune") is False
 
 
 def test_erase_conversations_deletes_pg_rows(world):

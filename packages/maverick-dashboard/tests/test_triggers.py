@@ -112,8 +112,42 @@ def _save_flow(monkeypatch):
     monkeypatch.setenv("MAVERICK_FLOWS", "1")
     from maverick.flow import store
     from maverick.flow.ir import Flow, FlowNode
-    store.save_flow(Flow(id="triage", name="Triage", start="a", nodes={
+    saved = store.save_flow(Flow(id="triage", name="Triage", start="a", nodes={
         "a": FlowNode(id="a", kind="agent", brief="triage {{issue}}", output="r")}))
+    store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+
+
+def _paused_event_run(run_id: str) -> None:
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+
+    saved = store.save_flow(Flow(
+        id="anyflow",
+        name="Waiting",
+        start="w",
+        nodes={"w": FlowNode(id="w", kind="wait_event", prompt="callback")},
+    ))
+    release = store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    store.save_run(store.FlowRun(
+        run_id=run_id,
+        flow_id="anyflow",
+        status="paused_event",
+        cursor="w",
+        definition_digest=release["definition_digest"],
+        release_digest=release["release_digest"],
+        release_id=release["release_id"],
+        definition_version=release["definition_version"],
+        definition_revision=release["definition_revision"],
+        subflow_digests=release["subflow_digests"],
+    ))
 
 
 def test_create_flow_trigger_and_exclusivity(monkeypatch, tmp_path):
@@ -170,6 +204,58 @@ def test_webhook_fires_flow_trigger_with_idempotent_delivery(monkeypatch, tmp_pa
         assert r2.json()["run_id"] == out["run_id"]
 
 
+def test_flow_trigger_runs_bound_published_revision_not_later_draft(
+    monkeypatch, tmp_path,
+):
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    _save_flow(monkeypatch)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+
+    monkeypatch.setattr(aq, "_queue", None)
+    client = _client()
+    _register(client, template="", flow="triage", params=None)
+
+    later = store.load_flow("triage")
+    later.nodes["a"].brief = "unpublished replacement {{issue}}"
+    saved = store.save_flow(
+        later,
+        expected_version=later.version,
+        expected_revision=later.revision,
+    )
+
+    body = json.dumps({
+        "trigger": "triage", "data": {"issue": "bug"}, "id": "bound-v1",
+    }).encode()
+    response = client.post(
+        "/webhook/run",
+        content=body,
+        headers={**_sign_headers(body), "Content-Type": "application/json"},
+    )
+    assert response.status_code == 201, response.text
+    run = store.load_run(response.json()["run_id"])
+    pinned = store.load_flow_snapshot(run.definition_digest)
+    assert pinned.version == 1
+    assert pinned.nodes["a"].brief == "triage {{issue}}"
+
+    # Publishing a different revision does not silently retarget an existing
+    # trigger. It fails stale until an operator re-arms it against the new digest.
+    store.publish_flow(
+        saved.id,
+        expected_version=saved.version,
+        expected_revision=saved.revision,
+    )
+    body2 = json.dumps({"trigger": "triage", "id": "bound-v2"}).encode()
+    stale = client.post(
+        "/webhook/run",
+        content=body2,
+        headers={**_sign_headers(body2), "Content-Type": "application/json"},
+    )
+    assert stale.status_code == 409
+    assert "stale" in stale.json()["detail"]
+
+
 def test_webhook_event_resume_continues_a_waiting_run(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _configured(monkeypatch)
@@ -177,8 +263,7 @@ def test_webhook_event_resume_continues_a_waiting_run(monkeypatch, tmp_path):
     from maverick.flow import store
     from maverick_dashboard import automation_queue as aq
     monkeypatch.setattr(aq, "_queue", None)
-    store.save_run(store.FlowRun(run_id="wr1", flow_id="anyflow",
-                                 status="paused_event", cursor="w"))
+    _paused_event_run("wr1")
     body = json.dumps({"resume": "wr1", "data": {"payload": "cb-1"}}).encode()
     r = _client().post("/webhook/run", content=body,
                        headers={**_sign_headers(body), "Content-Type": "application/json"})
@@ -199,11 +284,9 @@ def test_webhook_event_resume_dedupes_repeat_delivery_id(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _configured(monkeypatch)
     monkeypatch.setenv("MAVERICK_FLOWS", "1")
-    from maverick.flow import store
     from maverick_dashboard import automation_queue as aq
     monkeypatch.setattr(aq, "_queue", None)
-    store.save_run(store.FlowRun(run_id="wd1", flow_id="anyflow",
-                                 status="paused_event", cursor="w"))
+    _paused_event_run("wd1")
     payload = {"resume": "wd1", "data": {"payload": "x"}, "id": "evt-dup"}
     body = json.dumps(payload).encode()
     r1 = _client().post("/webhook/run", content=body,

@@ -43,7 +43,7 @@ def test_as_bool_only_true_authorizes(val, expected):
 # ---- no tool retains the unsafe pattern; all gate via as_bool ----
 @pytest.mark.parametrize("mod", _FIXED_TOOLS)
 def test_tool_has_no_unsafe_confirm_gate(mod):
-    src = (_TOOLS_DIR / f"{mod}.py").read_text()
+    src = (_TOOLS_DIR / f"{mod}.py").read_text(encoding="utf-8")
     assert 'if not args.get("confirm"):' not in src, (
         f"{mod} still has the fail-open confirm gate"
     )
@@ -56,7 +56,7 @@ def test_no_tool_anywhere_uses_unsafe_confirm_gate():
     """Repo-wide guard: the fail-open pattern must not reappear in any tool."""
     offenders = [
         f.name for f in _TOOLS_DIR.glob("*.py")
-        if 'if not args.get("confirm"):' in f.read_text()
+        if 'if not args.get("confirm"):' in f.read_text(encoding="utf-8")
     ]
     assert offenders == [], f"fail-open confirm gate reintroduced in: {offenders}"
 

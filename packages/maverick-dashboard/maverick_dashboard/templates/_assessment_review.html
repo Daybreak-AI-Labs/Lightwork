@@ -57,6 +57,7 @@
     const cadenceWrap = document.getElementById('arv-cadence-wrap');
     const cadenceSel = document.getElementById('arv-cadence');
     let currentId = null;
+    let currentRevision = null;
     let decidedInDialog = false;
 
     function el(tag, cls, text) {
@@ -71,6 +72,7 @@
     }
 
     function render(rec) {
+      currentRevision = Number(rec.revision || 0);
       body.innerHTML = '';
       const res = rec.result || {};
       const inherent = res.inherent_risk || res.risk_rating || '?';
@@ -170,7 +172,11 @@
         const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/decide', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ decision: decision, cadence_days: days })
+          body: JSON.stringify({
+            decision: decision,
+            cadence_days: days,
+            expected_revision: currentRevision
+          })
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const rec = await r.json();
@@ -190,6 +196,7 @@
 
     async function open(id) {
       currentId = id;
+      currentRevision = null;
       statusEl.textContent = '';
       body.innerHTML = '<p class="muted">Loading…</p>';
       sendBtn.style.display = 'none';
@@ -214,7 +221,10 @@
         const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/followups', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ questions: questions })
+          body: JSON.stringify({
+            questions: questions,
+            expected_revision: currentRevision
+          })
         });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         statusEl.textContent = 'Sent — the requester will be asked these ' + questions.length + ' question(s).';

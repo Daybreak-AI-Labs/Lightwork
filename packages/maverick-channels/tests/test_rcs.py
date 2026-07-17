@@ -52,12 +52,12 @@ def _envelope(event):
     return {"message": {"data": data, "messageId": "pubsub-outer-1"}}
 
 
-def _no_db(monkeypatch):
-    """No dedup DB in most tests: the claim path is exercised separately."""
-    monkeypatch.setattr(
-        "maverick.world_model.WorldModel",
-        MagicMock(side_effect=RuntimeError("no db")),
-    )
+def _claim_ok(monkeypatch):
+    """Most tests are not about dedup; provide an available claim store."""
+    wm = MagicMock()
+    wm.mark_message_processed.return_value = True
+    monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
+    return wm
 
 
 # -- inbound -----------------------------------------------------------------
@@ -65,7 +65,7 @@ def _no_db(monkeypatch):
 def test_token_verified_inbound_drives_handler_and_replies(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
-    _no_db(monkeypatch)
+    _claim_ok(monkeypatch)
     client = TestClient(ch._app)
 
     r = client.post("/webhook/rcs", params={"clientToken": TOKEN},
@@ -82,7 +82,7 @@ def test_token_verified_inbound_drives_handler_and_replies(monkeypatch):
 def test_direct_json_event_accepted(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
-    _no_db(monkeypatch)
+    _claim_ok(monkeypatch)
     client = TestClient(ch._app)
 
     r = client.post("/webhook/rcs", params={"clientToken": TOKEN}, json=_event())
@@ -95,7 +95,7 @@ def test_direct_json_event_accepted(monkeypatch):
 def test_token_accepted_from_header(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
-    _no_db(monkeypatch)
+    _claim_ok(monkeypatch)
     client = TestClient(ch._app)
 
     r = client.post("/webhook/rcs", headers={"clientToken": TOKEN},
@@ -150,7 +150,7 @@ def test_body_token_handshake_rejects_oversized_body():
 def test_unlisted_msisdn_ignored(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
-    _no_db(monkeypatch)
+    _claim_ok(monkeypatch)
     client = TestClient(ch._app)
 
     r = client.post("/webhook/rcs", params={"clientToken": TOKEN},
@@ -165,7 +165,7 @@ def test_non_text_event_ignored(monkeypatch):
     """Suggestion responses / receipts are acked and dropped: text only."""
     ch = _channel()
     ch.send = AsyncMock()
-    _no_db(monkeypatch)
+    _claim_ok(monkeypatch)
     client = TestClient(ch._app)
 
     event = _event(text=None)
@@ -214,6 +214,24 @@ def test_dedup_claim_skips_redelivery(monkeypatch):
     assert r.status_code == 200
     wm.mark_message_processed.assert_called_once_with("rcs", "rbm-msg-1")
     assert not ch.handler.await_count
+
+
+def test_claim_store_failure_is_retryable_and_never_runs_handler(monkeypatch):
+    ch = _channel()
+    ch.send = AsyncMock()
+    monkeypatch.setattr(
+        "maverick.world_model.open_world",
+        MagicMock(side_effect=RuntimeError("claim store offline")),
+    )
+    client = TestClient(ch._app)
+
+    r = client.post(
+        "/webhook/rcs", params={"clientToken": TOKEN}, json=_envelope(_event())
+    )
+
+    assert r.status_code == 503
+    assert not ch.handler.await_count
+    assert not ch.send.await_count
 
 
 def test_claim_released_on_handler_failure(monkeypatch):

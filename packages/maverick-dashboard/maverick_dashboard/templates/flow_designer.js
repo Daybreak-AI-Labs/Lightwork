@@ -863,6 +863,10 @@
       var pb = document.createElement('button'); pb.className = 'btn btn--primary'; pb.type = 'button';
       pb.textContent = 'Apply & track (→ ' + prop.to_kind
         + (prop.inferred_tool ? ' · ' + prop.inferred_tool : '') + ')';
+      if (prop.applicable === false) {
+        pb.disabled = true;
+        pb.title = prop.blocking_reason || 'Review parameter bindings before applying.';
+      }
       pb.addEventListener('click', function () { applyProposal(n, prop); });
       pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
     }
@@ -1018,7 +1022,9 @@
     var lg = document.getElementById('fd-legend'); if (lg) lg.classList.remove('on');
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [],
       max_seconds: f.max_seconds || 0, version: parseInt(f.version, 10) || 0,
-      revision: String(f.revision || '') };
+      revision: String(f.revision || ''), published: !!f.published,
+      published_version: parseInt(f.published_version, 10) || 0,
+      published_revision: String(f.published_revision || '') };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
     var msEl = document.getElementById('fd-maxsec'); if (msEl) msEl.value = f.max_seconds || '';
     var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
@@ -1074,8 +1080,32 @@
         rootFlow.id = body.id;
         rootFlow.version = parseInt(res.j.version, 10) || rootFlow.version || 1;
         rootFlow.revision = String(res.j.revision || rootFlow.revision || '');
+        rootFlow.published = !!res.j.published;
+        rootFlow.published_version = parseInt(res.j.published_version, 10) || 0;
+        rootFlow.published_revision = String(res.j.published_revision || '');
         say('Saved ✓'); if (cb) cb();
       }).catch(function () { say('Save failed', true); });
+  }
+  function publishFlow() {
+    // Publish is the explicit activation authority. Save the reviewed canvas as
+    // a draft, then bind activation to the exact CAS tokens the save returned.
+    save(function () {
+      apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/publish', {
+        method: 'POST', body: JSON.stringify({
+          version: rootFlow.version, revision: rootFlow.revision
+        })
+      }).then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          return { ok: r.ok, j: j };
+        });
+      }).then(function (res) {
+        if (!res.ok) { say(res.j.detail || 'Publish failed', true); return; }
+        rootFlow.published = true;
+        rootFlow.published_version = parseInt(res.j.published_version, 10) || 0;
+        rootFlow.published_revision = String(res.j.published_revision || '');
+        say('Published v' + rootFlow.published_version);
+      }).catch(function () { say('Publish failed', true); });
+    });
   }
   function inputFields() {
     // The declared manual-run inputs as an mvForm field spec.
@@ -1089,8 +1119,29 @@
     var raw = document.getElementById('fd-sample').value.trim();
     if (raw) { try { data = JSON.parse(raw); } catch (e) { say('Sample input is not valid JSON.', true); return; } }
     function proceed() {
-      save(function () {
-        apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run', { method: 'POST', body: JSON.stringify({ data: data, dry_run: !!dryRun }) })
+      var request;
+      if (dryRun) {
+        var bad = commitRawFields();
+        if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return; }
+        var draftBody = toApiFlow();
+        if (!draftBody.id) draftBody.id = slugify(draftBody.name);
+        if (!draftBody.id) { say('Give the flow a name (top-left).', true); return; }
+        if (!draftBody.nodes.length) { say('Add at least one step.', true); return; }
+        var errors = FDCore.validateFlow(draftBody);
+        if (errors.length) { say('Fix first: ' + errors.slice(0, 3).join(' / '), true); return; }
+        // The unsaved graph is the execution input. This endpoint does not save,
+        // publish, or let a draft schedule enter the scheduler inventory.
+        request = apiFetch('/api/v1/flows/dry-run', {
+          method: 'POST', body: JSON.stringify({ flow: draftBody, data: data })
+        });
+      } else {
+        if (!rootFlow.id) { say('Publish the flow before running it for real.', true); return; }
+        if (!rootFlow.published) { say('Publish a reviewed draft before running it for real.', true); return; }
+        request = apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run', {
+          method: 'POST', body: JSON.stringify({ data: data, dry_run: false })
+        });
+      }
+        request
           .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
           .then(function (res) {
             // Check res.ok first: a 4xx/5xx returns {detail} with no run_id, and
@@ -1103,12 +1154,11 @@
             document.getElementById('fd-legend').classList.add('on');
             watchRun(j.run_id);
           }).catch(function () { say('Run failed', true); });
-      });
     }
     var fields = inputFields();
     if (fields.length) {   // the typed-input form doubles as the run confirmation
-      window.mvForm((dryRun ? 'Dry run' : 'Run') + ' “' + (rootFlow.name || rootFlow.id || 'flow') + '”',
-        fields, { okText: dryRun ? 'Dry run' : 'Run for real' }).then(function (vals) {
+      window.mvForm((dryRun ? 'Dry run' : 'Run published') + ' “' + (rootFlow.name || rootFlow.id || 'flow') + '”',
+        fields, { okText: dryRun ? 'Dry run' : 'Run published' }).then(function (vals) {
         if (vals === null) { say('Run cancelled.'); return; }
         Object.keys(vals).forEach(function (k) { data[k] = vals[k]; });   // declared inputs win over sample
         proceed();
@@ -1116,7 +1166,7 @@
       return;
     }
     if (dryRun) { proceed(); return; }
-    window.mvConfirm('Run for real? This creates real goals and calls real connectors.', { okText: 'Run for real' })
+    window.mvConfirm('Run the published revision? This creates real goals and calls real connectors.', { okText: 'Run published' })
       .then(function (ok) { if (ok) proceed(); });
   }
   function runUrl(runId) {
@@ -1583,6 +1633,7 @@
   });
   document.getElementById('fd-draft').addEventListener('click', draft);
   document.getElementById('fd-save').addEventListener('click', function () { save(); });
+  document.getElementById('fd-publish').addEventListener('click', publishFlow);
   document.getElementById('fd-run').addEventListener('click', function () { run(true); });
   document.getElementById('fd-run-real').addEventListener('click', function () { run(false); });
   document.getElementById('fd-history').addEventListener('click', showHistory);

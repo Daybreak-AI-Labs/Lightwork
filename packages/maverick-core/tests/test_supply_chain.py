@@ -8,12 +8,12 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import logging
-import stat
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 from maverick import supply_chain as sc
+from maverick.file_lock import private_path_is_restricted
 
 
 def _dist(name: str, version: str):
@@ -112,8 +112,8 @@ def test_verify_renormalizes_hand_edited_pins(monkeypatch, tmp_path):
 def test_write_pins_atomic_and_0600(monkeypatch, tmp_path):
     _fake_env(monkeypatch, [_dist("alpha", "1.0")])
     path = sc.write_pins(tmp_path / "pins.json")
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert not (tmp_path / "pins.json.tmp").exists()  # tmp replaced, not left behind
+    assert private_path_is_restricted(path, 0o600)
+    assert not list(tmp_path.glob(".pins.json-*.tmp"))
 
 
 def test_default_path_under_data_dir(monkeypatch, tmp_path):

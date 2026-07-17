@@ -113,18 +113,22 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
-        from ..world_model import DEFAULT_DB, WorldModel
-        world = WorldModel(DEFAULT_DB)
+        from ..world_model import close_world_if_owned, open_world
+        world = open_world()
     except Exception:  # pragma: no cover -- world optional; no world -> no text
         world = None
-    records = list(load_donations(args.in_dir))
-    if world is not None:
-        def fetch(rec):
-            return fetch_steps_for_goal(world, rec.get("goal_id", 0))
-    else:
-        def fetch(rec):
-            return []
-    texts = export_texts(records, fetch)
+    try:
+        records = list(load_donations(args.in_dir))
+        if world is not None:
+            def fetch(rec):
+                return fetch_steps_for_goal(world, rec.get("goal_id", 0))
+        else:
+            def fetch(rec):
+                return []
+        texts = export_texts(records, fetch)
+    finally:
+        if world is not None:
+            close_world_if_owned(world)
     with args.out_file.open("w", encoding="utf-8") as out:
         for tid, text in texts.items():
             out.write(json.dumps({"id": tid, "text": text}) + "\n")

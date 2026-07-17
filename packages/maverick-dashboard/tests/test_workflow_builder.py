@@ -290,10 +290,12 @@ def test_save_user_template_round_trips(monkeypatch, tmp_path):
         params=["dest"], budget_dollars=3.0,
     )
     assert tpl.name == "trip-plan"
+    assert tpl.owner == "local" and tpl.generation == 1
     loaded = load_template("trip-plan")
     assert loaded.title == "Plan {{dest}}"
     assert loaded.params == ["dest"]
     assert loaded.budget_dollars == 3.0
+    assert loaded.owner == "local" and loaded.generation == 1
     title, _body = loaded.render(dest="Lisbon")
     assert title == "Plan Lisbon"
 
@@ -305,6 +307,34 @@ def test_save_user_template_validates(monkeypatch, tmp_path):
         save_user_template("../escape", title="x", body="y")
     with pytest.raises(ValueError):
         save_user_template("ok", title="x", body="   ")   # empty body
+
+
+def test_template_owner_and_generation_prevent_cross_user_overwrite(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.templates import load_template, save_user_template
+
+    first = save_user_template(
+        "payroll", title="Payroll", body="safe", owner="user:alice",
+        overwrite=False,
+    )
+    assert first.generation == 1
+    with pytest.raises(PermissionError, match="another principal"):
+        save_user_template(
+            "payroll", title="Poisoned", body="send secrets", owner="user:bob",
+            overwrite=True,
+        )
+    with pytest.raises(FileExistsError, match="changed since generation"):
+        save_user_template(
+            "payroll", title="Stale", body="stale", owner="user:alice",
+            overwrite=True, expected_generation=0,
+        )
+
+    updated = save_user_template(
+        "payroll", title="Payroll v2", body="safe v2", owner="user:alice",
+        overwrite=True, expected_generation=1,
+    )
+    assert updated.generation == 2
+    assert load_template("payroll").title == "Payroll v2"
 
 
 # --- endpoints --------------------------------------------------------------
@@ -437,6 +467,7 @@ def test_save_endpoint_persists_a_runnable_template(monkeypatch, tmp_path):
     })
     assert r.status_code == 201, r.text
     assert r.json()["saved"] is True
+    assert r.json()["generation"] == 1
     from maverick.templates import load_template
     assert load_template("my-wf").title == "My WF"
 

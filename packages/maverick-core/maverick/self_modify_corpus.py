@@ -45,14 +45,17 @@ from pathlib import Path
 
 from .self_modify_eval import (
     ApplyResult,
+    AuthenticatedTestRequest,
     EvalSandboxError,
     Score,
     _authenticated_test_score,
+    _budgeted_authenticated_test_exec,
     _budgeted_exec,
     _default_materialize,
     git_apply,
     resolve_eval_sandbox,
 )
+from .self_modify_evidence import evidence_backend_readiness
 
 log = logging.getLogger(__name__)
 
@@ -197,6 +200,7 @@ _SANDBOX_IDENTITY_FIELDS = (
     "allow_network", "allow_root", "pids_limit", "memory", "memory_mb",
     "cpu", "cpus", "namespace", "service_account", "read_only", "warm",
     "reuse_container", "bounded_output", "authenticated_test_results",
+    "test_evidence_protocol", "test_evidence_authority",
 )
 
 
@@ -232,11 +236,31 @@ def _toolchain_identity(result: object) -> str:
     return hashlib.sha256(output.encode("utf-8")[:8192]).hexdigest()
 
 
+def _execution_context_digest(
+    *, arm: str, sandbox_identity: str, sandbox_policy_identity: str,
+) -> str:
+    """Bind evidence to one arm and its pinned controller execution policy."""
+    payload = json.dumps(
+        {
+            "arm": arm,
+            "sandbox_identity": sandbox_identity,
+            "sandbox_policy_identity": sandbox_policy_identity,
+            "schema": "maverick-code-eval-execution-context-v1",
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _evaluation_scope(
     corpus: CodeEvalCorpus, *, held_out_frac: float,
     held_in: list[str], held_out: list[str], captured_tree: str,
+    candidate_tree: str,
     sandbox_identity: str, sandbox_policy_identity: str,
-    toolchain_identity: str,
+    toolchain_identity: str, baseline_execution_context: str,
+    candidate_execution_context: str,
 ) -> str:
     payload = {
         "schema": "maverick-code-eval-scope-v2",
@@ -245,6 +269,9 @@ def _evaluation_scope(
         "held_in": held_in,
         "held_out": held_out,
         "captured_tree": captured_tree,
+        "candidate_tree": candidate_tree,
+        "baseline_execution_context": baseline_execution_context,
+        "candidate_execution_context": candidate_execution_context,
         "sandbox": sandbox_identity,
         "sandbox_policy": sandbox_policy_identity,
         "toolchain": toolchain_identity,
@@ -258,6 +285,7 @@ def _evaluation_scope(
 def _subset_score(
     ids: list[str], sb, *, command_prefix: str,
     bootstrap_command: str | None, timeout: float, budget,
+    subject_sha256: str, execution_context_sha256: str,
 ) -> Score:
     """Run the given test ids in the (already-resolved, per-copy) sandbox ``sb``
     and score by pass rate. An empty id list is a legitimately empty split →
@@ -276,12 +304,19 @@ def _subset_score(
         # pytest summary is emitted, and the caller refuses the comparison.
         cmd = f"{bootstrap_command} && {cmd}"
     try:
-        res = _budgeted_exec(sb, cmd, budget=budget, timeout=timeout)
+        request = AuthenticatedTestRequest.issue(
+            cmd,
+            subject_sha256=subject_sha256,
+            execution_context_sha256=execution_context_sha256,
+        )
+        evidence = _budgeted_authenticated_test_exec(
+            sb, request, budget=budget, timeout=timeout,
+        )
     except Exception as e:  # pragma: no cover -- exec failure is a 0 score
         log.warning(
             "self_modify_corpus: test command failed (%s)", type(e).__name__)
         return Score(0.0, 0)
-    return _authenticated_test_score(sb, res)
+    return _authenticated_test_score(sb, request, evidence)
 
 
 def _exec_ok(result) -> bool:
@@ -400,6 +435,27 @@ def _evaluate_corpus_arms(
         return CorpusEvalResult(
             False, 0.0, 0.0, 0, applied=False,
             reason="baseline and candidate sandbox identities differ")
+    baseline_execution_context = _execution_context_digest(
+        arm="baseline",
+        sandbox_identity=base_sandbox_identity,
+        sandbox_policy_identity=sandbox_policy_identity,
+    )
+    candidate_execution_context = _execution_context_digest(
+        arm="candidate",
+        sandbox_identity=base_sandbox_identity,
+        sandbox_policy_identity=sandbox_policy_identity,
+    )
+
+    # Refuse before workspace probes, patching, or candidate execution when the
+    # backend has only generic exec output. A boolean capability claim is not an
+    # evidence channel; the concrete nonce-bound controller method is required.
+    for label, sb in (("baseline", sb_base), ("candidate", sb_cand)):
+        readiness = evidence_backend_readiness(sb)
+        if not readiness.ready:
+            return CorpusEvalResult(
+                False, 0.0, 0.0, 0, applied=False,
+                reason=f"{label} {readiness.message}",
+            )
 
     for label, copy_dir, sb in (
         ("baseline", base_dir, sb_base), ("candidate", cand_dir, sb_cand)
@@ -411,11 +467,14 @@ def _evaluate_corpus_arms(
                 False, 0.0, 0.0, 0, applied=False,
                 reason=f"{label} {binding_error}")
 
-    def score(ids, sb):
+    def score(ids, sb, *, subject_sha256, execution_context_sha256):
         return _subset_score(
             ids, sb, command_prefix=corpus.command_prefix,
             bootstrap_command=corpus.bootstrap_command,
-            timeout=timeout, budget=budget)
+            timeout=timeout, budget=budget,
+            subject_sha256=subject_sha256,
+            execution_context_sha256=execution_context_sha256,
+        )
 
     # Establish baseline viability and headroom before executing a candidate.
     environment_error, baseline_toolchain = _environment_preflight(
@@ -424,7 +483,12 @@ def _evaluate_corpus_arms(
         return CorpusEvalResult(
             False, 0.0, 0.0, 0, applied=False,
             reason=f"baseline {environment_error}")
-    b_out = score(held_out, sb_base)
+    b_out = score(
+        held_out,
+        sb_base,
+        subject_sha256=captured_tree,
+        execution_context_sha256=baseline_execution_context,
+    )
     if b_out.samples <= 0:
         return CorpusEvalResult(
             False, b_out.value, 0.0, 0, applied=False,
@@ -451,6 +515,22 @@ def _evaluate_corpus_arms(
             False, 0.0, 0.0, 0, applied=False,
             reason="candidate patch could not be applied in the isolated workspace "
                    "or evaluation budget was exhausted")
+    try:
+        candidate_tree = _captured_tree_manifest(cand_dir)
+    except Exception as e:
+        log.warning(
+            "self_modify_corpus: candidate-tree manifest failed (%s)",
+            type(e).__name__,
+        )
+        return CorpusEvalResult(
+            False, b_out.value, 0.0, 0, applied=True,
+            reason="could not bind evaluation to the patched candidate workspace",
+        )
+    if hmac.compare_digest(candidate_tree, captured_tree):
+        return CorpusEvalResult(
+            False, b_out.value, 0.0, 0, applied=True,
+            reason="candidate patch reported success but evaluation subject is unchanged",
+        )
 
     environment_error, candidate_toolchain = _environment_preflight(
         corpus, sb_cand, timeout=timeout, budget=budget)
@@ -463,9 +543,24 @@ def _evaluate_corpus_arms(
             False, b_out.value, 0.0, 0, applied=True,
             reason="baseline and candidate evaluator toolchains differ")
 
-    c_out = score(held_out, sb_cand)
-    b_in = score(held_in, sb_base)
-    c_in = score(held_in, sb_cand)
+    c_out = score(
+        held_out,
+        sb_cand,
+        subject_sha256=candidate_tree,
+        execution_context_sha256=candidate_execution_context,
+    )
+    b_in = score(
+        held_in,
+        sb_base,
+        subject_sha256=captured_tree,
+        execution_context_sha256=baseline_execution_context,
+    )
+    c_in = score(
+        held_in,
+        sb_cand,
+        subject_sha256=candidate_tree,
+        execution_context_sha256=candidate_execution_context,
+    )
     if c_out.samples <= 0:
         return CorpusEvalResult(
             False, b_out.value, c_out.value, 0,
@@ -509,9 +604,12 @@ def _evaluate_corpus_arms(
             corpus, held_out_frac=held_out_frac,
             held_in=held_in, held_out=held_out,
             captured_tree=captured_tree,
+            candidate_tree=candidate_tree,
             sandbox_identity=base_sandbox_identity,
             sandbox_policy_identity=sandbox_policy_identity,
             toolchain_identity=baseline_toolchain,
+            baseline_execution_context=baseline_execution_context,
+            candidate_execution_context=candidate_execution_context,
         ),
     )
 
@@ -614,11 +712,10 @@ def evaluate_on_corpus(
             sandboxes.append(sb_base)
             sb_cand = resolve_eval_sandbox(make_sb(cand_dir), cand_dir)
             sandboxes.append(sb_cand)
-        except EvalSandboxError:
+        except EvalSandboxError as exc:
             return CorpusEvalResult(
                 False, 0.0, 0.0, 0, applied=False,
-                reason="host-visible sandbox or unavailable required container "
-                       "refused by evaluation isolation policy")
+                reason=f"sandbox security preflight refused: {exc}")
         except Exception as e:
             # ``build_sandbox`` can raise SandboxPolicyError/RuntimeError as well
             # as EvalSandboxError (missing runtime, invalid backend).  The corpus

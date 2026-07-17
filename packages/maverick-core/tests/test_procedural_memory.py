@@ -57,11 +57,20 @@ def test_unreinforced_memory_decays_and_is_forgotten():
 
 
 def test_store_recall_and_roundtrip(tmp_path):
-    store = pm.MemoryStore(path=tmp_path / "m.json")
+    path = tmp_path / "m.json"
+    store = pm.MemoryStore(path=path)
     store.update(pm.consolidate(_corpus("Y")))
     assert store.recall()[0].action == "Y"
     assert store.strength_of("Y") == pm._BASE
-    assert pm.MemoryStore(path=tmp_path / "m.json").recall()[0].action == "Y"  # persisted
+    assert pm.MemoryStore(path=path).recall()[0].action == "Y"  # persisted
+    from maverick.file_lock import private_path_is_restricted
+    assert private_path_is_restricted(path)
+
+
+def test_store_ignores_valid_json_with_wrong_shape(tmp_path):
+    path = tmp_path / "m.json"
+    path.write_text("42", encoding="utf-8")
+    assert pm.MemoryStore(path=path).recall() == []
 
 
 def test_recall_empty_store_is_noop(tmp_path):

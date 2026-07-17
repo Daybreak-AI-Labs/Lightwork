@@ -168,6 +168,41 @@ def test_malformed_present_learning_environment_fails_closed(
     assert promotion_effect.enabled() is False
 
 
+def test_invalid_global_min_improvement_freezes_shared_promotion(
+    tmp_path, monkeypatch,
+):
+    _isolate(tmp_path, monkeypatch)
+    (tmp_path / "config.toml").write_text(
+        '[self_improvement]\nmin_improvement = "0.25"\n',
+        encoding="utf-8",
+    )
+    from maverick.config import get_self_improvement, reset_config_cache
+
+    reset_config_cache()
+    settings = get_self_improvement()
+    assert settings["promotion_policy_valid"] is False
+    assert settings["min_improvement"] == -1.0
+
+    self_improvement.reset_shared()
+    try:
+        controller = self_improvement.shared()
+        verdict = controller.evaluate(self_improvement.Candidate(
+            rung="config",
+            summary="must not promote under a malformed global margin",
+            baseline_score=0.1,
+            candidate_score=0.9,
+            samples=20,
+            rollback="snapshot-1",
+        ))
+        assert verdict.promote is False
+        assert any(
+            gate.gate == "evidence" and gate.ok is False
+            for gate in verdict.gates
+        )
+    finally:
+        self_improvement.reset_shared()
+
+
 def test_zero_environment_overrides_disable_default_learning(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     for name in _ENV_FLAGS:

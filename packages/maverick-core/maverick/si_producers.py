@@ -27,12 +27,17 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_file,
+)
 from .promotion_effect import EffectEstimate
 from .self_improvement import (
     Candidate,
@@ -63,11 +68,27 @@ class ToolOutcomeTracker:
         if not name:
             return
         with self._lock:
+            if self.path is not None:
+                try:
+                    path = Path(self.path)
+                    # The tally is a read-modify-write.  Serialize the whole
+                    # operation so two worker processes cannot both read N and
+                    # publish N+1, silently losing one training outcome.
+                    with cross_process_lock(path, strict=True):
+                        stats = self._read_stats(path)
+                        s = stats.setdefault(name, [0, 0])
+                        s[0] += 1
+                        if success:
+                            s[1] += 1
+                        atomic_write_text(path, json.dumps(stats, sort_keys=True))
+                    self._stats = stats
+                    return
+                except Exception:  # pragma: no cover -- evidence is best-effort
+                    log.debug("tool outcome save failed", exc_info=True)
             s = self._stats.setdefault(name, [0, 0])
             s[0] += 1
             if success:
                 s[1] += 1
-            self._save()
 
     def success_rate(self, name: str) -> float:
         with self._lock:
@@ -81,28 +102,36 @@ class ToolOutcomeTracker:
 
     def _load(self) -> None:
         try:
-            raw = json.loads(Path(self.path).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            self._stats = self._read_stats(Path(self.path))
+        except OSError:
             return
+
+    @staticmethod
+    def _read_stats(path: Path) -> dict[str, list[int]]:
+        if not path.exists():
+            return {}
+        path = ensure_private_file(path)
+        try:
+            raw = json.loads(atomic_read_text(path))
+        except ValueError:
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        out: dict[str, list[int]] = {}
         for k, v in (raw or {}).items():
             try:
-                self._stats[str(k)] = [int(v[0]), int(v[1])]
+                out[str(k)] = [int(v[0]), int(v[1])]
             except (TypeError, ValueError, IndexError):
                 continue
+        return out
 
     def _save(self) -> None:
         if self.path is None:
             return
         try:
-            p = Path(self.path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self._stats, sort_keys=True), encoding="utf-8")
-            os.replace(tmp, p)
-            try:
-                os.chmod(p, 0o600)
-            except OSError:
-                pass
+            atomic_write_text(
+                Path(self.path), json.dumps(self._stats, sort_keys=True),
+            )
         except Exception:  # pragma: no cover -- best-effort
             log.debug("tool outcome save failed", exc_info=True)
 
@@ -268,12 +297,14 @@ _tracker_lock = threading.Lock()
 
 
 def shared_tracker() -> ToolOutcomeTracker:
+    from .file_lock import ensure_private_directory
     from .paths import data_dir
 
     path = data_dir("tool_outcomes.json")
     with _tracker_lock:
         t = _tracker_shared.get(path)
         if t is None:
+            ensure_private_directory(path.parent)
             t = ToolOutcomeTracker(path=path)
             _tracker_shared[path] = t
         return t

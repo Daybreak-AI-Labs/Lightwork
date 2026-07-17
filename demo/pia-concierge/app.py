@@ -123,6 +123,26 @@ _DEMO_ANSWERS = {
 
 @app.on_event("startup")
 async def _startup() -> None:
+    # This public demo route explicitly opts into ambient document credentials,
+    # so make that ambient state unconditionally mock-only before startup does
+    # any async work. Never inherit real Graph credentials into a process that
+    # exposes unauthenticated intake endpoints. The launcher binds this server
+    # to loopback.
+    graph_sim_base = (
+        f"http://127.0.0.1:{int(os.environ.get('WORLD_PORT', '8890'))}/graph-sim"
+    )
+    os.environ["MSGRAPH_ACCESS_TOKEN"] = GRAPH_SIM_TOKEN
+    os.environ["MSGRAPH_BASE_URL"] = graph_sim_base
+    os.environ.pop("MAVERICK_FETCH_ALLOW_PRIVATE", None)
+    for inherited_source_setting in (
+        "SLACK_SEARCH_TOKEN",
+        "SLACK_BOT_TOKEN",
+        "SLACK_BASE_URL",
+        "GDRIVE_ACCESS_TOKEN",
+        "GDRIVE_BASE_URL",
+    ):
+        os.environ.pop(inherited_source_setting, None)
+
     host = os.environ.get("EMAIL_SMTP_HOST", "127.0.0.1")
     port = int(os.environ.get("EMAIL_SMTP_PORT", "1025"))
     try:
@@ -131,12 +151,7 @@ async def _startup() -> None:
     except Exception as exc:  # pragma: no cover
         print(f"[mailsink] could not bind {host}:{port}: {exc}")
     app.state.watcher = asyncio.create_task(_approval_watcher())
-    # Point the REAL doc-discovery module at this process's simulated
-    # SharePoint tenant (setdefault: exporting real Graph creds instead makes
-    # discovery search the real tenant with zero code change).
-    os.environ.setdefault("MSGRAPH_ACCESS_TOKEN", GRAPH_SIM_TOKEN)
-    os.environ.setdefault("MSGRAPH_BASE_URL", f"{BASE_URL}/graph-sim")
-    print(f"[graph-sim] simulated SharePoint tenant at {BASE_URL}/graph-sim")
+    print(f"[graph-sim] simulated SharePoint tenant at {graph_sim_base}")
 
 
 # ===========================================================================
@@ -216,6 +231,33 @@ def _seed_corp_docs(subject: str) -> None:
 def _graph_auth_ok(request: Request) -> bool:
     tok = request.headers.get("authorization", "")
     return tok == f"Bearer {os.environ.get('MSGRAPH_ACCESS_TOKEN', GRAPH_SIM_TOKEN)}"
+
+
+def _discover_mock_documents(subject: str):
+    """Run real discovery with a task-local allowance for the mock loopback."""
+    from maverick import doc_discovery
+    from maverick.tools._ssrf import allow_private_hosts
+
+    with allow_private_hosts({"127.0.0.1"}):
+        return doc_discovery.discover(
+            subject,
+            sources=["msgraph"],
+            allow_ambient_credentials=True,
+        )
+
+
+def _fetch_mock_document(source: str, doc_id: str, ref: dict):
+    """Fetch only from the fixed mock base under the same task-local policy."""
+    from maverick import doc_discovery
+    from maverick.tools._ssrf import allow_private_hosts
+
+    with allow_private_hosts({"127.0.0.1"}):
+        return doc_discovery.fetch(
+            source,
+            doc_id,
+            ref,
+            allow_ambient_credentials=True,
+        )
 
 
 @app.post("/graph-sim/search/query")
@@ -671,8 +713,7 @@ async def intake_discover(case_id: str) -> JSONResponse:
     case = STORE.cases.get(case_id)
     if not case:
         return JSONResponse({"ok": False}, status_code=404)
-    from maverick import doc_discovery
-    hits = await asyncio.to_thread(doc_discovery.discover, case.subject)
+    hits = await asyncio.to_thread(_discover_mock_documents, case.subject)
     gid = getattr(case, "goal_id", None)
     _audit("TOOL_CALL", ANALYST, gid, tool="doc_discovery", case=case_id,
            subject=case.subject, hits=len(hits))
@@ -692,13 +733,22 @@ async def intake_attach_found(case_id: str, request: Request) -> JSONResponse:
         return JSONResponse({"ok": False}, status_code=404)
     body = await request.json()
     source = str(body.get("source", ""))
+    if source != "msgraph":
+        return JSONResponse(
+            {"ok": False, "error": "document source is not available in this demo"},
+            status_code=400,
+        )
     doc_id = str(body.get("doc_id", ""))
     name = str(body.get("name", "")) or f"{source}-{doc_id[:16]}"
     ref = body.get("ref") or {}
     from maverick import doc_discovery
     try:
         data, mime = await asyncio.to_thread(
-            doc_discovery.fetch, source, doc_id, ref)
+            _fetch_mock_document,
+            source,
+            doc_id,
+            ref,
+        )
     except ValueError as exc:  # our own clean validation messages
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     except Exception:  # noqa: BLE001 -- no transport/URL detail to the caller

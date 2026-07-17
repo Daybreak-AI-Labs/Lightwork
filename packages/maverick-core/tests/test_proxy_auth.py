@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 from maverick.proxy_auth import (
     principal_from_proxy,
     proxy_auth_enabled,
@@ -114,3 +115,14 @@ def test_principal_from_proxy_maps_to_user():
     p = principal_from_proxy("alice@example.com")
     assert p.principal == "user:alice@example.com"
     assert p.claims.get("via") == "proxy"
+
+
+@pytest.mark.parametrize("subject", [" alice", "alice ", "alice\n", "x" * 252])
+def test_principal_from_proxy_rejects_invalid_subject_domain(subject):
+    with pytest.raises(ValueError, match="authenticated subject"):
+        principal_from_proxy(subject)
+
+
+def test_principal_from_proxy_accepts_full_principal_length_boundary():
+    subject = "x" * 251
+    assert len(principal_from_proxy(subject).principal) == 256

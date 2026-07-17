@@ -5,12 +5,37 @@ deterministic — the world model is faked and the clock injected.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from dataclasses import dataclass
 
 import pytest
 from maverick import budget_receipts as br
+from maverick.file_lock import private_path_is_restricted
 
 KEY = "test-receipt-key"
+
+
+def _make_shared_directory(path):
+    path.mkdir(mode=0o777)
+    if os.name == "nt":
+        subprocess.run(
+            ["icacls", str(path), "/grant", "*S-1-1-0:(OI)(CI)RX"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        path.chmod(0o755)
+    assert not private_path_is_restricted(path, 0o700)
+
+
+def _security_snapshot(path):
+    if os.name == "nt":
+        import maverick.file_lock as file_lock
+
+        return file_lock._windows_private_sddl(path)[0]
+    return path.stat().st_mode & 0o777
 
 
 @dataclass
@@ -67,6 +92,24 @@ def test_mint_verify_roundtrip(tmp_path):
     assert payload["ended_at"] == 260.0
     assert payload["minted_at"] == 999.0
     assert payload["prev_receipt_hash"] is None     # genesis
+
+
+def test_custom_ledger_requires_private_parent_without_mutating_it(tmp_path):
+    shared = tmp_path / "shared"
+    _make_shared_directory(shared)
+    unrelated = shared / "team-file.txt"
+    unrelated.write_text("keep-access", encoding="utf-8")
+    before = _security_snapshot(shared)
+    path = shared / "receipts.jsonl"
+
+    with pytest.raises(PermissionError, match="must already be private"):
+        br.mint(_world(), 7, KEY, path=path)
+
+    assert _security_snapshot(shared) == before
+    assert not private_path_is_restricted(shared, 0o700)
+    assert unrelated.read_text(encoding="utf-8") == "keep-access"
+    assert not path.exists()
+    assert not (shared / "receipts.jsonl.lock").exists()
 
 
 def test_budget_caps_embedded_from_config(monkeypatch, tmp_path):
@@ -171,10 +214,12 @@ def test_empty_chain_is_ok(tmp_path):
 
 
 def test_chain_file_mode_0600(tmp_path):
-    import stat
+    from maverick.file_lock import private_path_is_restricted
+
     path = tmp_path / "receipts.jsonl"
     br.mint(_world(), 7, KEY, path=path)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert private_path_is_restricted(path)
+    assert private_path_is_restricted(path.parent, 0o700)
 
 
 # --- render -----------------------------------------------------------------

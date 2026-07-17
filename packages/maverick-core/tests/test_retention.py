@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -185,6 +186,45 @@ def test_purge_missing_db_safe(tmp_path: Path):
     from maverick.audit.retention import purge_world_episodes
     res = purge_world_episodes(days=30, db_path=tmp_path / "absent.db")
     assert res["deleted"] == 0
+
+
+def test_unscoped_postgres_retention_fails_closed(monkeypatch):
+    """A maintenance process may not turn an absent tenant into DELETE ALL."""
+    from maverick.audit.retention import RetentionScopeError, purge_world_episodes
+
+    monkeypatch.setenv("MAVERICK_WORLD_BACKEND", "postgres")
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr("maverick.client.client_id", lambda: None)
+    with pytest.raises(RetentionScopeError, match="unscoped Postgres"):
+        purge_world_episodes(days=30)
+
+
+def test_enforce_covers_every_registered_tenant(monkeypatch):
+    """The operator command fans out under an explicit tenant context."""
+    from maverick.audit import retention
+    from maverick.paths import current_tenant_id
+    from maverick.tenant import registry
+
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr("maverick.client.client_id", lambda: None)
+    monkeypatch.setattr(
+        registry,
+        "list_tenants",
+        lambda: [SimpleNamespace(id="acme"), SimpleNamespace(id="beta")],
+    )
+    seen: list[str | None] = []
+
+    def _purge(**_kwargs):
+        seen.append(current_tenant_id())
+        return {"deleted": 0}
+
+    monkeypatch.setattr(retention, "purge_world_episodes", _purge)
+    report = retention.enforce(config={"episodes_days": 30}, dry_run=True)
+
+    assert report["scope"] == "tenant_fleet"
+    assert report["tenant_count"] == 2
+    assert set(report["tenants"]) == {"acme", "beta"}
+    assert seen == ["acme", "beta"]
 
 
 # ---- usage-ledger (cost telemetry) retention ----

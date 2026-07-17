@@ -109,10 +109,13 @@ def _world():
     if tid:
         from maverick.world_model import world_for_tenant
         return world_for_tenant(tid)
-    from maverick.world_model import DEFAULT_DB, WorldModel
-    key = str(DEFAULT_DB)
+    from maverick.world_model import default_db_path, open_world
+    path = default_db_path()
+    key = str(path)
     cached = _world_cache.get(key)
     if cached is None:
-        cached = WorldModel(DEFAULT_DB)
+        # Preserve DEFAULT_DB override ownership semantics: open_world() knows
+        # whether this is Lightwork's managed default or a caller-owned path.
+        cached = open_world()
         _world_cache[key] = cached
     return cached

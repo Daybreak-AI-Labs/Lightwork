@@ -62,9 +62,9 @@ health-checks `/healthz`.
 
 ## Scaling to multi-tenant / multi-worker
 
-These blueprints are single-node by default. To scale out, see the hosted
-control-plane pieces in [`FEATURES.md`](./FEATURES.md): the Postgres world-model
-backend (tenant isolation + migrations), the `QueueDispatcher` (arq) worker
-pool, per-tenant KMS/egress, and the operator console. Once Postgres + queue are
-configured, run the web tier (`maverick dashboard`) and a separate worker tier
-(`maverick worker`) as independent, horizontally-scaled Deployments/services.
+These blueprints use one dashboard/control-plane node. To add processing
+capacity, see the hosted pieces in [`FEATURES.md`](./FEATURES.md): the Postgres
+world-model backend (tenant isolation + migrations), the `QueueDispatcher`
+(arq) worker pool, per-tenant KMS/egress, and the operator console. Once
+Postgres + queue are configured, keep one web/control-plane replica (`maverick
+dashboard`) and scale only the separate worker tier (`maverick worker`).

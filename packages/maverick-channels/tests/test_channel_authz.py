@@ -227,7 +227,7 @@ class _FakeWorldModel:
 
     instances: list = []
 
-    def __init__(self, _path):
+    def __init__(self, _path=None):
         self.processed: set[tuple[str, str]] = set()
         self.marked: list[tuple[str, str]] = []
         _FakeWorldModel.instances.append(self)

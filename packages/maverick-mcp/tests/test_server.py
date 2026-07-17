@@ -20,6 +20,25 @@ from maverick_mcp.server import (
 )
 
 
+def test_tool_reads_use_canonical_world_and_ownership_close(monkeypatch):
+    """MCP persistence follows backend selection and never closes a cache peer."""
+    import maverick.world_model as world_model
+
+    class _World:
+        def get_facts(self):
+            return {}
+
+    world = _World()
+    closed = []
+    monkeypatch.setattr(world_model, "open_world", lambda: world)
+    monkeypatch.setattr(
+        world_model, "close_world_if_owned", lambda candidate: closed.append(candidate)
+    )
+
+    assert MCPServer()._tool_facts_get() == "no facts known"
+    assert closed == [world]
+
+
 class TestTools:
     def test_all_tools_have_required_fields(self):
         for t in TOOLS:
@@ -226,7 +245,8 @@ class TestProtocol:
         captured = {}
 
         class FakeWorld:
-            def create_goal(self, title, description):
+            def create_goal(self, title, description, *, owner=""):
+                assert owner == ""
                 return 123
 
         def fake_run_goal_sync(_llm, _world, budget, _goal_id, *, sandbox, max_depth):

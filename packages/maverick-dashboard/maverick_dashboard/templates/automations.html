@@ -830,7 +830,14 @@
         title.appendChild(a); main.appendChild(title);
         (f.proposals || []).forEach(function (p) {
           main.appendChild(el('div', 'mv-row__sub', '💡 ' + (p.reason || (p.from_kind + ' → ' + p.to_kind))));
-          main.appendChild(mkBtn('Apply this improvement', function () { applyProposal(f.flow_id, p); }));
+          if (p.applicable !== false) {
+            main.appendChild(mkBtn('Apply this improvement', function () { applyProposal(f.flow_id, p); }));
+          } else {
+            main.appendChild(el(
+              'div', 'mv-row__sub',
+              p.blocking_reason || 'Review parameter bindings before applying.'
+            ));
+          }
         });
         (f.changes || []).forEach(function (ch) {
           var imp = ch.impact || {}, d = imp.delta;

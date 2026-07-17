@@ -37,3 +37,14 @@ def test_world_answer_returns_match_flag(tmp_path: Path):
     qid = w.ask("Q?", goal_id=gid)
     assert w.answer(qid, "a") is True
     assert w.answer(999999, "a") is False
+
+
+def test_world_answer_owner_scope_is_atomic(tmp_path: Path):
+    w = open_world(tmp_path / "world.db")
+    gid = w.create_goal("private", owner="agent:alpha")
+    qid = w.ask("Private question?", goal_id=gid)
+
+    assert w.answer(qid, "stolen", expected_owner="agent:bravo") is False
+    assert [q.id for q in w.open_questions(gid)] == [qid]
+    assert w.answer(qid, "mine", expected_owner="agent:alpha") is True
+    assert w.open_questions(gid) == []

@@ -19,6 +19,46 @@ def _register():
     assert fleet_memory.register_agent("order-bot", "agentforce") is True
 
 
+def test_agent_id_cannot_be_registered_under_two_vendors():
+    assert fleet_memory.register_agent("order-bot", "agentforce") is True
+    assert fleet_memory.register_agent("order-bot", "copilot") is False
+    assert fleet_memory.register_agent("order-bot", "agentforce") is True
+    from maverick.file_lock import private_path_is_restricted
+    assert private_path_is_restricted(fleet_memory.registry_path())
+
+
+def test_ambiguous_legacy_vendor_identity_fails_closed(monkeypatch):
+    rows = [
+        {
+            "source": "agentforce:order-bot",
+            "vendor": "agentforce",
+            "agent_id": "order-bot",
+        },
+        {
+            "source": "copilot:order-bot",
+            "vendor": "copilot",
+            "agent_id": "order-bot",
+        },
+    ]
+    monkeypatch.setattr(fleet_memory, "roster", lambda: rows)
+
+    with fleet_memory.bind_caller("order-bot"):
+        ok, reason = fleet_memory.ingest({
+            "agent_id": "order-bot",
+            "vendor": "copilot",
+            "kind": "lesson",
+            "goal_text": "reconcile",
+        })
+        context, recall_reason = fleet_memory.recall(
+            "reconcile", agent_id="order-bot", vendor="agentforce",
+        )
+
+    assert ok is False
+    assert "ambiguous" in reason
+    assert context == ""
+    assert "ambiguous" in recall_reason
+
+
 def test_disabled_is_fail_closed(monkeypatch):
     monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "0")
     ok, reason = fleet_memory.ingest({"agent_id": "a", "vendor": "v",

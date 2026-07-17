@@ -29,6 +29,12 @@ def client():
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
+def _admin_auth(monkeypatch) -> dict[str, str]:
+    token = "invite-admin-test-token"  # pragma: allowlist secret
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", token)
+    return {"Authorization": f"Bearer {token}"}
+
+
 # ---------- store + gate (no HTTP) ----------
 
 def test_disabled_by_default():
@@ -130,7 +136,7 @@ def test_local_accept_flow_signs_in_and_binds_role(client, monkeypatch):
     # the cookie now establishes a principal whose role gates admin pages
     assert client.get("/users").status_code == 403      # viewer ≠ admin
     client.cookies.clear()
-    assert client.get("/users").status_code == 200      # anonymous loopback = legacy
+    assert client.get("/users").status_code == 401      # invites on => no anonymous admin
 
 
 def test_accept_post_requires_same_origin(client, monkeypatch):
@@ -158,26 +164,51 @@ def test_tampered_session_cookie_is_ignored(client, monkeypatch):
     assert invites.local_session_principal(_Req()) is None
 
 
+@pytest.mark.parametrize("subject", ["alice ", "alice\n", "x" * 252])
+def test_signed_invite_session_rejects_invalid_subject_domain(monkeypatch, subject):
+    import time
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    from maverick.web_session import sign_session
+    from maverick_dashboard import invites
+
+    now = int(time.time())
+    raw = sign_session(
+        {"sub": subject, "iat": now, "exp": now + 3600},
+        invites.local_session_secret(),
+    )
+
+    class _Req:
+        cookies = {"mvk_session": raw}
+
+    assert invites.local_session_principal(_Req()) is None
+
+
 # ---------- HTTP: admin mint + revoke on /users ----------
 
 def test_admin_mints_and_revokes_links(client, monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    headers = _admin_auth(monkeypatch)
     from maverick_dashboard import invites
     r = client.post("/users/invite", data={"email": "new@corp.com",
-                                           "role": "operator"})
+                                           "role": "operator"}, headers=headers)
     assert r.status_code == 200
     assert "/auth/invite/inv_" in r.text                 # link shown once
     pending = [i for i in invites.list_invites() if i.pending]
     assert [i.email for i in pending] == ["new@corp.com"]
     r = client.post("/users/invite/revoke", data={"invite_id": pending[0].id},
-                    follow_redirects=False)
+                    headers=headers, follow_redirects=False)
     assert r.status_code == 303
     assert not [i for i in invites.list_invites() if i.pending]
 
 
 def test_mint_rejects_bad_input(client, monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
-    r = client.post("/users/invite", data={"email": "nope", "role": "viewer"})
+    r = client.post(
+        "/users/invite",
+        data={"email": "nope", "role": "viewer"},
+        headers=_admin_auth(monkeypatch),
+    )
     assert r.status_code == 400
 
 
@@ -185,6 +216,7 @@ def test_mint_rejects_bad_input(client, monkeypatch):
 
 def test_mint_emails_the_link_when_configured(client, monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    headers = _admin_auth(monkeypatch)
     monkeypatch.setenv("EMAIL_USER", "sender@daybreak.example")
     monkeypatch.setenv("EMAIL_APP_PASSWORD", "pw")  # pragma: allowlist secret
     from maverick import mailer
@@ -194,7 +226,7 @@ def test_mint_emails_the_link_when_configured(client, monkeypatch):
         sent.update(to=to, subject=subject, body=body)
     monkeypatch.setattr(mailer, "send", fake_send)
     r = client.post("/users/invite", data={"email": "new@corp.com",
-                                           "role": "viewer"})
+                                           "role": "viewer"}, headers=headers)
     assert r.status_code == 200
     assert sent["to"] == "new@corp.com"
     assert "/auth/invite/inv_" in sent["body"]        # the link rides the email
@@ -204,6 +236,7 @@ def test_mint_emails_the_link_when_configured(client, monkeypatch):
 
 def test_mint_falls_back_to_copy_link_on_smtp_failure(client, monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    headers = _admin_auth(monkeypatch)
     monkeypatch.setenv("EMAIL_USER", "sender@daybreak.example")
     monkeypatch.setenv("EMAIL_APP_PASSWORD", "pw")  # pragma: allowlist secret
     from maverick import mailer
@@ -212,7 +245,7 @@ def test_mint_falls_back_to_copy_link_on_smtp_failure(client, monkeypatch):
         raise mailer.MailerError("smtp send failed: ConnectionRefusedError")
     monkeypatch.setattr(mailer, "send", fake_send)
     r = client.post("/users/invite", data={"email": "new@corp.com",
-                                           "role": "viewer"})
+                                           "role": "viewer"}, headers=headers)
     assert r.status_code == 200                        # fail-soft: still minted
     assert "/auth/invite/inv_" in r.text               # copyable link still shown
     assert "Emailing it failed" in r.text
@@ -220,8 +253,9 @@ def test_mint_falls_back_to_copy_link_on_smtp_failure(client, monkeypatch):
 
 def test_mint_without_sender_keeps_copy_link_flow(client, monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    headers = _admin_auth(monkeypatch)
     r = client.post("/users/invite", data={"email": "new@corp.com",
-                                           "role": "viewer"})
+                                           "role": "viewer"}, headers=headers)
     assert r.status_code == 200
     assert "Copy this link" in r.text                  # unconfigured = old UX
 

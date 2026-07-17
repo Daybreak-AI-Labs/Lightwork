@@ -271,6 +271,18 @@ def _resolve_base(spec: dict, override: str) -> str:
     return ""
 
 
+def _safe_failure_detail(value: Any) -> str:
+    """Secret-scrub and bound untrusted HTTP/spec failure detail."""
+    try:
+        raw = value if isinstance(value, str) else json.dumps(value, default=str)
+        from ..safety.secret_detector import redact
+
+        scrubbed, _ = redact(raw)
+        return scrubbed[:500]
+    except Exception:  # pragma: no cover -- error reporting must fail closed
+        return "request failed (details unavailable)"
+
+
 def _op_call(
     spec_src: str,
     op_id: str,
@@ -329,6 +341,11 @@ def _op_call(
         text = raw.decode(encoding or "utf-8", errors="replace")
     except (LookupError, UnicodeDecodeError):
         text = raw.decode("utf-8", errors="replace")
+    if status_code >= 400:
+        # A failed write is not a successful tool result. Prefixing ERROR lets
+        # governed_actions mark the post-effect state INDETERMINATE instead of
+        # committing a false success, and never returns an echoed credential.
+        return f"ERROR: HTTP {status_code}: upstream request failed"
     truncated = text[:3000] + (" ... (truncated)" if len(text) > 3000 else "")
     return f"HTTP {status_code}\n{truncated}"
 
@@ -365,12 +382,15 @@ def _run(args: dict[str, Any], workdir: Path | None = None) -> str:
                 workdir,
             )
     except RuntimeError as e:
-        return f"ERROR: {e}"
+        return f"ERROR: {_safe_failure_detail(str(e))}"
     except Exception as e:
         from ._ssrf import BlockedHost
         if isinstance(e, BlockedHost):
-            return f"ERROR: refusing to fetch (blocked host): {e}"
-        return f"ERROR: openapi request failed: {type(e).__name__}: {e}"
+            return (
+                "ERROR: refusing to fetch (blocked host): "
+                f"{_safe_failure_detail(str(e))}"
+            )
+        return f"ERROR: openapi request failed ({type(e).__name__[:120]})"
     return f"ERROR: unknown op {op!r}"
 
 

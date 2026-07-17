@@ -7,6 +7,7 @@ The full round-trip lives in test_postgres_world.py (skipped without a DSN).
 from __future__ import annotations
 
 import maverick.world_model_backends.postgres as pg
+import pytest
 
 
 def test_pending_from_fresh_db_applies_everything():
@@ -159,6 +160,137 @@ def test_tenant_scope_noop_without_active_tenant(monkeypatch):
     frag, params = pg._tenant_scope()
     assert frag == ""
     assert params == []
+
+
+def test_invalid_explicit_tenant_cannot_become_unscoped():
+    from maverick.paths import InvalidTenantError, reset_tenant, set_tenant
+
+    token = set_tenant("x" * 201)
+    try:
+        with pytest.raises(InvalidTenantError, match="too long"):
+            pg._tenant_scope()
+    finally:
+        reset_tenant(token)
+
+
+def test_corrupt_client_resolution_cannot_become_unscoped(monkeypatch):
+    from maverick import client
+
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr(
+        client,
+        "_raw_client_id",
+        lambda: (_ for _ in ()).throw(client.ClientBindingError("corrupt binding")),
+    )
+    with pytest.raises(client.ClientBindingError, match="corrupt binding"):
+        pg._tenant_scope()
+
+
+class _RetentionCursor:
+    rowcount = 3
+
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, sql, params=()):
+        self.calls.append((sql, params))
+
+    def fetchone(self):
+        return (4,)
+
+
+class _RetentionTx:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    def __enter__(self):
+        return self.cursor
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+@pytest.mark.parametrize(
+    ("method_name", "table"),
+    [
+        ("purge_episodes_before", "episodes"),
+        ("purge_goal_events_before", "goal_events"),
+    ],
+)
+def test_retention_requires_exact_active_tenant(monkeypatch, method_name, table):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "Acme")
+    monkeypatch.setattr(pg, "_strict_tenant_isolation", lambda: False)
+    cursor = _RetentionCursor()
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: _RetentionTx(cursor))
+
+    assert getattr(model, method_name)(123.0) == 3
+    sql, params = cursor.calls[0]
+    assert f"DELETE FROM {table}" in sql
+    assert "tenant_id = %s" in sql
+    assert "OR tenant_id IS NULL" not in sql
+    assert params == (123.0, "Acme")
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    [
+        "purge_episodes_before",
+        "purge_goal_events_before",
+        "prune_goal_events",
+        "prune_processed_messages",
+        "prune_conversations",
+    ],
+)
+def test_retention_refuses_unbound_execution(monkeypatch, method_name):
+    from maverick.paths import TenantPolicyError
+
+    monkeypatch.setattr(pg, "_active_tenant", lambda: None)
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(
+        model,
+        "_tx",
+        lambda: (_ for _ in ()).throw(AssertionError("must not open transaction")),
+    )
+
+    with pytest.raises(TenantPolicyError, match="refusing unbound"):
+        getattr(model, method_name)(123.0)
+
+
+def test_legacy_prune_methods_use_exact_tenant(monkeypatch):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "Acme")
+    monkeypatch.setattr(pg.time, "time", lambda: 200.0)
+    cursor = _RetentionCursor()
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: _RetentionTx(cursor))
+
+    assert model.prune_goal_events(older_than_seconds=50.0) == 3
+    event_sql, event_params = cursor.calls[0]
+    assert "tenant_id = %s" in event_sql
+    assert "OR tenant_id IS NULL" not in event_sql
+    assert event_params == (150.0, "Acme")
+
+    cursor.calls.clear()
+    assert model.prune_processed_messages(older_than_seconds=50.0) == 3
+    processed_sql, processed_params = cursor.calls[0]
+    assert "tenant_id = %s" in processed_sql
+    assert "IS NULL" not in processed_sql
+    assert processed_params == (150.0, "Acme")
+
+
+def test_conversation_prune_uses_exact_tenant_for_parent_and_children(monkeypatch):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "Acme")
+    monkeypatch.setattr(pg.time, "time", lambda: 200.0)
+    cursor = _RetentionCursor()
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: _RetentionTx(cursor))
+
+    assert model.prune_conversations(idle_for_seconds=50.0) == 3
+    assert len(cursor.calls) == 2
+    for sql, params in cursor.calls:
+        assert "tenant_id = %s" in sql
+        assert "IS NULL" not in sql
+        assert params == (150.0, "Acme")
 
 
 def test_tenant_scope_filters_to_active_tenant_null_tolerant(monkeypatch):

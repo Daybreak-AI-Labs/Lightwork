@@ -145,6 +145,19 @@ def test_enforced_env_overrides(monkeypatch):
     assert agent_trust.agent_trust_enforced() is False
 
 
+def test_enforced_rejects_malformed_env_and_config(monkeypatch):
+    monkeypatch.setenv("MAVERICK_AGENT_TRUST", "definitely")
+    with pytest.raises(agent_trust.AgentTrustError, match="recognized boolean"):
+        agent_trust.agent_trust_enforced({})
+
+    monkeypatch.delenv("MAVERICK_AGENT_TRUST")
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    with pytest.raises(agent_trust.AgentTrustError, match="must be a boolean"):
+        agent_trust.agent_trust_enforced({
+            "agent_trust": {"enforce": "false"},
+        })
+
+
 def test_enforced_follows_enterprise_mode(monkeypatch):
     monkeypatch.delenv("MAVERICK_AGENT_TRUST", raising=False)
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
@@ -361,12 +374,14 @@ def test_federation_disengaged_unchanged(monkeypatch):
 def test_a2a_capability_tightened_by_registry(monkeypatch):
     from maverick.a2a_tasks import _a2a_capability
 
-    monkeypatch.setattr(agent_trust, "agent_trust_enforced", lambda: True)
+    registry = {
+        "a2a": TrustedAgent(
+            id="a2a", allow_tools=frozenset({"read_file"}),
+        ),
+    }
     monkeypatch.setattr(
-        agent_trust, "lookup",
-        lambda agent_id, **kw: TrustedAgent(id="a2a",
-                                            allow_tools=frozenset({"read_file"}))
-        if agent_id == "a2a" else None)
+        agent_trust, "load_trust_state", lambda: (True, registry),
+    )
     cap = _a2a_capability()
     assert cap.allow_tools == frozenset({"read_file"})
 
@@ -374,7 +389,9 @@ def test_a2a_capability_tightened_by_registry(monkeypatch):
 def test_a2a_capability_unchanged_when_disengaged(monkeypatch):
     from maverick.a2a_tasks import _a2a_capability
 
-    monkeypatch.setattr(agent_trust, "agent_trust_enforced", lambda: False)
+    monkeypatch.setattr(
+        agent_trust, "load_trust_state", lambda: (False, {}),
+    )
     # Disengaged -> no [agent_trust] tightening; default ceiling (all tools,
     # medium risk) is preserved.
     cap = _a2a_capability()
@@ -387,8 +404,13 @@ def test_a2a_capability_unchanged_when_disengaged(monkeypatch):
 def _fleet(monkeypatch, *, registry, enforced=True):
     from maverick import fleet_memory
     monkeypatch.setattr(fleet_memory, "enabled", lambda: True)
-    monkeypatch.setattr(fleet_memory, "roster",
-                        lambda: [{"source": "acme:bot"}])
+    monkeypatch.setattr(
+        fleet_memory,
+        "roster",
+        lambda: [{
+            "source": "acme:bot", "vendor": "acme", "agent_id": "bot",
+        }],
+    )
     _patch_trust(monkeypatch, registry=registry, enforced=enforced)
     return fleet_memory
 

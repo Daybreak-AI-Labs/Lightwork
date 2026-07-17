@@ -182,6 +182,23 @@ def test_openapi_call_sends_body(tmp_path, monkeypatch):
     assert captured["body"] == {"name": "Rex"}
 
 
+def test_openapi_http_failure_is_error_and_secret_scrubbed(tmp_path, monkeypatch):
+    captured = {"body": None}
+    resp = MagicMock()
+    resp.status_code = 500
+    resp.text = "Authorization: Bearer tok123"
+    _patch_safe_client(monkeypatch, resp, captured)
+    from maverick.tools.openapi_runner import openapi_runner
+
+    out = openapi_runner(_sb(tmp_path)).fn({
+        "op": "call", "spec": _write_spec(tmp_path),
+        "op_id": "createPet", "body": {"name": "Rex"},
+    })
+
+    assert out.startswith("ERROR: HTTP 500")
+    assert "tok123" not in out
+
+
 def test_openapi_call_blocks_private_base_url(tmp_path, monkeypatch):
     # No client patch: safe_client must resolve 127.0.0.1, see it's
     # non-public, and refuse before any connection (works offline).
@@ -293,6 +310,35 @@ def test_ocr_hf_backend_requires_token(tmp_path, monkeypatch):
     from maverick.tools.ocr import ocr
     out = ocr().fn({"op": "extract", "path": str(img), "backend": "hf"})
     assert "HUGGINGFACE_API_TOKEN" in out
+
+
+def test_ocr_hf_cannot_borrow_operator_token_in_authenticated_enterprise(
+    tmp_path, monkeypatch,
+):
+    import asyncio
+
+    from maverick.tools import ToolRegistry
+    from maverick.tools.ocr import ocr
+
+    img = tmp_path / "x.png"
+    img.write_bytes(b"fake")
+    monkeypatch.setenv("HUGGINGFACE_API_TOKEN", "operator-global-secret")
+    monkeypatch.setattr("maverick.enterprise.enterprise_enabled", lambda: True)
+    called = []
+    monkeypatch.setattr(
+        "maverick.tools._ssrf.safe_client",
+        lambda *_a, **_k: called.append(True),
+    )
+    reg = ToolRegistry(principal="user:alice")
+    reg.register(ocr(_sb(tmp_path)))
+
+    out = asyncio.run(reg.run("ocr", {
+        "op": "extract", "path": str(img), "backend": "hf",
+    }))
+
+    assert out.startswith("REFUSED (credentials)")
+    assert "operator-global-secret" not in out
+    assert called == []
 
 
 def test_ocr_extract_blocks_path_escape():

@@ -57,6 +57,7 @@ from ._shared import (
 from ._shared import _world_cache as _world_cache  # re-export: tests clear app._world_cache
 from .api import router as api_router
 from .auth import (
+    SELF_AUTH_WEBHOOK_PATHS,
     AutomationAuthorizationError,
     assert_goal_access,
     auth_genuinely_off,
@@ -68,9 +69,10 @@ from .auth import (
     execution_user_id_from_request,
     goal_owner_filter,
     has_permission,
+    non_static_auth_configured,
     require_permission,
-    require_principal,
     require_principal_in_request_context,
+    require_websocket_principal_in_context,
     stored_automation_identity,
     websocket_caller_principal,
 )
@@ -234,18 +236,38 @@ def _require_auth_enabled() -> bool:
     ``MAVERICK_DASHBOARD_REQUIRE_AUTH`` env wins over ``[dashboard] require_auth``;
     off by default so the single-tenant local flow is unchanged."""
     env = os.environ.get("MAVERICK_DASHBOARD_REQUIRE_AUTH", "").strip().lower()
-    if env:
-        return env in {"1", "true", "yes", "on"}
     try:
-        from maverick.config import load_config
-        return bool(((load_config() or {}).get("dashboard") or {}).get("require_auth"))
-    except Exception:  # pragma: no cover -- config never blocks startup
-        return False
+        from maverick.config import config_source_errors, load_config
+
+        config = load_config() or {}
+        if config_source_errors():
+            return True
+    except Exception:
+        # A malformed/unreadable config may conceal ``require_auth = true``.
+        # Treat ambiguity as required so startup cannot silently enable local
+        # administrator access.
+        return True
+    if not isinstance(config, dict):
+        return True
+    if env:
+        if env in {"1", "true", "yes", "on"}:
+            return True
+        if env in {"0", "false", "no", "off"}:
+            return False
+        return True
+    if "dashboard" not in config:
+        dashboard = {}
+    else:
+        dashboard = config["dashboard"]
+    if not isinstance(dashboard, dict):
+        return True
+    configured = dashboard.get("require_auth", False)
+    return configured if isinstance(configured, bool) else True
 
 
 def _assert_dashboard_auth_configured() -> None:
     """When ``require_auth`` is set, refuse to boot if NO auth mechanism is
-    configured (a dashboard token, OIDC, or reverse-proxy SSO), so an operator
+    configured (token, OIDC, proxy SSO, invites, or complete SAML), so an operator
     who asked for auth can never accidentally serve the (loopback) control
     surface unauthenticated. No-op unless ``require_auth`` is explicitly on, so
     a fresh single-tenant install is never locked out."""
@@ -274,11 +296,19 @@ def _assert_dashboard_auth_configured() -> None:
             return
     except Exception:  # pragma: no cover
         pass
+    try:
+        # SAML uses the same signed browser session as OIDC, so a complete SAML
+        # configuration is a first-class authentication mechanism too.
+        from .saml import _session_secret, saml_enabled
+        if saml_enabled() and _session_secret():
+            return
+    except Exception:  # pragma: no cover
+        pass
     raise RuntimeError(
         "[dashboard] require_auth is set, but no auth mechanism is configured. "
         "Set MAVERICK_DASHBOARD_TOKEN, enable OIDC ([auth.oidc]), enable "
-        "reverse-proxy SSO ([auth.proxy]), or enable email invites "
-        "([dashboard] invites) -- refusing to serve the dashboard "
+        "reverse-proxy SSO ([auth.proxy]), enable SAML ([auth.saml]), or enable "
+        "email invites ([dashboard] invites) -- refusing to serve the dashboard "
         "unauthenticated."
     )
 
@@ -425,14 +455,11 @@ app = FastAPI(
     title="Lightwork Dashboard + REST API",
     description="Local browser UI plus REST API for programmatic access.",
     version="0.1.0",
-    # OIDC bearer-auth gate, applied to every route. Default-OFF: when OIDC is
-    # disabled (the default) `require_principal` returns None and changes
-    # nothing -- no token is required and no route 401s. When OIDC is enabled it
-    # enforces a valid `Authorization: Bearer` ID token on each request (health/
-    # liveness/docs paths excepted; see maverick_dashboard.auth). This is an
-    # auth layer ON TOP OF the existing MAVERICK_DASHBOARD_TOKEN middleware, not
-    # a replacement for it. `enforce_page_visibility` runs second so the
-    # role-based page-visibility policy sees the established principal.
+    # Global authentication dependency, applied to every route. It composes
+    # proxy/OIDC/SAML/invite sessions and the static dashboard bearer, while
+    # preserving same-origin loopback mode only when authentication is genuinely
+    # off. `enforce_page_visibility` runs second so role-based page policy sees
+    # the established principal.
     dependencies=[
         Depends(require_principal_in_request_context),
         Depends(enforce_page_visibility),
@@ -604,21 +631,10 @@ _AUTH_EXEMPT = {
     # /webhook/start authenticates with its own HMAC signature instead of
     # the dashboard bearer / same-origin checks (external senders have
     # neither), so it must bypass the centralized middleware.
-    "/webhook/start",
-    # /webhook/run fires a registered trigger; same HMAC auth as /webhook/start
-    # (strictly narrower -- runs only an operator-registered template).
-    "/webhook/run",
-    # Linear/Jira/GitHub issue webhooks authenticate the same way (their
-    # own HMAC signature), so they bypass the bearer/same-origin checks too.
-    "/webhook/linear",
-    "/webhook/jira",
-    "/webhook/github",
-    "/webhook/gitlab",
-    # Signed flow-approval links: a human clicks an approve/reject URL from a
-    # channel (Slack/Teams/email) with no dashboard session. The HMAC-signed,
-    # self-expiring token IS the auth (see maverick.flow.approvals); the state
-    # change is on the POST, gated by that token, so a link scanner's GET is inert.
-    "/flow/approve",
+    *SELF_AUTH_WEBHOOK_PATHS,
+    # The exact HMAC webhook paths are shared with the global dependency. A
+    # future /webhook/* route is authenticated by default until explicitly
+    # added to that reviewed set.
     # Built-in OIDC browser-login endpoints: they bootstrap a session and carry
     # their own flow-level security (state/PKCE/signed cookies). They must be
     # reachable by a browser that has no dashboard token yet; each self-gates on
@@ -841,6 +857,25 @@ def _is_proxied(request: Request) -> bool:
     return any(request.headers.get(h) for h in _PROXY_FORWARD_HEADERS)
 
 
+def _configured_oidc_bearer_present(request: Request) -> bool:
+    """Whether this request explicitly presents a bearer to enabled OIDC.
+
+    Such API credentials do not use ambient browser authority, so they do not
+    need an Origin/Referer. The global auth dependency remains authoritative:
+    it verifies the token (and rejects an invalid one) before any cookie/proxy
+    identity can be selected.
+    """
+    authorization = request.headers.get("authorization", "")
+    if not authorization.startswith("Bearer ") or not authorization[7:].strip():
+        return False
+    try:
+        from . import auth as auth_boundary
+
+        return auth_boundary.oidc_enabled()
+    except Exception:
+        return False
+
+
 @app.middleware("http")
 async def bearer_auth(request: Request, call_next):
     expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN")
@@ -858,54 +893,29 @@ async def bearer_auth(request: Request, call_next):
         # are disabled.
         return await call_next(request)
     if not expected:
-        if _require_auth_enabled():
-            # A configured OIDC or reverse-proxy SSO layer must get a chance to
-            # enforce identity. Do not satisfy require_auth with the historical
-            # loopback/no-token fallback.
-            try:
-                from maverick.oidc import oidc_enabled
-                from maverick.proxy_auth import proxy_auth_enabled
-                if oidc_enabled() or proxy_auth_enabled():
-                    # Cookie-session (OIDC / reverse-proxy SSO) mode: run the
-                    # same-origin CSRF gate that no-token loopback mode enforces
-                    # below. Without it, /api/v1 mutations rely solely on the
-                    # mvk_session cookie's SameSite=Lax, which does not cover
-                    # sibling-subdomain requests or top-level-navigation vectors.
-                    # The app.py form handlers already call _require_same_origin
-                    # in this mode; this extends the same guard to the API routes.
-                    # Safe methods short-circuit to True inside _is_same_origin.
-                    if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
-                        return JSONResponse(
-                            {"detail": "cross-site request blocked — for your "
-                                       "security, changes must be made from the "
-                                       "Lightwork page itself. Reload the "
-                                       "dashboard and try again."},
-                            status_code=403,
-                        )
-                    return await call_next(request)
-                # Email-invite local sessions (no IdP): a VERIFIED locally-
-                # minted mvk_session cookie satisfies require_auth, under the
-                # same same-origin CSRF gate as the other cookie-session modes.
-                # An absent/invalid cookie falls through to the fail-closed 401
-                # below — the invite-accept route itself is path-exempt above.
-                from .invites import invites_enabled, local_session_principal
-                if invites_enabled() and local_session_principal(request) is not None:
-                    if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
-                        return JSONResponse(
-                            {"detail": "cross-site request blocked — for your "
-                                       "security, changes must be made from the "
-                                       "Lightwork page itself. Reload the "
-                                       "dashboard and try again."},
-                            status_code=403,
-                        )
-                    return await call_next(request)
-            except Exception:  # pragma: no cover - fall through to fail closed
-                pass
-            _auth_metrics.record_auth_failure("require_auth_no_mechanism")
-            return JSONResponse(
-                {"detail": "dashboard require_auth is set but no auth mechanism accepted the request"},
-                status_code=401,
-            )
+        # Any configured identity mechanism disables legacy loopback-as-admin,
+        # even when the separate startup assertion ``dashboard.require_auth``
+        # is unset. The global dependency verifies proxy, OIDC, SAML, or invite
+        # identity and fails closed on unreadable auth configuration.
+        # Resolve through the module so identity-policy changes made by a
+        # deployment/test harness cannot leave this long-lived middleware with
+        # a stale function binding.
+        from . import auth as auth_boundary
+
+        if not auth_boundary.auth_genuinely_off():
+            explicit_oidc_bearer = _configured_oidc_bearer_present(request)
+            if (
+                not explicit_oidc_bearer
+                and not _is_same_origin(request)
+                and _allowed_extension_origin(request) is None
+            ):
+                return JSONResponse(
+                    {"detail": "cross-site request blocked - for your security, "
+                               "changes must be made from the Lightwork page "
+                               "itself. Reload the dashboard and try again."},
+                    status_code=403,
+                )
+            return await call_next(request)
         # Client-bound / enterprise: loopback-trust (no-token) mode is DISABLED.
         # In a hosted/regulated deployment any process sharing the loopback
         # namespace (a sidecar, a co-located container, an SSRF pivot to
@@ -987,6 +997,29 @@ async def bearer_auth(request: Request, call_next):
     # access logs, and any logging proxy in front. Require the
     # ``Authorization: Bearer`` header.
     if header_token and hmac.compare_digest(header_token.encode(), expected.encode()):
+        return await call_next(request)
+    if auth:
+        # A non-static bearer may be an OIDC token in a mixed deployment. Let
+        # the global dependency verify it; malformed/invalid credentials never
+        # fall back to proxy or cookie identity there.
+        if _configured_oidc_bearer_present(request):
+            return await call_next(request)
+        _auth_metrics.record_auth_failure("bad_token")
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    if non_static_auth_configured():
+        # The static operator token composes with proxy/OIDC/SAML/invite browser
+        # identities. Ambient authority remains CSRF-gated; the dependency then
+        # verifies the actual identity and rejects a missing/invalid session.
+        if (
+            not _is_same_origin(request)
+            and _allowed_extension_origin(request) is None
+        ):
+            return JSONResponse(
+                {"detail": "cross-site request blocked - for your security, "
+                           "changes must be made from the Lightwork page "
+                           "itself. Reload the dashboard and try again."},
+                status_code=403,
+            )
         return await call_next(request)
     # The bad/missing-bearer case — the credential-stuffing signal an alert
     # rule watches (a flood here means someone is probing the token).
@@ -1707,30 +1740,36 @@ async def tenants_page(request: Request) -> HTMLResponse:
 
 def _tenant_overview_rows() -> list[dict]:
     """Per-tenant rollup for the multi-tenant view: goals by status (from the
-    tenant's own world DB, when one exists), today's spend, suspended flag.
+    tenant's configured world backend), today's spend, suspended flag.
 
     Fail-soft per tenant: an unreadable world DB or spend ledger yields zero
-    counts/spend, never a 500. A tenant whose world.db doesn't exist yet (no
-    runs) reports empty counts rather than materializing the DB.
+    counts/spend, never a 500. On SQLite a tenant whose world.db doesn't exist
+    yet reports empty counts rather than materializing the DB. Postgres has no
+    local sentinel file, so it is always queried under an explicit tenant
+    scope through the canonical backend selector.
     """
     from maverick.tenant.registry import list_tenants, tenant_spend_today
+    from maverick.world_model_backends import is_postgres_configured
+
+    postgres = is_postgres_configured()
     rows: list[dict] = []
     for t in list_tenants():
         counts: dict[str, int] = {}
         try:
             from maverick.workspace import Workspace
             db = Workspace(t.id).db_path
-            if db.exists():
-                from maverick.world_model import WorldModel
-                wm = WorldModel(db)
-                try:
-                    counts = {
-                        str(r[0]): int(r[1]) for r in wm.conn.execute(
-                            "SELECT status, COUNT(*) FROM goals GROUP BY status"
-                        )
-                    }
-                finally:
-                    wm.close()
+            if postgres or db.exists():
+                from maverick.paths import tenant_scope
+                from maverick.world_model import close_world_if_owned, open_world
+
+                with tenant_scope(tenant=t.id):
+                    wm = open_world()
+                    try:
+                        # Aggregate in the selected backend. Do not decrypt and
+                        # materialize every goal just to render a histogram.
+                        counts = wm.goal_status_counts()
+                    finally:
+                        close_world_if_owned(wm)
         except Exception:  # pragma: no cover -- one bad tenant DB never 500s
             counts = {}
         try:
@@ -2112,25 +2151,35 @@ async def replay_page(request: Request) -> HTMLResponse:
 
     With no ``?goal=<id>`` it lists recent runs (owner-scoped) to pick from.
     """
-    from maverick.world_model import open_world
+    from maverick.world_model import close_world_if_owned, open_world
 
     from .control_plane import build_replay
     raw = (request.query_params.get("goal") or "").strip()
     goal_id = int(raw) if raw.isdigit() else None
     w = open_world()
-    if goal_id is None:
-        goals = w.list_goals(limit=50, order="desc", owner=goal_owner_filter(request))
+    try:
+        if goal_id is None:
+            goals = w.list_goals(
+                limit=50, order="desc", owner=goal_owner_filter(request)
+            )
+            return templates.TemplateResponse(
+                request,
+                "replay.html",
+                {"goal": None, "goals": goals, "replay": None},
+            )
+        goal = w.get_goal(goal_id)
+        if goal is None:
+            raise HTTPException(status_code=404, detail="no such goal")
+        assert_goal_access(request, goal)
+        replay = build_replay(goal_id, window=(goal.created_at, goal.updated_at))
         return templates.TemplateResponse(
-            request, "replay.html", {"goal": None, "goals": goals, "replay": None},
+            request, "replay.html", {"goal": goal, "goals": None, "replay": replay},
         )
-    goal = w.get_goal(goal_id)
-    if goal is None:
-        raise HTTPException(status_code=404, detail="no such goal")
-    assert_goal_access(request, goal)
-    replay = build_replay(goal_id, window=(goal.created_at, goal.updated_at))
-    return templates.TemplateResponse(
-        request, "replay.html", {"goal": goal, "goals": None, "replay": replay},
-    )
+    finally:
+        try:
+            close_world_if_owned(w)
+        except Exception:  # pragma: no cover -- best-effort response teardown
+            pass
 
 
 @app.get("/trust", response_class=HTMLResponse)
@@ -3192,7 +3241,7 @@ async def providers_api() -> JSONResponse:
 async def run_events_firehose(
     websocket: WebSocket,
     goal_id: int,
-    principal: VerifiedPrincipal | None = Depends(require_principal),
+    principal: VerifiedPrincipal | None = Depends(require_websocket_principal_in_context),
 ) -> None:
     """Run-events firehose: stream a goal's events over WebSocket as they land.
 
@@ -3206,7 +3255,7 @@ async def run_events_firehose(
     from fastapi import WebSocketDisconnect
 
     from .auth import websocket_authorized
-    if not websocket_authorized(websocket):
+    if not websocket_authorized(websocket, principal):
         await websocket.close(code=4401)
         return
     await websocket.accept()
@@ -3962,15 +4011,22 @@ def _fire_stored_trigger(
                 raise HTTPException(status_code=409, detail="the flow engine is off")
             from maverick.flow import store as flow_store
 
-            flow = flow_store.load_flow(trigger["flow"])
-            if flow is None:
+            try:
+                published = flow_store.load_published_bundle(trigger["flow"])
+            except flow_store.FlowSnapshotError as exc:
+                raise HTTPException(
+                    status_code=409, detail="trigger flow unavailable"
+                ) from exc
+            if published is None:
                 raise HTTPException(status_code=409, detail="trigger flow unavailable")
+            flow, release = published
             expected_owner = str(trigger.get("flow_owner") or "")
             expected_revision = str(trigger.get("flow_revision") or "")
             if not expected_revision and not auth_genuinely_off():
                 raise HTTPException(status_code=409, detail="trigger flow binding is stale")
             if expected_revision and (
-                flow.owner != expected_owner or flow.revision != expected_revision
+                flow.owner != expected_owner
+                or str(release.get("release_id") or "") != expected_revision
             ):
                 raise HTTPException(status_code=409, detail="trigger flow binding is stale")
             check_goal_rate_limit(request, source="webhook")
@@ -3985,7 +4041,7 @@ def _fire_stored_trigger(
             from maverick_dashboard import automation_queue as aq
 
             try:
-                run_id = aq.enqueue_flow_run(
+                run_id = aq.enqueue_published_flow_run(
                     trigger["flow"],
                     run_data,
                     owner=owner,
@@ -3993,6 +4049,7 @@ def _fire_stored_trigger(
                     channel="api" if user_id else None,
                     user_id=user_id,
                     allowed_suites=allowed_suites,
+                    expected_revision=expected_revision,
                 )
             except flow_store.FlowSnapshotError as exc:
                 raise HTTPException(
@@ -4119,12 +4176,18 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
         inputs = ({str(k): v for k, v in inbound_evt.items()}
                   if isinstance(inbound_evt, dict) else {})
         from maverick_dashboard import automation_queue as aq
-        resume_payload = {
-            "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner,
-            "inputs": inputs}
-        if resume_tenant:
-            resume_payload["tenant"] = resume_tenant
-        aq.queue().enqueue(aq.FLOW_RESUME_KIND, resume_payload)
+        try:
+            aq.enqueue_flow_resume(
+                run.flow_id,
+                run.run_id,
+                owner=run.owner,
+                inputs=inputs,
+                tenant=resume_tenant,
+            )
+        except flow_store.FlowSnapshotError as exc:
+            raise HTTPException(
+                status_code=409, detail="run release is no longer active"
+            ) from exc
         return JSONResponse({"run_id": run.run_id, "status": "resuming"},
                             status_code=202)
 
@@ -4201,21 +4264,51 @@ def _load_paused_approval_run(token: str):
             or str(run.prompt or "") != claim.get("prompt")
             or float(run.updated or 0.0) != float(claim.get("updated", -1.0))):
         return None, "This approval link is for an older approval step.", tenant
+    if (str((run.human or {}).get("assignee") or "") != claim.get("assignee", "")
+            or str(run.owner or "") != claim.get("owner", "")):
+        return None, "This approval link is for a different approver scope.", tenant
     return run, claim["decision"], tenant
+
+
+def _approval_link_actor(request: Request, run) -> str:
+    """Return a provable authorized actor for a signed link, or fail closed."""
+    require_permission(request, "operate")
+    principal = str(caller_principal(request) or "").strip()
+    if not principal:
+        raise HTTPException(
+            status_code=403,
+            detail="sign in with an attributable identity to decide this approval",
+        )
+    aliases = {principal.casefold()}
+    if principal.casefold().startswith("user:") and principal[5:]:
+        subject = principal[5:].casefold()
+        aliases.update({subject, f"@{subject}"})
+    assignee = str((run.human or {}).get("assignee") or "").strip().casefold()
+    if assignee and assignee not in aliases:
+        raise HTTPException(status_code=403, detail="this approval is assigned to someone else")
+    if not assignee and run.owner and principal != run.owner:
+        raise HTTPException(status_code=403, detail="this approval belongs to another user")
+    return principal
 
 
 @app.get("/flow/approve", response_class=HTMLResponse)
 async def flow_approve_confirm(request: Request, token: str = "") -> HTMLResponse:
     """Show a one-click confirmation for a signed approve/reject link. The state
     change happens on the POST (below), not this GET, so an email/link scanner
-    that pre-fetches the URL cannot silently actuate a decision. Auth is the
-    signed token itself (see ``_AUTH_EXEMPT``)."""
+    that pre-fetches the URL cannot silently actuate a decision. The token binds
+    the pause while dashboard authentication proves the approver identity."""
     from maverick import flow
     if not flow.enabled():
         raise HTTPException(status_code=404, detail="the flow engine is off")
     run, decision, _tenant = _load_paused_approval_run(token)
     if run is None:
         return _flow_approve_page("Approval unavailable", decision, status=410)
+    try:
+        _approval_link_actor(request, run)
+    except HTTPException as exc:
+        return _flow_approve_page(
+            "Approval unavailable", str(exc.detail), status=exc.status_code,
+        )
     verb = "approve" if decision == "approved" else "reject"
     name = run.flow_id
     return _flow_approve_page(
@@ -4236,8 +4329,26 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
     run, decision, tenant = _load_paused_approval_run(token)
     if run is None:
         return _flow_approve_page("Approval unavailable", decision, status=410)
+    try:
+        decided_by = _approval_link_actor(request, run)
+    except HTTPException as exc:
+        return _flow_approve_page(
+            "Approval unavailable", str(exc.detail), status=exc.status_code,
+        )
+    from maverick.flow import store as flow_store
+
     from maverick_dashboard import automation_queue as aq
-    aq.enqueue_flow_resume(run.flow_id, run.run_id, decision, run.owner, tenant=tenant)
+    try:
+        aq.enqueue_flow_resume(
+            run.flow_id, run.run_id, decision, run.owner, tenant=tenant,
+            decided_by=decided_by,
+        )
+    except flow_store.FlowSnapshotError:
+        return _flow_approve_page(
+            "Approval unavailable",
+            "This flow release is no longer active.",
+            status=410,
+        )
     verb = "approved" if decision == "approved" else "rejected"
     return _flow_approve_page("Thanks — recorded",
                               f"You {verb} “{run.flow_id}”. It is resuming now; "
@@ -5280,7 +5391,8 @@ async def workflow_builder_page(request: Request, template: str | None = None,
                             "params": list(t.params), "budget_dollars": t.budget_dollars,
                             # Carry the wall-seconds cap so a save round-trip can't
                             # silently reset it to the schema default (3600).
-                            "budget_wall_seconds": t.budget_wall_seconds}
+                            "budget_wall_seconds": t.budget_wall_seconds,
+                            "generation": t.generation}
         except (ValueError, FileNotFoundError):
             edit_prefill = None
     elif template:
@@ -5852,15 +5964,16 @@ async def metrics(request: Request) -> PlainTextResponse:
     try:
         import shutil
 
-        from maverick.world_model import DEFAULT_DB
+        from maverick.world_model import default_db_path
         from maverick.world_model_backends import is_postgres_configured
-        probe = DEFAULT_DB.parent if DEFAULT_DB.parent.exists() else None
+        db_path = default_db_path()
+        probe = db_path.parent if db_path.parent.exists() else None
         usage = shutil.disk_usage(str(probe) if probe else ".")
         # The world-DB-bytes gauge is a SQLite-file metric; on Postgres the size
         # lives in the DB server, not a local file, so emit it only for SQLite
         # rather than report a misleading 0. Disk-free stays useful on both.
         if not is_postgres_configured():
-            db_bytes = DEFAULT_DB.stat().st_size if DEFAULT_DB.exists() else 0
+            db_bytes = db_path.stat().st_size if db_path.exists() else 0
             lines += [
                 "# HELP maverick_world_db_bytes Size of the world.db file on disk",
                 "# TYPE maverick_world_db_bytes gauge",

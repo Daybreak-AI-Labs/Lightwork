@@ -108,9 +108,10 @@ gcloud run deploy lightwork \
   --set-env-vars ANTHROPIC_API_KEY=...   # or Vertex/Gemini via provider config
 ```
 
-**k8s / on-prem:** the same image in a Deployment; mount a PVC at
-`/home/maverick/.maverick` for the world DB + audit chain. SQLite by default;
-Postgres via the `postgres` extra for scale.
+**k8s / on-prem:** the same image in a single-replica control-plane Deployment;
+mount a PVC at `/home/maverick/.maverick` for the world DB + audit chain.
+SQLite is the default; Postgres adds database HA/isolation and supports separate
+remote-worker scale, but not multiple dashboard/serve replicas yet.
 
 Governance + data stay in the customer's tenant; only the model call goes out
 (and even that can be an in-tenant endpoint). That's the whole self-hosted

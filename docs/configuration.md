@@ -351,8 +351,9 @@ eval_tests = []            # readiness needs at least two discriminating tests
 # Readiness additionally requires [self_improvement] enable, a clean learning
 # HALT state, a Git snapshot/budget preflight, and an external sandbox SDK
 # backend (`[sandbox] backend = "ep:<name>"`) that enforces no egress/non-root,
-# bounded output, and authenticated structured test results. Bundled sandboxes
-# are deliberately not DGM-attested. Inspect with `maverick self-modify status`.
+# bounded output, and the controller-owned `maverick.test-evidence.v1` protocol.
+# Bundled sandboxes are deliberately not DGM-attested; stdout/JUnit files do not
+# satisfy this boundary. See `docs/security/dgm-evaluator-evidence.md`.
 
 [domains]                  # specialist-pack behavior (defaults shown)
 discipline = true          # suite operating-discipline appended at spawn

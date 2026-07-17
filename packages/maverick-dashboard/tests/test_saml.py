@@ -126,6 +126,30 @@ def test_extract_identity_maps_nameid_and_attrs():
     assert ident.attributes["groups"] == ["admins"]
 
 
+@pytest.mark.parametrize("name_id", [" alice", "alice ", "alice\n", "x" * 252])
+def test_extract_identity_rejects_invalid_nameid_without_canonicalizing(name_id):
+    class _NID:
+        text = name_id
+
+    class _Response(_FakeResp):
+        name_id = _NID()
+
+    with pytest.raises(saml_mod.SamlUnavailable, match="no NameID"):
+        saml_mod.extract_identity(_Response())
+
+
+def test_extract_identity_accepts_full_principal_length_boundary():
+    subject = "x" * 251
+
+    class _NID:
+        text = subject
+
+    class _Response(_FakeResp):
+        name_id = _NID()
+
+    assert len(saml_mod.extract_identity(_Response()).principal) == 256
+
+
 def test_extract_identity_requires_nameid():
     class _NoNID:
         name_id = None
@@ -212,6 +236,34 @@ def test_mint_session_after_revocation_has_fresh_iat(monkeypatch, tmp_path):
 def test_mint_session_requires_secret():
     with pytest.raises(saml_mod.SamlUnavailable):
         saml_mod.mint_session_cookie("bob", secret="")
+
+
+def test_saml_only_session_reaches_protected_route_and_anonymous_is_denied(
+    _enabled, monkeypatch,
+):
+    """SAML is a complete dashboard auth mode even when OIDC login is off."""
+    from maverick_dashboard import auth, oidc_login
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.delenv("MAVERICK_DASHBOARD_REQUIRE_AUTH", raising=False)
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+    monkeypatch.setattr(auth, "proxy_auth_enabled", lambda: False)
+    monkeypatch.setattr(oidc_login, "login_enabled", lambda: False)
+    monkeypatch.setattr(
+        oidc_login,
+        "load_oidc_config",
+        lambda: types.SimpleNamespace(session_secret=SECRET),
+    )
+
+    anonymous = _client()
+    assert anonymous.get("/api/v1/providers").status_code == 401
+
+    authenticated = _client()
+    authenticated.cookies.set(
+        "mvk_session",
+        saml_mod.mint_session_cookie("alice@example.com", secret=SECRET),
+    )
+    assert authenticated.get("/api/v1/providers").status_code == 200
 
 
 # --- ACS --------------------------------------------------------------------

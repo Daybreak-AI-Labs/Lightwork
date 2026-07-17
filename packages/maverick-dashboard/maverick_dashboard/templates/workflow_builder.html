@@ -584,6 +584,7 @@
     // ---- template form ----
     var wfEditingName = null;   // set when rehydrated via ?edit= (Save overwrites)
     var wfEditWall = null;      // preserved budget_wall_seconds for an edited template
+    var wfEditGeneration = null; // compare-and-swap generation for safe edits
     // Render an API error detail readably. A 422's `detail` is a Pydantic error
     // ARRAY, not a string — assigning it to textContent would print "[object
     // Object]", so flatten it to "field: message" here.
@@ -630,6 +631,9 @@
       // Overwrite only when saving back to the template we opened for edit; a
       // fresh name must not silently clobber an existing one.
       t.overwrite = !!(wfEditingName && t.name === wfEditingName);
+      if (t.overwrite && wfEditGeneration != null) {
+        t.expected_generation = wfEditGeneration;
+      }
       return t;
     }
     async function postTemplate(payload) {
@@ -661,6 +665,7 @@
         var data = r.data;
         setStatus('');
         wfEditingName = data.name;   // subsequent saves overwrite this one
+        wfEditGeneration = data.generation;
         savedMsg.textContent = 'Saved “' + (data.title || data.name) + '” as a reusable workflow'
           + ((data.params && data.params.length) ? ' (parameters: ' + data.params.join(', ') + ').' : '.');
         showSaved('/templates', 'Open Templates');
@@ -1377,6 +1382,7 @@
     } else if (WF_EDIT && WF_EDIT.name) {
       setForm('template');
       wfEditingName = WF_EDIT.name;   // Save overwrites this template
+      wfEditGeneration = WF_EDIT.generation;
       renderDraft(WF_EDIT);
       setStatus('Editing “' + (WF_EDIT.title || WF_EDIT.name) + '” — change it and Save to overwrite (or rename to save a copy).');
     } else if (WF_PREFILL && WF_PREFILL.name) {

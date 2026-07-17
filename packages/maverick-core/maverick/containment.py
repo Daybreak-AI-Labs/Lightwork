@@ -45,12 +45,12 @@ from __future__ import annotations
 
 import logging
 import os
-import stat
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ._envparse import is_truthy
+from .file_lock import ensure_private_directory
 
 log = logging.getLogger(__name__)
 
@@ -239,7 +239,9 @@ def make_ephemeral_workdir(prefix: str = "maverick-contained-") -> EphemeralWork
     """
     tmp = tempfile.TemporaryDirectory(prefix=prefix)
     path = Path(tmp.name)
-    os.chmod(path, stat.S_IRWXU)  # 0700
+    # Nothing is placed in the scratch directory until its effective Windows
+    # DACL / POSIX mode has been verified as owner-only.
+    ensure_private_directory(path)
     return EphemeralWorkdir(path=path, _tmp=tmp)
 
 

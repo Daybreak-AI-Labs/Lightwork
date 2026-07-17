@@ -31,6 +31,13 @@ def _current_revision(flow_id: str) -> str:
     return str(flow.revision or "") if flow is not None else ""
 
 
+def _current_cohort(flow_id: str) -> str:
+    from .store import flow_cohort, load_flow
+
+    flow = load_flow(flow_id)
+    return flow_cohort(flow) if flow is not None else ""
+
+
 def record(
     flow_id: str,
     node_id: str,
@@ -38,12 +45,14 @@ def record(
     value: float,
     *,
     revision: str | None = None,
+    cohort: str | None = None,
 ) -> None:
     """Append one node outcome. ``value`` in [0, 1]. Best-effort; never raises."""
     append_row(_path(), {
         "ts": time.time(), "flow_id": str(flow_id), "node_id": str(node_id),
         "kind": str(kind), "value": clamp01(value),
         "revision": str(_current_revision(flow_id) if revision is None else revision),
+        "cohort": str(_current_cohort(flow_id) if cohort is None else cohort),
     })
 
 
@@ -52,16 +61,23 @@ def _read_rows() -> list[dict]:
 
 
 def series(
-    flow_id: str, node_id: str, *, revision: str | None = None,
+    flow_id: str,
+    node_id: str,
+    *,
+    revision: str | None = None,
+    cohort: str | None = None,
 ) -> list[tuple[float, float]]:
     """Time-ordered ``(ts, value)`` outcomes for one node -- the raw signal the
     measurement pass splits around an applied change to score before vs. after."""
     out: list[tuple[float, float]] = []
     expected_revision = _current_revision(flow_id) if revision is None else str(revision)
+    expected_cohort = _current_cohort(flow_id) if cohort is None else str(cohort)
     for r in _read_rows():
         if r.get("flow_id") != flow_id or str(r.get("node_id")) != str(node_id):
             continue
         if str(r.get("revision") or "") != expected_revision:
+            continue
+        if str(r.get("cohort") or "") != expected_cohort:
             continue
         try:
             out.append((float(r.get("ts") or 0.0), float(r.get("value"))))
@@ -71,16 +87,24 @@ def series(
     return out
 
 
-def stats(flow_id: str, *, revision: str | None = None) -> dict[str, dict]:
+def stats(
+    flow_id: str,
+    *,
+    revision: str | None = None,
+    cohort: str | None = None,
+) -> dict[str, dict]:
     """Per-node aggregate for a flow: ``{node_id: {n, mean, kind}}``."""
     sums: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
     kinds: dict[str, str] = {}
     expected_revision = _current_revision(flow_id) if revision is None else str(revision)
+    expected_cohort = _current_cohort(flow_id) if cohort is None else str(cohort)
     for r in _read_rows():
         if r.get("flow_id") != flow_id:
             continue
         if str(r.get("revision") or "") != expected_revision:
+            continue
+        if str(r.get("cohort") or "") != expected_cohort:
             continue
         nid = str(r.get("node_id"))
         try:

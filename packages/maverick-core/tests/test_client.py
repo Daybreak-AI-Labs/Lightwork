@@ -27,6 +27,43 @@ def test_client_id_invalid_rejected(monkeypatch):
     assert client.client_id() is None
 
 
+def test_strict_client_id_rejects_invalid_binding(monkeypatch):
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "Acme")
+    with pytest.raises(client.ClientBindingError, match="invalid"):
+        client.strict_client_id()
+
+
+def test_strict_client_id_allows_explicit_unbound_legacy_mode(monkeypatch):
+    monkeypatch.delenv("MAVERICK_CLIENT_ID", raising=False)
+    monkeypatch.setattr(client, "_raw_client_id", lambda: "")
+    assert client.strict_client_id() is None
+
+
+def test_invalid_client_cannot_resolve_shared_storage(monkeypatch, tmp_path):
+    from maverick.paths import data_dir
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "Acme")
+    with pytest.raises(client.ClientBindingError, match="invalid"):
+        data_dir("world.db")
+    # Doctor/status has an explicitly non-storage diagnostic path and can still
+    # show the operator where the legacy root would be while reporting config.
+    assert client.data_root() == tmp_path
+
+
+def test_corrupt_client_binding_cannot_resolve_shared_storage(monkeypatch):
+    from maverick.paths import data_dir
+
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr(
+        client,
+        "_raw_client_id",
+        lambda: (_ for _ in ()).throw(client.ClientBindingError("corrupt binding")),
+    )
+    with pytest.raises(client.ClientBindingError, match="corrupt binding"):
+        data_dir("world.db")
+
+
 def test_client_id_none_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_CLIENT_ID", raising=False)
     monkeypatch.setattr(client, "_resolve", lambda: None)

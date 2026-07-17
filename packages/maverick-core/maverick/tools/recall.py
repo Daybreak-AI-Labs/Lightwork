@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..world_model import DEFAULT_DB, WorldModel
+from ..world_model import WorldModel, close_world_if_owned
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -139,7 +139,7 @@ def _list_candidate_goals(world: WorldModel, include_running: bool) -> list:
 def recall_past_goals(
     query: str,
     *,
-    db_path: Path = DEFAULT_DB,
+    db_path: Path | None = None,
     num_results: int = 5,
     include_running: bool = False,
     world: WorldModel | None = None,
@@ -167,7 +167,10 @@ def recall_past_goals(
         return scored[:num_results]
     finally:
         if own_world:
-            world.close()
+            # A no-path open under tenant/client scope returns the canonical
+            # process-cached world. Closing it here would poison that cache for
+            # every later request; close only non-cached, caller-owned handles.
+            close_world_if_owned(world)
 
 
 def _run_recall(args: dict[str, Any]) -> str:

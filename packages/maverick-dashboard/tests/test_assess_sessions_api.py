@@ -62,15 +62,19 @@ def test_get_unknown_record_404():
 
 def test_post_followups_flips_status_and_validates():
     s = _saved_session()
+    current = client.get(f"/api/v1/assess/sessions/{s.id}").json()
     resp = client.post(f"/api/v1/assess/sessions/{s.id}/followups",
                        json={"questions": ["Which sub-processors?",
-                                           "DPA countersigned?"]})
+                                           "DPA countersigned?"],
+                             "expected_revision": current["revision"]})
     assert resp.status_code == 200, resp.text
     rec = resp.json()
     assert rec["status"] == "needs_more"
     assert len(rec["followups"]) == 2
     # Validation: empty list 422; unknown id 404.
     assert client.post(f"/api/v1/assess/sessions/{s.id}/followups",
-                       json={"questions": []}).status_code == 422
+                       json={"questions": [],
+                             "expected_revision": rec["revision"]}).status_code == 422
     assert client.post("/api/v1/assess/sessions/nope/followups",
-                       json={"questions": ["Q?"]}).status_code == 404
+                       json={"questions": ["Q?"],
+                             "expected_revision": 0}).status_code == 404

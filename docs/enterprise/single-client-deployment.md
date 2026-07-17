@@ -69,11 +69,16 @@ Sequenced by leverage. Each phase is independently shippable.
 - `maverick backup create` snapshots the **client-scoped data root** — world DB
   (via the SQLite **online backup API**, consistent under WAL), signed **audit
   chain + anchors + keys**, memory, fleet, and the managed trust registry — into
-  a portable `.tgz` with an integrity manifest (client id, time, schema, per-file
-  SHA-256). `maverick backup info` inspects it; `maverick backup restore`
-  applies it.
-- **Fail-closed restore**: refuses a backup whose client id differs from this
-  deployment's (`--force` to override); extraction is path-traversal safe.
+  a portable `.tgz` with a HMAC-authenticated manifest (client id, time, schema,
+  exact size and SHA-256 per file). Set a separately custodied, 32-byte
+  `MAVERICK_BACKUP_SIGNING_KEY` on both the active and standby nodes; the key is
+  never included in the archive. `maverick backup info` authenticates and
+  inspects it; `maverick backup restore` authenticates, verifies, and applies it.
+- **Fail-closed restore**: refuses an unsigned, forged, oversized, structurally
+  unsafe, wrong-client, or forward-schema archive. `--force` can override only
+  client/schema compatibility, never authentication. Restore uses private
+  staging plus a durable transaction journal and rolls every file and SQLite
+  sidecar back if publication is interrupted.
 - **Warm standby**: cron `backup create`, ship the `.tgz` offsite + to a standby
   host, `backup restore` + start on failover (see runbook §3.6).
 
@@ -244,9 +249,15 @@ appear directly under `…/.maverick/`.
 ### 3.6 Backup & warm-standby failover
 
 ```bash
+# Provision this once through the host secret manager; use the same secret on
+# the active and standby nodes. Example generation: `openssl rand -hex 32`.
+export MAVERICK_BACKUP_SIGNING_KEY='<64 hex characters from secret manager>'
+
 # Nightly consistent backup, shipped offsite + to the standby host.
 sudo -u maverick MAVERICK_HOME=/var/lib/maverick/.maverick \
-  MAVERICK_CLIENT_ID=acme-corp maverick backup create --out /backups/acme.tgz
+  MAVERICK_CLIENT_ID=acme-corp \
+  MAVERICK_BACKUP_SIGNING_KEY="$MAVERICK_BACKUP_SIGNING_KEY" \
+  maverick backup create --out /backups/acme.tgz
 aws s3 cp /backups/acme.tgz s3://acme-maverick-dr/   # or rsync to standby
 
 # On the STANDBY (same MAVERICK_CLIENT_ID), restore + start on failover:
@@ -255,8 +266,9 @@ maverick backup restore /backups/acme.tgz            # fail-closed if client mis
 systemctl start maverick-dashboard
 ```
 
-The restore refuses a backup whose `client_id` differs from the standby's
-binding — a client's data can never be restored onto another client's node.
+The restore first authenticates the manifest with the standby's
+`MAVERICK_BACKUP_SIGNING_KEY`, then refuses a backup whose `client_id` differs
+from the standby's binding. The CLI has no unsigned-restore bypass.
 
 ### 3.7 Offboard a client (right-to-erasure)
 
