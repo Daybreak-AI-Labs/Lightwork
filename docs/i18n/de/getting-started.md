@@ -137,7 +137,10 @@ Spezialist von der ersten Ausführung an für seine Aufgabe ausgerüstet ist.
 ## Spracheingabe (eingebaut, offline)
 
 Der Mikrofon-Button im Dashboard und das Tool `transcribe_audio` funktionieren
-ohne Provider-Schlüssel über ein lokales Whisper-Modell:
+ohne Provider-Schlüssel: die lokale Whisper-Engine wird mit dem
+Dashboard-Paket ausgeliefert, und das checksummen-geprüfte Modell wird beim
+ersten Dashboard-Start automatisch geladen (übersprungen bei Egress-Lock oder
+mit `[voice] auto_fetch_model = false`). Die CLI zeigt die Details:
 
 ```bash
 maverick voice setup    # lädt das checksummen-geprüfte Modell (~148 MB)
@@ -145,12 +148,10 @@ maverick voice status   # zeigt, welche Speech-to-Text-Backends nutzbar sind
 maverick voice transcribe clip.wav   # Schnelltest der Pipeline
 ```
 
-Installiere das `whisper.cpp`-Binary (`brew install whisper-cpp` oder ein
-Release von github.com/ggml-org/whisper.cpp) — Lightwork findet es im PATH.
-Mit `[voice] stt_backend = "local"` bleibt Audio auch dann auf der Maschine,
-wenn OpenAI/Groq-Schlüssel konfiguriert sind; `[voice] auto_fetch_model =
-true` (eine Wizard-Option) lädt das Modell erst bei der ersten Nutzung statt
-im Voraus.
+Lieber eine System-Engine? Ein `whisper.cpp`-Binary im PATH
+(`brew install whisper-cpp`) oder faster-whisper fügen sich in dieselbe
+Kette ein. Mit `[voice] stt_backend = "local"` bleibt Audio auch dann auf der
+Maschine, wenn OpenAI/Groq-Schlüssel konfiguriert sind.
 
 ## Modelle oder Provider wechseln
 

@@ -132,14 +132,50 @@ def test_locate_model_uses_any_installed_ggml(monkeypatch, tmp_path):
     assert voice_models.locate_model() == hand_copied
 
 
-def test_locate_model_none_without_auto_fetch(monkeypatch, tmp_path):
+def test_locate_model_none_when_auto_fetch_disabled(monkeypatch, tmp_path):
     _home(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_VOICE_AUTO_FETCH", "0")
 
     def _boom(url, timeout=0.0):
-        raise AssertionError("auto-fetch is opt-in; no network by default")
+        raise AssertionError("auto-fetch disabled; must not touch the network")
 
     monkeypatch.setattr("urllib.request.urlopen", _boom)
     assert voice_models.locate_model() is None
+
+
+def test_auto_fetch_defaults_on_for_standard_deployments(monkeypatch, tmp_path):
+    _home(monkeypatch, tmp_path)
+    assert voice_models.auto_fetch_enabled() is True
+
+
+def test_auto_fetch_defaults_off_under_egress_lock(monkeypatch, tmp_path):
+    """An egress-locked box must not phone Hugging Face because someone
+    clicked a mic — the enterprise boundary flips the default."""
+    _home(monkeypatch, tmp_path)
+    import maverick.enterprise as enterprise
+    monkeypatch.setattr(enterprise, "enterprise_enabled", lambda: True)
+    assert voice_models.auto_fetch_enabled() is False
+
+
+def test_auto_fetch_explicit_config_beats_posture(monkeypatch, tmp_path):
+    _home(monkeypatch, tmp_path)
+    import maverick.enterprise as enterprise
+    (tmp_path / "config.toml").write_text(
+        "[voice]\nauto_fetch_model = true\n", encoding="utf-8")
+    monkeypatch.setattr(enterprise, "enterprise_enabled", lambda: True)
+    assert voice_models.auto_fetch_enabled() is True
+    (tmp_path / "config.toml").write_text(
+        "[voice]\nauto_fetch_model = false\n", encoding="utf-8")
+    monkeypatch.setattr(enterprise, "enterprise_enabled", lambda: False)
+    assert voice_models.auto_fetch_enabled() is False
+
+
+def test_auto_fetch_env_beats_everything(monkeypatch, tmp_path):
+    _home(monkeypatch, tmp_path)
+    (tmp_path / "config.toml").write_text(
+        "[voice]\nauto_fetch_model = true\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_VOICE_AUTO_FETCH", "0")
+    assert voice_models.auto_fetch_enabled() is False
 
 
 def test_locate_model_auto_fetch_downloads_configured(monkeypatch, tmp_path):

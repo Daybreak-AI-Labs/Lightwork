@@ -52,26 +52,30 @@ def test_advanced_all_off_persists_default_on_learning_opt_out(tmp_path, monkeyp
     assert tomllib.loads(cfg)["reflexion"]["enable"] is False
 
 
-def test_voice_optins_share_one_voice_table(tmp_path, monkeypatch):
-    """voice_commands=False + voice_local_stt=True must merge into ONE [voice]
-    table (two would be a duplicate-key TOML error) with both knobs set."""
+def test_voice_declines_share_one_voice_table(tmp_path, monkeypatch):
+    """voice_commands=False + voice_local_stt=False must merge into ONE
+    [voice] table (two would be a duplicate-key TOML error). Both knobs are
+    default-on, so only declines write lines."""
     cfg = _write(tmp_path, monkeypatch, {
-        "voice_commands": False, "voice_local_stt": True,
+        "voice_commands": False, "voice_local_stt": False,
     })
     assert cfg.count("[voice]") == 1
     parsed = tomllib.loads(cfg)
     assert parsed["voice"]["dashboard_commands"] is False
-    assert parsed["voice"]["auto_fetch_model"] is True
+    assert parsed["voice"]["auto_fetch_model"] is False
 
 
-def test_voice_local_stt_alone_writes_auto_fetch(tmp_path, monkeypatch):
-    cfg = _write(tmp_path, monkeypatch, {"voice_local_stt": True})
+def test_voice_local_stt_decline_writes_auto_fetch_off(tmp_path, monkeypatch):
+    cfg = _write(tmp_path, monkeypatch, {"voice_local_stt": False})
     parsed = tomllib.loads(cfg)
-    assert parsed["voice"] == {"auto_fetch_model": True}
+    assert parsed["voice"] == {"auto_fetch_model": False}
 
 
 def test_voice_defaults_write_no_voice_table(tmp_path, monkeypatch):
-    cfg = _write(tmp_path, monkeypatch, {"voice_commands": True})
+    # Default-on accepts (mic + built-in local STT) need no config at all.
+    cfg = _write(tmp_path, monkeypatch, {
+        "voice_commands": True, "voice_local_stt": True,
+    })
     assert "[voice]" not in cfg
 
 

@@ -1565,10 +1565,10 @@ def pick_advanced() -> dict[str, Any]:
         ),
         "voice_local_stt": _q_confirm(
             "  Built-in local speech-to-text? Auto-fetch a checksum-verified "
-            "Whisper model (~148 MB) on first use so voice works offline with "
-            "no provider key (needs the whisper.cpp binary; `maverick voice "
-            "setup` fetches the model up front instead). OFF by default.",
-            default=False,
+            "Whisper model (~148 MB, at dashboard startup) so the mic works "
+            "offline with no provider key — the engine ships with the "
+            "dashboard. ON by default (egress-locked deployments stay off).",
+            default=True,
         ),
         "attach_any_mime": _q_confirm(
             "Accept attachments of ANY declared type? Text, images, audio, video, "
@@ -3747,10 +3747,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("voice_commands") is False:
         # Default-on; only a decline needs a line.
         _voice_lines.append("dashboard_commands = false")
-    if advanced.get("voice_local_stt"):
-        # Built-in local STT: fetch the pinned Whisper model on first use
-        # (tools/voice.py whisper.cpp backend via maverick.voice_models).
-        _voice_lines.append("auto_fetch_model = true")
+    if advanced.get("voice_local_stt") is False:
+        # Built-in local STT model auto-fetch is default-on (egress-locked
+        # deployments already default off); only a decline needs a line.
+        _voice_lines.append("auto_fetch_model = false")
     if _voice_lines:
         # ONE [voice] table -- two would be a duplicate-key TOML error.
         lines.append("")

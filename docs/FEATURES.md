@@ -755,10 +755,13 @@ here.
   `arxiv`, `semantic_scholar`, `wikipedia`, `hackernews`, `youtube`.
 - **Media** — `view_image`, `view_video`, `pdf_reader`, `ocr`, `voice`
   (transcribe/speak — STT backends: OpenAI/Groq Whisper keys, local
-  faster-whisper, and a **built-in offline path**: a local whisper.cpp
-  binary + checksum-pinned GGML model managed by `voice_models.py`
-  (`maverick voice setup|status|transcribe`; opt-in first-use auto-fetch via
-  `[voice] auto_fetch_model`; deployment-wide routing via `[voice]
+  faster-whisper, and a **built-in offline path**: the pywhispercpp engine
+  (whisper.cpp wheels, a maverick-dashboard dependency — dashboard installs
+  transcribe out of the box) or a local whisper.cpp binary, both loading the
+  checksum-pinned GGML model managed by `voice_models.py`
+  (`maverick voice setup|status|transcribe`; auto-fetch ON by default and
+  OFF under the egress lock, override via `[voice] auto_fetch_model`;
+  deployment-wide routing via `[voice]
   stt_backend`, where `local` keeps audio on-machine even with keys set) —
   with **voice persona presets** (`[voice.personas]`:
   named backend+voice bundles selected per call) and **multi-language voice**
@@ -2388,9 +2391,12 @@ tested without spawning py-spy.
   transcript source (finalized vs in-flight, word-boundary trimming);
   **dashboard voice commands** (`POST /api/v1/voice/transcribe` + a mic
   button on the chat composer): record a spoken goal in the browser
-  (MediaRecorder), transcribe it server-side through the kernel STT backends
-  (OpenAI/Groq Whisper, local faster-whisper, or the built-in local
-  whisper.cpp engine — `maverick voice setup` — via `tools/voice.py`), and
+  (MediaRecorder), re-encode it to 16 kHz WAV client-side (`_voice_mic.js` —
+  no server ffmpeg needed), transcribe it server-side through the kernel STT
+  backends (OpenAI/Groq Whisper, local faster-whisper, or the built-in local
+  whisper.cpp engine, warmed at dashboard startup with a 503+Retry-After
+  "warming" handshake while the first-run model download finishes — via
+  `tools/voice.py`), and
   fill the goal field for review — speech never auto-submits; falls back to
   the browser's own speech recognition when no STT backend is configured;
   on by default, off via `[voice] dashboard_commands = false` /

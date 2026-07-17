@@ -148,13 +148,25 @@ def verify_model(path: Path) -> bool | None:
 
 
 def auto_fetch_enabled() -> bool:
-    """Opt-in runtime download of the configured model on first transcription.
-    OFF by default: a server must not surprise-download 150 MB mid-request
-    unless the operator (or the wizard) said so."""
+    """Runtime download of the configured model on first use / warm-up.
+
+    ON by default so the dashboard mic works with zero setup — the dashboard
+    warm-up fetches at startup, not mid-request. Egress-locked deployments
+    (enterprise boundary / compliance floors) default OFF: a locked box must
+    not phone Hugging Face because someone clicked a mic. An explicit
+    ``MAVERICK_VOICE_AUTO_FETCH`` env or ``[voice] auto_fetch_model`` config
+    value always wins, in either direction."""
     raw = (os.environ.get("MAVERICK_VOICE_AUTO_FETCH") or "").strip().lower()
     if raw:
         return raw not in {"0", "false", "no", "off"}
-    return bool(_voice_cfg().get("auto_fetch_model", False))
+    cfg = _voice_cfg()
+    if "auto_fetch_model" in cfg:
+        return bool(cfg["auto_fetch_model"])
+    try:
+        from .enterprise import enterprise_enabled
+        return not enterprise_enabled()
+    except Exception:  # posture probe must never break voice paths
+        return True
 
 
 def download_model(

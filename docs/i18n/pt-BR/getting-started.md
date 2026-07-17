@@ -137,7 +137,10 @@ envelope limitado do pacote.)
 ## Entrada de voz (integrada, offline)
 
 O botão de microfone do painel e a ferramenta `transcribe_audio` funcionam sem
-chave de provedor por meio de um modelo Whisper local:
+chave de provedor: o motor Whisper local vem junto com o pacote do painel, e
+o modelo (verificado por checksum) é baixado automaticamente na primeira vez
+que o painel inicia (pulado em implantações com bloqueio de egresso, ou com
+`[voice] auto_fetch_model = false`). A CLI mostra os detalhes:
 
 ```bash
 maverick voice setup    # baixa o modelo verificado por checksum (~148 MB)
@@ -145,12 +148,10 @@ maverick voice status   # mostra quais backends de fala-para-texto estão dispon
 maverick voice transcribe clip.wav   # teste rápido do pipeline
 ```
 
-Instale o binário `whisper.cpp` (`brew install whisper-cpp`, ou uma release de
-github.com/ggml-org/whisper.cpp) e o Lightwork o encontra no PATH. Defina
-`[voice] stt_backend = "local"` para manter o áudio na máquina mesmo com
-chaves OpenAI/Groq configuradas; `[voice] auto_fetch_model = true` (opção do
-assistente de instalação) baixa o modelo no primeiro uso em vez de
-antecipadamente.
+Prefere um motor do sistema? Um binário `whisper.cpp` no PATH
+(`brew install whisper-cpp`) ou o faster-whisper entram na mesma cadeia.
+Defina `[voice] stt_backend = "local"` para manter o áudio na máquina mesmo
+com chaves OpenAI/Groq configuradas.
 
 ## Trocar de modelos ou provedores
 
