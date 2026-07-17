@@ -1890,14 +1890,15 @@ async def privacy_page(request: Request) -> HTMLResponse:
     # page still works without them.
     from maverick import privacy_ops
     records = {"enabled": privacy_ops.enabled(),
-               "dpa": [], "ai": [], "ropa": [], "dsar": []}
+               "dpa": [], "ai": [], "ropa": [], "dsar": [], "incidents": []}
     if records["enabled"]:
         records["dpa"] = privacy_ops.list_dpa_reviews()
         records["ai"] = privacy_ops.list_ai_systems()
         records["ropa"] = privacy_ops.list_ropa()
         records["dsar"] = privacy_ops.list_dsars()
+        records["incidents"] = privacy_ops.list_incidents()
         for rows in (records["dpa"], records["ai"], records["ropa"],
-                     records["dsar"]):
+                     records["dsar"], records["incidents"]):
             for r in rows:
                 created = float(r.get("created_at") or 0)
                 r["created"] = (_time.strftime("%Y-%m-%d",
@@ -1908,6 +1909,11 @@ async def privacy_page(request: Request) -> HTMLResponse:
             if r.get("status") in ("open", "awaiting_erasure"))
         records["dsar_overdue"] = sum(
             1 for r in records["dsar"] if r.get("overdue"))
+        records["incidents_open"] = sum(
+            1 for r in records["incidents"]
+            if r.get("status") in ("open", "notify"))
+        records["incidents_breached"] = sum(
+            1 for r in records["incidents"] if r.get("clock_breached"))
     ctx["records"] = records
     return templates.TemplateResponse(request, "privacy.html", ctx)
 

@@ -338,3 +338,52 @@ class TestDsarIntake:
         # No subject anywhere -> no request opened.
         assert privacy_ops.open_dsar_from_message(
             "please delete my data thanks") is None
+
+
+class TestIncidentRegister:
+    """Art. 33/34: a 72-hour clock the register tracks, and a notification
+    decision that stays a documented human call either way."""
+
+    def test_open_starts_the_72h_clock(self):
+        r = privacy_ops.open_incident(
+            "Misdirected owner statement batch", severity="high",
+            categories="contact details, account balances",
+            affected_estimate="~120 owners", reported_by="ops")
+        assert r["status"] == "open"
+        listed = privacy_ops.list_incidents()[0]
+        assert 70 <= listed["hours_left"] <= 72
+        assert listed["clock_breached"] is False
+        with pytest.raises(ValueError):
+            privacy_ops.open_incident("x", severity="catastrophic")
+        with pytest.raises(ValueError):
+            privacy_ops.open_incident("   ")
+
+    def test_notification_decision_documents_both_ways(self):
+        r = privacy_ops.open_incident("Lost badge with cached emails")
+        doc = privacy_ops.decide_incident_notification(
+            r["id"], False, rationale="device encrypted, remotely wiped; "
+            "no risk to rights and freedoms", decided_by="dpo")
+        assert doc["status"] == "documented"
+        assert doc["notification"]["notifiable"] is False
+        assert "encrypted" in doc["notification"]["rationale"]
+        r2 = privacy_ops.open_incident("Processor breach at Initech",
+                                       severity="high")
+        notify = privacy_ops.decide_incident_notification(
+            r2["id"], True, rationale="personal data exfiltrated",
+            decided_by="dpo")
+        assert notify["status"] == "notify"
+        closed = privacy_ops.close_incident(r2["id"], closed_by="dpo")
+        assert closed["status"] == "closed"
+        assert privacy_ops.decide_incident_notification("nope", True) is None
+
+    def test_clock_breach_flags_only_undecided_open_incidents(self, monkeypatch):
+        import time as _t
+        undecided = privacy_ops.open_incident("Slow-burn misconfig")
+        decided = privacy_ops.open_incident("Contained laptop loss")
+        privacy_ops.decide_incident_notification(decided["id"], False,
+                                                 rationale="contained")
+        real = _t.time
+        monkeypatch.setattr(_t, "time", lambda: real() + 80 * 3600)
+        listed = {x["id"]: x for x in privacy_ops.list_incidents()}
+        assert listed[undecided["id"]]["clock_breached"] is True
+        assert listed[decided["id"]]["clock_breached"] is False

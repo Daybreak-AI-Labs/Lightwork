@@ -662,6 +662,24 @@ class DsarIn(BaseModel):
     channel: str = Field("", max_length=64)
 
 
+class IncidentIn(BaseModel):
+    """Open a privacy-incident record; the Art. 33 72-hour clock starts at
+    discovery. Whether it is a notifiable breach stays a separate, human
+    decision."""
+    title: str = Field(..., min_length=1, max_length=200)
+    severity: str = Field("medium", pattern="^(low|medium|high)$")
+    description: str = Field("", max_length=4000)
+    categories: str = Field("", max_length=500)
+    affected_estimate: str = Field("", max_length=100)
+
+
+class IncidentNotifyIn(BaseModel):
+    """The documented human call on Art. 33/34 notification -- both
+    directions require a rationale (Art. 33(5) covers the 'no' too)."""
+    notifiable: bool
+    rationale: str = Field(..., min_length=1, max_length=2000)
+
+
 class DsarFromMessageIn(BaseModel):
     """An inbound message (email/chat/web form) to triage into a tracked
     data-subject request. Detection is deterministic; no request is opened

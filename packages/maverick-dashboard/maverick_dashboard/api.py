@@ -82,6 +82,8 @@ from .api_schemas import (
     HaltIn,
     ImportRunIn,
     ImportRunOut,
+    IncidentIn,
+    IncidentNotifyIn,
     JDDraftIn,
     JDMatchIn,
     LearningToggleIn,
@@ -1142,6 +1144,64 @@ async def close_dsar_request(request: Request, request_id: str) -> dict:
     record = await run_in_threadpool(ops.close_dsar, request_id[:64])
     if record is None:
         raise HTTPException(status_code=404, detail="no such request")
+    return record
+
+
+@router.get("/privacy/incidents")
+async def list_privacy_incidents(request: Request) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    return {"incidents": await run_in_threadpool(ops.list_incidents)}
+
+
+@router.post("/privacy/incidents", status_code=201)
+async def open_privacy_incident(request: Request, body: IncidentIn) -> dict:
+    """Open an incident: the Art. 33 clock starts now; the register tracks
+    it and never notifies anyone itself."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(
+        ops.open_incident, body.title, severity=body.severity,
+        description=body.description, categories=body.categories,
+        affected_estimate=body.affected_estimate)
+    try:
+        from maverick.audit import record as audit_record
+        audit_record("PRIVACY_INCIDENT_OPENED", agent="operator",
+                     incident=record["id"], severity=body.severity)
+    except Exception:  # pragma: no cover -- audit is best-effort here
+        pass
+    return record
+
+
+@router.post("/privacy/incidents/{incident_id}/notification")
+async def decide_privacy_incident(request: Request, incident_id: str,
+                                  body: IncidentNotifyIn) -> dict:
+    """Record the human Art. 33/34 call -- notifiable or documented-why-not.
+    Audited either way."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(
+        ops.decide_incident_notification, incident_id[:64], body.notifiable,
+        rationale=body.rationale)
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such incident")
+    try:
+        from maverick.audit import record as audit_record
+        audit_record("PRIVACY_INCIDENT_DECISION", agent="operator",
+                     incident=incident_id[:64], notifiable=body.notifiable)
+    except Exception:  # pragma: no cover -- audit is best-effort here
+        pass
+    return record
+
+
+@router.post("/privacy/incidents/{incident_id}/close")
+async def close_privacy_incident(request: Request,
+                                 incident_id: str) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(ops.close_incident, incident_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such incident")
     return record
 
 

@@ -37,6 +37,7 @@
       <button class="btn" data-tab="ai" type="button">AI registry ({{ records.ai | length }})</button>
       <button class="btn" data-tab="ropa" type="button">RoPA ({{ records.ropa | length }})</button>
       <button class="btn" data-tab="dsar" type="button">DSARs ({{ records.dsar | length }})</button>
+      <button class="btn" data-tab="incidents" type="button">Incidents ({{ records.incidents | length }}){% if records.incidents_breached %} <span class="badge blocked">{{ records.incidents_breached }} past 72h</span>{% endif %}</button>
     </div>
 
     <div class="pw-tab" id="pw-tab-dpa">
@@ -284,6 +285,71 @@
           clock and the fulfillment machinery (real exports, deliberate erasure) are wired in.</p>
       {% endif %}
     </div>
+    <div class="pw-tab" id="pw-tab-incidents" hidden>
+      <form class="pw-form" data-endpoint="/api/v1/privacy/incidents">
+        <div class="pw-form-row">
+          <label><span>What happened</span>
+            <input class="ctl" name="title" required maxlength="200" placeholder="Misdirected owner statement batch"></label>
+          <label><span>Severity</span>
+            <select class="ctl" name="severity">
+              <option value="low">low</option>
+              <option value="medium" selected>medium</option>
+              <option value="high">high</option>
+            </select></label>
+        </div>
+        <div class="pw-form-row">
+          <label><span>Data categories involved</span>
+            <input class="ctl" name="categories" maxlength="500" placeholder="contact details, balances"></label>
+          <label><span>Affected (estimate)</span>
+            <input class="ctl" name="affected_estimate" maxlength="100" placeholder="~120 owners"></label>
+        </div>
+        <label><span>Description (optional)</span>
+          <textarea class="ctl" name="description" rows="2"
+            placeholder="What is known so far — the Art. 33 72-hour clock starts when you open the record."></textarea></label>
+        <div class="pw-form-actions">
+          <button class="btn btn--primary" type="submit">Open incident (72-hour clock starts)</button>
+          <span class="pw-form-err" role="alert"></span>
+        </div>
+      </form>
+      {% if records.incidents %}
+      <div class="pw-scroll">
+      <table>
+        <thead><tr><th scope="col">incident</th><th scope="col">severity</th>
+          <th scope="col">status</th><th scope="col">Art. 33 clock</th>
+          <th scope="col">decision</th><th scope="col">actions</th></tr></thead>
+        <tbody>
+          {% for r in records.incidents %}
+          <tr>
+            <td>{{ r.title }}{% if r.categories %}<br><span class="muted" style="font-size:var(--text-xs);">{{ r.categories }}{% if r.affected_estimate %} · {{ r.affected_estimate }}{% endif %}</span>{% endif %}</td>
+            <td><span class="badge {{ 'blocked' if r.severity == 'high' else 'warn' if r.severity == 'medium' else 'done' }}">{{ r.severity }}</span></td>
+            <td><span class="badge {{ 'blocked' if r.status == 'notify' else 'done' if r.status in ('documented', 'closed') else 'info' }}">{{ r.status }}</span></td>
+            <td {% if r.clock_breached %}class="pw-due-warn"{% endif %}>
+              {% if r.notification %}decided{% elif r.clock_breached %}{{ (0 - r.hours_left) }}h past deadline{% else %}{{ r.hours_left }}h left{% endif %}</td>
+            <td class="pw-clip" {% if r.notification %}title="{{ r.notification.rationale }}"{% endif %}>
+              {% if r.notification %}{{ 'notify authority' if r.notification.notifiable else 'no notification' }} — {{ r.notification.rationale }}{% else %}—{% endif %}</td>
+            <td>
+              {% if not r.notification %}
+                <input class="ctl pw-inc-rationale" data-id="{{ r.id }}" maxlength="2000"
+                       placeholder="rationale" aria-label="Notification rationale" style="max-width:11rem;">
+                <button class="btn pw-inc-act" data-id="{{ r.id }}" data-notify="true" type="button">Notify</button>
+                <button class="btn pw-inc-act" data-id="{{ r.id }}" data-notify="false" type="button">Document</button>
+              {% endif %}
+              {% if r.status != 'closed' %}
+                <button class="btn pw-inc-close" data-id="{{ r.id }}" type="button">Close</button>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      <p class="muted" style="font-size:var(--text-xs);">The register tracks the Art. 33 clock and
+        documents the decision both ways (Art. 33(5)) — it never notifies anyone itself.</p>
+      {% else %}
+        <p class="muted">No incidents recorded. Opening one starts the Art. 33 72-hour clock;
+          whether it is a notifiable breach stays a documented human decision.</p>
+      {% endif %}
+    </div>
   </div>
   {% endif %}
 
@@ -430,6 +496,35 @@
         btn.disabled = false;
         window.alert(e.message);
       });
+    });
+  });
+
+  // Incident register: record the Art. 33 call / close.
+  document.querySelectorAll('.pw-inc-act').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var rat = document.querySelector('.pw-inc-rationale[data-id="' + btn.dataset.id + '"]');
+      if (!rat || !rat.value.trim()) {
+        window.alert('Write the rationale first — Art. 33(5) documents the decision both ways.');
+        return;
+      }
+      btn.disabled = true;
+      fetch('/api/v1/privacy/incidents/' + encodeURIComponent(btn.dataset.id) + '/notification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notifiable: btn.dataset.notify === 'true',
+                               rationale: rat.value.trim() })
+      }).then(function (r) {
+        if (r.ok) { location.reload(); return; }
+        btn.disabled = false;
+        window.alert('HTTP ' + r.status);
+      });
+    });
+  });
+  document.querySelectorAll('.pw-inc-close').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      post('/api/v1/privacy/incidents/' + encodeURIComponent(btn.dataset.id) +
+           '/close').catch(function (e) { btn.disabled = false; window.alert(e.message); });
     });
   });
 
