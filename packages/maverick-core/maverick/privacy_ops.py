@@ -39,6 +39,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import re
 import stat
@@ -55,6 +56,18 @@ _MAX_DOCX_ENTRIES = 1024
 _MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 _MAX_DOCX_DOCUMENT_XML_BYTES = 8 * 1024 * 1024
 _MAX_DOCX_COMPRESSION_RATIO = 200
+_MAX_DOCUMENT_INPUT_BYTES = 16 * 1024 * 1024
+_MAX_PDF_INPUT_BYTES = _MAX_DOCUMENT_INPUT_BYTES
+_MAX_PDF_OBJECTS = 4096
+_MAX_PDF_STREAMS = 256
+_MAX_PDF_COMPRESSED_STREAM_BYTES = 4 * 1024 * 1024
+_MAX_PDF_EXPANDED_STREAM_BYTES = 8 * 1024 * 1024
+_MAX_PDF_AGGREGATE_STREAM_BYTES = 16 * 1024 * 1024
+_MAX_PDF_DECODED_TEXT_BYTES = 2 * 1024 * 1024
+_MAX_PDF_TEXT_OPERATORS = 100_000
+_MAX_PDF_CONTENT_TOKENS = 250_000
+_MAX_AUDIT_PENDING_RECEIPTS = 128
+_MAX_AUDIT_DELIVERIES_PER_FLUSH = 16
 _RECORD_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 
 
@@ -229,6 +242,136 @@ class RecordConflict(RuntimeError):
     """A caller tried to replace a stale privacy record revision."""
 
 
+class AuditOutboxError(RuntimeError):
+    """A privacy mutation cannot preserve a valid bounded audit outbox."""
+
+
+class PrivacyStateError(RuntimeError):
+    """A present governed privacy record cannot be trusted or recovered."""
+
+
+def _validated_audit_queue(record: dict) -> list[dict]:
+    """Return a shape- and size-validated copy of an embedded outbox."""
+    raw = record.get("_audit_pending")
+    if raw is None:
+        return []
+    if isinstance(raw, dict):
+        queue = [raw]
+    elif isinstance(raw, list):
+        queue = list(raw)
+    else:
+        raise AuditOutboxError("privacy audit outbox has invalid shape")
+    if len(queue) > _MAX_AUDIT_PENDING_RECEIPTS:
+        raise AuditOutboxError("privacy audit outbox exceeds receipt cap")
+    event_ids: set[str] = set()
+    for receipt in queue:
+        if not isinstance(receipt, dict):
+            raise AuditOutboxError("privacy audit outbox receipt is not an object")
+        event_id = receipt.get("event_id")
+        action = receipt.get("action")
+        actor = receipt.get("actor")
+        prepared_at = receipt.get("prepared_at")
+        if not isinstance(event_id, str) or not 1 <= len(event_id) <= 128:
+            raise AuditOutboxError("privacy audit receipt has invalid event id")
+        if event_id in event_ids:
+            raise AuditOutboxError("privacy audit outbox has duplicate event id")
+        event_ids.add(event_id)
+        if not isinstance(action, str) or not 1 <= len(action) <= 64:
+            raise AuditOutboxError("privacy audit receipt has invalid action")
+        if not isinstance(actor, str) or not 1 <= len(actor) <= 256:
+            raise AuditOutboxError("privacy audit receipt has invalid actor")
+        if isinstance(prepared_at, bool):
+            raise AuditOutboxError("privacy audit receipt has invalid timestamp")
+        try:
+            timestamp = float(prepared_at)
+        except (TypeError, ValueError) as exc:
+            raise AuditOutboxError(
+                "privacy audit receipt has invalid timestamp"
+            ) from exc
+        if not math.isfinite(timestamp) or timestamp <= 0:
+            raise AuditOutboxError("privacy audit receipt has invalid timestamp")
+        digest = receipt.get("record_sha256")
+        if digest is not None and (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        ):
+            raise AuditOutboxError("privacy audit receipt has invalid record digest")
+        revision = receipt.get("revision")
+        if revision is not None and (
+            isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or revision < 0
+        ):
+            raise AuditOutboxError("privacy audit receipt has invalid revision")
+        status = receipt.get("status")
+        if status is not None and (
+            not isinstance(status, str) or len(status) > 64
+        ):
+            raise AuditOutboxError("privacy audit receipt has invalid status")
+    return queue
+
+
+def _validate_document_evidence_record(record: dict) -> None:
+    """Verify bounded provenance metadata before a DPA record is served."""
+    evidence = record.get("document_evidence")
+    if evidence is None:
+        return
+    if not isinstance(evidence, dict):
+        raise PrivacyStateError("document evidence is invalid")
+    if evidence.get("schema") != "lightwork.document-extraction-evidence.v1":
+        raise PrivacyStateError("document evidence schema is invalid")
+    for key in (
+        "source_binding_sha256",
+        "document_sha256",
+        "extracted_text_sha256",
+        "binding_sha256",
+    ):
+        if not isinstance(evidence.get(key), str) or re.fullmatch(
+            r"[0-9a-f]{64}", evidence[key]
+        ) is None:
+            raise PrivacyStateError("document evidence digest is invalid")
+    bounded_strings = {
+        "source": 64,
+        "resolved_mime": 255,
+        "method": 64,
+        "scope": 64,
+        "confidence": 32,
+    }
+    for key, limit in bounded_strings.items():
+        value = evidence.get(key)
+        if not isinstance(value, str) or not 1 <= len(value) <= limit:
+            raise PrivacyStateError("document evidence metadata is invalid")
+    size = evidence.get("document_size_bytes")
+    if (
+        not isinstance(size, int)
+        or isinstance(size, bool)
+        or not 0 <= size <= _MAX_DOCUMENT_INPUT_BYTES
+    ):
+        raise PrivacyStateError("document evidence size is invalid")
+    if not isinstance(evidence.get("review_required"), bool):
+        raise PrivacyStateError("document evidence review policy is invalid")
+    streams = evidence.get("referenced_streams")
+    if streams is not None and (
+        not isinstance(streams, int)
+        or isinstance(streams, bool)
+        or not 0 <= streams <= _MAX_PDF_STREAMS
+    ):
+        raise PrivacyStateError("document evidence stream count is invalid")
+    bound = dict(evidence)
+    claimed = bound.pop("binding_sha256")
+    if _canonical_sha256(bound) != claimed:
+        raise PrivacyStateError("document evidence binding does not verify")
+    if (
+        record.get("extraction_confidence") != evidence["confidence"]
+        or record.get("review_required") is not evidence["review_required"]
+        or (
+            evidence["confidence"] == "untrusted"
+            and evidence["review_required"] is not True
+        )
+    ):
+        raise PrivacyStateError("document evidence policy binding is invalid")
+
+
 class _RecordStore:
     """Tenant-scoped, atomic JSON records with per-record strict locking.
 
@@ -274,18 +417,45 @@ class _RecordStore:
                 raise PermissionError(
                     "privacy record identity does not match its store path"
                 )
+            try:
+                _validated_audit_queue(value)
+            except AuditOutboxError as exc:
+                raise PermissionError(
+                    "privacy record has an invalid audit outbox"
+                ) from exc
+            self._revision(value)
+            _validate_document_evidence_record(value)
             return value
         except PermissionError:
             raise
-        except (FileNotFoundError, OSError, UnicodeError, ValueError):
+        except FileNotFoundError:
             return None
+        except PrivacyStateError:
+            raise
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise PrivacyStateError(
+                "privacy record is unreadable or corrupt") from exc
 
     @staticmethod
     def _revision(record: dict | None) -> int:
-        try:
-            return max(0, int((record or {}).get("revision") or 0))
-        except (TypeError, ValueError):
+        if record is None or "revision" not in record:
             return 0
+        revision = record.get("revision")
+        if (
+            not isinstance(revision, int)
+            or isinstance(revision, bool)
+            or revision < 0
+        ):
+            raise PermissionError("privacy record revision is invalid")
+        return revision
+
+    @staticmethod
+    def _expected_revision(value: int | None) -> int | None:
+        if value is None:
+            return None
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError("expected privacy record revision is invalid")
+        return value
 
     @classmethod
     def _write_path(
@@ -314,23 +484,19 @@ class _RecordStore:
         # Bind each durable outbox receipt to the exact logical version and
         # status committed by the mutation that created it.  A later retry
         # must not accidentally describe the record's newer state.
-        raw_pending = saved.get("_audit_pending")
-        pending_items = (
-            raw_pending
-            if isinstance(raw_pending, list)
-            else [raw_pending] if isinstance(raw_pending, dict) else []
-        )
+        pending_items = _validated_audit_queue(saved)
         if pending_items:
             stamped: list[dict] = []
             for item in pending_items:
-                if not isinstance(item, dict):
-                    continue
                 receipt = dict(item)
                 receipt.setdefault("revision", saved["revision"])
                 receipt.setdefault("status", str(saved.get("status") or ""))
                 receipt.setdefault("record_sha256", record_sha256)
                 stamped.append(receipt)
             saved["_audit_pending"] = stamped
+            _validated_audit_queue(saved)
+        else:
+            saved.pop("_audit_pending", None)
         atomic_write_text(
             path,
             json.dumps(saved, indent=2, default=str),
@@ -350,10 +516,8 @@ class _RecordStore:
         with cross_process_lock(path, strict=True):
             current = self._read_path(path)
             current_revision = self._revision(current)
-            if (
-                expected_revision is not None
-                and current_revision != int(expected_revision)
-            ):
+            expected = self._expected_revision(expected_revision)
+            if expected is not None and current_revision != expected:
                 raise RecordConflict(
                     f"privacy record changed (expected revision "
                     f"{expected_revision}, found {current_revision})"
@@ -466,10 +630,8 @@ class _RecordStore:
             if record is None:
                 return None
             current_revision = self._revision(record)
-            if (
-                expected_revision is not None
-                and current_revision != int(expected_revision)
-            ):
+            expected = self._expected_revision(expected_revision)
+            if expected is not None and current_revision != expected:
                 raise RecordConflict(
                     f"privacy record changed (expected revision "
                     f"{expected_revision}, found {current_revision})"
@@ -513,13 +675,12 @@ def _pending_audit(action: str, actor: str = "") -> dict:
 
 def _queue_audit(record: dict, action: str, actor: str = "") -> None:
     """Append an event to a record's durable outbox without losing a racer."""
-    raw = record.get("_audit_pending")
-    if isinstance(raw, list):
-        queue = [item for item in raw if isinstance(item, dict)]
-    elif isinstance(raw, dict):  # migrate an in-flight single-receipt record
-        queue = [raw]
-    else:
-        queue = []
+    queue = _validated_audit_queue(record)
+    if len(queue) >= _MAX_AUDIT_PENDING_RECEIPTS:
+        # Never discard an older receipt to make a new mutation appear
+        # auditable. The surrounding locked update aborts without publishing
+        # any of the caller's changes.
+        raise AuditOutboxError("privacy audit outbox is full")
     queue.append(_pending_audit(action, actor))
     record["_audit_pending"] = queue
 
@@ -546,20 +707,14 @@ def _audit_mutation(
 
     def _flush(current: dict) -> None:
         nonlocal outcome
-        raw = current.get("_audit_pending")
-        if isinstance(raw, list):
-            queue = [item for item in raw if isinstance(item, dict)]
-        elif isinstance(raw, dict):
-            queue = [raw]
-        else:
-            queue = []
+        queue = _validated_audit_queue(current)
         if _status is not None:
             _status["had_pending"] = bool(queue)
         if not queue:
             outcome = current
             return
         remaining = list(queue)
-        for pending in queue:
+        for pending in queue[:_MAX_AUDIT_DELIVERIES_PER_FLUSH]:
             try:
                 from .audit import EventKind
                 from .audit import record as audit_record
@@ -604,7 +759,9 @@ def _audit_mutation(
         outcome = current
 
     saved = store.update(record_id, _flush, metadata_only=True)
-    return saved or outcome or record
+    if saved is None:
+        raise PrivacyStateError("privacy record disappeared during audit commit")
+    return saved
 
 
 _AUDIT_RETRY_STATE_LOCK = threading.Lock()
@@ -657,12 +814,30 @@ def retry_pending_audits(*, limit: int = 100) -> int:
                 _AUDIT_RETRY_CURSORS[record_type] = filename
                 visited += 1
                 status: dict[str, bool] = {}
-                result = _audit_mutation(
-                    store,
-                    record_type,
-                    {"id": record_id},
-                    _status=status,
-                )
+                try:
+                    result = _audit_mutation(
+                        store,
+                        record_type,
+                        {"id": record_id},
+                        _status=status,
+                    )
+                except (
+                    AuditOutboxError,
+                    PermissionError,
+                    PrivacyStateError,
+                    ValueError,
+                ) as exc:
+                    # A corrupt record cannot consume an unbounded scan or
+                    # prevent rotation to other stores. Keep it untouched for
+                    # operator repair and continue within the visit budget.
+                    log.error(
+                        "invalid privacy audit outbox for %s/%s (%s)",
+                        record_type,
+                        record_id,
+                        type(exc).__name__,
+                    )
+                    _AUDIT_RETRY_STORE_OFFSET = (index + 1) % len(stores)
+                    continue
                 if status.get("had_pending") and not isinstance(
                     result.get("_audit_pending"),
                     (dict, list),
@@ -749,7 +924,8 @@ def _find(text_lower: str, patterns: tuple[str, ...],
 
 
 def review_dpa(vendor: str, text: str, *, document_name: str = "",
-               reviewed_by: str = "") -> dict:
+               reviewed_by: str = "",
+               _document_evidence: dict | None = None) -> dict:
     """Review DPA ``text`` against the Art. 28 checklist. Deterministic and
     explainable: every verdict carries the matched excerpt (or its absence).
     Returns the saved record."""
@@ -800,21 +976,84 @@ def review_dpa(vendor: str, text: str, *, document_name: str = "",
         "residual_risk": _rollup(residual_sev),
         "chars_reviewed": len(body),
     }
+    if _document_evidence:
+        evidence = dict(_document_evidence)
+        confidence = str(evidence.get("confidence") or "unknown")
+        # A best-effort extractor can support a human review, never silently
+        # turn heuristic findings into an authoritative approval.  In
+        # particular, the intentionally incomplete PDF parser is always
+        # untrusted and review-gated even if a caller supplies bad metadata.
+        review_required = bool(evidence.get("review_required", True))
+        if confidence == "untrusted":
+            review_required = True
+        evidence["review_required"] = review_required
+        evidence_without_binding = {
+            key: value for key, value in evidence.items()
+            if key != "binding_sha256"
+        }
+        evidence["binding_sha256"] = _canonical_sha256(
+            evidence_without_binding)
+        record["document_evidence"] = evidence
+        record["extraction_confidence"] = confidence
+        record["review_required"] = review_required
+        _validate_document_evidence_record(record)
     _queue_audit(record, "create", reviewed_by)
     saved = _DPA.save(record, expected_revision=0)
     return _audit_mutation(_DPA, "dpa_review", saved)
 
 
-_PDF_LITERAL = re.compile(rb"\((?:\\.|[^\\()])*\)")
 _PDF_ESCAPES = {b"n": b"\n", b"r": b"\r", b"t": b"\t", b"b": b"\b",
                 b"f": b"\f", b"(": b"(", b")": b")", b"\\": b"\\"}
+_PDF_OBJECT_HEADER = re.compile(
+    rb"(?m)^[ \t]*(\d{1,10})[ \t]+(\d{1,10})[ \t]+obj[ \t]*"
+    rb"(?:\r\n|\n|\r)"
+)
+_PDF_END_OBJECT = re.compile(rb"(?m)^[ \t]*endobj\b")
+_PDF_STREAM_START = re.compile(
+    rb"(?m)^[ \t]*stream[ \t]*(?:\r\n|\n|\r)"
+)
+_PDF_STREAM_TAIL = re.compile(
+    rb"(?:\r\n|\n|\r)[ \t]*endstream[ \t]*(?:\r\n|\n|\r)"
+    rb"[ \t]*endobj\b"
+)
+_PDF_DIRECT_LENGTH = re.compile(rb"/Length\s+(\d{1,10})\b")
+_PDF_TRAILER_TOKEN = re.compile(
+    rb"(?m)^[ \t]*trailer[ \t]*(?:\r\n|\n|\r)"
+)
+_PDF_TRAILER_DICTIONARY = re.compile(
+    rb"[ \t\r\n]*(<<(?:(?!<<|>>).)*>>)",
+    re.DOTALL,
+)
+_PDF_TRAILER_TAIL = re.compile(
+    rb"[ \t\r\n]*startxref[ \t]*(?:\r\n|\n|\r)[ \t]*\d+"
+    rb"[ \t]*(?:\r\n|\n|\r)[ \t]*%%EOF[ \t\r\n]*\Z"
+)
+_PDF_TRAILER_ROOT = re.compile(rb"/Root\s+(\d+\s+\d+\s+R)\b")
+_PDF_DIRECT_FILTER = re.compile(rb"/Filter\s*/(FlateDecode|Fl)\b")
+_PDF_NUMBER = re.compile(rb"[+-]?(?:\d+(?:\.\d*)?|\.\d+)\Z")
+_PDF_CATALOG = re.compile(rb"/Type\s*/Catalog\b")
+_PDF_PAGES_NODE = re.compile(rb"/Type\s*/Pages\b")
+_PDF_PAGE = re.compile(rb"/Type\s*/Page(?!s)\b")
+_PDF_ROOT_PAGES = re.compile(rb"/Pages\s+(\d+\s+\d+\s+R)\b")
+_PDF_KIDS = re.compile(rb"/Kids\s*\[((?:[^\]]|\\.)*?)\]", re.DOTALL)
+_PDF_CONTENTS = re.compile(
+    rb"/Contents\s*(?:\[((?:[^\]]|\\.)*?)\]|(\d+\s+\d+\s+R))",
+    re.DOTALL,
+)
+_PDF_REFERENCE = re.compile(rb"(\d{1,10})\s+(\d{1,10})\s+R\b")
 
 
-def _pdf_literal_bytes(lit: bytes) -> bytes:
+class _PdfExtractionRejected(ValueError):
+    """Malformed or resource-exhausting best-effort PDF extraction."""
+
+
+def _pdf_literal_bytes(lit: bytes, *, max_output: int | None = None) -> bytes:
     """Decode one PDF literal string ``(...)`` including escapes/octals."""
     out = bytearray()
     i, end = 1, len(lit) - 1
     while i < end:
+        if max_output is not None and len(out) >= max_output:
+            raise _PdfExtractionRejected("PDF literal exceeds decoded text limit")
         c = lit[i:i + 1]
         if c == b"\\" and i + 1 < end:
             nxt = lit[i + 1:i + 2]
@@ -836,59 +1075,591 @@ def _pdf_literal_bytes(lit: bytes) -> bytes:
     return bytes(out)
 
 
-def _pdf_text(data: bytes) -> str:
+def _pdf_hex_bytes(value: bytes, *, max_output: int) -> bytes:
+    digits = re.sub(rb"\s", b"", value)
+    if len(digits) % 2:
+        digits += b"0"
+    if len(digits) // 2 > max_output:
+        raise _PdfExtractionRejected("PDF decoded text exceeds limit")
+    try:
+        return bytes.fromhex(digits.decode())
+    except ValueError:  # pragma: no cover - regex admits only hex
+        return b""
+
+
+def _pdf_literal_token(data: bytes, start: int) -> tuple[bytes, int]:
+    """Read one non-nested PDF literal token, preserving its delimiters."""
+    index = start + 1
+    while index < len(data):
+        current = data[index]
+        if current == 0x5C:  # backslash escape
+            if index + 1 >= len(data):
+                raise _PdfExtractionRejected("unterminated PDF literal escape")
+            index += 2
+            continue
+        if current == 0x28:
+            # Nested literals are valid PDF, but accepting them requires a
+            # complete lexer to avoid recognizing operator-looking inner data.
+            raise _PdfExtractionRejected("nested PDF literals are unsupported")
+        if current == 0x29:
+            return data[start:index + 1], index + 1
+        index += 1
+    raise _PdfExtractionRejected("unterminated PDF literal")
+
+
+def _pdf_hex_token(data: bytes, start: int) -> tuple[bytes, int]:
+    if start + 1 < len(data) and data[start + 1] == 0x3C:
+        raise _PdfExtractionRejected("PDF content dictionaries are unsupported")
+    end = data.find(b">", start + 1)
+    if end < 0:
+        raise _PdfExtractionRejected("unterminated PDF hex string")
+    value = data[start + 1:end]
+    if re.fullmatch(rb"[0-9A-Fa-f\s]*", value) is None:
+        raise _PdfExtractionRejected("invalid PDF hex string")
+    return value, end + 1
+
+
+def _pdf_content_tokens(data: bytes) -> list[tuple[str, bytes]]:
+    """Lex a bounded, conservative subset of a PDF content stream."""
+    tokens: list[tuple[str, bytes]] = []
+    whitespace = b"\x00\x09\x0a\x0c\x0d\x20"
+    delimiters = b"()<>[]{}/%"
+    index = 0
+
+    def append(kind: str, value: bytes = b"") -> None:
+        if len(tokens) >= _MAX_PDF_CONTENT_TOKENS:
+            raise _PdfExtractionRejected("PDF content token count exceeds limit")
+        tokens.append((kind, value))
+
+    while index < len(data):
+        current = data[index]
+        if current in whitespace:
+            index += 1
+            continue
+        if current == 0x25:  # comments are deliberately unsupported
+            raise _PdfExtractionRejected("PDF content comments are unsupported")
+        if current == 0x28:
+            value, index = _pdf_literal_token(data, index)
+            append("literal", value)
+            continue
+        if current == 0x3C:
+            value, index = _pdf_hex_token(data, index)
+            append("hex", value)
+            continue
+        if current == 0x5B:
+            append("array_start")
+            index += 1
+            continue
+        if current == 0x5D:
+            append("array_end")
+            index += 1
+            continue
+        if current in b")>{}":
+            raise _PdfExtractionRejected("unbalanced PDF content delimiter")
+
+        start = index
+        if current == 0x2F:  # name token
+            index += 1
+        while (
+            index < len(data)
+            and data[index] not in whitespace
+            and data[index] not in delimiters
+        ):
+            index += 1
+        if index == start:
+            raise _PdfExtractionRejected("unsupported PDF content delimiter")
+        append("word", data[start:index])
+    return tokens
+
+
+def _decode_pdf_text_token(kind: str, value: bytes, max_output: int) -> bytes:
+    if kind == "literal":
+        return _pdf_literal_bytes(value, max_output=max_output)
+    if kind == "hex":
+        return _pdf_hex_bytes(value, max_output=max_output)
+    raise _PdfExtractionRejected("invalid PDF text operand")
+
+
+def _pdf_text_object_transition(
+    kind: str,
+    value: bytes,
+    in_text_object: bool,
+) -> tuple[bool, bool]:
+    """Validate structural operators; return ``(new_state, consumed)``."""
+    if kind != "word":
+        return in_text_object, False
+    if value in (b"BI", b"ID", b"EI"):
+        raise _PdfExtractionRejected("PDF inline images are unsupported")
+    if value == b"BT":
+        if in_text_object:
+            raise _PdfExtractionRejected("nested PDF text object")
+        return True, True
+    if value == b"ET":
+        if not in_text_object:
+            raise _PdfExtractionRejected("unbalanced PDF text object")
+        return False, True
+    if value in (b"Tj", b"TJ", b"'"):
+        message = (
+            "orphan PDF text operator"
+            if in_text_object
+            else "text operator outside PDF text object"
+        )
+        raise _PdfExtractionRejected(message)
+    return in_text_object, False
+
+
+def _pdf_tj_array_piece(
+    tokens: list[tuple[str, bytes]],
+    start: int,
+    *,
+    max_output: int,
+) -> tuple[bytes | None, int]:
+    """Decode one top-level TJ array or skip a non-TJ array operand."""
+    end = start + 1
+    while end < len(tokens) and tokens[end][0] != "array_end":
+        if tokens[end][0] == "array_start":
+            raise _PdfExtractionRejected("nested PDF arrays are unsupported")
+        end += 1
+    if end >= len(tokens):
+        raise _PdfExtractionRejected("unterminated PDF content array")
+    after = tokens[end + 1] if end + 1 < len(tokens) else None
+    if after != ("word", b"TJ"):
+        return None, end + 1
+
+    combined = bytearray()
+    for item_kind, item_value in tokens[start + 1:end]:
+        if item_kind in ("literal", "hex"):
+            combined.extend(_decode_pdf_text_token(
+                item_kind,
+                item_value,
+                max(0, max_output - len(combined)),
+            ))
+        elif item_kind != "word" or _PDF_NUMBER.fullmatch(item_value) is None:
+            raise _PdfExtractionRejected("invalid PDF TJ array")
+    return bytes(combined), end + 2
+
+
+def _pdf_stream_text_pieces(
+    data: bytes,
+    *,
+    max_output: int,
+    max_operators: int,
+    has_prior_output: bool,
+) -> tuple[list[bytes], int]:
+    """Recognize text-showing operators only at top-level token boundaries."""
+    tokens = _pdf_content_tokens(data)
+    pieces: list[bytes] = []
+    used = 0
+    operators = 0
+    in_text_object = False
+
+    def output_budget() -> int:
+        separator = 1 if has_prior_output or pieces else 0
+        return max(0, max_output - used - separator)
+
+    def append_piece(piece: bytes) -> None:
+        nonlocal used
+        if not piece:
+            return
+        separator = 1 if has_prior_output or pieces else 0
+        if used + separator + len(piece) > max_output:
+            raise _PdfExtractionRejected("PDF decoded text exceeds limit")
+        pieces.append(piece)
+        used += separator + len(piece)
+
+    def count_operator() -> None:
+        nonlocal operators
+        operators += 1
+        if operators > max_operators:
+            raise _PdfExtractionRejected("PDF text operator count exceeds limit")
+
+    index = 0
+    while index < len(tokens):
+        kind, value = tokens[index]
+        in_text_object, consumed = _pdf_text_object_transition(
+            kind,
+            value,
+            in_text_object,
+        )
+        if consumed:
+            index += 1
+            continue
+        following = tokens[index + 1] if index + 1 < len(tokens) else None
+        if (
+            kind in ("literal", "hex")
+            and following is not None
+            and following[0] == "word"
+            and following[1] in (b"Tj", b"'")
+        ):
+            if not in_text_object:
+                raise _PdfExtractionRejected("text outside PDF text object")
+            count_operator()
+            append_piece(_decode_pdf_text_token(kind, value, output_budget()))
+            index += 2
+            continue
+        if kind == "array_start":
+            piece, next_index = _pdf_tj_array_piece(
+                tokens,
+                index,
+                max_output=output_budget(),
+            )
+            if piece is not None:
+                if not in_text_object:
+                    raise _PdfExtractionRejected("text outside PDF text object")
+                count_operator()
+                append_piece(piece)
+            index = next_index
+            continue
+        if kind == "array_end":
+            raise _PdfExtractionRejected("unbalanced PDF content array")
+        index += 1
+    if in_text_object:
+        raise _PdfExtractionRejected("unterminated PDF text object")
+    return pieces, operators
+
+
+def _bounded_pdf_stream(dictionary: bytes, raw: bytes) -> bytes:
+    """Expand one content stream without allowing zlib output overflow."""
+    filter_markers = len(re.findall(rb"/Filter\b", dictionary))
+    if re.search(rb"/DecodeParms?\b", dictionary):
+        raise _PdfExtractionRejected("unsupported PDF stream DecodeParms")
+    if filter_markers == 0:
+        if len(raw) > _MAX_PDF_EXPANDED_STREAM_BYTES:
+            raise _PdfExtractionRejected("PDF content stream exceeds size limit")
+        return raw
+    filters = _PDF_DIRECT_FILTER.findall(dictionary)
+    if filter_markers != 1 or len(filters) != 1:
+        raise _PdfExtractionRejected("unsupported or ambiguous PDF stream filter")
+    if len(raw) > _MAX_PDF_COMPRESSED_STREAM_BYTES:
+        raise _PdfExtractionRejected("compressed PDF stream exceeds size limit")
+
+    import zlib
+
+    try:
+        inflater = zlib.decompressobj()
+        expanded = inflater.decompress(raw, _MAX_PDF_EXPANDED_STREAM_BYTES + 1)
+    except zlib.error as exc:
+        raise _PdfExtractionRejected("invalid compressed PDF stream") from exc
+    if (
+        len(expanded) > _MAX_PDF_EXPANDED_STREAM_BYTES
+        or inflater.unconsumed_tail
+        or not inflater.eof
+        or inflater.unused_data.strip()
+    ):
+        # ``not eof`` also rejects truncated streams instead of silently
+        # scoring whatever prefix happened to decompress.
+        raise _PdfExtractionRejected("compressed PDF stream overflow or truncation")
+    return expanded
+
+
+def _strict_pdf_dictionary(value: bytes) -> bytes:
+    """Accept only dictionary shells that cannot hide structural tokens."""
+    dictionary = value.strip()
+    if (
+        not dictionary.startswith(b"<<")
+        or not dictionary.endswith(b">>")
+        or b"(" in dictionary
+        or b")" in dictionary
+        or b"%" in dictionary
+    ):
+        # Literal strings and comments can legally contain line-oriented
+        # ``endobj`` text. Supporting them without a complete PDF lexer would
+        # let data bytes masquerade as structure, so this extractor under-reads
+        # those objects deliberately.
+        raise _PdfExtractionRejected("unsupported or ambiguous PDF dictionary")
+    return dictionary
+
+
+def _pdf_object_map(
+    data: bytes,
+) -> tuple[dict[tuple[int, int], tuple[bytes, bytes | None]], int]:
+    """Parse bounded objects using direct stream lengths."""
+    objects: dict[tuple[int, int], tuple[bytes, bytes | None]] = {}
+    stream_count = 0
+    cursor = 0
+    while header := _PDF_OBJECT_HEADER.search(data, cursor):
+        if _PDF_TRAILER_TOKEN.search(data, cursor, header.start()):
+            raise _PdfExtractionRejected("PDF has an incremental trailer")
+        if len(objects) >= _MAX_PDF_OBJECTS:
+            raise _PdfExtractionRejected("PDF object count exceeds limit")
+        key = (int(header.group(1)), int(header.group(2)))
+        if key in objects:
+            raise _PdfExtractionRejected("duplicate PDF object identity")
+
+        body_start = header.end()
+        stream = _PDF_STREAM_START.search(data, body_start)
+        end_object = _PDF_END_OBJECT.search(data, body_start)
+        next_header = _PDF_OBJECT_HEADER.search(data, body_start)
+        if end_object is None:
+            raise _PdfExtractionRejected("PDF object has no endobj marker")
+        structural_end = min(
+            item.start() for item in (stream, end_object) if item is not None
+        )
+        if next_header is not None and next_header.start() < structural_end:
+            raise _PdfExtractionRejected("nested PDF object header")
+
+        raw: bytes | None = None
+        if stream is not None and stream.start() < end_object.start():
+            dictionary = _strict_pdf_dictionary(data[body_start:stream.start()])
+            lengths = _PDF_DIRECT_LENGTH.findall(dictionary)
+            if len(lengths) != 1:
+                raise _PdfExtractionRejected(
+                    "PDF streams require one direct Length value"
+                )
+            raw_start = stream.end()
+            raw_end = raw_start + int(lengths[0])
+            if raw_end > len(data):
+                raise _PdfExtractionRejected("PDF stream length exceeds input")
+            tail = _PDF_STREAM_TAIL.match(data, raw_end)
+            if tail is None:
+                raise _PdfExtractionRejected("PDF stream length is inconsistent")
+            raw = data[raw_start:raw_end]
+            stream_count += 1
+            if stream_count > _MAX_PDF_STREAMS:
+                raise _PdfExtractionRejected("PDF stream count exceeds limit")
+            cursor = tail.end()
+        else:
+            dictionary = _strict_pdf_dictionary(data[body_start:end_object.start()])
+            cursor = end_object.end()
+        objects[key] = (dictionary, raw)
+    return objects, cursor
+
+
+def _pdf_trailer_root(data: bytes, object_end: int) -> tuple[int, int]:
+    """Bind extraction to the one final trailer's direct Root reference."""
+    suffix = data[object_end:]
+    trailers = list(_PDF_TRAILER_TOKEN.finditer(suffix))
+    if len(trailers) != 1:
+        raise _PdfExtractionRejected("PDF requires one final trailer")
+    trailer = trailers[0]
+    dictionary_match = _PDF_TRAILER_DICTIONARY.match(suffix, trailer.end())
+    if dictionary_match is None:
+        raise _PdfExtractionRejected("PDF trailer dictionary is unsupported")
+    dictionary = _strict_pdf_dictionary(dictionary_match.group(1))
+    if _PDF_TRAILER_TAIL.fullmatch(suffix[dictionary_match.end():]) is None:
+        raise _PdfExtractionRejected("PDF trailer is not final or is ambiguous")
+    roots = _PDF_TRAILER_ROOT.findall(dictionary)
+    if len(roots) != 1 or len(re.findall(rb"/Root\b", dictionary)) != 1:
+        raise _PdfExtractionRejected("PDF trailer has ambiguous Root")
+    root_match = _PDF_REFERENCE.fullmatch(roots[0])
+    if root_match is None:  # pragma: no cover - constrained by root regex
+        raise _PdfExtractionRejected("invalid PDF trailer Root")
+    return int(root_match.group(1)), int(root_match.group(2))
+
+
+def _pdf_rooted_pages(
+    objects: dict[tuple[int, int], tuple[bytes, bytes | None]],
+    catalog_key: tuple[int, int],
+) -> list[bytes]:
+    """Walk only the Page tree rooted by the trailer-selected Catalog."""
+    catalog_object = objects.get(catalog_key)
+    if catalog_object is None or catalog_object[1] is not None:
+        raise _PdfExtractionRejected("PDF Root references invalid Catalog")
+    catalog = catalog_object[0]
+    if not _PDF_CATALOG.search(catalog):
+        raise _PdfExtractionRejected("PDF Root is not an inspectable Catalog")
+    roots = _PDF_ROOT_PAGES.findall(catalog)
+    if len(roots) != 1 or len(re.findall(rb"/Pages\b", catalog)) != 1:
+        raise _PdfExtractionRejected("PDF Catalog has ambiguous Pages root")
+    root_match = _PDF_REFERENCE.fullmatch(roots[0])
+    if root_match is None:  # pragma: no cover - constrained by root regex
+        raise _PdfExtractionRejected("invalid PDF Pages root")
+
+    queue = [(int(root_match.group(1)), int(root_match.group(2)))]
+    visited: set[tuple[int, int]] = set()
+    pages: list[bytes] = []
+    position = 0
+    while position < len(queue):
+        key = queue[position]
+        position += 1
+        if key in visited:
+            raise _PdfExtractionRejected("cyclic or duplicate PDF Pages node")
+        visited.add(key)
+        node = objects.get(key)
+        if node is None or node[1] is not None:
+            raise _PdfExtractionRejected("PDF Pages tree references invalid object")
+        dictionary = node[0]
+        if _PDF_PAGE.search(dictionary):
+            pages.append(dictionary)
+            continue
+        if not _PDF_PAGES_NODE.search(dictionary):
+            raise _PdfExtractionRejected("PDF Pages tree has invalid node type")
+        kids = _PDF_KIDS.findall(dictionary)
+        if len(kids) != 1 or len(re.findall(rb"/Kids\b", dictionary)) != 1:
+            raise _PdfExtractionRejected("PDF Pages node has ambiguous Kids")
+        child_refs = [
+            (int(match.group(1)), int(match.group(2)))
+            for match in _PDF_REFERENCE.finditer(kids[0])
+        ]
+        if not child_refs or len(queue) + len(child_refs) > _MAX_PDF_OBJECTS:
+            raise _PdfExtractionRejected("PDF Pages Kids exceeds limit")
+        queue.extend(child_refs)
+    if not pages:
+        raise _PdfExtractionRejected("PDF has no rooted inspectable Page objects")
+    return pages
+
+
+def _pdf_page_content_references(pages: list[bytes]) -> list[tuple[int, int]]:
+    """Return ordered, unique direct stream refs from rooted Pages only."""
+    # Never scan every stream as a fallback: hidden/unreferenced objects could
+    # contain clauses that are not part of any rendered page and overstate the
+    # review. This intentionally under-reads unsupported/object-stream PDFs.
+    references: list[tuple[int, int]] = []
+    reference_set: set[tuple[int, int]] = set()
+    for page in pages:
+        contents = _PDF_CONTENTS.findall(page)
+        content_markers = len(re.findall(rb"/Contents\b", page))
+        if content_markers == 0:
+            continue
+        if content_markers != 1 or len(contents) != 1:
+            raise _PdfExtractionRejected("PDF Page has ambiguous Contents")
+        raw_refs = contents[0][0] or contents[0][1] or b""
+        for reference in _PDF_REFERENCE.finditer(raw_refs):
+            key = (int(reference.group(1)), int(reference.group(2)))
+            if key not in reference_set:
+                reference_set.add(key)
+                references.append(key)
+    if not references:
+        raise _PdfExtractionRejected("PDF pages have no referenced content streams")
+    return references
+
+
+def _pdf_objects(data: bytes) -> tuple[
+    dict[tuple[int, int], tuple[bytes, bytes | None]],
+    list[tuple[int, int]],
+]:
+    """Parse a strict PDF subset and return rooted Page content references.
+
+    Direct ``/Length`` values let the parser skip over stream bytes without
+    treating attacker-controlled ``obj``/``endobj`` tokens inside a stream as
+    PDF structure. Only Pages reachable from the Catalog's Pages tree count.
+    Unsupported or ambiguous constructs fail closed.
+    """
+    objects, object_end = _pdf_object_map(data)
+    catalog_key = _pdf_trailer_root(data, object_end)
+    pages = _pdf_rooted_pages(objects, catalog_key)
+    return objects, _pdf_page_content_references(pages)
+
+
+def _pdf_extraction(data: bytes) -> tuple[str, dict]:
     """Best-effort text from a digital PDF with the stdlib only.
 
-    Decompresses FlateDecode content streams (zlib) and reads the text-
-    showing operators (``Tj``, ``'``, and ``TJ`` arrays; hex strings too).
-    Honest limits: no encryption, no CID/Unicode font maps -- a scanned or
-    exotic PDF yields too little text and the caller says so instead of
-    reviewing garbage."""
-    import zlib
-    chunks: list[str] = []
-    for m in re.finditer(rb"stream\r?\n(.*?)endstream", data, re.DOTALL):
-        raw = m.group(1)
-        try:
-            raw = zlib.decompress(raw)
-        except zlib.error:
-            pass  # uncompressed content stream -- use as-is
-        if b"Tj" not in raw and b"TJ" not in raw and b"'" not in raw:
-            continue
-        # TJ arrays: concatenate the string chunks (kerning splits words).
-        for arr in re.finditer(rb"\[((?:[^\]]|\\.)*?)\]\s*TJ", raw):
-            parts = [_pdf_literal_bytes(lit.group(0))
-                     for lit in _PDF_LITERAL.finditer(arr.group(1))]
-            if parts:
-                chunks.append(b"".join(parts).decode("latin-1"))
-        # Plain Tj / ' operators, one string each.
-        for lit in re.finditer(rb"(\((?:\\.|[^\\()])*\))\s*(?:Tj|')",
-                               raw):
-            chunks.append(_pdf_literal_bytes(lit.group(1)).decode("latin-1"))
-        for hexs in re.finditer(rb"<([0-9A-Fa-f\s]+)>\s*Tj", raw):
-            digits = re.sub(rb"\s", b"", hexs.group(1))
-            if len(digits) % 2:
-                digits += b"0"
-            try:
-                chunks.append(bytes.fromhex(digits.decode()).decode("latin-1"))
-            except ValueError:  # pragma: no cover
+    Only streams explicitly referenced by a Page ``/Contents`` entry are
+    considered; unsupported PDFs fail closed rather than crediting hidden
+    objects. Extraction remains untrusted because this is not a full PDF
+    renderer (no encryption, object streams, font maps, XObjects, or OCR).
+    """
+    meta = {
+        "method": "pdf_page_content_streams",
+        "scope": "page_referenced",
+        "confidence": "untrusted",
+        "review_required": True,
+    }
+    if (
+        not isinstance(data, bytes)
+        or len(data) > _MAX_PDF_INPUT_BYTES
+        or not data.startswith(b"%PDF-")
+    ):
+        return "", meta
+    try:
+        objects, references = _pdf_objects(data)
+        chunks: list[str] = []
+        aggregate_stream_bytes = 0
+        decoded_text_bytes = 0
+        operator_count = 0
+
+        def append_piece(piece: bytes) -> None:
+            nonlocal decoded_text_bytes
+            separator = 1 if chunks else 0
+            if (
+                decoded_text_bytes + separator + len(piece)
+                > _MAX_PDF_DECODED_TEXT_BYTES
+            ):
+                raise _PdfExtractionRejected("PDF decoded text exceeds limit")
+            chunks.append(piece.decode("latin-1"))
+            decoded_text_bytes += separator + len(piece)
+
+        for reference in references:
+            target = objects.get(reference)
+            if target is None or target[1] is None:
+                raise _PdfExtractionRejected("PDF page references a missing stream")
+            dictionary, encoded = target
+            raw = _bounded_pdf_stream(dictionary, encoded)
+            aggregate_stream_bytes += len(raw)
+            if aggregate_stream_bytes > _MAX_PDF_AGGREGATE_STREAM_BYTES:
+                raise _PdfExtractionRejected("PDF aggregate stream bytes exceed limit")
+            if b"Tj" not in raw and b"TJ" not in raw and b"'" not in raw:
                 continue
-    text = "\n".join(chunks)
-    printable = re.sub(r"[^\x20-\x7e\n\u00a0-\uffff]", "", text)
-    return printable if len(printable.strip()) >= 40 else ""
+            pieces, operators = _pdf_stream_text_pieces(
+                raw,
+                max_output=_MAX_PDF_DECODED_TEXT_BYTES - decoded_text_bytes,
+                max_operators=_MAX_PDF_TEXT_OPERATORS - operator_count,
+                has_prior_output=bool(chunks),
+            )
+            operator_count += operators
+            for piece in pieces:
+                append_piece(piece)
+        text = "\n".join(chunks)
+        printable = re.sub(r"[^\x20-\x7e\n\u00a0-\uffff]", "", text)
+        if len(printable.strip()) < 40:
+            return "", meta
+        meta["referenced_streams"] = len(references)
+        return printable, meta
+    except _PdfExtractionRejected:
+        return "", meta
 
 
-def _document_text(data: bytes, mime: str) -> str:
+def _pdf_text(data: bytes) -> str:
+    """Compatibility wrapper returning only bounded untrusted PDF text."""
+    return _pdf_extraction(data)[0]
+
+
+def _document_text(
+    data: bytes,
+    mime: str,
+    *,
+    _metadata: dict | None = None,
+) -> str:
     """Honest text extraction for the formats we can read with the stdlib:
     text/json/xml decode as UTF-8; docx is a ZIP whose word/document.xml we
     strip of tags. Anything else returns "" and the caller says so — no
-    pretending a PDF was read."""
+    over-claiming that an unsupported or scanned document was read. PDF
+    extraction is explicitly untrusted and limited to page content streams."""
     m = (mime or "").split(";")[0].strip().lower()
+    metadata = {
+        "method": "unsupported",
+        "scope": "none",
+        "confidence": "none",
+        "review_required": True,
+    }
+    if _metadata is not None:
+        _metadata.clear()
+        _metadata.update(metadata)
+    if not isinstance(data, bytes) or len(data) > _MAX_DOCUMENT_INPUT_BYTES:
+        return ""
     if m.startswith("text/") or m in ("application/json", "application/xml"):
+        metadata.update({
+            "method": "utf8_decode",
+            "scope": "document_bytes",
+            "confidence": "source_bytes",
+        })
+        if _metadata is not None:
+            _metadata.update(metadata)
         return data.decode("utf-8", errors="ignore")
     if m == "application/pdf":
-        return _pdf_text(data)
+        text, metadata = _pdf_extraction(data)
+        if _metadata is not None:
+            _metadata.update(metadata)
+        return text
     if m == ("application/vnd.openxmlformats-officedocument"
              ".wordprocessingml.document"):
+        metadata.update({
+            "method": "docx_document_xml",
+            "scope": "word/document.xml",
+            "confidence": "best_effort",
+        })
+        if _metadata is not None:
+            _metadata.update(metadata)
         import io
         import zipfile
         try:
@@ -942,6 +1713,56 @@ def _document_text(data: bytes, mime: str) -> str:
     return ""
 
 
+def _canonical_sha256(value: object) -> str:
+    canonical = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _build_document_evidence(
+    *,
+    data: bytes,
+    text: str,
+    mime: str,
+    source: str,
+    doc_id: str,
+    ref: dict | None,
+    extraction: dict,
+) -> dict:
+    """Digest-bind an extraction to bytes and a non-disclosed locator."""
+    source_name = str(source or "")
+    locator = {
+        "source": source_name,
+        "document_id": str(doc_id or ""),
+        "ref": ref or {},
+    }
+    evidence = {
+        "schema": "lightwork.document-extraction-evidence.v1",
+        # Connector names are operational metadata; the potentially sensitive
+        # source locator and ref remain digest-only in the durable record.
+        "source": source_name[:64],
+        "source_binding_sha256": _canonical_sha256(locator),
+        "document_sha256": hashlib.sha256(data).hexdigest(),
+        "document_size_bytes": len(data),
+        "extracted_text_sha256": hashlib.sha256(
+            text.encode("utf-8")
+        ).hexdigest(),
+        "resolved_mime": str(mime or "")[:255],
+        "method": str(extraction.get("method") or "unsupported")[:64],
+        "scope": str(extraction.get("scope") or "none")[:64],
+        "confidence": str(extraction.get("confidence") or "none")[:32],
+        "review_required": bool(extraction.get("review_required", True)),
+    }
+    if isinstance(extraction.get("referenced_streams"), int):
+        evidence["referenced_streams"] = extraction["referenced_streams"]
+    evidence["binding_sha256"] = _canonical_sha256(evidence)
+    return evidence
+
+
 def review_dpa_from_document(vendor: str, source: str, doc_id: str, *,
                              ref: dict | None = None,
                              document_name: str = "",
@@ -957,11 +1778,14 @@ def review_dpa_from_document(vendor: str, source: str, doc_id: str, *,
         source,
         doc_id,
         ref,
+        max_bytes=_MAX_DOCUMENT_INPUT_BYTES,
         principal=principal,
         allow_ambient_credentials=allow_ambient_credentials,
     )
     mime = doc_discovery.resolve_mime(document_name or doc_id, mime)
-    text = _document_text(data, mime)
+    display_name = str(document_name or "").strip() or "Connected document"
+    extraction: dict = {}
+    text = _document_text(data, mime, _metadata=extraction)
     if not text.strip():
         raise ValueError(
             f"cannot extract text from {mime or 'unknown format'} — "
@@ -970,8 +1794,20 @@ def review_dpa_from_document(vendor: str, source: str, doc_id: str, *,
     return review_dpa(
         vendor,
         text,
-        document_name=document_name or doc_id,
+        # A connector locator can itself contain PII or secret-bearing path
+        # material. Keep it digest-only unless the caller supplied an explicit
+        # human-facing label.
+        document_name=display_name,
         reviewed_by=reviewed_by,
+        _document_evidence=_build_document_evidence(
+            data=data,
+            text=text,
+            mime=mime,
+            source=source,
+            doc_id=doc_id,
+            ref=ref,
+            extraction=extraction,
+        ),
     )
 
 
@@ -980,7 +1816,8 @@ def list_dpa_reviews() -> list[dict]:
     return [{k: r.get(k) for k in
              ("id", "vendor", "document_name", "created_at", "status",
               "inherent_risk", "residual_risk", "clauses_present",
-              "clauses_total")} for r in _DPA.list()]
+              "clauses_total", "extraction_confidence",
+              "review_required")} for r in _DPA.list()]
 
 
 def get_dpa_review(review_id: str) -> dict | None:

@@ -1420,9 +1420,22 @@ async def list_assessment_templates(request: Request) -> dict:
     from maverick.assessment import list_templates
     return {"templates": [
         {"type": t.type, "title": t.title, "framework": t.framework,
-         "questions": len(t.questions)}
+         "questions": len(t.questions), "revision": t.revision,
+         "digest": t.digest, "custom": t.custom}
         for t in list_templates()
     ]}
+
+
+@router.get("/assess/template-state/{assessment_type}")
+async def get_assessment_template_state(request: Request,
+                                        assessment_type: str) -> dict:
+    """CAS identity, including a deleted custom-only questionnaire tombstone."""
+    require_permission(request, "view")
+    from maverick.assessment import template_state
+    try:
+        return await run_in_threadpool(template_state, assessment_type[:64])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/assess/templates/{assessment_type}")
@@ -1430,11 +1443,7 @@ async def get_assessment_template(request: Request,
                                   assessment_type: str) -> dict:
     """One template in full (questions included) for the catalog editor."""
     require_permission(request, "view")
-    from maverick.assessment import (
-        custom_template_records,
-        get_template,
-        template_department,
-    )
+    from maverick.assessment import get_template, template_department
     tpl = get_template(assessment_type[:64])
     if tpl is None:
         raise HTTPException(status_code=404, detail="no such template")
@@ -1442,7 +1451,9 @@ async def get_assessment_template(request: Request,
         "type": tpl.type, "title": tpl.title, "framework": tpl.framework,
         "description": tpl.description,
         "department": template_department(tpl.type),
-        "custom": tpl.type in custom_template_records(),
+        "custom": tpl.custom,
+        "revision": tpl.revision,
+        "digest": tpl.digest,
         "questions": [{"id": q.id, "section": q.section, "text": q.text,
                        "risk_answer": q.risk_answer, "severity": q.severity,
                        "guidance": q.guidance} for q in tpl.questions],
@@ -1452,40 +1463,66 @@ async def get_assessment_template(request: Request,
 @router.put("/assess/templates/{assessment_type}")
 async def put_assessment_template(request: Request, assessment_type: str,
                                   body: TemplateIn) -> dict:
-    """Author or edit a questionnaire from the workspace catalog. Templates
-    are data, not code -- saving under a built-in type overrides it; the
-    override is a file an operator can delete to restore the original."""
-    require_permission(request, "operate")
-    from maverick.assessment import save_custom_template
+    """Admin-publish one immutable questionnaire release with pointer CAS."""
+    require_permission(request, "admin")
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        save_custom_template,
+    )
+    values = body.model_dump()
+    expected_revision = values.pop("expected_revision")
+    expected_digest = values.pop("expected_digest")
     try:
         tpl = await run_in_threadpool(
             save_custom_template,
-            {"type": assessment_type[:64], **body.model_dump()})
+            {"type": assessment_type[:64], **values},
+            expected_revision=expected_revision,
+            expected_digest=expected_digest,
+            actor=_request_actor(request),
+        )
+    except AssessmentConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    try:
-        from maverick.audit import record as audit_record
-        audit_record("TEMPLATE_SAVED", agent="operator",
-                     template=tpl.type, questions=len(tpl.questions))
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
     return {"type": tpl.type, "title": tpl.title,
-            "questions": len(tpl.questions), "custom": True}
+            "questions": len(tpl.questions), "custom": True,
+            "revision": tpl.revision, "digest": tpl.digest}
 
 
 @router.delete("/assess/templates/{assessment_type}")
 async def delete_assessment_template(request: Request,
-                                     assessment_type: str) -> dict:
-    """Remove a custom template / override (built-ins are restored, never
-    deleted)."""
-    require_permission(request, "operate")
-    from maverick.assessment import TEMPLATES, delete_custom_template
-    removed = await run_in_threadpool(delete_custom_template,
-                                      assessment_type[:64])
+                                     assessment_type: str,
+                                     expected_revision: int,
+                                     expected_digest: str) -> dict:
+    """Admin-unpublish a custom release; immutable history is retained."""
+    require_permission(request, "admin")
+    from maverick.assessment import (
+        TEMPLATES,
+        AssessmentConflict,
+        AssessmentStateError,
+        delete_custom_template,
+        template_state,
+    )
+    try:
+        removed = await run_in_threadpool(
+            delete_custom_template, assessment_type[:64],
+            expected_revision=expected_revision,
+            expected_digest=expected_digest,
+            actor=_request_actor(request),
+        )
+    except AssessmentConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     if not removed:
         raise HTTPException(status_code=404, detail="no custom template")
+    state = await run_in_threadpool(template_state, assessment_type[:64])
     return {"deleted": assessment_type[:64],
-            "builtin_restored": assessment_type[:64] in TEMPLATES}
+            "builtin_restored": assessment_type[:64] in TEMPLATES,
+            "revision": state["revision"], "digest": state["digest"]}
 
 
 @router.get("/assess/sessions")
@@ -1504,13 +1541,13 @@ async def get_assessment_session(request: Request, assessment_id: str) -> dict:
     respondent's notes, scored findings, rating, and the follow-up thread.
     This is what the review pop-out renders."""
     require_permission(request, "operate")
-    from maverick.assessment import get_template, load_saved
+    from maverick.assessment import load_saved, template_for_saved_record
     record = await run_in_threadpool(load_saved, assessment_id[:64])
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
     # Enrich with the template's question text + section so the pop-out
     # shows real questions, never raw ids like "pia_necessity".
-    tpl = get_template(str(record.get("type", "")))
+    tpl = template_for_saved_record(record)
     if tpl is not None:
         record["question_text"] = {
             q.id: {"text": q.text, "section": q.section} for q in tpl.questions
@@ -1526,25 +1563,24 @@ async def add_assessment_followups(
     ``needs_more`` until every follow-up is answered; the respondent-facing
     harness (intake portal) picks them up and re-interviews. Audited."""
     require_permission(request, "operate")
-    from maverick.assessment import add_followups
-    who = ""
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        add_followups,
+    )
+    who = _request_actor(request)
     try:
-        principal = getattr(request.state, "principal", None)
-        who = str(getattr(principal, "id", "") or "") if principal else ""
-    except Exception:  # pragma: no cover -- attribution is best-effort
-        who = ""
-    record = await run_in_threadpool(
-        add_followups, assessment_id[:64], body.questions, who or "reviewer")
+        record = await run_in_threadpool(
+            add_followups, assessment_id[:64], body.questions, who,
+            expected_revision=body.expected_revision,
+        )
+    except AssessmentConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     if record is None:
         raise HTTPException(status_code=404,
                             detail="no such assessment (or empty questions)")
-    try:
-        from maverick.audit import record as audit_record
-        audit_record("ASSESSMENT_FOLLOWUP", agent=who or "reviewer",
-                     assessment=assessment_id[:64],
-                     questions=len(body.questions))
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
     return record
 
 
@@ -1556,26 +1592,26 @@ async def decide_assessment_session(
     next review -- the workspace surfaces the record again when it comes due,
     and the follow-up cycle re-opens it. Audited."""
     require_permission(request, "operate")
-    from maverick.assessment import decide_assessment
-    who = ""
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        AssessmentTransitionError,
+        decide_assessment,
+    )
+    who = _request_actor(request)
     try:
-        principal = getattr(request.state, "principal", None)
-        who = str(getattr(principal, "id", "") or "") if principal else ""
-    except Exception:  # pragma: no cover -- attribution is best-effort
-        who = ""
-    record = await run_in_threadpool(
-        decide_assessment, assessment_id[:64], body.decision,
-        decided_by=who or "reviewer", note=body.note,
-        cadence_days=body.cadence_days)
+        record = await run_in_threadpool(
+            decide_assessment, assessment_id[:64], body.decision,
+            decided_by=who, note=body.note,
+            cadence_days=body.cadence_days,
+            expected_revision=body.expected_revision,
+        )
+    except (AssessmentConflict, AssessmentTransitionError) as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
-    try:
-        from maverick.audit import record as audit_record
-        audit_record("ASSESSMENT_DECIDED", agent=who or "reviewer",
-                     assessment=assessment_id[:64], decision=body.decision,
-                     cadence_days=body.cadence_days or 0)
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
     return record
 
 

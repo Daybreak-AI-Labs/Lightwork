@@ -154,13 +154,30 @@ _SQL_CONNECTORS = frozenset({
 
 
 def _enterprise_mode() -> bool:
-    """Central enterprise predicate, isolated for deterministic tests."""
+    """Central enterprise predicate, strict on policy-source uncertainty.
+
+    The connector wrapper is a mandatory enterprise floor.  If the config
+    source that may contain ``[enterprise] mode = true`` is unreadable, the
+    safe interpretation at this effect boundary is enterprise-on; treating a
+    loader error as ``False`` would silently remove approval and receipts.
+    """
     try:
+        from .config import config_source_errors
         from .enterprise import enterprise_enabled
 
+        if config_source_errors():
+            log.error(
+                "governed_connectors: config source unreadable; enforcing "
+                "enterprise connector governance",
+            )
+            return True
         return bool(enterprise_enabled())
-    except Exception:  # pragma: no cover -- defensive import boundary
-        return False
+    except Exception:
+        log.exception(
+            "governed_connectors: enterprise policy unavailable; enforcing "
+            "connector governance",
+        )
+        return True
 
 
 def _approver() -> str:

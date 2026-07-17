@@ -41,6 +41,26 @@ def test_config_enables(monkeypatch):
     assert enterprise_enabled() is True
 
 
+def test_policy_uncertainty_fails_closed(monkeypatch):
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "maybe")
+    assert enterprise_enabled() is True
+
+    monkeypatch.delenv("MAVERICK_ENTERPRISE")
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda *a, **k: {"enterprise": {"mode": "false"}},
+    )
+    assert enterprise_enabled() is True
+
+
+def test_unreadable_config_source_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        "maverick.config.config_source_errors",
+        lambda **_kwargs: {"config.toml": "unreadable"},
+    )
+    assert enterprise_enabled() is True
+
+
 def test_local_provider_classification():
     assert is_local_provider("ollama")
     assert is_local_provider("local")  # alias -> ollama

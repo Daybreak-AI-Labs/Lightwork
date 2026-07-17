@@ -80,10 +80,30 @@ def test_approvals_page_still_carries_shared_popout():
 
 def test_records_section_renders_all_four_types():
     from maverick import privacy_ops
+    dpa_text = (
+        "processor acts on documented instructions from the controller; "
+        "audit rights; retention for 12 months"
+    )
+    evidence = privacy_ops._build_document_evidence(
+        data=dpa_text.encode("utf-8"),
+        text=dpa_text,
+        mime="application/pdf",
+        source="test-connector",
+        doc_id="opaque-test-document",
+        ref=None,
+        extraction={
+            "method": "pdf_page_content_streams",
+            "scope": "page_referenced",
+            "confidence": "untrusted",
+            "review_required": True,
+            "referenced_streams": 1,
+        },
+    )
     privacy_ops.review_dpa(
-        "Acme Corp", "processor acts on documented instructions from the "
-        "controller; audit rights; retention for 12 months",
-        document_name="acme-dpa.pdf")
+        "Acme Corp", dpa_text,
+        document_name="acme-dpa.pdf",
+        _document_evidence=evidence,
+    )
     privacy_ops.register_ai_system(
         "CV screener", "ranks job candidates for hiring")
     s = _seed("Acme CRM")
@@ -97,6 +117,10 @@ def test_records_section_renders_all_four_types():
     # DPA reviews tab: vendor row + the clause-detail trigger.
     assert "Acme Corp" in html and "acme-dpa.pdf" in html
     assert 'class="btn pw-dpa-clauses"' in html
+    assert "Extracted evidence — human review required" in html
+    assert "Extraction method" in html
+    assert "Document SHA-256" in html
+    assert "document_id" not in html
     # AI registry tab: high-risk tier from the Annex III employment test.
     assert "CV screener" in html
     assert ">high</span>" in html
@@ -128,15 +152,21 @@ def test_records_section_hidden_when_disabled(monkeypatch, tmp_path):
 
 def test_decide_endpoint_and_review_due_surfacing(monkeypatch):
     import time as _t
+
+    from maverick.assessment import load_saved
+
     s = _seed("Acme CRM", risky=True)
     resp = client.post(f"/api/v1/assess/sessions/{s.id}/decide",
-                       json={"decision": "approved", "cadence_days": 30})
+                       json={"decision": "approved", "cadence_days": 30,
+                             "expected_revision": load_saved(s.id)["revision"]})
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "approved"
     assert client.post("/api/v1/assess/sessions/nope/decide",
-                       json={"decision": "approved"}).status_code == 404
+                       json={"decision": "approved",
+                             "expected_revision": 0}).status_code == 404
     assert client.post(f"/api/v1/assess/sessions/{s.id}/decide",
-                       json={"decision": "maybe"}).status_code == 422
+                       json={"decision": "maybe",
+                             "expected_revision": resp.json()["revision"]}).status_code == 422
 
     html = client.get("/privacy").text
     assert ">approved</span>" in html
@@ -152,12 +182,24 @@ def test_decide_endpoint_and_review_due_surfacing(monkeypatch):
 
 
 def test_template_editor_crud_and_department_catalog():
+    def governed_payload(type_: str, values: dict):
+        state = client.get(
+            f"/api/v1/assess/template-state/{type_}",
+        ).json()
+        return {
+            **values,
+            "expected_revision": state["revision"],
+            "expected_digest": state["digest"],
+        }
+
     # Author a new privacy questionnaire from the catalog.
-    resp = client.put("/api/v1/assess/templates/dpia_lite", json={
+    resp = client.put("/api/v1/assess/templates/dpia_lite", json=governed_payload(
+        "dpia_lite", {
         "title": "DPIA Lite", "framework": "GDPR Art. 35 (lightweight)",
         "department": "privacy",
         "questions": [{"text": "Is the processing high risk?",
-                       "risk_answer": "yes", "severity": "high"}]})
+                       "risk_answer": "yes", "severity": "high"}],
+    }))
     assert resp.status_code == 200, resp.text
     assert resp.json()["custom"] is True
     # It appears in the privacy catalog but not finance's.
@@ -169,24 +211,35 @@ def test_template_editor_crud_and_department_catalog():
     # Overriding a built-in flags it custom; deleting restores it.
     orig = client.get("/api/v1/assess/templates/pia").json()
     assert orig["custom"] is False and len(orig["questions"]) == 10
-    resp = client.put("/api/v1/assess/templates/pia", json={
+    resp = client.put("/api/v1/assess/templates/pia", json=governed_payload(
+        "pia", {
         "title": "PIA (company edition)", "framework": "GDPR",
         "questions": [{"text": "Only company question?",
-                       "risk_answer": "no", "severity": "low"}]})
+                       "risk_answer": "no", "severity": "low"}],
+    }))
     assert resp.status_code == 200
     assert "PIA (company edition)" in client.get("/privacy").text
-    assert client.delete("/api/v1/assess/templates/pia").json()[
+    assert client.delete(
+        "/api/v1/assess/templates/pia",
+        params={"expected_revision": resp.json()["revision"],
+                "expected_digest": resp.json()["digest"]},
+    ).json()[
         "builtin_restored"] is True
     assert client.get("/api/v1/assess/templates/pia").json()["custom"] is False
     # Validation surfaces as 422 with the human-readable reason.
-    resp = client.put("/api/v1/assess/templates/bad", json={
+    resp = client.put("/api/v1/assess/templates/bad", json=governed_payload(
+        "bad", {
         "title": "X", "framework": "Y",
         "questions": [{"text": "q?", "severity": "high",
                        "risk_answer": "yes", "id": "dup"},
                       {"text": "q2?", "severity": "high",
-                       "risk_answer": "yes", "id": "dup"}]})
+                       "risk_answer": "yes", "id": "dup"}],
+    }))
     assert resp.status_code == 422
-    assert client.delete("/api/v1/assess/templates/never").status_code == 404
+    assert client.delete(
+        "/api/v1/assess/templates/never",
+        params={"expected_revision": 0, "expected_digest": ""},
+    ).status_code == 404
 
 
 def test_program_report_page_and_api():

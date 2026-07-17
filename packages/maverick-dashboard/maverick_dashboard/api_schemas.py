@@ -727,6 +727,7 @@ class FollowupsIn(BaseModel):
     """Reviewer follow-up questions to send back to an assessment's
     respondent (the pop-out's 'needs more detail' path)."""
     questions: list[str] = Field(..., min_length=1, max_length=20)
+    expected_revision: int = Field(..., ge=0)
 
 
 class TemplateQuestionIn(BaseModel):
@@ -740,14 +741,20 @@ class TemplateQuestionIn(BaseModel):
 
 
 class TemplateIn(BaseModel):
-    """Author or edit an assessment questionnaire. Saving under a built-in
-    type overrides it (deleting the override restores the built-in)."""
+    """Publish an immutable assessment-questionnaire release.
+
+    The revision+digest pair binds the admin's write to the exact release they
+    reviewed and prevents stale/ABA publication.
+    """
     title: str = Field(..., min_length=1, max_length=120)
     framework: str = Field(..., min_length=1, max_length=200)
     department: str = Field("privacy", pattern="^(privacy|finance)$")
     description: str = Field("", max_length=500)
     questions: list[TemplateQuestionIn] = Field(..., min_length=1,
                                                 max_length=60)
+    expected_revision: int = Field(..., ge=0)
+    expected_digest: str = Field(..., max_length=64,
+                                 pattern="^([0-9a-f]{64})?$")
 
 
 class AssessmentDecideIn(BaseModel):
@@ -757,6 +764,7 @@ class AssessmentDecideIn(BaseModel):
     decision: str = Field(..., pattern="^(approved|rejected)$")
     cadence_days: int | None = Field(default=365, ge=0, le=3650)
     note: str = Field("", max_length=4000)
+    expected_revision: int = Field(..., ge=0)
 
 
 class DocDiscoverIn(BaseModel):

@@ -618,10 +618,57 @@ def test_self_modify_cli_refusal_is_nonzero(monkeypatch):
     assert "safety posture refused" in result.output
 
 
-def test_negative_min_promotions_is_clamped():
-    # A negative min_promotions must not sort a non-empty tier ahead of tier-0
-    # (which would make the rollback-freeze unlock a wide surface).
-    pol = runner.build_policy({"tiers": [
-        {"name": "evil", "editable_paths": ["**"], "min_promotions": -5}]})
-    assert pol.tiers[0].editable_globs == ()          # narrowest tier stays empty
-    assert all(t.min_promotions >= 0 for t in pol.tiers)
+@pytest.mark.parametrize("threshold", [-5, "0", 0.0, False, None])
+def test_invalid_min_promotions_can_never_unlock_a_surface(threshold):
+    policy = runner.build_policy({
+        "tiers": [{
+            "name": "invalid",
+            "editable_paths": ["**"],
+            "min_promotions": threshold,
+        }],
+        # A present tier policy owns the decision; invalid entries must not
+        # fall through to this legacy zero-proof allowlist.
+        "editable_paths": ["**"],
+    })
+
+    assert [tier.name for tier in policy.tiers] == ["none"]
+    assert policy.earned(
+        promotions=1_000_000,
+        had_rollback=False,
+    ).editable_globs == ()
+
+
+@pytest.mark.parametrize("editable_paths", ["**", ["**", 1], {"all": "**"}])
+def test_malformed_tier_editable_paths_cannot_fall_through(editable_paths):
+    policy = runner.build_policy({
+        "tiers": [{
+            "name": "invalid",
+            "editable_paths": editable_paths,
+            "min_promotions": 0,
+        }],
+        "editable_paths": ["**"],
+    })
+
+    assert [tier.name for tier in policy.tiers] == ["none"]
+    assert policy.earned(
+        promotions=1_000_000,
+        had_rollback=False,
+    ).editable_globs == ()
+
+
+@pytest.mark.parametrize("tiers", [{"name": "not-a-list"}, "not-a-list", True])
+def test_malformed_tier_container_cannot_fall_through(tiers):
+    policy = runner.build_policy({"tiers": tiers, "editable_paths": ["**"]})
+
+    assert [tier.name for tier in policy.tiers] == ["none"]
+    assert policy.earned(
+        promotions=1_000_000,
+        had_rollback=False,
+    ).editable_globs == ()
+
+
+@pytest.mark.parametrize("editable_paths", ["**", ["**", 1], {"all": "**"}])
+def test_malformed_legacy_editable_paths_grant_nothing(editable_paths):
+    policy = runner.build_policy({"editable_paths": editable_paths})
+
+    assert [tier.name for tier in policy.tiers] == ["none"]

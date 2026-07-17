@@ -177,5 +177,7 @@ def test_load_saved_rejects_path_traversal():
 
 def test_save_session_is_written_private_0600():
     from maverick.assessment import AssessmentSession, save_session
+    from maverick.file_lock import private_path_is_restricted
+
     path = save_session(AssessmentSession(type="pia", subject="Acme"))
-    assert oct(path.stat().st_mode)[-3:] == "600"
+    assert private_path_is_restricted(path, 0o600)

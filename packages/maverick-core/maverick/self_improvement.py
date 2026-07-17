@@ -130,7 +130,10 @@ def _config() -> dict:
         from .config import get_self_improvement
         return get_self_improvement()
     except Exception:  # pragma: no cover
-        return {"enable": False, "min_improvement": 0.0, "max_auto_rung": "policy"}
+        # Invalid margin freezes the controller if a direct caller constructs it
+        # despite the disabled master switch. Never turn config loss into the
+        # permissive zero-margin policy.
+        return {"enable": False, "min_improvement": -1.0, "max_auto_rung": "policy"}
 
 
 @dataclass
@@ -599,11 +602,12 @@ class SelfImprovementController:
                 enforced = approval_signing.signing_enforced()
                 if enforced:
                     approver = approval_signing.verify_candidate(cand)
-        except Exception:  # pragma: no cover -- consult failure => decide below
-            # If the approval subsystem errored while enforced, `approver` stays
-            # None and we fail closed; if it was not enforced, fall through to
-            # the boolean path.
-            pass
+        except Exception:
+            # Whether signing is configured is itself security policy. If that
+            # policy or its trust roots cannot be resolved, we cannot prove that
+            # the legacy boolean path is authorized, so refuse the promotion.
+            return (False, None,
+                    f"{cand.rung} promotion approval policy is unavailable")
         if enforced:
             if approver:
                 return True, approver, ""
@@ -982,14 +986,35 @@ def _exclusive_ledger_lock(journal: Path):
             flags = os.O_CREAT | os.O_RDWR
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW
-            fd = os.open(os.fspath(lock_path), flags, 0o600)
+            created = False
+            if os.name == "nt":
+                try:
+                    fd = os.open(
+                        os.fspath(lock_path), flags | os.O_EXCL, 0o600)
+                    created = True
+                except FileExistsError:
+                    fd = os.open(os.fspath(lock_path), flags, 0o600)
+            else:
+                fd = os.open(os.fspath(lock_path), flags, 0o600)
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise PromotionLedgerError("promotion ledger lock must be a regular file")
             if os.name == "nt":
                 import msvcrt
 
-                if os.fstat(fd).st_size == 0:
+                if created:
                     os.write(fd, b"\0")
+                else:
+                    # Only the O_EXCL creator initializes the lock byte. The
+                    # old check-then-write let two fresh processes both observe
+                    # size zero; one could lock the byte before the other wrote,
+                    # turning a valid idempotent retry into PermissionError.
+                    for _ in range(1_000):
+                        if os.fstat(fd).st_size >= 1:
+                            break
+                        time.sleep(0.001)
+                    else:
+                        raise PromotionLedgerError(
+                            "promotion ledger lock is uninitialized")
                 os.lseek(fd, 0, os.SEEK_SET)
                 msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
                 kind = "msvcrt"

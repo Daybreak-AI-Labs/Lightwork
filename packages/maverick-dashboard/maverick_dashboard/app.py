@@ -57,6 +57,7 @@ from ._shared import (
 from ._shared import _world_cache as _world_cache  # re-export: tests clear app._world_cache
 from .api import router as api_router
 from .auth import (
+    SELF_AUTH_WEBHOOK_PATHS,
     AutomationAuthorizationError,
     assert_goal_access,
     auth_genuinely_off,
@@ -68,9 +69,10 @@ from .auth import (
     execution_user_id_from_request,
     goal_owner_filter,
     has_permission,
+    non_static_auth_configured,
     require_permission,
-    require_principal,
     require_principal_in_request_context,
+    require_websocket_principal_in_context,
     stored_automation_identity,
     websocket_caller_principal,
 )
@@ -234,18 +236,38 @@ def _require_auth_enabled() -> bool:
     ``MAVERICK_DASHBOARD_REQUIRE_AUTH`` env wins over ``[dashboard] require_auth``;
     off by default so the single-tenant local flow is unchanged."""
     env = os.environ.get("MAVERICK_DASHBOARD_REQUIRE_AUTH", "").strip().lower()
-    if env:
-        return env in {"1", "true", "yes", "on"}
     try:
-        from maverick.config import load_config
-        return bool(((load_config() or {}).get("dashboard") or {}).get("require_auth"))
-    except Exception:  # pragma: no cover -- config never blocks startup
-        return False
+        from maverick.config import config_source_errors, load_config
+
+        config = load_config() or {}
+        if config_source_errors():
+            return True
+    except Exception:
+        # A malformed/unreadable config may conceal ``require_auth = true``.
+        # Treat ambiguity as required so startup cannot silently enable local
+        # administrator access.
+        return True
+    if not isinstance(config, dict):
+        return True
+    if env:
+        if env in {"1", "true", "yes", "on"}:
+            return True
+        if env in {"0", "false", "no", "off"}:
+            return False
+        return True
+    if "dashboard" not in config:
+        dashboard = {}
+    else:
+        dashboard = config["dashboard"]
+    if not isinstance(dashboard, dict):
+        return True
+    configured = dashboard.get("require_auth", False)
+    return configured if isinstance(configured, bool) else True
 
 
 def _assert_dashboard_auth_configured() -> None:
     """When ``require_auth`` is set, refuse to boot if NO auth mechanism is
-    configured (a dashboard token, OIDC, or reverse-proxy SSO), so an operator
+    configured (token, OIDC, proxy SSO, invites, or complete SAML), so an operator
     who asked for auth can never accidentally serve the (loopback) control
     surface unauthenticated. No-op unless ``require_auth`` is explicitly on, so
     a fresh single-tenant install is never locked out."""
@@ -274,11 +296,19 @@ def _assert_dashboard_auth_configured() -> None:
             return
     except Exception:  # pragma: no cover
         pass
+    try:
+        # SAML uses the same signed browser session as OIDC, so a complete SAML
+        # configuration is a first-class authentication mechanism too.
+        from .saml import _session_secret, saml_enabled
+        if saml_enabled() and _session_secret():
+            return
+    except Exception:  # pragma: no cover
+        pass
     raise RuntimeError(
         "[dashboard] require_auth is set, but no auth mechanism is configured. "
         "Set MAVERICK_DASHBOARD_TOKEN, enable OIDC ([auth.oidc]), enable "
-        "reverse-proxy SSO ([auth.proxy]), or enable email invites "
-        "([dashboard] invites) -- refusing to serve the dashboard "
+        "reverse-proxy SSO ([auth.proxy]), enable SAML ([auth.saml]), or enable "
+        "email invites ([dashboard] invites) -- refusing to serve the dashboard "
         "unauthenticated."
     )
 
@@ -425,14 +455,11 @@ app = FastAPI(
     title="Lightwork Dashboard + REST API",
     description="Local browser UI plus REST API for programmatic access.",
     version="0.1.0",
-    # OIDC bearer-auth gate, applied to every route. Default-OFF: when OIDC is
-    # disabled (the default) `require_principal` returns None and changes
-    # nothing -- no token is required and no route 401s. When OIDC is enabled it
-    # enforces a valid `Authorization: Bearer` ID token on each request (health/
-    # liveness/docs paths excepted; see maverick_dashboard.auth). This is an
-    # auth layer ON TOP OF the existing MAVERICK_DASHBOARD_TOKEN middleware, not
-    # a replacement for it. `enforce_page_visibility` runs second so the
-    # role-based page-visibility policy sees the established principal.
+    # Global authentication dependency, applied to every route. It composes
+    # proxy/OIDC/SAML/invite sessions and the static dashboard bearer, while
+    # preserving same-origin loopback mode only when authentication is genuinely
+    # off. `enforce_page_visibility` runs second so role-based page policy sees
+    # the established principal.
     dependencies=[
         Depends(require_principal_in_request_context),
         Depends(enforce_page_visibility),
@@ -604,16 +631,10 @@ _AUTH_EXEMPT = {
     # /webhook/start authenticates with its own HMAC signature instead of
     # the dashboard bearer / same-origin checks (external senders have
     # neither), so it must bypass the centralized middleware.
-    "/webhook/start",
-    # /webhook/run fires a registered trigger; same HMAC auth as /webhook/start
-    # (strictly narrower -- runs only an operator-registered template).
-    "/webhook/run",
-    # Linear/Jira/GitHub issue webhooks authenticate the same way (their
-    # own HMAC signature), so they bypass the bearer/same-origin checks too.
-    "/webhook/linear",
-    "/webhook/jira",
-    "/webhook/github",
-    "/webhook/gitlab",
+    *SELF_AUTH_WEBHOOK_PATHS,
+    # The exact HMAC webhook paths are shared with the global dependency. A
+    # future /webhook/* route is authenticated by default until explicitly
+    # added to that reviewed set.
     # Built-in OIDC browser-login endpoints: they bootstrap a session and carry
     # their own flow-level security (state/PKCE/signed cookies). They must be
     # reachable by a browser that has no dashboard token yet; each self-gates on
@@ -836,6 +857,25 @@ def _is_proxied(request: Request) -> bool:
     return any(request.headers.get(h) for h in _PROXY_FORWARD_HEADERS)
 
 
+def _configured_oidc_bearer_present(request: Request) -> bool:
+    """Whether this request explicitly presents a bearer to enabled OIDC.
+
+    Such API credentials do not use ambient browser authority, so they do not
+    need an Origin/Referer. The global auth dependency remains authoritative:
+    it verifies the token (and rejects an invalid one) before any cookie/proxy
+    identity can be selected.
+    """
+    authorization = request.headers.get("authorization", "")
+    if not authorization.startswith("Bearer ") or not authorization[7:].strip():
+        return False
+    try:
+        from . import auth as auth_boundary
+
+        return auth_boundary.oidc_enabled()
+    except Exception:
+        return False
+
+
 @app.middleware("http")
 async def bearer_auth(request: Request, call_next):
     expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN")
@@ -853,54 +893,29 @@ async def bearer_auth(request: Request, call_next):
         # are disabled.
         return await call_next(request)
     if not expected:
-        if _require_auth_enabled():
-            # A configured OIDC or reverse-proxy SSO layer must get a chance to
-            # enforce identity. Do not satisfy require_auth with the historical
-            # loopback/no-token fallback.
-            try:
-                from maverick.oidc import oidc_enabled
-                from maverick.proxy_auth import proxy_auth_enabled
-                if oidc_enabled() or proxy_auth_enabled():
-                    # Cookie-session (OIDC / reverse-proxy SSO) mode: run the
-                    # same-origin CSRF gate that no-token loopback mode enforces
-                    # below. Without it, /api/v1 mutations rely solely on the
-                    # mvk_session cookie's SameSite=Lax, which does not cover
-                    # sibling-subdomain requests or top-level-navigation vectors.
-                    # The app.py form handlers already call _require_same_origin
-                    # in this mode; this extends the same guard to the API routes.
-                    # Safe methods short-circuit to True inside _is_same_origin.
-                    if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
-                        return JSONResponse(
-                            {"detail": "cross-site request blocked — for your "
-                                       "security, changes must be made from the "
-                                       "Lightwork page itself. Reload the "
-                                       "dashboard and try again."},
-                            status_code=403,
-                        )
-                    return await call_next(request)
-                # Email-invite local sessions (no IdP): a VERIFIED locally-
-                # minted mvk_session cookie satisfies require_auth, under the
-                # same same-origin CSRF gate as the other cookie-session modes.
-                # An absent/invalid cookie falls through to the fail-closed 401
-                # below — the invite-accept route itself is path-exempt above.
-                from .invites import invites_enabled, local_session_principal
-                if invites_enabled() and local_session_principal(request) is not None:
-                    if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
-                        return JSONResponse(
-                            {"detail": "cross-site request blocked — for your "
-                                       "security, changes must be made from the "
-                                       "Lightwork page itself. Reload the "
-                                       "dashboard and try again."},
-                            status_code=403,
-                        )
-                    return await call_next(request)
-            except Exception:  # pragma: no cover - fall through to fail closed
-                pass
-            _auth_metrics.record_auth_failure("require_auth_no_mechanism")
-            return JSONResponse(
-                {"detail": "dashboard require_auth is set but no auth mechanism accepted the request"},
-                status_code=401,
-            )
+        # Any configured identity mechanism disables legacy loopback-as-admin,
+        # even when the separate startup assertion ``dashboard.require_auth``
+        # is unset. The global dependency verifies proxy, OIDC, SAML, or invite
+        # identity and fails closed on unreadable auth configuration.
+        # Resolve through the module so identity-policy changes made by a
+        # deployment/test harness cannot leave this long-lived middleware with
+        # a stale function binding.
+        from . import auth as auth_boundary
+
+        if not auth_boundary.auth_genuinely_off():
+            explicit_oidc_bearer = _configured_oidc_bearer_present(request)
+            if (
+                not explicit_oidc_bearer
+                and not _is_same_origin(request)
+                and _allowed_extension_origin(request) is None
+            ):
+                return JSONResponse(
+                    {"detail": "cross-site request blocked - for your security, "
+                               "changes must be made from the Lightwork page "
+                               "itself. Reload the dashboard and try again."},
+                    status_code=403,
+                )
+            return await call_next(request)
         # Client-bound / enterprise: loopback-trust (no-token) mode is DISABLED.
         # In a hosted/regulated deployment any process sharing the loopback
         # namespace (a sidecar, a co-located container, an SSRF pivot to
@@ -982,6 +997,29 @@ async def bearer_auth(request: Request, call_next):
     # access logs, and any logging proxy in front. Require the
     # ``Authorization: Bearer`` header.
     if header_token and hmac.compare_digest(header_token.encode(), expected.encode()):
+        return await call_next(request)
+    if auth:
+        # A non-static bearer may be an OIDC token in a mixed deployment. Let
+        # the global dependency verify it; malformed/invalid credentials never
+        # fall back to proxy or cookie identity there.
+        if _configured_oidc_bearer_present(request):
+            return await call_next(request)
+        _auth_metrics.record_auth_failure("bad_token")
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    if non_static_auth_configured():
+        # The static operator token composes with proxy/OIDC/SAML/invite browser
+        # identities. Ambient authority remains CSRF-gated; the dependency then
+        # verifies the actual identity and rejects a missing/invalid session.
+        if (
+            not _is_same_origin(request)
+            and _allowed_extension_origin(request) is None
+        ):
+            return JSONResponse(
+                {"detail": "cross-site request blocked - for your security, "
+                           "changes must be made from the Lightwork page "
+                           "itself. Reload the dashboard and try again."},
+                status_code=403,
+            )
         return await call_next(request)
     # The bad/missing-bearer case — the credential-stuffing signal an alert
     # rule watches (a flood here means someone is probing the token).
@@ -3187,7 +3225,7 @@ async def providers_api() -> JSONResponse:
 async def run_events_firehose(
     websocket: WebSocket,
     goal_id: int,
-    principal: VerifiedPrincipal | None = Depends(require_principal),
+    principal: VerifiedPrincipal | None = Depends(require_websocket_principal_in_context),
 ) -> None:
     """Run-events firehose: stream a goal's events over WebSocket as they land.
 
@@ -3201,7 +3239,7 @@ async def run_events_firehose(
     from fastapi import WebSocketDisconnect
 
     from .auth import websocket_authorized
-    if not websocket_authorized(websocket):
+    if not websocket_authorized(websocket, principal):
         await websocket.close(code=4401)
         return
     await websocket.accept()

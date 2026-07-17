@@ -1608,22 +1608,51 @@ class Agent:
         # capability above, an org-level policy can DENY an action outright or
         # REQUIRE_HUMAN sign-off (EU AI Act Art 14). Default-open -- an empty
         # [governance] policy returns ALLOW, so this is a no-op for non-
-        # enterprise installs. Fail behaviour is split (hardening): if a policy
-        # IS configured but evaluating THIS action errors, fail CLOSED + log
-        # loudly -- a config/classifier bug must never silently bypass the
-        # oversight gate. If governance/config can't load at all (can't even
-        # tell a policy is set), fail open + log, so a broken import never wedges
-        # every tool for non-enterprise installs.
+        # enterprise installs. A present-but-invalid policy, unreadable source,
+        # missing enforcement module, or evaluation error fails CLOSED: true
+        # absence is represented by a successfully loaded empty Policy, so
+        # policy uncertainty must never masquerade as the default-open posture.
         _gov = None
         try:
             from .governance import Decision as _GovDecision
             from .governance import Policy as _GovPolicy
             from .governance import Verdict as _GovVerdict
             from .governance import evaluate as _gov_evaluate
-            _gov_policy = _GovPolicy.from_config()
-        except Exception:  # governance unavailable -> can't enforce; fail open (logged)
-            log.warning("governance: unavailable; enforcement skipped for %r", name)
-            _gov_policy = None
+        except Exception:
+            log.warning(
+                "governance: enforcement module unavailable for %r; failing closed",
+                name,
+                exc_info=True,
+            )
+            self.ctx.blackboard.post(
+                self.name,
+                "error",
+                f"tool={name} DENIED: governance enforcement unavailable",
+            )
+            return (
+                "⚠ DENIED by governance policy (policy_unavailable): "
+                "the enforcement module was unavailable, so the tool was not "
+                "executed."
+            )
+        else:
+            try:
+                _gov_policy = _GovPolicy.from_config()
+            except Exception:
+                # The module is available but its active policy is not. This is
+                # distinguishable from the intentional no-policy posture because
+                # Policy.from_config returns an empty Policy for true absence and
+                # raises only when the source or a present field is untrusted.
+                log.warning(
+                    "governance: policy unavailable for %r; failing closed",
+                    name,
+                    exc_info=True,
+                )
+                _gov_policy = None
+                _gov = _GovVerdict(
+                    _GovDecision.DENY,
+                    "governance policy is unavailable or invalid (failed closed)",
+                    "policy_unavailable",
+                )
         if _gov_policy is not None and not _gov_policy.is_empty():
             try:
                 # Pass the transaction amount/currency so the policy's
@@ -1652,19 +1681,23 @@ class Agent:
         # consequential (non-low-risk) tools are gated -- reading/searching is
         # always allowed regardless of the hire's rung. Independent of whether an
         # [governance] policy is set; no-op unless [workforce] levels is enabled.
-        # Fail-open: a bug here must never wedge a tool.
+        # Once the client enables this enforcement layer, an evaluation failure
+        # must refuse the action. Otherwise a classifier/profile bug would turn
+        # the authority dial into an execution bypass.
+        _autonomy_levels_enabled = False
         try:
             from . import agent_autonomy as _aa
             from .governance import Decision as _GD
             from .governance import Verdict as _GV
             from .safety.tool_risk import risk_rank as _rr
             from .safety.tool_risk import tool_risk as _tr
+            _autonomy_levels_enabled = _aa.levels_enabled()
             _risk = _tr(name)
             # Disabled => the gate is a strict no-op (kernel rule 1: byte-for-byte
             # historical behaviour). Low-risk tools (reads/searches) and the
             # coordination control-plane (spawn/bus/delegate -- how the workforce
             # communicates) are never gated by the dial.
-            if (_aa.levels_enabled() and _rr(_risk) > 0
+            if (_autonomy_levels_enabled and _rr(_risk) > 0
                     and name not in _aa.COORDINATION_TOOLS):
                 _al = _aa.decide(getattr(self, "_autonomy_name", self.role),
                                  getattr(self, "_autonomy", None),
@@ -1677,9 +1710,46 @@ class Agent:
                     if _gov is None or _rank[_adec] > _rank[_gov.decision]:
                         _gov = _GV(_adec, f"autonomy level: {_al.reason}",
                                    f"autonomy:{_al.level.value}")
-        except Exception:  # pragma: no cover -- autonomy gate must never break the loop
-            log.warning("autonomy: level evaluation failed for %r; skipping", name,
-                        exc_info=True)
+        except Exception:
+            if _autonomy_levels_enabled:
+                log.warning(
+                    "autonomy: level evaluation failed for %r; failing closed",
+                    name,
+                    exc_info=True,
+                )
+                self.ctx.blackboard.post(
+                    self.name,
+                    "error",
+                    f"tool={name} DENIED: autonomy evaluation unavailable",
+                )
+                try:
+                    from .audit import EventKind, record
+
+                    record(
+                        EventKind.GOVERNANCE_DENIED,
+                        agent=self.name,
+                        goal_id=self.ctx.goal_id,
+                        tool=name,
+                        principal=(
+                            getattr(cap, "principal", None)
+                            if cap is not None else None
+                        ),
+                        rule="autonomy:error",
+                        reason="autonomy level evaluation failed closed",
+                    )
+                except Exception:  # pragma: no cover -- audit is best-effort
+                    pass
+                return (
+                    "⚠ DENIED by autonomy policy (autonomy:error): "
+                    "authority evaluation was unavailable, so the tool was not "
+                    "executed."
+                )
+            log.warning(
+                "autonomy: level evaluation unavailable while disabled for %r; "
+                "skipping",
+                name,
+                exc_info=True,
+            )
         if _gov is None or _gov.decision is _GovDecision.ALLOW:
             return None
         from .audit import EventKind, record

@@ -543,15 +543,24 @@ def data_grounding_enabled() -> bool:
     the ``[workforce] data_grounding`` config either way. Never raises."""
     import os
     env = os.environ.get("MAVERICK_WORKFORCE_DATA_GROUNDING", "").strip().lower()
-    if env in {"1", "true", "yes", "on"}:
-        return True
     if env in {"0", "false", "no", "off"}:
         return False
     try:
-        from .config import get_workforce
-        return bool(get_workforce().get("data_grounding", True))
+        from .config import config_source_errors, get_workforce
+
+        settings = get_workforce()
+        # ``load_config`` deliberately maps unreadable TOML to defaults. At an
+        # additive capability boundary, policy loss must not restore the
+        # default-on connector grant or let a positive env flag bypass it.
+        if config_source_errors():
+            return False
+        if env in {"1", "true", "yes", "on"}:
+            return True
+        if env:
+            return False
+        return settings.get("data_grounding") is True
     except Exception:  # pragma: no cover -- config must never block a run
-        return True
+        return False
 
 
 def domain_capability(profile: DomainProfile, parent_cap, principal: str):

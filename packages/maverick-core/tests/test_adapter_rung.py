@@ -698,6 +698,21 @@ def test_get_adapter_rung_defaults(monkeypatch):
     }
 
 
+def test_get_adapter_rung_rejects_truthy_string_booleans(monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", lambda: {"adapter_rung": {
+        "enable": "false",
+        "allow_synthetic": "false",
+        "allow_model_output": "true",
+    }})
+
+    settings = config.get_adapter_rung()
+    assert settings["enable"] is False
+    assert settings["allow_synthetic"] is False
+    assert settings["allow_model_output"] is False
+
+
 # --- the governed decision ---------------------------------------------------------
 
 def _keys(tmp_path) -> Path:
@@ -1525,8 +1540,12 @@ def test_govern_threads_configured_min_improvement(tmp_path, monkeypatch):
     # govern builds its own controller (no explicit controller passed).
     import maverick.config as config
     from maverick.self_improvement import PromotionLedger
-    monkeypatch.setattr(config, "get_self_improvement",
-                        lambda: {"min_improvement": 0.5})
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda: {"self_improvement": {"min_improvement": 0.5}},
+    )
+    monkeypatch.setattr(config, "config_source_errors", dict)
     keydir = _keys(tmp_path)
     ledger = PromotionLedger(path=tmp_path / "ledger.json")
     _manifest(tmp_path)
@@ -1544,6 +1563,65 @@ def test_govern_threads_configured_min_improvement(tmp_path, monkeypatch):
                                    unsafe_dev_auto_sign=True)
     assert not res.promoted
     assert "min" in res.reason.lower() or "gate refused" in res.reason.lower()
+
+
+def test_govern_refuses_untrusted_promotion_policy_source(tmp_path, monkeypatch):
+    import maverick.config as config
+    from maverick.self_improvement import PromotionLedger
+
+    monkeypatch.setattr(
+        config,
+        "config_source_errors",
+        lambda: {"config.toml": "invalid TOML"},
+    )
+    keydir = _keys(tmp_path)
+    ledger = PromotionLedger(path=tmp_path / "ledger.json")
+    _manifest(tmp_path)
+
+    result = ar.govern_adapter_change(
+        tmp_path / "a",
+        _cases(),
+        score_fn=_genuine_scorer,
+        keys_dir=keydir,
+        ledger=ledger,
+        store=ar.AdapterStore(root=tmp_path / "store"),
+        unsafe_dev_auto_sign=True,
+    )
+
+    assert not result.promoted
+    assert "policy source is invalid" in result.reason
+    assert ledger.all() == []
+
+
+@pytest.mark.parametrize("margin", ["0.25", True, float("nan"), -0.1, 1.1])
+def test_govern_refuses_invalid_explicit_promotion_margin(
+    tmp_path, monkeypatch, margin,
+):
+    import maverick.config as config
+    from maverick.self_improvement import PromotionLedger
+
+    monkeypatch.setattr(
+        config,
+        "load_config",
+        lambda: {"self_improvement": {"min_improvement": margin}},
+    )
+    keydir = _keys(tmp_path)
+    ledger = PromotionLedger(path=tmp_path / "ledger.json")
+    _manifest(tmp_path)
+
+    result = ar.govern_adapter_change(
+        tmp_path / "a",
+        _cases(),
+        score_fn=_genuine_scorer,
+        keys_dir=keydir,
+        ledger=ledger,
+        store=ar.AdapterStore(root=tmp_path / "store"),
+        unsafe_dev_auto_sign=True,
+    )
+
+    assert not result.promoted
+    assert "min_improvement is invalid" in result.reason
+    assert ledger.all() == []
 
 
 def test_govern_refuses_empty_base_model_id(tmp_path):

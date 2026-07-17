@@ -305,7 +305,13 @@ def _principal_from_request_session(request: Request):
     absent, or the cookie fails verification (tampered/expired/wrong-secret).
     """
     if not login_enabled():
-        return None
+        try:
+            from .saml import saml_enabled
+
+            if not saml_enabled():
+                return None
+        except Exception:  # pragma: no cover - unavailable SAML is not a session
+            return None
     raw = request.cookies.get(SESSION_COOKIE)
     if not raw:
         return None

@@ -238,6 +238,34 @@ def test_mint_session_requires_secret():
         saml_mod.mint_session_cookie("bob", secret="")
 
 
+def test_saml_only_session_reaches_protected_route_and_anonymous_is_denied(
+    _enabled, monkeypatch,
+):
+    """SAML is a complete dashboard auth mode even when OIDC login is off."""
+    from maverick_dashboard import auth, oidc_login
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    monkeypatch.delenv("MAVERICK_DASHBOARD_REQUIRE_AUTH", raising=False)
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+    monkeypatch.setattr(auth, "proxy_auth_enabled", lambda: False)
+    monkeypatch.setattr(oidc_login, "login_enabled", lambda: False)
+    monkeypatch.setattr(
+        oidc_login,
+        "load_oidc_config",
+        lambda: types.SimpleNamespace(session_secret=SECRET),
+    )
+
+    anonymous = _client()
+    assert anonymous.get("/api/v1/providers").status_code == 401
+
+    authenticated = _client()
+    authenticated.cookies.set(
+        "mvk_session",
+        saml_mod.mint_session_cookie("alice@example.com", secret=SECRET),
+    )
+    assert authenticated.get("/api/v1/providers").status_code == 200
+
+
 # --- ACS --------------------------------------------------------------------
 
 

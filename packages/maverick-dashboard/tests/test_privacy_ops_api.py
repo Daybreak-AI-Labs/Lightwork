@@ -279,7 +279,17 @@ def test_dpa_from_document_and_search(monkeypatch):
         "vendor": "Acme Corp", "source": "msgraph", "doc_id": "d1",
         "document_name": "acme-dpa.txt"})
     assert resp.status_code == 201, resp.text
-    assert resp.json()["clauses_present"] >= 9
+    record = resp.json()
+    assert record["clauses_present"] >= 9
+    assert record["review_required"] is True
+    assert record["extraction_confidence"] == "source_bytes"
+    assert record["document_evidence"]["method"] == "utf8_decode"
+    assert len(record["document_evidence"]["document_sha256"]) == 64
+    summary = client.get(
+        "/api/v1/privacy/dpa-reviews"
+    ).json()["reviews"][0]
+    assert summary["review_required"] is True
+    assert summary["extraction_confidence"] == "source_bytes"
     # A format we cannot honestly read is a 400, not a fake review.
     monkeypatch.setattr(doc_discovery, "fetch",
                         lambda *a, **k: (b"%PDF-1.7", "application/pdf"))

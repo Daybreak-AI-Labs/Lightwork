@@ -1,6 +1,7 @@
 """Privacy ops record types: DPA review, AI registry, RoPA, DSAR tracker."""
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
@@ -440,6 +441,107 @@ def test_privacy_store_refuses_hardlink_and_mismatched_identity(tmp_path):
         privacy_ops._DPA.load(created["id"])
 
 
+@pytest.mark.parametrize("revision", [False, "1", 1.5, -1])
+def test_privacy_store_rejects_non_monotonic_revision(tmp_path, revision):
+    from maverick.file_lock import atomic_write_text
+
+    created = privacy_ops.review_dpa("Acme", GOOD_DPA)
+    path = tmp_path / "dpa_reviews" / f"{created['id']}.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["revision"] = revision
+    atomic_write_text(path, json.dumps(payload), mode=0o600)
+
+    with pytest.raises(PermissionError, match="revision"):
+        privacy_ops._DPA.load(created["id"])
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["document_sha256", "binding_sha256"],
+)
+def test_document_evidence_hash_tampering_refuses_read_and_mutation(
+    tmp_path,
+    field,
+):
+    from maverick.file_lock import atomic_write_text
+
+    evidence = privacy_ops._build_document_evidence(
+        data=GOOD_DPA.encode("utf-8"),
+        text=GOOD_DPA,
+        mime="text/plain",
+        source="msgraph",
+        doc_id="private-document-id",
+        ref={"drive_id": "private-drive-id"},
+        extraction={
+            "method": "plain_text",
+            "scope": "document_bytes",
+            "confidence": "untrusted",
+            "review_required": True,
+        },
+    )
+    created = privacy_ops.review_dpa(
+        "Acme",
+        GOOD_DPA,
+        _document_evidence=evidence,
+    )
+    path = tmp_path / "dpa_reviews" / f"{created['id']}.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    replacement = "0" * 64
+    if payload["document_evidence"][field] == replacement:
+        replacement = "1" * 64
+    payload["document_evidence"][field] = replacement
+    atomic_write_text(path, json.dumps(payload), mode=0o600)
+    tampered_bytes = path.read_bytes()
+
+    with pytest.raises(
+        privacy_ops.PrivacyStateError,
+        match="evidence binding does not verify",
+    ):
+        privacy_ops._DPA.load(created["id"])
+    with pytest.raises(
+        privacy_ops.PrivacyStateError,
+        match="evidence binding does not verify",
+    ):
+        privacy_ops._DPA.update(
+            created["id"],
+            lambda record: record.update(status="approved"),
+            expected_revision=created["revision"],
+        )
+    assert path.read_bytes() == tampered_bytes
+
+
+def test_corrupt_existing_privacy_record_is_never_treated_as_absent(tmp_path):
+    from maverick.file_lock import atomic_write_text
+
+    created = privacy_ops.review_dpa("Acme", GOOD_DPA)
+    path = tmp_path / "dpa_reviews" / f"{created['id']}.json"
+    atomic_write_text(path, "{not-json", mode=0o600)
+    corrupt_bytes = path.read_bytes()
+
+    with pytest.raises(privacy_ops.PrivacyStateError, match="corrupt"):
+        privacy_ops._DPA.load(created["id"])
+    with pytest.raises(privacy_ops.PrivacyStateError, match="corrupt"):
+        privacy_ops._DPA.save(
+            {**created, "vendor": "Replacement must not publish"},
+            expected_revision=created["revision"],
+        )
+    assert path.read_bytes() == corrupt_bytes
+
+
+def test_duplicate_persisted_audit_event_id_is_rejected(tmp_path):
+    from maverick.file_lock import atomic_write_text
+
+    created = privacy_ops.review_dpa("Acme", GOOD_DPA)
+    path = tmp_path / "dpa_reviews" / f"{created['id']}.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    receipt = privacy_ops._pending_audit("review", "user:alice")
+    payload["_audit_pending"] = [receipt, dict(receipt)]
+    atomic_write_text(path, json.dumps(payload), mode=0o600)
+
+    with pytest.raises(PermissionError, match="invalid audit outbox"):
+        privacy_ops._DPA.load(created["id"])
+
+
 def test_privacy_store_rejects_malformed_filename(tmp_path):
     from maverick.file_lock import atomic_write_text, ensure_private_directory
 
@@ -594,6 +696,80 @@ def test_audit_retry_cursor_rotates_past_nonpending_records(monkeypatch):
     assert captured == ["stable-event-id"]
 
 
+def test_audit_outbox_cap_aborts_mutation_without_dropping_receipts():
+    created = privacy_ops.upsert_ropa(
+        {"activity": "Payroll", "purpose": "Pay employees"},
+        _audit=False,
+    )
+    assert created is not None
+    pending = [
+        privacy_ops._pending_audit("prior", f"system:{index}")
+        for index in range(privacy_ops._MAX_AUDIT_PENDING_RECEIPTS)
+    ]
+
+    def fill_outbox(record):
+        record["_audit_pending"] = pending
+
+    full = privacy_ops._ROPA.update(created["id"], fill_outbox)
+    assert full is not None
+    before = privacy_ops._ROPA.load(created["id"])
+    assert before is not None
+    with pytest.raises(privacy_ops.AuditOutboxError, match="outbox is full"):
+        privacy_ops.upsert_ropa(
+            {"purpose": "This change must not be published"},
+            ropa_id=created["id"],
+            expected_revision=before["revision"],
+            updated_by="user:alice",
+        )
+    after = privacy_ops._ROPA.load(created["id"])
+    assert after is not None
+    assert after["revision"] == before["revision"]
+    assert after["purpose"] == "Pay employees"
+    assert after["_audit_pending"] == before["_audit_pending"]
+    assert len(after["_audit_pending"]) == privacy_ops._MAX_AUDIT_PENDING_RECEIPTS
+
+
+def test_audit_flush_attempts_are_bounded_per_record(monkeypatch):
+    import maverick.audit as audit
+
+    created = privacy_ops.upsert_ropa(
+        {"activity": "Payroll", "purpose": "Pay employees"},
+        _audit=False,
+    )
+    assert created is not None
+
+    def fill_outbox(record):
+        record["_audit_pending"] = [
+            privacy_ops._pending_audit("prior") for _ in range(5)
+        ]
+
+    saved = privacy_ops._ROPA.update(created["id"], fill_outbox)
+    assert saved is not None
+    delivered = []
+    monkeypatch.setattr(
+        audit,
+        "record",
+        lambda *args, **kwargs: delivered.append(kwargs["event_id"]) or True,
+    )
+    monkeypatch.setattr(privacy_ops, "_MAX_AUDIT_DELIVERIES_PER_FLUSH", 2)
+    flushed = privacy_ops._audit_mutation(privacy_ops._ROPA, "ropa", saved)
+    assert len(delivered) == 2
+    assert len(flushed["_audit_pending"]) == 3
+    assert flushed["revision"] == saved["revision"]
+
+
+def test_persisted_audit_outbox_shape_is_validated(tmp_path):
+    from maverick.file_lock import atomic_write_text
+
+    created = privacy_ops.review_dpa("Acme", GOOD_DPA)
+    path = tmp_path / "dpa_reviews" / f"{created['id']}.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["_audit_pending"] = "not-a-receipt-queue"
+    atomic_write_text(path, json.dumps(payload), mode=0o600)
+    with pytest.raises(PermissionError, match="invalid audit outbox"):
+        privacy_ops._DPA.load(created["id"])
+
+
 class TestDepthHooks:
     """The workspace feeding itself: AIRA -> registry, connected sources ->
     DPA review, OneTrust export -> RoPA."""
@@ -711,18 +887,74 @@ class TestPdfExtraction:
     arrive in. Scanned PDFs still refuse honestly."""
 
     @staticmethod
-    def _pdf(lines, compress=False):
+    def _stream_object(
+        number,
+        body,
+        *,
+        flate=False,
+        filter_value=None,
+    ):
+        if filter_value is not None:
+            filter_entry = b" /Filter " + filter_value
+        else:
+            filter_entry = b" /Filter /FlateDecode" if flate else b""
+        return (
+            str(number).encode()
+            + b" 0 obj\n<< /Length "
+            + str(len(body)).encode()
+            + filter_entry
+            + b" >>\nstream\n"
+            + body
+            + b"\nendstream\nendobj\n"
+        )
+
+    @classmethod
+    def _pdf_document(
+        cls,
+        body,
+        *,
+        compress=False,
+        encoded=None,
+        flate=None,
+        filter_value=None,
+        contents=b"4 0 R",
+        extra_objects=(),
+    ):
         import zlib
+
+        if encoded is None:
+            encoded = zlib.compress(body) if compress else body
+        if flate is None:
+            flate = compress
+        return (
+            b"%PDF-1.4\n"
+            b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents "
+            + contents
+            + b" >>\nendobj\n"
+            + cls._stream_object(
+                4,
+                encoded,
+                flate=flate,
+                filter_value=filter_value,
+            )
+            + b"".join(extra_objects)
+            + b"trailer\n<< /Size 32 /Root 1 0 R >>\n"
+            b"startxref\n0\n%%EOF\n"
+        )
+
+    @classmethod
+    def _pdf(cls, lines, compress=False):
+        escaped = (
+            str(line).replace("\\", "\\\\").replace("(", "\\(")
+            .replace(")", "\\)")
+            for line in lines
+        )
         body = "\n".join(
-            f"BT /F1 10 Tf 54 700 Td ({ln}) Tj ET" for ln in lines).encode()
-        if compress:
-            comp = zlib.compress(body)
-            return (b"%PDF-1.4\n1 0 obj\n<< /Length "
-                    + str(len(comp)).encode()
-                    + b" /Filter /FlateDecode >>\nstream\n" + comp
-                    + b"\nendstream\nendobj\n%%EOF")
-        return (b"%PDF-1.4\n1 0 obj\n<< /Length " + str(len(body)).encode()
-                + b" >>\nstream\n" + body + b"\nendstream\nendobj\n%%EOF")
+            f"BT /F1 10 Tf 54 700 Td ({line}) Tj ET" for line in escaped
+        ).encode()
+        return cls._pdf_document(body, compress=compress)
 
     def test_review_dpa_from_pdf_compressed_and_not(self, monkeypatch):
         from maverick import doc_discovery
@@ -735,6 +967,9 @@ class TestPdfExtraction:
             r = privacy_ops.review_dpa_from_document(
                 "Acme Corp", "msgraph", "d1", document_name="acme-dpa.pdf")
             assert r["clauses_present"] >= 9, (compress, r)
+            assert r["status"] == "pending_review"
+            assert r["extraction_confidence"] == "untrusted"
+            assert r["review_required"] is True
 
     def test_tj_arrays_and_hex_strings(self):
         s = (b"BT [(Standard )(Contractual )(Clauses )(cover )(the )"
@@ -742,20 +977,19 @@ class TestPdfExtraction:
              b"BT <41756469742072696768747320616e6420726574656e74696f6e2073"
              b"6368656475"
              b"6c6520646566696e65642e> Tj ET")
-        txt = privacy_ops._pdf_text(b"%PDF-1.4\nstream\n" + s + b"\nendstream")
+        txt = privacy_ops._pdf_text(self._pdf_document(s))
         assert ("Standard Contractual Clauses cover the international "
                 "transfers of personal data.") in txt
         assert "Audit rights and retention schedule defined." in txt
 
     def test_scanned_pdf_still_refuses(self, monkeypatch):
         from maverick import doc_discovery
+        scanned = self._pdf_document(b"\x00\x89PNG\x01\x02 image pixels")
         monkeypatch.setattr(
             doc_discovery, "fetch",
-            lambda *a, **k: (b"%PDF-1.4\nstream\n\x00\x89PNG\x01\x02"
-                             b"\nendstream", "application/pdf"))
+            lambda *a, **k: (scanned, "application/pdf"))
         with pytest.raises(ValueError, match="cannot extract text"):
             privacy_ops.review_dpa_from_document("Acme", "msgraph", "scan")
-
 
 class TestDsarIntake:
     """Inbound messages become tracked requests — deterministically, with
@@ -850,3 +1084,318 @@ class TestIncidentRegister:
         listed = {x["id"]: x for x in privacy_ops.list_incidents()}
         assert listed[undecided["id"]]["clock_breached"] is True
         assert listed[decided["id"]]["clock_breached"] is False
+class TestPdfExtraction(TestPdfExtraction):  # noqa: F811
+    """Extend the concurrent PDF suite without duplicating inherited tests."""
+
+    def test_decompression_bomb_and_truncated_flate_fail_closed(
+        self,
+        monkeypatch,
+    ):
+        import zlib
+
+        body = b"BT (" + (b"A" * 4096) + b") Tj ET"
+        monkeypatch.setattr(privacy_ops, "_MAX_PDF_EXPANDED_STREAM_BYTES", 128)
+        assert privacy_ops._pdf_text(
+            self._pdf_document(body, compress=True)
+        ) == ""
+
+        monkeypatch.setattr(
+            privacy_ops,
+            "_MAX_PDF_EXPANDED_STREAM_BYTES",
+            8 * 1024,
+        )
+        encoded = zlib.compress(body)
+        monkeypatch.setattr(
+            privacy_ops,
+            "_MAX_PDF_COMPRESSED_STREAM_BYTES",
+            len(encoded) - 1,
+        )
+        assert privacy_ops._pdf_text(
+            self._pdf_document(body, encoded=encoded, flate=True)
+        ) == ""
+
+        monkeypatch.setattr(
+            privacy_ops,
+            "_MAX_PDF_COMPRESSED_STREAM_BYTES",
+            len(encoded),
+        )
+        truncated = encoded[:-2]
+        assert privacy_ops._pdf_text(
+            self._pdf_document(body, encoded=truncated, flate=True)
+        ) == ""
+
+    def test_pdf_resource_limits_reject_before_crediting_text(self, monkeypatch):
+        visible = b"BT (This visible quarterly summary is intentionally harmless.) Tj ET"
+        hidden = self._stream_object(
+            5,
+            b"BT (The controller has audit and inspection rights.) Tj ET",
+        )
+        pdf = self._pdf_document(visible, extra_objects=(hidden,))
+
+        monkeypatch.setattr(privacy_ops, "_MAX_PDF_STREAMS", 1)
+        assert privacy_ops._pdf_text(pdf) == ""
+
+        monkeypatch.setattr(privacy_ops, "_MAX_PDF_STREAMS", 2)
+        monkeypatch.setattr(privacy_ops, "_MAX_PDF_DECODED_TEXT_BYTES", 32)
+        assert privacy_ops._pdf_text(pdf) == ""
+
+        monkeypatch.setattr(privacy_ops, "_MAX_PDF_DECODED_TEXT_BYTES", 1024)
+        monkeypatch.setattr(privacy_ops, "_MAX_PDF_INPUT_BYTES", 64)
+        assert privacy_ops._pdf_text(pdf) == ""
+
+    def test_aggregate_referenced_stream_limit_is_enforced(self, monkeypatch):
+        first = b"BT (First visible page content is deliberately long.) Tj ET"
+        second = b"BT (Second visible page content is deliberately long.) Tj ET"
+        object_five = self._stream_object(5, second)
+        pdf = self._pdf_document(
+            first,
+            contents=b"[4 0 R 5 0 R]",
+            extra_objects=(object_five,),
+        )
+        monkeypatch.setattr(
+            privacy_ops,
+            "_MAX_PDF_AGGREGATE_STREAM_BYTES",
+            len(first) + len(second) - 1,
+        )
+        assert privacy_ops._pdf_text(pdf) == ""
+
+    def test_hidden_unreferenced_stream_cannot_overstate_findings(self):
+        visible = (
+            b"BT (Quarterly finance summary for internal planning only.) Tj ET"
+        )
+        hidden = self._stream_object(
+            5,
+            b"BT (The controller has audit and inspection rights. "
+            b"International transfers use Standard Contractual Clauses.) Tj ET",
+        )
+        orphan_page = (
+            b"6 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>\n"
+            b"endobj\n"
+        )
+        text, metadata = privacy_ops._pdf_extraction(
+            self._pdf_document(
+                visible,
+                extra_objects=(hidden, orphan_page),
+            )
+        )
+        assert "Quarterly finance summary" in text
+        assert "audit and inspection rights" not in text
+        assert "Standard Contractual Clauses" not in text
+        assert metadata["referenced_streams"] == 1
+        assert privacy_ops.review_dpa("Acme", text)["clauses_present"] == 0
+
+    def test_stream_bytes_cannot_masquerade_as_pdf_objects(self):
+        hidden = self._stream_object(
+            5,
+            b"BT (The controller has audit and inspection rights.) Tj ET",
+        )
+        visible_with_fake_structure = (
+            b"BT (Quarterly finance summary for internal planning only.) Tj ET\n"
+            b"9 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 5 0 R >>\n"
+            b"endobj\n"
+        )
+        text = privacy_ops._pdf_text(self._pdf_document(
+            visible_with_fake_structure,
+            extra_objects=(hidden,),
+        ))
+        assert text == ""
+
+    def test_trailer_root_excludes_unrooted_catalog_tree(self):
+        visible = b"BT (Quarterly finance summary for internal planning only.) Tj ET"
+        hidden = self._stream_object(
+            5,
+            b"BT (The controller has audit and inspection rights.) Tj ET",
+        )
+        fake_page = (
+            b"6 0 obj\n<< /Type /Page /Parent 7 0 R /Contents 5 0 R >>\n"
+            b"endobj\n"
+        )
+        fake_pages = (
+            b"7 0 obj\n<< /Type /Pages /Kids [6 0 R] /Count 1 >>\n"
+            b"endobj\n"
+        )
+        fake_catalog = (
+            b"8 0 obj\n<< /Type /Catalog /Pages 7 0 R >>\nendobj\n"
+        )
+        text = privacy_ops._pdf_text(self._pdf_document(
+            visible,
+            extra_objects=(hidden, fake_page, fake_pages, fake_catalog),
+        ))
+        assert "Quarterly finance summary" in text
+        assert "audit and inspection rights" not in text
+
+    def test_missing_or_ambiguous_final_trailer_fails_closed(self):
+        body = b"BT (Quarterly finance summary for internal planning only.) Tj ET"
+        pdf = self._pdf_document(body)
+        assert privacy_ops._pdf_text(pdf.split(b"trailer", 1)[0]) == ""
+        assert privacy_ops._pdf_text(
+            pdf + b"trailer\n<< /Root 1 0 R >>\nstartxref\n0\n%%EOF\n"
+        ) == ""
+
+    def test_unsupported_or_ambiguous_stream_filters_fail_closed(self):
+        import zlib
+
+        body = b"BT (The controller has audit and inspection rights.) Tj ET"
+        assert privacy_ops._pdf_text(self._pdf_document(
+            body,
+            filter_value=b"/ASCII85Decode",
+        )) == ""
+        compressed = zlib.compress(body)
+        assert privacy_ops._pdf_text(self._pdf_document(
+            body,
+            encoded=compressed,
+            filter_value=b"[/FlateDecode]",
+        )) == ""
+        assert privacy_ops._pdf_text(self._pdf_document(
+            body,
+            encoded=compressed,
+            filter_value=b"/FlateDecode /Filter /FlateDecode",
+        )) == ""
+        assert privacy_ops._pdf_text(self._pdf_document(
+            body,
+            encoded=compressed,
+            filter_value=b"/FlateDecode /DecodeParms << /Predictor 12 >>",
+        )) == ""
+
+    def test_content_lexer_rejects_semantic_operator_injection(self):
+        visible = b"BT (Quarterly finance summary for internal planning only.) Tj ET"
+        favorable = b"BT (The controller has audit and inspection rights.) Tj ET"
+
+        assert privacy_ops._pdf_text(self._pdf_document(
+            visible + b"\n% " + favorable,
+        )) == ""
+        assert privacy_ops._pdf_text(self._pdf_document(
+            visible + b"\n(not shown (audit and inspection rights) Tj) Do",
+        )) == ""
+
+        escaped_operand = (
+            visible
+            + b"\n(\\(audit and inspection rights\\) Tj) Do"
+        )
+        text = privacy_ops._pdf_text(self._pdf_document(escaped_operand))
+        assert "Quarterly finance summary" in text
+        assert "audit and inspection rights" not in text
+
+        assert privacy_ops._pdf_text(self._pdf_document(
+            b"(The controller has audit and inspection rights.) Tj",
+        )) == ""
+        assert privacy_ops._pdf_text(self._pdf_document(
+            b"BT (Quarterly finance summary for internal planning only.) Tj",
+        )) == ""
+        assert privacy_ops._pdf_text(self._pdf_document(
+            b"q BI /W 1 /H 1 ID " + favorable + b" EI Q",
+        )) == ""
+
+    def test_provenance_binds_bytes_mime_and_private_locator(self, monkeypatch):
+        from maverick import doc_discovery
+
+        pdf = self._pdf(
+            [line for line in GOOD_DPA.splitlines() if line],
+            compress=True,
+        )
+        fetch_calls = []
+
+        def fake_fetch(source, doc_id, ref=None, **kwargs):
+            fetch_calls.append((source, doc_id, ref, kwargs))
+            return pdf, "application/pdf; charset=binary"
+
+        monkeypatch.setattr(doc_discovery, "fetch", fake_fetch)
+        locator = "opaque-doc-12345"
+        ref = {"drive_id": "opaque-drive-67890"}
+        record = privacy_ops.review_dpa_from_document(
+            "Acme",
+            "msgraph",
+            locator,
+            ref=ref,
+            document_name="agreement.pdf",
+        )
+
+        assert fetch_calls[0][3]["max_bytes"] == (
+            privacy_ops._MAX_DOCUMENT_INPUT_BYTES
+        )
+        evidence = record["document_evidence"]
+        assert evidence["document_sha256"] == hashlib.sha256(pdf).hexdigest()
+        assert evidence["document_size_bytes"] == len(pdf)
+        assert evidence["resolved_mime"] == "application/pdf"
+        assert evidence["method"] == "pdf_page_content_streams"
+        assert evidence["scope"] == "page_referenced"
+        assert evidence["confidence"] == "untrusted"
+        assert evidence["review_required"] is True
+        assert evidence["referenced_streams"] == 1
+        assert record["review_required"] is True
+        assert locator not in json.dumps(evidence)
+        assert ref["drive_id"] not in json.dumps(evidence)
+        bound = dict(evidence)
+        binding = bound.pop("binding_sha256")
+        assert binding == privacy_ops._canonical_sha256(bound)
+
+        another = privacy_ops.review_dpa_from_document(
+            "Acme",
+            "msgraph",
+            "different-document-locator",
+            ref=ref,
+            document_name="agreement.pdf",
+        )
+        assert (
+            another["document_evidence"]["document_sha256"]
+            == evidence["document_sha256"]
+        )
+        assert (
+            another["document_evidence"]["source_binding_sha256"]
+            != evidence["source_binding_sha256"]
+        )
+
+        private_locator = "employee-alice-secret-folder/report-42.pdf"
+        unnamed = privacy_ops.review_dpa_from_document(
+            "Acme",
+            "msgraph",
+            private_locator,
+            ref={"drive_id": "private-drive"},
+        )
+        assert unnamed["document_name"] == "Connected document"
+        assert private_locator not in json.dumps(unnamed)
+        assert "private-drive" not in json.dumps(unnamed)
+
+    def test_review_boundary_rejects_oversize_fetch_result(self, monkeypatch):
+        from maverick import doc_discovery
+
+        fetch_kwargs = {}
+
+        def fake_fetch(*args, **kwargs):
+            fetch_kwargs.update(kwargs)
+            return b"A" * 65, "text/plain"
+
+        monkeypatch.setattr(privacy_ops, "_MAX_DOCUMENT_INPUT_BYTES", 64)
+        monkeypatch.setattr(doc_discovery, "fetch", fake_fetch)
+        with pytest.raises(ValueError, match="cannot extract text"):
+            privacy_ops.review_dpa_from_document(
+                "Acme",
+                "msgraph",
+                "oversize",
+            )
+        assert fetch_kwargs["max_bytes"] == 64
+
+    def test_untrusted_evidence_cannot_disable_human_review(self):
+        text = GOOD_DPA
+        evidence = privacy_ops._build_document_evidence(
+            data=text.encode("utf-8"),
+            text=text,
+            mime="text/plain",
+            source="msgraph",
+            doc_id="private-doc",
+            ref=None,
+            extraction={
+                "method": "test_extractor",
+                "scope": "document_bytes",
+                "confidence": "untrusted",
+                "review_required": False,
+            },
+        )
+        record = privacy_ops.review_dpa(
+            "Acme",
+            text,
+            _document_evidence=evidence,
+        )
+        assert record["status"] == "pending_review"
+        assert record["review_required"] is True
+        assert record["document_evidence"]["review_required"] is True

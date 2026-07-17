@@ -29,12 +29,13 @@ a thin layer on top of this engine, exactly as the intake agent sits on
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 # Answer vocabulary. ``na`` = not applicable (clears the question); ``unknown`` =
@@ -64,6 +65,12 @@ class AssessmentTemplate:
     framework: str
     description: str
     questions: tuple[Question, ...]
+    # Governance identity of the exact questionnaire release. Built-in
+    # declarations leave these empty; :func:`get_template` returns a copy with
+    # the current monotonic pointer revision and content digest attached.
+    revision: int = 0
+    digest: str = ""
+    custom: bool = False
 
     def question(self, qid: str) -> Question | None:
         return next((q for q in self.questions if q.id == qid), None)
@@ -552,16 +559,98 @@ TEMPLATES: dict[str, AssessmentTemplate] = {
 }
 
 
-# --- Custom / edited templates ---------------------------------------------
-# Templates are data, not code: an operator can edit a built-in questionnaire
-# or author a new one from the workspace. Custom templates live as JSON under
-# the tenant home and WIN over the built-in of the same type; deleting the
-# custom file restores the built-in. Scoring is identical -- evaluate() only
-# reads template.questions.
+# --- Governed questionnaire releases ---------------------------------------
+#
+# Questionnaire policy is executable governance data: it determines which
+# risks are asked about and therefore what can be approved.  Treating one
+# mutable ``<type>.json`` file as the policy let an operator silently weaken a
+# built-in questionnaire, changed the meaning of in-flight assessments, and
+# made concurrent edits last-writer-wins.  The store below uses:
+#
+# * immutable, content-addressed release artifacts;
+# * one monotonic per-type pointer/tombstone with compare-and-swap;
+# * stable question ids carried by the editor; and
+# * a durable at-least-once audit receipt embedded in the pointer.
+#
+# The old single-file format is read as revision 0 and migrated on the next
+# governed publication.  It is never silently discarded or treated as an
+# absent override when it is malformed.
 
 TEMPLATE_DEPARTMENTS = ("privacy", "finance")
 _TYPE_RE = r"^[a-z0-9_]{2,40}$"
 _SEVERITIES = ("low", "medium", "high")
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_TEMPLATE_STATE_SCHEMA = 2
+_AUDIT_READ_RETRY_LIMIT = 8
+_AUDIT_OUTBOX_LIMIT = 128
+
+
+class AssessmentConflict(RuntimeError):
+    """A governed record no longer matches the revision the caller reviewed."""
+
+
+class AssessmentStateError(RuntimeError):
+    """Persisted assessment governance state is present but cannot be trusted."""
+
+
+class AssessmentAuditBackpressure(AssessmentStateError):
+    """A governed write was refused because its durable audit outbox is full."""
+
+
+class AssessmentTransitionError(AssessmentStateError):
+    """A requested valid-state transition is not currently permitted."""
+
+
+def _validated_revision_value(value, *, label: str) -> int:
+    """Require an exact non-boolean monotonic revision integer."""
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise AssessmentStateError(f"{label} revision is invalid")
+    return value
+
+
+def _record_revision(
+    record: dict | None,
+    *,
+    label: str,
+    key: str = "revision",
+    required: bool = False,
+) -> int:
+    if record is None or key not in record:
+        if required:
+            raise AssessmentStateError(f"{label} revision is invalid")
+        return 0
+    return _validated_revision_value(record.get(key), label=label)
+
+
+def _validated_audit_pending(value, *, label: str) -> list[dict]:
+    pending = [] if value is None else value
+    if (
+        not isinstance(pending, list)
+        or any(not isinstance(receipt, dict) for receipt in pending)
+        or len(pending) > _AUDIT_OUTBOX_LIMIT
+    ):
+        raise AssessmentStateError(f"{label} audit outbox is invalid")
+    event_ids: set[str] = set()
+    for receipt in pending:
+        event_id = receipt.get("event_id")
+        if (
+            not isinstance(event_id, str)
+            or not 1 <= len(event_id) <= 128
+            or event_id in event_ids
+            or not isinstance(receipt.get("kind"), str)
+            or not isinstance(receipt.get("actor"), str)
+            or not isinstance(receipt.get("payload"), dict)
+        ):
+            raise AssessmentStateError(f"{label} audit outbox is invalid")
+        event_ids.add(event_id)
+    return list(pending)
+
+
+def _reserve_audit_slot(pending: list[dict], *, label: str) -> None:
+    if len(pending) >= _AUDIT_OUTBOX_LIMIT:
+        raise AssessmentAuditBackpressure(
+            f"{label} audit outbox is full; retry audit delivery before writing"
+        )
 
 
 def _custom_templates_dir() -> Path:
@@ -569,13 +658,248 @@ def _custom_templates_dir() -> Path:
     return data_dir("custom_templates")
 
 
-def save_custom_template(payload: dict) -> AssessmentTemplate:
-    """Validate + persist a custom (or built-in-overriding) template.
+def _canonical_json(value: dict) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False)
 
-    Raises ValueError with a human-readable reason on bad input; returns
-    the live template on success."""
+
+def _template_policy_record(record: dict) -> dict:
+    """Fields whose exact bytes define questionnaire semantics."""
+    return {
+        "type": str(record.get("type", "")),
+        "title": str(record.get("title", "")),
+        "framework": str(record.get("framework", "")),
+        "department": str(record.get("department", "privacy")),
+        "description": str(record.get("description", "")),
+        "questions": [dict(q) for q in (record.get("questions") or [])],
+    }
+
+
+def _template_digest(record: dict) -> str:
+    return hashlib.sha256(
+        _canonical_json(_template_policy_record(record)).encode("utf-8")
+    ).hexdigest()
+
+
+def _template_record(tpl: AssessmentTemplate, *, department: str) -> dict:
+    return {
+        "type": tpl.type,
+        "title": tpl.title,
+        "framework": tpl.framework,
+        "department": department,
+        "description": tpl.description,
+        "questions": [asdict(q) for q in tpl.questions],
+    }
+
+
+def _builtin_record(assessment_type: str) -> dict | None:
+    tpl = TEMPLATES.get(assessment_type)
+    if tpl is None:
+        return None
+    department = (
+        "finance"
+        if assessment_type in {
+            "sox_control", "fraud_risk", "itgc", "credit_risk",
+            "close_readiness",
+        }
+        else "privacy"
+    )
+    return _template_record(tpl, department=department)
+
+
+def _state_path(assessment_type: str) -> Path:
+    return _custom_templates_dir() / f"{assessment_type}.json"
+
+
+def _release_path(assessment_type: str, digest: str) -> Path:
+    if not _DIGEST_RE.fullmatch(digest):
+        raise AssessmentStateError("questionnaire release digest is invalid")
+    return _custom_templates_dir() / "releases" / assessment_type / f"{digest}.json"
+
+
+def _read_json(path: Path) -> dict | None:
+    from .file_lock import atomic_read_text, ensure_private_file
+
+    if not path.exists():
+        return None
+    try:
+        ensure_private_file(path)
+        value = json.loads(atomic_read_text(path, encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise AssessmentStateError(
+            f"questionnaire state is unreadable or corrupt: {path.name}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise AssessmentStateError(
+            f"questionnaire state is not an object: {path.name}"
+        )
+    return value
+
+
+def _validated_release(record: dict, assessment_type: str,
+                       expected_digest: str) -> dict:
+    policy = _template_policy_record(record)
+    if policy["type"] != assessment_type:
+        raise AssessmentStateError("questionnaire release type does not match its path")
+    actual = _template_digest(policy)
+    claimed = str(record.get("digest") or actual)
+    if claimed != expected_digest or actual != expected_digest:
+        raise AssessmentStateError("questionnaire release digest does not verify")
+    # Re-run the full semantic validator on data loaded from disk.  A valid
+    # digest only proves consistency, not that malicious/tampered data is safe.
+    _normalise_template(policy)
+    return policy
+
+
+def _load_state_unlocked(assessment_type: str) -> dict | None:
+    raw = _read_json(_state_path(assessment_type))
+    if raw is None:
+        return None
+    # Legacy v1: the state file was the mutable policy artifact itself.
+    if "questions" in raw and "active_digest" not in raw:
+        policy = _normalise_template(raw)
+        if policy["type"] != assessment_type:
+            raise AssessmentStateError(
+                "legacy questionnaire type does not match its path"
+            )
+        digest = _template_digest(policy)
+        legacy_revision = _record_revision(
+            raw, label="legacy questionnaire")
+        return {
+            "schema_version": 1,
+            "type": assessment_type,
+            "revision": legacy_revision,
+            "active_digest": digest,
+            "_legacy_release": policy,
+            "_audit_pending": [],
+        }
+    schema = raw.get("schema_version")
+    _record_revision(raw, label="questionnaire pointer", required=True)
+    if (
+        not isinstance(schema, int)
+        or isinstance(schema, bool)
+        or schema != _TEMPLATE_STATE_SCHEMA
+        or raw.get("type") != assessment_type
+    ):
+        raise AssessmentStateError("questionnaire pointer identity is invalid")
+    active = raw.get("active_digest")
+    if not isinstance(active, str):
+        raise AssessmentStateError("questionnaire pointer digest is invalid")
+    if active and not _DIGEST_RE.fullmatch(active):
+        raise AssessmentStateError("questionnaire pointer digest is invalid")
+    _validated_audit_pending(
+        raw.get("_audit_pending"), label="questionnaire",
+    )
+    return dict(raw)
+
+
+def _active_release_unlocked(assessment_type: str, state: dict) -> dict | None:
+    digest = str(state.get("active_digest") or "")
+    if not digest:
+        return None
+    legacy = state.get("_legacy_release")
+    if isinstance(legacy, dict):
+        return _validated_release(legacy, assessment_type, digest)
+    release = _read_json(_release_path(assessment_type, digest))
+    if release is None:
+        raise AssessmentStateError("active questionnaire release is missing")
+    return _validated_release(release, assessment_type, digest)
+
+
+def _write_release_unlocked(assessment_type: str, policy: dict,
+                            digest: str) -> None:
+    from .file_lock import atomic_write_text, ensure_private_directory
+
+    path = _release_path(assessment_type, digest)
+    ensure_private_directory(path.parent)
+    release = {"schema_version": 1, "digest": digest, **policy}
+    existing = _read_json(path)
+    if existing is not None:
+        _validated_release(existing, assessment_type, digest)
+        if _canonical_json(existing) != _canonical_json(release):
+            raise AssessmentStateError("immutable questionnaire release was replaced")
+        return
+    atomic_write_text(path, json.dumps(release, indent=2, ensure_ascii=False),
+                      mode=0o600)
+
+
+def _write_state_unlocked(assessment_type: str, state: dict) -> None:
+    from .file_lock import atomic_write_text, ensure_private_directory
+
+    path = _state_path(assessment_type)
+    ensure_private_directory(path.parent)
+    atomic_write_text(path, json.dumps(state, indent=2, ensure_ascii=False),
+                      mode=0o600)
+
+
+def _audit_receipt(kind: str, actor: str, **payload) -> dict:
+    return {
+        "event_id": uuid.uuid4().hex,
+        "kind": kind,
+        "actor": str(actor or "system")[:256],
+        "payload": payload,
+        "created_at": time.time(),
+    }
+
+
+def _deliver_audit(receipt: dict) -> bool:
+    try:
+        from .audit import record as audit_record
+        return bool(audit_record(
+            str(receipt.get("kind") or "assessment_governance"),
+            agent=str(receipt.get("actor") or "system"),
+            event_id=str(receipt.get("event_id") or ""),
+            **dict(receipt.get("payload") or {}),
+        ))
+    except Exception:  # noqa: BLE001 -- durable receipt remains for retry
+        return False
+
+
+def _flush_template_audit(assessment_type: str) -> None:
+    """Best-effort delivery; the pointer retains undelivered stable event ids."""
+    from .file_lock import cross_process_lock
+
+    path = _state_path(assessment_type)
+    with cross_process_lock(path, strict=True):
+        state = _load_state_unlocked(assessment_type)
+        pending = list((state or {}).get("_audit_pending") or [])
+    delivered = {
+        str(item.get("event_id"))
+        for item in pending
+        if _deliver_audit(item)
+    }
+    if not delivered:
+        return
+    with cross_process_lock(path, strict=True):
+        state = _load_state_unlocked(assessment_type)
+        if state is None:
+            return
+        current = list(state.get("_audit_pending") or [])
+        state["_audit_pending"] = [
+            item for item in current
+            if str(item.get("event_id")) not in delivered
+        ]
+        _write_state_unlocked(assessment_type, state)
+
+
+def _load_state_with_audit_retry(assessment_type: str, *, retry: bool) -> dict | None:
+    state = _load_state_unlocked(assessment_type)
+    if retry and state and state.get("_audit_pending"):
+        _flush_template_audit(assessment_type)
+        state = _load_state_unlocked(assessment_type)
+    return state
+
+
+def _normalise_template(
+    payload: dict,
+    *,
+    historical_ids: set[str] | None = None,
+    reusable_ids: set[str] | None = None,
+) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("template must be an object")
     t = str(payload.get("type", "")).strip().lower()
-    if not re.match(_TYPE_RE, t):
+    if not re.fullmatch(_TYPE_RE, t):
         raise ValueError("type must be a slug: lowercase letters, digits, _")
     title = str(payload.get("title", "")).strip()[:120]
     framework = str(payload.get("framework", "")).strip()[:200]
@@ -589,14 +913,46 @@ def save_custom_template(payload: dict) -> AssessmentTemplate:
         raise ValueError("a template needs 1-60 questions")
     questions = []
     seen_ids: set[str] = set()
+    explicit_ids: dict[int, str] = {}
+    historical = set(historical_ids or ())
+    reusable = set(reusable_ids or ())
+    # Reserve every existing id before allocating ids for newly-inserted blank
+    # rows. Otherwise inserting a blank row before ``type_q1`` would steal q1
+    # and either renumber or reject the unchanged existing question.
+    for i, q in enumerate(raw_qs, start=1):
+        if not isinstance(q, dict):
+            raise ValueError(f"question {i}: must be an object")
+        raw_qid = str(q.get("id", ""))
+        qid = raw_qid.strip().lower()
+        if not qid:
+            continue
+        if raw_qid != qid:
+            raise ValueError(
+                f"question {i}: id must already be lowercase with no padding"
+            )
+        if not re.fullmatch(r"^[a-z0-9_]{1,60}$", qid) or qid in seen_ids:
+            raise ValueError(f"question {i}: bad or duplicate id {qid!r}")
+        if qid in historical and qid not in reusable:
+            raise ValueError(
+                f"question {i}: id {qid!r} belongs to a retired question"
+            )
+        explicit_ids[i] = qid
+        seen_ids.add(qid)
+    next_id = 1
     for i, q in enumerate(raw_qs, start=1):
         text = str(q.get("text", "")).strip()[:500]
         if len(text) < 3:
             raise ValueError(f"question {i}: text is required")
-        qid = str(q.get("id", "")).strip().lower() or f"{t}_q{i}"
-        if not re.match(r"^[a-z0-9_]{1,60}$", qid) or qid in seen_ids:
-            raise ValueError(f"question {i}: bad or duplicate id {qid!r}")
-        seen_ids.add(qid)
+        qid = explicit_ids.get(i, "")
+        if not qid:
+            while (
+                f"{t}_q{next_id}" in seen_ids
+                or f"{t}_q{next_id}" in historical
+            ):
+                next_id += 1
+            qid = f"{t}_q{next_id}"
+            seen_ids.add(qid)
+            next_id += 1
         risk_answer = str(q.get("risk_answer", "no")).strip().lower()
         if risk_answer not in ("yes", "no"):
             raise ValueError(f"question {i}: risk_answer must be yes or no")
@@ -611,34 +967,183 @@ def save_custom_template(payload: dict) -> AssessmentTemplate:
             "severity": severity,
             "guidance": str(q.get("guidance", "")).strip()[:500],
         })
-    record = {"type": t, "title": title, "framework": framework,
-              "department": department,
-              "description": str(payload.get("description", "")).strip()[:500],
-              "questions": questions, "updated_at": time.time()}
-    d = _custom_templates_dir()
-    d.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(d, 0o700)
-    except OSError:  # pragma: no cover
-        pass
-    path = d / f"{t}.json"
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(json.dumps(record, indent=2))
-    return _template_from_record(record)
+    return {
+        "type": t,
+        "title": title,
+        "framework": framework,
+        "department": department,
+        "description": str(payload.get("description", "")).strip()[:500],
+        "questions": questions,
+    }
 
 
-def delete_custom_template(assessment_type: str) -> bool:
-    """Remove a custom template (restoring the built-in when one exists)."""
+def _historical_question_ids(assessment_type: str) -> set[str]:
+    """Every question id ever published for one immutable template type."""
+    identifiers: set[str] = set()
+    builtin = _builtin_record(assessment_type)
+    if builtin is not None:
+        identifiers.update(str(q.get("id") or "") for q in builtin["questions"])
+    root = _custom_templates_dir() / "releases" / assessment_type
+    if not root.exists():
+        return {item for item in identifiers if item}
+    releases = sorted(root.glob("*.json"))
+    if len(releases) > 4096:
+        raise AssessmentStateError("questionnaire release history exceeds limit")
+    for path in releases:
+        if not _DIGEST_RE.fullmatch(path.stem):
+            raise AssessmentStateError("questionnaire release identity is invalid")
+        record = _read_json(path)
+        if record is None:  # pragma: no cover -- path came from glob
+            raise AssessmentStateError("questionnaire release disappeared")
+        policy = _validated_release(record, assessment_type, path.stem)
+        identifiers.update(str(q.get("id") or "") for q in policy["questions"])
+    return {item for item in identifiers if item}
+
+
+def _effective_digest_unlocked(assessment_type: str,
+                               state: dict | None) -> str:
+    if state and state.get("active_digest"):
+        return str(state["active_digest"])
+    builtin = _builtin_record(assessment_type)
+    return _template_digest(builtin) if builtin else ""
+
+
+def save_custom_template(
+    payload: dict,
+    *,
+    expected_revision: int | None = None,
+    expected_digest: str | None = None,
+    actor: str = "system",
+) -> AssessmentTemplate:
+    """Publish an immutable questionnaire release and CAS its active pointer.
+
+    Core callers may omit CAS for legacy/bootstrap compatibility; dashboard
+    publication always supplies both values.  Writes are still serialized and
+    atomic in the compatibility path.
+    """
+    from .file_lock import cross_process_lock, ensure_private_directory
+
+    preflight = _normalise_template(payload)
+    t = preflight["type"]
+    path = _state_path(t)
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path, strict=True):
+        state = _load_state_unlocked(t)
+        active_policy = None
+        if state and state.get("active_digest"):
+            active_policy = _active_release_unlocked(t, state)
+        if active_policy is None:
+            active_policy = _builtin_record(t)
+        reusable_ids = {
+            str(question.get("id") or "")
+            for question in (active_policy or {}).get("questions", [])
+            if str(question.get("id") or "")
+        }
+        historical_ids = _historical_question_ids(t)
+        # The first governed write over a legacy mutable policy has no release
+        # artifact yet. Include that active policy so any removed legacy ids
+        # become retired instead of silently reusable after migration.
+        historical_ids.update(reusable_ids)
+        policy = _normalise_template(
+            payload,
+            historical_ids=historical_ids,
+            reusable_ids=reusable_ids,
+        )
+        revision = _record_revision(state, label="questionnaire pointer")
+        current_digest = _effective_digest_unlocked(t, state)
+        if expected_revision is not None and revision != _validated_revision_value(
+            expected_revision, label="expected questionnaire",
+        ):
+            raise AssessmentConflict(
+                f"questionnaire changed (expected revision {expected_revision}, "
+                f"found {revision})"
+            )
+        if expected_digest is not None and current_digest != str(expected_digest):
+            raise AssessmentConflict("questionnaire changed (digest mismatch)")
+        pending = _validated_audit_pending(
+            (state or {}).get("_audit_pending"), label="questionnaire",
+        )
+        _reserve_audit_slot(pending, label="questionnaire")
+        digest = _template_digest(policy)
+        _write_release_unlocked(t, policy, digest)
+        receipt = _audit_receipt(
+            "QUESTIONNAIRE_RELEASE_PUBLISHED", actor,
+            template=t, before_digest=current_digest, digest=digest,
+            before_revision=revision, revision=revision + 1,
+            questions=len(policy["questions"]),
+        )
+        pending.append(receipt)
+        new_state = {
+            "schema_version": _TEMPLATE_STATE_SCHEMA,
+            "type": t,
+            "revision": revision + 1,
+            "active_digest": digest,
+            "published_at": time.time(),
+            "published_by": str(actor or "system")[:256],
+            "_audit_pending": pending,
+        }
+        _write_state_unlocked(t, new_state)
+    _flush_template_audit(t)
+    return replace(_template_from_record(policy), revision=revision + 1,
+                   digest=digest, custom=True)
+
+
+def delete_custom_template(
+    assessment_type: str,
+    *,
+    expected_revision: int | None = None,
+    expected_digest: str | None = None,
+    actor: str = "system",
+) -> bool:
+    """CAS-unpublish a custom release; immutable history remains available."""
+    from .file_lock import cross_process_lock, ensure_private_directory
+
     t = (assessment_type or "").strip().lower()
-    if not re.match(_TYPE_RE, t):
+    if not re.fullmatch(_TYPE_RE, t):
         return False
-    path = _custom_templates_dir() / f"{t}.json"
-    try:
-        path.unlink()
-        return True
-    except OSError:
-        return False
+    path = _state_path(t)
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path, strict=True):
+        state = _load_state_unlocked(t)
+        if state is None or not state.get("active_digest"):
+            return False
+        _active_release_unlocked(t, state)
+        revision = _record_revision(
+            state, label="questionnaire pointer", required=True)
+        current_digest = str(state["active_digest"])
+        if expected_revision is not None and revision != _validated_revision_value(
+            expected_revision, label="expected questionnaire",
+        ):
+            raise AssessmentConflict(
+                f"questionnaire changed (expected revision {expected_revision}, "
+                f"found {revision})"
+            )
+        if expected_digest is not None and current_digest != str(expected_digest):
+            raise AssessmentConflict("questionnaire changed (digest mismatch)")
+        effective_after = _builtin_record(t)
+        after_digest = _template_digest(effective_after) if effective_after else ""
+        receipt = _audit_receipt(
+            "QUESTIONNAIRE_RELEASE_UNPUBLISHED", actor,
+            template=t, before_digest=current_digest, digest=after_digest,
+            before_revision=revision, revision=revision + 1,
+        )
+        pending = _validated_audit_pending(
+            state.get("_audit_pending"), label="questionnaire",
+        )
+        _reserve_audit_slot(pending, label="questionnaire")
+        pending.append(receipt)
+        new_state = {
+            "schema_version": _TEMPLATE_STATE_SCHEMA,
+            "type": t,
+            "revision": revision + 1,
+            "active_digest": "",
+            "deleted_at": time.time(),
+            "deleted_by": str(actor or "system")[:256],
+            "_audit_pending": pending,
+        }
+        _write_state_unlocked(t, new_state)
+    _flush_template_audit(t)
+    return True
 
 
 def _template_from_record(record: dict) -> AssessmentTemplate:
@@ -652,19 +1157,47 @@ def _template_from_record(record: dict) -> AssessmentTemplate:
                         for q in record.get("questions", [])))
 
 
+def template_state(assessment_type: str) -> dict:
+    """CAS identity for the currently effective release (including tombstones)."""
+    t = (assessment_type or "").strip().lower()
+    if not re.fullmatch(_TYPE_RE, t):
+        raise ValueError("invalid assessment type")
+    state = _load_state_with_audit_retry(t, retry=True)
+    active = bool(state and state.get("active_digest"))
+    builtin = _builtin_record(t)
+    digest = _effective_digest_unlocked(t, state)
+    return {
+        "type": t,
+        "revision": _record_revision(state, label="questionnaire pointer"),
+        "digest": digest,
+        "custom": active,
+        "builtin": builtin is not None,
+        "exists": active or builtin is not None,
+    }
+
+
 def custom_template_records() -> dict[str, dict]:
-    """Raw custom-template records by type (carries ``department``)."""
+    """Active immutable custom releases by type (carries governance identity)."""
     d = _custom_templates_dir()
     if not d.exists():
         return {}
     out: dict[str, dict] = {}
     for p in sorted(d.glob("*.json")):
-        try:
-            rec = json.loads(p.read_text(encoding="utf-8"))
-            if re.match(_TYPE_RE, str(rec.get("type", ""))):
-                out[rec["type"]] = rec
-        except (OSError, ValueError):
+        t = p.stem
+        if not re.fullmatch(_TYPE_RE, t):
             continue
+        state = _load_state_unlocked(t)
+        if state is None or not state.get("active_digest"):
+            continue
+        rec = _active_release_unlocked(t, state)
+        if rec is None:  # pragma: no cover -- active pointer is checked above
+            raise AssessmentStateError("active questionnaire release is missing")
+        out[t] = {
+            **rec,
+            "revision": _record_revision(
+                state, label="questionnaire pointer", required=True),
+            "digest": str(state.get("active_digest") or ""),
+        }
     return out
 
 
@@ -680,24 +1213,50 @@ def template_department(assessment_type: str) -> str:
 
 
 def list_templates() -> list[AssessmentTemplate]:
-    merged: dict[str, AssessmentTemplate] = dict(TEMPLATES)
-    for t, rec in custom_template_records().items():
-        try:
-            merged[t] = _template_from_record(rec)
-        except (KeyError, TypeError):  # pragma: no cover -- corrupt file
-            continue
-    return list(merged.values())
+    types = set(TEMPLATES)
+    d = _custom_templates_dir()
+    if d.exists():
+        types.update(
+            p.stem for p in d.glob("*.json")
+            if re.fullmatch(_TYPE_RE, p.stem)
+        )
+    out: list[AssessmentTemplate] = []
+    retries = 0
+    for t in sorted(types):
+        state = _load_state_unlocked(t)
+        retry = bool(
+            state and state.get("_audit_pending")
+            and retries < _AUDIT_READ_RETRY_LIMIT
+        )
+        if retry:
+            retries += 1
+        tpl = get_template(t, _retry_audit=retry)
+        if tpl is not None:
+            out.append(tpl)
+    return out
 
 
-def get_template(assessment_type: str) -> AssessmentTemplate | None:
+def get_template(assessment_type: str, *,
+                 _retry_audit: bool = True) -> AssessmentTemplate | None:
     t = (assessment_type or "").strip().lower()
-    rec = custom_template_records().get(t)
-    if rec:
-        try:
-            return _template_from_record(rec)
-        except (KeyError, TypeError):  # pragma: no cover -- corrupt file
-            pass
-    return TEMPLATES.get(t)
+    if not re.fullmatch(_TYPE_RE, t):
+        return None
+    state = _load_state_with_audit_retry(t, retry=_retry_audit)
+    revision = _record_revision(state, label="questionnaire pointer")
+    if state and state.get("active_digest"):
+        rec = _active_release_unlocked(t, state)
+        if rec is None:  # pragma: no cover
+            raise AssessmentStateError("active questionnaire release is missing")
+        return replace(
+            _template_from_record(rec), revision=revision,
+            digest=str(state["active_digest"]), custom=True,
+        )
+    builtin = TEMPLATES.get(t)
+    builtin_record = _builtin_record(t)
+    if builtin is None or builtin_record is None:
+        return None
+    return replace(builtin, revision=revision,
+                   digest=_template_digest(builtin_record), custom=False)
 
 
 # --- A running assessment --------------------------------------------------
@@ -712,6 +1271,9 @@ class AssessmentSession:
     answers: dict[str, dict] = field(default_factory=dict)
     id: str = field(default_factory=_new_session_id)
     created_at: float = field(default_factory=time.time)
+    template_revision: int = -1
+    template_digest: str = ""
+    template_snapshot: dict = field(default_factory=dict, repr=False)
 
     def restart(self, assessment_type: str, subject: str) -> None:
         """Start a new assessment draft in this reusable conversation session."""
@@ -720,11 +1282,41 @@ class AssessmentSession:
         self.answers.clear()
         self.id = _new_session_id()
         self.created_at = time.time()
+        self.template_revision = -1
+        self.template_digest = ""
+        self.template_snapshot.clear()
+        # Pin now, before an admin can publish another release between start
+        # and the first answer.
+        self.template()
 
     def template(self) -> AssessmentTemplate:
+        if self.template_snapshot:
+            policy = _normalise_template(self.template_snapshot)
+            digest = _template_digest(policy)
+            if (
+                policy["type"] != self.type
+                or not self.template_digest
+                or digest != self.template_digest
+                or self.template_revision < 0
+            ):
+                raise AssessmentStateError(
+                    "pinned assessment questionnaire does not verify"
+                )
+            return replace(
+                _template_from_record(policy),
+                revision=self.template_revision,
+                digest=self.template_digest,
+                custom=bool(self.template_snapshot.get("custom", False)),
+            )
         tpl = get_template(self.type)
         if tpl is None:
             raise KeyError(f"unknown assessment type {self.type!r}")
+        policy = _template_record(
+            tpl, department=template_department(tpl.type),
+        )
+        self.template_revision = tpl.revision
+        self.template_digest = tpl.digest or _template_digest(policy)
+        self.template_snapshot = {**policy, "custom": tpl.custom}
         return tpl
 
     def record(self, question_id: str, answer: str, note: str = "") -> None:
@@ -778,6 +1370,38 @@ class AssessmentSession:
         )
 
 
+def template_for_saved_record(record: dict) -> AssessmentTemplate | None:
+    """Resolve the exact release pinned into a saved assessment.
+
+    Pre-governance records lack a snapshot and retain the historical fallback
+    to the current template. New records never consult a mutable live pointer.
+    """
+    snapshot = record.get("template_snapshot")
+    if isinstance(snapshot, dict) and snapshot:
+        policy = _normalise_template(snapshot)
+        digest = _template_digest(policy)
+        expected = str(record.get("template_digest") or "")
+        if not expected or digest != expected:
+            raise AssessmentStateError(
+                "saved assessment questionnaire snapshot does not verify"
+            )
+        revision = _record_revision(
+            record,
+            key="template_revision",
+            label="saved assessment questionnaire",
+            required=True,
+        )
+        if policy["type"] != str(record.get("type") or ""):
+            raise AssessmentStateError(
+                "saved assessment questionnaire identity is invalid"
+            )
+        return replace(
+            _template_from_record(policy), revision=revision,
+            digest=digest, custom=bool(snapshot.get("custom", False)),
+        )
+    return get_template(str(record.get("type") or ""))
+
+
 def _rollup(severities: list[str]) -> str:
     if not severities:
         return "minimal"
@@ -792,30 +1416,85 @@ def _assessments_dir() -> Path:
     return data_dir("assessments")
 
 
-def save_session(session: AssessmentSession) -> Path:
-    """Persist a session + its current evaluation as JSON. Returns the path."""
-    d = _assessments_dir()
-    d.mkdir(parents=True, exist_ok=True)
+_ASSESSMENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def _assessment_path(assessment_id: str) -> Path | None:
+    value = str(assessment_id or "")
+    if not _ASSESSMENT_ID_RE.fullmatch(value):
+        return None
+    return _assessments_dir() / f"{value}.json"
+
+
+def _read_saved_path_unlocked(path: Path) -> dict | None:
+    from .file_lock import atomic_read_text, ensure_private_file
+
+    if not path.exists():
+        return None
     try:
-        os.chmod(d, 0o700)
-    except OSError:
-        pass
+        ensure_private_file(path)
+        record = json.loads(atomic_read_text(path, encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise AssessmentStateError(
+            f"assessment record is unreadable or corrupt: {path.name}"
+        ) from exc
+    if not isinstance(record, dict) or record.get("id") != path.stem:
+        raise AssessmentStateError("assessment record identity is invalid")
+    _validated_audit_pending(
+        record.get("_audit_pending"), label="assessment",
+    )
+    _record_revision(record, label="assessment")
+    return record
+
+
+def _write_saved_path_unlocked(path: Path, record: dict) -> None:
+    from .file_lock import atomic_write_text
+
+    atomic_write_text(
+        path,
+        json.dumps(record, indent=2, default=str, ensure_ascii=False),
+        mode=0o600,
+    )
+    # Keep the cross-platform stat postcondition that the previous O_CREAT
+    # writer exposed, in addition to atomic_write_text's Windows DACL hardening.
+    os.chmod(path, 0o600)
+
+
+def _public_assessment_record(record: dict) -> dict:
+    return {key: value for key, value in record.items()
+            if key != "_audit_pending"}
+
+
+def save_session(session: AssessmentSession) -> Path:
+    """Atomically create a pinned assessment draft. Returns its path."""
+    from .file_lock import cross_process_lock, ensure_private_directory
+
+    d = _assessments_dir()
+    ensure_private_directory(d)
     result = session.evaluate()
-    path = d / f"{session.id}.json"
+    # evaluate() pins the current release before we serialize it.
+    if not session.template_snapshot or not session.template_digest:
+        raise AssessmentStateError("assessment questionnaire was not pinned")
+    path = _assessment_path(session.id)
+    if path is None:
+        raise ValueError("invalid assessment id")
     record = {
         "id": session.id,
         "type": session.type,
         "subject": session.subject,
         "created_at": session.created_at,
+        "status": "pending_review",
+        "revision": 1,
+        "template_revision": session.template_revision,
+        "template_digest": session.template_digest,
+        "template_snapshot": session.template_snapshot,
         "answers": session.answers,
         "result": asdict(result),
     }
-    payload = json.dumps(record, indent=2, default=str)
-    # The assessment holds sensitive content (subject, answers, findings); write
-    # it 0600 so a co-tenant on a shared host can't read it (like dsar export).
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(payload)
+    with cross_process_lock(path, strict=True):
+        if _read_saved_path_unlocked(path) is not None:
+            raise AssessmentConflict("assessment id already exists")
+        _write_saved_path_unlocked(path, record)
     # Assessment memory: distill into the knowledge plane so future
     # assessments recall this one. Fail-open -- the JSON above is canonical.
     try:
@@ -826,24 +1505,99 @@ def save_session(session: AssessmentSession) -> Path:
     return path
 
 
-def _rewrite_saved(assessment_id: str, mutate) -> dict | None:
-    """Load a saved assessment, apply ``mutate(record)`` and write it back
-    (0600). Returns the updated record, or ``None`` for an unknown id. Reuses
-    :func:`load_saved`'s path-traversal guard."""
-    record = load_saved(assessment_id)
-    if record is None:
+def _flush_assessment_audit(assessment_id: str) -> None:
+    """Deliver embedded audit receipts and remove only confirmed event ids.
+
+    Delivery is at-least-once: a crash after append and before receipt removal
+    may retry the same stable ``event_id``, which downstream sinks can dedupe.
+    """
+    from .file_lock import cross_process_lock
+
+    path = _assessment_path(assessment_id)
+    if path is None:
+        return
+    with cross_process_lock(path, strict=True):
+        record = _read_saved_path_unlocked(path)
+        pending = list((record or {}).get("_audit_pending") or [])
+    delivered = {
+        str(item.get("event_id"))
+        for item in pending
+        if isinstance(item, dict) and _deliver_audit(item)
+    }
+    if not delivered:
+        return
+    with cross_process_lock(path, strict=True):
+        record = _read_saved_path_unlocked(path)
+        if record is None:
+            return
+        current = _validated_audit_pending(
+            record.get("_audit_pending"), label="assessment",
+        )
+        record["_audit_pending"] = [
+            item for item in current
+            if str(item.get("event_id")) not in delivered
+        ]
+        _write_saved_path_unlocked(path, record)
+
+
+def _rewrite_saved(
+    assessment_id: str,
+    mutate,
+    *,
+    expected_revision: int | None = None,
+    audit_receipt: dict | None = None,
+) -> dict | None:
+    """Locked read-modify-atomic-replace, optionally guarded by revision CAS.
+
+    ``expected_revision=None`` remains a safe serialized compatibility path for
+    the demo seeder and old internal callers. Security-sensitive dashboard
+    mutations always pass the revision fetched by the reviewer.
+    """
+    from .file_lock import cross_process_lock, ensure_private_directory
+
+    path = _assessment_path(assessment_id)
+    if path is None:
         return None
-    mutate(record)
-    path = _assessments_dir() / f"{assessment_id}.json"
-    payload = json.dumps(record, indent=2, default=str)
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(payload)
-    return record
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path, strict=True):
+        record = _read_saved_path_unlocked(path)
+        if record is None:
+            return None
+        revision = _record_revision(record, label="assessment")
+        if expected_revision is not None and revision != _validated_revision_value(
+            expected_revision, label="expected assessment",
+        ):
+            raise AssessmentConflict(
+                f"assessment changed (expected revision {expected_revision}, "
+                f"found {revision})"
+            )
+        # Deep-copy through JSON so nested follow-up edits do not mutate the
+        # object used for validation before the atomic commit.
+        updated = json.loads(json.dumps(record, default=str))
+        mutate(updated)
+        if updated == record:
+            return _public_assessment_record(record)
+        updated["revision"] = revision + 1
+        pending = _validated_audit_pending(
+            updated.get("_audit_pending"), label="assessment",
+        )
+        if audit_receipt is not None:
+            _reserve_audit_slot(pending, label="assessment")
+            pending.append(audit_receipt)
+        updated["_audit_pending"] = pending
+        _write_saved_path_unlocked(path, updated)
+    _flush_assessment_audit(assessment_id)
+    refreshed = _load_saved_raw(assessment_id)
+    return _public_assessment_record(refreshed) if refreshed is not None else None
 
 
-def add_followups(assessment_id: str, questions: list[str],
-                  asked_by: str = "") -> dict | None:
+def add_followups(
+    assessment_id: str,
+    questions: list[str],
+    asked_by: str = "",
+    *,
+    expected_revision: int | None = None,
+) -> dict | None:
     """Attach reviewer follow-up questions to a saved assessment.
 
     The reviewer working the assessment (dashboard pop-out) sends these back
@@ -869,11 +1623,19 @@ def add_followups(assessment_id: str, questions: list[str],
             })
         record["status"] = "needs_more"
 
-    return _rewrite_saved(assessment_id, _mutate)
+    receipt = _audit_receipt(
+        "ASSESSMENT_FOLLOWUP", asked_by,
+        assessment=assessment_id, questions=len(cleaned),
+    )
+    return _rewrite_saved(
+        assessment_id, _mutate, expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
 
 
 def answer_followup(assessment_id: str, followup_id: str, answer: str,
-                    answered_by: str = "") -> dict | None:
+                    answered_by: str = "", *,
+                    expected_revision: int | None = None) -> dict | None:
     """Record the respondent's answer to one follow-up. When the last open
     follow-up is answered the record's ``status`` returns to
     ``pending_review``. Returns the updated record, or None for an unknown
@@ -891,10 +1653,17 @@ def answer_followup(assessment_id: str, followup_id: str, answer: str,
                 f["answered_by"] = answered_by
                 f["answered_at"] = time.time()
                 hit["found"] = True
-        if all(f.get("answer") for f in fups):
+        if hit["found"] and all(f.get("answer") for f in fups):
             record["status"] = "pending_review"
 
-    record = _rewrite_saved(assessment_id, _mutate)
+    receipt = _audit_receipt(
+        "ASSESSMENT_FOLLOWUP_ANSWERED", answered_by,
+        assessment=assessment_id, followup_id=followup_id[:64],
+    )
+    record = _rewrite_saved(
+        assessment_id, _mutate, expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
     return record if (record is not None and hit["found"]) else None
 
 
@@ -903,7 +1672,8 @@ DECISIONS = ("approved", "rejected")
 
 def decide_assessment(assessment_id: str, decision: str, *,
                       decided_by: str = "", note: str = "",
-                      cadence_days: int | None = 365) -> dict | None:
+                      cadence_days: int | None = 365,
+                      expected_revision: int | None = None) -> dict | None:
     """Record the reviewer's decision on a saved assessment.
 
     ``approved`` closes the loop and (with a cadence) schedules the next
@@ -916,6 +1686,14 @@ def decide_assessment(assessment_id: str, decision: str, *,
         raise ValueError(f"decision must be one of {DECISIONS}")
 
     def _mutate(record: dict) -> None:
+        if (
+            decision == "approved"
+            and any(not str(f.get("answer") or "").strip()
+                    for f in (record.get("followups") or []))
+        ):
+            raise AssessmentTransitionError(
+                "assessment cannot be approved with unanswered follow-ups"
+            )
         record["status"] = decision
         record["decided_at"] = time.time()
         record["decided_by"] = decided_by
@@ -928,7 +1706,15 @@ def decide_assessment(assessment_id: str, decision: str, *,
             record["cadence_days"] = None
             record["next_review_at"] = None
 
-    return _rewrite_saved(assessment_id, _mutate)
+    receipt = _audit_receipt(
+        "ASSESSMENT_DECIDED", decided_by,
+        assessment=assessment_id, decision=decision,
+        cadence_days=int(cadence_days or 0),
+    )
+    return _rewrite_saved(
+        assessment_id, _mutate, expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
 
 
 def list_saved() -> list[dict]:
@@ -937,11 +1723,20 @@ def list_saved() -> list[dict]:
     if not d.exists():
         return []
     out: list[dict] = []
+    audit_retries = 0
     for p in d.glob("*.json"):
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        if not _ASSESSMENT_ID_RE.fullmatch(p.stem):
             continue
+        data = _load_saved_raw(p.stem)
+        if data is None:
+            continue
+        if data.get("_audit_pending") and audit_retries < _AUDIT_READ_RETRY_LIMIT:
+            audit_retries += 1
+            _flush_assessment_audit(p.stem)
+            data = _load_saved_raw(p.stem)
+            if data is None:  # pragma: no cover -- immutable id cannot vanish here
+                continue
+        revision = _record_revision(data, label="assessment")
         res = data.get("result", {})
         fups = data.get("followups") or []
         out.append({
@@ -956,6 +1751,9 @@ def list_saved() -> list[dict]:
                                      res.get("risk_rating", "?")),
             "findings": len(res.get("findings", [])),
             "created_at": data.get("created_at", 0),
+            "revision": revision,
+            "template_revision": data.get("template_revision"),
+            "template_digest": data.get("template_digest", ""),
             "status": data.get("status", "pending_review"),
             "open_followups": sum(1 for f in fups if not f.get("answer")),
             "decided_at": data.get("decided_at"),
@@ -968,18 +1766,22 @@ def list_saved() -> list[dict]:
     return sorted(out, key=lambda r: r["created_at"], reverse=True)
 
 
+def _load_saved_raw(assessment_id: str) -> dict | None:
+    from .file_lock import cross_process_lock
+
+    path = _assessment_path(assessment_id)
+    if path is None:
+        return None
+    with cross_process_lock(path, strict=True):
+        return _read_saved_path_unlocked(path)
+
+
 def load_saved(assessment_id: str) -> dict | None:
-    base = _assessments_dir()
-    path = (base / f"{assessment_id}.json").resolve()
-    # Guard against path traversal: ``assessment_id`` is a server-generated id and
-    # the file must sit directly in the assessments dir. A ``../`` id resolves
-    # outside it and is refused (so `assess show ../../etc/passwd` can't read it).
-    if path.parent != base.resolve():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    record = _load_saved_raw(assessment_id)
+    if record is not None and record.get("_audit_pending"):
+        _flush_assessment_audit(assessment_id)
+        record = _load_saved_raw(assessment_id)
+    return _public_assessment_record(record) if record is not None else None
 
 
 # --- Rendering -------------------------------------------------------------
@@ -1200,9 +2002,19 @@ __all__ = [
     "Finding",
     "AssessmentResult",
     "AssessmentSession",
+    "AssessmentConflict",
+    "AssessmentStateError",
+    "AssessmentAuditBackpressure",
+    "AssessmentTransitionError",
     "TEMPLATES",
     "list_templates",
     "get_template",
+    "template_state",
+    "template_department",
+    "template_for_saved_record",
+    "custom_template_records",
+    "save_custom_template",
+    "delete_custom_template",
     "save_session",
     "list_saved",
     "load_saved",

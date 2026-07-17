@@ -538,6 +538,41 @@ class TestEnterpriseBoundary:
         with pytest.raises(RuntimeError, match="missing or incompatible"):
             apply_governed_connectors(ToolRegistry())
 
+    def test_unreadable_enterprise_policy_cannot_remove_wrappers(self, monkeypatch):
+        import maverick.config as cfg
+        import maverick.enterprise as enterprise
+
+        monkeypatch.setattr(
+            cfg,
+            "config_source_errors",
+            lambda **_kwargs: {"config.toml": "unreadable"},
+        )
+        monkeypatch.setattr(enterprise, "enterprise_enabled", lambda: False)
+        monkeypatch.setattr(
+            cfg,
+            "get_governed_connectors",
+            lambda: {"enable": False, "connectors": [], "approver": ""},
+        )
+        registry = ToolRegistry()
+        registry.register(_fake_tool([]))
+
+        assert governance_enabled() is True
+        assert apply_governed_connectors(registry) == ["acme"]
+        assert "[governed:" in registry.get("acme").description
+
+    def test_enterprise_policy_exception_cannot_remove_wrappers(self, monkeypatch):
+        import maverick.config as cfg
+        import maverick.enterprise as enterprise
+
+        monkeypatch.setattr(cfg, "config_source_errors", lambda **_kwargs: {})
+        monkeypatch.setattr(
+            enterprise,
+            "enterprise_enabled",
+            lambda: (_ for _ in ()).throw(OSError("policy unavailable")),
+        )
+
+        assert governance_enabled() is True
+
     def test_fresh_human_consent_and_prepare_commit_receipts(self, monkeypatch):
         import maverick.config as cfg
         import maverick.governed_actions as actions

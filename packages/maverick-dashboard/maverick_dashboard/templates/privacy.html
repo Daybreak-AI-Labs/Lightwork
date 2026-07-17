@@ -20,6 +20,15 @@
   .pw-due-warn { color: var(--danger); font-weight: var(--font-medium); }
   .pw-clauses td { font-size: var(--text-sm); }
   .pw-erase-note { display: inline-block; font-size: var(--text-xs); }
+  .pw-review-required { display: inline-block; margin-top: var(--space-1);
+                        white-space: normal; }
+  .pw-evidence-panel { margin-bottom: var(--space-3); padding: var(--space-3);
+                       border: 1px solid var(--warn); border-radius: 8px;
+                       background: var(--warn-subtle); }
+  .pw-evidence-panel dl { display: grid; grid-template-columns: max-content 1fr;
+                          gap: var(--space-1) var(--space-3); margin: var(--space-2) 0 0; }
+  .pw-evidence-panel dt { font-weight: var(--font-medium); }
+  .pw-evidence-panel dd { margin: 0; overflow-wrap: anywhere; }
 </style>
 
   <h1 class="page-title">Privacy</h1>
@@ -83,7 +92,11 @@
               <span aria-hidden="true" class="muted">→</span>
               <span class="badge {{ 'blocked' if r.residual_risk == 'high' else 'warn' if r.residual_risk == 'medium' else 'done' }}">{{ r.residual_risk }}</span>
             </td>
-            <td><span class="badge info">{{ r.status | replace('_', ' ') }}</span></td>
+            <td><span class="badge info">{{ r.status | replace('_', ' ') }}</span>
+              {% if r.review_required %}
+                <br><span class="badge warn pw-review-required">Extracted evidence — human review required{% if r.extraction_confidence %} ({{ r.extraction_confidence }}){% endif %}</span>
+              {% endif %}
+            </td>
             <td class="muted">{{ r.created }}</td>
             <td><button class="btn pw-dpa-clauses" data-review="{{ r.id }}" type="button">Clauses</button></td>
           </tr>
@@ -544,6 +557,35 @@
           tr.className = 'pw-clauses';
           var td = document.createElement('td');
           td.colSpan = row.children.length;
+          if (rec.document_evidence) {
+            var ev = rec.document_evidence;
+            var provenance = document.createElement('div');
+            provenance.className = 'pw-evidence-panel';
+            var warning = document.createElement('strong');
+            warning.textContent = rec.review_required
+              ? 'Extracted evidence — human review required'
+              : 'Extracted evidence provenance';
+            provenance.appendChild(warning);
+            var facts = document.createElement('dl');
+            [
+              ['Extraction method', ev.method],
+              ['Extraction scope', ev.scope],
+              ['Confidence', ev.confidence],
+              ['Document SHA-256', ev.document_sha256],
+              ['Extracted text SHA-256', ev.extracted_text_sha256],
+              ['Source binding SHA-256', ev.source_binding_sha256],
+              ['Evidence binding SHA-256', ev.binding_sha256]
+            ].forEach(function (item) {
+              if (!item[1]) { return; }
+              var term = document.createElement('dt');
+              term.textContent = item[0];
+              var value = document.createElement('dd');
+              value.textContent = item[1];
+              facts.appendChild(term); facts.appendChild(value);
+            });
+            provenance.appendChild(facts);
+            td.appendChild(provenance);
+          }
           var tbl = document.createElement('table');
           var head = tbl.createTHead().insertRow();
           ['requirement', 'citation', 'verdict', 'evidence'].forEach(function (h) {

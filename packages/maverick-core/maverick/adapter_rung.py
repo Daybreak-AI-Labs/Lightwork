@@ -2302,6 +2302,29 @@ def _unsafe_dev_approval_callbacks(keys_dir: Path | str):
     return approve, verify, _validated_approval_public_keys(public_keys)
 
 
+def _adapter_min_improvement_from_config() -> float:
+    """Return the trusted adapter promotion margin or refuse the policy."""
+    from .config import config_source_errors, load_config
+
+    # ``load_config`` is intentionally fail-soft for ordinary model selection,
+    # so a mutation boundary must consult its trust side-channel explicitly.
+    snapshot = load_config()
+    if config_source_errors():
+        raise ValueError("adapter promotion policy source is invalid")
+    raw_section = snapshot.get("self_improvement", {})
+    if not isinstance(raw_section, dict):
+        raise ValueError("adapter promotion policy is invalid")
+    raw_margin = raw_section.get("min_improvement", 0.0)
+    if (
+        not isinstance(raw_margin, (int, float))
+        or isinstance(raw_margin, bool)
+        or not math.isfinite(float(raw_margin))
+        or not 0.0 <= float(raw_margin) <= 1.0
+    ):
+        raise ValueError("adapter promotion min_improvement is invalid")
+    return float(raw_margin)
+
+
 def _configure_adapter_governance(
     *, keys_dir, ledger, controller, approve, approval_signature,
     approval_verifier, approval_public_keys, unsafe_dev_auto_sign,
@@ -2338,11 +2361,14 @@ def _configure_adapter_governance(
                 str(signature), trusted_keys)
 
     if controller is None:
-        try:
-            from .config import get_self_improvement
-            min_imp = float(get_self_improvement().get("min_improvement", 0.0))
-        except Exception:  # pragma: no cover -- config never blocks a promotion
-            min_imp = 0.0
+        # A promotion boundary must not turn a lost or malformed policy into
+        # the most permissive evidence floor.  ``load_config`` is intentionally
+        # fail-soft for ordinary model selection, so explicitly consult its
+        # trust side-channel and validate the raw value before constructing the
+        # controller.  Absence still uses the documented zero-margin default;
+        # an unreadable source or a present non-numeric/out-of-range value
+        # refuses promotion.
+        min_imp = _adapter_min_improvement_from_config()
         controller = SelfImprovementController(
             ledger=ledger, min_improvement=min_imp,
             approval_verifier=approval_verifier)

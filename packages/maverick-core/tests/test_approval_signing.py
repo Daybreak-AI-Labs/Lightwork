@@ -177,6 +177,35 @@ class TestEnforcement:
         assert ap.trusted_approver_keys() == [pub]
         assert ap.signing_enforced() is True
 
+    @pytest.mark.parametrize(
+        "policy",
+        [
+            {"approver_keys": "not-a-list"},
+            {"approver_keys": [123]},
+            {"approver_keys_dir": 123},
+            {"require_signed_approval": "false"},
+        ],
+    )
+    def test_malformed_configured_approval_policy_is_not_unsigned(
+        self, monkeypatch, policy,
+    ):
+        from maverick import config
+
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS_DIR", raising=False)
+        monkeypatch.delenv("MAVERICK_REQUIRE_SIGNED_APPROVAL", raising=False)
+        monkeypatch.setattr(
+            config,
+            "load_config",
+            lambda: {"self_improvement": policy},
+        )
+        monkeypatch.setattr(config, "config_source_errors", dict)
+
+        with pytest.raises(RuntimeError, match="unavailable or invalid"):
+            ap.signing_enforced()
+        with pytest.raises(RuntimeError, match="unavailable or invalid"):
+            ap.trusted_approver_keys()
+
 
 class TestGateIntegration:
     """The controller's human-approval gate under enforcement."""
@@ -236,3 +265,35 @@ class TestGateIntegration:
         h_ok = [g for g in approved.gates if g.gate == "human_approval"][0]
         h_no = [g for g in refused.gates if g.gate == "human_approval"][0]
         assert h_ok.ok is True and h_no.ok is False
+
+    @pytest.mark.parametrize("source_outage", [False, True])
+    def test_signed_code_candidate_is_refused_when_policy_is_untrusted(
+        self, monkeypatch, source_outage,
+    ):
+        from maverick import config
+
+        priv, pub = _keypair()
+        candidate = _candidate(approved=True)
+        candidate.approval_signature = ap.sign_request(
+            ap.ApprovalRequest.for_candidate(candidate), priv,
+        )
+        policy = {} if source_outage else {"approver_keys": [pub, 123]}
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS_DIR", raising=False)
+        monkeypatch.delenv("MAVERICK_REQUIRE_SIGNED_APPROVAL", raising=False)
+        monkeypatch.setattr(
+            config,
+            "load_config",
+            lambda: {"self_improvement": policy},
+        )
+        monkeypatch.setattr(
+            config,
+            "config_source_errors",
+            lambda: ({"config.toml": "unreadable"} if source_outage else {}),
+        )
+
+        verdict = self._controller().evaluate(candidate)
+        human = [g for g in verdict.gates if g.gate == "human_approval"][0]
+        assert verdict.promote is False
+        assert human.ok is False
+        assert "policy is unavailable" in human.reason

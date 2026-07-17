@@ -3341,7 +3341,9 @@ def test_config_eval_budget_dollars(monkeypatch):
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {
         "self_harness": {"eval_budget_dollars": 2.5}})
     assert config.get_self_harness()["eval_budget_dollars"] == 2.5
-    # 0, negative, or garbage all mean UNCAPPED (the historical behavior)
+    # Valid non-positive values retain the historical uncapped meaning. Invalid
+    # values also normalize to None in this non-risk profile, but carry an
+    # explicit invalidity bit that disables unattended execution.
     for bad in (0, -3, "abc", None):
         monkeypatch.setattr(config, "load_config", lambda *a, _b=bad, **k: {
             "self_harness": {"eval_budget_dollars": _b}})
@@ -3349,6 +3351,27 @@ def test_config_eval_budget_dollars(monkeypatch):
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
     assert config.get_self_harness()["eval_budget_dollars"] == 5.0
     assert sh.settings()["eval_budget_dollars"] == 5.0
+
+
+@pytest.mark.parametrize("budget", ["abc", None, True, float("nan")])
+def test_malformed_eval_budget_disables_auto_run_and_manual_budget_builder(
+    monkeypatch, budget,
+):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {
+            "auto_run": True,
+            "eval_budget_dollars": budget,
+        },
+    })
+
+    settings = config.get_self_harness()
+    assert settings["eval_budget_valid"] is False
+    assert settings["auto_run"] is False
+    with pytest.raises(ValueError, match="budget policy is invalid"):
+        runner._eval_budget(settings)
 
 
 def test_eval_budget_builder_dollars_is_the_binding_cap():

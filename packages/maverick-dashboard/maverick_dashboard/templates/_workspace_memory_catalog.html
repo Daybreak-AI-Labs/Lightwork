@@ -50,8 +50,8 @@
   <div class="section-head"><h2>Assessment catalog</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top:0; font-size:var(--text-sm);">Frameworks the engine runs
-      today. Templates are data, not code — click one to edit it, or author a new
-      questionnaire; a custom version overrides the built-in until you delete it.</p>
+      today. Admins publish immutable questionnaire releases; every assessment
+      stays pinned to the exact release it started with.</p>
     <div class="pw-cat">
       {% for t in templates %}
         <button class="chip" data-tpl="{{ t.type }}" type="button"><b>{{ t.title }}</b> · {{ t.framework }} · {{ t.questions }} questions{% if t.custom %} · <em>custom</em>{% endif %}</button>
@@ -84,14 +84,16 @@
       <label><span class="muted">Framework</span>
         <input class="ctl" id="tpl-framework" maxlength="200"></label>
     </div>
+    <label><span class="muted">Description</span>
+      <textarea class="ctl" id="tpl-description" maxlength="500" rows="3"></textarea></label>
     <div class="arv__section">Questions — the risky answer creates a finding at that severity</div>
     <div id="tpl-qs"></div>
     <button class="btn" id="tpl-add" type="button">＋ Add question</button>
   </div>
   <div class="arv__foot">
     <span class="muted" id="tpl-status" role="status" aria-live="polite" style="margin-inline-end:auto;"></span>
-    <button class="btn" id="tpl-restore" style="display:none;" type="button">Delete custom version</button>
-    <button class="btn btn--primary" id="tpl-save" type="button">Save questionnaire</button>
+    <button class="btn" id="tpl-restore" style="display:none;" type="button">Unpublish custom release</button>
+    <button class="btn btn--primary" id="tpl-save" type="button">Publish release</button>
   </div>
 </dialog>
 <script>
@@ -113,11 +115,14 @@
   var tplNewMeta = document.getElementById('tpl-newmeta');
   var editingType = null;   // null = authoring a new questionnaire
   var editingDept = 'privacy';
+  var editingRevision = 0;
+  var editingDigest = '';
 
   function qRow(q) {
     q = q || {};
     var row = document.createElement('div');
     row.className = 'tpl-q';
+    row.dataset.questionId = q.id || '';
     function field(tag, cls, attrs) {
       var el = document.createElement(tag);
       el.className = 'ctl ' + (cls || '');
@@ -157,10 +162,13 @@
 
   function openEditor(type) {
     editingType = type;
+    editingRevision = 0;
+    editingDigest = '';
     tplStatus.textContent = '';
     tplQs.innerHTML = '';
     document.getElementById('tpl-title').value = '';
     document.getElementById('tpl-framework').value = '';
+    document.getElementById('tpl-description').value = '';
     document.getElementById('tpl-type').value = '';
     tplNewMeta.style.display = type ? 'none' : 'flex';
     tplRestore.style.display = 'none';
@@ -174,7 +182,10 @@
         tplStatus.textContent = '';
         document.getElementById('tpl-title').value = tpl.title;
         document.getElementById('tpl-framework').value = tpl.framework;
+        document.getElementById('tpl-description').value = tpl.description || '';
         editingDept = tpl.department || 'privacy';
+        editingRevision = Number(tpl.revision || 0);
+        editingDigest = tpl.digest || '';
         (tpl.questions || []).forEach(function (q) { tplQs.appendChild(qRow(q)); });
         if (tpl.custom) {
           tplFlag.style.display = '';
@@ -204,6 +215,7 @@
       var text = row.querySelector('.tpl-text').value.trim();
       if (!text) return;
       questions.push({
+        id: row.dataset.questionId || '',
         text: text,
         section: row.querySelector('.tpl-section').value.trim(),
         risk_answer: row.querySelector('.tpl-risk').value,
@@ -212,28 +224,41 @@
       });
     });
     if (!questions.length) { tplStatus.textContent = 'Add at least one question.'; return; }
-    tplStatus.textContent = 'Saving…';
-    fetch('/api/v1/assess/templates/' + encodeURIComponent(type), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: document.getElementById('tpl-title').value.trim(),
-        framework: document.getElementById('tpl-framework').value.trim(),
-        department: dept,
-        questions: questions
-      })
-    }).then(function (r) {
-      if (r.ok) { location.reload(); return null; }
-      return r.json().then(function (j) {
-        throw new Error(typeof j.detail === 'string' ? j.detail : 'HTTP ' + r.status);
+    tplStatus.textContent = 'Publishing…';
+    function publish(revision, digest) {
+      return fetch('/api/v1/assess/templates/' + encodeURIComponent(type), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: document.getElementById('tpl-title').value.trim(),
+          framework: document.getElementById('tpl-framework').value.trim(),
+          description: document.getElementById('tpl-description').value.trim(),
+          department: dept,
+          questions: questions,
+          expected_revision: revision,
+          expected_digest: digest
+        })
+      }).then(function (r) {
+        if (r.ok) { location.reload(); return null; }
+        return r.json().then(function (j) {
+          throw new Error(typeof j.detail === 'string' ? j.detail : 'HTTP ' + r.status);
+        });
       });
-    }).catch(function (e) { tplStatus.textContent = e.message; });
+    }
+    var publication = editingType
+      ? publish(editingRevision, editingDigest)
+      : fetch('/api/v1/assess/template-state/' + encodeURIComponent(type))
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .then(function (state) { return publish(state.revision, state.digest); });
+    publication.catch(function (e) { tplStatus.textContent = e.message; });
   });
 
   tplRestore.addEventListener('click', function () {
     if (!editingType) return;
-    tplStatus.textContent = 'Removing custom version…';
-    fetch('/api/v1/assess/templates/' + encodeURIComponent(editingType),
+    tplStatus.textContent = 'Unpublishing release…';
+    fetch('/api/v1/assess/templates/' + encodeURIComponent(editingType) +
+          '?expected_revision=' + encodeURIComponent(editingRevision) +
+          '&expected_digest=' + encodeURIComponent(editingDigest),
           { method: 'DELETE' })
       .then(function (r) {
         if (r.ok) { location.reload(); return; }
