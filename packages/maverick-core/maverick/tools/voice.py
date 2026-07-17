@@ -1,11 +1,13 @@
 """Voice tools — speech-to-text (Whisper) and text-to-speech.
 
-Both are optional extras; they require API keys.
-
 Speech-to-text backends (tried in order):
   1. OpenAI Whisper API (OPENAI_API_KEY)
   2. Groq Whisper API (GROQ_API_KEY, faster + cheap)
   3. local faster-whisper if installed
+  4. local whisper.cpp binary + GGML model — the BUILT-IN path: no API key,
+     no Python ML stack, works offline. ``maverick voice setup`` fetches the
+     model; ``[voice] stt_backend = "local"`` keeps audio on the machine even
+     when provider keys are present.
 
 Text-to-speech backends:
   1. OpenAI TTS API (OPENAI_API_KEY)
@@ -15,6 +17,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -135,6 +139,131 @@ def _whisper_local(audio_path: Path, language: str | None) -> str | None:
         return None
 
 
+_WHISPER_CPP_NAMES = ("whisper-cli", "whisper-cpp", "whisper.cpp")
+
+
+def _find_whisper_cpp() -> str | None:
+    """The whisper.cpp executable, or None.
+
+    Order: ``MAVERICK_WHISPER_CPP`` env > ``[voice] whisper_cpp_bin`` config
+    (either may be a PATH name or a file path) > well-known PATH names >
+    ``<maverick_home>/bin`` (where desktop installers drop a bundled binary).
+    """
+    from ..voice_models import _voice_cfg
+    for raw in (os.environ.get("MAVERICK_WHISPER_CPP"),
+                _voice_cfg().get("whisper_cpp_bin")):
+        if raw:
+            found = shutil.which(str(raw))
+            if found:
+                return found
+            log.warning("configured whisper.cpp binary %r not found", raw)
+    for name in _WHISPER_CPP_NAMES:
+        found = shutil.which(name)
+        if found:
+            return found
+    from ..paths import maverick_home
+    for name in _WHISPER_CPP_NAMES:
+        cand = maverick_home() / "bin" / name
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+    return None
+
+
+def _to_wav16k(audio_path: Path) -> Path | None:
+    """A 16 kHz mono PCM WAV of ``audio_path`` (whisper.cpp's input format).
+
+    Browsers record webm/ogg and phones m4a, so this converts via ffmpeg —
+    always, even for .wav input, since arbitrary WAVs aren't 16 kHz. Returns
+    a NEW temp file (caller deletes), or the input itself when it's already
+    a .wav and ffmpeg is missing (best effort), or None when conversion is
+    impossible.
+    """
+    from . import sandbox_run
+    if not shutil.which("ffmpeg"):
+        if audio_path.suffix.lower() == ".wav":
+            return audio_path
+        log.warning("whisper.cpp needs ffmpeg to decode %s input",
+                    audio_path.suffix or "raw")
+        return None
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    # Host-run on purpose (sandbox=None): the input is a confined/internal
+    # temp path and the output is our own temp file, mirroring how the
+    # faster-whisper backend already runs on the host.
+    code, _out, err = sandbox_run(
+        None,
+        ["ffmpeg", "-y", "-i", str(audio_path),
+         "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", tmp.name],
+        timeout=300.0,
+    )
+    if code != 0:
+        log.warning("ffmpeg convert for whisper.cpp failed: %s",
+                    err.strip()[-300:])
+        Path(tmp.name).unlink(missing_ok=True)
+        return None
+    return Path(tmp.name)
+
+
+def _whisper_cpp(audio_path: Path, language: str | None) -> str | None:
+    """Transcribe via a local whisper.cpp binary + GGML model, or None when
+    either piece is missing / the run fails (the caller falls through)."""
+    from . import sandbox_run
+    binary = _find_whisper_cpp()
+    if not binary:
+        return None
+    from ..voice_models import locate_model
+    model = locate_model()
+    if model is None:
+        log.warning(
+            "whisper.cpp found (%s) but no GGML model installed; "
+            "run `maverick voice setup`", binary)
+        return None
+    wav = _to_wav16k(audio_path)
+    if wav is None:
+        return None
+    try:
+        with tempfile.TemporaryDirectory(prefix="whispercpp-") as td:
+            prefix = os.path.join(td, "transcript")
+            # -otxt/-of: read the transcript from a file instead of scraping
+            # stdout, which whisper.cpp mixes with progress/system banners.
+            code, _out, err = sandbox_run(
+                None,
+                [binary, "-m", str(model), "-f", str(wav),
+                 "-l", (language or "auto"), "-otxt", "-of", prefix],
+                timeout=600.0,
+            )
+            txt = Path(prefix + ".txt")
+            if code != 0 or not txt.is_file():
+                log.warning("whisper.cpp (%s) failed: %s",
+                            binary, err.strip()[-300:])
+                return None
+            text = " ".join(txt.read_text(encoding="utf-8").split())
+            return text.strip()
+    except Exception as e:
+        log.warning("whisper (whisper.cpp): %s", e)
+        return None
+    finally:
+        if wav != audio_path:
+            wav.unlink(missing_ok=True)
+
+
+_STT_BACKENDS = ("auto", "openai", "groq", "local")
+
+
+def _default_stt_backend() -> str:
+    """Deployment-wide STT routing when a call doesn't force a backend:
+    ``MAVERICK_VOICE_STT_BACKEND`` env > ``[voice] stt_backend`` > ``auto``.
+    ``local`` pins transcription on-machine (privacy) even with keys set."""
+    raw = (os.environ.get("MAVERICK_VOICE_STT_BACKEND") or "").strip().lower()
+    if not raw:
+        from ..voice_models import _voice_cfg
+        raw = str(_voice_cfg().get("stt_backend") or "").strip().lower()
+    if raw and raw not in _STT_BACKENDS:
+        log.warning("unknown STT backend %r; using 'auto'", raw)
+        raw = ""
+    return raw or "auto"
+
+
 def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
     src = (args.get("source") or "").strip()
     if not src:
@@ -151,7 +280,7 @@ def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
     if not path.exists() or not path.is_file():
         return f"ERROR: audio file not found: {src!r}"
     language = args.get("language")
-    backend = (args.get("backend") or "auto").lower()
+    backend = (args.get("backend") or _default_stt_backend()).lower()
 
     if backend in ("openai", "auto"):
         out = _whisper_openai(path, language)
@@ -167,16 +296,20 @@ def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
             return "ERROR: Groq Whisper failed (check GROQ_API_KEY)"
     if backend in ("local", "auto"):
         out = _whisper_local(path, language)
+        if out is None:
+            out = _whisper_cpp(path, language)
         if out is not None:
             return out
         if backend == "local":
             return (
-                "ERROR: local Whisper not installed. "
-                "Run: python -m pip install -e './packages/maverick-core[voice]'"
+                "ERROR: no local STT engine available. Install whisper.cpp "
+                "and run `maverick voice setup`, or install faster-whisper "
+                "(python -m pip install -e './packages/maverick-core[voice]')."
             )
     return (
-        "ERROR: no voice backend available. Set OPENAI_API_KEY / GROQ_API_KEY "
-        "or install faster-whisper for local transcription."
+        "ERROR: no voice backend available. Set OPENAI_API_KEY / GROQ_API_KEY, "
+        "or set up the built-in local engine: install whisper.cpp and run "
+        "`maverick voice setup`."
     )
 
 
@@ -304,7 +437,8 @@ def transcribe_audio(sandbox: Any = None) -> Tool:
         description=(
             "Transcribe an audio file via Whisper. Backends tried in order: "
             "OpenAI (OPENAI_API_KEY), Groq (GROQ_API_KEY, fast+cheap), local "
-            "faster-whisper if installed. Accepts mp3/wav/m4a/flac/ogg. "
+            "faster-whisper, local whisper.cpp (built-in offline path — "
+            "`maverick voice setup`). Accepts mp3/wav/m4a/flac/ogg/webm. "
             "Set `language='en'` to skip auto-detect."
         ),
         input_schema=_TRANSCRIBE_SCHEMA,

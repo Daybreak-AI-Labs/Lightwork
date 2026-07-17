@@ -1,4 +1,4 @@
-<!-- Traduzione mantenuta dalla community di docs/getting-started.md (commit di origine: 00d6097) — la versione inglese è quella di riferimento. -->
+<!-- Traduzione mantenuta dalla community di docs/getting-started.md (commit di origine: a7b9cee) — la versione inglese è quella di riferimento. -->
 
 # Primi passi
 
@@ -134,6 +134,24 @@ specialista appena approvato sia attrezzato per svolgere il proprio compito fin
 dalla prima esecuzione. (Questo passaggio rispetta la configurazione
 `[self_learning]` / `provision_packs` e non amplia mai l'envelope vincolato del
 pack.)
+
+## Input vocale (integrato, offline)
+
+Il pulsante del microfono nella dashboard e lo strumento `transcribe_audio`
+funzionano senza chiave del provider grazie a un modello Whisper locale:
+
+```bash
+maverick voice setup    # scarica il modello verificato tramite checksum (~148 MB)
+maverick voice status   # mostra quali backend speech-to-text sono utilizzabili
+maverick voice transcribe clip.wav   # test rapido della pipeline
+```
+
+Installa il binario `whisper.cpp` (`brew install whisper-cpp`, oppure una
+release da github.com/ggml-org/whisper.cpp) e Lightwork lo trova nel PATH.
+Imposta `[voice] stt_backend = "local"` per tenere l'audio sulla macchina
+anche quando sono configurate chiavi OpenAI/Groq; `[voice] auto_fetch_model =
+true` (opt-in della procedura guidata) scarica il modello al primo utilizzo
+invece che in anticipo.
 
 ## Cambiare modelli o provider
 

@@ -754,7 +754,13 @@ here.
   (ws/wss connect-send-recv), `dom_diff` (structural before/after HTML diff),
   `arxiv`, `semantic_scholar`, `wikipedia`, `hackernews`, `youtube`.
 - **Media** — `view_image`, `view_video`, `pdf_reader`, `ocr`, `voice`
-  (transcribe/speak — with **voice persona presets** (`[voice.personas]`:
+  (transcribe/speak — STT backends: OpenAI/Groq Whisper keys, local
+  faster-whisper, and a **built-in offline path**: a local whisper.cpp
+  binary + checksum-pinned GGML model managed by `voice_models.py`
+  (`maverick voice setup|status|transcribe`; opt-in first-use auto-fetch via
+  `[voice] auto_fetch_model`; deployment-wide routing via `[voice]
+  stt_backend`, where `local` keeps audio on-machine even with keys set) —
+  with **voice persona presets** (`[voice.personas]`:
   named backend+voice bundles selected per call) and **multi-language voice**
   (`[voice.languages]`: per-language voice map, BCP-47 prefix match); explicit
   args always win, unknown presets degrade to defaults — `voice_personas.py`), `ffmpeg_tool`, `imagemagick_tool`, `pandoc_tool`,
@@ -2383,7 +2389,8 @@ tested without spawning py-spy.
   **dashboard voice commands** (`POST /api/v1/voice/transcribe` + a mic
   button on the chat composer): record a spoken goal in the browser
   (MediaRecorder), transcribe it server-side through the kernel STT backends
-  (OpenAI/Groq Whisper or local faster-whisper via `tools/voice.py`), and
+  (OpenAI/Groq Whisper, local faster-whisper, or the built-in local
+  whisper.cpp engine — `maverick voice setup` — via `tools/voice.py`), and
   fill the goal field for review — speech never auto-submits; falls back to
   the browser's own speech recognition when no STT backend is configured;
   on by default, off via `[voice] dashboard_commands = false` /

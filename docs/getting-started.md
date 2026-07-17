@@ -131,6 +131,23 @@ freshly approved specialist is equipped to do its job from the first run. (This
 step honors the `[self_learning]` / `provision_packs` config and never widens the
 pack's clamped envelope.)
 
+## Voice input (built-in, offline)
+
+The dashboard's mic button and the `transcribe_audio` tool work with no
+provider key via a local Whisper model:
+
+```bash
+maverick voice setup    # fetch the checksum-verified model (~148 MB)
+maverick voice status   # see which speech-to-text backends are usable
+maverick voice transcribe clip.wav   # smoke-test the pipeline
+```
+
+Install the `whisper.cpp` binary (`brew install whisper-cpp`, or a release
+from github.com/ggml-org/whisper.cpp) and Lightwork finds it on PATH. Set
+`[voice] stt_backend = "local"` to keep audio on-machine even when
+OpenAI/Groq keys are configured; `[voice] auto_fetch_model = true` (a wizard
+opt-in) fetches the model on first use instead of up front.
+
 ## Changing models or providers
 
 Re-run the wizard any time:

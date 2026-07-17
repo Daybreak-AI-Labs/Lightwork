@@ -1558,10 +1558,17 @@ def pick_advanced() -> dict[str, Any]:
         ),
         "voice_commands": _q_confirm(
             "Dashboard voice commands? A mic button on the chat composer records "
-            "a spoken goal and transcribes it (OpenAI/Groq Whisper key or local "
-            "faster-whisper; falls back to browser speech recognition). ON by "
-            "default.",
+            "a spoken goal and transcribes it (OpenAI/Groq Whisper key or the "
+            "built-in local Whisper; falls back to browser speech recognition). "
+            "ON by default.",
             default=True,
+        ),
+        "voice_local_stt": _q_confirm(
+            "  Built-in local speech-to-text? Auto-fetch a checksum-verified "
+            "Whisper model (~148 MB) on first use so voice works offline with "
+            "no provider key (needs the whisper.cpp binary; `maverick voice "
+            "setup` fetches the model up front instead). OFF by default.",
+            default=False,
         ),
         "attach_any_mime": _q_confirm(
             "Accept attachments of ANY declared type? Text, images, audio, video, "
@@ -3736,11 +3743,19 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[context]")
         lines.extend(_context_lines)
+    _voice_lines = []
     if advanced.get("voice_commands") is False:
         # Default-on; only a decline needs a line.
+        _voice_lines.append("dashboard_commands = false")
+    if advanced.get("voice_local_stt"):
+        # Built-in local STT: fetch the pinned Whisper model on first use
+        # (tools/voice.py whisper.cpp backend via maverick.voice_models).
+        _voice_lines.append("auto_fetch_model = true")
+    if _voice_lines:
+        # ONE [voice] table -- two would be a duplicate-key TOML error.
         lines.append("")
         lines.append("[voice]")
-        lines.append("dashboard_commands = false")
+        lines.extend(_voice_lines)
     _attach_lines = []
     if advanced.get("attach_any_mime"):
         _attach_lines.append("allow_any_mime = true")

@@ -6114,6 +6114,7 @@ from . import (  # noqa: E402,F401
     _reporting_groups,
     _training_groups,
     _trust_groups,
+    _voice_groups,
 )
 
 if __name__ == "__main__":
