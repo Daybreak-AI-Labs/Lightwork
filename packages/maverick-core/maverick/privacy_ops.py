@@ -802,8 +802,93 @@ def close_dsar(request_id: str, *, closed_by: str = "") -> dict | None:
     return _DSAR.update(request_id, _close)
 
 
+# --------------------------------------------------------------------------- #
+# Privacy incident / breach register -- Art. 33/34
+# --------------------------------------------------------------------------- #
+
+_INCIDENT = _RecordStore("privacy_incidents", "INC")
+
+INCIDENT_SEVERITIES = ("low", "medium", "high")
+BREACH_NOTIFY_HOURS = 72  # Art. 33(1): without undue delay, within 72h
+
+
+def open_incident(title: str, *, severity: str = "medium",
+                  description: str = "", categories: str = "",
+                  affected_estimate: str = "", reported_by: str = "") -> dict:
+    """Open a privacy-incident record; the Art. 33 clock starts at discovery
+    (= now). Whether the incident is a notifiable breach stays a HUMAN
+    decision recorded via :func:`decide_incident_notification` -- the
+    register tracks the clock, it never notifies anyone itself."""
+    severity = (severity or "medium").strip().lower()
+    if severity not in INCIDENT_SEVERITIES:
+        raise ValueError(f"severity must be one of {INCIDENT_SEVERITIES}")
+    now = time.time()
+    record = {
+        "id": _INCIDENT.new_id(),
+        "title": (title or "").strip()[:200],
+        "description": (description or "").strip()[:4000],
+        "categories": (categories or "").strip()[:500],
+        "affected_estimate": (affected_estimate or "").strip()[:100],
+        "severity": severity,
+        "reported_by": reported_by,
+        "created_at": now,
+        "notify_deadline_at": now + BREACH_NOTIFY_HOURS * 3600,
+        "status": "open",
+        "notification": None,
+    }
+    if not record["title"]:
+        raise ValueError("title is required")
+    return _INCIDENT.save(record)
+
+
+def decide_incident_notification(incident_id: str, notifiable: bool, *,
+                                 rationale: str = "",
+                                 decided_by: str = "") -> dict | None:
+    """Record the human call on Art. 33/34 notification. ``notifiable=True``
+    marks the record ``notify`` (the operator runs the actual notification
+    through their authority's channel); ``False`` documents WHY not --
+    Art. 33(5) requires documenting non-notified breaches too."""
+    def _mut(r: dict) -> None:
+        r["notification"] = {
+            "notifiable": bool(notifiable),
+            "rationale": (rationale or "").strip()[:2000],
+            "decided_by": decided_by,
+            "decided_at": time.time(),
+        }
+        if r.get("status") == "open":
+            r["status"] = "notify" if notifiable else "documented"
+    return _INCIDENT.update(incident_id, _mut)
+
+
+def close_incident(incident_id: str, *, closed_by: str = "") -> dict | None:
+    def _mut(r: dict) -> None:
+        r["status"] = "closed"
+        r["closed_at"] = time.time()
+        r["closed_by"] = closed_by
+    return _INCIDENT.update(incident_id, _mut)
+
+
+def list_incidents() -> list[dict]:
+    now = time.time()
+    out = []
+    for r in _INCIDENT.list():
+        if "status" not in r:  # not an incident record (defensive)
+            continue
+        r = dict(r)
+        remaining = float(r.get("notify_deadline_at", now)) - now
+        r["hours_left"] = int(remaining // 3600)
+        # The 72h clock matters while the notification call is unmade.
+        r["clock_breached"] = (r.get("notification") is None
+                               and r.get("status") == "open"
+                               and remaining < 0)
+        out.append(r)
+    return out
+
+
 __all__ = [
-    "AI_ACT_NOTE", "DPA_CHECKLIST", "DSAR_DUE_DAYS", "DSAR_KINDS",
+    "AI_ACT_NOTE", "BREACH_NOTIFY_HOURS", "DPA_CHECKLIST", "DSAR_DUE_DAYS",
+    "DSAR_KINDS", "close_incident", "decide_incident_notification",
+    "list_incidents", "open_incident",
     "ROPA_FIELDS", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
     "detect_dsar", "fulfill_dsar", "get_ai_system", "get_dpa_review",

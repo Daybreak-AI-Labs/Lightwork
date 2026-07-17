@@ -194,3 +194,25 @@ def test_dsar_from_message_intake():
     resp = client.post("/api/v1/privacy/dsar/from-message", json={
         "text": "lunch on thursday?", "sender": "x@example.com"})
     assert resp.status_code == 422
+
+
+def test_incident_register_lifecycle():
+    resp = client.post("/api/v1/privacy/incidents", json={
+        "title": "Misdirected owner statement batch", "severity": "high",
+        "categories": "contact details, balances",
+        "affected_estimate": "~120 owners"})
+    assert resp.status_code == 201, resp.text
+    iid = resp.json()["id"]
+    rows = client.get("/api/v1/privacy/incidents").json()["incidents"]
+    assert rows[0]["hours_left"] <= 72 and rows[0]["clock_breached"] is False
+    resp = client.post(f"/api/v1/privacy/incidents/{iid}/notification",
+                       json={"notifiable": True,
+                             "rationale": "personal data exposed"})
+    assert resp.json()["status"] == "notify"
+    assert client.post(f"/api/v1/privacy/incidents/{iid}/close").json()[
+        "status"] == "closed"
+    assert client.post("/api/v1/privacy/incidents/nope/notification",
+                       json={"notifiable": False,
+                             "rationale": "x"}).status_code == 404
+    assert client.post("/api/v1/privacy/incidents", json={
+        "title": "x", "severity": "catastrophic"}).status_code == 422

@@ -441,6 +441,28 @@ def seed() -> None:
     privacy_ops._DSAR.update(r4["id"], lambda rec: rec.update(
         created_at=NOW - 40 * DAY, due_at=NOW - 10 * DAY))
 
+    # Incident register: the Art. 33 clock in three states.
+    inc = privacy_ops.open_incident(
+        "Misdirected owner statement batch", severity="high",
+        categories="contact details, account balances",
+        affected_estimate="~120 owners", reported_by="ops")
+    privacy_ops._INCIDENT.update(inc["id"], lambda r: r.update(
+        created_at=NOW - 8 * 3600,
+        notify_deadline_at=NOW - 8 * 3600 + 72 * 3600))
+    doc = privacy_ops.open_incident(
+        "Lost badge with cached emails", severity="low",
+        categories="work emails", affected_estimate="1 employee")
+    privacy_ops.decide_incident_notification(
+        doc["id"], False, rationale="device encrypted and remotely wiped; "
+        "no risk to rights and freedoms", decided_by="dpo")
+    told = privacy_ops.open_incident(
+        "Processor breach at Initech", severity="high",
+        categories="names, emails", affected_estimate="~2,400 customers")
+    privacy_ops.decide_incident_notification(
+        told["id"], True, rationale="confirmed exfiltration of personal "
+        "data; authority and subjects notified", decided_by="dpo")
+    privacy_ops.close_incident(told["id"], closed_by="dpo")
+
     # A decided assessment feeding both registers (provenance on show).
     from maverick.assessment import list_saved
     aira_ids = [s["id"] for s in list_saved() if s["type"] == "aira"]
