@@ -1636,7 +1636,7 @@ def test_required_shield_scrubs_and_scans_resource_output(monkeypatch):
     monkeypatch.setenv("MAVERICK_REQUIRE_SHIELD", "1")
     from maverick import world_model
 
-    raw_secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+    raw_secret = "sk-abcdefghijklmnopqrstuvwxyz123456"  # pragma: allowlist secret
 
     class _World:
         def __init__(self, *_args, **_kwargs):
@@ -1702,7 +1702,7 @@ def test_tool_exception_is_scrubbed_bounded_and_shield_scanned(monkeypatch):
         enforced=False,
     )
     monkeypatch.setenv("MAVERICK_REQUIRE_SHIELD", "1")
-    raw_secret = "sk-abcdefghijklmnopqrstuvwxyz123456"
+    raw_secret = "sk-abcdefghijklmnopqrstuvwxyz123456"  # pragma: allowlist secret
     scanned = []
 
     class _Shield:
