@@ -180,3 +180,17 @@ def test_onetrust_ropa_import():
     assert resp.json() == {"imported": 1, "activities": ["CRM marketing"]}
     rows = client.get("/api/v1/privacy/ropa").json()["activities"]
     assert rows[0]["source"] == "onetrust"
+
+
+def test_dsar_from_message_intake():
+    resp = client.post("/api/v1/privacy/dsar/from-message", json={
+        "text": "Under Article 17 please delete my data. — sam@example.com",
+        "channel": "email"})
+    assert resp.status_code == 201, resp.text
+    rec = resp.json()
+    assert rec["kind"] == "erasure" and rec["subject_id"] == "sam@example.com"
+    assert rec["intake"]["signals"]
+    # Ordinary mail refuses instead of silently opening a case.
+    resp = client.post("/api/v1/privacy/dsar/from-message", json={
+        "text": "lunch on thursday?", "sender": "x@example.com"})
+    assert resp.status_code == 422
