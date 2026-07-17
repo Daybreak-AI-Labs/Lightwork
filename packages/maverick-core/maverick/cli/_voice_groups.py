@@ -43,6 +43,15 @@ def voice_status_cmd() -> None:
         click.echo(f"  {_YELLOW} faster-whisper (not installed — "
                    "pip install -e './packages/maverick-core[voice]')")
 
+    try:
+        import pywhispercpp  # noqa: F401
+        have_pywhisper = True
+        click.echo(f"  {_GREEN} pywhispercpp engine (installed)")
+    except ImportError:
+        have_pywhisper = False
+        click.echo(f"  {_YELLOW} pywhispercpp engine (not installed — "
+                   "ships with maverick-dashboard)")
+
     binary = _find_whisper_cpp()
     if binary:
         click.echo(f"  {_GREEN} whisper.cpp binary: {binary}")
@@ -63,14 +72,20 @@ def voice_status_cmd() -> None:
         click.echo(f"  {_YELLOW} no local Whisper model in {models_dir()} "
                    "(run `maverick voice setup`)")
     if not _shutil.which("ffmpeg"):
-        click.echo(f"  {_YELLOW} ffmpeg not on PATH — whisper.cpp can only "
-                   "read 16 kHz .wav input without it")
+        click.echo(f"  {_YELLOW} ffmpeg not on PATH — local engines read only "
+                   ".wav without it (the dashboard mic is unaffected: it "
+                   "uploads 16 kHz WAV)")
     click.echo("")
     click.echo(f"  default backend: {_default_stt_backend()} "
                "(MAVERICK_VOICE_STT_BACKEND / [voice] stt_backend)")
-    local_ok = bool(models and binary)
+    from ..voice_models import auto_fetch_enabled
+    if not models and auto_fetch_enabled():
+        click.echo("  model auto-fetch: on (first transcription or dashboard "
+                   "startup fetches it; `maverick voice setup` prefetches)")
+    local_ok = bool(models and (binary or have_pywhisper))
     have_any = (local_ok or os.environ.get("OPENAI_API_KEY")
-                or os.environ.get("GROQ_API_KEY"))
+                or os.environ.get("GROQ_API_KEY")
+                or (have_pywhisper and auto_fetch_enabled()))
     try:
         import faster_whisper  # noqa: F401
         have_any = True

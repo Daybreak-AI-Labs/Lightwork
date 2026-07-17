@@ -121,8 +121,11 @@ maverick onboard
 
 ## 音声入力(内蔵・オフライン)
 
-ダッシュボードのマイクボタンと `transcribe_audio` ツールは、ローカルの
-Whisper モデルによりプロバイダーの API キーなしで動作します:
+ダッシュボードのマイクボタンと `transcribe_audio` ツールは、プロバイダーの
+API キーなしで動作します。ローカル Whisper エンジンはダッシュボード
+パッケージに同梱され、チェックサム検証済みモデルは初回起動時に自動取得
+されます(エグレスロックされた環境や `[voice] auto_fetch_model = false`
+ではスキップ)。詳細は CLI で確認できます:
 
 ```bash
 maverick voice setup    # チェックサム検証済みモデルを取得(約148 MB)
@@ -130,12 +133,10 @@ maverick voice status   # 利用可能な音声認識バックエンドを確認
 maverick voice transcribe clip.wav   # パイプラインの動作確認
 ```
 
-`whisper.cpp` バイナリをインストールすれば(`brew install whisper-cpp`、
-または github.com/ggml-org/whisper.cpp のリリース)、Lightwork が PATH 上で
-自動検出します。`[voice] stt_backend = "local"` を設定すると、OpenAI/Groq の
-キーがあっても音声はマシンの外に出ません。`[voice] auto_fetch_model = true`
-(ウィザードのオプトイン)を有効にすると、事前ではなく初回利用時にモデルを
-取得します。
+システムのエンジンを使いたい場合は、PATH 上の `whisper.cpp` バイナリ
+(`brew install whisper-cpp`)や faster-whisper も同じチェーンに組み込めます。
+`[voice] stt_backend = "local"` を設定すると、OpenAI/Groq のキーがあっても
+音声はマシンの外に出ません。
 
 ## モデルやプロバイダーの変更
 

@@ -134,7 +134,10 @@ pack's clamped envelope.)
 ## Voice input (built-in, offline)
 
 The dashboard's mic button and the `transcribe_audio` tool work with no
-provider key via a local Whisper model:
+provider key: the local Whisper engine ships with the dashboard package, and
+the checksum-verified model is fetched automatically when the dashboard
+first starts (skipped on egress-locked deployments, or with
+`[voice] auto_fetch_model = false`). The CLI covers the details:
 
 ```bash
 maverick voice setup    # fetch the checksum-verified model (~148 MB)
@@ -142,11 +145,10 @@ maverick voice status   # see which speech-to-text backends are usable
 maverick voice transcribe clip.wav   # smoke-test the pipeline
 ```
 
-Install the `whisper.cpp` binary (`brew install whisper-cpp`, or a release
-from github.com/ggml-org/whisper.cpp) and Lightwork finds it on PATH. Set
+Prefer a system engine instead? A `whisper.cpp` binary on PATH (`brew
+install whisper-cpp`) or faster-whisper both plug into the same chain. Set
 `[voice] stt_backend = "local"` to keep audio on-machine even when
-OpenAI/Groq keys are configured; `[voice] auto_fetch_model = true` (a wizard
-opt-in) fetches the model on first use instead of up front.
+OpenAI/Groq keys are configured.
 
 ## Changing models or providers
 

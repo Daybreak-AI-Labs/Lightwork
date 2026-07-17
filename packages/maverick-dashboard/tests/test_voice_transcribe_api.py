@@ -163,3 +163,35 @@ def test_transcribe_uses_dashboard_rate_limit(monkeypatch, tmp_path):
     r = _post_audio(client)
     assert r.status_code == 429
     assert calls == 1
+
+
+def test_transcribe_503_with_retry_after_while_warming(monkeypatch, tmp_path):
+    """First-run warm-up in progress -> a RETRYABLE 503 (Retry-After header),
+    distinct from the terminal no-backend 503 that triggers browser fallback."""
+    _isolate(monkeypatch, tmp_path)
+    import maverick.tools.voice as voice_mod
+
+    def _not_reached(args, sandbox=None):
+        raise AssertionError("backend dispatched while warming")
+
+    monkeypatch.setattr(voice_mod, "_run_transcribe", _not_reached)
+    voice_mod._WARMING.set()
+    try:
+        r = _post_audio(_client())
+    finally:
+        voice_mod._WARMING.clear()
+    assert r.status_code == 503
+    assert r.headers.get("Retry-After") == "5"
+    assert "warming" in r.json()["detail"]
+
+
+def test_transcribe_no_retry_after_on_terminal_503(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    import maverick.tools.voice as voice_mod
+    monkeypatch.setattr(
+        voice_mod, "_run_transcribe",
+        lambda args, sandbox=None: "ERROR: no voice backend available.",
+    )
+    r = _post_audio(_client())
+    assert r.status_code == 503
+    assert r.headers.get("Retry-After") is None

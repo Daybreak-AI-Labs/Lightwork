@@ -132,8 +132,11 @@ maverick onboard
 
 ## वॉइस इनपुट (बिल्ट-इन, ऑफ़लाइन)
 
-डैशबोर्ड का माइक बटन और `transcribe_audio` टूल लोकल Whisper मॉडल की मदद से
-बिना किसी प्रोवाइडर key के काम करते हैं:
+डैशबोर्ड का माइक बटन और `transcribe_audio` टूल बिना किसी प्रोवाइडर key के
+काम करते हैं: लोकल Whisper इंजन डैशबोर्ड पैकेज के साथ आता है, और
+checksum-सत्यापित मॉडल डैशबोर्ड के पहले स्टार्ट पर अपने आप डाउनलोड हो जाता है
+(egress-लॉक्ड डिप्लॉयमेंट में या `[voice] auto_fetch_model = false` होने पर
+छोड़ दिया जाता है)। विवरण CLI से देखें:
 
 ```bash
 maverick voice setup    # checksum-सत्यापित मॉडल डाउनलोड करें (~148 MB)
@@ -141,12 +144,10 @@ maverick voice status   # देखें कि कौन से speech-to-text
 maverick voice transcribe clip.wav   # पाइपलाइन का त्वरित परीक्षण
 ```
 
-`whisper.cpp` बाइनरी इंस्टॉल करें (`brew install whisper-cpp`, या
-github.com/ggml-org/whisper.cpp से कोई release) — Lightwork उसे PATH में खोज
-लेता है। `[voice] stt_backend = "local"` सेट करने पर OpenAI/Groq keys
-कॉन्फ़िगर होने पर भी ऑडियो मशीन से बाहर नहीं जाता; `[voice] auto_fetch_model
-= true` (विज़ार्ड ऑप्ट-इन) मॉडल को पहले से नहीं, बल्कि पहली बार उपयोग होने पर
-लाता है।
+सिस्टम इंजन पसंद है? PATH में मौजूद `whisper.cpp` बाइनरी
+(`brew install whisper-cpp`) या faster-whisper उसी चेन में जुड़ जाते हैं।
+`[voice] stt_backend = "local"` सेट करने पर OpenAI/Groq keys कॉन्फ़िगर होने
+पर भी ऑडियो मशीन से बाहर नहीं जाता।
 
 ## मॉडल या प्रोवाइडर बदलना
 

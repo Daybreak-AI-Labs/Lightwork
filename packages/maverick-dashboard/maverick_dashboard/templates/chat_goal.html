@@ -1050,9 +1050,13 @@
     })();
   </script>
   <script>
-    // Voice: dictate a clarifying-question answer (mic → /api/v1/voice/transcribe,
-    // browser speech recognition as fallback) and read the finished result aloud
-    // (/api/v1/voice/speak). Transcripts fill the input for review — never auto-send.
+    {% include "_voice_mic.js" %}
+
+    // Voice: dictate a clarifying-question answer (mic → browser-side 16 kHz
+    // WAV encode → /api/v1/voice/transcribe, retrying while the local model
+    // warms; browser speech recognition as terminal fallback) and read the
+    // finished result aloud (/api/v1/voice/speak). Transcripts fill the
+    // input for review — never auto-send.
     (function () {
       var mic = document.getElementById('answer-mic');
       var input = document.getElementById('answer-input');
@@ -1080,15 +1084,11 @@
         }
         function upload(blob) {
           busy = true;
-          var fd = new FormData();
-          fd.append('file', blob, 'answer.webm');
-          fetch('/api/v1/voice/transcribe', { method: 'POST', body: fd })
-            .then(function (r) {
-              if (r.status === 503) { fallback(); return null; }
-              if (!r.ok) throw new Error('transcribe failed');
-              return r.json();
-            })
-            .then(function (d) { if (d) fill(d.text); })
+          lwVoiceUpload(blob, {
+            filename: 'answer.webm',
+            onFallback: fallback,
+            onResult: fill,
+          })
             .catch(function () {})
             .finally(function () { busy = false; });
         }

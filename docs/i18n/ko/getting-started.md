@@ -130,8 +130,11 @@ maverick onboard
 
 ## 음성 입력(내장, 오프라인)
 
-대시보드의 마이크 버튼과 `transcribe_audio` 도구는 로컬 Whisper 모델
-덕분에 공급자 키 없이 동작합니다:
+대시보드의 마이크 버튼과 `transcribe_audio` 도구는 공급자 키 없이
+동작합니다. 로컬 Whisper 엔진은 대시보드 패키지에 포함되어 있고, 체크섬
+검증된 모델은 대시보드 첫 시작 시 자동으로 내려받습니다(이그레스 잠금
+배포이거나 `[voice] auto_fetch_model = false`이면 건너뜀). 자세한 내용은
+CLI로 확인합니다:
 
 ```bash
 maverick voice setup    # 체크섬 검증된 모델 다운로드(약 148 MB)
@@ -139,11 +142,10 @@ maverick voice status   # 사용 가능한 음성 인식 백엔드 확인
 maverick voice transcribe clip.wav   # 파이프라인 동작 테스트
 ```
 
-`whisper.cpp` 바이너리를 설치하면(`brew install whisper-cpp` 또는
-github.com/ggml-org/whisper.cpp 릴리스) Lightwork가 PATH에서 자동으로
-찾습니다. `[voice] stt_backend = "local"`을 설정하면 OpenAI/Groq 키가
-있어도 오디오가 머신 밖으로 나가지 않습니다. `[voice] auto_fetch_model =
-true`(마법사 옵트인)를 켜면 모델을 미리 받지 않고 첫 사용 시 가져옵니다.
+시스템 엔진을 선호한다면 PATH의 `whisper.cpp` 바이너리
+(`brew install whisper-cpp`)나 faster-whisper도 같은 체인에 연결됩니다.
+`[voice] stt_backend = "local"`을 설정하면 OpenAI/Groq 키가 있어도
+오디오가 머신 밖으로 나가지 않습니다.
 
 ## 모델 또는 공급자 변경
 

@@ -137,7 +137,11 @@ jamais l'enveloppe verrouillée du pack.)
 ## Saisie vocale (intégrée, hors ligne)
 
 Le bouton micro du tableau de bord et l'outil `transcribe_audio` fonctionnent
-sans clé de fournisseur grâce à un modèle Whisper local :
+sans clé de fournisseur : le moteur Whisper local est livré avec le paquet du
+tableau de bord, et le modèle (vérifié par checksum) est téléchargé
+automatiquement au premier démarrage (ignoré sur les déploiements à egress
+verrouillé, ou avec `[voice] auto_fetch_model = false`). La CLI donne les
+détails :
 
 ```bash
 maverick voice setup    # télécharge le modèle vérifié par checksum (~148 Mo)
@@ -145,12 +149,10 @@ maverick voice status   # affiche les backends de reconnaissance vocale utilisab
 maverick voice transcribe clip.wav   # test rapide du pipeline
 ```
 
-Installez le binaire `whisper.cpp` (`brew install whisper-cpp`, ou une release
-depuis github.com/ggml-org/whisper.cpp) et Lightwork le trouve dans le PATH.
-Réglez `[voice] stt_backend = "local"` pour que l'audio ne quitte jamais la
-machine, même avec des clés OpenAI/Groq configurées ; `[voice]
-auto_fetch_model = true` (une option de l'assistant) télécharge le modèle au
-premier usage plutôt qu'à l'avance.
+Vous préférez un moteur système ? Un binaire `whisper.cpp` dans le PATH
+(`brew install whisper-cpp`) ou faster-whisper s'insèrent dans la même
+chaîne. Réglez `[voice] stt_backend = "local"` pour que l'audio ne quitte
+jamais la machine, même avec des clés OpenAI/Groq configurées.
 
 ## Changer de modèles ou de fournisseurs
 

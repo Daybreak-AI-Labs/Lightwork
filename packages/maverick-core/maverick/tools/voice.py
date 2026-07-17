@@ -4,10 +4,16 @@ Speech-to-text backends (tried in order):
   1. OpenAI Whisper API (OPENAI_API_KEY)
   2. Groq Whisper API (GROQ_API_KEY, faster + cheap)
   3. local faster-whisper if installed
-  4. local whisper.cpp binary + GGML model — the BUILT-IN path: no API key,
-     no Python ML stack, works offline. ``maverick voice setup`` fetches the
-     model; ``[voice] stt_backend = "local"`` keeps audio on the machine even
-     when provider keys are present.
+  4. local pywhispercpp (whisper.cpp wheels; a maverick-dashboard dependency,
+     so dashboard installs transcribe OUT OF THE BOX) — model file managed by
+     ``maverick.voice_models`` (auto-fetched by default; ``maverick voice
+     setup`` prefetches)
+  5. local whisper.cpp CLI binary + the same GGML model (for installs that
+     prefer a system binary over the wheel)
+
+``[voice] stt_backend = "local"`` keeps audio on the machine even when
+provider keys are present. :func:`warm_up_local_stt` (dashboard startup)
+fetches the model and loads the engine before the first mic click.
 
 Text-to-speech backends:
   1. OpenAI TTS API (OPENAI_API_KEY)
@@ -19,6 +25,7 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -124,6 +131,15 @@ def _whisper_groq(audio_path: Path, language: str | None) -> str | None:
         return None
 
 
+# One resident local model per engine. Loading weights per request adds
+# seconds of latency to every mic click; caching keeps the first click's cost
+# only. _LOCAL_STT_LOCK serializes construction AND pywhispercpp inference
+# (a whisper.cpp context is not safe under concurrent transcribes; the
+# dashboard endpoint allows MAVERICK_VOICE_TRANSCRIBE_CONCURRENCY=2 workers).
+_LOCAL_STT_LOCK = threading.Lock()
+_LOCAL_STT_CACHE: dict[str, Any] = {}
+
+
 def _whisper_local(audio_path: Path, language: str | None) -> str | None:
     try:
         from faster_whisper import WhisperModel  # type: ignore
@@ -131,12 +147,64 @@ def _whisper_local(audio_path: Path, language: str | None) -> str | None:
         return None
     try:
         model_size = os.environ.get("MAVERICK_WHISPER_MODEL", "small")
-        model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        key = f"faster-whisper:{model_size}"
+        with _LOCAL_STT_LOCK:
+            model = _LOCAL_STT_CACHE.get(key)
+            if model is None:
+                model = WhisperModel(model_size, device="cpu", compute_type="int8")
+                _LOCAL_STT_CACHE[key] = model
         segments, _ = model.transcribe(str(audio_path), language=language)
         return " ".join(s.text for s in segments).strip()
     except Exception as e:
         log.warning("whisper (local): %s", e)
         return None
+
+
+def _whisper_pywhispercpp(audio_path: Path, language: str | None) -> str | None:
+    """Transcribe via the pywhispercpp wheel (whisper.cpp in-process).
+
+    Ships as a maverick-dashboard dependency, so this is the backend that
+    makes the mic work on a plain install. Loads the checksum-verified GGML
+    model from :mod:`maverick.voice_models` (never pywhispercpp's own
+    unpinned downloader). Returns None when the wheel or model is missing
+    so the caller falls through.
+    """
+    try:
+        from pywhispercpp.model import Model  # type: ignore
+    except ImportError:
+        return None
+    from ..voice_models import locate_model
+    model_file = locate_model()
+    if model_file is None:
+        log.warning("pywhispercpp installed but no GGML model; "
+                    "run `maverick voice setup` (or enable auto_fetch_model)")
+        return None
+    # pywhispercpp decodes WAV itself but needs ffmpeg for webm/ogg/mp3; the
+    # dashboard mic uploads 16 kHz WAV (client-side encode), other callers
+    # get converted here when ffmpeg exists.
+    wav = _to_wav16k(audio_path)
+    if wav is None:
+        return None
+    try:
+        key = f"pywhispercpp:{model_file}"
+        with _LOCAL_STT_LOCK:
+            model = _LOCAL_STT_CACHE.get(key)
+            if model is None:
+                # redirect_whispercpp_logs_to=None routes the C++ init spew
+                # to /dev/null (False would mean "no redirection").
+                model = Model(str(model_file),
+                              redirect_whispercpp_logs_to=None,
+                              print_progress=False, print_realtime=False)
+                _LOCAL_STT_CACHE[key] = model
+            # language "" = whisper.cpp auto-detect.
+            segments = model.transcribe(str(wav), language=(language or ""))
+        return " ".join(s.text for s in segments).strip()
+    except Exception as e:
+        log.warning("whisper (pywhispercpp): %s", e)
+        return None
+    finally:
+        if wav != audio_path:
+            wav.unlink(missing_ok=True)
 
 
 _WHISPER_CPP_NAMES = ("whisper-cli", "whisper-cpp", "whisper.cpp")
@@ -264,6 +332,55 @@ def _default_stt_backend() -> str:
     return raw or "auto"
 
 
+_WARMING = threading.Event()
+
+
+def stt_warming() -> bool:
+    """True while :func:`warm_up_local_stt` is still provisioning (model
+    download / first engine load). The dashboard turns this into a friendly
+    503 + Retry-After instead of a dead "no backend" error."""
+    return _WARMING.is_set()
+
+
+def warm_up_local_stt() -> bool:
+    """Fetch the local model and load the engine BEFORE the first mic click.
+
+    Runs from the dashboard lifespan in a background thread; a cold start
+    otherwise means the first click eats a ~150 MB download plus a model
+    load. Cloud keys present → nothing to warm (that chain has no cold
+    start). Never raises; returns True when transcription will work.
+    """
+    if os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY"):
+        return True
+    _WARMING.set()
+    try:
+        from ..voice_models import locate_model
+        model_file = locate_model()  # triggers the (default-on) auto-fetch
+        try:
+            from pywhispercpp.model import Model  # type: ignore
+        except ImportError:
+            Model = None  # type: ignore[assignment]
+        if model_file is not None and Model is not None:
+            key = f"pywhispercpp:{model_file}"
+            with _LOCAL_STT_LOCK:
+                if key not in _LOCAL_STT_CACHE:
+                    _LOCAL_STT_CACHE[key] = Model(
+                        str(model_file), redirect_whispercpp_logs_to=None,
+                        print_progress=False, print_realtime=False)
+            return True
+        try:
+            import faster_whisper  # noqa: F401
+            return True
+        except ImportError:
+            pass
+        return model_file is not None and _find_whisper_cpp() is not None
+    except Exception as e:  # warm-up is best-effort; requests still degrade
+        log.warning("voice warm-up failed: %s", e)
+        return False
+    finally:
+        _WARMING.clear()
+
+
 def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
     src = (args.get("source") or "").strip()
     if not src:
@@ -297,13 +414,16 @@ def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
     if backend in ("local", "auto"):
         out = _whisper_local(path, language)
         if out is None:
+            out = _whisper_pywhispercpp(path, language)
+        if out is None:
             out = _whisper_cpp(path, language)
         if out is not None:
             return out
         if backend == "local":
             return (
-                "ERROR: no local STT engine available. Install whisper.cpp "
-                "and run `maverick voice setup`, or install faster-whisper "
+                "ERROR: no local STT engine available. Run `maverick voice "
+                "setup` (fetches the model; the pywhispercpp engine ships "
+                "with maverick-dashboard), or install faster-whisper "
                 "(python -m pip install -e './packages/maverick-core[voice]')."
             )
     return (

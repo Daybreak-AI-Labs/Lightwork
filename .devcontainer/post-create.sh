@@ -15,7 +15,7 @@ pip install --no-deps -e ./apps/installer-cli
 # Runtime deps the --no-deps installs dropped, plus the dev tooling.
 pip install 'questionary>=2.0' 'rich>=13.7' \
             'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' \
-            'httpx>=0.27' 'python-multipart>=0.0.9'
+            'httpx>=0.27' 'python-multipart>=0.0.9' 'pywhispercpp>=1.5'
 # pyjwt[crypto] mirrors the CI test job (test_oidc.py self-skips without it).
 # cffi: distro-owned cryptography builds (e.g. Debian's 41.x) lack
 # _cffi_backend for this interpreter and crash pytest collection with a

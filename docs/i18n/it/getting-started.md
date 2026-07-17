@@ -138,7 +138,11 @@ pack.)
 ## Input vocale (integrato, offline)
 
 Il pulsante del microfono nella dashboard e lo strumento `transcribe_audio`
-funzionano senza chiave del provider grazie a un modello Whisper locale:
+funzionano senza chiave del provider: il motore Whisper locale è incluso nel
+pacchetto della dashboard e il modello (verificato tramite checksum) viene
+scaricato automaticamente al primo avvio della dashboard (saltato nei
+deployment con blocco dell'egress, o con `[voice] auto_fetch_model = false`).
+La CLI mostra i dettagli:
 
 ```bash
 maverick voice setup    # scarica il modello verificato tramite checksum (~148 MB)
@@ -146,12 +150,10 @@ maverick voice status   # mostra quali backend speech-to-text sono utilizzabili
 maverick voice transcribe clip.wav   # test rapido della pipeline
 ```
 
-Installa il binario `whisper.cpp` (`brew install whisper-cpp`, oppure una
-release da github.com/ggml-org/whisper.cpp) e Lightwork lo trova nel PATH.
-Imposta `[voice] stt_backend = "local"` per tenere l'audio sulla macchina
-anche quando sono configurate chiavi OpenAI/Groq; `[voice] auto_fetch_model =
-true` (opt-in della procedura guidata) scarica il modello al primo utilizzo
-invece che in anticipo.
+Preferisci un motore di sistema? Un binario `whisper.cpp` nel PATH
+(`brew install whisper-cpp`) o faster-whisper si agganciano alla stessa
+catena. Imposta `[voice] stt_backend = "local"` per tenere l'audio sulla
+macchina anche quando sono configurate chiavi OpenAI/Groq.
 
 ## Cambiare modelli o provider
 

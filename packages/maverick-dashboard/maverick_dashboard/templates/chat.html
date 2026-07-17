@@ -284,11 +284,15 @@
     }
   })();
 
-  // Voice commands: the mic button records via MediaRecorder and posts the
-  // clip to /api/v1/voice/transcribe (server-side Whisper); if no STT backend
-  // is configured (503) it falls back to the browser's own speech
-  // recognition where available. The transcript fills the goal field for
-  // review — speech never auto-submits.
+  {% include "_voice_mic.js" %}
+
+  // Voice commands: the mic button records via MediaRecorder, re-encodes to
+  // 16 kHz WAV in the browser (no server ffmpeg needed), and posts the clip
+  // to /api/v1/voice/transcribe (server-side Whisper — built-in local engine
+  // by default). While the server warms the local model it answers 503 +
+  // Retry-After and we retry; a terminal 503 falls back to the browser's own
+  // speech recognition where available. The transcript fills the goal field
+  // for review — speech never auto-submits.
   (function () {
     var btn = document.getElementById('mic-btn');
     var hint = document.getElementById('composer-hint');
@@ -334,15 +338,11 @@
     function upload(blob) {
       busy = true;
       hint.textContent = 'Transcribing…';
-      var fd = new FormData();
-      fd.append('file', blob, 'voice-command.webm');
-      fetch('/api/v1/voice/transcribe', { method: 'POST', body: fd })
-        .then(function (r) {
-          if (r.status === 503) { browserFallback(); return null; }
-          if (!r.ok) throw new Error('transcribe failed (' + r.status + ')');
-          return r.json();
-        })
-        .then(function (data) { if (data) fillGoal(data.text); })
+      lwVoiceUpload(blob, {
+        onStatus: function (m) { hint.textContent = m; },
+        onFallback: browserFallback,
+        onResult: fillGoal,
+      })
         .catch(function (err) { hint.textContent = String(err.message || err); })
         .finally(function () { busy = false; });
     }

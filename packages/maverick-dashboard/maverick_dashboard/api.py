@@ -3020,6 +3020,17 @@ async def voice_transcribe(
     # reading/writing the upload or dispatching to the backend.
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request)
+    # First-run warm-up still downloading/loading the local model: tell the
+    # client to retry shortly (Retry-After distinguishes "almost ready" from
+    # the terminal "no backend" 503, which triggers browser fallback).
+    from maverick.tools.voice import stt_warming
+    if stt_warming():
+        raise HTTPException(
+            status_code=503,
+            detail=("local speech-to-text is still warming up "
+                    "(first-run model download) — retry in a few seconds."),
+            headers={"Retry-After": "5"},
+        )
 
     import os as _os
     import tempfile as _tempfile

@@ -357,6 +357,21 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_refresher)
     except Exception:  # pragma: no cover - never block startup
         log.exception("license auto-refresh not started")
+    # Voice warm-up: fetch/load the local STT model in the background so the
+    # first mic click transcribes instead of 503ing into browser fallback.
+    # A plain daemon thread, NOT run_in_threadpool: the first-run model
+    # download can take minutes and must never delay startup. Fail-open —
+    # requests degrade to the normal backend chain if warm-up loses.
+    try:
+        from maverick.tools.voice import warm_up_local_stt
+
+        from .api import _voice_commands_enabled
+        if _voice_commands_enabled():
+            threading.Thread(
+                target=warm_up_local_stt, name="voice-stt-warmup", daemon=True,
+            ).start()
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("voice STT warm-up not started")
     yield
     try:
         from maverick.entitlements import stop_refresher
