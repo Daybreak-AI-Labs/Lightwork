@@ -12,6 +12,7 @@ v0.1.6 reliability hardening:
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import logging
 import os
@@ -27,6 +28,7 @@ from typing import Any
 
 from .file_lock import (
     atomic_create_bytes,
+    cross_process_lock,
     ensure_private_directory,
     ensure_private_file,
     prepare_private_directory,
@@ -871,7 +873,29 @@ def _resolve_world_path(path: Path | str | None) -> tuple[Path, bool]:
     return Path(path), False
 
 
+def _serialize_world_initialization(init):
+    """Serialize one world's open/WAL/schema bootstrap across processes.
+
+    SQLite's Windows VFS can surface ``SQLITE_READONLY`` when several fresh
+    connections race file publication, WAL activation, and schema creation.
+    Busy timeouts do not cover that state.  The durable per-world lock also
+    keeps permission verification and migrations in the same admission
+    transaction; it is released on every constructor exception.  In-memory
+    worlds remain independent and never touch the filesystem lock.
+    """
+    @functools.wraps(init)
+    def guarded(self, path: Path | str | None = None, *, _managed_path: bool = False):
+        resolved, _ = _resolve_world_path(path)
+        if str(resolved) == ":memory:":
+            return init(self, path, _managed_path=_managed_path)
+        with cross_process_lock(resolved, strict=True):
+            return init(self, path, _managed_path=_managed_path)
+
+    return guarded
+
+
 class WorldModel:
+    @_serialize_world_initialization
     def __init__(
         self,
         path: Path | str | None = None,

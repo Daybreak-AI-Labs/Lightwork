@@ -454,6 +454,281 @@ def _windows_private_sddl(path: Path) -> tuple[str, str]:
             kernel32.LocalFree(descriptor)
 
 
+def _windows_handle_private_sddl(handle: int) -> tuple[str, str]:
+    """Return ``(DACL SDDL, owner SID)`` for one already-open Windows object."""
+    import ctypes
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_info = advapi32.GetSecurityInfo
+    get_info.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    get_info.restype = wintypes.DWORD
+    to_sddl = advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW
+    to_sddl.argtypes = [
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_wchar_p),
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    to_sddl.restype = wintypes.BOOL
+    sid_to_text = advapi32.ConvertSidToStringSidW
+    sid_to_text.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+    sid_to_text.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+
+    owner = ctypes.c_void_p()
+    descriptor = ctypes.c_void_p()
+    result = get_info(
+        handle,
+        1,  # SE_FILE_OBJECT
+        0x00000001 | 0x00000004,  # OWNER + DACL
+        ctypes.byref(owner),
+        None,
+        None,
+        None,
+        ctypes.byref(descriptor),
+    )
+    if result:
+        raise OSError(result, "GetSecurityInfo failed")
+    sddl_text = ctypes.c_wchar_p()
+    owner_text = ctypes.c_wchar_p()
+    try:
+        if not to_sddl(descriptor, 1, 0x00000004, ctypes.byref(sddl_text), None):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not sid_to_text(owner, ctypes.byref(owner_text)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return str(sddl_text.value or ""), str(owner_text.value or "")
+    finally:
+        if sddl_text:
+            kernel32.LocalFree(sddl_text)
+        if owner_text:
+            kernel32.LocalFree(owner_text)
+        if descriptor:
+            kernel32.LocalFree(descriptor)
+
+
+def _windows_current_user_sid() -> str:
+    """Return the current process token's user SID."""
+    import ctypes
+    from ctypes import wintypes
+
+    class SID_AND_ATTRIBUTES(ctypes.Structure):
+        _fields_ = [("Sid", ctypes.c_void_p), ("Attributes", wintypes.DWORD)]
+
+    class TOKEN_USER(ctypes.Structure):
+        _fields_ = [("User", SID_AND_ATTRIBUTES)]
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    open_token = advapi32.OpenProcessToken
+    open_token.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    open_token.restype = wintypes.BOOL
+    get_token_info = advapi32.GetTokenInformation
+    get_token_info.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    get_token_info.restype = wintypes.BOOL
+    sid_to_text = advapi32.ConvertSidToStringSidW
+    sid_to_text.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+    sid_to_text.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
+
+    token = wintypes.HANDLE()
+    if not open_token(kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        needed = wintypes.DWORD()
+        get_token_info(token, 1, None, 0, ctypes.byref(needed))  # TokenUser
+        if not needed.value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        buffer = ctypes.create_string_buffer(needed.value)
+        if not get_token_info(
+            token,
+            1,
+            buffer,
+            needed,
+            ctypes.byref(needed),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        token_user = ctypes.cast(buffer, ctypes.POINTER(TOKEN_USER)).contents
+        sid_text = ctypes.c_wchar_p()
+        try:
+            if not sid_to_text(token_user.User.Sid, ctypes.byref(sid_text)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return str(sid_text.value or "")
+        finally:
+            if sid_text:
+                kernel32.LocalFree(sid_text)
+    finally:
+        kernel32.CloseHandle(token)
+
+
+def _windows_acl_is_restricted(sddl: str, owner_sid: str) -> bool:
+    """Validate the exact protected allow-only ACL installed by Lightwork."""
+    if not sddl.startswith("D:P"):
+        return False
+    current_sid = _windows_current_user_sid()
+    trusted_owners = {
+        current_sid,
+        "S-1-5-18",  # LocalSystem
+        "S-1-5-32-544",  # Built-in Administrators
+    }
+    if owner_sid not in trusted_owners:
+        return False
+    allowed_principals = {
+        "OW",
+        "SY",
+        "BA",
+        owner_sid,
+        current_sid,
+        "S-1-3-4",
+        "S-1-5-18",
+        "S-1-5-32-544",
+    }
+    aces = re.findall(r"\(([^()]*)\)", sddl)
+    if not aces:
+        return False
+    principals: set[str] = set()
+    for ace in aces:
+        fields = ace.split(";")
+        if (
+            len(fields) != 6
+            or fields[0] != "A"
+            or fields[2] != "FA"
+            or fields[5] not in allowed_principals
+        ):
+            return False
+        principals.add(fields[5])
+    # OW is the owner-rights SID used by our create-time descriptor. Accept an
+    # explicit owner ACE too, but never infer trust merely from a private DACL
+    # owned by an arbitrary principal.
+    return bool(principals & {"OW", "S-1-3-4", owner_sid})
+
+
+def _windows_open_security_handle(path: Path) -> tuple[int, int]:
+    """Open ``path`` itself for identity-bound Windows security inspection."""
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create_file.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = create_file(
+        str(path),
+        0x00020000 | 0x00000080,  # READ_CONTROL | FILE_READ_ATTRIBUTES
+        0x00000001 | 0x00000002 | 0x00000004,  # SHARE R/W/DELETE
+        None,
+        3,  # OPEN_EXISTING
+        0x00200000 | 0x02000000,  # OPEN_REPARSE_POINT | BACKUP_SEMANTICS
+        None,
+    )
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOINHERIT", 0)
+        fd = msvcrt.open_osfhandle(handle, flags)
+    except BaseException:
+        kernel32.CloseHandle(handle)
+        raise
+    return fd, handle
+
+
+def _windows_open_private_file_is_restricted(
+    path: Path,
+    expected: os.stat_result,
+    mode: int,
+) -> bool:
+    """Verify one Windows file through a no-follow, identity-bound handle.
+
+    A path-based ACL lookup admits an ABA swap (broad B -> private A -> broad
+    B). The open handle binds the security descriptor to the same file ID seen
+    by both the initial and final path inspections. ACL and DOS write posture
+    are sampled twice so a mutation during the check cannot earn a fast return.
+    """
+    fd, handle = _windows_open_security_handle(path)
+    try:
+        opened = os.fstat(fd)
+
+        def _require_bound_identity(
+            visible: os.stat_result,
+            current_opened: os.stat_result,
+        ) -> None:
+            if (
+                not expected.st_dev
+                or not expected.st_ino
+                or not current_opened.st_dev
+                or not current_opened.st_ino
+                or _unsafe_lock_alias(path, current_opened)
+                or _unsafe_lock_alias(path, visible)
+                or not stat.S_ISREG(current_opened.st_mode)
+                or not stat.S_ISREG(visible.st_mode)
+                or current_opened.st_nlink != 1
+                or visible.st_nlink != 1
+                or (expected.st_dev, expected.st_ino)
+                != (current_opened.st_dev, current_opened.st_ino)
+                or (visible.st_dev, visible.st_ino)
+                != (current_opened.st_dev, current_opened.st_ino)
+                or (opened.st_dev, opened.st_ino)
+                != (current_opened.st_dev, current_opened.st_ino)
+            ):
+                raise PermissionError(
+                    f"sensitive state file identity changed: {path}"
+                )
+
+        _require_bound_identity(path.lstat(), opened)
+        requested_writable = bool(mode & stat.S_IWRITE)
+        if bool(opened.st_mode & stat.S_IWRITE) != requested_writable:
+            return False
+        first_sddl, first_owner = _windows_handle_private_sddl(handle)
+        if not _windows_acl_is_restricted(first_sddl, first_owner):
+            return False
+        _require_bound_identity(path.lstat(), os.fstat(fd))
+        refreshed = os.fstat(fd)
+        _require_bound_identity(path.lstat(), refreshed)
+        if bool(refreshed.st_mode & stat.S_IWRITE) != requested_writable:
+            return False
+        second_sddl, second_owner = _windows_handle_private_sddl(handle)
+        if not _windows_acl_is_restricted(second_sddl, second_owner):
+            return False
+        _require_bound_identity(path.lstat(), os.fstat(fd))
+        return True
+    finally:
+        os.close(fd)
+
+
 def harden_path_permissions(path: str | Path, mode: int = 0o600) -> None:
     """Apply real private permissions on POSIX and Windows.
 
@@ -558,6 +833,49 @@ def prepare_private_directory(path: str | Path) -> Path:
     return require_private_directory(prepared)
 
 
+_PRIVATE_FILE_PUBLICATION_RETRY_SECONDS = 1.0
+
+
+def _private_file_publication_in_progress(
+    path: Path,
+    info: os.stat_result,
+) -> bool:
+    """Identify the brief POSIX hard-link window of atomic_create_*.
+
+    POSIX publishes an exclusive create with ``link(temp, target)`` followed
+    by ``unlink(temp)``. Between those syscalls the newly published inode has
+    two links. A concurrent security check must not accept a generic hard
+    link, but it also must not reject our still-open, private sibling
+    publication. Only the exact internal temp-name shape and inode qualify for
+    a bounded retry; the caller still requires ``st_nlink == 1`` before it
+    changes permissions or returns.
+    """
+    if os.name == "nt" or info.st_nlink <= 1:
+        return False
+    prefix = f".{path.name}-"
+    try:
+        with os.scandir(path.parent) as entries:
+            for entry in entries:
+                if not (
+                    entry.name.startswith(prefix)
+                    and entry.name.endswith(".tmp")
+                ):
+                    continue
+                try:
+                    candidate = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if (
+                    stat.S_ISREG(candidate.st_mode)
+                    and (candidate.st_dev, candidate.st_ino)
+                    == (info.st_dev, info.st_ino)
+                ):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
 def ensure_private_file(path: str | Path, mode: int = 0o600) -> Path:
     """Tighten and verify an existing sensitive regular file.
 
@@ -569,13 +887,42 @@ def ensure_private_file(path: str | Path, mode: int = 0o600) -> Path:
     permissions.
     """
     path = Path(path)
-    info = path.lstat()
+    deadline = time.monotonic() + _PRIVATE_FILE_PUBLICATION_RETRY_SECONDS
+    while True:
+        info = path.lstat()
+        if info.st_nlink == 1:
+            break
+        if _private_file_publication_in_progress(path, info):
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.001)
+            continue
+        # The publisher may have removed its temp between our lstat and the
+        # sibling scan. Recheck the same inode once before treating it as a
+        # hostile/persistent hard link.
+        refreshed = path.lstat()
+        if (
+            refreshed.st_nlink == 1
+            and (refreshed.st_dev, refreshed.st_ino)
+            == (info.st_dev, info.st_ino)
+        ):
+            info = refreshed
+            break
+        info = refreshed
+        break
     if (
         _unsafe_lock_alias(path, info)
         or not stat.S_ISREG(info.st_mode)
         or info.st_nlink != 1
     ):
         raise PermissionError(f"sensitive state path is not a regular file: {path}")
+    # Atomic Windows creators already publish the requested DOS write posture
+    # and protected DACL. Re-applying that DACL to an already-private SQLite
+    # file while another connection is opening it can make the Windows VFS
+    # report the live database as read-only. The handle-bound verifier avoids
+    # that mutation without weakening alias, hard-link, owner, or ABA checks.
+    if os.name == "nt" and _windows_open_private_file_is_restricted(path, info, mode):
+        return path
     harden_path_permissions(path, mode)
     try:
         after = path.lstat()
@@ -608,15 +955,12 @@ def private_path_is_restricted(path: str | Path, mode: int = 0o600) -> bool:
         sddl, owner_sid = _windows_private_sddl(path)
     except (OSError, ValueError):
         return False
-    if not sddl.startswith("D:P"):
+    if bool(info.st_mode & stat.S_IWRITE) != bool(mode & stat.S_IWRITE):
         return False
-    allowed = {
-        "OW", "SY", "BA", owner_sid,
-        "S-1-3-4", "S-1-5-18", "S-1-5-32-544",
-    }
-    aces = re.findall(r"\(([^()]*)\)", sddl)
-    principals = {ace.rsplit(";", 1)[-1] for ace in aces if ";" in ace}
-    return bool(principals & {"OW", owner_sid, "S-1-3-4"}) and principals <= allowed
+    try:
+        return _windows_acl_is_restricted(sddl, owner_sid)
+    except OSError:
+        return False
 
 
 def _replace_with_retry(source: str | Path, target: str | Path) -> None:

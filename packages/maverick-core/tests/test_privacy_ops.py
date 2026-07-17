@@ -587,14 +587,8 @@ def test_privacy_handle_read_does_not_follow_swap_to_secret(tmp_path, monkeypatc
         return real_open(path, flags, mode, dir_fd=dir_fd)
 
     monkeypatch.setattr(privacy_ops.os, "open", swapping_open)
-    try:
-        result = privacy_ops._DPA.load(created["id"])
-    except PermissionError:
-        # Windows exposes the path/handle mismatch directly; POSIX O_NOFOLLOW
-        # may instead be normalized to an unreadable record. Both are a
-        # fail-closed outcome, provided the outside payload is never returned.
-        result = None
-    assert result is None or result.get("vendor") != "DO NOT DISCLOSE"
+    with pytest.raises(PermissionError, match="changed during open"):
+        privacy_ops._DPA.load(created["id"])
     assert swapped is True
 
 

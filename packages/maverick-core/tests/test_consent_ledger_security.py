@@ -7,9 +7,29 @@ import sys
 import textwrap
 
 import pytest
+from maverick import client
 from maverick.connections import bind_principal
 from maverick.file_lock import private_path_is_restricted
 from maverick.safety import consent
+
+
+def test_corrupt_client_binding_cannot_use_legacy_ledger_override(
+    monkeypatch, tmp_path,
+):
+    legacy = tmp_path / "legacy-consent.ledger"
+    monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", legacy)
+    monkeypatch.setattr(
+        client,
+        "_raw_client_id",
+        lambda: (_ for _ in ()).throw(
+            client.ClientBindingError("corrupt client binding")
+        ),
+    )
+
+    with pytest.raises(client.ClientBindingError, match="corrupt client binding"):
+        consent.consent_ledger_path()
+
+    assert not legacy.exists()
 
 
 def test_control_character_injection_is_rejected(tmp_path):

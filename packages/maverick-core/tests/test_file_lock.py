@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -169,6 +170,164 @@ def test_ensure_private_file_hardens_existing_file(tmp_path):
     assert p.read_text(encoding="utf-8") == "secret"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows DACL fast path")
+def test_ensure_private_file_does_not_reharden_already_private_file(
+    tmp_path, monkeypatch,
+):
+    """A verified private live database must not receive chmod/DACL churn."""
+    import maverick.file_lock as file_lock
+
+    path = tmp_path / "already-private.db"
+    atomic_create_text(path, "private")
+    assert private_path_is_restricted(path)
+
+    def _unexpected_hardening(*_args, **_kwargs):
+        raise AssertionError("already-private file was hardened again")
+
+    monkeypatch.setattr(file_lock, "harden_path_permissions", _unexpected_hardening)
+    assert ensure_private_file(path) == path
+    assert path.read_text(encoding="utf-8") == "private"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-bound DACL fast path")
+def test_ensure_private_file_rejects_aba_swap_during_private_fast_path(
+    tmp_path, monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    path = tmp_path / "sensitive.txt"
+    displaced = tmp_path / "displaced.txt"
+    replacement = tmp_path / "replacement.txt"
+    replacement_displaced = tmp_path / "replacement-displaced.txt"
+    atomic_create_text(path, "original")
+    atomic_create_text(replacement, "attacker replacement")
+    real_open = file_lock._windows_open_security_handle
+
+    def _open_during_aba(candidate):
+        os.replace(candidate, displaced)
+        os.replace(replacement, candidate)
+        fd, handle = real_open(candidate)
+        # Restore the initial object before the verifier's final lstat. A
+        # path-based ACL query would see a private file and accept this ABA.
+        os.replace(candidate, replacement_displaced)
+        os.replace(displaced, candidate)
+        return fd, handle
+
+    monkeypatch.setattr(file_lock, "_windows_open_security_handle", _open_during_aba)
+    with pytest.raises(PermissionError, match="identity changed"):
+        ensure_private_file(path)
+
+    assert path.read_text(encoding="utf-8") == "original"
+    assert replacement_displaced.read_text(encoding="utf-8") == "attacker replacement"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-bound DACL fast path")
+def test_ensure_private_file_repairs_acl_broadened_during_fast_path(
+    tmp_path, monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    path = tmp_path / "sensitive.txt"
+    atomic_create_text(path, "original")
+    real_query = file_lock._windows_handle_private_sddl
+    real_harden = file_lock.harden_path_permissions
+    queries = 0
+    harden_calls = 0
+
+    def _broaden_after_first_query(handle):
+        nonlocal queries
+        result = real_query(handle)
+        queries += 1
+        if queries == 1:
+            subprocess.run(
+                ["icacls", str(path), "/grant", "*S-1-1-0:R"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        return result
+
+    def _record_hardening(candidate, mode=0o600):
+        nonlocal harden_calls
+        harden_calls += 1
+        return real_harden(candidate, mode)
+
+    monkeypatch.setattr(
+        file_lock,
+        "_windows_handle_private_sddl",
+        _broaden_after_first_query,
+    )
+    monkeypatch.setattr(file_lock, "harden_path_permissions", _record_hardening)
+    assert ensure_private_file(path) == path
+
+    assert queries == 2
+    assert harden_calls == 1
+    assert private_path_is_restricted(path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows handle-bound DACL fast path")
+def test_ensure_private_file_rejects_hardlink_added_during_fast_path(
+    tmp_path, monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    path = tmp_path / "sensitive.txt"
+    alias = tmp_path / "late-hardlink.txt"
+    atomic_create_text(path, "original")
+    real_query = file_lock._windows_handle_private_sddl
+    queries = 0
+
+    def _link_after_first_query(handle):
+        nonlocal queries
+        result = real_query(handle)
+        queries += 1
+        if queries == 1:
+            os.link(path, alias)
+        return result
+
+    monkeypatch.setattr(
+        file_lock,
+        "_windows_handle_private_sddl",
+        _link_after_first_query,
+    )
+    with pytest.raises(PermissionError, match="identity changed"):
+        ensure_private_file(path)
+
+    assert path.stat().st_nlink == 2
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DOS write posture")
+def test_ensure_private_file_does_not_fast_return_for_wrong_windows_mode(tmp_path):
+    path = tmp_path / "read-only.txt"
+    atomic_create_text(path, "private", mode=0o600)
+
+    assert ensure_private_file(path, mode=0o400) == path
+    assert not path.stat().st_mode & stat.S_IWRITE
+    assert private_path_is_restricted(path, mode=0o400)
+
+
+def test_windows_restricted_acl_requires_trusted_owner_and_allow_only(monkeypatch):
+    import maverick.file_lock as file_lock
+
+    current = "S-1-5-21-1-2-3-1001"
+    monkeypatch.setattr(file_lock, "_windows_current_user_sid", lambda: current)
+
+    private = "D:P(A;;FA;;;OW)(A;;FA;;;SY)(A;;FA;;;BA)"
+    assert file_lock._windows_acl_is_restricted(private, current)
+    assert not file_lock._windows_acl_is_restricted(
+        private,
+        "S-1-5-21-9-9-9-1002",
+    )
+    assert not file_lock._windows_acl_is_restricted(
+        "D:P(A;;FA;;;OW)(A;;FR;;;WD)",
+        current,
+    )
+    assert not file_lock._windows_acl_is_restricted(
+        "D:P(D;;FA;;;OW)(A;;FA;;;SY)",
+        current,
+    )
+
+
 def test_ensure_private_file_rejects_identity_swap_during_hardening(
     tmp_path, monkeypatch,
 ):
@@ -211,6 +370,54 @@ def test_ensure_private_file_rejects_symlink(tmp_path):
         raise
     with pytest.raises(PermissionError, match="not a regular file"):
         ensure_private_file(link)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX link/unlink publication window")
+def test_ensure_private_file_waits_for_atomic_create_publication(tmp_path):
+    """A verifier may observe link(temp, target) before unlink(temp)."""
+    target = tmp_path / "world.db"
+    temp = tmp_path / ".world.db-publication.tmp"
+    temp.write_bytes(b"")
+    temp.chmod(0o600)
+    os.link(temp, target, follow_symlinks=False)
+
+    removed = threading.Event()
+
+    def _finish_publication():
+        time.sleep(0.02)
+        temp.unlink()
+        removed.set()
+
+    publisher = threading.Thread(target=_finish_publication)
+    publisher.start()
+    try:
+        assert ensure_private_file(target) == target
+    finally:
+        publisher.join(timeout=2)
+
+    assert removed.is_set()
+    assert target.stat().st_nlink == 1
+    assert private_path_is_restricted(target)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX link/unlink publication window")
+def test_ensure_private_file_never_accepts_persistent_publication_hardlink(
+    tmp_path,
+    monkeypatch,
+):
+    import maverick.file_lock as file_lock
+
+    target = tmp_path / "world.db"
+    temp = tmp_path / ".world.db-attacker.tmp"
+    temp.write_bytes(b"sensitive")
+    temp.chmod(0o600)
+    os.link(temp, target, follow_symlinks=False)
+    monkeypatch.setattr(file_lock, "_PRIVATE_FILE_PUBLICATION_RETRY_SECONDS", 0)
+
+    with pytest.raises(PermissionError, match="not a regular file"):
+        ensure_private_file(target)
+
+    assert target.stat().st_nlink == 2
 
 
 def test_atomic_write_leaves_no_temp_files(tmp_path):

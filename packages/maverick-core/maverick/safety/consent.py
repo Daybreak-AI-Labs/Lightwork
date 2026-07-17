@@ -51,7 +51,7 @@ from ..file_lock import (
     open_private_append,
     require_private_directory,
 )
-from ..paths import TenantPolicyError, current_tenant_id, data_dir
+from ..paths import TenantPolicyError, current_tenant_id_strict, data_dir
 
 log = logging.getLogger(__name__)
 
@@ -80,8 +80,14 @@ def _resolve_ledger_path(path: Path | None = None) -> Path:
     a stale process-wide override must never turn into a shared-grant fallback
     in a long-lived multi-tenant worker.
     """
-    if current_tenant_id() is not None:
-        active = data_dir("consent.ledger")
+    # Standing consent is an authorization boundary, so diagnostic identity
+    # resolution is not sufficient here: corrupt client configuration must not
+    # become indistinguishable from legitimate legacy/unbound mode. Resolve the
+    # strict identity once and thread that exact value into path construction to
+    # avoid a second lookup disagreeing with the admission decision.
+    tenant = current_tenant_id_strict()
+    if tenant is not None:
+        active = data_dir("consent.ledger", tenant=tenant)
         if path is not None and not _same_ledger_path(Path(path), active):
             raise TenantPolicyError(
                 "explicit consent ledger path does not match the active tenant"
@@ -218,7 +224,7 @@ def _policy_binding() -> str:
 
 def _authority_binding() -> tuple[str, str, str]:
     return (
-        str(current_tenant_id() or "shared"),
+        str(current_tenant_id_strict() or "shared"),
         _principal_binding(),
         _policy_binding(),
     )

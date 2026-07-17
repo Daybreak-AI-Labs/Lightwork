@@ -171,18 +171,28 @@ def _read_private_json(path: Path, *, root: Path) -> dict:
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
     try:
-        if os.name != "nt":
-            root_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-            root_flags |= getattr(os, "O_NOFOLLOW", 0)
-            root_fd = os.open(root, root_flags)
-            if _component_identity(os.fstat(root_fd)) != components_before[-1]:
-                raise PermissionError("privacy store root changed during open")
-            fd = os.open(lexical.name, flags, dir_fd=root_fd)
-        else:
-            # Windows CRT descriptors have no openat. The verified component
-            # identities are rechecked before returning any bytes; final
-            # reparse points are rejected from both path and handle metadata.
-            fd = os.open(lexical, flags)
+        try:
+            if os.name != "nt":
+                root_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                root_flags |= getattr(os, "O_NOFOLLOW", 0)
+                root_fd = os.open(root, root_flags)
+                if _component_identity(os.fstat(root_fd)) != components_before[-1]:
+                    raise PermissionError("privacy store root changed during open")
+                fd = os.open(lexical.name, flags, dir_fd=root_fd)
+            else:
+                # Windows CRT descriptors have no openat. The verified component
+                # identities are rechecked before returning any bytes; final
+                # reparse points are rejected from both path and handle metadata.
+                fd = os.open(lexical, flags)
+        except OSError as exc:
+            # A record that existed at the lstat boundary but cannot be opened
+            # through the no-follow handle boundary changed underneath us.
+            # POSIX reports a leaf swap to a symlink as ELOOP (a plain
+            # OSError), while Windows generally exposes the later identity
+            # mismatch as PermissionError. Normalize both hosts to the same
+            # fail-closed API instead of misclassifying the race as corrupt
+            # JSON in _RecordStore._read_path.
+            raise PermissionError("privacy state changed during open") from exc
         opened = os.fstat(fd)
         if (
             _unsafe_path_alias(lexical, opened)

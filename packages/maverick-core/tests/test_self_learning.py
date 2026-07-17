@@ -361,7 +361,11 @@ class TestLedger:
         from maverick.safety import consent
 
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
-        monkeypatch.setattr("maverick.client.client_id", lambda: "client-floor")
+        # Configure the real binding seam so diagnostic reads and strict storage
+        # admission resolve the same immutable tenant floor. Mocking only
+        # client_id() deliberately bypasses strict_client_id() and no longer
+        # represents a valid configured deployment.
+        monkeypatch.setenv("MAVERICK_CLIENT_ID", "client-floor")
         shared = tmp_path / "legacy-consent.ledger"
         monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", shared)
 

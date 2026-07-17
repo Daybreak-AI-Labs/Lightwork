@@ -12,8 +12,7 @@ from typing import TypeVar
 
 import click
 
-from ..world_model import open_world
-from . import _strip_terminal_control, harness, main
+from . import _strip_terminal_control, harness, main, open_world
 
 _T = TypeVar("_T")
 

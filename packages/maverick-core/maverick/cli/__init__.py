@@ -17,10 +17,17 @@ import click
 # minimal so `maverick --help` and `maverick version` don't pay for
 # heavy submodules (orchestrator, agent, swarm, skills, sandbox) they
 # never use. Submodules import lazily inside the command bodies that
-# actually need them. `world_model` stays at module top — its imports
-# are stdlib (sqlite3, dataclasses, pathlib) and `open_world` is used
-# by nearly every command below.
-from ..world_model import open_world  # noqa: E402  -- cheap stdlib chain
+# actually need them. ``world_model`` must be lazy too: importing it performs
+# storage admission for its compatibility ``DEFAULT_DB`` hook, while diagnostic
+# commands such as ``config-lint`` must be able to report a corrupt client
+# configuration before any storage path is admitted.
+
+
+def open_world(*args, **kwargs):
+    """Lazy compatibility facade for the CLI's many world-model commands."""
+    from ..world_model import open_world as _open_world
+
+    return _open_world(*args, **kwargs)
 
 _TERMINAL_CONTROL_RE = re.compile(
     r"(?:\x1b\][^\x07\x1b]*(?:\x07|\x1b\\|$))"
@@ -313,8 +320,18 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     # ~/.maverick/world.db, so single-tenant installs are unchanged. An explicit
     # --db always wins.
     if db is None:
-        from ..workspace import Workspace
-        db = str(Workspace.current().db_path)
+        if ctx.invoked_subcommand == "config-lint":
+            # config-lint is diagnostic-only and never opens the world DB. A
+            # corrupt config may make the strict client floor unknowable, so
+            # resolving the ordinary Workspace path here would abort silently
+            # before config-lint can print the parse error it exists to report.
+            from ..paths import diagnostic_data_dir
+
+            db = str(diagnostic_data_dir("world.db"))
+        else:
+            from ..workspace import Workspace
+
+            db = str(Workspace.current().db_path)
     ctx.obj["db"] = Path(db)
     ctx.obj["model"] = model  # resolved lazily on first use
     # `--model` is a run-wide override. The agents resolve their model via
