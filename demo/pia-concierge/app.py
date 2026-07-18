@@ -245,6 +245,72 @@ def _latest_prior_record(subject: str) -> OneTrustAssessment | None:
     return max(matches, key=lambda a: a.filed_at) if matches else None
 
 
+def _fmt_elapsed(seconds: float) -> str:
+    s = max(0, int(seconds))
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m {s % 60:02d}s"
+    return f"{s // 3600}h {(s % 3600) // 60}m"
+
+
+def _case_value(case: Case) -> dict:
+    """The speed story, counted rather than claimed: how much of this
+    assessment the agent answered from evidence, and how fast it moved."""
+    tpl_total = len(get_template("pia").questions)
+    auto = sum(1 for rec in case.answers.values() if rec.get("auto"))
+    delegated = sum(1 for rec in case.answers.values()
+                    if rec.get("by") and not rec.get("auto"))
+    out: dict[str, Any] = {
+        "questions_total": tpl_total,
+        "auto_answered": auto,
+        "delegated": delegated,
+        "asked": max(0, len(case.answers) - auto - delegated),
+        "documents": len(case.uploads),
+    }
+    if case.submitted_at:
+        out["intake_seconds"] = int(case.submitted_at - case.created_at)
+        out["intake_elapsed"] = _fmt_elapsed(out["intake_seconds"])
+    ot = _ot_record_for(case)
+    if ot:
+        out["filed_seconds"] = int(ot.filed_at - case.created_at)
+        out["filed_elapsed"] = _fmt_elapsed(out["filed_seconds"])
+        if ot.decided_at:
+            out["decided_seconds"] = int(ot.decided_at - case.created_at)
+            out["decided_elapsed"] = _fmt_elapsed(out["decided_seconds"])
+    return out
+
+
+def _program_value() -> dict:
+    """Aggregate value strip for the landing page. The manual baseline is an
+    explicit, configurable assumption (PIA_MANUAL_BASELINE_HOURS, default 6),
+    never presented as a measurement."""
+    records = list(STORE.onetrust.values())
+    minutes: list[float] = []
+    auto_total = 0
+    answered_total = 0
+    for a in records:
+        c = STORE.cases.get(a.case_id)
+        if not c:
+            continue
+        end = a.decided_at or a.filed_at
+        minutes.append(max(0.0, (end - c.created_at) / 60))
+        auto_total += sum(1 for r in c.answers.values() if r.get("auto"))
+        answered_total += len(c.answers)
+    baseline_hours = float(os.environ.get("PIA_MANUAL_BASELINE_HOURS", "6"))
+    return {
+        "filed": len(records),
+        "completed": sum(1 for a in records if a.status == "Completed"),
+        "median_minutes": (round(sorted(minutes)[len(minutes) // 2], 1)
+                           if minutes else 0.0),
+        "auto_answered": auto_total,
+        "answered": answered_total,
+        "baseline_hours": baseline_hours,
+        "saved_hours": round(max(
+            0.0, len(records) * baseline_hours - sum(minutes) / 60), 1),
+    }
+
+
 def _prior_summary(ot: OneTrustAssessment) -> dict:
     """What we already know about this vendor — shown to the requester."""
     prior_case = STORE.cases.get(ot.case_id)
@@ -459,7 +525,7 @@ def _page(request: Request, template: str, **ctx: Any) -> HTMLResponse:
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     return _page(request, "index.html", tickets=list(STORE.tickets.values()),
-                 cases=list(STORE.cases.values()))
+                 cases=list(STORE.cases.values()), value=_program_value())
 
 
 # ===========================================================================
@@ -682,11 +748,12 @@ async def intake(request: Request, case_id: str, d: str = "") -> HTMLResponse:
                       "by": rec.get("by", "")}
                 for qid, rec in case.answers.items()}
 
+    done = (case.stage not in ("intake_sent", "followup")
+            and delegation is None)
     return _page(request, "intake.html", case=case, questions=questions,
                  delegation=delegation, followups=followups, prior=prior,
-                 answered=answered,
-                 done=(case.stage not in ("intake_sent", "followup")
-                       and delegation is None))
+                 answered=answered, done=done,
+                 value=_case_value(case) if done else None)
 
 
 @app.post("/intake/{case_id}/followup-answer")
@@ -1099,6 +1166,7 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
     if not case:
         return RedirectResponse("/", status_code=303)
     gid = getattr(case, "goal_id", None)
+    case.submitted_at = time.time()
 
     def _score_and_park() -> tuple[dict, list[dict], int]:
         # REAL scoring engine.
@@ -1488,6 +1556,17 @@ async def ot_list_assessments(request: Request) -> JSONResponse:
 async def onetrust_viewer(request: Request) -> HTMLResponse:
     items = sorted(STORE.onetrust.values(), key=lambda a: a.filed_at, reverse=True)
     # Serializable payload for the record-detail / review pop-out.
+    def _speed(a: OneTrustAssessment) -> dict:
+        c = STORE.cases.get(a.case_id)
+        if not c:
+            return {}
+        out = {"filed_elapsed": _fmt_elapsed(a.filed_at - c.created_at),
+               "auto_answered": sum(1 for r in c.answers.values()
+                                    if r.get("auto"))}
+        if a.decided_at:
+            out["decided_elapsed"] = _fmt_elapsed(a.decided_at - c.created_at)
+        return out
+
     records_json = [{
         "assessment_id": a.assessment_id, "name": a.name,
         "template": a.template, "subject": a.subject, "status": a.status,
@@ -1504,6 +1583,7 @@ async def onetrust_viewer(request: Request) -> HTMLResponse:
         "addenda": a.addenda,
         "needs_re_review": a.needs_re_review,
         "decided_by": a.decided_by,
+        "speed": _speed(a),
     } for a in items]
     n_review = sum(1 for a in items if a.status == "Under Review")
     return _page(request, "onetrust.html", assessments=items,

@@ -190,6 +190,12 @@ function openRecord(r) {
    ['Filed by', 'Lightwork agent (input + analysis; decision is human)']].forEach(function (p) {
     kv.append(el('dt', '', p[0]), el('dd', '', p[1]));
   });
+  if (r.speed && r.speed.filed_elapsed) {
+    kv.append(el('dt', '', 'Agent speed'), el('dd', '',
+      'ticket → filed in ' + r.speed.filed_elapsed +
+      (r.speed.decided_elapsed ? ' · decided at ' + r.speed.decided_elapsed : '') +
+      (r.speed.auto_answered ? ' · ' + r.speed.auto_answered + ' answer(s) from evidence on file' : '')));
+  }
   b.appendChild(kv);
 
   if ((r.answers || []).length) {

@@ -34,6 +34,31 @@
   </div>
 </div>
 
+{% if value and value.filed %}
+<div class="card" id="value-strip">
+  <h2>The speed story</h2>
+  <div class="flow" style="gap: 26px; flex-wrap: wrap; align-items: baseline;">
+    <div>
+      <div style="font-size: 26px; font-weight: 800;">{{ value.filed }}</div>
+      <div class="muted" style="font-size: 12px;">assessment(s) filed</div>
+    </div>
+    <div>
+      <div style="font-size: 26px; font-weight: 800;">{{ value.median_minutes }}m</div>
+      <div class="muted" style="font-size: 12px;">median, ticket → decision</div>
+    </div>
+    <div>
+      <div style="font-size: 26px; font-weight: 800;">{{ value.auto_answered }}/{{ value.answered }}</div>
+      <div class="muted" style="font-size: 12px;">answers auto-answered with quoted evidence</div>
+    </div>
+    <div>
+      <div style="font-size: 26px; font-weight: 800;">≈{{ value.saved_hours }}h</div>
+      <div class="muted" style="font-size: 12px;">privacy-team time saved vs a
+        {{ value.baseline_hours|int }}h manual PIA <em>(stated assumption, configurable)</em></div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="grid two">
   <div class="card">
     <h2>Open tickets ({{ tickets|length }})</h2>

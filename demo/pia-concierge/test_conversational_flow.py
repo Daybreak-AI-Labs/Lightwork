@@ -391,6 +391,51 @@ def test_prior_offer_survives_ticket_prefill(demo_app, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# The speed story: counted value, never invented
+# --------------------------------------------------------------------------- #
+def test_case_value_counts_answer_sources(demo_app):
+    case = _mkcase(demo_app)
+    demo_app._prefill_from_ticket(case)                       # 1 auto
+    case.answers["pia_security"] = {"answer": "yes", "note": "typed"}
+    case.answers["pia_rights"] = {"answer": "yes", "note": "", "by": "Alex"}
+    v = demo_app._case_value(case)
+    assert v["auto_answered"] == 1
+    assert v["asked"] == 1
+    assert v["delegated"] == 1
+    assert v["questions_total"] == 10
+    assert "filed_seconds" not in v  # nothing filed yet
+
+
+def test_value_surfaces_after_full_flow(demo_app, monkeypatch):
+    case = _mkcase(demo_app)
+    ot = _submit(demo_app, monkeypatch, case)
+    v = demo_app._case_value(case)
+    assert v["intake_seconds"] >= 0 and v["filed_seconds"] >= 0
+    asyncio.run(demo_app.onetrust_decide(_json_request(
+        {"assessment_id": ot.assessment_id, "decision": "approve",
+         "reviewer": "GT Reviewer"})))
+    assert "decided_elapsed" in demo_app._case_value(case)
+    program = demo_app._program_value()
+    assert program["filed"] == 1 and program["completed"] == 1
+    assert program["saved_hours"] > 0
+    # The landing page shows the strip; the OneTrust record carries speed.
+    html = asyncio.run(demo_app.index(_request())).body.decode()
+    assert 'id="value-strip"' in html
+    assert "stated assumption, configurable" in html
+    ot_html = asyncio.run(demo_app.onetrust_viewer(_request())).body.decode()
+    assert "Agent speed" in ot_html and '"speed"' in ot_html
+    # The intake done panel tells the requester how fast it went.
+    intake_html = asyncio.run(
+        demo_app.intake(_request(), case.id)).body.decode()
+    assert "Ticket to filed took" in intake_html
+
+
+def test_value_strip_hidden_before_any_filing(demo_app):
+    html = asyncio.run(demo_app.index(_request())).body.decode()
+    assert 'id="value-strip"' not in html
+
+
+# --------------------------------------------------------------------------- #
 # Pages: the selectable chat/guided experience; suggestions panel is gone
 # --------------------------------------------------------------------------- #
 def test_intake_page_offers_both_modes_and_voice_without_suggestions(demo_app):
