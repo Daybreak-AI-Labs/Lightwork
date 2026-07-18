@@ -39,14 +39,26 @@ class Ticket:
 
 @dataclass
 class OneTrustAssessment:
-    """A mock OneTrust assessment record filed on approval."""
+    """A mock OneTrust assessment record.
+
+    Filed by the agent as "Under Review" the moment analysis completes; the
+    human decision (Approve / Send back) happens INSIDE this tenant and is
+    mirrored onto the Lightwork approval row + signed audit chain."""
     assessment_id: str
     name: str
     template: str
     subject: str
-    status: str
+    status: str                 # Under Review -> Completed | Sent back
     risk_level: str
     result: dict[str, Any]
+    case_id: str = ""
+    controls: list[dict] = field(default_factory=list)
+    # Documents appended AFTER the assessment existed ("we're just adding
+    # stuff"): [{at, filename, summary, gaps, re_review, dpa_review_id}].
+    addenda: list[dict] = field(default_factory=list)
+    needs_re_review: bool = False
+    decided_by: str = ""
+    decided_at: float = 0.0
     filed_at: float = field(default_factory=_now)
 
 

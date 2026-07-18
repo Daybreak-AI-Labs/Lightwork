@@ -29,6 +29,7 @@ import asyncio
 import datetime as _dt
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -433,7 +434,8 @@ async def webhook_pia(request: Request) -> JSONResponse:
            subject=ticket.system_name, source=body.get("source", "webhook"))
     _post_event(gid, AGENT, "plan",
                 f"PIA request {number} received from {body.get('source', 'webhook')}. "
-                f"Plan: interview requester → score risk → map controls → human review → file to OneTrust.")
+                f"Plan: interview requester → score risk → map controls → "
+                f"file to OneTrust for review → human approves in OneTrust.")
     case.log(f"Intake received from {body.get('source', 'webhook')} ticket {number}.")
 
     ticket.state = "In Progress"
@@ -450,8 +452,10 @@ async def webhook_pia(request: Request) -> JSONResponse:
             f"Thanks for requesting a privacy assessment for {ticket.system_name}.\n\n"
             f"Please complete the short intake questionnaire and attach any vendor "
             f"documents (DPA, security overview) here:\n\n    {intake_link}\n\n"
-            f"It takes about two minutes. Once you submit, our privacy team reviews "
-            f"the first-pass risk assessment and files it in OneTrust.\n\n"
+            f"It takes about two minutes — answer in the chat (typing or "
+            f"voice) or use the guided buttons. Once you submit, the analysis "
+            f"is filed straight into OneTrust for the privacy team to review "
+            f"and approve.\n\n"
             f"— Privacy Office (automated)\n"
         ),
     )
@@ -517,8 +521,20 @@ async def intake(request: Request, case_id: str, d: str = "") -> HTMLResponse:
     followups = (_open_followups(case)
                  if case.stage == "followup" and delegation is None else [])
 
+    # A vendor we've already assessed? Offer "just add documents" instead of
+    # a second full interview — the append-to-vendor flow.
+    prior = None
+    if case.stage == "intake_sent" and not case.answers and delegation is None:
+        for a in STORE.onetrust.values():
+            if (a.subject.strip().lower() == case.subject.strip().lower()
+                    and a.status in ("Completed", "Under Review")):
+                prior = {"ot_id": a.assessment_id, "status": a.status,
+                         "risk": (a.result or {}).get("risk_rating",
+                                                      a.risk_level)}
+                break
+
     return _page(request, "intake.html", case=case, questions=questions,
-                 delegation=delegation, followups=followups,
+                 delegation=delegation, followups=followups, prior=prior,
                  done=(case.stage not in ("intake_sent", "followup")
                        and delegation is None))
 
@@ -650,6 +666,125 @@ async def intake_autofill(case_id: str) -> JSONResponse:
     return JSONResponse({"ok": True, "answered": len(case.answers)})
 
 
+# ---- Conversational answers: free text / voice -> the template vocabulary --
+_ANSWER_WORDS = {
+    "yes": "yes", "yeah": "yes", "yep": "yes", "yup": "yes", "correct": "yes",
+    "absolutely": "yes", "definitely": "yes", "affirmative": "yes",
+    "no": "no", "nope": "no", "nah": "no", "negative": "no",
+    "unknown": "unknown", "unsure": "unknown", "maybe": "unknown", "dunno": "unknown",
+}
+_NA_PHRASES = ("not applicable", "n/a", "na for", "doesn't apply",
+               "does not apply", "doesnt apply", "irrelevant",
+               "no such thing here")
+_UNKNOWN_PHRASES = ("not sure", "don't know", "dont know", "do not know",
+                    "no idea", "have to check", "need to check", "not certain",
+                    "i'd have to", "id have to", "would have to ask", "tbd",
+                    "can't say", "cant say", "hard to say")
+_NO_PHRASES = ("we don't", "we do not", "we dont", "there is no", "there's no",
+               "theres no", "not yet", "never", "haven't", "hasn't", "hasnt",
+               "havent", "isn't", "isnt", "aren't", "arent", "won't", "wont",
+               "nothing in place", "no dpa", "no agreement", "no retention",
+               "unencrypted", "not encrypted", "not documented", "no notice",
+               "without a", "still waiting on", "missing")
+_YES_PHRASES = ("we do", "we have", "we've", "weve got", "it is", "it does",
+                "they do", "in place", "signed", "covered", "documented",
+                "encrypted", "always", "of course", "already", "that's right",
+                "thats right", "there is a", "there's a", "theres a")
+
+
+def _parse_free_answer(text: str) -> str | None:
+    """Deterministic mapping of a typed/spoken reply onto yes/no/na/unknown.
+
+    Scripted on purpose: the demo must behave identically with no API key
+    and no network. Returns None when the reply is genuinely ambiguous so
+    the agent can ask for a clarification instead of guessing."""
+    low = " ".join((text or "").lower().split())
+    if not low:
+        return None
+    if any(p in low for p in _NA_PHRASES):
+        return "na"
+    if any(p in low for p in _UNKNOWN_PHRASES):
+        return "unknown"
+    first = low.split()[0].strip(".,!?:;")
+    if first in _ANSWER_WORDS:
+        return _ANSWER_WORDS[first]
+    # Phrase scan: negations are checked first because "no, it's encrypted
+    # in transit only" should read as the correction it is.
+    if any(p in low for p in _NO_PHRASES):
+        return "no"
+    if any(p in low for p in _YES_PHRASES):
+        return "yes"
+    return None
+
+
+def _llm_interpret(question: str, text: str) -> str | None:
+    """Optional upgrade: when a provider key is configured, let a model read
+    the ambiguous reply. Errors and absent keys degrade to None (the scripted
+    clarification) — the demo never depends on the network."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return None
+    try:
+        from maverick.budget import Budget
+        from maverick.llm import LLM, model_for_role
+        llm = LLM(model_for_role("summarizer"))
+        resp = llm.complete(
+            system=("You classify a respondent's reply to one yes/no privacy "
+                    "questionnaire question. Answer with exactly one word: "
+                    "yes, no, na, or unknown."),
+            messages=[{"role": "user",
+                       "content": f"Question: {question}\nReply: {text[:1000]}"}],
+            budget=Budget(max_dollars=0.25, max_output_tokens=1000),
+            max_tokens=10,
+        )
+        word = (resp.text or "").strip().lower().split()
+        return word[0] if word and word[0] in ("yes", "no", "na", "unknown") else None
+    except Exception as exc:  # pragma: no cover - network/key variance
+        print(f"[interpret-llm] degraded to scripted clarification: {exc}")
+        return None
+
+
+@app.post("/intake/{case_id}/interpret")
+async def intake_interpret(case_id: str, request: Request) -> JSONResponse:
+    """Chat/voice mode: turn a free-text reply into a recorded answer.
+
+    The respondent's own words are preserved as the answer note (they land in
+    the real assessment record and the reviewer sees them verbatim)."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return JSONResponse({"ok": False}, status_code=404)
+    body = await request.json()
+    question_id = str(body.get("question_id", ""))
+    text = str(body.get("text", "")).strip()[:2000]
+    d = str(body.get("d", ""))
+    if not question_id or not text:
+        return JSONResponse({"ok": False, "error": "question_id and text "
+                             "are required"}, status_code=400)
+    prompt = _INTAKE_PHRASING.get(question_id, question_id)
+    answer = _parse_free_answer(text)
+    method = "scripted"
+    if answer is None:
+        answer = await asyncio.to_thread(_llm_interpret, prompt, text)
+        method = "llm"
+    if answer is None:
+        return JSONResponse({"ok": True, "answer": None, "method": "clarify",
+                             "reply": "Sorry — I couldn't tell. Is that a yes, "
+                                      "a no, not applicable, or are you unsure?"})
+    rec = {"answer": answer, "note": text}
+    if d:
+        dele = case.delegations.get(d)
+        if not dele or question_id not in dele["qids"]:
+            return JSONResponse({"ok": False, "error": "not your question"},
+                                status_code=403)
+        rec["by"] = dele["to_name"]
+        if question_id not in dele["answered"]:
+            dele["answered"].append(question_id)
+    case.answers[question_id] = rec
+    labels = {"yes": "Yes", "no": "No", "na": "N/A", "unknown": "Not sure"}
+    return JSONResponse({"ok": True, "answer": answer, "method": method,
+                         "label": labels[answer],
+                         "answered": len(case.answers)})
+
+
 def _store_evidence(case: Case, filename: str, data: bytes, mime: str,
                     *, via: str) -> tuple[bool, str]:
     """Store evidence bytes as a REAL goal attachment (size cap, mime
@@ -762,35 +897,6 @@ async def intake_attach_found(case_id: str, request: Request) -> JSONResponse:
                          "uploads": case.uploads}, status_code=status)
 
 
-@app.get("/intake/{case_id}/insights")
-async def intake_insights(case_id: str) -> JSONResponse:
-    """What the org already knows: similar past assessments (real
-    maverick.assessment records) + advisory per-question suggestions.
-
-    Deliberate demo tradeoff: like the rest of the intake surface this is
-    reachable by case id, so precedent subjects/ratings/notes are visible to
-    anyone holding an intake link. The PLATFORM twin
-    (``GET /api/v1/assessment-memory/similar``) sits behind the dashboard's
-    ``view`` permission — production respondent portals should proxy through
-    that, not replicate this open endpoint."""
-    case = STORE.cases.get(case_id)
-    if not case:
-        return JSONResponse({"ok": False}, status_code=404)
-    from maverick import assessment_memory
-
-    def _collect() -> dict[str, Any]:
-        return {
-            "similar": assessment_memory.similar(
-                case.subject, assessment_type="pia", k=3),
-            "suggestions": assessment_memory.suggest_answers(
-                "pia", case.subject, k=3),
-            "lessons": assessment_memory.lessons(case.subject, k=2),
-        }
-
-    data = await asyncio.to_thread(_collect)
-    return JSONResponse({"ok": True, **data})
-
-
 @app.post("/intake/{case_id}/submit")
 async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
     case = STORE.cases.get(case_id)
@@ -845,6 +951,15 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
                 "guidance": f.recommendation,
             } for f in result.findings],
         }
+        # The OneTrust review screen shows the interview verbatim — the
+        # reviewer approves there, so the record must carry the answers.
+        qtext = {q.id: _INTAKE_PHRASING.get(q.id, q.text)
+                 for q in get_template("pia").questions}
+        result_dict["answers"] = [{
+            "question": qtext.get(qid, qid),
+            "answer": rec.get("answer", ""), "note": rec.get("note", ""),
+            "by": rec.get("by", ""),
+        } for qid, rec in case.answers.items()]
 
         # REAL approval row -> the dashboard's /approvals queue.
         risk = result.risk_rating if result.risk_rating in ("high", "medium", "low") else "medium"
@@ -853,7 +968,7 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
         controls_txt = "; ".join(f"{c['id']} {c['title']}" for c in controls) or "none"
         w = _world()
         approval_id = w.create_approval(
-            f"File PIA for {case.subject} to OneTrust (risk: {result.risk_rating.upper()})",
+            f"Approve PIA for {case.subject} (risk: {result.risk_rating.upper()})",
             risk=risk,
             scope=f"onetrust:/api/assessment/v2/assessments · ticket {case.ticket_number}",
             detail=(f"First-pass assessment {case.id} — inherent {result.inherent_risk.upper()} "
@@ -874,40 +989,90 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
     case.result = result_dict
     case.controls = controls
     case.approval_id = str(approval_id)
-    case.stage = "pending_review"
 
     _audit("ASSESSMENT_REVIEW", ANALYST, gid, case=case_id, subject=case.subject,
            risk=result_dict["risk_rating"], findings=len(result_dict["findings"]),
            controls=len(controls), status="pending_human_review")
     _audit("AUTONOMY_GATED", AGENT, gid, case=case_id, approval_id=approval_id,
-           reason="assessment_requires_human_approval_before_filing")
+           reason="assessment_requires_human_approval_before_completion")
     if gid:
         _post_event(gid, ANALYST, "finding",
                     f"First-pass assessment: risk {result_dict['risk_rating'].upper()}, "
                     f"{len(result_dict['findings'])} findings, {len(controls)} required controls "
                     f"(GDPR/ISO 27001/SOC 2/NIST citations attached).")
+
+    # OneTrust-first: file immediately as UNDER REVIEW. The human decision
+    # happens inside OneTrust (or the Lightwork queue — either surface decides
+    # approval #{id}); nothing is marked Completed until a person approves.
+    await _file_under_review(case)
+    if gid:
         _post_event(gid, AGENT, "verify",
-                    f"Autonomy gated: approval #{approval_id} created — a human must approve "
-                    f"before anything is filed to OneTrust. See the dashboard Approvals queue.")
-    case.log(f"Scored risk={result_dict['risk_rating']}; approval #{approval_id} "
-             f"awaiting human decision in the dashboard.")
+                    f"Autonomy gated: filed to OneTrust as UNDER REVIEW. Approval "
+                    f"#{approval_id} mirrors the human decision — approve in "
+                    f"OneTrust and the signed audit chain records it.")
+    case.log(f"Scored risk={result_dict['risk_rating']}; filed to OneTrust as "
+             f"Under Review (approval #{approval_id} tracks the decision).")
 
     ticket = STORE.tickets.get(case.ticket_number)
     if ticket:
         ticket.note(f"First-pass assessment complete — risk "
                     f"{result_dict['risk_rating'].upper()}, {len(result_dict['findings'])} findings. "
-                    f"Pending privacy-team approval (approval #{approval_id}).")
+                    f"Filed to OneTrust as Under Review; awaiting the privacy "
+                    f"team's decision there (approval #{approval_id}).")
 
     return RedirectResponse(f"/intake/{case_id}?submitted=1", status_code=303)
 
 
+async def _file_under_review(case: Case) -> None:
+    """File the scored assessment into OneTrust as "Under Review" through the
+    REAL integration tool — input + analysis are the agent's job; the human
+    approves inside OneTrust."""
+    gid = getattr(case, "goal_id", None)
+    ot = onetrust_tool()
+    body = {
+        "name": f"PIA — {case.subject}",
+        "templateName": "Privacy Impact Assessment",
+        "subject": case.subject,
+        "status": "Under Review",
+        "riskLevel": (case.result or {}).get("risk_rating", "unknown"),
+        "result": case.result,
+        "controls": case.controls,
+        "sourceTicket": case.ticket_number,
+        "caseId": case.id,
+    }
+    filed = await asyncio.to_thread(ot.fn, {
+        "op": "post", "path": "/api/assessment/v2/assessments",
+        "body": body, "confirm": True})
+    _audit("TOOL_CALL", ANALYST, gid, tool="onetrust", op="post",
+           path="/api/assessment/v2/assessments", case=case.id,
+           status="Under Review", outcome=filed[:120])
+    if filed.startswith("ok"):
+        case.onetrust_id = _extract_ot_id(filed)
+        case.stage = "in_onetrust_review"
+        case.log(f"Filed to OneTrust as {case.onetrust_id} (Under Review).")
+        if gid:
+            _post_event(gid, ANALYST, "artifact",
+                        f"Filed in OneTrust as {case.onetrust_id} — status "
+                        f"UNDER REVIEW (POST /api/assessment/v2/assessments, "
+                        f"confirm-gated). Review & approve happens in OneTrust.")
+    else:
+        # The tenant refused: keep the case reviewable from Lightwork.
+        case.stage = "pending_review"
+        case.log(f"OneTrust filing did not confirm: {filed[:120]}")
+
+
 # ===========================================================================
-# Approval watcher — reacts to the human decision made in the REAL dashboard
+# Approval watcher — mirrors a decision made in the REAL Lightwork queue
+# (the primary review surface is now INSIDE OneTrust; both converge here)
 # ===========================================================================
+_REVIEWABLE_STAGES = ("in_onetrust_review", "pending_review")
+
+
 async def _approval_watcher() -> None:
     while True:
         try:
-            pending = [c for c in STORE.cases.values() if c.stage == "pending_review"]
+            pending = [c for c in STORE.cases.values()
+                       if c.stage in _REVIEWABLE_STAGES]
             for case in pending:
                 # Reviewer asked for more detail (dashboard pop-out)? Reopen
                 # the interview before looking at the approve/deny state.
@@ -916,9 +1081,9 @@ async def _approval_watcher() -> None:
                     continue
                 status, decided_by = await asyncio.to_thread(_approval_state, case)
                 if status == "approved":
-                    await _file_to_onetrust(case, decided_by)
+                    await _complete_case(case, decided_by, via="lightwork")
                 elif status in ("denied", "rejected"):
-                    await _handle_rejection(case, decided_by)
+                    await _send_back_case(case, decided_by, via="lightwork")
         except Exception as exc:  # pragma: no cover
             print(f"[watcher] {exc}")
         await asyncio.sleep(2)
@@ -972,84 +1137,105 @@ def _approval_state(case: Case) -> tuple[str, str]:
         return "error", ""
 
 
-async def _file_to_onetrust(case: Case, decided_by: str) -> None:
+def _ot_record_for(case: Case) -> OneTrustAssessment | None:
+    return STORE.onetrust.get(case.onetrust_id) if case.onetrust_id else None
+
+
+def _decide_saved_assessment(case: Case, decision: str, decided_by: str) -> None:
+    """Mirror the decision onto the REAL assessment record (revision-checked;
+    the record may already carry the decision if it was made in the dashboard
+    pop-out — that's fine, the state converges)."""
+    aid = getattr(case, "assessment_id", "")
+    if not aid:
+        return
+    try:
+        from maverick.assessment import decide_assessment, load_saved
+        rec = load_saved(aid)
+        if rec is None or rec.get("status") == decision:
+            return
+        decide_assessment(aid, decision, decided_by=decided_by,
+                          cadence_days=365,
+                          expected_revision=rec["revision"])
+    except Exception as exc:  # pragma: no cover - demo resilience
+        print(f"[decide] assessment record mirror failed: {exc}")
+
+
+async def _complete_case(case: Case, decided_by: str, *, via: str) -> None:
+    """One approval, wherever it was clicked (OneTrust screen or the Lightwork
+    queue): flip the OneTrust record to Completed, decide the real assessment
+    record, close the goal + ticket, notify the requester — all on the signed
+    audit chain."""
+    if case.stage not in _REVIEWABLE_STAGES:
+        return
     gid = getattr(case, "goal_id", None)
-    case.stage = "approved"
-    case.decided_by = decided_by or "dashboard-reviewer"
-    case.log(f"Approved by {case.decided_by} in the Lightwork dashboard.")
+    case.stage = "filed"
+    case.decided_by = decided_by or "privacy-reviewer"
+    case.log(f"Approved by {case.decided_by} (via {via}).")
     _audit("APPROVAL_DECISION", case.decided_by, gid, case=case.id,
-           decision="approved", approval_id=case.approval_id,
+           decision="approved", approval_id=case.approval_id, via=via,
            risk=(case.result or {}).get("risk_rating"))
+    await asyncio.to_thread(_decide_saved_assessment, case, "approved",
+                            case.decided_by)
+    ot = _ot_record_for(case)
+    if ot:
+        ot.status = "Completed"
+        ot.decided_by = case.decided_by
+        ot.decided_at = time.time()
     if gid:
         _post_event(gid, AGENT, "observation",
-                    f"Approval #{case.approval_id} granted by {case.decided_by}. Filing to OneTrust.")
-
-    # REAL integration code -> mock tenant.
-    ot = onetrust_tool()
-    body = {
-        "name": f"PIA — {case.subject}",
-        "templateName": "Privacy Impact Assessment",
-        "subject": case.subject,
-        "riskLevel": (case.result or {}).get("risk_rating", "unknown"),
-        "result": case.result,
-        "controls": case.controls,
-        "sourceTicket": case.ticket_number,
-    }
-    filed = await asyncio.to_thread(ot.fn, {
-        "op": "post", "path": "/api/assessment/v2/assessments",
-        "body": body, "confirm": True})
-    _audit("TOOL_CALL", ANALYST, gid, tool="onetrust", op="post",
-           path="/api/assessment/v2/assessments", case=case.id, outcome=filed[:120])
-
-    if filed.startswith("ok"):
-        case.stage = "filed"
-        case.onetrust_id = _extract_ot_id(filed)
-        case.log(f"Filed into OneTrust as {case.onetrust_id}.")
-        if gid:
-            _post_event(gid, ANALYST, "artifact",
-                        f"Assessment filed in OneTrust as {case.onetrust_id} "
-                        f"(POST /api/assessment/v2/assessments, confirm-gated).")
-            await asyncio.to_thread(
-                _world().set_goal_status, gid, "done",
-                f"PIA complete: risk {(case.result or {}).get('risk_rating', '?').upper()}, "
-                f"filed as {case.onetrust_id}, ticket {case.ticket_number} resolved.")
-        ticket = STORE.tickets.get(case.ticket_number)
-        if ticket:
-            ticket.state = "Resolved"
-            ticket.note(
-                f"Privacy assessment APPROVED (risk "
-                f"{(case.result or {}).get('risk_rating', '?').upper()}) by {case.decided_by} "
-                f"and filed in OneTrust as {case.onetrust_id}. "
-                f"{len(case.controls)} required controls attached. Closing ticket.")
-        await _send_email(
-            case.requester_email,
-            f"Privacy assessment complete — {case.subject} ({case.id})",
-            (
-                f"Hi {case.requester},\n\n"
-                f"Your privacy assessment for {case.subject} is complete and approved.\n\n"
-                f"Risk rating: {(case.result or {}).get('risk_rating', '?').upper()}\n"
-                f"Filed in OneTrust: {case.onetrust_id}\n"
-                f"Required controls: {len(case.controls)}\n\n"
-                f"The privacy team will follow up on any open controls.\n\n"
-                f"— Privacy Office\n"
-            ),
-        )
-    else:
-        case.log(f"OneTrust filing did not confirm: {filed[:120]}")
+                    f"Approval #{case.approval_id} granted by {case.decided_by} "
+                    f"(via {via}). {case.onetrust_id or 'The assessment'} is now "
+                    f"COMPLETED in OneTrust.")
+        await asyncio.to_thread(
+            _world().set_goal_status, gid, "done",
+            f"PIA complete: risk {(case.result or {}).get('risk_rating', '?').upper()}, "
+            f"approved by {case.decided_by} in OneTrust review, "
+            f"ticket {case.ticket_number} resolved.")
+    ticket = STORE.tickets.get(case.ticket_number)
+    if ticket:
+        ticket.state = "Resolved"
+        ticket.note(
+            f"Privacy assessment APPROVED (risk "
+            f"{(case.result or {}).get('risk_rating', '?').upper()}) by {case.decided_by} "
+            f"in OneTrust ({case.onetrust_id}). "
+            f"{len(case.controls)} required controls attached. Closing ticket.")
+    await _send_email(
+        case.requester_email,
+        f"Privacy assessment complete — {case.subject} ({case.id})",
+        (
+            f"Hi {case.requester},\n\n"
+            f"Your privacy assessment for {case.subject} is complete and approved.\n\n"
+            f"Risk rating: {(case.result or {}).get('risk_rating', '?').upper()}\n"
+            f"OneTrust record: {case.onetrust_id}\n"
+            f"Required controls: {len(case.controls)}\n\n"
+            f"The privacy team will follow up on any open controls.\n\n"
+            f"— Privacy Office\n"
+        ),
+    )
 
 
-async def _handle_rejection(case: Case, decided_by: str) -> None:
+async def _send_back_case(case: Case, decided_by: str, *, via: str) -> None:
+    if case.stage not in _REVIEWABLE_STAGES:
+        return
     gid = getattr(case, "goal_id", None)
     case.stage = "rejected"
-    case.decided_by = decided_by or "dashboard-reviewer"
-    case.log(f"Sent back by {case.decided_by}.")
+    case.decided_by = decided_by or "privacy-reviewer"
+    case.log(f"Sent back by {case.decided_by} (via {via}).")
     _audit("APPROVAL_DECISION", case.decided_by, gid, case=case.id,
-           decision="denied", approval_id=case.approval_id)
+           decision="denied", approval_id=case.approval_id, via=via)
+    await asyncio.to_thread(_decide_saved_assessment, case, "rejected",
+                            case.decided_by)
+    ot = _ot_record_for(case)
+    if ot:
+        ot.status = "Sent back"
+        ot.decided_by = case.decided_by
+        ot.decided_at = time.time()
     if gid:
         _post_event(gid, AGENT, "error",
-                    f"Approval #{case.approval_id} denied by {case.decided_by}; nothing filed.")
+                    f"Approval #{case.approval_id} denied by {case.decided_by} "
+                    f"(via {via}); the OneTrust record is marked Sent back.")
         await asyncio.to_thread(_world().set_goal_status, gid, "blocked",
-                                "Assessment sent back by privacy review; not filed.")
+                                "Assessment sent back by privacy review.")
     ticket = STORE.tickets.get(case.ticket_number)
     if ticket:
         ticket.state = "In Progress"
@@ -1075,16 +1261,19 @@ async def ot_create_assessment(request: Request) -> JSONResponse:
         return JSONResponse({"error": "missing bearer token"}, status_code=401)
     body = await request.json()
     ot_id = STORE.next_onetrust_id()
+    status = body.get("status") or "Under Review"
     STORE.onetrust[ot_id] = OneTrustAssessment(
         assessment_id=ot_id,
         name=body.get("name", "Assessment"),
         template=body.get("templateName", "PIA"),
         subject=body.get("subject", ""),
-        status="Completed",
+        status=status,
         risk_level=body.get("riskLevel", "unknown"),
         result=body.get("result") or {},
+        case_id=body.get("caseId", ""),
+        controls=body.get("controls") or [],
     )
-    return JSONResponse({"assessmentId": ot_id, "status": "Completed",
+    return JSONResponse({"assessmentId": ot_id, "status": status,
                          "created": True})
 
 
@@ -1102,7 +1291,7 @@ async def ot_list_assessments(request: Request) -> JSONResponse:
 @app.get("/onetrust", response_class=HTMLResponse)
 async def onetrust_viewer(request: Request) -> HTMLResponse:
     items = sorted(STORE.onetrust.values(), key=lambda a: a.filed_at, reverse=True)
-    # Serializable payload for the record-detail pop-out.
+    # Serializable payload for the record-detail / review pop-out.
     records_json = [{
         "assessment_id": a.assessment_id, "name": a.name,
         "template": a.template, "subject": a.subject, "status": a.status,
@@ -1114,9 +1303,204 @@ async def onetrust_viewer(request: Request) -> HTMLResponse:
         "answered": (a.result or {}).get("answered", 0),
         "total": (a.result or {}).get("total", 0),
         "findings": (a.result or {}).get("findings", []),
+        "answers": (a.result or {}).get("answers", []),
+        "controls": a.controls,
+        "addenda": a.addenda,
+        "needs_re_review": a.needs_re_review,
+        "decided_by": a.decided_by,
     } for a in items]
+    n_review = sum(1 for a in items if a.status == "Under Review")
     return _page(request, "onetrust.html", assessments=items,
-                 records_json=records_json)
+                 records_json=records_json, n_review=n_review)
+
+
+@app.post("/onetrust/decide")
+async def onetrust_decide(request: Request) -> JSONResponse:
+    """The reviewer's decision, made INSIDE OneTrust. It drives the same
+    governed machinery as the Lightwork queue: the world approval row is
+    decided, the real assessment record is decided, and the signed audit
+    chain records who clicked."""
+    body = await request.json()
+    ot_id = str(body.get("assessment_id", ""))
+    decision = str(body.get("decision", ""))
+    reviewer = str(body.get("reviewer", "")).strip()[:80] or "OneTrust reviewer"
+    ot = STORE.onetrust.get(ot_id)
+    if not ot:
+        return JSONResponse({"ok": False, "error": "unknown assessment"},
+                            status_code=404)
+    if ot.status != "Under Review":
+        return JSONResponse({"ok": False, "error": f"already {ot.status}"},
+                            status_code=409)
+    if decision not in ("approve", "send_back"):
+        return JSONResponse({"ok": False, "error": "decision must be approve "
+                             "or send_back"}, status_code=422)
+    case = STORE.cases.get(ot.case_id)
+    if case is None:
+        # Record predates a demo restart: flip it locally, honestly labeled.
+        ot.status = "Completed" if decision == "approve" else "Sent back"
+        ot.decided_by = reviewer
+        ot.decided_at = time.time()
+        return JSONResponse({"ok": True, "status": ot.status})
+    if decision == "approve" and await asyncio.to_thread(_open_followups, case):
+        return JSONResponse(
+            {"ok": False, "error": "follow-up questions are still open with "
+             "the requester — answers land back here automatically"},
+            status_code=409)
+    status = "approved" if decision == "approve" else "denied"
+    if case.approval_id:
+        await asyncio.to_thread(
+            _world().decide_approval, int(case.approval_id), status,
+            decided_by=reviewer)
+    if decision == "approve":
+        await _complete_case(case, reviewer, via="onetrust")
+    else:
+        await _send_back_case(case, reviewer, via="onetrust")
+    return JSONResponse({"ok": True, "status": ot.status})
+
+
+# ---- Append documents to a vendor we've already assessed -------------------
+def _analyze_addendum(ot: OneTrustAssessment, case: Case | None,
+                      filename: str, data: bytes, mime: str) -> dict:
+    """Honest first-pass analysis of a document added AFTER the assessment
+    existed. DPA-looking text runs through the real Art. 28 clause review
+    (the record also lands in the /privacy workspace); anything unreadable is
+    said to be unreadable and flagged for a human."""
+    from maverick import privacy_ops
+    gid = getattr(case, "goal_id", None) if case else None
+    extraction: dict = {}
+    try:
+        text = privacy_ops._document_text(data, mime, _metadata=extraction)
+    except Exception:
+        text = ""
+    entry: dict[str, Any] = {"at": time.time(), "filename": filename,
+                             "summary": "", "gaps": [], "re_review": False,
+                             "dpa_review_id": ""}
+    low = f"{filename} {text[:4000]}".lower()
+    dpa_like = text.strip() and any(
+        k in low for k in ("data processing", "dpa", "processor",
+                           "art. 28", "article 28"))
+    if dpa_like:
+        try:
+            review = privacy_ops.review_dpa(
+                ot.subject, text, document_name=filename, reviewed_by=AGENT,
+                _document_evidence=privacy_ops._build_document_evidence(
+                    data=data, text=text, mime=mime, source="upload",
+                    doc_id=filename, ref=None, extraction=extraction))
+            missing = [c["requirement"] for c in review.get("clauses", [])
+                       if c.get("status") == "missing"]
+            entry["gaps"] = missing[:6]
+            entry["dpa_review_id"] = review.get("id", "")
+            entry["re_review"] = (bool(missing)
+                                  or review.get("residual_risk") in ("high",
+                                                                     "medium"))
+            entry["summary"] = (
+                f"Art. 28 clause review: {review.get('clauses_present', 0)} of "
+                f"{review.get('clauses_total', 0)} clauses present, residual "
+                f"risk {str(review.get('residual_risk', '?')).upper()}."
+                + (" Missing clauses flagged — re-review recommended."
+                   if entry["re_review"] else " No gaps — filed for the record."))
+        except Exception as exc:
+            print(f"[addendum] clause review unavailable: {exc}")
+            entry["re_review"] = True
+            entry["summary"] = ("Text extracted but the clause review is "
+                                "unavailable — attached for human review.")
+    elif text.strip():
+        entry["summary"] = (f"Text extracted ({len(text):,} chars); no DPA "
+                            "clause set detected — attached for the record.")
+    else:
+        entry["re_review"] = True
+        entry["summary"] = ("Not machine-readable (scanned or unsupported "
+                            "format) — attached; human review required.")
+    ot.addenda.append(entry)
+    if entry["re_review"]:
+        ot.needs_re_review = True
+    _audit("ASSESSMENT_ADDENDUM", ANALYST, gid, subject=ot.subject,
+           ot_id=ot.assessment_id, artifact=filename,
+           re_review=entry["re_review"], gaps=len(entry["gaps"]))
+    if gid:
+        _post_event(gid, ANALYST, "artifact",
+                    f"Addendum on {ot.assessment_id}: {filename} — "
+                    f"{entry['summary']}")
+    return entry
+
+
+async def _read_upload_bounded(file: UploadFile) -> tuple[bytes | None, str]:
+    from maverick.attachments import MAX_FILE_BYTES
+    data = await file.read(MAX_FILE_BYTES + 1)
+    if len(data) > MAX_FILE_BYTES:
+        return None, f"file too large (limit {MAX_FILE_BYTES} bytes)"
+    return data, ""
+
+
+@app.post("/onetrust/record/{ot_id}/add-document")
+async def onetrust_add_document(ot_id: str, file: UploadFile) -> JSONResponse:
+    """"We've already done the assessment — we're just adding stuff": append
+    a document to an existing OneTrust record, analyze it, and flag whether
+    the addition warrants a re-review."""
+    ot = STORE.onetrust.get(ot_id)
+    if not ot:
+        return JSONResponse({"ok": False, "error": "unknown assessment"},
+                            status_code=404)
+    data, err = await _read_upload_bounded(file)
+    if data is None:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    mime = file.content_type or "application/octet-stream"
+    filename = file.filename or "document"
+    case = STORE.cases.get(ot.case_id)
+    if case is not None:
+        ok, msg = await asyncio.to_thread(
+            _store_evidence, case, filename, data, mime, via="onetrust addendum")
+        if not ok:
+            return JSONResponse({"ok": False, "error": msg}, status_code=400)
+    entry = await asyncio.to_thread(_analyze_addendum, ot, case, filename,
+                                    data, mime)
+    return JSONResponse({"ok": True, "addendum": entry,
+                         "needs_re_review": ot.needs_re_review})
+
+
+@app.post("/intake/{case_id}/append-doc")
+async def intake_append_doc(case_id: str, file: UploadFile) -> JSONResponse:
+    """Chat-side append: the requester says they're just adding documents to
+    a vendor we've already assessed. The file lands on the EXISTING OneTrust
+    record as an analyzed addendum; no second interview."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return JSONResponse({"ok": False}, status_code=404)
+    ot = next((a for a in STORE.onetrust.values()
+               if a.subject.strip().lower() == case.subject.strip().lower()
+               and a.status in ("Completed", "Under Review")), None)
+    if ot is None:
+        return JSONResponse({"ok": False, "error": "no prior assessment for "
+                             f"{case.subject}"}, status_code=404)
+    data, err = await _read_upload_bounded(file)
+    if data is None:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+    mime = file.content_type or "application/octet-stream"
+    filename = file.filename or "document"
+    ok, msg = await asyncio.to_thread(
+        _store_evidence, case, filename, data, mime, via="append to "
+        + ot.assessment_id)
+    if not ok:
+        return JSONResponse({"ok": False, "error": msg}, status_code=400)
+    entry = await asyncio.to_thread(_analyze_addendum, ot, case, filename,
+                                    data, mime)
+    gid = getattr(case, "goal_id", None)
+    if case.stage == "intake_sent":
+        case.stage = "addendum_filed"
+        case.log(f"Append-only: document(s) added to {ot.assessment_id}.")
+        if gid:
+            await asyncio.to_thread(
+                _world().set_goal_status, gid, "done",
+                f"Append-only request: document(s) analyzed and attached to "
+                f"{ot.assessment_id}; no new interview needed.")
+        ticket = STORE.tickets.get(case.ticket_number)
+        if ticket:
+            ticket.state = "Resolved"
+            ticket.note(f"Document appended to existing assessment "
+                        f"{ot.assessment_id} — {entry['summary']}")
+    return JSONResponse({"ok": True, "ot_id": ot.assessment_id,
+                         "addendum": entry,
+                         "needs_re_review": ot.needs_re_review})
 
 
 @app.get("/health")

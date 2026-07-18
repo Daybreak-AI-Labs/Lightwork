@@ -215,8 +215,7 @@
   <nav class="stages">
     <a href="/servicenow" class="{{ 'active' if active=='servicenow' }}">1 · ServiceNow</a>
     <a href="/mail" class="{{ 'active' if active=='mail' }}">2 · Requester inbox{% if n_mail %}<span class="badge">{{ n_mail }}</span>{% endif %}</a>
-    <a href="{{ dashboard_url }}/approvals" target="lightwork">3 · Approvals ↗ Lightwork</a>
-    <a href="/onetrust" class="{{ 'active' if active=='onetrust' }}">4 · OneTrust{% if n_filed %}<span class="badge">{{ n_filed }}</span>{% endif %}</a>
+    <a href="/onetrust" class="{{ 'active' if active=='onetrust' }}">3 · OneTrust review{% if n_filed %}<span class="badge">{{ n_filed }}</span>{% endif %}</a>
     <a href="{{ dashboard_url }}/audit" target="lightwork">Audit ↗ Lightwork</a>
   </nav>
 </header>

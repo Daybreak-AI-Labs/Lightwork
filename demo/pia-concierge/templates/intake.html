@@ -38,8 +38,23 @@
            border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
   .srcbadge { font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
               padding: 2px 8px; border-radius: 99px; border: 1px solid var(--accent-dim); color: var(--accent); }
-  .suggest-btn { border-color: var(--accent-dim) !important; }
   .memo { border-color: var(--accent-dim); background: var(--accent-glow); }
+
+  /* Chat vs guided: a visible, selectable experience. */
+  .modeseg { display: inline-flex; border: 1px solid var(--line); border-radius: 99px;
+             overflow: hidden; margin-left: auto; flex: none; }
+  .modeseg button { border: 0; background: transparent; color: var(--ink-dim);
+                    padding: 5px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  .modeseg button.on { background: var(--accent-glow); color: var(--accent); }
+  .chatrow { display: flex; gap: 8px; align-items: center; }
+  .chatrow input[type="text"] { flex: 1; padding: 10px 14px; border-radius: 12px; }
+  .micbtn { border: 1px solid var(--line); background: transparent; color: var(--ink);
+            border-radius: 50%; width: 40px; height: 40px; cursor: pointer;
+            font-size: 17px; flex: none; }
+  .micbtn.live { border-color: var(--high, #c0392b); color: var(--high, #c0392b);
+                 animation: micpulse 1.2s ease infinite; }
+  @keyframes micpulse { 50% { box-shadow: 0 0 0 6px rgba(192,57,43,.15); } }
+  .chatsub { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
   .delegated-chip { font-size: 12px; color: var(--medium); background: var(--medium-bg);
                     border-radius: 20px; padding: 3px 10px; font-weight: 600; }
   dialog.dlg { margin: auto; background: var(--bg-card); color: var(--ink); border: 1px solid var(--line);
@@ -128,21 +143,33 @@ document.querySelectorAll('.fu-q').forEach(function (row) {
 </div>
 {% endif %}
 
-<div class="card memo" id="memory" style="display:none;">
-  <div class="flow">
-    <strong>💡 We've seen systems like this before.</strong>
-    <span class="muted" id="memoryText"></span>
-  </div>
-</div>
-
 <div class="card" id="chat">
   <div class="qprog" id="qprog" aria-hidden="true">
     <span class="lbl" id="qprog-label"></span>
     <div class="qbar"><div id="qbar-fill"></div></div>
+    <div class="modeseg" role="tablist" aria-label="Answering mode">
+      <button type="button" id="mode-chat" role="tab">💬 Chat</button>
+      <button type="button" id="mode-guided" role="tab">☑ Guided</button>
+    </div>
   </div>
   <div id="thread"></div>
   <div id="controls" style="margin-top:16px;"></div>
 </div>
+
+{% if prior %}
+<div class="card" id="appendCard" style="display:none;">
+  <h2>Add documents to {{ prior.ot_id }}</h2>
+  <p class="muted" style="margin-bottom:10px;">Each file is analyzed on the spot and appended to the
+    existing assessment — flagged for re-review only if it changes the risk picture.</p>
+  <div class="dropzone" id="appendzone" role="button" tabindex="0"
+       aria-label="Append documents to the existing assessment">
+    <div>📎 <strong>Drop files here</strong> or click to browse</div>
+    <div class="hint muted">They land on {{ prior.ot_id }} in OneTrust as analyzed addenda.</div>
+    <input type="file" id="appendInput" multiple style="display:none;">
+  </div>
+  <div id="appendResults"></div>
+</div>
+{% endif %}
 
 {% if not delegation %}
 <div class="card">
@@ -171,15 +198,20 @@ document.querySelectorAll('.fu-q').forEach(function (row) {
 {% if done %}
 <div class="card" style="border-color: var(--low);">
   <div class="flow">
-    <span class="risk low">✓ submitted</span>
-    <span class="muted">Your answers are with the privacy team. The assessment was scored by
-      Lightwork and is awaiting human review in the governed approvals queue.</span>
+    <span class="risk low">✓ {{ 'documents appended' if case.stage == 'addendum_filed' else 'submitted' }}</span>
+    {% if case.stage == 'addendum_filed' %}
+    <span class="muted">Your document(s) were analyzed and appended to the vendor's existing
+      assessment in OneTrust — no second interview needed.</span>
+    {% else %}
+    <span class="muted">The agent scored the risk, mapped the controls, and filed the assessment
+      into OneTrust as <b>Under Review</b>. A person approves it there.</span>
+    {% endif %}
   </div>
 </div>
 <div class="nextstep">
   <span class="k">Next</span>
-  <span class="t">Switch hats: you're the privacy team now. Review the scored assessment and decide.</span>
-  <a class="btn" href="{{ dashboard_url }}/approvals" target="lightwork">Open Lightwork approvals →</a>
+  <span class="t">Switch hats: you're the privacy team now. Review and approve the assessment in OneTrust.</span>
+  <a class="btn" href="/onetrust">Open OneTrust →</a>
 </div>
 {% endif %}
 
@@ -222,8 +254,12 @@ const CASE = "{{ case.id }}";
 const DTOKEN = "{{ delegation.token if delegation else '' }}";
 const QUESTIONS = {{ questions|tojson }};
 const PRE_DELEGATED = {{ (case.delegations or {})|tojson }};
+const PRIOR = {{ (prior or none)|tojson }};
 let idx = 0;
-let SUGGEST = {};
+// The selectable experience: full chat (type or talk) vs guided buttons —
+// switchable mid-interview, both drive the same governed template.
+let MODE = localStorage.getItem('pia-mode') || 'chat';
+let SPEAK = false;
 const delegated = {};   // qid -> colleague name (skip in this session's flow)
 Object.keys(PRE_DELEGATED).forEach(function (t) {
   if (t === DTOKEN) return;  // a delegate still answers their own set
@@ -247,6 +283,12 @@ function bubble(who, text) {
   d.appendChild(b);
   thread.appendChild(d);
   thread.scrollTop = thread.scrollHeight;
+  if (who === 'bot' && SPEAK && window.speechSynthesis) {
+    try {
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    } catch (e) { /* voice output is best-effort */ }
+  }
 }
 
 const SEVLABEL = {high:'sev-high', medium:'sev-medium', low:'sev-low'};
@@ -295,27 +337,16 @@ function ask() {
 
 const ANSWERED = {};
 
-// Separate from ask() so late-arriving insights can refresh the buttons of
-// the question already on screen without re-bubbling its text.
+// Separate from ask() so a mode switch can re-render the input for the
+// question already on screen without re-bubbling its text.
 function renderControls() {
   progress();
   controls.innerHTML = '';
   if (idx >= QUESTIONS.length) return;
   const q = QUESTIONS[idx];
+  if (MODE === 'chat') { renderChatControls(q); return; }
   const wrap = document.createElement('div');
   wrap.className = 'flow';
-  // Learned suggestion first: one click confirms what the org already knows.
-  const s = SUGGEST[q.id];
-  if (s && ANSLABEL[s.answer]) {
-    const sb = document.createElement('button');
-    sb.className = 'btn ghost sm suggest-btn';
-    sb.textContent = '💡 Use suggested: ' + ANSLABEL[s.answer];
-    sb.title = 'From ' + (s.based_on || []).join(', ') +
-      (s.note ? (' — "' + s.note + '"') : '') +
-      ' (confidence ' + Math.round((s.confidence || 0) * 100) + '%)';
-    sb.onclick = () => answer(q, s.answer, ANSLABEL[s.answer] + ' (suggested)');
-    wrap.appendChild(sb);
-  }
   const opts = [['yes','Yes'],['no','No'],['na','N/A'],['unknown','Not sure']];
   opts.forEach(([val,lbl]) => {
     const btn = document.createElement('button');
@@ -332,12 +363,97 @@ function renderControls() {
     del.onclick = () => openDelegate(q);
     wrap.appendChild(del);
   }
+  wrap.appendChild(sectionBadge(q));
+  controls.appendChild(wrap);
+}
+
+function sectionBadge(q) {
   const sec = document.createElement('span');
   sec.className = 'faint';
   sec.style.cssText = 'font-size:12px; margin-left:auto;';
   sec.innerHTML = '<span class="sev-dot '+(SEVLABEL[q.severity]||'')+'"></span> ' + q.section;
-  wrap.appendChild(sec);
-  controls.appendChild(wrap);
+  return sec;
+}
+
+// Chat mode: answer in your own words — typed or spoken. The reply is
+// interpreted server-side (scripted rules, model-assisted when a key is
+// configured) and your words are kept verbatim as the answer note.
+function renderChatControls(q) {
+  const row = document.createElement('div');
+  row.className = 'chatrow';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Type your answer — or tap the mic and just talk…';
+  input.setAttribute('aria-label', 'Your answer');
+  const mic = document.createElement('button');
+  mic.type = 'button';
+  mic.className = 'micbtn';
+  mic.textContent = '🎤';
+  mic.title = 'Answer by voice';
+  mic.setAttribute('aria-label', 'Answer by voice');
+  wireMic(mic, input, q);
+  const send = document.createElement('button');
+  send.type = 'button';
+  send.className = 'btn';
+  send.textContent = 'Send';
+  const submit = () => { if (input.value.trim()) sendFree(q, input.value.trim()); };
+  send.onclick = submit;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  row.append(input, mic, send);
+  controls.appendChild(row);
+
+  const sub = document.createElement('div');
+  sub.className = 'chatsub';
+  const speak = document.createElement('button');
+  speak.type = 'button';
+  speak.className = 'btn ghost sm';
+  speak.textContent = SPEAK ? '🔊 Voice replies on' : '🔈 Read questions aloud';
+  speak.onclick = () => { SPEAK = !SPEAK; renderControls(); };
+  sub.appendChild(speak);
+  if (!DTOKEN) {
+    const del = document.createElement('button');
+    del.className = 'btn ghost sm';
+    del.textContent = '🤝 Ask a colleague';
+    del.onclick = () => openDelegate(q);
+    sub.appendChild(del);
+  }
+  sub.appendChild(sectionBadge(q));
+  controls.appendChild(sub);
+  input.focus();
+}
+
+function wireMic(mic, input, q) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    mic.disabled = true;
+    mic.title = 'Voice input needs Chrome (Web Speech API)';
+    return;
+  }
+  let rec = null;
+  mic.onclick = () => {
+    if (rec) { rec.stop(); return; }
+    rec = new SR();
+    rec.lang = 'en-US';
+    rec.interimResults = true;
+    mic.classList.add('live');
+    let finalText = '';
+    rec.onresult = (ev) => {
+      let interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        if (ev.results[i].isFinal) finalText += ev.results[i][0].transcript;
+        else interim += ev.results[i][0].transcript;
+      }
+      input.value = (finalText + ' ' + interim).trim();
+    };
+    rec.onend = () => {
+      mic.classList.remove('live');
+      rec = null;
+      // Spoken answers send themselves — that's the conversation.
+      if (finalText.trim()) sendFree(q, finalText.trim());
+    };
+    rec.onerror = () => { mic.classList.remove('live'); rec = null; };
+    rec.start();
+  };
 }
 
 let answering = false;  // a double-click must not skip the next question
@@ -356,6 +472,36 @@ async function answer(q, val, lbl) {
   idx++;
   answering = false;
   setTimeout(ask, 250);
+}
+
+async function sendFree(q, text) {
+  if (answering) return;
+  answering = true;
+  controls.querySelectorAll('input[type=text]').forEach(i => { i.value = ''; });
+  controls.querySelectorAll('button, input').forEach(b => { b.disabled = true; });
+  bubble('me', text);
+  let r = {};
+  try {
+    r = await (await fetch(`/intake/${CASE}/interpret`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question_id: q.id, text: text, d: DTOKEN}),
+    })).json();
+  } catch (e) { r = {ok: false}; }
+  answering = false;
+  if (!r.ok) {
+    bubble('bot', 'Hmm, that didn\'t go through — mind trying again?');
+    renderControls();
+    return;
+  }
+  if (!r.answer) {
+    bubble('bot', r.reply || 'Is that a yes or a no?');
+    renderControls();
+    return;
+  }
+  bubble('bot', 'Got it — recorded as ' + r.label + '. Your words stay on the record for the reviewer.');
+  ANSWERED[q.id] = true;
+  idx++;
+  setTimeout(ask, 350);
 }
 
 // ---- Delegation dialog -----------------------------------------------------
@@ -512,25 +658,91 @@ if (dropzone) {
   };
 }
 
-// ---- Learning: what the org already knows about systems like this ---------
-(async () => {
-  try {
-    const r = await (await fetch(`/intake/${CASE}/insights`)).json();
-    if (!r.ok) return;
-    SUGGEST = r.suggestions || {};
-    renderControls();  // refresh the on-screen question with suggestion chips
-    const sim = r.similar || [];
-    const memo = document.getElementById('memory');
-    if (sim.length && memo) {
-      const bits = sim.slice(0, 2).map(s =>
-        `${s.subject} was rated ${String(s.risk_rating).toUpperCase()}`);
-      document.getElementById('memoryText').textContent =
-        bits.join('; ') + '. Questions below show one-click suggested answers ' +
-        'from those assessments — you confirm, nothing is auto-answered.';
-      memo.style.display = 'block';
-    }
-  } catch (e) { /* learning is advisory; the intake works without it */ }
-})();
+// ---- Mode toggle: the selectable chat / guided experience -----------------
+const modeChat = document.getElementById('mode-chat');
+const modeGuided = document.getElementById('mode-guided');
+function paintMode() {
+  if (modeChat) modeChat.classList.toggle('on', MODE === 'chat');
+  if (modeGuided) modeGuided.classList.toggle('on', MODE === 'guided');
+}
+function setMode(m) {
+  MODE = m;
+  try { localStorage.setItem('pia-mode', m); } catch (e) {}
+  paintMode();
+  renderControls();
+}
+if (modeChat) modeChat.onclick = () => setMode('chat');
+if (modeGuided) modeGuided.onclick = () => setMode('guided');
+paintMode();
+
+// ---- Append flow: this vendor is already assessed — just add documents ----
+function offerAppendChoice() {
+  bubble('bot', 'We\'ve already assessed ' + {{ case.subject|tojson }} +
+    (PRIOR ? (' — ' + PRIOR.ot_id + ' is ' + PRIOR.status + ' (risk ' +
+      String(PRIOR.risk).toUpperCase() + ') in OneTrust.') : '.'));
+  bubble('bot', 'Are you just adding documents to that assessment, or do you need a fresh one?');
+  controls.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'flow';
+  const add = document.createElement('button');
+  add.className = 'btn';
+  add.textContent = '📎 Just adding documents';
+  add.onclick = () => {
+    bubble('me', 'Just adding documents.');
+    bubble('bot', 'Easy. Drop them below — I\'ll analyze each one and append it to ' +
+      PRIOR.ot_id + '. The privacy team sees the addendum in OneTrust; no second interview.');
+    controls.innerHTML = '';
+    const card = document.getElementById('appendCard');
+    if (card) { card.style.display = 'block'; card.scrollIntoView({behavior: 'smooth'}); }
+  };
+  const fresh = document.createElement('button');
+  fresh.className = 'btn ghost';
+  fresh.textContent = 'Start a fresh assessment';
+  fresh.onclick = () => {
+    bubble('me', 'It\'s changed enough — let\'s do a fresh assessment.');
+    ask();
+  };
+  wrap.append(add, fresh);
+  controls.appendChild(wrap);
+}
+
+const appendzone = document.getElementById('appendzone');
+if (appendzone) {
+  const appendInput = document.getElementById('appendInput');
+  const results = document.getElementById('appendResults');
+  function appendOne(file) {
+    const c = document.createElement('div');
+    c.className = 'filechip';
+    c.innerHTML = '<span>📎</span><span class="nm mono"></span><span class="meta muted">analyzing…</span>';
+    c.querySelector('.nm').textContent = file.name;
+    results.appendChild(c);
+    const fd = new FormData();
+    fd.append('file', file);
+    fetch(`/intake/${CASE}/append-doc`, {method: 'POST', body: fd})
+      .then(r => r.json())
+      .then(r => {
+        const meta = c.querySelector('.meta');
+        if (!r.ok) { meta.textContent = 'rejected: ' + (r.error || '?'); return; }
+        meta.textContent = 'appended to ' + r.ot_id + ' ✓';
+        const a = r.addendum || {};
+        bubble('bot', file.name + ': ' + (a.summary || 'appended.') +
+          (a.re_review ? ' I\'ve flagged ' + r.ot_id + ' for re-review.' : ''));
+      })
+      .catch(() => { c.querySelector('.meta').textContent = 'network error'; });
+  }
+  appendzone.onclick = () => appendInput.click();
+  appendzone.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); appendInput.click(); }
+  };
+  appendInput.onchange = () => { [...appendInput.files].forEach(appendOne); appendInput.value = ''; };
+  ['dragenter','dragover'].forEach(ev => appendzone.addEventListener(ev, (e) => {
+    e.preventDefault(); appendzone.classList.add('drag');
+  }));
+  ['dragleave','drop'].forEach(ev => appendzone.addEventListener(ev, (e) => {
+    e.preventDefault(); appendzone.classList.remove('drag');
+  }));
+  appendzone.addEventListener('drop', (e) => [...e.dataTransfer.files].forEach(appendOne));
+}
 
 const autofillBtn = document.getElementById('autofill');
 if (autofillBtn) autofillBtn.onclick = async () => {
@@ -547,8 +759,8 @@ bubble('bot', "This assessment has already been submitted — thank you!");
 bubble('bot', {{ ("Hi " ~ delegation.to_name.split(' ')[0] ~ "! Just a few questions " ~ delegation.from_name.split(' ')[0] ~ " needs your expertise on.")|tojson }});
 ask();
 {% else %}
-bubble('bot', {{ ("Hi! I'll ask a few questions about how " ~ case.subject ~ " handles personal data.")|tojson }});
-ask();
+bubble('bot', {{ ("Hi! I'll ask a few questions about how " ~ case.subject ~ " handles personal data. Answer in your own words — typed or spoken — or switch to Guided for one-click answers.")|tojson }});
+if (PRIOR) { offerAppendChoice(); } else { ask(); }
 {% endif %}
 </script>
 {% endif %}

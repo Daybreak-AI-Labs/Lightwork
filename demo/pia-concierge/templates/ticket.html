@@ -22,16 +22,23 @@
     Play the requester and answer it.</span>
   <a class="btn" href="/mail">Open the requester's inbox →</a>
 </div>
-{% elif case and case.stage == 'pending_review' %}
+{% elif case and case.stage in ('pending_review', 'in_onetrust_review') %}
 <div class="nextstep">
   <span class="k">Next</span>
-  <span class="t">Scored by Lightwork — a human decides. Review and approve in the governed queue.</span>
-  <a class="btn" href="{{ dashboard_url }}/approvals" target="lightwork">Open Lightwork approvals →</a>
+  <span class="t">The agent scored it and filed it to OneTrust as Under Review — a human decides there.</span>
+  <a class="btn" href="/onetrust">Review &amp; approve in OneTrust →</a>
+</div>
+{% elif case and case.stage == 'addendum_filed' %}
+<div class="nextstep">
+  <span class="k">Done</span>
+  <span class="t">Append-only request: the document(s) were analyzed and attached to the
+    vendor's existing assessment — ticket resolved.</span>
+  <a class="btn" href="/onetrust">See the addendum in OneTrust →</a>
 </div>
 {% elif case and case.onetrust_id %}
 <div class="nextstep">
   <span class="k">Done</span>
-  <span class="t">Approved and filed to OneTrust as {{ case.onetrust_id }} — ticket resolved,
+  <span class="t">Approved in OneTrust as {{ case.onetrust_id }} — ticket resolved,
     requester notified.</span>
   <a class="btn" href="/onetrust">See it in OneTrust →</a>
 </div>
@@ -52,10 +59,10 @@
     <p class="muted">Waiting on the requester to complete the intake questionnaire.</p>
     <a class="btn ghost sm" href="/mail">Open requester inbox →</a>
     {% endif %}
-    {% if case and case.stage == 'pending_review' %}
+    {% if case and case.stage in ('pending_review', 'in_onetrust_review') %}
     <hr>
-    <p class="muted">Scored by Lightwork — awaiting human approval in the governed queue.</p>
-    <a class="btn ghost sm" href="{{ dashboard_url }}/approvals" target="lightwork">Open Lightwork approvals ↗</a>
+    <p class="muted">Scored by the agent — awaiting the privacy team's decision in OneTrust.</p>
+    <a class="btn ghost sm" href="/onetrust">Open OneTrust review →</a>
     {% endif %}
     {% if case %}
     <hr>
