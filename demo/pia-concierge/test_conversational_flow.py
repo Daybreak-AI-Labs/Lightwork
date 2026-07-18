@@ -281,6 +281,116 @@ def test_append_without_prior_assessment_is_refused(demo_app):
 
 
 # --------------------------------------------------------------------------- #
+# Prefills: skip questions the agent can answer with quotable provenance
+# --------------------------------------------------------------------------- #
+def test_document_evidence_prefills_with_negation_guard(demo_app):
+    case = _mkcase(demo_app)
+    text = ("Art. 28 GDPR data processing agreement with Acme CRM. "
+            "Standard contractual clauses (module 2) are annexed. "
+            "There is no retention period defined by the vendor.")
+    hits = demo_app._prefill_from_document(case, "acme-dpa.pdf", text)
+    by_q = {h["id"]: h for h in hits}
+    assert by_q["pia_processors"]["answer"] == "yes"
+    assert by_q["pia_transfers"]["answer"] == "no"     # safeguard exists
+    # "no retention period" must NOT read as evidence FOR retention.
+    assert "pia_retention" not in by_q
+    # Provenance survives into the record the reviewer reads.
+    note = case.answers["pia_processors"]["note"]
+    assert "acme-dpa.pdf" in note and "data processing agreement" in note.lower()
+    assert case.answers["pia_processors"]["auto"] is True
+
+
+def test_prefill_never_overwrites_a_human_or_delegate_answer(demo_app):
+    case = _mkcase(demo_app)
+    case.answers["pia_security"] = {"answer": "no", "note": "typed by human"}
+    case.delegations["tok"] = {"qids": ["pia_processors"], "to_name": "Alex",
+                               "to_email": "a@x.test", "note": "",
+                               "answered": []}
+    hits = demo_app._prefill_from_document(
+        case, "sec.pdf",
+        "Encryption at rest (AES-256). Data processing agreement attached.")
+    assert {h["id"] for h in hits} == set()  # security human-owned, processors delegated
+    assert case.answers["pia_security"]["note"] == "typed by human"
+
+
+def test_ticket_prefills_special_category_both_ways(demo_app):
+    plain = _mkcase(demo_app)
+    assert demo_app._prefill_from_ticket(plain)[0]["answer"] == "no"
+    assert plain.answers["pia_special_category"]["auto"] is True
+    health = _mkcase(demo_app, subject="MedTrack",
+                     case_id="LW-PIA-T010", ticket="PRV-T-10")
+    health.data_types = "employee health records and biometrics"
+    assert demo_app._prefill_from_ticket(health)[0]["answer"] == "yes"
+
+
+def test_upload_endpoint_returns_prefills(demo_app):
+    case = _mkcase(demo_app)
+    pdf = demo_app._mini_pdf(
+        "Acme CRM — Security Overview",
+        ["Encryption at rest (AES-256), TLS 1.2+, SOC 2 Type II attested."])
+    resp = asyncio.run(demo_app.intake_upload(
+        case.id, _upload("sec-overview.pdf", pdf)))
+    payload = json.loads(resp.body)
+    assert payload["ok"] is True
+    assert {p["id"] for p in payload["prefilled"]} == {"pia_security"}
+    assert case.answers["pia_security"]["answer"] == "yes"
+
+
+def test_carry_forward_prefills_from_the_last_review(demo_app, monkeypatch):
+    first = _mkcase(demo_app)
+    _submit(demo_app, monkeypatch, first)
+    second = _mkcase(demo_app, case_id="LW-PIA-T011", ticket="PRV-T-11")
+    resp = asyncio.run(demo_app.intake_carry_forward(second.id))
+    payload = json.loads(resp.body)
+    assert payload["ok"] is True
+    assert len(payload["prefilled"]) == len(demo_app._DEMO_ANSWERS)
+    assert payload["prior"]["ot_id"] == first.onetrust_id
+    rec = second.answers["pia_transfers"]
+    assert rec["auto"] is True and "last review" in rec["source"]
+    # Nothing to carry -> clean empty, not an error.
+    lone = _mkcase(demo_app, subject="Globex HRIS",
+                   case_id="LW-PIA-T012", ticket="PRV-T-12")
+    assert json.loads(asyncio.run(
+        demo_app.intake_carry_forward(lone.id)).body)["prefilled"] == []
+
+
+def test_addendum_reports_gaps_closed_since_last_review(demo_app, monkeypatch):
+    case = _mkcase(demo_app)
+    ot = _submit(demo_app, monkeypatch, case)
+    # First document: sparse DPA -> plenty of missing clauses recorded.
+    asyncio.run(demo_app.onetrust_add_document(
+        ot.assessment_id, _upload("acme-dpa-v1.pdf", _dpa_pdf(demo_app))))
+    # Second document: fuller DPA -> closes some of those gaps.
+    fuller = demo_app._mini_pdf(
+        "Acme CRM — countersigned Data Processing Agreement v2",
+        ["Art. 28 GDPR data processing agreement with Acme CRM.",
+         "Processor acts only on documented instructions from the controller.",
+         "Audit rights: controller may audit annually.",
+         "Sub-processor list maintained; prior written authorisation required.",
+         "Personnel are bound by confidentiality obligations.",
+         "Breach notification to the controller without undue delay.",
+         "Deletion or return of all personal data at contract end.",
+         "Assists the controller with data subject requests.",
+         "Technical and organisational security measures per Art. 32."])
+    resp = asyncio.run(demo_app.onetrust_add_document(
+        ot.assessment_id, _upload("acme-dpa-v2.pdf", fuller)))
+    entry = json.loads(resp.body)["addendum"]
+    assert entry["closed_gaps"], "the fuller DPA closes earlier gaps"
+    assert "Closes" in entry["summary"]
+
+
+def test_prior_offer_survives_ticket_prefill(demo_app, monkeypatch):
+    first = _mkcase(demo_app)
+    _submit(demo_app, monkeypatch, first)
+    second = _mkcase(demo_app, case_id="LW-PIA-T013", ticket="PRV-T-13")
+    demo_app._prefill_from_ticket(second)   # auto answers must not hide the offer
+    html = asyncio.run(demo_app.intake(_request(), second.id)).body.decode()
+    assert 'id="appendCard"' in html
+    assert "Already on file" not in html or first.uploads  # only with docs
+    assert "carry-forward" in html
+
+
+# --------------------------------------------------------------------------- #
 # Pages: the selectable chat/guided experience; suggestions panel is gone
 # --------------------------------------------------------------------------- #
 def test_intake_page_offers_both_modes_and_voice_without_suggestions(demo_app):

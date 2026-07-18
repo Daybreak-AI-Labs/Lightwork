@@ -29,6 +29,7 @@ import asyncio
 import datetime as _dt
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -120,6 +121,146 @@ _DEMO_ANSWERS = {
     "pia_processors": ("no", "Acme CRM is a processor; Art. 28 DPA not yet countersigned."),
     "pia_automated": ("yes", "Large-scale lead scoring / profiling of customers."),
 }
+
+
+# ===========================================================================
+# Vendor memory + evidence prefills — the agent answers what it can PROVE,
+# with quotable provenance: an attached document, the ticket itself, or the
+# vendor's last review. Every auto-answer keeps source + excerpt as the answer
+# note the reviewer reads. Nothing is silently invented.
+# ===========================================================================
+_ANSWER_LABELS = {"yes": "Yes", "no": "No", "na": "N/A", "unknown": "Not sure"}
+
+_DOC_ANSWER_RULES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("pia_processors", "yes",
+     ("data processing agreement", "art. 28", "article 28")),
+    ("pia_lawful_basis", "yes",
+     ("lawful basis", "legitimate interest assessment",
+      "legitimate-interest assessment")),
+    ("pia_security", "yes",
+     ("encryption at rest", "aes-256", "encrypted in transit", "tls 1.")),
+    ("pia_retention", "yes",
+     ("retention period", "retention:", "deletion schedule",
+      "deleted 12 months")),
+    ("pia_transfers", "no",
+     ("standard contractual clauses", "scc module", "scc annex")),
+)
+
+_SPECIAL_CATEGORY_TERMS = ("health", "medical", "biometric", "genetic",
+                           "race", "ethnic", "religio", "union membership",
+                           "sexual", "political")
+
+
+def _negated_before(low: str, pos: int) -> bool:
+    """"no audit rights", "without SCCs" must not read as evidence FOR."""
+    return bool(re.search(r"\b(?:no|not|without|never)\b\W*$",
+                          low[max(0, pos - 24):pos]))
+
+
+def _term_excerpt(text: str, pos: int, term: str) -> str:
+    lo = max(0, pos - 40)
+    hi = min(len(text), pos + len(term) + 60)
+    return " ".join(text[lo:hi].split())
+
+
+def _record_auto_answer(case: Case, qid: str, answer: str, source: str,
+                        excerpt: str) -> dict | None:
+    """Answer on the requester's behalf — only if nobody (human, delegate, or
+    an earlier source) owns the question yet."""
+    if qid in case.answers:
+        return None
+    if any(qid in d["qids"] for d in case.delegations.values()):
+        return None
+    note = f"Auto-answered from {source}"
+    if excerpt:
+        note += f': "{excerpt}"'
+    case.answers[qid] = {"answer": answer, "note": note, "auto": True,
+                         "source": source}
+    return {"id": qid, "answer": answer, "label": _ANSWER_LABELS[answer],
+            "source": source, "excerpt": excerpt}
+
+
+def _prefill_from_document(case: Case, filename: str, text: str) -> list[dict]:
+    """Evidence rules: what an attached document proves, quoted."""
+    if not (text or "").strip():
+        return []
+    low = text.lower()
+    hits: list[dict] = []
+    for qid, answer, terms in _DOC_ANSWER_RULES:
+        for term in terms:
+            pos = low.find(term)
+            if pos < 0 or _negated_before(low, pos):
+                continue
+            hit = _record_auto_answer(case, qid, answer, filename,
+                                      _term_excerpt(text, pos, term))
+            if hit:
+                hits.append(hit)
+            break
+    if hits:
+        gid = getattr(case, "goal_id", None)
+        _audit("INTAKE_PREFILL", ANALYST, gid, case=case.id, source=filename,
+               questions=[h["id"] for h in hits])
+        if gid:
+            _post_event(gid, ANALYST, "observation",
+                        f"{filename} answered {len(hits)} intake question(s) "
+                        f"with quoted evidence; the requester won't be asked.")
+    return hits
+
+
+def _prefill_from_ticket(case: Case) -> list[dict]:
+    """The ticket already declares the data types — settle the special-
+    category question from the requester's own declaration."""
+    dt = (case.data_types or "").strip()
+    if not dt:
+        return []
+    low = dt.lower()
+    source = f"ServiceNow ticket {case.ticket_number}"
+    if any(t in low for t in _SPECIAL_CATEGORY_TERMS):
+        hit = _record_auto_answer(case, "pia_special_category", "yes", source,
+                                  f"data types declared: {dt}")
+    else:
+        hit = _record_auto_answer(case, "pia_special_category", "no", source,
+                                  f"no special-category types among: {dt}")
+    return [hit] if hit else []
+
+
+def _doc_text_for_prefill(data: bytes, mime: str) -> str:
+    from maverick import privacy_ops
+    try:
+        return privacy_ops._document_text(data, mime)
+    except Exception:
+        return ""
+
+
+def _prefills_from_bytes(case: Case, filename: str, data: bytes,
+                         mime: str) -> list[dict]:
+    return _prefill_from_document(case, filename,
+                                  _doc_text_for_prefill(data, mime))
+
+
+def _latest_prior_record(subject: str) -> OneTrustAssessment | None:
+    matches = [a for a in STORE.onetrust.values()
+               if a.subject.strip().lower() == subject.strip().lower()
+               and a.status in ("Completed", "Under Review")]
+    return max(matches, key=lambda a: a.filed_at) if matches else None
+
+
+def _prior_summary(ot: OneTrustAssessment) -> dict:
+    """What we already know about this vendor — shown to the requester."""
+    prior_case = STORE.cases.get(ot.case_id)
+    doc_names = []
+    if prior_case:
+        doc_names += [u.split(" (")[0] for u in prior_case.uploads]
+    doc_names += [a["filename"] for a in ot.addenda]
+    when = ot.decided_at or ot.filed_at
+    return {
+        "ot_id": ot.assessment_id, "status": ot.status,
+        "risk": (ot.result or {}).get("risk_rating", ot.risk_level),
+        "decided_by": ot.decided_by,
+        "when": _dt.datetime.fromtimestamp(when).strftime("%b %d, %Y"),
+        "findings": len((ot.result or {}).get("findings", [])),
+        "docs": doc_names[:8],
+    }
 
 
 @app.on_event("startup")
@@ -429,6 +570,8 @@ async def webhook_pia(request: Request) -> JSONResponse:
     ticket.case_id = case_id
     # The org "already has" this vendor's paperwork in the simulated tenant.
     _seed_corp_docs(ticket.system_name)
+    # The ticket itself already answers what it can (quoted provenance).
+    _prefill_from_ticket(case)
 
     _audit("GOAL_START", AGENT, gid, case=case_id, ticket=number,
            subject=ticket.system_name, source=body.get("source", "webhook"))
@@ -522,19 +665,26 @@ async def intake(request: Request, case_id: str, d: str = "") -> HTMLResponse:
                  if case.stage == "followup" and delegation is None else [])
 
     # A vendor we've already assessed? Offer "just add documents" instead of
-    # a second full interview — the append-to-vendor flow.
+    # a second full interview — the append-to-vendor flow. Auto-answers (from
+    # the ticket/docs) don't count as having started the interview.
+    human_answers = any(not rec.get("auto") for rec in case.answers.values())
     prior = None
-    if case.stage == "intake_sent" and not case.answers and delegation is None:
-        for a in STORE.onetrust.values():
-            if (a.subject.strip().lower() == case.subject.strip().lower()
-                    and a.status in ("Completed", "Under Review")):
-                prior = {"ot_id": a.assessment_id, "status": a.status,
-                         "risk": (a.result or {}).get("risk_rating",
-                                                      a.risk_level)}
-                break
+    if case.stage == "intake_sent" and not human_answers and delegation is None:
+        prior_ot = _latest_prior_record(case.subject)
+        if prior_ot:
+            prior = _prior_summary(prior_ot)
+
+    # Already-resolved questions (human, delegate, or auto with provenance):
+    # the interview skips them and shows where each answer came from.
+    answered = {qid: {"answer": rec.get("answer", ""),
+                      "auto": bool(rec.get("auto")),
+                      "source": rec.get("source", ""),
+                      "by": rec.get("by", "")}
+                for qid, rec in case.answers.items()}
 
     return _page(request, "intake.html", case=case, questions=questions,
                  delegation=delegation, followups=followups, prior=prior,
+                 answered=answered,
                  done=(case.stage not in ("intake_sent", "followup")
                        and delegation is None))
 
@@ -743,6 +893,44 @@ def _llm_interpret(question: str, text: str) -> str | None:
         return None
 
 
+@app.post("/intake/{case_id}/carry-forward")
+async def intake_carry_forward(case_id: str) -> JSONResponse:
+    """Fresh assessment for a vendor we've reviewed before: pre-answer the
+    interview from the last review's saved record. The requester only covers
+    what's new; the reviewer sees where every carried answer came from."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return JSONResponse({"ok": False}, status_code=404)
+    prior_ot = _latest_prior_record(case.subject)
+    prior_case = STORE.cases.get(prior_ot.case_id) if prior_ot else None
+    if (prior_ot is None or prior_case is None
+            or not getattr(prior_case, "assessment_id", "")):
+        return JSONResponse({"ok": True, "prefilled": []})
+    from maverick.assessment import load_saved
+    record = await asyncio.to_thread(load_saved, prior_case.assessment_id)
+    source = f"last review {prior_ot.assessment_id}"
+    hits: list[dict] = []
+    for qid, rec in ((record or {}).get("answers") or {}).items():
+        ans = (rec.get("answer") or "").strip()
+        if ans not in _ANSWER_LABELS:
+            continue
+        hit = _record_auto_answer(case, qid, ans, source,
+                                  (rec.get("note") or "")[:160])
+        if hit:
+            hits.append(hit)
+    if hits:
+        gid = getattr(case, "goal_id", None)
+        _audit("INTAKE_PREFILL", ANALYST, gid, case=case.id, source=source,
+               questions=[h["id"] for h in hits])
+        if gid:
+            _post_event(gid, ANALYST, "observation",
+                        f"Carried {len(hits)} answer(s) forward from "
+                        f"{prior_ot.assessment_id}; only new or changed "
+                        f"ground gets asked.")
+    return JSONResponse({"ok": True, "prefilled": hits,
+                         "prior": _prior_summary(prior_ot)})
+
+
 @app.post("/intake/{case_id}/interpret")
 async def intake_interpret(case_id: str, request: Request) -> JSONResponse:
     """Chat/voice mode: turn a free-text reply into a recorded answer.
@@ -831,13 +1019,16 @@ async def intake_upload(case_id: str, file: UploadFile) -> JSONResponse:
                                    "bytes)", "uploads": case.uploads},
             status_code=400)
     mime = file.content_type or "application/octet-stream"
+    filename = file.filename or "upload"
     ok, msg = await asyncio.to_thread(
-        _store_evidence, case, file.filename or "upload", data, mime,
-        via="upload")
+        _store_evidence, case, filename, data, mime, via="upload")
     if not ok:
         return JSONResponse({"ok": False, "error": msg,
                              "uploads": case.uploads}, status_code=400)
-    return JSONResponse({"ok": True, "uploads": case.uploads})
+    prefilled = await asyncio.to_thread(
+        _prefills_from_bytes, case, filename, data, mime)
+    return JSONResponse({"ok": True, "uploads": case.uploads,
+                         "prefilled": prefilled})
 
 
 @app.post("/intake/{case_id}/discover")
@@ -889,12 +1080,17 @@ async def intake_attach_found(case_id: str, request: Request) -> JSONResponse:
     except Exception:  # noqa: BLE001 -- no transport/URL detail to the caller
         return JSONResponse({"ok": False, "error": "could not fetch that "
                              "document from the source"}, status_code=400)
+    resolved_mime = doc_discovery.resolve_mime(name, mime)
     ok, msg = await asyncio.to_thread(
-        _store_evidence, case, name, data,
-        doc_discovery.resolve_mime(name, mime), via=f"found in {source}")
-    status = 200 if ok else 400
-    return JSONResponse({"ok": ok, "error": None if ok else msg,
-                         "uploads": case.uploads}, status_code=status)
+        _store_evidence, case, name, data, resolved_mime,
+        via=f"found in {source}")
+    if not ok:
+        return JSONResponse({"ok": False, "error": msg,
+                             "uploads": case.uploads}, status_code=400)
+    prefilled = await asyncio.to_thread(
+        _prefills_from_bytes, case, name, data, resolved_mime)
+    return JSONResponse({"ok": True, "error": None, "uploads": case.uploads,
+                         "prefilled": prefilled})
 
 
 @app.post("/intake/{case_id}/submit")
@@ -1359,6 +1555,24 @@ async def onetrust_decide(request: Request) -> JSONResponse:
 
 
 # ---- Append documents to a vendor we've already assessed -------------------
+def _vendor_previous_gaps(subject: str) -> set[str]:
+    """Missing clauses from the vendor's most recent DPA review (if any) —
+    so a newly appended document can be reported as closing them."""
+    from maverick import privacy_ops
+    gaps: set[str] = set()
+    try:
+        for summary in privacy_ops.list_dpa_reviews():
+            if ((summary.get("vendor") or "").strip().lower()
+                    != subject.strip().lower()):
+                continue
+            full = privacy_ops.get_dpa_review(summary["id"]) or {}
+            gaps = {c["requirement"] for c in full.get("clauses", [])
+                    if c.get("status") == "missing"}
+    except Exception:  # pragma: no cover - demo resilience
+        pass
+    return gaps
+
+
 def _analyze_addendum(ot: OneTrustAssessment, case: Case | None,
                       filename: str, data: bytes, mime: str) -> dict:
     """Honest first-pass analysis of a document added AFTER the assessment
@@ -1381,6 +1595,9 @@ def _analyze_addendum(ot: OneTrustAssessment, case: Case | None,
                            "art. 28", "article 28"))
     if dpa_like:
         try:
+            # It knows we reviewed this vendor before: diff the new document
+            # against the gaps the LAST review left open.
+            prev_missing = _vendor_previous_gaps(ot.subject)
             review = privacy_ops.review_dpa(
                 ot.subject, text, document_name=filename, reviewed_by=AGENT,
                 _document_evidence=privacy_ops._build_document_evidence(
@@ -1399,6 +1616,12 @@ def _analyze_addendum(ot: OneTrustAssessment, case: Case | None,
                 f"risk {str(review.get('residual_risk', '?')).upper()}."
                 + (" Missing clauses flagged — re-review recommended."
                    if entry["re_review"] else " No gaps — filed for the record."))
+            closed = sorted(prev_missing - set(missing))
+            if closed:
+                entry["closed_gaps"] = closed[:6]
+                entry["summary"] += (
+                    f" Closes {len(closed)} gap(s) from the last review: "
+                    f"{'; '.join(closed[:3])}.")
         except Exception as exc:
             print(f"[addendum] clause review unavailable: {exc}")
             entry["re_review"] = True
@@ -1466,9 +1689,7 @@ async def intake_append_doc(case_id: str, file: UploadFile) -> JSONResponse:
     case = STORE.cases.get(case_id)
     if not case:
         return JSONResponse({"ok": False}, status_code=404)
-    ot = next((a for a in STORE.onetrust.values()
-               if a.subject.strip().lower() == case.subject.strip().lower()
-               and a.status in ("Completed", "Under Review")), None)
+    ot = _latest_prior_record(case.subject)
     if ot is None:
         return JSONResponse({"ok": False, "error": "no prior assessment for "
                              f"{case.subject}"}, status_code=404)
