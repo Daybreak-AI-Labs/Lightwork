@@ -41,6 +41,9 @@
   .ot__chip { display: inline-block; font-size: 11.5px; font-weight: 700; border-radius: 3px;
               padding: 3px 10px; text-transform: capitalize; }
   .ot__chip.completed { background: #eaf6da; color: #3c6b00; }
+  .ot__chip.underreview { background: #fef2dd; color: #925f0a; }
+  .ot__chip.sentback { background: #fde8e8; color: #b42318; }
+  .ot__chip.rereview { background: #ffe9f2; color: #a61e6a; }
   .ot__chip.high   { background: #fde8e8; color: #b42318; }
   .ot__chip.medium { background: #fef2dd; color: #925f0a; }
   .ot__chip.low, .ot__chip.minimal { background: #eaf6da; color: #3c6b00; }
@@ -73,12 +76,30 @@
   .otd__finding.medium { border-left-color: #e8a13c; }
   .otd__finding.low { border-left-color: #78be20; }
   .otd__finding .g { color: #51626f; font-size: 12.5px; margin-top: 3px; }
+  .otd__ans { background: #fff; border: 1px solid #dde4e9; border-radius: 6px;
+              padding: 8px 12px; margin-bottom: 6px; font-size: 13px; }
+  .otd__ans .q { color: #51626f; }
+  .otd__ans .a { font-weight: 700; text-transform: capitalize; }
+  .otd__ans .note { color: #51626f; font-size: 12.5px; font-style: italic; margin-top: 2px; }
+  .otd__decide { position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center;
+                 background: #ffffff; border-top: 1px solid #dde4e9; padding: 12px 20px;
+                 margin: 14px -20px -16px; }
+  .otd__decide input { border: 1px solid #cfd9e0; border-radius: 4px; padding: 7px 10px;
+                       font-size: 13px; width: 170px; }
+  .otd__approve { background: #78be20; color: #113300; border: none; border-radius: 4px;
+                  padding: 9px 20px; font-weight: 700; font-size: 13.5px; cursor: pointer; }
+  .otd__reject { background: #fff; color: #b42318; border: 1px solid #e5b9b4; border-radius: 4px;
+                 padding: 9px 16px; font-weight: 600; font-size: 13.5px; cursor: pointer; }
+  .otd__adddoc { background: #fff; color: #2a7ab0; border: 1px solid #bcd5e6; border-radius: 4px;
+                 padding: 7px 14px; font-weight: 600; font-size: 12.5px; cursor: pointer; }
+  .otd__msg { font-size: 12.5px; color: #51626f; }
 </style>
 
 <div class="sim-banner"><span class="sim-chip">Simulated</span>
-  <span>Stand-in for the customer's <b>OneTrust</b> tenant. Lightwork filed these records through the
-  <b>real</b> integration tool (<span class="mono">POST /api/assessment/v2/assessments</span>,
-  confirm-gated) — repoint <span class="mono">ONETRUST_HOSTNAME</span> at a live sandbox and it's identical.</span></div>
+  <span>Stand-in for the customer's <b>OneTrust</b> tenant. The agent files each analyzed assessment
+  here as <b>Under Review</b> through the <b>real</b> integration tool
+  (<span class="mono">POST /api/assessment/v2/assessments</span>, confirm-gated) — and the privacy
+  team <b>reviews and approves it right here</b>. Every decision lands on Lightwork's signed audit chain.</span></div>
 
 <div class="ot">
   <div class="ot__rail">
@@ -103,8 +124,8 @@
     <div class="ot__content">
       <div class="ot__filters">
         <span class="on">All ({{ assessments|length }})</span>
-        <span>In Progress (0)</span>
-        <span>Completed ({{ assessments|length }})</span>
+        <span>Under Review ({{ n_review }})</span>
+        <span>Completed ({{ assessments|selectattr('status', 'equalto', 'Completed')|list|length }})</span>
       </div>
       {% if assessments %}
       <table class="ot__tbl">
@@ -112,17 +133,18 @@
         {% for a in assessments %}
         <tr data-i="{{ loop.index0 }}" role="button" tabindex="0" aria-label="Open {{ a.assessment_id }}">
           <td class="ot__id">{{ a.assessment_id }}</td>
-          <td><b>{{ a.name }}</b></td>
+          <td><b>{{ a.name }}</b>{% if a.addenda %} <span class="ot__chip" style="background:#eef1f4; color:#51626f;">+{{ a.addenda|length }} doc{{ 's' if a.addenda|length != 1 }}</span>{% endif %}</td>
           <td>{{ a.subject }}</td>
           <td><span class="ot__chip {{ (a.result or {}).get('inherent_risk', a.risk_level) }}">{{ (a.result or {}).get('inherent_risk', a.risk_level) }}</span></td>
           <td><span class="ot__chip {{ (a.result or {}).get('residual_risk', a.risk_level) }}">{{ (a.result or {}).get('residual_risk', a.risk_level) }}</span></td>
-          <td><span class="ot__chip completed">{{ a.status }}</span></td>
+          <td><span class="ot__chip {{ a.status|lower|replace(' ', '') }}">{{ a.status }}</span>{% if a.needs_re_review %} <span class="ot__chip rereview">re-review</span>{% endif %}</td>
         </tr>
         {% endfor %}
       </table>
       {% else %}
-      <div class="ot__empty">No assessments yet. Approve one in the Lightwork queue and it
-        files here automatically — pre-populated with the risk rating, findings, and controls.</div>
+      <div class="ot__empty">No assessments yet. Submit an intake and the agent files its
+        analysis here as Under Review — pre-populated with the answers, risk rating,
+        findings, and controls, ready for your decision.</div>
       {% endif %}
     </div>
   </div>
@@ -137,46 +159,152 @@
   <div class="otd__body" id="otd-body"></div>
 </dialog>
 
+<input type="file" id="otd-file" multiple style="display:none;">
+
 <script>
 const RECORDS = {{ records_json | tojson }};
 const dlg = document.getElementById('otDlg');
+const fileInput = document.getElementById('otd-file');
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function section(b, label) { b.appendChild(el('div', 'otd__sec', label)); }
+
+function openRecord(r) {
+  document.getElementById('otd-id').textContent = r.assessment_id;
+  document.getElementById('otd-name').textContent = r.name;
+  const b = document.getElementById('otd-body');
+  b.innerHTML = '';
+  const kv = document.createElement('dl'); kv.className = 'otd__kv';
+  [['Subject', r.subject], ['Template', r.template],
+   ['Inherent risk', String(r.inherent_risk).toUpperCase()],
+   ['Residual risk', String(r.residual_risk).toUpperCase() +
+      (r.risks_in_scope ? ' (' + r.controls_in_place + ' of ' + r.risks_in_scope + ' risk areas controlled)' : '')],
+   ['Status', r.status + (r.decided_by ? ' · by ' + r.decided_by : '')],
+   ['Responses', r.answered + ' / ' + r.total + ' answered'],
+   ['Filed by', 'Lightwork agent (input + analysis; decision is human)']].forEach(function (p) {
+    kv.append(el('dt', '', p[0]), el('dd', '', p[1]));
+  });
+  b.appendChild(kv);
+
+  if ((r.answers || []).length) {
+    section(b, 'Interview responses (' + r.answers.length + ')');
+    r.answers.forEach(function (a) {
+      const d = el('div', 'otd__ans');
+      const q = el('div', 'q', a.question);
+      const ans = el('div');
+      ans.append(el('span', 'a', String(a.answer || '?')));
+      if (a.by) ans.append(el('span', 'note', '  — answered by ' + a.by));
+      d.append(q, ans);
+      if (a.note) d.appendChild(el('div', 'note', '“' + a.note + '”'));
+      b.appendChild(d);
+    });
+  }
+  if ((r.findings || []).length) {
+    section(b, 'Findings (' + r.findings.length + ')');
+    r.findings.forEach(function (f) {
+      const d = el('div', 'otd__finding ' + (f.severity || 'low'));
+      d.append(
+        el('div', '', '[' + String(f.severity || '?').toUpperCase() + '] ' + (f.text || f.question || '')),
+        el('div', 'g', f.guidance || f.recommendation || ''));
+      b.appendChild(d);
+    });
+  }
+  if ((r.controls || []).length) {
+    section(b, 'Required controls (' + r.controls.length + ')');
+    r.controls.forEach(function (c) {
+      const d = el('div', 'otd__ans');
+      d.append(el('div', '', c.id + ' — ' + c.title));
+      if (c.frameworks) d.appendChild(el('div', 'note', c.frameworks));
+      b.appendChild(d);
+    });
+  }
+
+  // "We're just adding stuff": documents appended after the assessment.
+  section(b, 'Documents added after assessment (' + (r.addenda || []).length + ')');
+  (r.addenda || []).forEach(function (a) {
+    const d = el('div', 'otd__finding ' + (a.re_review ? 'medium' : 'low'));
+    d.append(el('div', '', '📎 ' + a.filename), el('div', 'g', a.summary || ''));
+    if ((a.gaps || []).length) d.appendChild(el('div', 'g', 'Missing: ' + a.gaps.join('; ')));
+    b.appendChild(d);
+  });
+  const addRow = el('div');
+  addRow.style.cssText = 'margin: 4px 0 10px;';
+  const addBtn = el('button', 'otd__adddoc', '＋ Add document to this vendor');
+  addBtn.type = 'button';
+  const addMsg = el('span', 'otd__msg', '');
+  addMsg.style.marginLeft = '10px';
+  addBtn.onclick = function () {
+    fileInput.onchange = function () {
+      const files = [...fileInput.files];
+      fileInput.value = '';
+      addMsg.textContent = 'Analyzing…';
+      Promise.all(files.map(function (f) {
+        const fd = new FormData();
+        fd.append('file', f);
+        return fetch('/onetrust/record/' + encodeURIComponent(r.assessment_id) + '/add-document',
+                     {method: 'POST', body: fd}).then(function (resp) { return resp.json(); });
+      })).then(function (rs) {
+        const bad = rs.find(function (x) { return !x.ok; });
+        if (bad) { addMsg.textContent = 'Rejected: ' + (bad.error || '?'); return; }
+        addMsg.textContent = 'Appended ✓ — reloading…';
+        setTimeout(function () { location.reload(); }, 600);
+      }).catch(function () { addMsg.textContent = 'Network error.'; });
+    };
+    fileInput.click();
+  };
+  addRow.append(addBtn, addMsg);
+  b.appendChild(addRow);
+
+  // The decision happens HERE, in the tenant the customer already lives in.
+  if (r.status === 'Under Review') {
+    const bar = el('div', 'otd__decide');
+    const who = document.createElement('input');
+    who.type = 'text';
+    who.placeholder = 'Reviewer name';
+    who.value = 'Privacy Reviewer';
+    who.setAttribute('aria-label', 'Reviewer name');
+    const ok = el('button', 'otd__approve', '✓ Approve');
+    ok.type = 'button';
+    const back = el('button', 'otd__reject', 'Send back');
+    back.type = 'button';
+    const msg = el('span', 'otd__msg', 'Approval is recorded on Lightwork\'s signed audit chain.');
+    function decide(action) {
+      ok.disabled = back.disabled = true;
+      msg.textContent = action === 'approve' ? 'Approving…' : 'Sending back…';
+      fetch('/onetrust/decide', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({assessment_id: r.assessment_id, decision: action,
+                              reviewer: who.value.trim()}),
+      }).then(function (resp) { return resp.json().then(function (j) { return {s: resp.status, j: j}; }); })
+        .then(function (x) {
+          if (!x.j.ok) {
+            ok.disabled = back.disabled = false;
+            msg.textContent = x.j.error || ('Failed: ' + x.s);
+            return;
+          }
+          msg.textContent = x.j.status + ' ✓ — reloading…';
+          setTimeout(function () { location.reload(); }, 600);
+        })
+        .catch(function () { ok.disabled = back.disabled = false; msg.textContent = 'Network error.'; });
+    }
+    ok.onclick = function () { decide('approve'); };
+    back.onclick = function () { decide('send_back'); };
+    bar.append(who, ok, back, msg);
+    b.appendChild(bar);
+  }
+  dlg.showModal();
+}
+
 document.querySelectorAll('.ot__tbl tr[data-i]').forEach(function (row) {
   function open() {
     const r = RECORDS[Number(row.dataset.i)];
-    if (!r) return;
-    document.getElementById('otd-id').textContent = r.assessment_id;
-    document.getElementById('otd-name').textContent = r.name;
-    const b = document.getElementById('otd-body');
-    b.innerHTML = '';
-    const kv = document.createElement('dl'); kv.className = 'otd__kv';
-    [['Subject', r.subject], ['Template', r.template],
-     ['Inherent risk', String(r.inherent_risk).toUpperCase()],
-     ['Residual risk', String(r.residual_risk).toUpperCase() +
-        (r.risks_in_scope ? ' (' + r.controls_in_place + ' of ' + r.risks_in_scope + ' risk areas controlled)' : '')],
-     ['Status', r.status],
-     ['Responses', r.answered + ' / ' + r.total + ' answered'],
-     ['Filed by', 'Lightwork (governed, human-approved)']].forEach(function (p) {
-      const dt = document.createElement('dt'); dt.textContent = p[0];
-      const dd = document.createElement('dd'); dd.textContent = p[1];
-      kv.append(dt, dd);
-    });
-    b.appendChild(kv);
-    if ((r.findings || []).length) {
-      const sec = document.createElement('div'); sec.className = 'otd__sec';
-      sec.textContent = 'Findings (' + r.findings.length + ')';
-      b.appendChild(sec);
-      r.findings.forEach(function (f) {
-        const d = document.createElement('div');
-        d.className = 'otd__finding ' + (f.severity || 'low');
-        const t = document.createElement('div');
-        t.textContent = '[' + String(f.severity || '?').toUpperCase() + '] ' + (f.text || f.question || '');
-        const g = document.createElement('div'); g.className = 'g';
-        g.textContent = f.guidance || f.recommendation || '';
-        d.append(t, g);
-        b.appendChild(d);
-      });
-    }
-    dlg.showModal();
+    if (r) openRecord(r);
   }
   row.addEventListener('click', open);
   row.addEventListener('keydown', function (e) {

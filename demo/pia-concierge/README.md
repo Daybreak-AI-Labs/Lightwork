@@ -1,12 +1,16 @@
 # PIA Concierge — governed privacy-assessment demo
 
-**The platform is the demo.** A privacy-assessment request submitted in any
-ticketing system is picked up by Lightwork, which interviews the requester,
-scores the risk with the real assessment engine, maps required controls with
-framework citations, parks the decision in the real governed approvals queue,
-and — only after a human approves — files the completed assessment into
-OneTrust and resolves the originating ticket. Every step lands in the real
-Ed25519-signed audit chain.
+**The agent does input + analysis; the human approves in OneTrust.** A
+privacy-assessment request submitted in any ticketing system is picked up by
+Lightwork, which interviews the requester — a full **chat experience** (typed
+or **voice**) or one-click guided answers, switchable mid-interview — scores
+the risk with the real assessment engine, maps required controls with
+framework citations, and files the completed analysis **straight into
+OneTrust as Under Review**. The privacy team reviews and approves it *inside
+OneTrust*; the decision is mirrored onto the governed approval row and the
+real Ed25519-signed audit chain in the background. Vendors that were already
+assessed take the short path: "just adding documents" appends an analyzed
+addendum to the existing OneTrust record — no second interview.
 
 ## What is real vs. simulated
 
@@ -15,21 +19,25 @@ Ed25519-signed audit chain.
 | Goal + live timeline on the dashboard (`/goals`, `/chat/goal/{id}`) | ServiceNow tenant (`:8890/servicenow`) — fires a real HTTP webhook |
 | PIA scoring — `maverick.assessment` (GDPR Art. 35 template) | OneTrust tenant (`:8890/onetrust` + `/ot-api`) — receives the real tool's POST |
 | Control mapping — `maverick.controls` (GDPR/ISO 27001/SOC 2/NIST/HIPAA citations) | Requester mailbox (`:8890/mail`) — real SMTP+STARTTLS delivery, captured locally |
-| Approval — real world-model approval, decided on the real `/approvals` page | Requester questionnaire (`:8890/intake/{case}`) — the emailed link |
+| Approval — real world-model approval row; the OneTrust Approve button (and the Lightwork queue) both decide it | Requester questionnaire (`:8890/intake/{case}`) — chat (type/voice) or guided |
 | Email send — `maverick.tools.email_tool` (SMTP) | SharePoint tenant (`:8890/graph-sim`) — Graph-shaped search + download, seeded with each vendor's SOW/MSA/DPA/security PDFs |
 | OneTrust filing — `maverick.tools.onetrust_tool` (confirm-gated POST) | |
 | Signed audit chain — `maverick.audit` (verify with `maverick audit verify`) | |
 | Evidence storage — `maverick.attachments` (real goal attachments: size caps, mime allowlist, executable deny) | |
 | Doc discovery — `maverick.doc_discovery` (searches connected sources for the SOW/contract/DPA) | |
-| Assessment memory — `maverick.assessment_memory` (similar past assessments + suggested answers, advisory) | |
+| Addendum analysis — `maverick.privacy_ops` Art. 28 clause review on appended documents | |
 
 Point `ONETRUST_HOSTNAME` at a real OneTrust sandbox and the filing is live —
 same code path. Any ticketing system that can send a webhook can replace the
 mock ServiceNow. Export a real `MSGRAPH_ACCESS_TOKEN` (and unset
 `MSGRAPH_BASE_URL`) and "Find my documents" searches your real SharePoint /
-OneDrive — same code path there too. The intake questionnaire learns across
-runs: submit one assessment, open a similar one, and the questions show
-one-click suggested answers with provenance (nothing is auto-answered).
+OneDrive — same code path there too.
+
+Chat answers are interpreted by scripted rules (identical behavior with no
+key and no network); set `ANTHROPIC_API_KEY` and ambiguous replies get a
+model-assisted read, degrading back to a scripted clarification on any error.
+Voice input uses the browser's Web Speech API (Chrome; allow the mic) and
+"Read questions aloud" speaks the agent's side — no server dependency.
 
 ## Run it
 
@@ -95,27 +103,35 @@ dashboard (:8765).
 1. **[left → ServiceNow]** File the pre-filled privacy request. *"An employee
    asks for a privacy review the way they already do — a ticket. They never
    learn a new tool."*
-2. **[right → Goals]** The goal is already there, timeline running. *"The
-   webhook made it a governed goal — intake from anything: ServiceNow, Jira,
-   email, a form."*
-3. **[left → Requester inbox]** Open the intake email, click the link, answer
-   the questionnaire (or hit ⚡ Auto-fill), attach a file, submit. *"The
-   requester is interviewed by the platform — a controlled instrument, not a
-   freewheeling chatbot. Two minutes, no privacy-team time."*
-4. **[right → Govern → Approvals]** The money shot: *File PIA … (risk: HIGH)*
-   with findings and required controls — each control carrying GDPR / ISO 27001
-   / SOC 2 / NIST citations. *"First-pass assessment done. And here is the
-   governance: the platform cannot file this anywhere until a person approves.
-   Click Approve."*
-5. **[left]** OneTrust tab now shows the filed assessment; the ServiceNow
-   ticket is Resolved with the risk rating in the work notes; the requester got
-   a completion email. *"Filed by the real OneTrust integration — repoint one
-   hostname at your tenant and this is live."*
-6. **[right → Govern → Audit]** The signed chain: GOAL_START → TOOL_CALL(email)
-   → ASSESSMENT_REVIEW → AUTONOMY_GATED → APPROVAL_DECISION →
-   TOOL_CALL(onetrust). *"Ticket to filed assessment, one tamper-evident,
-   Ed25519-signed record. Your own survey says 78% of executives couldn't pass
-   an AI-governance audit in 90 days — this is how their agents pass it."*
+2. **[left → Requester inbox]** Open the intake email, click the link. The
+   interview opens in **Chat** mode — tap the 🎤 and *talk* an answer, type
+   another in plain words, then flip the toggle to **Guided** to show the
+   one-click version. Attach a file or hit ⚡ Auto-fill and submit. *"A real
+   conversation, not a form — and every answer still lands in the same
+   governed template, with the requester's own words kept for the reviewer.
+   Two minutes, no privacy-team time."*
+3. **[left → OneTrust]** The money shot: the assessment is **already in
+   OneTrust, Under Review** — open it: the full interview verbatim, findings,
+   and required controls with GDPR / ISO 27001 / SOC 2 / NIST citations.
+   Click **Approve**. *"The agent did the input and the analysis; your team
+   reviews and approves in the tool they already live in. Nothing is
+   Completed until a person clicks."*
+4. **[left]** The record flips to Completed; the ServiceNow ticket is
+   Resolved with the risk rating in the work notes; the requester got a
+   completion email. *"Repoint one hostname at your OneTrust tenant and this
+   is live."*
+5. **[left → OneTrust record]** Click **＋ Add document to this vendor** and
+   drop the updated DPA. *"Already assessed the vendor and just have new
+   paperwork? The addendum is analyzed clause-by-clause on the spot and the
+   record is flagged for re-review only if the risk picture changed."* (The
+   same thing works from chat: a new ticket for a known vendor is offered
+   "just adding documents" — no second interview.)
+6. **[right → Govern → Audit]** The silent governance: GOAL_START →
+   TOOL_CALL(email) → ASSESSMENT_REVIEW → AUTONOMY_GATED → TOOL_CALL(onetrust)
+   → APPROVAL_DECISION (via onetrust). *"Your reviewer never left OneTrust,
+   yet every step — including their click — is on a tamper-evident,
+   Ed25519-signed chain. That's how these assessments get 5× faster without
+   losing the audit."*
 
 Optional closer (terminal):
 
@@ -132,21 +148,25 @@ bash demo/pia-concierge/run_demo.sh                        # then dry-run once
 ```
 
 - Dry-run the whole flow once, then reset `.demo-home` again.
+- Voice input: use Chrome and grant the mic on the intake page during the
+  dry-run so the permission prompt doesn't appear on stage. No key needed.
 - Don't set `MAVERICK_DASHBOARD_TOKEN` locally (it gates every page).
 - The launcher already sets `MAVERICK_SHIELD_PROFILE=strict` and
   `MAVERICK_DEFAULT_MAX_DOLLARS=10`.
-- Keep both windows pre-opened; the approvals page auto-refreshes on reload
-  only — F5 after the requester submits.
+- Keep both windows pre-opened; the OneTrust page refreshes on reload only —
+  F5 after the requester submits.
 
 ## Architecture
 
 ```
 ServiceNow (mock, :8890) ──webhook──▶ harness ──create_goal/append_event──▶ world.db ◀── dashboard (:8765)
                                         │                                        ▲
-        requester inbox (SMTP sink) ◀───┤ email_tool                             │ human approves on /approvals
-        questionnaire /intake/{case} ───┤ assessment engine + controls           │
-                                        └─create_approval ─────────────────────▶─┘
-        watcher (2s poll) ── approval approved? ──▶ onetrust_tool POST ──▶ OneTrust (mock)
-                                                └─▶ ticket resolved · completion email · goal done
+        requester inbox (SMTP sink) ◀───┤ email_tool                             │
+        chat/guided /intake/{case} ─────┤ interpret (scripted, LLM-assist opt.)  │
+                                        │ assessment engine + controls           │
+                                        ├─create_approval (mirror) ────────────▶─┘
+                                        └─onetrust_tool POST (Under Review) ──▶ OneTrust (mock)
+        OneTrust "Approve" ──▶ decide approval + assessment record ──▶ Completed · ticket resolved · email · goal done
+        "Add document" / chat append ──▶ Art. 28 clause review ──▶ addendum (+ re-review flag)
         every step ──▶ maverick.audit (Ed25519 signed chain)
 ```
