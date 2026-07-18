@@ -230,7 +230,12 @@ function openRecord(r) {
   (r.addenda || []).forEach(function (a) {
     const d = el('div', 'otd__finding ' + (a.re_review ? 'medium' : 'low'));
     d.append(el('div', '', '📎 ' + a.filename), el('div', 'g', a.summary || ''));
-    if ((a.gaps || []).length) d.appendChild(el('div', 'g', 'Missing: ' + a.gaps.join('; ')));
+    if ((a.closed_gaps || []).length) {
+      const c = el('div', 'g', '✓ Closes from last review: ' + a.closed_gaps.join('; '));
+      c.style.color = '#3c6b00';
+      d.appendChild(c);
+    }
+    if ((a.gaps || []).length) d.appendChild(el('div', 'g', 'Still missing: ' + a.gaps.join('; ')));
     b.appendChild(d);
   });
   const addRow = el('div');

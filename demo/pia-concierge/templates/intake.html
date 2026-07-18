@@ -159,8 +159,19 @@ document.querySelectorAll('.fu-q').forEach(function (row) {
 {% if prior %}
 <div class="card" id="appendCard" style="display:none;">
   <h2>Add documents to {{ prior.ot_id }}</h2>
-  <p class="muted" style="margin-bottom:10px;">Each file is analyzed on the spot and appended to the
-    existing assessment — flagged for re-review only if it changes the risk picture.</p>
+  <p class="muted" style="margin-bottom:10px;">
+    {{ case.subject }} was reviewed{% if prior.decided_by %} by {{ prior.decided_by }}{% endif %}
+    on {{ prior.when }} — risk {{ prior.risk|upper }}, {{ prior.findings }} finding(s).
+    Each new file is analyzed on the spot, appended as an addendum, and compared against the
+    last review's gaps — flagged for re-review only if it changes the risk picture.</p>
+  {% if prior.docs %}
+  <div class="muted" style="font-size:12.5px; margin-bottom:6px;">Already on file for this vendor:</div>
+  {% for d in prior.docs %}
+  <div class="filechip"><span>📄</span><span class="nm mono">{{ d }}</span>
+    <span class="meta muted">on file</span></div>
+  {% endfor %}
+  <div style="height:10px;"></div>
+  {% endif %}
   <div class="dropzone" id="appendzone" role="button" tabindex="0"
        aria-label="Append documents to the existing assessment">
     <div>📎 <strong>Drop files here</strong> or click to browse</div>
@@ -255,6 +266,9 @@ const DTOKEN = "{{ delegation.token if delegation else '' }}";
 const QUESTIONS = {{ questions|tojson }};
 const PRE_DELEGATED = {{ (case.delegations or {})|tojson }};
 const PRIOR = {{ (prior or none)|tojson }};
+// Questions already resolved server-side — by a human, a delegate, or an
+// auto-answer with provenance (ticket / attached document / last review).
+const PRE_ANSWERED = {{ (answered or {})|tojson }};
 let idx = 0;
 // The selectable experience: full chat (type or talk) vs guided buttons —
 // switchable mid-interview, both drive the same governed template.
@@ -294,12 +308,43 @@ function bubble(who, text) {
 const SEVLABEL = {high:'sev-high', medium:'sev-medium', low:'sev-low'};
 const ANSLABEL = {yes:'Yes', no:'No', na:'N/A', unknown:'Not sure'};
 
-function advancePastDelegated() {
-  while (idx < QUESTIONS.length && delegated[QUESTIONS[idx].id]) {
-    bubble('bot', QUESTIONS[idx].prompt);
-    bubble('me', '→ sent to ' + delegated[QUESTIONS[idx].id]);
-    idx++;
+// Skip everything already resolved: delegated questions, and answers the
+// agent derived from the ticket, attached documents, or the last review —
+// each skip shows its provenance so nothing disappears silently.
+function advancePastResolved() {
+  while (idx < QUESTIONS.length) {
+    const q = QUESTIONS[idx];
+    if (ANSWERED[q.id]) {
+      const pa = PRE_ANSWERED[q.id];
+      if (pa && pa.auto && !pa.shown) {
+        pa.shown = true;
+        bubble('bot', '✓ ' + q.prompt);
+        bubble('me', (pa.label || pa.answer) + ' — from ' +
+          (pa.source || 'your documents'));
+      }
+      idx++;
+    } else if (delegated[q.id]) {
+      bubble('bot', q.prompt);
+      bubble('me', '→ sent to ' + delegated[q.id]);
+      idx++;
+    } else {
+      break;
+    }
   }
+}
+
+// New auto-answers arriving mid-interview (a document was just attached):
+// absorb them, tell the requester, and advance if the current question is
+// among them.
+function absorbPrefills(list, from) {
+  list.forEach(function (p) {
+    PRE_ANSWERED[p.id] = {answer: p.answer, label: p.label || p.answer,
+                          auto: true, source: p.source};
+    ANSWERED[p.id] = true;
+  });
+  bubble('bot', '📎 ' + from + ' answered ' + list.length +
+    ' question(s) for you — I\'ll skip those and show the evidence.');
+  if (idx < QUESTIONS.length && ANSWERED[QUESTIONS[idx].id]) ask();
 }
 
 function progress() {
@@ -314,7 +359,7 @@ function progress() {
 }
 
 function ask() {
-  advancePastDelegated();
+  advancePastResolved();
   progress();
   if (idx >= QUESTIONS.length) {
     controls.innerHTML = '';
@@ -336,6 +381,11 @@ function ask() {
 }
 
 const ANSWERED = {};
+Object.keys(PRE_ANSWERED).forEach(function (q) {
+  const pa = PRE_ANSWERED[q];
+  pa.label = ANSLABEL[pa.answer] || pa.answer;
+  ANSWERED[q] = true;
+});
 
 // Separate from ask() so a mode switch can re-render the input for the
 // question already on screen without re-bubbling its text.
@@ -586,6 +636,7 @@ if (dropzone) {
       if (xhr.status === 200 && r.ok) {
         bar.style.width = '100%';
         meta.textContent = (file.size/1024).toFixed(0) + ' KB · attached ✓';
+        if ((r.prefilled || []).length) absorbPrefills(r.prefilled, file.name);
       } else {
         meta.textContent = 'rejected: ' + (r.error || xhr.status);
         c.style.borderColor = 'var(--high, #c0392b)';
@@ -647,6 +698,7 @@ if (dropzone) {
           const c = window._chip(h.name);
           c.querySelector('.meta').textContent = 'from ' + badge.textContent + ' ✓';
           c.querySelector('.bar').style.width = '100%';
+          if ((rr.prefilled || []).length) absorbPrefills(rr.prefilled, h.name);
         } else {
           attach.textContent = 'Failed';
           attach.title = rr.error || '';
@@ -677,9 +729,13 @@ paintMode();
 
 // ---- Append flow: this vendor is already assessed — just add documents ----
 function offerAppendChoice() {
-  bubble('bot', 'We\'ve already assessed ' + {{ case.subject|tojson }} +
-    (PRIOR ? (' — ' + PRIOR.ot_id + ' is ' + PRIOR.status + ' (risk ' +
-      String(PRIOR.risk).toUpperCase() + ') in OneTrust.') : '.'));
+  bubble('bot', 'I know this vendor — we reviewed ' + {{ case.subject|tojson }} +
+    ' before. ' + PRIOR.ot_id + ' is ' + PRIOR.status +
+    ' (risk ' + String(PRIOR.risk).toUpperCase() + ')' +
+    (PRIOR.decided_by ? ', decided by ' + PRIOR.decided_by : '') +
+    ' on ' + PRIOR.when + ', with ' + PRIOR.findings + ' finding(s)' +
+    ((PRIOR.docs || []).length
+      ? ' and ' + PRIOR.docs.length + ' document(s) on file.' : '.'));
   bubble('bot', 'Are you just adding documents to that assessment, or do you need a fresh one?');
   controls.innerHTML = '';
   const wrap = document.createElement('div');
@@ -698,8 +754,24 @@ function offerAppendChoice() {
   const fresh = document.createElement('button');
   fresh.className = 'btn ghost';
   fresh.textContent = 'Start a fresh assessment';
-  fresh.onclick = () => {
+  fresh.onclick = async () => {
     bubble('me', 'It\'s changed enough — let\'s do a fresh assessment.');
+    // Carry the last review's answers forward; only new ground gets asked.
+    let r = {};
+    try {
+      r = await (await fetch(`/intake/${CASE}/carry-forward`, {method: 'POST'})).json();
+    } catch (e) { r = {}; }
+    const carried = r.prefilled || [];
+    if (carried.length) {
+      carried.forEach(function (p) {
+        PRE_ANSWERED[p.id] = {answer: p.answer, label: p.label || p.answer,
+                              auto: true, source: p.source};
+        ANSWERED[p.id] = true;
+      });
+      bubble('bot', 'I carried ' + carried.length + ' answer(s) forward from ' +
+        'the last review — I\'ll only ask what\'s new, and the reviewer sees ' +
+        'where every answer came from.');
+    }
     ask();
   };
   wrap.append(add, fresh);
