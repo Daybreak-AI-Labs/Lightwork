@@ -1973,6 +1973,17 @@ async def privacy_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "privacy.html", ctx)
 
 
+@app.get("/privacy/board", response_class=HTMLResponse)
+async def privacy_board_page(request: Request) -> HTMLResponse:
+    """The privacy command center: the whole program on one live board --
+    KPI tiles with deltas, the risk mix and burn-down, 12 months of
+    throughput, DSAR SLA runway, transfer safeguards, AI Act tiers, and
+    posture gauges, with click-to-cross-filter. Same operate floor as the
+    workspace; the numbers arrive from GET /api/v1/privacy/board."""
+    require_permission(request, "operate")
+    return templates.TemplateResponse(request, "privacy_board.html", {})
+
+
 @app.get("/privacy/report", response_class=HTMLResponse)
 async def privacy_report_page(request: Request) -> HTMLResponse:
     """The privacy program report: a print-friendly board pack over every

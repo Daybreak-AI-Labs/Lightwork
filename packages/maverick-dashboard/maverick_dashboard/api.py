@@ -1282,14 +1282,9 @@ async def list_dsar_requests(request: Request) -> dict:
     return {"requests": await run_in_threadpool(ops.list_dsars)}
 
 
-@router.get("/privacy/dsar/aging")
-async def dsar_aging(request: Request) -> dict:
-    """SLA aging over the open DSAR clocks: how many requests sit in each
-    band to the statutory deadline, and the same split by request kind -- the
-    at-a-glance heatmap of where the queue is about to breach."""
-    require_permission(request, "operate")
-    ops = _privacy_ops_or_403()
-    rows = await run_in_threadpool(ops.list_dsars)
+def _dsar_aging_payload(rows: list[dict]) -> dict:
+    """SLA aging bands over the open DSAR clocks. Shared by the aging
+    endpoint and the command-center board so both always agree."""
     bands = {"overdue": 0, "d0_7": 0, "d8_14": 0, "d15_30": 0, "d30_plus": 0}
     by_kind: dict[str, dict] = {}
     open_rows = [r for r in rows if r.get("status") == "open"]
@@ -1309,23 +1304,26 @@ async def dsar_aging(request: Request) -> dict:
             "closing_soon": bands["overdue"] + bands["d0_7"]}
 
 
-@router.get("/privacy/transfer-map")
-async def transfer_map(request: Request) -> dict:
-    """Where personal data flows out: cross-border transfers drawn from the
-    Art. 30 register and any Transfer Impact Assessments -- destination,
-    recipients, and whether a Chapter V safeguard is recorded. The map behind
-    the paperwork."""
-    # Operate-gated to match /privacy/ropa: this surfaces the register's
-    # recipient and destination content, not the viewer-tier summary rows.
+@router.get("/privacy/dsar/aging")
+async def dsar_aging(request: Request) -> dict:
+    """SLA aging over the open DSAR clocks: how many requests sit in each
+    band to the statutory deadline, and the same split by request kind -- the
+    at-a-glance heatmap of where the queue is about to breach."""
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
-    from maverick.assessment import list_saved
-    ropa = await run_in_threadpool(ops.list_ropa)
-    saved = await run_in_threadpool(list_saved)
+    rows = await run_in_threadpool(ops.list_dsars)
+    return _dsar_aging_payload(rows)
 
-    _SAFE = ("scc", "standard contractual", "adequacy", "bcr",
-             "binding corporate", "chapter v", "art. 46", "article 46")
 
+# Chapter V safeguard markers recognised in a RoPA transfer description.
+_SAFEGUARD_MARKERS = ("scc", "standard contractual", "adequacy", "bcr",
+                      "binding corporate", "chapter v", "art. 46",
+                      "article 46")
+
+
+def _transfer_flow_rows(ropa: list[dict], saved: list[dict]) -> list[dict]:
+    """Cross-border flows from the Art. 30 register plus TIA records. Shared
+    by the transfer-map endpoint and the command-center board."""
     flows: list[dict] = []
     for r in ropa:
         transfers = str(r.get("transfers", "")).strip()
@@ -1337,7 +1335,7 @@ async def transfer_map(request: Request) -> dict:
             "activity": r.get("activity", "") or r.get("controller", ""),
             "destination": transfers[:300],
             "recipients": str(r.get("recipients", ""))[:300],
-            "safeguarded": any(s in low for s in _SAFE),
+            "safeguarded": any(s in low for s in _SAFEGUARD_MARKERS),
             "ref": r.get("id", ""),
         })
     # TIAs are, by definition, cross-border transfer assessments.
@@ -1353,8 +1351,242 @@ async def transfer_map(request: Request) -> dict:
             "residual_risk": s.get("residual_risk", "?"),
             "ref": s.get("id", ""),
         })
+    return flows
+
+
+@router.get("/privacy/transfer-map")
+async def transfer_map(request: Request) -> dict:
+    """Where personal data flows out: cross-border transfers drawn from the
+    Art. 30 register and any Transfer Impact Assessments -- destination,
+    recipients, and whether a Chapter V safeguard is recorded. The map behind
+    the paperwork."""
+    # Operate-gated to match /privacy/ropa: this surfaces the register's
+    # recipient and destination content, not the viewer-tier summary rows.
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    from maverick.assessment import list_saved
+    ropa = await run_in_threadpool(ops.list_ropa)
+    saved = await run_in_threadpool(list_saved)
+    flows = _transfer_flow_rows(ropa, saved)
     unsafe = sum(1 for f in flows if not f["safeguarded"])
     return {"flows": flows, "total": len(flows), "unsafeguarded": unsafe}
+
+
+# ---- privacy command center (the board behind /privacy/board) --------------
+
+_RISK_LEVELS = ("minimal", "low", "medium", "high")
+_OPEN_ASSESSMENT_STATUSES = ("pending_review", "needs_more")
+# Client-side cross-filtering works off summary rows; the cap keeps the
+# payload bounded at program volume without silently changing the KPIs
+# (those are computed over everything server-side).
+_BOARD_SESSION_CAP = 1500
+
+
+def _privacy_session_rows() -> list[dict]:
+    """Saved assessments filtered to the privacy department's types
+    (built-ins plus custom templates authored for privacy) -- the board
+    never counts the finance chassis."""
+    from maverick.assessment import custom_template_records, list_saved
+
+    from .app import PRIVACY_ASSESSMENT_TYPES
+    types = set(PRIVACY_ASSESSMENT_TYPES) | {
+        t for t, rec in custom_template_records().items()
+        if rec.get("department", "privacy") == "privacy"}
+    return [s for s in list_saved() if s.get("type") in types]
+
+
+def _board_month_series(sessions: list[dict], now: float,
+                        months: int = 12) -> list[dict]:
+    """Opened/decided counts per calendar month (UTC), oldest first."""
+    t = time.gmtime(now)
+    y, m = t.tm_year, t.tm_mon
+    keys: list[str] = []
+    for _ in range(months):
+        keys.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    keys.reverse()
+    opened = dict.fromkeys(keys, 0)
+    decided = dict.fromkeys(keys, 0)
+    for s in sessions:
+        ck = time.strftime("%Y-%m", time.gmtime(float(s.get("created_at")
+                                                      or 0)))
+        if ck in opened:
+            opened[ck] += 1
+        if s.get("decided_at"):
+            dk = time.strftime("%Y-%m",
+                               time.gmtime(float(s["decided_at"])))
+            if dk in decided:
+                decided[dk] += 1
+    return [{"month": k, "opened": opened[k], "decided": decided[k]}
+            for k in keys]
+
+
+def _board_deltas(sessions: list[dict], now: float,
+                  days: int = 30) -> dict:
+    """This window vs the prior window -- the KPI delta chips."""
+    cur_lo, prev_lo = now - days * 86400, now - 2 * days * 86400
+    d = {"window_days": days,
+         "opened": {"cur": 0, "prev": 0},
+         "decided": {"cur": 0, "prev": 0},
+         "high_residual": {"cur": 0, "prev": 0}}
+    for s in sessions:
+        c = float(s.get("created_at") or 0)
+        bucket = "cur" if c >= cur_lo else "prev" if c >= prev_lo else ""
+        if bucket:
+            d["opened"][bucket] += 1
+            if s.get("residual_risk") == "high":
+                d["high_residual"][bucket] += 1
+        dec = float(s.get("decided_at") or 0)
+        if dec >= cur_lo:
+            d["decided"]["cur"] += 1
+        elif dec >= prev_lo:
+            d["decided"]["prev"] += 1
+    return d
+
+
+def _board_assessment_plane(sessions: list[dict], now: float) -> dict:
+    """KPIs, the inherent->residual risk mix, per-type volumes, and the
+    12-month throughput series over the privacy assessment records."""
+    mix = {"inherent": dict.fromkeys(_RISK_LEVELS, 0),
+           "residual": dict.fromkeys(_RISK_LEVELS, 0)}
+    by_type: dict[str, dict] = {}
+    for s in sessions:
+        for side in ("inherent", "residual"):
+            lvl = s.get(f"{side}_risk")
+            if lvl in mix[side]:
+                mix[side][lvl] += 1
+        row = by_type.setdefault(
+            str(s.get("type", "?")),
+            {"type": str(s.get("type", "?")), "total": 0, "open": 0,
+             "high": 0})
+        row["total"] += 1
+        if s.get("status") in _OPEN_ASSESSMENT_STATUSES:
+            row["open"] += 1
+        if s.get("residual_risk") == "high":
+            row["high"] += 1
+    kpis = {
+        "assessments": len(sessions),
+        "open_work": sum(1 for s in sessions
+                         if s.get("status") in _OPEN_ASSESSMENT_STATUSES),
+        "high_residual": mix["residual"]["high"],
+        "review_due": sum(1 for s in sessions if s.get("review_due")),
+        "risk_accepted": sum(1 for s in sessions if s.get("risk_accepted")),
+    }
+    return {"kpis": kpis, "risk_mix": mix,
+            "by_type": sorted(by_type.values(),
+                              key=lambda r: -r["total"]),
+            "throughput": _board_month_series(sessions, now),
+            "deltas": _board_deltas(sessions, now)}
+
+
+def _board_session_rows(sessions: list[dict]) -> list[dict]:
+    """The bounded summary rows the board cross-filters client-side."""
+    return [{"id": s.get("id"), "type": s.get("type"),
+             "subject": s.get("subject"), "status": s.get("status"),
+             "inherent": s.get("inherent_risk"),
+             "residual": s.get("residual_risk"),
+             "created_at": s.get("created_at"),
+             "decided_at": s.get("decided_at"),
+             "review_due": bool(s.get("review_due")),
+             "review_due_reason": s.get("review_due_reason", ""),
+             "risk_accepted": bool(s.get("risk_accepted")),
+             "open_followups": s.get("open_followups", 0)}
+            for s in sessions[:_BOARD_SESSION_CAP]]
+
+
+def _board_posture(sessions: list[dict], dsar_rows: list[dict],
+                   incidents: list[dict], dpa: list[dict],
+                   flows: list[dict]) -> list[dict]:
+    """The posture gauges: each one a real ratio out of the registers, never
+    a synthetic score. ``pct`` is None when a register is empty."""
+    def item(key: str, label: str, ok: int, total: int, note: str) -> dict:
+        return {"key": key, "label": label, "ok": ok, "total": total,
+                "pct": round(100.0 * ok / total, 1) if total else None,
+                "note": note}
+
+    open_dsar = [r for r in dsar_rows if r.get("status") == "open"]
+    approved = [s for s in sessions if s.get("status") == "approved"]
+    inc_ok = sum(1 for r in incidents
+                 if r.get("notification") or not r.get("clock_breached"))
+    clauses_total = sum(int(r.get("clauses_total") or 0) for r in dpa)
+    clauses_present = sum(int(r.get("clauses_present") or 0) for r in dpa)
+    return [
+        item("dsar_sla", "DSAR SLA health",
+             sum(1 for r in open_dsar if not r.get("overdue")),
+             len(open_dsar),
+             "open requests still inside the statutory clock"),
+        item("review_cadence", "Review cadence",
+             sum(1 for s in approved if not s.get("review_due")),
+             len(approved),
+             "approved assessments not overdue for re-review"),
+        item("transfer_safeguards", "Transfer safeguards",
+             sum(1 for f in flows if f.get("safeguarded")), len(flows),
+             "cross-border flows with a Chapter V safeguard on file"),
+        item("incident_clock", "Incident 72h clock",
+             inc_ok, len(incidents),
+             "incidents decided or still inside the Art. 33 window"),
+        item("dpa_coverage", "DPA clause coverage",
+             clauses_present, clauses_total,
+             "Art. 28(3) clauses found across reviewed DPAs"),
+    ]
+
+
+@router.get("/privacy/board")
+async def privacy_board(request: Request) -> dict:
+    """Everything the privacy command center renders, in one round trip:
+    program KPIs with 30-day deltas, the inherent->residual risk mix,
+    per-framework volumes, 12 months of throughput, DSAR SLA aging, the
+    transfer map, AI Act tiers, and the posture gauges. Operate-gated like
+    the workspace it summarizes; works (with empty registers) when
+    [privacy_ops] is disabled."""
+    require_permission(request, "operate")
+    from maverick import privacy_ops
+    now = time.time()
+    sessions = await run_in_threadpool(_privacy_session_rows)
+    payload = _board_assessment_plane(sessions, now)
+    payload["sessions"] = _board_session_rows(sessions)
+
+    dsar_rows: list[dict] = []
+    incidents: list[dict] = []
+    dpa: list[dict] = []
+    ai_rows: list[dict] = []
+    ropa: list[dict] = []
+    flows: list[dict] = []
+    enabled = privacy_ops.enabled()
+    if enabled:
+        dsar_rows = await run_in_threadpool(privacy_ops.list_dsars)
+        incidents = await run_in_threadpool(privacy_ops.list_incidents)
+        dpa = await run_in_threadpool(privacy_ops.list_dpa_reviews)
+        ai_rows = await run_in_threadpool(privacy_ops.list_ai_systems)
+        ropa = await run_in_threadpool(privacy_ops.list_ropa)
+        flows = _transfer_flow_rows(ropa, sessions)
+
+    payload["records_enabled"] = enabled
+    payload["dsar"] = _dsar_aging_payload(dsar_rows)
+    payload["transfers"] = {
+        "flows": flows[:40], "total": len(flows),
+        "unsafeguarded": sum(1 for f in flows
+                             if not f.get("safeguarded"))}
+    payload["incidents"] = {
+        "total": len(incidents),
+        "on_clock": sum(1 for r in incidents
+                        if not r.get("notification")
+                        and r.get("status") in ("open", "notify")),
+        "breached": sum(1 for r in incidents if r.get("clock_breached"))}
+    tiers = {"prohibited": 0, "high": 0, "limited": 0, "minimal": 0}
+    for r in ai_rows:
+        t = str(r.get("tier", ""))
+        if t in tiers:
+            tiers[t] += 1
+    payload["ai_tiers"] = tiers
+    payload["registers"] = {"ropa": len(ropa), "dpa": len(dpa),
+                            "ai": len(ai_rows), "dsar": len(dsar_rows)}
+    payload["posture"] = _board_posture(sessions, dsar_rows, incidents,
+                                        dpa, flows)
+    payload["generated_at"] = now
+    return payload
 
 
 @router.post("/privacy/dsar", status_code=201)
