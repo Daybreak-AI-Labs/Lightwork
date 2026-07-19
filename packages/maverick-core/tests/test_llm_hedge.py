@@ -124,6 +124,34 @@ def test_hedge_race_bounded_by_wall_budget(monkeypatch):
         asyncio.run(run())
 
 
+def test_hedge_race_with_exhausted_wall_budget_times_out(monkeypatch):
+    """A wall budget that is already spent bounds the race at zero. This is
+    the deterministic form of the race-bounded-by-wall-budget case: on a slow
+    runner the 100ms wall can elapse before the race starts, and an exhausted
+    span must yield an immediate TimeoutError, never an unbounded race."""
+    monkeypatch.setenv("MAVERICK_LLM_HEDGE_MS", "10")
+    import time
+
+    from maverick.budget import Budget
+
+    class FakeClient:
+        async def complete_async(self, **kwargs):
+            await asyncio.sleep(5.0)  # would win any unbounded race
+            return _resp("late")
+
+    monkeypatch.setattr(LLM, "_get_client", lambda self, provider: FakeClient())
+    budget = Budget(max_dollars=1.0, max_wall_seconds=0.05)
+    time.sleep(0.06)  # burn the whole wall before the race starts
+
+    async def run():
+        return await LLM(model=OPUS).complete_async(
+            "sys", [{"role": "user", "content": "hi"}], budget=budget
+        )
+
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(run())
+
+
 def test_hedge_backup_requires_its_own_budget_reservation(monkeypatch):
     monkeypatch.setenv("MAVERICK_LLM_HEDGE_MS", "10")
     from maverick.budget import Budget
