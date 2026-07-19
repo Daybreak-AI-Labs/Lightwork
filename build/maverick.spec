@@ -4,7 +4,11 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy
 
 # Bundle the .dist-info metadata so `maverick version` can read the
 # installed package versions from inside the frozen binary.
-_datas = collect_data_files('maverick_dashboard')
+# Collect both packages' declared non-Python data.  Dashboard templates were
+# already bundled; core also owns domain TOML packs, built-in skill Markdown,
+# the gRPC contract, and environment-hunter Sigma rules.  Hidden imports alone
+# do not make those resources available in a frozen binary.
+_datas = collect_data_files('maverick') + collect_data_files('maverick_dashboard')
 for _dist in (
     'maverick-agent', 'maverick-shield', 'maverick-channels',
     'maverick-dashboard', 'maverick-mcp-server', 'maverick-installer',

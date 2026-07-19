@@ -26,6 +26,14 @@ from maverick import config
 _SETTINGS_LOCK = threading.Lock()
 
 
+class SecuritySuiteRevisionConflict(RuntimeError):
+    """The admin edited an out-of-date deployment-wide security control."""
+
+
+class SecuritySuiteConfigUnavailable(RuntimeError):
+    """The security-suite overlay cannot be read without risking data loss."""
+
+
 def _locked():
     from contextlib import ExitStack
 
@@ -34,6 +42,20 @@ def _locked():
     stack.enter_context(_SETTINGS_LOCK)
     stack.enter_context(cross_process_lock(config.dashboard_overrides_path()))
     return stack
+
+
+def _security_suite_revision(data: dict) -> int:
+    metadata = data.get("security_suite_control")
+    value = metadata.get("revision") if isinstance(metadata, dict) else None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return 1
+    return value
+
+
+def security_suite_revision() -> int:
+    """Return the monotonic CAS revision for the four suite control bits."""
+    with _locked():
+        return _security_suite_revision(_load_security_suite_overlay())
 
 # Providers offered in the UI: name, label, env var(s) that also satisfy it,
 # whether a base_url (self-hosted endpoint) is relevant.
@@ -227,8 +249,62 @@ def load_overlay() -> dict:
         return {}
 
 
+def _load_overlay_for_update() -> dict:
+    """Strict overlay read for every load-modify-write operation.
+
+    The general Settings UI historically treats a malformed optional overlay as
+    empty. A mutation cannot: writing a newly constructed table over unreadable
+    state would delete unrelated provider, channel, feature, and security-suite
+    settings. Missing remains the one legitimate empty state.
+    """
+    path = config.dashboard_overrides_path()
+    try:
+        with open(path, "rb") as handle:
+            value = _tomllib().load(handle)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        raise SecuritySuiteConfigUnavailable(
+            "dashboard settings are unreadable; settings were not changed"
+        ) from exc
+    if not isinstance(value, dict):  # defensive: TOML roots are mappings
+        raise SecuritySuiteConfigUnavailable(
+            "dashboard settings are unreadable; settings were not changed"
+        )
+    return value
+
+
+def _load_security_suite_overlay() -> dict:
+    """Compatibility name for the strict security-suite CAS read."""
+    return _load_overlay_for_update()
+
+
 def _toml_str(value: str) -> str:
     return json.dumps(str(value))  # JSON strings are valid TOML basic strings
+
+
+def _toml_value(value) -> str:
+    """Render the bounded TOML value types load_overlay can return.
+
+    Security connector selections and vendor extension settings may be arrays
+    or inline tables. Coercing them through ``str()`` silently changed their
+    type on every unrelated feature-toggle save.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return _toml_str(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        entries = (
+            f"{_toml_str(str(key))} = {_toml_value(item)}"
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        )
+        return "{ " + ", ".join(entries) + " }"
+    raise TypeError(f"unsupported dashboard setting value: {type(value).__name__}")
 
 
 def _dump_value(lines: list[str], val: dict) -> None:
@@ -268,19 +344,14 @@ def _dump(data: dict) -> str:
     # "flows" carries the autonomous self-improvement knobs (auto_evolve/auto_apply,
     # both booleans) -- persisted here so set_flow_autonomy survives a restart.
     for section in ("capabilities", "features", "flows", "self_modify", "ekko",
+                    "security_ops", "threat_hunt", "env_hunt",
+                    "security_suite_control",
                     *_LEARNING_SECTIONS):
         tbl = data.get(section) or {}
         if tbl:
             lines.append(f"[{section}]")
             for k in sorted(tbl):
-                value = tbl[k]
-                if isinstance(value, bool):
-                    rendered = "true" if value else "false"
-                elif isinstance(value, (int, float)):
-                    rendered = str(value)
-                else:
-                    rendered = _toml_str(value)
-                lines.append(f"{k} = {rendered}")
+                lines.append(f"{k} = {_toml_value(tbl[k])}")
             lines.append("")
     _dump_value(lines, data.get("value") or {})
     # [webhooks] secret -- the signing key the Settings page manages. Written
@@ -333,7 +404,7 @@ def set_provider(name: str, api_key: str | None = None, base_url: str | None = N
     if name not in _PROVIDER_NAMES:
         raise ValueError("unknown provider")
     with _locked():
-        data = load_overlay()
+        data = _load_overlay_for_update()
         pcfg = data.setdefault("providers", {}).setdefault(name, {})
         if api_key and api_key.strip():
             pcfg["api_key"] = api_key.strip()
@@ -348,7 +419,7 @@ def clear_provider(name: str) -> None:
     if name not in _PROVIDER_NAMES:
         raise ValueError("unknown provider")
     with _locked():
-        data = load_overlay()
+        data = _load_overlay_for_update()
         (data.get("providers") or {}).pop(name, None)
         _write(data)
 
@@ -358,7 +429,7 @@ def set_webhooks_secret(secret: str | None) -> None:
     in the dashboard overlay -- the same [webhooks] secret knob operators set
     in config; the MAVERICK_WEBHOOK_SECRET env var still takes precedence."""
     with _locked():
-        data = load_overlay()
+        data = _load_overlay_for_update()
         cleaned = (secret or "").strip()
         if cleaned:
             data.setdefault("webhooks", {})["secret"] = cleaned
@@ -375,9 +446,106 @@ def set_toggle(section: str, name: str, enabled: bool) -> None:
     if defaults is None or name not in defaults:
         raise ValueError("unknown setting")
     with _locked():
-        data = load_overlay()
+        data = _load_overlay_for_update()
         data.setdefault(section, {})[name] = bool(enabled)
         _write(data)
+
+
+def set_security_suite(
+    *,
+    security_ops: bool,
+    threat_hunt: bool,
+    env_hunt: bool,
+    response_execution: bool,
+    actor: str,
+    expected_revision: int,
+) -> int:
+    """Atomically publish deployment-wide security-suite enablement.
+
+    Response execution can never be armed without the environment hunter. The
+    signed authorization is durable before the overlay is published, so a
+    crash or concurrent reader can never observe an unaudited authority bit.
+    """
+    if response_execution and not env_hunt:
+        raise ValueError("response execution requires env_hunt")
+    if (
+        isinstance(expected_revision, bool)
+        or not isinstance(expected_revision, int)
+        or expected_revision < 1
+    ):
+        raise ValueError("expected_revision must be a positive integer")
+    requested = {
+        "security_ops": bool(security_ops),
+        "threat_hunt": bool(threat_hunt),
+        "env_hunt": bool(env_hunt),
+        "response_execution": bool(response_execution),
+    }
+    with _locked():
+        before = _load_security_suite_overlay()
+        current_revision = _security_suite_revision(before)
+        if current_revision != expected_revision:
+            raise SecuritySuiteRevisionConflict(
+                f"expected security-suite revision {expected_revision}, "
+                f"found {current_revision}"
+            )
+        effective_before = config.load_global_config() or {}
+        if config.config_source_errors(include_tenant=False):
+            raise SecuritySuiteConfigUnavailable(
+                "an active global config source is unreadable; "
+                "security-suite configuration was not changed"
+            )
+        data = json.loads(json.dumps(before))
+        security_section = dict(data.get("security_ops") or {})
+        platform_section = dict(data.get("threat_hunt") or {})
+        environment_section = dict(data.get("env_hunt") or {})
+        security_section["enable"] = requested["security_ops"]
+        platform_section["enable"] = requested["threat_hunt"]
+        environment_section["enable"] = requested["env_hunt"]
+        environment_section["response_execution"] = requested["response_execution"]
+        # This endpoint owns only the four booleans above. Preserve connector
+        # selections, polling intervals, limits, and vendor extension settings.
+        data["security_ops"] = security_section
+        data["threat_hunt"] = platform_section
+        data["env_hunt"] = environment_section
+        next_revision = current_revision + 1
+        metadata = dict(data.get("security_suite_control") or {})
+        metadata["revision"] = next_revision
+        data["security_suite_control"] = metadata
+        from maverick.config import reset_config_cache
+
+        effective_security = effective_before.get("security_ops") or {}
+        effective_platform = effective_before.get("threat_hunt") or {}
+        effective_environment = effective_before.get("env_hunt") or {}
+        previous = {
+            "security_ops": effective_security.get("enable", True) is True,
+            "threat_hunt": effective_platform.get("enable", False) is True,
+            "env_hunt": effective_environment.get("enable", False) is True,
+            "response_execution": (
+                effective_environment.get("response_execution", False) is True
+            ),
+        }
+        import time
+
+        from maverick.audit import AuditEvent, EventKind, global_audit_log
+        from maverick.privacy_ops import _actor_label
+
+        accepted = global_audit_log().record(AuditEvent(
+            ts=time.time(),
+            kind=EventKind.SECURITY_SUITE_CONTROL_CHANGED,
+            agent="dashboard",
+            payload={
+                "actor": _actor_label(actor),
+                "previous": previous,
+                "requested": requested,
+                "revision": next_revision,
+                "phase": "authorized",
+            },
+        ))
+        if not accepted:
+            raise RuntimeError("security-suite control audit was not accepted")
+        _write(data)
+        reset_config_cache()
+        return next_revision
 
 
 def set_learning(enabled: bool, *, actor: str = "local") -> None:
@@ -387,7 +555,7 @@ def set_learning(enabled: bool, *, actor: str = "local") -> None:
     ``MAVERICK_CONSEQUENCE`` still overrides the overlay if a deployment set
     one.)"""
     with _locked():
-        before = load_overlay()
+        before = _load_overlay_for_update()
         data = json.loads(json.dumps(before))
         for section, key in LEARNING_TOGGLES:
             data.setdefault(section, {})[key] = bool(enabled)
@@ -446,7 +614,7 @@ def set_dgm(
             raise ValueError("research-only acknowledgement is required")
         if enabled and any(code.startswith("invalid_") for code in blocker_codes):
             raise PermissionError("DGM boolean configuration is invalid")
-        before = load_overlay()
+        before = _load_overlay_for_update()
         data = json.loads(json.dumps(before))
         data.setdefault("self_modify", {})["enable"] = bool(enabled)
         # The global audit entry is the durable authorization record; the
@@ -539,7 +707,7 @@ def set_ekko(enabled: bool, *, actor: str = "local") -> dict:
                 raise PermissionError(
                     f"higher-precedence {owner} owns the Ekko control"
                 )
-        before = load_overlay()
+        before = _load_overlay_for_update()
         data = json.loads(json.dumps(before))
         data.setdefault("ekko", {})["enable"] = bool(enabled)
         try:
@@ -584,7 +752,7 @@ def set_flow_autonomy(*, auto_evolve: bool | None = None,
     only the fields passed are changed. An env var (``MAVERICK_FLOWS_AUTO``) still
     overrides the overlay if a deployment set one."""
     with _locked():
-        data = load_overlay()
+        data = _load_overlay_for_update()
         flows = data.setdefault("flows", {})
         if auto_evolve is not None:
             flows["auto_evolve"] = bool(auto_evolve)
@@ -617,7 +785,7 @@ def set_value_assumptions(*, hourly_rate: float | None = None,
         return f
 
     with _locked():
-        data = load_overlay()
+        data = _load_overlay_for_update()
         val = data.setdefault("value", {})
         if hourly_rate is not None:
             val["hourly_rate"] = _pos(hourly_rate, "hourly_rate")
@@ -659,7 +827,7 @@ def set_channel(name: str, enabled: bool, values: dict | None = None) -> None:
         raise ValueError("unknown channel")
     values = values or {}
     with _locked():
-        data = load_overlay()
+        data = _load_overlay_for_update()
         ccfg = data.setdefault("channels", {}).setdefault(name, {})
         ccfg["enabled"] = bool(enabled)
         for field in spec["fields"]:
@@ -683,7 +851,7 @@ def clear_channel(name: str) -> None:
     if name not in _CHANNELS_BY_NAME:
         raise ValueError("unknown channel")
     with _locked():
-        data = load_overlay()
+        data = _load_overlay_for_update()
         (data.get("channels") or {}).pop(name, None)
         _write(data)
 
@@ -793,7 +961,9 @@ __all__ = [
     "PROVIDERS", "CAPABILITY_DEFAULTS", "CAPABILITY_INFO",
     "FEATURE_DEFAULTS", "FEATURE_INFO", "CHANNELS",
     "LEARNING_SUBSYSTEMS", "load_overlay", "set_provider", "clear_provider",
-    "set_dgm", "set_ekko",
+    "SecuritySuiteConfigUnavailable", "SecuritySuiteRevisionConflict",
+    "security_suite_revision",
+    "set_dgm", "set_ekko", "set_security_suite",
     "set_toggle", "set_learning", "set_flow_autonomy", "state", "set_channel", "clear_channel",
     "channels_state",
 ]

@@ -12,25 +12,39 @@ import pytest
 
 
 def _lock_held_during(monkeypatch, call) -> bool:
-    """Run ``call`` with load_overlay() instrumented to report whether the
-    in-process settings lock is held while the mutator is reading the overlay.
-    _locked() acquires the (non-reentrant) _SETTINGS_LOCK, so a non-blocking
-    acquire from inside load_overlay() fails iff the mutator holds the lock."""
+    """Report whether ``call`` holds the settings lock for its complete RMW.
+
+    Mutators intentionally use the strict ``_load_overlay_for_update`` reader,
+    rather than the forgiving public ``load_overlay`` reader, so an unreadable
+    overlay cannot be replaced and lose unrelated settings. Instrument both
+    that read and the write: ``_locked`` acquires the non-reentrant
+    ``_SETTINGS_LOCK``, so a non-blocking acquire fails at each boundary iff
+    the mutator still holds the lock.
+    """
     from maverick_dashboard import settings_store
 
     held: list[bool] = []
-    real_load = settings_store.load_overlay
+    real_load = settings_store._load_overlay_for_update
+    real_write = settings_store._write
 
-    def probing_load():
+    def record_lock_state() -> None:
         acquired = settings_store._SETTINGS_LOCK.acquire(blocking=False)
         if acquired:
             settings_store._SETTINGS_LOCK.release()
-        held.append(not acquired)  # not acquirable -> mutator already holds it
+        held.append(not acquired)
+
+    def probing_load():
+        record_lock_state()
         return real_load()
 
-    monkeypatch.setattr(settings_store, "load_overlay", probing_load)
+    def probing_write(data):
+        record_lock_state()
+        return real_write(data)
+
+    monkeypatch.setattr(settings_store, "_load_overlay_for_update", probing_load)
+    monkeypatch.setattr(settings_store, "_write", probing_write)
     call(settings_store)
-    return bool(held) and all(held)
+    return len(held) == 2 and all(held)
 
 
 def test_set_channel_holds_lock(monkeypatch, tmp_path):

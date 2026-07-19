@@ -1,8 +1,9 @@
 # Distribution & Deployment — how Lightwork ships
 
 > How a user gets Lightwork onto a Mac, Windows PC, Linux box, or a cloud
-> (Azure / AWS / GCP) — **without** us publishing source to PyPI. Everything
-> below ships **compiled binaries or a container image**, never the source tree.
+> (Azure / AWS / GCP). The integrated platform ships as compiled artifacts or a
+> container; the three reduced standalone SKUs deliberately ship as licensed,
+> versioned source archives rather than pretending to be PyPI distributions.
 
 ## TL;DR — what the release pipeline produces
 
@@ -14,11 +15,14 @@ One tagged release (`release.yml` + `desktop.yml`) emits **all** of these, for
 | **Single-file binary** | `maverick-macos-arm64`, `maverick-windows-x86_64.exe`, `maverick-linux-x86_64` | technical users / CI / servers | **No** — PyInstaller-compiled |
 | **Native installer** | `Lightwork_<ver>.dmg` / `.msi` / `.exe` / `.AppImage` / `.deb` | non-technical end users (double-click) | **No** |
 | **Container image** | `ghcr.io/day-ai-labs/maverick:<ver>` | **Azure / AWS / GCP**, k8s, on-prem Docker | **No** |
-| Supply-chain | Sigstore `.sig`/`.pem` per binary + CycloneDX SBOM | security / procurement review | n/a |
+| **Reduced standalone SKU** | `lightwork-<sku>-<ver>.zip` | local evaluation of GRC / platform hunt / environment hunt | **Yes** — licensed source archive |
+| Supply-chain | Sigstore `.sig`/`.pem` per release artifact + SHA-256 manifest + CycloneDX SBOMs | security / procurement review | n/a |
 
-**No PyPI.** The `pipx install` path in the README is intentionally *not* used —
-the binaries and the container are the distribution. The 8 Python packages stay
-private.
+The standalone SKUs are **not PyPI packages**. Their explicit release manifests
+drive deterministic ZIP builds and each GitHub Release carries SHA-256 checksums,
+a CycloneDX SBOM, and Sigstore signature/certificate files. `publish.yml`
+separately contains an opt-in, allowlisted Trusted Publishing path for the real
+workspace Python distributions; standalone source archives never enter it.
 
 **What "compiled" means (be honest with buyers):** PyInstaller bundles Python
 **bytecode**, not source. That stops casual copying and means no `pip install`
@@ -131,8 +135,9 @@ gh workflow run release.yml -f tag=v0.1.7
 ```
 
 `release.yml` then: builds the 3-OS binaries → builds + pushes the GHCR image →
-Sigstore-signs + SBOMs → creates the GitHub Release → dispatches `desktop.yml`,
-which builds the installers and attaches them to that same Release.
+builds the three versioned standalone source archives → generates checksums and
+SBOMs → Sigstore-signs the artifacts → creates the GitHub Release → dispatches
+`desktop.yml`, which builds the installers and attaches them to that same Release.
 
 **Before cutting a real (public) release:** merge the intended code to `main`,
 decide signing (below), and bump the version. A release is public and

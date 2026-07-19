@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Security readiness report - Lightwork{% endblock %}
+{% block content %}
+<style>
+  @media print { .sidebar,.topbar,.rpt-actions,#mv-sidebar,header { display:none!important; }
+                 .content { margin:0!important; max-width:none!important; } }
+  .rpt-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(10rem,1fr)); gap:var(--space-3); }
+  .rpt-grid .stat { break-inside:avoid; }
+  .rpt-note { border-left:4px solid var(--warn); padding:var(--space-3); background:var(--surface-2); }
+</style>
+<div class="rpt-actions" style="display:flex; gap:var(--space-2); float:right;">
+  <button class="btn" type="button" onclick="window.print()">Print / save PDF</button>
+  <a class="btn" href="/api/v1/security/report">JSON</a>
+  <a class="btn" href="/security">Back to workspace</a>
+</div>
+<h1 class="page-title">Security &amp; GRC readiness report</h1>
+<p class="page-subtitle">Generated {{ r.get('generated','unknown') }} from current durable program records.</p>
+<p class="rpt-note"><strong>Readiness, not certification.</strong> Automated mappings and
+  extraction are review aids. Framework applicability, evidence sufficiency, risk acceptance,
+  regulatory notification, and audit conclusions remain human decisions.</p>
+
+<div class="rpt-grid">
+{% for label, key in [('Assessments','assessments'),('Controls','controls'),('Evidence','evidence'),('Risks','risks'),('POA&M','poam'),('Vendors','vendors'),('Policies','policies'),('Incidents','incidents'),('Audits','audits')] %}
+  {% set value = r.get(key,{}) %}
+  <div class="stat"><div class="num">{{ value.get('total',0) if value is mapping else value }}</div><div class="label">{{ label }}</div></div>
+{% endfor %}
+</div>
+
+<div class="section-head"><h2>Control readiness</h2></div>
+<div class="panel">
+  {% set row = r.get('readiness',{}) or {} %}
+  <table><thead><tr><th>scope</th><th>coverage</th><th>implemented</th><th>partial</th><th>applicable</th></tr></thead><tbody>
+  {% if row %}
+    <tr><td>{{ row.get('framework','all') }}</td><td>{{ row.get('coverage_percent',0) }}%</td>
+      <td>{{ row.get('controls_implemented',0) }}</td><td>{{ row.get('controls_partial',0) }}</td>
+      <td>{{ row.get('controls_applicable',0) }}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">Initialize controls to calculate framework readiness.</td></tr>{% endif %}
+  </tbody></table>
+</div>
+
+<div class="section-head"><h2>Top gaps</h2></div>
+<div class="panel">
+  <table><thead><tr><th>control / finding</th><th>framework</th><th>owner</th><th>status</th></tr></thead><tbody>
+  {% for row in r.get('top_gaps',[]) %}
+    <tr><td>{{ row.get('title') or row.get('finding') or row.get('control_id') or row.get('id') }}</td>
+      <td>{{ row.get('framework','-') }}</td><td>{{ row.get('owner','-') }}</td><td>{{ row.get('status','open') }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">No ranked gaps in the current report.</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+{% endblock %}

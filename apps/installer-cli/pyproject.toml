@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "maverick-installer"
-version = "0.1.6"
+version = "0.1.7"
 description = "Interactive setup wizard for Lightwork"
 requires-python = ">=3.10"
 license = { text = "LicenseRef-Proprietary" }
 authors = [{ name = "cdayAI" }]
 readme = "README.md"
 dependencies = [
-    "maverick-agent>=0.1.6",
+    "maverick-agent>=0.1.7",
     "questionary>=2.0",
     "rich>=13.7",
 ]

@@ -2,7 +2,7 @@
 
 import os
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 _LIGHTWORK_PREFIX = "LIGHTWORK_"
 _MAVERICK_PREFIX = "MAVERICK_"

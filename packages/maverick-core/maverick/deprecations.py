@@ -76,7 +76,7 @@ def current_version() -> str:
         from importlib.metadata import version
         return version("maverick-agent")
     except Exception:
-        return "0.1.6"
+        return "0.1.7"
 
 
 def get(name: str) -> Deprecation | None:
