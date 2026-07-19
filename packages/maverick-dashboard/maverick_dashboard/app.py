@@ -376,6 +376,12 @@ async def _lifespan(app: FastAPI):
     await _reclaim_orphans()
     await _install_queue_dispatcher()
     await _install_automation_scheduler()
+    try:
+        from maverick_dashboard.security_api import start_hunter_scheduler
+
+        await run_in_threadpool(start_hunter_scheduler)
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("security hunter scheduler not started")
     # Connected-entitlement auto-refresh: a deployment with [license] api_url
     # configured polls the vendor console so an upgrade/downgrade issued there
     # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
@@ -406,6 +412,12 @@ async def _lifespan(app: FastAPI):
     try:
         from maverick.entitlements import stop_refresher
         await run_in_threadpool(stop_refresher)
+    except Exception:  # pragma: no cover - shutdown must never raise
+        pass
+    try:
+        from maverick_dashboard.security_api import stop_hunter_scheduler
+
+        await run_in_threadpool(stop_hunter_scheduler)
     except Exception:  # pragma: no cover - shutdown must never raise
         pass
     await _stop_automation_scheduler()
@@ -656,6 +668,11 @@ _AUTH_EXEMPT = {
 _MAX_WEBHOOK_BODY_BYTES = 256 * 1024
 _MAX_SKILL_VALIDATE_BODY_BYTES = 256 * 1024
 _MAX_SAVED_VIEW_BODY_BYTES = 32 * 1024
+_MAX_SECURITY_HUNTER_HTTP_BODY_BYTES = 17 * 1024 * 1024
+_SECURITY_HUNTER_BODY_PATHS = {
+    "/api/v1/security/threats/scan",
+    "/api/v1/security/soc/ingest",
+}
 
 
 async def _read_limited_request_body(
@@ -686,6 +703,38 @@ async def _read_limited_request_body(
         if len(body) > max_bytes:
             raise HTTPException(status_code=413, detail=too_large_detail)
     return bytes(body)
+
+
+@app.middleware("http")
+async def bound_security_hunter_body(request: Request, call_next):
+    """Cap hunter JSON before FastAPI/Pydantic parses nested telemetry."""
+    if request.method != "POST" or request.url.path not in _SECURITY_HUNTER_BODY_PATHS:
+        return await call_next(request)
+    try:
+        body = await _read_limited_request_body(
+            request,
+            max_bytes=_MAX_SECURITY_HUNTER_HTTP_BODY_BYTES,
+            too_large_detail="security hunter request body too large",
+        )
+    except HTTPException as exc:
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+    delivered = False
+
+    async def replay_receive():
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return {"type": "http.disconnect"}
+
+    # BaseHTTPMiddleware wraps this Request and consults its cached-body marker;
+    # setting only ``_receive`` after consuming the stream makes that wrapper
+    # emit an empty body. Populate both seams so downstream validation receives
+    # the exact bounded bytes once.
+    request._body = body  # noqa: SLF001 - bounded ASGI body replay
+    request._receive = replay_receive  # noqa: SLF001 - bounded ASGI body replay
+    return await call_next(request)
 
 
 async def _read_limited_webhook_body(request: Request) -> bytes:
@@ -1853,10 +1902,13 @@ async def spend_page(request: Request) -> HTMLResponse:
 # One assessment engine, one workspace chassis per department: each
 # department page filters the same records/templates to its own types.
 PRIVACY_ASSESSMENT_TYPES = frozenset(
-    {"pia", "dpia", "lia", "ccpa", "aira", "vendor_risk", "tia",
-     "hipaa", "soc2", "pci_dss"})
+    {"pia", "dpia", "lia", "ccpa", "aira", "vendor_risk", "tia"})
 FINANCE_ASSESSMENT_TYPES = frozenset(
     {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"})
+SECURITY_ASSESSMENT_TYPES = frozenset({
+    "soc2", "iso27001", "nist_csf", "nist_800_53", "cis_v8",
+    "pci_dss", "hipaa", "cmmc_l2", "fedramp_moderate",
+})
 
 
 def _workspace_ctx(department: str) -> dict:
@@ -1872,8 +1924,11 @@ def _workspace_ctx(department: str) -> dict:
         list_templates,
     )
 
-    base = (FINANCE_ASSESSMENT_TYPES if department == "finance"
-            else PRIVACY_ASSESSMENT_TYPES)
+    base = {
+        "finance": FINANCE_ASSESSMENT_TYPES,
+        "privacy": PRIVACY_ASSESSMENT_TYPES,
+        "security": SECURITY_ASSESSMENT_TYPES,
+    }.get(department, frozenset())
     customs = custom_template_records()
     types = set(base) | {
         t for t, rec in customs.items()
@@ -1944,7 +1999,7 @@ async def privacy_page(request: Request) -> HTMLResponse:
     # The record types — the data plane behind the [privacy_ops] knob. The
     # page still works without them.
     from maverick import privacy_ops
-    records = {"enabled": privacy_ops.enabled(),
+    records = {"enabled": privacy_ops.enabled(), "kind": "privacy",
                "dpa": [], "ai": [], "ropa": [], "dsar": [], "incidents": []}
     if records["enabled"]:
         records["dpa"] = privacy_ops.list_dpa_reviews()
@@ -2000,6 +2055,143 @@ async def privacy_report_page(request: Request) -> HTMLResponse:
         "%Y-%m-%d %H:%M", _time.localtime(report["generated_at"]))
     return templates.TemplateResponse(request, "privacy_report.html",
                                       {"r": report})
+
+
+@app.get("/security", response_class=HTMLResponse)
+async def security_page(request: Request) -> HTMLResponse:
+    """Security & GRC department workspace over assessments and durable
+    control-program records. Record contents are operate-tier data."""
+    require_permission(request, "operate")
+    from maverick import security_ops
+
+    ctx = _workspace_ctx("security")
+    records = {
+        "enabled": security_ops.enabled(),
+        "kind": "security",
+        "controls": [],
+        "evidence": [],
+        "risks": [],
+        "poams": [],
+        "vendors": [],
+        "policies": [],
+        "incidents": [],
+        "audits": [],
+    }
+    report: dict = {}
+    framework_labels = (
+        ("soc2", "SOC 2"),
+        ("iso27001", "ISO 27001"),
+        ("nist_csf", "NIST CSF 2.0"),
+        ("nist_800_53", "NIST 800-53"),
+        ("cis_v8", "CIS v8.1"),
+        ("pci_dss", "PCI DSS 4.0.1"),
+        ("hipaa", "HIPAA"),
+        ("cmmc_l2", "CMMC L2"),
+        ("fedramp_moderate", "FedRAMP Class C"),
+    )
+    insights = {
+        "coverage_percent": 0.0,
+        "framework_coverage": [],
+        "control_status": {},
+        "open_poams": [],
+        "exceptions_due": [],
+        "crosswalk_links": 0,
+        "crosswalk_frameworks": [
+            {"key": key, "label": label} for key, label in framework_labels
+        ],
+        "crosswalk_matrix": [],
+    }
+    if records["enabled"]:
+        records.update({
+            "controls": security_ops.list_controls(),
+            "evidence": security_ops.list_evidence(),
+            "risks": security_ops.list_risks(),
+            "poams": security_ops.list_poams(),
+            "vendors": security_ops.list_vendor_assessments(),
+            "policies": security_ops.list_policies(),
+            "incidents": security_ops.list_incidents(),
+            "audits": security_ops.list_audit_engagements(),
+        })
+        report = security_ops.program_report()
+        for control in records["controls"]:
+            status = str(control.get("implementation_status") or "unknown")
+            insights["control_status"][status] = (
+                insights["control_status"].get(status, 0) + 1
+            )
+            mappings = control.get("crosswalk") or control.get("mappings") or []
+            insights["crosswalk_links"] += len(mappings) if isinstance(
+                mappings, (list, tuple, dict)
+            ) else 0
+        overall_readiness = security_ops.readiness_report()
+        insights["coverage_percent"] = overall_readiness["coverage_percent"]
+        insights["framework_coverage"] = [
+            {
+                **security_ops.readiness_report(key),
+                "label": label,
+            }
+            for key, label in framework_labels
+        ]
+        insights["crosswalk_matrix"] = security_ops.control_crosswalk()
+        insights["open_poams"] = [
+            row for row in records["poams"]
+            if row.get("status") not in {"closed", "complete", "accepted"}
+        ][:10]
+        insights["exceptions_due"] = [
+            row for row in records["risks"]
+            if row.get("exception_due") or row.get("exception_expired")
+        ][:10]
+    ctx.update({"records": records, "program": report, "insights": insights})
+    return templates.TemplateResponse(request, "security.html", ctx)
+
+
+@app.get("/security/report", response_class=HTMLResponse)
+async def security_report_page(request: Request) -> HTMLResponse:
+    """Print-friendly security readiness and board report."""
+    require_permission(request, "operate")
+    from maverick import security_ops
+
+    if not security_ops.enabled():
+        raise HTTPException(status_code=404, detail="security ops are disabled")
+    report = security_ops.program_report()
+    generated_at = report.get("generated_at")
+    if isinstance(generated_at, (int, float)):
+        report["generated"] = time.strftime(
+            "%Y-%m-%d %H:%M %Z", time.localtime(generated_at)
+        )
+    else:
+        report["generated"] = "unknown"
+    return templates.TemplateResponse(
+        request,
+        "security_report.html",
+        {"r": report},
+    )
+
+
+@app.get("/security/threats", response_class=HTMLResponse)
+async def platform_threats_page(request: Request) -> HTMLResponse:
+    """Internal Lightwork platform threat-hunter console."""
+    require_permission(request, "operate")
+    from maverick import platform_hunt
+
+    return templates.TemplateResponse(
+        request, "security_threats.html", {"enabled": platform_hunt.enabled()}
+    )
+
+
+@app.get("/security/soc", response_class=HTMLResponse)
+async def environment_threats_page(request: Request) -> HTMLResponse:
+    """Customer-environment defensive SOC hunter console."""
+    require_permission(request, "operate")
+    from maverick import env_hunt
+
+    return templates.TemplateResponse(
+        request,
+        "security_soc.html",
+        {
+            "enabled": env_hunt.enabled(),
+            "response_execution": env_hunt.response_execution_enabled(),
+        },
+    )
 
 
 @app.get("/finance", response_class=HTMLResponse)

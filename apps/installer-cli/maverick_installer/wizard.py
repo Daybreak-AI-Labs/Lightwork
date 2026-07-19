@@ -106,6 +106,7 @@ STEPS: list[tuple[str, str]] = [
     ("finance", "Finance suite"),
     ("value", "Savings assumptions"),
     ("assessments", "Assessment assists"),
+    ("security_suite", "Security & GRC"),
     ("advanced", "Advanced reasoning"),
     ("web_search", "Web search"),
     ("mcp_servers", "MCP servers"),
@@ -1373,6 +1374,111 @@ def pick_assessments() -> dict[str, Any]:
     if not ops:
         out["privacy_ops"] = False
     return out
+
+
+def pick_security_suite() -> dict[str, Any]:
+    """Configure the Security/GRC suite and both defensive hunters.
+
+    The record-only GRC workspace follows Privacy's default-on posture.  The
+    hunters are explicit opt-ins because they consume operational telemetry.
+    Environment response execution is a second, independent opt-in and still
+    requires a human-approved playbook at runtime.
+    """
+    console.print()
+    console.print(
+        "[dim]Security & GRC maintains control, evidence, risk, POA&M, policy, "
+        "vendor, incident, and audit records locally. The platform hunter "
+        "defensively scans Lightwork's signed telemetry; the environment "
+        "hunter reads configured customer telemetry. Hunters are OFF until "
+        "enabled. Approved response execution is a separate opt-in.[/dim]"
+    )
+    security_ops = _q_confirm(
+        "Enable Security & GRC records and readiness workspace?", default=True
+    )
+    threat_hunt = _q_confirm(
+        "Enable the defensive Lightwork platform threat hunter?", default=False
+    )
+    env_hunt = _q_confirm(
+        "Enable the defensive customer-environment threat hunter?", default=False
+    )
+    response_execution = False
+    connectors: dict[str, dict[str, bool]] = {}
+    enrichment_sources: list[str] = []
+    poll_seconds = 300
+    if env_hunt:
+        response_execution = _q_confirm(
+            "Allow execution of human-approved response playbooks?",
+            default=False,
+        )
+        connector_labels = {
+            "AWS CloudTrail": "cloudtrail",
+            "AWS GuardDuty": "guardduty",
+            "Syslog": "syslog",
+            "Endpoint detection and response (EDR)": "edr",
+            "Splunk": "splunk",
+            "Elastic": "elastic",
+            "Microsoft Sentinel": "sentinel",
+            "Kubernetes audit logs": "kubernetes_audit",
+            "Okta": "okta",
+            "Microsoft Entra ID": "entra",
+        }
+        console.print(
+            "[dim]Choose the read-only telemetry connector types to prepare. "
+            "Credentials and vendor-specific transports are configured after "
+            "installation; selecting a type here does not grant access.[/dim]"
+        )
+        selected_labels = _q_checkbox(
+            "Prepare which read-only environment connectors?",
+            list(connector_labels),
+            default=[],
+        )
+        push_labels = _q_checkbox(
+            "Allow API push ingestion for which selected connector types?",
+            selected_labels,
+            default=[],
+        ) if selected_labels else []
+        pivot_labels = _q_checkbox(
+            "Allow bounded read-only investigation pivots for which selected connectors?",
+            selected_labels,
+            default=[],
+        ) if selected_labels else []
+        connectors = {
+            name: {
+                "enable": label in selected_labels,
+                "push_enable": label in push_labels,
+                "pivot_enable": label in pivot_labels,
+            }
+            for label, name in connector_labels.items()
+        }
+        enrichment_sources = [
+            value.strip().lower()
+            for value in _q_text(
+                "Allowlisted enrichment adapter names (comma-separated; optional)",
+                default="",
+            ).split(",")
+            if value.strip()
+        ]
+        poll_seconds = max(
+            30,
+            min(
+                3600,
+                int(_safe_float(
+                    _q_text("Hunter poll interval (seconds)", default="300"),
+                    default=300.0,
+                )),
+            ),
+        )
+    result = {
+        "security_ops": security_ops,
+        "threat_hunt": threat_hunt,
+        "env_hunt": env_hunt,
+        "response_execution": response_execution,
+    }
+    if env_hunt:
+        result["connectors"] = connectors
+        result["enrichment_sources"] = list(dict.fromkeys(enrichment_sources))
+        result["poll_seconds"] = poll_seconds
+    return result
 
 
 def pick_value() -> dict[str, Any]:
@@ -3255,6 +3361,67 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
+    if security_suite is None:
+        return []
+    lines = [
+        "",
+        "[security_ops]",
+        f"enable = {'true' if security_suite.get('security_ops', True) else 'false'}",
+        "",
+        "[threat_hunt]",
+        f"enable = {'true' if security_suite.get('threat_hunt', False) else 'false'}",
+        "",
+        "[env_hunt]",
+        f"enable = {'true' if security_suite.get('env_hunt', False) else 'false'}",
+        "response_execution = "
+        f"{'true' if security_suite.get('response_execution', False) else 'false'}",
+        f"poll_seconds = {max(30, min(3600, int(security_suite.get('poll_seconds', 300))))}",
+    ]
+    enrichment_sources = security_suite.get("enrichment_sources") or []
+    enrichment_sources = list(dict.fromkeys(
+        str(value).strip().lower()
+        for value in enrichment_sources
+        if str(value).strip()
+    ))
+    for name in enrichment_sources:
+        lines += [
+            "",
+            f"[env_hunt.enrichment_sources.{name}]",
+            "enable = true",
+        ]
+    try:
+        from maverick.env_hunt import CONNECTOR_NAMES
+    except ImportError:  # installer can render before maverick-core is installed
+        CONNECTOR_NAMES = (
+            "cloudtrail",
+            "guardduty",
+            "syslog",
+            "edr",
+            "splunk",
+            "elastic",
+            "sentinel",
+            "kubernetes_audit",
+            "okta",
+            "entra",
+        )
+    configured = security_suite.get("connectors") or {}
+    configured = configured if isinstance(configured, dict) else {}
+    for name in CONNECTOR_NAMES:
+        value = configured.get(name, False)
+        enabled = value.get("enable", False) if isinstance(value, dict) else value
+        push_enabled = value.get("push_enable", False) if isinstance(value, dict) else False
+        pivot_enabled = value.get("pivot_enable", False) if isinstance(value, dict) else False
+        lines += [
+            "",
+            f"[env_hunt.connectors.{name}]",
+            f"enable = {'true' if enabled is True else 'false'}",
+            f"push_enable = {'true' if push_enabled is True else 'false'}",
+            f"pivot_enable = {'true' if pivot_enabled is True else 'false'}",
+        ]
+    return lines
+
+
 def _cfg_value(value: dict[str, Any] | None) -> list[str]:
     if not value:
         return []
@@ -4110,6 +4277,7 @@ def write_config(
     finance: dict[str, Any] | None = None,
     value: dict[str, Any] | None = None,
     assessments: dict[str, Any] | None = None,
+    security_suite: dict[str, Any] | None = None,
     deployment: str | None = None,
     suites: dict[str, bool] | None = None,
     license_cfg: dict[str, Any] | None = None,
@@ -4222,6 +4390,7 @@ def write_config(
     lines += _cfg_finance(finance)
     lines += _cfg_value(value)
     lines += _cfg_assessments(assessments)
+    lines += _cfg_security_suite(security_suite)
 
     capability_config = dict(capabilities or {})
     if web_search_enabled and not capability_config.get("web_search"):
@@ -5094,6 +5263,13 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         _save_partial(state)
 
     _announce()
+    security_suite = state.get("security_suite")
+    if security_suite is None:
+        security_suite = pick_security_suite()
+        state["security_suite"] = security_suite
+        _save_partial(state)
+
+    _announce()
     advanced = state.get("advanced") or pick_advanced()
     state["advanced"] = advanced
     _save_partial(state)
@@ -5116,6 +5292,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "finance": finance,
         "value": value,
         "assessments": assessments,
+        "security_suite": security_suite,
         "advanced": advanced,
     }
 
@@ -5314,6 +5491,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     finance = _simple["finance"]
     value = _simple["value"]
     assessments = _simple["assessments"]
+    security_suite = _simple["security_suite"]
     advanced = _simple["advanced"]
 
     _announce()
@@ -5429,6 +5607,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         finance=finance if finance.get("enable") else None,
         value=value or None,
         assessments=assessments or None,
+        security_suite=security_suite,
         suites=suites,
         license_cfg=license_cfg or None,
         # The advanced flow applies no preset -- the operator hand-picked

@@ -118,6 +118,17 @@ PAGES: tuple[dict, ...] = (
     # answer bodies and reviewer threads, a tier above viewer summaries.
     {"path": "/privacy", "label": "Privacy", "group": "Govern", "icon": "shield",
      "floor": "operate", "default": "operate"},
+    # Security is the department workspace. The two hunter consoles are
+    # governed child surfaces linked from it, so the sidebar keeps one clear
+    # entry while role visibility still protects every direct URL.
+    {"path": "/security", "label": "Security & GRC", "group": "Govern",
+     "icon": "shield", "floor": "operate", "default": "operate"},
+    {"path": "/security/threats", "label": "Platform Threat Hunter",
+     "group": "Govern", "icon": "shield", "floor": "operate",
+     "default": "operate", "in_nav": False},
+    {"path": "/security/soc", "label": "Environment Threat Hunter",
+     "group": "Govern", "icon": "shield", "floor": "operate",
+     "default": "operate", "in_nav": False},
     # The Finance workspace: the same chassis over the finance assessment
     # types (SOX control / fraud risk / ITGC / credit risk / close readiness).
     {"path": "/finance", "label": "Finance", "group": "Govern", "icon": "spend",

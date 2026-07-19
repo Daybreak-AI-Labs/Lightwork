@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Verify a Lightwork release artifact's Sigstore (cosign keyless) signature.
 #
-# Every release binary and the SBOM ship with a detached `.sig` (signature) and
-# `.pem` (signing certificate). The signature is keyless: it was produced by the
+# Every release binary, standalone source archive, checksum manifest, and SBOM
+# ships with a detached `.sig` (signature) and `.pem` (signing certificate).
+# The signature is keyless: it was produced by the
 # release workflow's OIDC identity and logged to the public Rekor transparency
 # log, so verification proves the artifact was built by THIS repo's release
 # workflow for the expected release tag -- no shared public key to distribute or
 # trust on faith.
 #
 #   deploy/verify-release.sh maverick-linux-x86_64 v1.2.3
+#   deploy/verify-release.sh lightwork-grc-concierge-1.2.3.zip v1.2.3
 #   deploy/verify-release.sh maverick-linux-x86_64 v1.2.3 maverick-linux-x86_64.sig maverick-linux-x86_64.pem
 #
 # Pass the release tag you intend to install (for example, v1.2.3). Verification
@@ -39,7 +41,9 @@ esac
 # OIDC issuer is GitHub. Escape regex metacharacters in the user-supplied tag so
 # the certificate identity is anchored to the literal tag value.
 ESCAPED_TAG="$(printf '%s' "$TAG" | sed -e 's/[.[\\*^$()+?{}|]/\\&/g')"
-IDENTITY_REGEXP="^https://github.com/[Dd]ay-[Aa][Ii]-[Ll]abs/[Mm]averick/\.github/workflows/release\.yml@refs/tags/${ESCAPED_TAG}$"
+# Lightwork is the current repository name; accept the legacy Maverick name so
+# artifacts from releases cut before the rename remain verifiable.
+IDENTITY_REGEXP="^https://github.com/[Dd]ay-[Aa][Ii]-[Ll]abs/([Ll]ightwork|[Mm]averick)/\.github/workflows/release\.yml@refs/tags/${ESCAPED_TAG}$"
 OIDC_ISSUER="${OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
 
 command -v cosign >/dev/null 2>&1 || {

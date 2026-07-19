@@ -175,13 +175,49 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
 
+  standalone-sku-artifacts:
+    needs: validate-release-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ needs.validate-release-tag.outputs.ref }}
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Build reproducible standalone SKU source archives
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate-release-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          revision="$(git rev-parse HEAD)"
+          python scripts/build_standalone_skus.py \
+            --version "$version" \
+            --source-revision "$revision" \
+            --output-dir dist
+          (cd dist && sha256sum --check "lightwork-standalone-skus-${version}.sha256")
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: standalone-sku-source
+          path: |
+            dist/lightwork-*.zip
+            dist/lightwork-standalone-skus-*.cdx.json
+            dist/lightwork-standalone-skus-*.sha256
+          if-no-files-found: error
+
   release:
     # PyPI publish lives in publish.yml on the same tag; this workflow
-    # only owns Docker images, single-file binaries, and the GitHub
-    # release that bundles them.
-    needs: [validate-release-tag, docker-image, binaries]
+    # owns Docker images, single-file binaries, standalone source archives,
+    # and the GitHub release that bundles them.
+    needs: [validate-release-tag, docker-image, binaries, standalone-sku-artifacts]
     runs-on: ubuntu-latest
-    if: always() && needs.docker-image.result == 'success' && needs.binaries.result == 'success'
+    if: >-
+      always() &&
+      needs.docker-image.result == 'success' &&
+      needs.binaries.result == 'success' &&
+      needs.standalone-sku-artifacts.result == 'success'
     permissions:
       contents: write   # create the GitHub Release
       actions: write    # dispatch desktop.yml to build + attach installers
@@ -220,14 +256,15 @@ jobs:
         # Keyless signing: cosign mints a short-lived cert bound to THIS
         # workflow's OIDC identity and logs the signature to the public Rekor
         # transparency log -- no long-lived private key to store or leak. For
-        # each binary + the SBOM we emit a detached `.sig` (signature) and
-        # `.pem` (signing certificate); users verify with
+        # each binary, standalone source archive, checksum manifest, and SBOM
+        # gets a detached `.sig` (signature) and `.pem` (signing certificate);
+        # users verify with
         # `cosign verify-blob` (see deploy/verify-release.sh).
         env:
           COSIGN_YES: "true"
         run: |
           shopt -s nullglob
-          for f in dist/maverick-* dist/maverick-sbom-*.cdx.json; do
+          for f in dist/maverick-* dist/lightwork-*; do
             case "$f" in *.sig|*.pem) continue;; esac
             echo "signing $f"
             cosign sign-blob --yes \
@@ -240,11 +277,11 @@ jobs:
           # The validation job resolves manual dispatches and tag pushes
           # to the same v* tag that every build job checked out.
           tag_name: ${{ needs.validate-release-tag.outputs.tag }}
-          # Binaries + the per-release CycloneDX SBOM + their Sigstore
-          # signatures (.sig) and signing certificates (.pem).
+          # Binaries, versioned standalone source archives, SHA-256 manifest,
+          # CycloneDX SBOMs, and their Sigstore signatures/certificates.
           files: |
             dist/maverick-*
-            dist/maverick-sbom-*.cdx.json
+            dist/lightwork-*
           generate_release_notes: true
           draft: false
           prerelease: ${{ needs.validate-release-tag.outputs.prerelease }}

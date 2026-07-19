@@ -45,7 +45,7 @@
       <div class="num">{{ stats.oldest_open_days if stats.oldest_open_days is not none else '—' }}{{ 'd' if stats.oldest_open_days is not none }}</div>
       <div class="label">oldest open item</div>
     </div>
-    {% if records is defined and records.enabled %}
+    {% if records is defined and records.enabled and records.kind == 'privacy' %}
     <div class="stat">
       <div class="num {{ 'pw-age-warn' if records.dsar_overdue }}">{{ records.dsar_open }}</div>
       <div class="label">open DSARs</div>
@@ -53,6 +53,16 @@
     <div class="stat">
       <div class="num">{{ records.ropa | length }}</div>
       <div class="label">Art. 30 entries</div>
+    </div>
+    {% elif records is defined and records.enabled and records.kind == 'security' %}
+    <div class="stat">
+      <div class="num">{{ records.controls | length }}</div>
+      <div class="label">controls in register</div>
+    </div>
+    <div class="stat">
+      {% set open_poam = records.poams | rejectattr('status', 'in', ('closed','complete','accepted')) | list %}
+      <div class="num {{ 'pw-age-warn' if open_poam }}">{{ open_poam | length }}</div>
+      <div class="label">open POA&amp;M items</div>
     </div>
     {% endif %}
   </div>

@@ -1,4 +1,5 @@
 """Compliance assessment engine: templates, scoring, persistence, CLI."""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +13,7 @@ from maverick.cli import main
 def _isolate(monkeypatch, tmp_path):
     # Keep saved assessments off the real ~/.maverick.
     from maverick import paths
+
     monkeypatch.setattr(paths, "maverick_home", lambda: tmp_path / "home")
 
 
@@ -21,12 +23,43 @@ def test_templates_registered_and_looked_up():
     types = {t.type for t in list_templates()}
     # Core compliance templates + the finance suite (finance-agent-suite §6).
     assert types == {
-        "pia", "dpia", "lia", "ccpa", "aira", "vendor_risk", "tia",
-        "hipaa", "soc2", "pci_dss",
-        "sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness",
+        "pia",
+        "dpia",
+        "lia",
+        "ccpa",
+        "aira",
+        "vendor_risk",
+        "tia",
+        "hipaa",
+        "soc2",
+        "iso27001",
+        "nist_csf",
+        "nist_800_53",
+        "cis_v8",
+        "pci_dss",
+        "cmmc_l2",
+        "fedramp_moderate",
+        "sox_control",
+        "fraud_risk",
+        "itgc",
+        "credit_risk",
+        "close_readiness",
     }
     assert get_template("VENDOR_RISK").title == "Vendor Risk Assessment"  # case-insensitive
     assert get_template("nope") is None
+
+
+def test_fedramp_catalog_tracks_the_2026_transition_source():
+    from maverick.assessment import FRAMEWORK_SOURCES, get_template
+
+    source = FRAMEWORK_SOURCES["fedramp_moderate"]
+    template = get_template("fedramp_moderate")
+
+    assert source["source_url"] == "https://www.fedramp.gov/2026/"
+    assert "Class C" in source["version"]
+    assert template is not None
+    assert "Class C" in template.framework
+    assert "screen" in template.description.lower()
 
 
 def test_privacy_templates_dpia_lia_ccpa_score_and_route():
@@ -77,19 +110,19 @@ def test_risky_answers_score_findings_and_roll_up():
     from maverick.assessment import AssessmentSession
 
     s = AssessmentSession(type="vendor_risk", subject="Acme Corp")
-    s.record("vr_dpa", "no")                  # high (risk answer)
-    s.record("vr_soc2", "yes")                # safe -> no finding
-    s.record("vr_breach_history", "yes")      # medium (risk answer is "yes")
+    s.record("vr_dpa", "no")  # high (risk answer)
+    s.record("vr_soc2", "yes")  # safe -> no finding
+    s.record("vr_breach_history", "yes")  # medium (risk answer is "yes")
     s.record("vr_business_continuity", "unknown")  # low, unverified
     r = s.evaluate()
 
-    assert r.risk_rating == "high"            # max severity among findings
+    assert r.risk_rating == "high"  # max severity among findings
     kinds = {f.question_id: f.kind for f in r.findings}
     assert kinds["vr_dpa"] == "risk"
     assert kinds["vr_breach_history"] == "risk"
     assert kinds["vr_business_continuity"] == "unverified"
     assert "vr_soc2" not in kinds
-    assert r.answered == 3                     # yes/no/na count; unknown does not
+    assert r.answered == 3  # yes/no/na count; unknown does not
 
 
 def test_inherent_vs_residual_risk_pair():
@@ -99,18 +132,18 @@ def test_inherent_vs_residual_risk_pair():
     from maverick.assessment import AssessmentSession
 
     s = AssessmentSession(type="vendor_risk", subject="Acme Corp")
-    s.record("vr_dpa", "yes")                 # high area, CONTROLLED
-    s.record("vr_encryption", "yes")          # high area, CONTROLLED
-    s.record("vr_breach_history", "no")       # medium area, safe answer
-    s.record("vr_deletion", "no")             # medium area, RISK answer
+    s.record("vr_dpa", "yes")  # high area, CONTROLLED
+    s.record("vr_encryption", "yes")  # high area, CONTROLLED
+    s.record("vr_breach_history", "no")  # medium area, safe answer
+    s.record("vr_deletion", "no")  # medium area, RISK answer
     s.record("vr_business_continuity", "na")  # out of scope entirely
     r = s.evaluate()
 
-    assert r.inherent_risk == "high"          # high areas apply to this vendor
-    assert r.residual_risk == "medium"        # only the deletion gap is open
-    assert r.risk_rating == r.residual_risk   # back-compat alias
-    assert r.risks_in_scope == 4              # the four non-na answers
-    assert r.controls_in_place == 3           # dpa, encryption, breach history
+    assert r.inherent_risk == "high"  # high areas apply to this vendor
+    assert r.residual_risk == "medium"  # only the deletion gap is open
+    assert r.risk_rating == r.residual_risk  # back-compat alias
+    assert r.risks_in_scope == 4  # the four non-na answers
+    assert r.controls_in_place == 3  # dpa, encryption, breach history
     # Fully clean subject: both ratings collapse to minimal.
     s2 = AssessmentSession(type="vendor_risk", subject="Clean Corp")
     s2.record("vr_dpa", "na")
@@ -124,8 +157,8 @@ def test_saved_summaries_carry_the_risk_pair(tmp_path, monkeypatch):
     from maverick.assessment import AssessmentSession, list_saved, save_session
 
     s = AssessmentSession(type="pia", subject="Acme CRM")
-    s.record("pia_transfers", "yes")          # high risk answer -> open finding
-    s.record("pia_security", "yes")           # safe answer -> controlled
+    s.record("pia_transfers", "yes")  # high risk answer -> open finding
+    s.record("pia_security", "yes")  # safe answer -> controlled
     save_session(s)
     row = next(r for r in list_saved() if r["id"] == s.id)
     assert row["inherent_risk"] == "high"
@@ -200,6 +233,7 @@ def test_cli_assess_flow(tmp_path):
 
 def test_load_saved_rejects_path_traversal():
     from maverick.assessment import load_saved
+
     # `assess show ../../etc/passwd` must not read outside the assessments dir.
     assert load_saved("../../etc/passwd") is None
     assert load_saved("../secret") is None

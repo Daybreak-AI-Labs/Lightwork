@@ -519,6 +519,65 @@ here.
     HUMAN decision both ways (rationale required — Art. 33(5) covers the
     "no"), attributed and audited. The register never notifies anyone
     itself.
+- **Security & GRC workspace** (`security_ops.py`, dashboard `/security` +
+  print-friendly `/security/report`, `[security_ops] enable`) — a governed
+  control-program data plane on the shared department chassis. Security
+  questionnaires cover SOC 2, ISO/IEC 27001:2022, NIST CSF 2.0, NIST SP
+  800-53 Rev. 5, CIS Controls v8, PCI DSS 4.0, the HIPAA Security Rule,
+  CMMC 2.0 Level 2, and FedRAMP Rev. 5 Class C readiness (the 2026
+  transition mapping for legacy Moderate authorizations) using the existing
+  yes/no/na/unknown and inherent→residual scoring contract. Pinned granular
+  catalogs provide 106 CSF subcategories, 287 NIST 800-53 Moderate selections,
+  153 CIS safeguard IDs with minimum IG assignments, 110 CMMC L2 practices,
+  and 322 current FedRAMP Class C selections; the CIS prompts omit licensed
+  safeguard titles/text and require an authorized CIS copy for commercial use.
+  Durable record
+  types cover the control register / SoA, quoted-evidence verdicts, risk and
+  expiring exceptions, POA&M, vendor posture, policy/attestation lifecycle,
+  security incidents, and audit engagements. Mutations are revision-CAS and
+  audit-outbox backed; program insights aggregate framework coverage, control
+  status, open work, exception expiry, and crosswalk reuse. Framework prompts
+  are readiness aids, not bundled licensed standards text or certification.
+- **Internal platform threat hunter** (`platform_hunt/`, dashboard
+  `/security/threats`, opt-in `[threat_hunt] enable`) — a deterministic,
+  model-free detector whose production verdict authority is the verified signed
+  audit chain plus the independently verified budget-receipt ledger. Mutable
+  WorldModel approval/goal/episode snapshots cannot become finding evidence by
+  being supplied beside an intact chain. Stable MITRE ATT&CK-tagged findings
+  cover shield bypass, injection,
+  novel tools, privilege/approval abuse, exfiltration-shaped sequences,
+  unsanctioned self-modification, budget/rate and operator anomalies, quorum
+  abuse, and goal anomalies; every verdict cites exact event references plus a
+  normalized-event SHA-256 commitment. Audit-chain verification is a separate
+  input and can raise a critical finding. Findings/investigations use revision
+  CAS + a durable outbox; containment is proposal-only, never autonomous.
+- **Customer-environment threat hunter** (`env_hunt/`, dashboard
+  `/security/soc`, opt-in `[env_hunt] enable`) — read-only telemetry adapters,
+  deterministic and customer-Sigma detections, exact-event evidence,
+  bounded related-event pivots, allowlisted enrichment, an ATT&CK heatmap, and
+  defensive response proposals. Raw events
+  stay ephemeral; durable data is derived findings, investigations, proposals,
+  and receipts. `[env_hunt] response_execution` is a separate default-off
+  switch and does not bypass exact proposal-bound human approval or executor
+  scope. The offline Ed25519 approval binds the exact queue row, decision
+  identity, proposal digest, and executor; a durable one-shot claim blocks
+  automatic retries after an ambiguous external outcome. Missing Shield keeps
+  deterministic detection available but suppresses pivots, enrichment,
+  automatic proposals, and execution as reduced-autonomy mode.
+  The read-only `ConnectorRegistry` is the ingestion extension seam; the
+  mutating `ResponseExecutorRegistry` ships empty and requires explicit client
+  registration. The reduced standalone's generic JSON ingestion is the
+  compatibility floor for a client source without a named adapter.
+- **Three reduced standalone security SKUs** (`demo/grc-concierge/`,
+  `demo/platform-threat-hunter/`, `demo/environment-threat-hunter/`) — each has
+  an explicit standalone capability layer, backend seam, vendored
+  engine that imports no `maverick` code in forced mode, launcher, accessible
+  UI, `/about` capability matrix, and focused isolation tests. GRC keeps a
+  local unsigned starter catalog/risk/POA&M store; both hunters persist derived
+  records only. They do not claim the platform's signed audit, governed
+  approvals, managed connectors, or cross-run learning. Both hunter SKUs are
+  proposal-only; response execution is exclusive to the integrated platform's
+  exact approval-bound, explicitly enabled executor seam.
 - **Workspace history seeder** (`demo/pia-concierge/seed_workspace.py`) —
   seeds an enterprise year through the real engines: ~436 assessments over
   14 months across both departments (weighted statuses, cadences with a

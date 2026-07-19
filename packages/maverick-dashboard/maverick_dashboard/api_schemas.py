@@ -5,7 +5,53 @@ Importing here changes no behavior: these are pure data schemas.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+import json
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+_HUNTER_BATCH_BYTES = 16 * 1024 * 1024
+_HUNTER_EVENT_BYTES = 256 * 1024
+_HUNTER_MAX_DEPTH = 12
+_HUNTER_MAX_CONTAINER_ITEMS = 2_048
+
+
+def _validate_hunter_events(events: list[dict], *, label: str) -> int:
+    """Bound serialized size and structural complexity of telemetry events."""
+    total = 0
+    for index, event in enumerate(events):
+        try:
+            encoded = json.dumps(
+                event, ensure_ascii=False, allow_nan=False, separators=(",", ":"),
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} event {index} is not valid JSON") from exc
+        if len(encoded) > _HUNTER_EVENT_BYTES:
+            raise ValueError(
+                f"{label} event {index} exceeds the 256 KiB per-event limit"
+            )
+        total += len(encoded)
+        if total > _HUNTER_BATCH_BYTES:
+            raise ValueError(f"{label} events exceed the 16 MiB aggregate limit")
+        stack: list[tuple[object, int]] = [(event, 0)]
+        nodes = 0
+        while stack:
+            value, depth = stack.pop()
+            nodes += 1
+            if depth > _HUNTER_MAX_DEPTH:
+                raise ValueError(
+                    f"{label} event {index} exceeds the maximum nesting depth"
+                )
+            if nodes > 20_000:
+                raise ValueError(f"{label} event {index} is too structurally complex")
+            if isinstance(value, dict):
+                if len(value) > _HUNTER_MAX_CONTAINER_ITEMS:
+                    raise ValueError(f"{label} event {index} has too many object keys")
+                stack.extend((item, depth + 1) for item in value.values())
+            elif isinstance(value, list):
+                if len(value) > _HUNTER_MAX_CONTAINER_ITEMS:
+                    raise ValueError(f"{label} event {index} has an oversized array")
+                stack.extend((item, depth + 1) for item in value)
+    return total
 
 
 class WorkflowStepIn(BaseModel):
@@ -749,10 +795,13 @@ class TemplateIn(BaseModel):
     """
     title: str = Field(..., min_length=1, max_length=120)
     framework: str = Field(..., min_length=1, max_length=200)
-    department: str = Field("privacy", pattern="^(privacy|finance)$")
+    department: str = Field("privacy", pattern="^(privacy|finance|security)$")
     description: str = Field("", max_length=500)
+    # ISO/IEC 27001's original-paraphrase built-in currently has 93 questions.
+    # Keep publication bounded while allowing built-ins to round-trip through
+    # the shared editor without an unavoidable 422.
     questions: list[TemplateQuestionIn] = Field(..., min_length=1,
-                                                max_length=60)
+                                                max_length=256)
     expected_revision: int = Field(..., ge=0)
     expected_digest: str = Field(..., max_length=64,
                                  pattern="^([0-9a-f]{64})?$")
@@ -827,3 +876,411 @@ class ValueAssumptionsIn(BaseModel):
     hours_per_task: float | None = Field(None, ge=0.0, le=10_000.0)
     currency: str | None = Field(None, max_length=8, pattern="^[A-Za-z]{3,8}$")
     departments: dict[str, ValueDeptIn | None] = Field(default_factory=dict)
+
+
+# Security & GRC ------------------------------------------------------------
+
+class SecurityControlIn(BaseModel):
+    framework: str = Field(..., min_length=1, max_length=120)
+    control_id: str = Field(..., min_length=1, max_length=160)
+    title: str = Field(..., min_length=1, max_length=500)
+    implementation_status: str = Field(
+        "not_started",
+        pattern="^(not_started|not_implemented|planned|not_applicable)$",
+    )
+    owner: str = Field(..., min_length=1, max_length=200)
+    applicable: bool = True
+    applicability_rationale: str = Field("", max_length=2000)
+    crosswalk: list[str] = Field(default_factory=list, max_length=256)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=256)
+
+    @model_validator(mode="after")
+    def require_nonblank_owner(self):
+        self.owner = self.owner.strip()
+        if not self.owner:
+            raise ValueError("control owner must not be blank")
+        return self
+
+
+class SecurityControlUpdateIn(BaseModel):
+    expected_revision: int = Field(..., ge=1)
+    title: str | None = Field(None, min_length=1, max_length=500)
+    implementation_status: str | None = Field(
+        None,
+        pattern="^(not_started|not_implemented|planned|not_applicable)$",
+    )
+    owner: str | None = Field(None, min_length=1, max_length=200)
+    applicable: bool | None = None
+    applicability_rationale: str | None = Field(None, max_length=2000)
+    crosswalk: list[str] | None = Field(None, max_length=256)
+    evidence_ids: list[str] | None = Field(None, max_length=256)
+
+    @model_validator(mode="after")
+    def reject_blank_owner(self):
+        if self.owner is not None:
+            self.owner = self.owner.strip()
+            if not self.owner:
+                raise ValueError("control owner must not be blank")
+        return self
+
+
+class SecurityEvidenceIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    text: str = Field(..., min_length=1, max_length=2_000_000)
+    source: str = Field("paste", max_length=80)
+    control_ids: list[str] = Field(default_factory=list, max_length=256)
+
+
+class SecurityEvidenceFromDocumentIn(BaseModel):
+    """Map one connector-fetched document as untrusted, review-gated evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(..., min_length=1, max_length=300)
+    source: str = Field(..., min_length=1, max_length=32)
+    doc_id: str = Field(..., min_length=1, max_length=300)
+    ref: dict | None = None
+    control_ids: list[str] = Field(default_factory=list, max_length=128)
+
+    @model_validator(mode="after")
+    def bound_opaque_reference_and_control_ids(self):
+        if self.ref is not None:
+            _validate_hunter_events([self.ref], label="document reference")
+            encoded = json.dumps(
+                self.ref,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            if len(encoded) > 64 * 1024:
+                raise ValueError("document reference exceeds the 64 KiB limit")
+        cleaned = []
+        for control_id in self.control_ids:
+            value = str(control_id).strip()
+            if not value or len(value) > 200:
+                raise ValueError("control IDs must be nonblank and at most 200 characters")
+            cleaned.append(value)
+        self.control_ids = cleaned
+        return self
+
+
+class SecurityEvidenceDecisionIn(BaseModel):
+    decision: str = Field(..., pattern="^(approved|rejected)$")
+    rationale: str = Field(..., min_length=1, max_length=4000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityEvidenceApplyIn(BaseModel):
+    evidence_id: str = Field(..., min_length=1, max_length=80)
+    implementation_status: str = Field(
+        ..., pattern="^(partial|implemented)$"
+    )
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityRiskIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    likelihood: int = Field(..., ge=1, le=5)
+    impact: int = Field(..., ge=1, le=5)
+    likelihood_rationale: str = Field(..., min_length=1, max_length=4000)
+    impact_rationale: str = Field(..., min_length=1, max_length=4000)
+    evidence_ids: list[str] = Field(..., min_length=1, max_length=256)
+    owner: str = Field(..., min_length=1, max_length=200)
+    description: str = Field("", max_length=4000)
+    control_ids: list[str] = Field(default_factory=list, max_length=256)
+
+
+class SecurityRiskTreatmentIn(BaseModel):
+    treatment: str = Field(..., pattern="^(accept|mitigate|transfer|avoid)$")
+    plan: str = Field(..., min_length=1, max_length=4000)
+    residual_likelihood: int = Field(..., ge=1, le=5)
+    residual_impact: int = Field(..., ge=1, le=5)
+    residual_likelihood_rationale: str = Field(..., min_length=1, max_length=4000)
+    residual_impact_rationale: str = Field(..., min_length=1, max_length=4000)
+    evidence_ids: list[str] = Field(..., min_length=1, max_length=256)
+    owner: str = Field(..., min_length=1, max_length=200)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityRiskExceptionIn(BaseModel):
+    owner: str = Field(..., min_length=1, max_length=200)
+    rationale: str = Field(..., min_length=1, max_length=4000)
+    expires_at: float = Field(..., gt=0)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityCloseIn(BaseModel):
+    rationale: str = Field(..., min_length=1, max_length=4000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityPoamIn(BaseModel):
+    finding: str = Field(..., min_length=1, max_length=2000)
+    owner: str = Field(..., min_length=1, max_length=200)
+    due_at: float = Field(..., gt=0)
+    control_ids: list[str] = Field(default_factory=list, max_length=256)
+    milestones: list[dict] = Field(default_factory=list, max_length=100)
+
+
+class SecurityPoamUpdateIn(BaseModel):
+    status: str = Field(
+        ..., pattern="^(open|in_progress|blocked|complete|closed|accepted)$"
+    )
+    owner: str | None = Field(None, max_length=200)
+    due_at: float | None = Field(None, gt=0)
+    milestones: list[dict] | None = Field(None, max_length=100)
+    note: str = Field("", max_length=2000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityReviewTriggerIn(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=1000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityVendorIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=300)
+    posture: dict = Field(default_factory=dict)
+    criticality: str = Field("medium", pattern="^(low|medium|high|critical)$")
+    owner: str = Field("", max_length=200)
+    services: str = Field("", max_length=2000)
+    assessment_id: str = Field("", max_length=80)
+    carry_forward_from: str = Field("", max_length=80)
+
+
+class SecurityDecisionIn(BaseModel):
+    decision: str = Field(..., pattern="^(approved|needs_work|rejected)$")
+    rationale: str = Field(..., min_length=1, max_length=4000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityPolicyIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    owner: str = Field(..., min_length=1, max_length=200)
+    content_ref: str = Field("", max_length=2000)
+    review_cadence_days: int = Field(365, ge=1, le=3650)
+
+
+class SecurityPolicyTransitionIn(BaseModel):
+    target_status: str = Field(
+        ..., pattern="^(draft|review|approved|attested|retired)$"
+    )
+    note: str = Field("", max_length=2000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityPolicyAttestIn(BaseModel):
+    subject: str = Field(..., min_length=1, max_length=300)
+    statement: str = Field(..., min_length=1, max_length=2000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityIncidentIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    severity: str = Field("medium", pattern="^(low|medium|high|critical)$")
+    description: str = Field("", max_length=8000)
+    mitre_techniques: list[str] = Field(default_factory=list, max_length=128)
+    clock_ids: list[str] = Field(default_factory=list, max_length=64)
+    custom_clocks: list[dict] = Field(default_factory=list, max_length=32)
+    discovered_at: float | None = Field(None, gt=0)
+
+
+class SecurityIncidentPhaseIn(BaseModel):
+    phase: str = Field(..., pattern="^(containment|eradication|recovery)$")
+    note: str = Field(..., min_length=1, max_length=4000)
+    occurred_at: float | None = Field(None, gt=0)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityIncidentClockIn(BaseModel):
+    clock_id: str = Field(..., min_length=1, max_length=120)
+    anchor_at: float = Field(..., gt=0)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityIncidentNotifyIn(BaseModel):
+    clock_id: str = Field(..., min_length=1, max_length=120)
+    notifiable: bool
+    rationale: str = Field(..., min_length=1, max_length=4000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityIncidentCloseIn(BaseModel):
+    summary: str = Field(..., min_length=1, max_length=4000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityClockIn(BaseModel):
+    clock_id: str = Field("", max_length=120)
+    title: str = Field(..., min_length=1, max_length=300)
+    jurisdiction: str = Field(..., min_length=1, max_length=120)
+    source_url: str = Field(..., min_length=1, max_length=2000)
+    source_title: str = Field(..., min_length=1, max_length=500)
+    anchor: str = Field(..., min_length=1, max_length=500)
+    deadline_seconds: int | None = Field(None, ge=1)
+    deadline_kind: str = Field("elapsed", pattern="^(elapsed|calendar|business|asap)$")
+    status: str = Field("current", pattern="^(current|proposed|superseded|custom)$")
+    effective: str = Field("", max_length=80)
+    expected_revision: int | None = Field(None, ge=1)
+
+
+class SecurityEngagementIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=300)
+    framework: str = Field(..., min_length=1, max_length=120)
+    scope: str = Field(..., min_length=1, max_length=4000)
+    owner: str = Field(..., min_length=1, max_length=200)
+    due_at: float | None = Field(None, gt=0)
+
+
+class SecurityEvidenceRequestIn(BaseModel):
+    description: str = Field(..., min_length=1, max_length=2000)
+    owner: str = Field(..., min_length=1, max_length=200)
+    due_at: float = Field(..., gt=0)
+    control_ids: list[str] = Field(default_factory=list, max_length=256)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityEvidenceRequestUpdateIn(BaseModel):
+    request_id: str = Field(..., min_length=1, max_length=120)
+    status: str = Field(..., pattern="^(open|submitted|accepted|rejected|closed)$")
+    evidence_ids: list[str] = Field(default_factory=list, max_length=256)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityControlTestIn(BaseModel):
+    control_id: str = Field(..., min_length=1, max_length=160)
+    procedure: str = Field(..., min_length=1, max_length=4000)
+    result: str = Field(..., pattern="^(pass|fail|needs_review)$")
+    evidence_ids: list[str] = Field(default_factory=list, max_length=256)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityAuditFindingIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=500)
+    severity: str = Field(..., pattern="^(low|medium|high|critical)$")
+    control_ids: list[str] = Field(default_factory=list, max_length=256)
+    owner: str = Field("", max_length=200)
+    due_at: float | None = Field(None, gt=0)
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityAuditFindingUpdateIn(BaseModel):
+    finding_id: str = Field(..., min_length=1, max_length=120)
+    status: str = Field(
+        ..., pattern="^(open|in_progress|resolved|remediated|accepted|closed)$"
+    )
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecurityEngagementStatusIn(BaseModel):
+    status: str = Field(
+        ..., pattern="^(planning|planned|fieldwork|review|complete|closed)$"
+    )
+    expected_revision: int = Field(..., ge=1)
+
+
+# Defensive hunters ---------------------------------------------------------
+
+class PlatformHuntScanIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    since_hours: int = Field(24, ge=1, le=24 * 365)
+
+
+class HuntRecordUpdateIn(BaseModel):
+    changes: dict = Field(..., min_length=1, max_length=64)
+    expected_revision: int = Field(..., ge=1)
+
+
+class PlatformInvestigationIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    finding_ids: list[str] = Field(..., min_length=1, max_length=100)
+    summary: str = Field(..., min_length=1, max_length=8000)
+
+
+class PlatformContainmentIn(BaseModel):
+    action: str = Field(..., min_length=1, max_length=300)
+    scope: str = Field(..., min_length=1, max_length=1000)
+    reason: str = Field(..., min_length=1, max_length=4000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class EnvironmentIngestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    connector: str = Field(
+        ...,
+        pattern="^(cloudtrail|guardduty|syslog|edr|splunk|elastic|sentinel|kubernetes_audit|okta|entra)$",
+    )
+    events: list[dict] | None = Field(None, min_length=1, max_length=10_000)
+    start: float | None = Field(None, ge=0)
+    end: float | None = Field(None, ge=0)
+    query: str = Field("*", min_length=1, max_length=4096)
+    filters: dict = Field(default_factory=dict, max_length=32)
+    limit: int = Field(1000, ge=1, le=1000)
+    sigma_rules: list[str] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def bound_sigma_content(self):
+        if self.events is None:
+            if self.start is None or self.end is None:
+                raise ValueError("registered connector queries require start and end")
+        elif self.start is not None or self.end is not None or self.filters or self.query != "*":
+            raise ValueError("push ingestion cannot include registered connector query fields")
+        event_bytes = _validate_hunter_events(self.events or [], label="environment")
+        if any(len(text.encode("utf-8")) > 1_048_576 for text in self.sigma_rules):
+            raise ValueError("each Sigma document must be at most 1 MiB")
+        sigma_bytes = sum(len(text.encode("utf-8")) for text in self.sigma_rules)
+        if event_bytes + sigma_bytes > _HUNTER_BATCH_BYTES:
+            raise ValueError("environment telemetry exceeds the 16 MiB aggregate limit")
+        return self
+
+
+class EnvironmentResponseIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: str = Field(
+        ...,
+        pattern="^(isolate_host|disable_identity|disable_key|rotate_credential|block_destination|revoke_session)$",
+    )
+    target: str = Field(..., min_length=1, max_length=1000)
+    reason: str = Field(..., min_length=1, max_length=4000)
+    finding_id: str = Field(..., min_length=1, max_length=120)
+    investigation_id: str = Field(..., min_length=1, max_length=120)
+    expected_revision: int = Field(..., ge=1)
+    executor: str = Field(..., pattern="^[a-z][a-z0-9_.-]{0,119}$")
+    parameters: dict = Field(default_factory=dict, max_length=64)
+
+    @model_validator(mode="after")
+    def bound_response_parameters(self):
+        from maverick.env_hunt import validate_response_parameters
+
+        self.parameters = validate_response_parameters(self.parameters)
+        return self
+
+
+class EnvironmentExecuteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    investigation_id: str = Field(..., min_length=1, max_length=120)
+    proposal_id: str = Field(..., min_length=1, max_length=120)
+    approval_id: int = Field(..., ge=1)
+    executor: str = Field(..., pattern="^[a-z][a-z0-9_.-]{0,119}$")
+    signature: str = Field(..., min_length=128, max_length=128, pattern="^[0-9a-fA-F]+$")
+    expected_revision: int = Field(..., ge=1)
+
+
+class SecuritySuiteConfigIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    security_ops: bool
+    threat_hunt: bool
+    env_hunt: bool
+    response_execution: bool = False
+    expected_revision: int = Field(..., ge=1)
+
+    @model_validator(mode="after")
+    def response_requires_environment_hunter(self):
+        if self.response_execution and not self.env_hunt:
+            raise ValueError("response execution requires env_hunt")
+        return self

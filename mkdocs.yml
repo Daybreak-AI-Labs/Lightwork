@@ -93,6 +93,7 @@ nav:
   - Performance:
       - Streaming parity: performance/streaming-parity.md
   - Security:
+      - Security & GRC suite: SECURITY_GRC.md
       - Threat model: security/threat-model.md
       - DGM evaluator evidence: security/dgm-evaluator-evidence.md
       - Capability attenuation (verified): security/capability-attenuation.md
