@@ -550,9 +550,201 @@ _TIA = AssessmentTemplate(
     ),
 )
 
+_DPIA = AssessmentTemplate(
+    type="dpia",
+    title="Data Protection Impact Assessment",
+    framework="GDPR Art. 35",
+    description="The formal Art. 35 assessment triggered by high-risk "
+                "processing: the systematic description, necessity and "
+                "proportionality test, risks to rights and freedoms, and the "
+                "mitigating measures — with the Art. 36 prior-consultation "
+                "trigger. Deeper than the lightweight PIA screen.",
+    questions=(
+        _q("dpia_description", "Art. 35(7)(a)",
+           "Is there a systematic description of the processing operations, "
+           "purposes, and (where relevant) the controller's legitimate "
+           "interest?",
+           "no", "medium", "Document the processing end to end: data flows, "
+           "purposes, recipients, retention (Art. 35(7)(a))."),
+        _q("dpia_necessity", "Art. 35(7)(b)",
+           "Is the processing necessary and proportionate in relation to the "
+           "purposes?",
+           "no", "high", "Justify necessity and proportionality; minimise "
+           "data and purposes (Art. 35(7)(b))."),
+        _q("dpia_risk_assessment", "Art. 35(7)(c)",
+           "Have the risks to the rights and freedoms of data subjects been "
+           "assessed?",
+           "no", "high", "Assess likelihood and severity of harm to "
+           "individuals (Art. 35(7)(c))."),
+        _q("dpia_measures", "Art. 35(7)(d)",
+           "Are measures to address the risks identified (safeguards, "
+           "security, mechanisms to demonstrate compliance)?",
+           "no", "high", "Define mitigating measures and residual-risk "
+           "treatment (Art. 35(7)(d))."),
+        _q("dpia_dpo", "Consultation",
+           "Has the Data Protection Officer been consulted and their advice "
+           "recorded (Art. 35(2))?",
+           "no", "medium", "Seek and document the DPO's advice on the DPIA."),
+        _q("dpia_subject_views", "Consultation",
+           "Where appropriate, have the views of data subjects or their "
+           "representatives been sought (Art. 35(9))?",
+           "no", "low", "Seek data-subject views where proportionate, or "
+           "record why it was not appropriate."),
+        _q("dpia_residual_high", "Prior consultation",
+           "After mitigation, does a high residual risk remain that requires "
+           "prior consultation with the supervisory authority (Art. 36)?",
+           "yes", "high", "Consult the supervisory authority before "
+           "processing where high residual risk remains (Art. 36)."),
+        _q("dpia_monitoring", "High-risk triggers",
+           "Does it involve systematic monitoring of a publicly accessible "
+           "area on a large scale?",
+           "yes", "medium", "Systematic large-scale monitoring is a "
+           "high-risk trigger — ensure the DPIA and safeguards are complete."),
+        _q("dpia_automated", "High-risk triggers",
+           "Does it involve automated decision-making, including profiling, "
+           "with legal or similarly significant effects?",
+           "yes", "medium", "Add human oversight and an Art. 22 "
+           "safeguard/exception for significant automated decisions."),
+        _q("dpia_review", "Ongoing review",
+           "Is the DPIA reviewed when the risk posed by the processing "
+           "changes (Art. 35(11))?",
+           "no", "low", "Set a review trigger for material changes to the "
+           "processing."),
+    ),
+)
+
+_LIA = AssessmentTemplate(
+    type="lia",
+    title="Legitimate Interest Assessment",
+    framework="GDPR Art. 6(1)(f)",
+    description="The three-part test for relying on legitimate interests: the "
+                "purpose test (is there a real interest?), the necessity test "
+                "(is processing needed for it?), and the balancing test (do "
+                "the individual's rights override it?).",
+    questions=(
+        _q("lia_interest", "Purpose test",
+           "Is a specific legitimate interest clearly identified and "
+           "articulated (yours or a third party's)?",
+           "no", "high", "State the legitimate interest precisely; a vague "
+           "or generic interest cannot be balanced."),
+        _q("lia_lawful_interest", "Purpose test",
+           "Is that interest lawful, real, and present rather than "
+           "speculative or contrary to law?",
+           "no", "medium", "Confirm the interest is lawful and current, not "
+           "hypothetical."),
+        _q("lia_necessity", "Necessity test",
+           "Is the processing necessary to achieve that interest, with no "
+           "reasonable less-intrusive means?",
+           "no", "high", "Show the processing is necessary — if a less "
+           "intrusive route exists, legitimate interests does not apply."),
+        _q("lia_alternative", "Necessity test",
+           "Could the purpose reasonably be achieved with less data or a "
+           "different, more appropriate lawful basis?",
+           "yes", "medium", "If consent or another basis fits better, or "
+           "less data would do, reconsider relying on legitimate interests."),
+        _q("lia_expectation", "Balancing test",
+           "Would data subjects reasonably expect this processing at the "
+           "time and in the context the data was collected?",
+           "no", "high", "If the processing is unexpected, the balance tips "
+           "against you — add transparency or reconsider the basis."),
+        _q("lia_impact", "Balancing test",
+           "Is the processing likely to have an unjustified adverse impact "
+           "on the individual's interests, rights, or freedoms?",
+           "yes", "high", "Where adverse impact is likely and unjustified, "
+           "legitimate interests fails the balancing test."),
+        _q("lia_vulnerable", "Balancing test",
+           "Does it involve children's data or vulnerable individuals "
+           "without additional safeguards?",
+           "yes", "high", "Give special weight to children/vulnerable "
+           "groups; add safeguards or do not rely on this basis."),
+        _q("lia_safeguards", "Balancing test",
+           "Are safeguards in place (data minimisation, transparency, "
+           "opt-out) that tip the balance in your favour?",
+           "no", "medium", "Add safeguards that reduce the impact on "
+           "individuals and strengthen the balance."),
+        _q("lia_objection", "Right to object",
+           "Is an easy, effective mechanism to object to the processing "
+           "provided (Art. 21)?",
+           "no", "medium", "Provide a simple right-to-object route and honour "
+           "objections."),
+        _q("lia_documented", "Accountability",
+           "Is the LIA outcome documented, dated, and available for review?",
+           "no", "low", "Record the LIA and its conclusion so the basis can "
+           "be demonstrated (Art. 5(2))."),
+    ),
+)
+
+_CCPA = AssessmentTemplate(
+    type="ccpa",
+    title="CCPA / CPRA Assessment",
+    framework="CCPA / CPRA (California)",
+    description="Assess a processing activity against the California Consumer "
+                "Privacy Act as amended by the CPRA: consumer notices, rights, "
+                "opt-outs, sensitive-PI limits, purpose limitation, and "
+                "service-provider contracts.",
+    questions=(
+        _q("ccpa_notice", "Notices",
+           "Are consumers given notice at or before collection of the "
+           "categories of personal information and the purposes (§1798.100)?",
+           "no", "high", "Publish a notice at collection listing categories "
+           "and purposes before collecting."),
+        _q("ccpa_do_not_sell", "Opt-out",
+           "If personal information is sold or shared, is a \"Do Not Sell or "
+           "Share My Personal Information\" opt-out provided (§1798.135)?",
+           "no", "high", "Add the Do-Not-Sell/Share link and honour "
+           "opt-out preference signals."),
+        _q("ccpa_sensitive_pi", "Sensitive PI",
+           "Where sensitive personal information is used beyond permitted "
+           "purposes, is a \"Limit the Use of My Sensitive Personal "
+           "Information\" control offered (§1798.121)?",
+           "no", "medium", "Offer the sensitive-PI limitation right where "
+           "required."),
+        _q("ccpa_rights", "Consumer rights",
+           "Can consumers exercise the rights to know, delete, correct, and "
+           "opt out (§1798.105-.130)?",
+           "no", "high", "Wire up know / delete / correct / opt-out request "
+           "handling within statutory timelines."),
+        _q("ccpa_methods", "Consumer rights",
+           "Are at least two designated methods offered for submitting "
+           "requests (e.g. toll-free number and web form)?",
+           "no", "low", "Provide the required request submission methods for "
+           "your business type."),
+        _q("ccpa_purpose_limit", "Purpose limitation",
+           "Is the use of personal information limited to the disclosed, "
+           "compatible purposes (CPRA data minimisation)?",
+           "no", "medium", "Limit use to disclosed purposes and minimise to "
+           "what is reasonably necessary."),
+        _q("ccpa_retention", "Retention",
+           "Are retention periods (or the criteria for them) disclosed and "
+           "enforced per category (§1798.100(a)(3))?",
+           "no", "medium", "Disclose and enforce retention per category of "
+           "personal information."),
+        _q("ccpa_service_providers", "Contracts",
+           "Are CCPA-compliant contracts in place with service providers, "
+           "contractors, and third parties (§1798.140)?",
+           "no", "high", "Execute service-provider / contractor agreements "
+           "with the required CCPA terms."),
+        _q("ccpa_non_discrimination", "Non-discrimination",
+           "Are consumers protected from discrimination for exercising their "
+           "privacy rights (§1798.125)?",
+           "no", "medium", "Ensure price/service parity for consumers who "
+           "exercise rights, within the statute's financial-incentive rules."),
+        _q("ccpa_minors", "Minors",
+           "Is opt-in consent obtained before selling or sharing the data of "
+           "consumers under 16 (§1798.120(c))?",
+           "no", "high", "Obtain opt-in (13-15) or parental consent (under "
+           "13) before selling/sharing minors' data."),
+        _q("ccpa_risk_assessment", "Accountability",
+           "For processing that presents significant risk, is a CPRA risk "
+           "assessment / cybersecurity audit performed (§1798.185)?",
+           "no", "medium", "Perform and retain the CPRA risk assessment / "
+           "audit for high-risk processing."),
+    ),
+)
+
 TEMPLATES: dict[str, AssessmentTemplate] = {
     t.type: t for t in (
-        _PIA, _AIRA, _VENDOR_RISK, _TIA,
+        _PIA, _DPIA, _LIA, _CCPA, _AIRA, _VENDOR_RISK, _TIA,
         _SOX_CONTROL, _FRAUD_RISK, _ITGC, _CREDIT_RISK, _CLOSE_READINESS,
         _HIPAA, _SOC2, _PCI_DSS,
     )
@@ -1698,6 +1890,14 @@ def decide_assessment(assessment_id: str, decision: str, *,
         record["decided_at"] = time.time()
         record["decided_by"] = decided_by
         record["decision_note"] = (note or "").strip()[:4000]
+        # A fresh decision supersedes the ad-hoc "due now" flags AND any prior
+        # risk acceptance: the reviewer just looked at the record, so a stale
+        # (possibly expired) acceptance must not keep it flagged due after
+        # approval. If the reviewer still wants to accept the residual risk,
+        # that is a fresh accept_risk with a new expiry.
+        record.pop("review_forced_at", None)
+        record.pop("review_trigger_reason", None)
+        record.pop("risk_acceptance", None)
         if decision == "approved" and cadence_days:
             record["cadence_days"] = int(cadence_days)
             record["next_review_at"] = (record["decided_at"]
@@ -1710,6 +1910,80 @@ def decide_assessment(assessment_id: str, decision: str, *,
         "ASSESSMENT_DECIDED", decided_by,
         assessment=assessment_id, decision=decision,
         cadence_days=int(cadence_days or 0),
+    )
+    return _rewrite_saved(
+        assessment_id, _mutate, expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
+
+
+def accept_risk(assessment_id: str, *, accepted_by: str = "",
+                rationale: str = "", expires_days: int = 365,
+                expected_revision: int | None = None) -> dict | None:
+    """Formally accept the residual risk on an assessment with a named owner,
+    a rationale, and an expiry. A risk acceptance is a dated decision, not a
+    permanent waiver: when it expires the record comes due again."""
+    rationale = (rationale or "").strip()
+    if not rationale:
+        raise ValueError("a rationale is required to accept risk")
+    days = int(expires_days or 0)
+    if days <= 0:
+        raise ValueError("risk acceptance must have a positive expiry (days)")
+
+    def _mutate(record: dict) -> None:
+        if record.get("status") not in ("approved", "pending_review"):
+            raise AssessmentTransitionError(
+                "only an approved or pending assessment can carry a risk "
+                "acceptance")
+        now = time.time()
+        record["risk_acceptance"] = {
+            "accepted_by": accepted_by,
+            "rationale": rationale[:4000],
+            "accepted_at": now,
+            "expires_at": now + days * 86400,
+        }
+
+    receipt = _audit_receipt(
+        "RISK_ACCEPTED", accepted_by,
+        assessment=assessment_id, expires_days=days,
+    )
+    return _rewrite_saved(
+        assessment_id, _mutate, expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
+
+
+def trigger_review(assessment_id: str, *, reason: str = "", by: str = "",
+                   expected_revision: int | None = None) -> dict | None:
+    """Force an assessment due for re-review now, ahead of its cadence -- the
+    hook for external events: a contract renewal, a new sub-processor, or any
+    material change to the processing."""
+    reason = (reason or "").strip() or "external trigger"
+
+    def _mutate(record: dict) -> None:
+        record["review_forced_at"] = time.time()
+        record["review_trigger_reason"] = reason[:400]
+
+    receipt = _audit_receipt(
+        "REVIEW_TRIGGERED", by, assessment=assessment_id, reason=reason[:120],
+    )
+    return _rewrite_saved(
+        assessment_id, _mutate, expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
+
+
+def set_renewal(assessment_id: str, *, renewal_at: float | None, by: str = "",
+                expected_revision: int | None = None) -> dict | None:
+    """Record a contract-renewal (or review-by) date. When it passes, the
+    record automatically flips due for re-review -- no manual trigger needed."""
+    ts = float(renewal_at) if renewal_at else 0.0
+
+    def _mutate(record: dict) -> None:
+        record["renewal_at"] = ts or None
+
+    receipt = _audit_receipt(
+        "RENEWAL_SET", by, assessment=assessment_id, renewal_at=ts,
     )
     return _rewrite_saved(
         assessment_id, _mutate, expected_revision=expected_revision,
@@ -1739,6 +2013,27 @@ def list_saved() -> list[dict]:
         revision = _record_revision(data, label="assessment")
         res = data.get("result", {})
         fups = data.get("followups") or []
+        now = time.time()
+        acceptance = data.get("risk_acceptance") or {}
+        acc_expires = acceptance.get("expires_at")
+        acc_expired = bool(acc_expires and now >= float(acc_expires))
+        forced = data.get("review_forced_at")
+        renewal = data.get("renewal_at")
+        renewal_due = bool(renewal and now >= float(renewal))
+        cadence_due = (data.get("status") == "approved"
+                       and bool(data.get("next_review_at"))
+                       and now >= float(data.get("next_review_at") or 0))
+        # Why the record is due -- most specific reason first.
+        if forced:
+            due_reason = data.get("review_trigger_reason") or "external trigger"
+        elif acc_expired:
+            due_reason = "risk acceptance expired"
+        elif renewal_due:
+            due_reason = "renewal date reached"
+        elif cadence_due:
+            due_reason = "review cadence elapsed"
+        else:
+            due_reason = ""
         out.append({
             "id": data.get("id", p.stem),
             "type": data.get("type", "?"),
@@ -1758,12 +2053,32 @@ def list_saved() -> list[dict]:
             "open_followups": sum(1 for f in fups if not f.get("answer")),
             "decided_at": data.get("decided_at"),
             "next_review_at": data.get("next_review_at"),
-            "review_due": (data.get("status") == "approved"
-                           and bool(data.get("next_review_at"))
-                           and time.time()
-                           >= float(data.get("next_review_at") or 0)),
+            "review_due": bool(cadence_due or forced or renewal_due
+                               or acc_expired),
+            "review_due_reason": due_reason,
+            "renewal_at": renewal or None,
+            "risk_accepted": bool(acceptance),
+            "acceptance_expires_at": acc_expires,
+            "acceptance_expired": acc_expired,
         })
     return sorted(out, key=lambda r: r["created_at"], reverse=True)
+
+
+def risk_trend(subject: str, assessment_type: str = "", *,
+               limit: int = 12) -> list[dict]:
+    """The residual-risk history for a subject (optionally one type), oldest
+    first. Powers the re-review delta -- a vendor's risk moving up or down
+    across successive assessments instead of a single point in time."""
+    subj = (subject or "").strip().lower()
+    if not subj:
+        return []
+    rows = [r for r in list_saved()
+            if str(r["subject"]).strip().lower() == subj
+            and (not assessment_type or r["type"] == assessment_type)]
+    rows.sort(key=lambda r: r["created_at"])
+    return [{"id": r["id"], "created_at": r["created_at"],
+             "residual_risk": r["residual_risk"],
+             "inherent_risk": r["inherent_risk"]} for r in rows][-limit:]
 
 
 def _load_saved_raw(assessment_id: str) -> dict | None:
@@ -2018,6 +2333,11 @@ __all__ = [
     "save_session",
     "list_saved",
     "load_saved",
+    "decide_assessment",
+    "accept_risk",
+    "trigger_review",
+    "set_renewal",
+    "risk_trend",
     "render_questions_text",
     "render_questions_json",
     "render_result_text",

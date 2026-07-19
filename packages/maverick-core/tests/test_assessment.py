@@ -21,12 +21,43 @@ def test_templates_registered_and_looked_up():
     types = {t.type for t in list_templates()}
     # Core compliance templates + the finance suite (finance-agent-suite §6).
     assert types == {
-        "pia", "aira", "vendor_risk", "tia",
+        "pia", "dpia", "lia", "ccpa", "aira", "vendor_risk", "tia",
         "hipaa", "soc2", "pci_dss",
         "sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness",
     }
     assert get_template("VENDOR_RISK").title == "Vendor Risk Assessment"  # case-insensitive
     assert get_template("nope") is None
+
+
+def test_privacy_templates_dpia_lia_ccpa_score_and_route():
+    from maverick.assessment import (
+        AssessmentSession,
+        get_template,
+        template_department,
+    )
+
+    expected = {"dpia": 10, "lia": 10, "ccpa": 11}
+    for type_, n_questions in expected.items():
+        tpl = get_template(type_)
+        assert tpl is not None and len(tpl.questions) == n_questions
+        # New privacy frameworks belong to the privacy workspace, not finance.
+        assert template_department(type_) == "privacy"
+        # The safe answer to every question yields a clean, minimal result...
+        clean = AssessmentSession(type=type_, subject="Clean")
+        for q in tpl.questions:
+            clean.record(q.id, "no" if q.risk_answer == "yes" else "yes")
+        r = clean.evaluate()
+        assert r.risk_rating == "minimal" and r.findings == []
+        # ...and the risky answer to every question raises findings that roll up.
+        risky = AssessmentSession(type=type_, subject="Risky")
+        for q in tpl.questions:
+            risky.record(q.id, q.risk_answer)
+        rr = risky.evaluate()
+        assert rr.risk_rating in ("high", "medium")
+        assert len(rr.findings) == n_questions
+    # The DPIA is a distinct, deeper instrument than the lightweight PIA.
+    assert get_template("dpia").title != get_template("pia").title
+    assert "Art. 35" in get_template("dpia").framework
 
 
 def test_clean_answers_are_minimal_risk():

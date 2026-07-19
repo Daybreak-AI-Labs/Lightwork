@@ -49,6 +49,7 @@ from .api_schemas import (
     AssessmentRefreshIn,
     AssessmentReviewIn,
     AttachmentOut,
+    BulkAssessmentImportIn,
     CachePurgeIn,
     CatalogInstallIn,
     ChildIn,
@@ -100,6 +101,8 @@ from .api_schemas import (
     RedactIn,
     ReparentIn,
     RetitleIn,
+    ReviewTriggerIn,
+    RiskAcceptIn,
     RoleOverrideIn,
     RopaIn,
     ScheduleIn,
@@ -1279,6 +1282,81 @@ async def list_dsar_requests(request: Request) -> dict:
     return {"requests": await run_in_threadpool(ops.list_dsars)}
 
 
+@router.get("/privacy/dsar/aging")
+async def dsar_aging(request: Request) -> dict:
+    """SLA aging over the open DSAR clocks: how many requests sit in each
+    band to the statutory deadline, and the same split by request kind -- the
+    at-a-glance heatmap of where the queue is about to breach."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    rows = await run_in_threadpool(ops.list_dsars)
+    bands = {"overdue": 0, "d0_7": 0, "d8_14": 0, "d15_30": 0, "d30_plus": 0}
+    by_kind: dict[str, dict] = {}
+    open_rows = [r for r in rows if r.get("status") == "open"]
+    for r in open_rows:
+        dl = int(r.get("days_left", 0))
+        band = ("overdue" if dl < 0 else "d0_7" if dl <= 7
+                else "d8_14" if dl <= 14 else "d15_30" if dl <= 30
+                else "d30_plus")
+        bands[band] += 1
+        k = str(r.get("kind", "other"))
+        kb = by_kind.setdefault(k, {"overdue": 0, "d0_7": 0, "d8_14": 0,
+                                    "d15_30": 0, "d30_plus": 0, "total": 0})
+        kb[band] += 1
+        kb["total"] += 1
+    return {"open": len(open_rows), "bands": bands, "by_kind": by_kind,
+            "overdue": bands["overdue"],
+            "closing_soon": bands["overdue"] + bands["d0_7"]}
+
+
+@router.get("/privacy/transfer-map")
+async def transfer_map(request: Request) -> dict:
+    """Where personal data flows out: cross-border transfers drawn from the
+    Art. 30 register and any Transfer Impact Assessments -- destination,
+    recipients, and whether a Chapter V safeguard is recorded. The map behind
+    the paperwork."""
+    # Operate-gated to match /privacy/ropa: this surfaces the register's
+    # recipient and destination content, not the viewer-tier summary rows.
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    from maverick.assessment import list_saved
+    ropa = await run_in_threadpool(ops.list_ropa)
+    saved = await run_in_threadpool(list_saved)
+
+    _SAFE = ("scc", "standard contractual", "adequacy", "bcr",
+             "binding corporate", "chapter v", "art. 46", "article 46")
+
+    flows: list[dict] = []
+    for r in ropa:
+        transfers = str(r.get("transfers", "")).strip()
+        if not transfers or transfers.lower() in ("none", "n/a", "no"):
+            continue
+        low = transfers.lower()
+        flows.append({
+            "source": "RoPA",
+            "activity": r.get("activity", "") or r.get("controller", ""),
+            "destination": transfers[:300],
+            "recipients": str(r.get("recipients", ""))[:300],
+            "safeguarded": any(s in low for s in _SAFE),
+            "ref": r.get("id", ""),
+        })
+    # TIAs are, by definition, cross-border transfer assessments.
+    for s in saved:
+        if s.get("type") != "tia":
+            continue
+        flows.append({
+            "source": "TIA",
+            "activity": s.get("subject", ""),
+            "destination": s.get("subject", ""),
+            "recipients": "",
+            "safeguarded": s.get("residual_risk") in ("minimal", "low"),
+            "residual_risk": s.get("residual_risk", "?"),
+            "ref": s.get("id", ""),
+        })
+    unsafe = sum(1 for f in flows if not f["safeguarded"])
+    return {"flows": flows, "total": len(flows), "unsafeguarded": unsafe}
+
+
 @router.post("/privacy/dsar", status_code=201)
 async def open_dsar_request(request: Request, body: DsarIn) -> dict:
     require_permission(request, "operate")
@@ -1612,6 +1690,155 @@ async def decide_assessment_session(
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
     return record
+
+
+@router.post("/assess/sessions/{assessment_id}/accept-risk")
+async def accept_assessment_risk(
+    request: Request, assessment_id: str, body: RiskAcceptIn,
+) -> dict:
+    """Formally accept the residual risk with a named owner, rationale, and
+    expiry. A dated decision, not a permanent waiver -- it comes due again
+    when it expires. Audited."""
+    require_permission(request, "operate")
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        AssessmentTransitionError,
+        accept_risk,
+    )
+    who = _request_actor(request)
+    try:
+        record = await run_in_threadpool(
+            accept_risk, assessment_id[:64], accepted_by=who,
+            rationale=body.rationale, expires_days=body.expires_days,
+            expected_revision=body.expected_revision,
+        )
+    except (AssessmentConflict, AssessmentTransitionError) as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    return record
+
+
+@router.post("/assess/sessions/{assessment_id}/trigger-review")
+async def trigger_assessment_review(
+    request: Request, assessment_id: str, body: ReviewTriggerIn,
+) -> dict:
+    """Force a re-review now (or set a renewal date that flips it due). The
+    external-event hook: a contract renewal, a new sub-processor, a material
+    change. Audited."""
+    require_permission(request, "operate")
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        set_renewal,
+        trigger_review,
+    )
+    who = _request_actor(request)
+    try:
+        if body.renewal_at is not None:
+            record = await run_in_threadpool(
+                set_renewal, assessment_id[:64], renewal_at=body.renewal_at,
+                by=who, expected_revision=body.expected_revision,
+            )
+        else:
+            record = await run_in_threadpool(
+                trigger_review, assessment_id[:64], reason=body.reason,
+                by=who, expected_revision=body.expected_revision,
+            )
+    except AssessmentConflict as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    return record
+
+
+@router.get("/assess/trend")
+async def assessment_risk_trend(
+    request: Request, subject: str, type: str = "",
+) -> dict:
+    """A subject's residual-risk history across successive assessments -- the
+    re-review delta (risk moving up or down over time), oldest first."""
+    require_permission(request, "view")
+    from maverick.assessment import risk_trend
+    rows = await run_in_threadpool(risk_trend, subject[:300], type[:40])
+    direction = ""
+    if len(rows) >= 2:
+        rank = {"minimal": 0, "low": 1, "medium": 2, "high": 3}
+        a = rank.get(rows[-2]["residual_risk"], 0)
+        b = rank.get(rows[-1]["residual_risk"], 0)
+        direction = "up" if b > a else "down" if b < a else "flat"
+    return {"subject": subject, "type": type, "trend": rows,
+            "direction": direction}
+
+
+_BULK_IMPORT_MAX_ROWS = 500
+
+
+@router.post("/assess/bulk-import")
+async def bulk_import_assessments(
+    request: Request, body: BulkAssessmentImportIn,
+) -> dict:
+    """Queue a batch of assessments from a pasted CSV (subject,type[,note]).
+    Onboards a whole vendor list without one-by-one intake: each row becomes a
+    pending assessment stub ready to be interviewed. Bounded to
+    ``_BULK_IMPORT_MAX_ROWS`` per request; emits one summary audit event."""
+    require_permission(request, "operate")
+    import csv as _csv
+    import io
+
+    from maverick.assessment import (
+        TEMPLATES,
+        AssessmentSession,
+        save_session,
+    )
+    who = _request_actor(request)
+    rows = list(_csv.reader(io.StringIO(body.csv)))
+    created: list[dict] = []
+    errors: list[dict] = []
+    skipped_over_cap = 0
+    for i, row in enumerate(rows):
+        cells = [c.strip() for c in row if c is not None]
+        if not cells or not any(cells):
+            continue
+        subject = cells[0]
+        atype = (cells[1].lower() if len(cells) > 1 and cells[1] else "vendor_risk")
+        # Tolerate a single header row -- only ever the first line, so a real
+        # vendor literally named "Vendor" on a later row is not dropped.
+        if i == 0 and subject.lower() in ("subject", "vendor", "name"):
+            continue
+        # Bound the synchronous per-row work (each save_session is a disk
+        # write + memory-plane record); report the overflow rather than
+        # silently truncating.
+        if len(created) >= _BULK_IMPORT_MAX_ROWS:
+            skipped_over_cap += 1
+            continue
+        if atype not in TEMPLATES:
+            errors.append({"row": i + 1, "subject": subject,
+                           "error": f"unknown template type '{atype}'"})
+            continue
+        try:
+            session = AssessmentSession(type=atype, subject=subject[:300])
+            await run_in_threadpool(save_session, session)
+            created.append({"id": session.id, "subject": subject,
+                            "type": atype})
+        except Exception as e:  # noqa: BLE001 -- report the row, keep going
+            errors.append({"row": i + 1, "subject": subject, "error": str(e)})
+    try:  # best-effort: the import already committed each session atomically
+        from maverick.audit import record as _audit_record
+        _audit_record("ASSESSMENTS_BULK_IMPORTED", agent=who,
+                      created=len(created), errors=len(errors))
+    except Exception:  # pragma: no cover -- audit write never blocks the import
+        pass
+    return {"created": created, "errors": errors,
+            "created_count": len(created), "error_count": len(errors),
+            "skipped_over_cap": skipped_over_cap}
 
 
 @router.get("/assessment-memory/similar")

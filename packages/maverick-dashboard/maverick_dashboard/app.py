@@ -1853,7 +1853,8 @@ async def spend_page(request: Request) -> HTMLResponse:
 # One assessment engine, one workspace chassis per department: each
 # department page filters the same records/templates to its own types.
 PRIVACY_ASSESSMENT_TYPES = frozenset(
-    {"pia", "aira", "vendor_risk", "tia", "hipaa", "soc2", "pci_dss"})
+    {"pia", "dpia", "lia", "ccpa", "aira", "vendor_risk", "tia",
+     "hipaa", "soc2", "pci_dss"})
 FINANCE_ASSESSMENT_TYPES = frozenset(
     {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"})
 

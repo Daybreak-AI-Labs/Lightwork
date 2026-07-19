@@ -34,19 +34,22 @@ import time
 from pathlib import Path
 from typing import Any
 
+# The agent talks to the platform (or its standalone stand-ins) through the
+# backend seam only -- so the same app is the Lightwork-bundled build AND the
+# sold-on-its-own standalone agent, depending on capabilities.
+import backend
 import httpx
+from backend import (
+    AssessmentSession,
+    find_controls,
+    get_template,
+    save_session,
+)
+from capabilities import CAPS, STANDALONE, caps_summary
 from fastapi import FastAPI, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from mailsink import INBOX, start_mailsink
-
-# Real platform modules ------------------------------------------------------
-from maverick.assessment import AssessmentSession, get_template, save_session
-from maverick.audit import record
-from maverick.controls import find_controls
-from maverick.tools.email_tool import email_tool
-from maverick.tools.onetrust_tool import onetrust_tool
-from maverick.world_model import DEFAULT_DB, WorldModel
 from store import STORE, Case, OneTrustAssessment, Ticket
 
 HERE = Path(__file__).resolve().parent
@@ -62,34 +65,33 @@ ANALYST = "privacy-analyst-agent"
 app = FastAPI(title="PIA Concierge — external world (ServiceNow / mail / OneTrust)")
 
 
-def _world() -> WorldModel:
-    return WorldModel(DEFAULT_DB)
+def _world():
+    """The governed world model, or None in the standalone agent (no goals /
+    approval queue without the platform)."""
+    return backend.world()
 
 
 def _audit(kind: str, agent: str, goal_id: int | None, **payload: Any) -> None:
-    """Write to the real signed audit chain; never abort a request on audit error."""
-    try:
-        record(kind, agent=agent, goal_id=goal_id, **payload)
-    except Exception as exc:  # pragma: no cover - demo resilience
-        print(f"[audit] {kind} failed: {exc}")
+    """Write to the signed audit chain when the platform is present; a no-op
+    in the standalone agent (audit is a Lightwork feature)."""
+    backend.audit_record(kind, agent=agent, goal_id=goal_id, **payload)
 
 
 def _post_event(goal_id: int, agent: str, kind: str, content: str) -> None:
-    """Mirror a step onto the goal's REAL timeline (dashboard /chat/goal/{id})."""
+    """Mirror a step onto the goal's timeline (platform only)."""
+    w = _world()
+    if w is None:
+        return
     try:
-        _world().append_event(goal_id, agent, kind, content)
+        w.append_event(goal_id, agent, kind, content)
     except Exception as exc:  # pragma: no cover
         print(f"[goal-event] failed: {exc}")
 
 
 async def _send_email(to: str, subject: str, body: str) -> str:
-    """Send via the real email tool, off the event loop (the SMTP capture sink
-    shares this process's loop; a blocking send from a handler would deadlock)."""
-    tool = email_tool()
-    return await asyncio.to_thread(tool.fn, {
-        "op": "send", "to": to or "requester@example.com",
-        "subject": subject, "body": body,
-    })
+    """Send off the event loop (the in-process capture sink shares this loop;
+    a blocking send from a handler would deadlock)."""
+    return await asyncio.to_thread(backend.send_email, to, subject, body)
 
 
 # Plain-language phrasing for the intake interview; answers map onto the real
@@ -225,11 +227,7 @@ def _prefill_from_ticket(case: Case) -> list[dict]:
 
 
 def _doc_text_for_prefill(data: bytes, mime: str) -> str:
-    from maverick import privacy_ops
-    try:
-        return privacy_ops._document_text(data, mime)
-    except Exception:
-        return ""
+    return backend.extract_text(data, mime)
 
 
 def _prefills_from_bytes(case: Case, filename: str, data: bytes,
@@ -647,6 +645,11 @@ def _page(request: Request, template: str, **ctx: Any) -> HTMLResponse:
         "dashboard_url": DASHBOARD_URL,
         "n_mail": len(INBOX),
         "n_filed": len(STORE.onetrust),
+        # Capability context: templates hide platform-only links (the
+        # dashboard, signed audit) and can show the standalone banner.
+        "standalone": STANDALONE,
+        "caps": CAPS,
+        "caps_summary": caps_summary(),
     }
     base.update(ctx)
     return templates.TemplateResponse(request, template, base)
@@ -659,6 +662,12 @@ def _page(request: Request, template: str, **ctx: Any) -> HTMLResponse:
 async def index(request: Request) -> HTMLResponse:
     return _page(request, "index.html", tickets=list(STORE.tickets.values()),
                  cases=list(STORE.cases.values()), value=_program_value())
+
+
+@app.get("/about", response_class=HTMLResponse)
+async def about(request: Request) -> HTMLResponse:
+    """What the standalone agent does on its own vs. what Lightwork adds."""
+    return _page(request, "about.html")
 
 
 # ===========================================================================
@@ -741,9 +750,13 @@ async def webhook_pia(request: Request) -> JSONResponse:
         )
         STORE.tickets[number] = ticket
 
-    # REAL goal in the shared world — appears on the dashboard /goals page.
-    def _mk_goal() -> int:
+    # A governed goal in the shared world (platform only) — appears on the
+    # dashboard /goals page. Standalone has no world: gid stays None and the
+    # agent runs ungoverned but fully functional.
+    def _mk_goal() -> int | None:
         w = _world()
+        if w is None:
+            return None
         gid = w.create_goal(
             f"Privacy assessment: {ticket.system_name} ({number})",
             description=(f"{ticket.short_description} — requested by {ticket.requester} "
@@ -902,9 +915,8 @@ async def intake_followup_answer(
     if not case or case.stage != "followup":
         return JSONResponse({"ok": False}, status_code=404)
     aid = getattr(case, "assessment_id", "")
-    from maverick.assessment import answer_followup
     record = await asyncio.to_thread(
-        answer_followup, aid, followup_id.strip(), answer.strip(),
+        backend.answer_followup, aid, followup_id.strip(), answer.strip(),
         case.requester)
     if record is None:
         return JSONResponse({"ok": False, "error": "unknown question"},
@@ -1068,29 +1080,11 @@ def _parse_free_answer(text: str) -> str | None:
 
 
 def _llm_interpret(question: str, text: str) -> str | None:
-    """Optional upgrade: when a provider key is configured, let a model read
-    the ambiguous reply. Errors and absent keys degrade to None (the scripted
-    clarification) — the demo never depends on the network."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return None
-    try:
-        from maverick.budget import Budget
-        from maverick.llm import LLM, model_for_role
-        llm = LLM(model_for_role("summarizer"))
-        resp = llm.complete(
-            system=("You classify a respondent's reply to one yes/no privacy "
-                    "questionnaire question. Answer with exactly one word: "
-                    "yes, no, na, or unknown."),
-            messages=[{"role": "user",
-                       "content": f"Question: {question}\nReply: {text[:1000]}"}],
-            budget=Budget(max_dollars=0.25, max_output_tokens=1000),
-            max_tokens=10,
-        )
-        word = (resp.text or "").strip().lower().split()
-        return word[0] if word and word[0] in ("yes", "no", "na", "unknown") else None
-    except Exception as exc:  # pragma: no cover - network/key variance
-        print(f"[interpret-llm] degraded to scripted clarification: {exc}")
-        return None
+    """Optional upgrade: on the platform, with a provider key, a model reads
+    an ambiguous reply. Standalone (no LLM assist) and any error degrade to
+    None -- the scripted clarification -- so the agent never needs the
+    network."""
+    return backend.llm_interpret(question, text)
 
 
 @app.post("/intake/{case_id}/carry-forward")
@@ -1107,8 +1101,8 @@ async def intake_carry_forward(case_id: str) -> JSONResponse:
         return JSONResponse({"ok": True, "prefilled": []})
     prior_answers: dict[str, dict] = {}
     if getattr(prior_case, "assessment_id", ""):
-        from maverick.assessment import load_saved
-        record = await asyncio.to_thread(load_saved, prior_case.assessment_id)
+        record = await asyncio.to_thread(backend.load_saved,
+                                         prior_case.assessment_id)
         prior_answers = (record or {}).get("answers") or {}
     if not prior_answers:
         # Seeded/legacy history has no saved platform record; the demo case
@@ -1217,12 +1211,12 @@ async def intake_upload(case_id: str, file: UploadFile) -> JSONResponse:
         return JSONResponse({"ok": False}, status_code=404)
     # Bounded read: the intake link is unauthenticated by design, so an
     # oversized body must fail fast instead of buffering without limit.
-    from maverick.attachments import MAX_FILE_BYTES
-    data = await file.read(MAX_FILE_BYTES + 1)
-    if len(data) > MAX_FILE_BYTES:
+    data = await file.read(backend.MAX_FILE_BYTES + 1)
+    if len(data) > backend.MAX_FILE_BYTES:
         return JSONResponse(
-            {"ok": False, "error": f"file too large (limit {MAX_FILE_BYTES} "
-                                   "bytes)", "uploads": case.uploads},
+            {"ok": False, "error": f"file too large (limit "
+                                   f"{backend.MAX_FILE_BYTES} bytes)",
+             "uploads": case.uploads},
             status_code=400)
     mime = file.content_type or "application/octet-stream"
     filename = file.filename or "upload"
@@ -1245,6 +1239,9 @@ async def intake_discover(case_id: str) -> JSONResponse:
     case = STORE.cases.get(case_id)
     if not case:
         return JSONResponse({"ok": False}, status_code=404)
+    if not backend.discovery_available():
+        # Connected-source discovery ships with Lightwork's connectors.
+        return JSONResponse({"ok": True, "hits": [], "unavailable": True})
     hits = await asyncio.to_thread(_discover_mock_documents, case.subject)
     gid = getattr(case, "goal_id", None)
     _audit("TOOL_CALL", ANALYST, gid, tool="doc_discovery", case=case_id,
@@ -1263,6 +1260,9 @@ async def intake_attach_found(case_id: str, request: Request) -> JSONResponse:
     case = STORE.cases.get(case_id)
     if not case:
         return JSONResponse({"ok": False}, status_code=404)
+    if not backend.discovery_available():
+        return JSONResponse({"ok": False, "error": "document discovery "
+                             "requires Lightwork connectors"}, status_code=400)
     body = await request.json()
     source = str(body.get("source", ""))
     if source != "msgraph":
@@ -1364,27 +1364,31 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
             "by": rec.get("by", ""),
         } for qid, rec in case.answers.items()]
 
-        # REAL approval row -> the dashboard's /approvals queue.
+        # Governed approval row -> the dashboard's /approvals queue (platform
+        # only). Standalone has no world queue: approval_id stays "" and the
+        # human decision happens purely in the OneTrust review screen.
         risk = result.risk_rating if result.risk_rating in ("high", "medium", "low") else "medium"
         findings_txt = "; ".join(
             f"[{f.severity}] {f.section}: {f.question}" for f in result.findings) or "no findings"
         controls_txt = "; ".join(f"{c['id']} {c['title']}" for c in controls) or "none"
         w = _world()
-        approval_id = w.create_approval(
-            f"Approve PIA for {case.subject} (risk: {result.risk_rating.upper()})",
-            risk=risk,
-            scope=f"onetrust:/api/assessment/v2/assessments · ticket {case.ticket_number}",
-            detail=(f"First-pass assessment {case.id} — inherent {result.inherent_risk.upper()} "
-                    f"→ residual {result.residual_risk.upper()} "
-                    f"({result.controls_in_place} of {result.risks_in_scope} risk areas controlled), "
-                    f"{result.answered}/{result.total} answered, "
-                    f"{len(result.findings)} findings. Findings: {findings_txt}. "
-                    f"Required controls: {controls_txt}. Uploads: {', '.join(case.uploads) or 'none'}. "
-                    # The token the dashboard's review pop-out keys on.
-                    f"[assessment:{getattr(case, 'assessment_id', '') or 'unsaved'}]"),
-            provenance="goal",
-            requested_by=AGENT,
-        )
+        approval_id: int | str = ""
+        if w is not None:
+            approval_id = w.create_approval(
+                f"Approve PIA for {case.subject} (risk: {result.risk_rating.upper()})",
+                risk=risk,
+                scope=f"onetrust:/api/assessment/v2/assessments · ticket {case.ticket_number}",
+                detail=(f"First-pass assessment {case.id} — inherent {result.inherent_risk.upper()} "
+                        f"→ residual {result.residual_risk.upper()} "
+                        f"({result.controls_in_place} of {result.risks_in_scope} risk areas controlled), "
+                        f"{result.answered}/{result.total} answered, "
+                        f"{len(result.findings)} findings. Findings: {findings_txt}. "
+                        f"Required controls: {controls_txt}. Uploads: {', '.join(case.uploads) or 'none'}. "
+                        # The token the dashboard's review pop-out keys on.
+                        f"[assessment:{getattr(case, 'assessment_id', '') or 'unsaved'}]"),
+                provenance="goal",
+                requested_by=AGENT,
+            )
         return result_dict, controls, approval_id
 
     result_dict, controls, approval_id = await asyncio.to_thread(_score_and_park)
@@ -1431,7 +1435,6 @@ async def _file_under_review(case: Case) -> None:
     REAL integration tool — input + analysis are the agent's job; the human
     approves inside OneTrust."""
     gid = getattr(case, "goal_id", None)
-    ot = onetrust_tool()
     body = {
         "name": f"PIA — {case.subject}",
         "templateName": "Privacy Impact Assessment",
@@ -1443,9 +1446,7 @@ async def _file_under_review(case: Case) -> None:
         "sourceTicket": case.ticket_number,
         "caseId": case.id,
     }
-    filed = await asyncio.to_thread(ot.fn, {
-        "op": "post", "path": "/api/assessment/v2/assessments",
-        "body": body, "confirm": True})
+    filed = await asyncio.to_thread(backend.file_onetrust, body)
     _audit("TOOL_CALL", ANALYST, gid, tool="onetrust", op="post",
            path="/api/assessment/v2/assessments", case=case.id,
            status="Under Review", outcome=filed[:120])
@@ -1498,8 +1499,7 @@ def _open_followups(case: Case) -> list[dict]:
     if not aid:
         return []
     try:
-        from maverick.assessment import load_saved
-        record = load_saved(aid) or {}
+        record = backend.load_saved(aid) or {}
         return [f for f in (record.get("followups") or []) if not f.get("answer")]
     except Exception:  # pragma: no cover - demo resilience
         return []
@@ -1531,8 +1531,13 @@ async def _reopen_for_followups(case: Case) -> None:
 
 
 def _approval_state(case: Case) -> tuple[str, str]:
+    w = _world()
+    if w is None or not case.approval_id:
+        # Standalone: no world approval row. Decisions come straight through
+        # the OneTrust screen (onetrust_decide), not this poll.
+        return "none", ""
     try:
-        a = _world().get_approval(int(case.approval_id))
+        a = w.get_approval(int(case.approval_id))
         if a is None:
             return "missing", ""
         return a.status, a.decided_by or ""
@@ -1552,13 +1557,12 @@ def _decide_saved_assessment(case: Case, decision: str, decided_by: str) -> None
     if not aid:
         return
     try:
-        from maverick.assessment import decide_assessment, load_saved
-        rec = load_saved(aid)
+        rec = backend.load_saved(aid)
         if rec is None or rec.get("status") == decision:
             return
-        decide_assessment(aid, decision, decided_by=decided_by,
-                          cadence_days=365,
-                          expected_revision=rec["revision"])
+        backend.decide_assessment(aid, decision, decided_by=decided_by,
+                                  cadence_days=365,
+                                  expected_revision=rec["revision"])
     except Exception as exc:  # pragma: no cover - demo resilience
         print(f"[decide] assessment record mirror failed: {exc}")
 
@@ -1762,9 +1766,10 @@ async def onetrust_decide(request: Request) -> JSONResponse:
              "the requester — answers land back here automatically"},
             status_code=409)
     status = "approved" if decision == "approve" else "denied"
-    if case.approval_id:
+    w = _world()
+    if w is not None and case.approval_id:
         await asyncio.to_thread(
-            _world().decide_approval, int(case.approval_id), status,
+            w.decide_approval, int(case.approval_id), status,
             decided_by=reviewer)
     if decision == "approve":
         await _complete_case(case, reviewer, via="onetrust")
@@ -1776,76 +1781,63 @@ async def onetrust_decide(request: Request) -> JSONResponse:
 # ---- Append documents to a vendor we've already assessed -------------------
 def _vendor_previous_gaps(subject: str) -> set[str]:
     """Missing clauses from the vendor's most recent DPA review (if any) —
-    so a newly appended document can be reported as closing them."""
-    from maverick import privacy_ops
-    gaps: set[str] = set()
-    try:
-        for summary in privacy_ops.list_dpa_reviews():
-            if ((summary.get("vendor") or "").strip().lower()
-                    != subject.strip().lower()):
-                continue
-            full = privacy_ops.get_dpa_review(summary["id"]) or {}
-            gaps = {c["requirement"] for c in full.get("clauses", [])
-                    if c.get("status") == "missing"}
-    except Exception:  # pragma: no cover - demo resilience
-        pass
-    return gaps
+    so a newly appended document can be reported as closing them. Empty in
+    standalone (the Art. 28 clause engine is a Lightwork feature)."""
+    return backend.previous_dpa_gaps(subject)
 
 
 def _analyze_addendum(ot: OneTrustAssessment, case: Case | None,
                       filename: str, data: bytes, mime: str) -> dict:
-    """Honest first-pass analysis of a document added AFTER the assessment
-    existed. DPA-looking text runs through the real Art. 28 clause review
-    (the record also lands in the /privacy workspace); anything unreadable is
-    said to be unreadable and flagged for a human."""
-    from maverick import privacy_ops
+    """First-pass analysis of a document added AFTER the assessment existed.
+    On the platform, DPA-looking text runs the real Art. 28 clause review and
+    the record lands in the /privacy workspace. In the standalone agent that
+    engine isn't present, so the addendum is attached with an honest
+    metadata-only summary and flagged for human review."""
     gid = getattr(case, "goal_id", None) if case else None
-    extraction: dict = {}
-    try:
-        text = privacy_ops._document_text(data, mime, _metadata=extraction)
-    except Exception:
-        text = ""
+    text = backend.extract_text(data, mime)
     entry: dict[str, Any] = {"at": time.time(), "filename": filename,
                              "summary": "", "gaps": [], "re_review": False,
                              "dpa_review_id": ""}
     low = f"{filename} {text[:4000]}".lower()
-    dpa_like = text.strip() and any(
-        k in low for k in ("data processing", "dpa", "processor",
-                           "art. 28", "article 28"))
-    if dpa_like:
+    dpa_like = any(k in low for k in ("data processing", "dpa", "processor",
+                                      "art. 28", "article 28"))
+    review = None
+    if dpa_like and CAPS["dpa_clause_review"]:
+        # It knows we reviewed this vendor before: diff the new document
+        # against the gaps the LAST review left open.
+        prev_missing = _vendor_previous_gaps(ot.subject)
         try:
-            # It knows we reviewed this vendor before: diff the new document
-            # against the gaps the LAST review left open.
-            prev_missing = _vendor_previous_gaps(ot.subject)
-            review = privacy_ops.review_dpa(
-                ot.subject, text, document_name=filename, reviewed_by=AGENT,
-                _document_evidence=privacy_ops._build_document_evidence(
-                    data=data, text=text, mime=mime, source="upload",
-                    doc_id=filename, ref=None, extraction=extraction))
-            missing = [c["requirement"] for c in review.get("clauses", [])
-                       if c.get("status") == "missing"]
-            entry["gaps"] = missing[:6]
-            entry["dpa_review_id"] = review.get("id", "")
-            entry["re_review"] = (bool(missing)
-                                  or review.get("residual_risk") in ("high",
-                                                                     "medium"))
-            entry["summary"] = (
-                f"Art. 28 clause review: {review.get('clauses_present', 0)} of "
-                f"{review.get('clauses_total', 0)} clauses present, residual "
-                f"risk {str(review.get('residual_risk', '?')).upper()}."
-                + (" Missing clauses flagged — re-review recommended."
-                   if entry["re_review"] else " No gaps — filed for the record."))
-            closed = sorted(prev_missing - set(missing))
-            if closed:
-                entry["closed_gaps"] = closed[:6]
-                entry["summary"] += (
-                    f" Closes {len(closed)} gap(s) from the last review: "
-                    f"{'; '.join(closed[:3])}.")
+            review = backend.dpa_clause_review(
+                ot.subject, text, filename=filename, mime=mime, data=data)
         except Exception as exc:
             print(f"[addendum] clause review unavailable: {exc}")
-            entry["re_review"] = True
-            entry["summary"] = ("Text extracted but the clause review is "
-                                "unavailable — attached for human review.")
+            review = None
+    if review is not None:
+        missing = [c["requirement"] for c in review.get("clauses", [])
+                   if c.get("status") == "missing"]
+        entry["gaps"] = missing[:6]
+        entry["dpa_review_id"] = review.get("id", "")
+        entry["re_review"] = (bool(missing)
+                              or review.get("residual_risk") in ("high",
+                                                                 "medium"))
+        entry["summary"] = (
+            f"Art. 28 clause review: {review.get('clauses_present', 0)} of "
+            f"{review.get('clauses_total', 0)} clauses present, residual "
+            f"risk {str(review.get('residual_risk', '?')).upper()}."
+            + (" Missing clauses flagged — re-review recommended."
+               if entry["re_review"] else " No gaps — filed for the record."))
+        closed = sorted(prev_missing - set(missing))
+        if closed:
+            entry["closed_gaps"] = closed[:6]
+            entry["summary"] += (
+                f" Closes {len(closed)} gap(s) from the last review: "
+                f"{'; '.join(closed[:3])}.")
+    elif dpa_like and not CAPS["dpa_clause_review"]:
+        # Standalone: recognise the document type, flag for human review.
+        entry["re_review"] = True
+        entry["summary"] = ("Looks like a DPA — the Art. 28 clause-by-clause "
+                            "review comes with Lightwork. Attached for human "
+                            "review.")
     elif text.strip():
         entry["summary"] = (f"Text extracted ({len(text):,} chars); no DPA "
                             "clause set detected — attached for the record.")
@@ -1867,10 +1859,9 @@ def _analyze_addendum(ot: OneTrustAssessment, case: Case | None,
 
 
 async def _read_upload_bounded(file: UploadFile) -> tuple[bytes | None, str]:
-    from maverick.attachments import MAX_FILE_BYTES
-    data = await file.read(MAX_FILE_BYTES + 1)
-    if len(data) > MAX_FILE_BYTES:
-        return None, f"file too large (limit {MAX_FILE_BYTES} bytes)"
+    data = await file.read(backend.MAX_FILE_BYTES + 1)
+    if len(data) > backend.MAX_FILE_BYTES:
+        return None, f"file too large (limit {backend.MAX_FILE_BYTES} bytes)"
     return data, ""
 
 

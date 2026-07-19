@@ -1,5 +1,34 @@
 # PIA Concierge — governed privacy-assessment demo
 
+## Two SKUs from one codebase
+
+PIA Concierge sells two ways:
+
+* **Standalone agent** — sold on its own. Run `bash run_standalone.sh` (sets
+  `PIA_STANDALONE=1`). The agent takes the intake (chat / voice / guided),
+  scores the risk on its **own self-contained engine** (`pia_engine.py`,
+  imports nothing from `maverick`), files into OneTrust, and a human reviews
+  and approves there. There is **no audit trail, no governance, no learning,
+  no dashboard, and no control-catalog citations** — those are Lightwork
+  features. The agent still works end to end. `/about` shows the live
+  capability matrix.
+* **Lightwork platform** — the same agent bundled with the governed engine,
+  the Ed25519 signed audit chain, the world-model approval queue, the privacy
+  workspace + program insights, cross-run learning, and the connectors.
+
+The seam is `capabilities.py` (what's on) and `backend.py` (binds each
+capability to the platform or its standalone stand-in). The app never branches
+on the mode itself — set `PIA_STANDALONE=1` to preview the standalone SKU on a
+machine that has the platform installed.
+
+**What a standalone client gives up (and what unlocks it):** the signed audit
+chain, the governed approval queue and program workspace, the full framework
+catalog with control citations, cross-run memory / suggested answers,
+connected-source document discovery, the Art. 28 clause-by-clause DPA review,
+and model-assisted chat understanding — all of it comes with Lightwork.
+
+---
+
 **The agent does input + analysis; the human approves in OneTrust.** A
 privacy-assessment request submitted in any ticketing system is picked up by
 Lightwork, which interviews the requester — a full **chat experience** (typed

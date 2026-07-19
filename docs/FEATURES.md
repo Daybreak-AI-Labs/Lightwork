@@ -436,6 +436,28 @@ here.
   WINS over the built-in of the same type; deleting the override restores
   the built-in, which is never modified. Scoring identical; strict
   human-readable validation; saves audited (`TEMPLATE_SAVED`).
+- **Privacy framework coverage** — built-in questionnaires now span the
+  assessments a program actually runs: PIA (lightweight screen) plus the
+  formal **DPIA** (GDPR Art. 35, distinct and deeper), **LIA** (Art. 6(1)(f)
+  three-part legitimate-interest test), **CCPA/CPRA** (California), the
+  **TIA** (Schrems II), AIRA, vendor risk, HIPAA/SOC 2/PCI DSS.
+- **Assessment lifecycle depth** — beyond approve/reject: **risk acceptance**
+  (`accept_risk`, `POST /assess/sessions/{id}/accept-risk`) records a named
+  owner, rationale, and expiry, and comes due again when it lapses;
+  **re-review triggers** (`trigger_review` / `set_renewal`,
+  `/trigger-review`) force a record due now for an external event (contract
+  renewal, new sub-processor) or on a renewal date; the worklist's
+  `review_due_reason` says why. **Vendor risk trend** (`risk_trend`,
+  `/assess/trend`) shows residual risk moving up/down across successive
+  reviews in the pop-out. **Bulk import** (`/assess/bulk-import`) queues a
+  CSV of vendors as pending assessments. All revision-checked and audited
+  (`RISK_ACCEPTED`, `REVIEW_TRIGGERED`, `RENEWAL_SET`,
+  `ASSESSMENTS_BULK_IMPORTED`).
+- **Program insights** on `/privacy` — a **DSAR SLA aging** heatmap
+  (`/privacy/dsar/aging`: open requests bucketed by days to the statutory
+  deadline, by kind) and a **cross-border transfer map**
+  (`/privacy/transfer-map`: flows drawn from the Art. 30 register and TIAs
+  with a Chapter V safeguard flag).
 - **Privacy ops record types** (`privacy_ops.py`, `/api/v1/privacy/*`,
   tabs on `/privacy`; `[privacy_ops] enable`, wizard step) — the "nimble
   OneTrust" data plane, every engine deterministic and explainable:
