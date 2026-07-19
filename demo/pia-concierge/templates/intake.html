@@ -215,7 +215,11 @@ document.querySelectorAll('.fu-q').forEach(function (row) {
       assessment in OneTrust — no second interview needed.</span>
     {% else %}
     <span class="muted">The agent scored the risk, mapped the controls, and filed the assessment
-      into OneTrust as <b>Under Review</b>. A person approves it there.</span>
+      into OneTrust as <b>Under Review</b>. A person approves it there.
+      {% if value and (value.filed_elapsed or value.intake_elapsed) %}
+      Ticket to filed took <b>{{ value.filed_elapsed or value.intake_elapsed }}</b>{% if value.auto_answered %}
+      — {{ value.auto_answered }} of {{ value.questions_total }} answers came from evidence on file{% endif %}.
+      {% endif %}</span>
     {% endif %}
   </div>
 </div>

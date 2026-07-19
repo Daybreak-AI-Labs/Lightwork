@@ -86,6 +86,7 @@ class Case:
     decided_by: str = ""
     onetrust_id: str = ""
     created_at: float = field(default_factory=_now)
+    submitted_at: float = 0.0
     events: list[dict] = field(default_factory=list)
 
     def log(self, text: str) -> None:
