@@ -18,9 +18,11 @@ WORKDIR /opt/pia-concierge
 COPY requirements-standalone.txt ./
 RUN pip install --no-cache-dir -r requirements-standalone.txt
 
-# The standalone agent: app + vendored engine + templates. No maverick.
+# The standalone agent: app + vendored engine + the verified OneTrust wire
+# client and its deterministic advisors + templates. No maverick.
 COPY app.py backend.py capabilities.py pia_engine.py store.py mailsink.py \
-     serve_standalone.py ./
+     onetrust_client.py ot_mock.py notice_check.py contract_guard.py \
+     value_ledger.py serve_standalone.py ./
 COPY templates/ templates/
 COPY static/ static/
 

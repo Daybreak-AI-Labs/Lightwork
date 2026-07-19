@@ -53,7 +53,7 @@ addendum to the existing OneTrust record — no second interview.
 | Real (actual product code) | Simulated (this harness) |
 |---|---|
 | Goal + live timeline on the dashboard (`/goals`, `/chat/goal/{id}`) | ServiceNow tenant (`:8890/servicenow`) — fires a real HTTP webhook |
-| PIA scoring — `maverick.assessment` (GDPR Art. 35 template) | OneTrust tenant (`:8890/onetrust` + `/ot-api`) — receives the real tool's POST |
+| PIA scoring — `maverick.assessment` (GDPR Art. 35 template) | OneTrust tenant (`:8890/onetrust` + `/ot-api`) — speaks the field-verified wire protocol (see `ONETRUST-INTEGRATION.md`) |
 | Control mapping — `maverick.controls` (GDPR/ISO 27001/SOC 2/NIST/HIPAA citations) | Requester mailbox (`:8890/mail`) — real SMTP+STARTTLS delivery, captured locally |
 | Approval — real world-model approval row; the OneTrust Approve button (and the Lightwork queue) both decide it | Requester questionnaire (`:8890/intake/{case}`) — chat (type/voice) or guided |
 | Email send — `maverick.tools.email_tool` (SMTP) | SharePoint tenant (`:8890/graph-sim`) — Graph-shaped search + download, seeded with each vendor's SOW/MSA/DPA/security PDFs |

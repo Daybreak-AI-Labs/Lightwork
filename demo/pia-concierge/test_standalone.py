@@ -51,20 +51,20 @@ def _clean_store(sa_app, monkeypatch):
 
     monkeypatch.setattr(sa_app, "_send_email", _no_email)
 
-    # File "to OneTrust" in-process (a live server would take the real httpx
-    # POST; the flow logic is identical).
-    def _fake_file(body):
-        ot_id = sa_app.STORE.next_onetrust_id()
-        sa_app.STORE.onetrust[ot_id] = sa_app.OneTrustAssessment(
-            assessment_id=ot_id, name=body["name"],
-            template=body["templateName"], subject=body["subject"],
-            status=body.get("status") or "Under Review",
-            risk_level=body.get("riskLevel", "unknown"),
-            result=body.get("result") or {}, case_id=body.get("caseId", ""),
-            controls=body.get("controls") or [])
-        return f'ok (201): {{"assessmentId": "{ot_id}"}}'
-
-    monkeypatch.setattr(sa_app.backend, "file_onetrust", _fake_file)
+    # Bind the wire client to the in-process mock tenant over ASGI (a live
+    # deployment takes the same calls over real HTTP; the protocol is
+    # identical — that is the point of the mock enforcing the shapes).
+    from starlette.testclient import TestClient
+    sys.path.insert(0, str(HERE))
+    try:
+        import ot_mock
+        from onetrust_client import OneTrustClient
+    finally:
+        sys.path.remove(str(HERE))
+    ot_mock.reset_mock()
+    tc = TestClient(sa_app.app)
+    monkeypatch.setattr(sa_app.backend, "onetrust_client",
+                        lambda: OneTrustClient(base_url="/ot-api", http=tc))
     yield
 
 

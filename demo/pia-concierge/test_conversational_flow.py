@@ -96,21 +96,20 @@ def _mkcase(demo_app, subject="Acme CRM", case_id="LW-PIA-T001",
     return case
 
 
-def _fake_file_onetrust(demo_app):
-    """Simulate the OneTrust POST the backend would make (the HTTP hop needs a
-    live server; the record shape is identical)."""
-    def _file(body):
-        ot_id = demo_app.STORE.next_onetrust_id()
-        demo_app.STORE.onetrust[ot_id] = demo_app.OneTrustAssessment(
-            assessment_id=ot_id, name=body["name"],
-            template=body["templateName"], subject=body["subject"],
-            status=body.get("status") or "Under Review",
-            risk_level=body.get("riskLevel", "unknown"),
-            result=body.get("result") or {},
-            case_id=body.get("caseId", ""),
-            controls=body.get("controls") or [])
-        return f'ok (201): {{"assessmentId": "{ot_id}"}}'
-    return _file
+def _wire_onetrust(demo_app, monkeypatch):
+    """Bind the wire client to the in-process mock tenant over ASGI — the
+    protocol run then exercises every verified shape end-to-end."""
+    from starlette.testclient import TestClient
+    sys.path.insert(0, str(HERE))
+    try:
+        import ot_mock
+        from onetrust_client import OneTrustClient
+    finally:
+        sys.path.remove(str(HERE))
+    ot_mock.reset_mock()
+    tc = TestClient(demo_app.app)
+    monkeypatch.setattr(demo_app.backend, "onetrust_client",
+                        lambda: OneTrustClient(base_url="/ot-api", http=tc))
 
 
 def _upload(name: str, data: bytes, mime: str = "application/pdf") -> UploadFile:
@@ -166,8 +165,7 @@ def test_interpret_asks_for_clarification_instead_of_guessing(demo_app):
 # OneTrust-first: submit files Under Review; the decision happens in OneTrust
 # --------------------------------------------------------------------------- #
 def _submit(demo_app, monkeypatch, case):
-    monkeypatch.setattr(demo_app.backend, "file_onetrust",
-                        _fake_file_onetrust(demo_app))
+    _wire_onetrust(demo_app, monkeypatch)
     for qid, (ans, note) in demo_app._DEMO_ANSWERS.items():
         case.answers[qid] = {"answer": ans, "note": note}
     asyncio.run(demo_app.intake_submit(_request("POST"), case.id))

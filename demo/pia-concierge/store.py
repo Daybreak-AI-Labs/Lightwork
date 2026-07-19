@@ -57,6 +57,14 @@ class OneTrustAssessment:
     # stuff"): [{at, filename, summary, gaps, re_review, dpa_review_id}].
     addenda: list[dict] = field(default_factory=list)
     needs_re_review: bool = False
+    # Wire-protocol state (the mock tenant enforces the verified shapes):
+    # export-shaped sections/questions, per-question response entries, and
+    # the launch metadata a real tenant requires.
+    questions: list[dict] = field(default_factory=list)
+    responses: dict[str, list[dict]] = field(default_factory=dict)
+    respondent: str = ""
+    org_group: str = ""
+    submitted_on: str = ""
     decided_by: str = ""
     decided_at: float = 0.0
     filed_at: float = field(default_factory=_now)
