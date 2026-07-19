@@ -436,6 +436,57 @@ def test_value_strip_hidden_before_any_filing(demo_app):
 
 
 # --------------------------------------------------------------------------- #
+# Lived-in tenant fixtures (PIA_SEED_TENANT)
+# --------------------------------------------------------------------------- #
+def test_tenant_seed_is_opt_in_and_idempotent(demo_app, monkeypatch):
+    monkeypatch.delenv("PIA_SEED_TENANT", raising=False)
+    demo_app._seed_tenant()
+    assert not demo_app.STORE.onetrust
+    monkeypatch.setenv("PIA_SEED_TENANT", "1")
+    demo_app._seed_tenant()
+    n = len(demo_app.STORE.onetrust)
+    assert n == len(demo_app._TENANT_VENDORS)
+    demo_app._seed_tenant()   # second call must not double-seed
+    assert len(demo_app.STORE.onetrust) == n
+
+
+def test_tenant_seed_shapes_a_years_history(demo_app, monkeypatch):
+    monkeypatch.setenv("PIA_SEED_TENANT", "1")
+    demo_app._seed_tenant()
+    records = list(demo_app.STORE.onetrust.values())
+    by_status: dict[str, int] = {}
+    for a in records:
+        by_status[a.status] = by_status.get(a.status, 0) + 1
+    assert by_status["Under Review"] == 3
+    assert by_status["Sent back"] == 1
+    assert by_status["Completed"] == len(records) - 4
+    # Every record has a matching case and ticket; nothing touched the world.
+    for a in records:
+        assert a.case_id in demo_app.STORE.cases
+    assert any(a.addenda for a in records)
+    assert any(a.needs_re_review for a in records)
+    assert demo_app._world().pending_approvals() == []
+    # The value strip has program-scale numbers to show.
+    v = demo_app._program_value()
+    assert v["filed"] == len(records) and v["saved_hours"] > 0
+    html = asyncio.run(demo_app.index(_request())).body.decode()
+    assert 'id="value-strip"' in html
+
+
+def test_seeded_vendor_supports_memory_and_carry_forward(demo_app, monkeypatch):
+    monkeypatch.setenv("PIA_SEED_TENANT", "1")
+    demo_app._seed_tenant()
+    case = _mkcase(demo_app, subject="Wayne Payments",
+                   case_id="LW-PIA-T020", ticket="PRV-T-20")
+    html = asyncio.run(demo_app.intake(_request(), case.id)).body.decode()
+    assert 'id="appendCard"' in html   # the vendor is known
+    resp = asyncio.run(demo_app.intake_carry_forward(case.id))
+    payload = json.loads(resp.body)
+    assert len(payload["prefilled"]) == 10   # seeded interview carries over
+    assert all("last review" in p["source"] for p in payload["prefilled"])
+
+
+# --------------------------------------------------------------------------- #
 # Pages: the selectable chat/guided experience; suggestions panel is gone
 # --------------------------------------------------------------------------- #
 def test_intake_page_offers_both_modes_and_voice_without_suggestions(demo_app):

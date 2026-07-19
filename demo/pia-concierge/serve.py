@@ -6,8 +6,9 @@ critically, giving the Ed25519 audit chain its required single writer: the
 dashboard's approval-decision audit rows and the concierge's agent-step rows
 chain through the same signer, so `maverick audit verify` stays green.
 
-  :8765  maverick_dashboard.app:app  (goals · approvals · assessments · audit)
-  :8890  app:app                     (ServiceNow · inbox · questionnaire · OneTrust)
+  :8765  maverick_dashboard.app:app  (goals · workspaces · audit)
+  :8890  app:app                     (ServiceNow · inbox · chat/guided intake ·
+                                      OneTrust review & approve)
 """
 from __future__ import annotations
 
