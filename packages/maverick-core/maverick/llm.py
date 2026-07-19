@@ -1117,7 +1117,9 @@ class LLM:
                         max(0.0, (budget.max_wall_seconds - budget.elapsed()) * 1000.0)
                     )
                     tag_span_budget(span)
-                    race_budget_ms = span.remaining() or None
+                    # An already-spent wall (remaining() == 0.0) must bound the
+                    # race at zero -- it is not "no budget" (None = unbounded).
+                    race_budget_ms = span.remaining()
 
                 async def _backup():
                     await _asyncio.sleep(hedge / 1000.0)

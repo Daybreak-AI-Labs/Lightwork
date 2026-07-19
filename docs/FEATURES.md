@@ -458,6 +458,19 @@ here.
   deadline, by kind) and a **cross-border transfer map**
   (`/privacy/transfer-map`: flows drawn from the Art. 30 register and TIAs
   with a Chapter V safeguard flag).
+- **Privacy command center** (`/privacy/board`, `GET /api/v1/privacy/board`,
+  operate-gated) — the whole program on one live executive board, every
+  number from the operating record: KPI tiles with 30-day delta chips and
+  sparklines; a residual-risk donut and per-framework bars that
+  **cross-filter** the board on click (plus a 30d/90d/12m time slicer); the
+  **risk burn-down** (inherent → residual — the risk the program removed);
+  12 months of opened-vs-decided throughput; the DSAR SLA runway stacked by
+  kind; transfer safeguard coverage; AI Act tiers; **posture gauges** that
+  are real ratios out of the registers (DSAR SLA, review cadence, transfer
+  safeguards, incident 72h clock, DPA clause coverage — never a synthetic
+  score); and a drill-through of the records behind the numbers. One
+  aggregate round trip; hand-rolled SVG (no chart deps); auto-refreshes
+  every 60s; Present mode for a full-screen pitch.
 - **Privacy ops record types** (`privacy_ops.py`, `/api/v1/privacy/*`,
   tabs on `/privacy`; `[privacy_ops] enable`, wizard step) — the "nimble
   OneTrust" data plane, every engine deterministic and explainable:
