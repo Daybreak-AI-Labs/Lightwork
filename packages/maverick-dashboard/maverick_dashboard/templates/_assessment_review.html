@@ -37,6 +37,8 @@
         <option value="0">none</option>
       </select>
     </label>
+    <button class="btn" id="arv-trigger" style="display:none;" title="Force a re-review now (renewal, new sub-processor, material change)">Re-review now</button>
+    <button class="btn" id="arv-accept" style="display:none;" title="Formally accept the residual risk with a rationale and expiry">Accept risk</button>
     <button class="btn" id="arv-reject" style="display:none;">Reject</button>
     <button class="btn btn--primary" id="arv-approve" style="display:none;">Approve</button>
   </div>
@@ -54,6 +56,8 @@
     const statusEl = document.getElementById('arv-status');
     const approveBtn = document.getElementById('arv-approve');
     const rejectBtn = document.getElementById('arv-reject');
+    const acceptBtn = document.getElementById('arv-accept');
+    const triggerBtn = document.getElementById('arv-trigger');
     const cadenceWrap = document.getElementById('arv-cadence-wrap');
     const cadenceSel = document.getElementById('arv-cadence');
     let currentId = null;
@@ -106,6 +110,31 @@
         line.appendChild(note);
         body.appendChild(line);
       }
+
+      // Risk acceptance (B11) and forced re-review reason (B14).
+      const acc = rec.risk_acceptance;
+      if (acc) {
+        const expired = acc.expires_at && (acc.expires_at * 1000 <= Date.now());
+        const days = acc.expires_at ? Math.ceil((acc.expires_at * 1000 - Date.now()) / 86400000) : null;
+        const p = el('p', null);
+        p.appendChild(el('span', 'badge ' + (expired ? 'blocked' : 'warn'),
+          expired ? 'risk acceptance expired' : 'risk accepted'));
+        p.appendChild(el('span', 'muted',
+          (acc.accepted_by ? ' by ' + acc.accepted_by : '') +
+          (days != null ? (expired ? ' · expired' : ' · expires in ' + days + 'd') : '') +
+          (acc.rationale ? ' — “' + acc.rationale + '”' : '')));
+        p.style.fontSize = 'var(--text-sm)';
+        body.appendChild(p);
+      }
+      if (rec.review_forced_at && rec.review_trigger_reason) {
+        const p = el('p', null);
+        p.appendChild(el('span', 'badge warn', 'due for re-review'));
+        p.appendChild(el('span', 'muted', ' · ' + rec.review_trigger_reason));
+        p.style.fontSize = 'var(--text-sm)';
+        body.appendChild(p);
+      }
+      // Risk trend (B12): the vendor's residual risk over successive reviews.
+      renderTrend(rec);
 
       body.appendChild(el('div', 'arv__section', 'Answers'));
       const answers = rec.answers || {};
@@ -162,6 +191,33 @@
       cadenceWrap.style.display = 'flex';
       approveBtn.style.display = '';
       rejectBtn.style.display = '';
+      // Accept-risk and re-review-now apply to a decided (or pending) record.
+      acceptBtn.style.display = '';
+      triggerBtn.style.display = (rec.status === 'approved') ? '' : 'none';
+    }
+
+    const RISK_RANK = { minimal: 0, low: 1, medium: 2, high: 3 };
+    async function renderTrend(rec) {
+      if (!rec.subject) return;
+      try {
+        const r = await fetch('/api/v1/assess/trend?subject=' +
+          encodeURIComponent(rec.subject) + '&type=' + encodeURIComponent(rec.type || ''));
+        if (!r.ok) return;
+        const data = await r.json();
+        const t = data.trend || [];
+        if (t.length < 2) return;
+        const arrow = data.direction === 'up' ? '▲ risk rising'
+          : data.direction === 'down' ? '▼ risk falling' : '▬ risk steady';
+        const cls = data.direction === 'up' ? 'blocked'
+          : data.direction === 'down' ? 'done' : 'warn';
+        const p = el('p', null);
+        p.appendChild(el('span', 'badge ' + cls, arrow));
+        p.appendChild(el('span', 'muted', ' · ' +
+          t.map(function (x) { return x.residual_risk; }).join(' → ') +
+          ' (' + t.length + ' reviews)'));
+        p.style.fontSize = 'var(--text-sm)';
+        body.appendChild(p);
+      } catch (e) { /* trend is advisory */ }
     }
 
     async function decide(decision) {
@@ -199,6 +255,53 @@
     }
     approveBtn.addEventListener('click', function () { decide('approved'); });
     rejectBtn.addEventListener('click', function () { decide('rejected'); });
+
+    async function reload() {
+      const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId));
+      if (r.ok) render(await r.json());
+    }
+
+    // Accept the residual risk (B11): named owner, rationale, expiry.
+    acceptBtn.addEventListener('click', async function () {
+      const rationale = window.prompt('Rationale for accepting this residual risk ' +
+        '(e.g. compensating controls, business justification):');
+      if (rationale == null || !rationale.trim()) return;
+      const days = parseInt(window.prompt('Acceptance expires in how many days?', '365'), 10);
+      if (!days || days < 1) { statusEl.textContent = 'A positive expiry is required.'; return; }
+      acceptBtn.disabled = true;
+      statusEl.textContent = 'Recording risk acceptance…';
+      try {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/accept-risk', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rationale: rationale.trim(), expires_days: days, expected_revision: currentRevision })
+        });
+        if (!r.ok) { const j = await r.json().catch(function () { return {}; }); throw new Error(j.detail || ('HTTP ' + r.status)); }
+        statusEl.textContent = 'Risk accepted — comes due again in ' + days + ' days.';
+        await reload();
+      } catch (e) {
+        statusEl.textContent = 'Could not accept risk: ' + e.message;
+      } finally { acceptBtn.disabled = false; }
+    });
+
+    // Force a re-review now (B14): an external event trigger.
+    triggerBtn.addEventListener('click', async function () {
+      const reason = window.prompt('Why re-review now? (contract renewal, new sub-processor, material change)');
+      if (reason == null) return;
+      triggerBtn.disabled = true;
+      statusEl.textContent = 'Flagging for re-review…';
+      try {
+        const r = await fetch('/api/v1/assess/sessions/' + encodeURIComponent(currentId) + '/trigger-review', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: reason.trim(), expected_revision: currentRevision })
+        });
+        if (!r.ok) { const j = await r.json().catch(function () { return {}; }); throw new Error(j.detail || ('HTTP ' + r.status)); }
+        statusEl.textContent = 'Flagged for re-review.';
+        await reload();
+        document.dispatchEvent(new CustomEvent('mv-assessment-decided', { detail: { id: currentId, decision: 'retriggered' } }));
+      } catch (e) {
+        statusEl.textContent = 'Could not flag for re-review: ' + e.message;
+      } finally { triggerBtn.disabled = false; }
+    });
 
     async function open(id) {
       currentId = id;

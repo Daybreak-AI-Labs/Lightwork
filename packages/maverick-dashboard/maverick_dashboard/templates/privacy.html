@@ -40,6 +40,114 @@
   {% include "_workspace_worklist.html" %}
 
   {% if records.enabled %}
+  <style>
+    .pv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+    @media (max-width: 900px) { .pv-grid { grid-template-columns: 1fr; } }
+    .pv-heat { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: var(--space-2); }
+    .pv-cell { border-radius: 6px; padding: 10px 8px; text-align: center; border: 1px solid var(--border); }
+    .pv-cell .n { font-size: var(--text-lg); font-weight: var(--font-bold); }
+    .pv-cell .l { font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+    .pv-cell.hot { background: color-mix(in srgb, var(--danger) 18%, transparent); border-color: var(--danger); }
+    .pv-cell.warm { background: color-mix(in srgb, var(--warn, #b8860b) 16%, transparent); }
+    .pv-flow { display: flex; align-items: center; gap: var(--space-2); padding: 8px 0; border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
+    .pv-flow .arr { color: var(--muted); }
+    .pv-flow .dest { font-weight: var(--font-medium); }
+    .pv-empty { color: var(--muted); font-size: var(--text-sm); padding: var(--space-3) 0; }
+  </style>
+  <div class="section-head"><h2>Program insights</h2></div>
+  <div class="pv-grid">
+    <div class="panel">
+      <h3 style="margin-top:0;">DSAR SLA aging</h3>
+      <p class="muted" style="font-size: var(--text-sm);">Open subject requests by time to the statutory deadline — where the queue is about to breach.</p>
+      <div class="pv-heat" id="pv-dsar-heat" role="img" aria-label="DSAR aging bands"></div>
+      <p class="muted" id="pv-dsar-msg" style="font-size: var(--text-sm); margin-top: var(--space-2);"></p>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0;">Cross-border transfer map</h3>
+      <p class="muted" style="font-size: var(--text-sm);">Where personal data flows out, from the Art. 30 register and Transfer Impact Assessments — and whether a Chapter V safeguard is on file.</p>
+      <div id="pv-transfer" aria-live="polite"></div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const RANK = ['overdue', 'd0_7', 'd8_14', 'd15_30', 'd30_plus'];
+      const LABEL = { overdue: 'overdue', d0_7: '≤7d', d8_14: '8–14d', d15_30: '15–30d', d30_plus: '30d+' };
+      fetch('/api/v1/privacy/dsar/aging').then(function (r) { return r.json(); }).then(function (d) {
+        const heat = document.getElementById('pv-dsar-heat');
+        const bands = d.bands || {};
+        heat.innerHTML = '';
+        RANK.forEach(function (k) {
+          const cell = document.createElement('div');
+          cell.className = 'pv-cell' + (k === 'overdue' ? ' hot' : k === 'd0_7' ? ' warm' : '');
+          const n = document.createElement('div'); n.className = 'n'; n.textContent = bands[k] || 0;
+          const l = document.createElement('div'); l.className = 'l'; l.textContent = LABEL[k];
+          cell.append(n, l); heat.appendChild(cell);
+        });
+        document.getElementById('pv-dsar-msg').textContent =
+          d.open + ' open · ' + (d.closing_soon || 0) + ' closing this week' +
+          (d.overdue ? ' · ' + d.overdue + ' already overdue' : '');
+      }).catch(function () {});
+      fetch('/api/v1/privacy/transfer-map').then(function (r) { return r.json(); }).then(function (d) {
+        const box = document.getElementById('pv-transfer');
+        const flows = d.flows || [];
+        if (!flows.length) { box.innerHTML = '<p class="pv-empty">No cross-border transfers recorded yet.</p>'; return; }
+        box.innerHTML = '';
+        flows.slice(0, 12).forEach(function (f) {
+          const row = document.createElement('div'); row.className = 'pv-flow';
+          const src = document.createElement('span'); src.textContent = f.activity || f.source;
+          const arr = document.createElement('span'); arr.className = 'arr'; arr.textContent = '→';
+          const dest = document.createElement('span'); dest.className = 'dest'; dest.textContent = f.destination;
+          const badge = document.createElement('span');
+          badge.className = 'badge ' + (f.safeguarded ? 'done' : 'blocked');
+          badge.style.marginInlineStart = 'auto';
+          badge.textContent = f.safeguarded ? 'safeguarded' : 'no safeguard';
+          row.append(src, arr, dest, badge); box.appendChild(row);
+        });
+        if (d.unsafeguarded) {
+          const m = document.createElement('p'); m.className = 'muted'; m.style.fontSize = 'var(--text-sm)'; m.style.marginTop = 'var(--space-2)';
+          m.textContent = d.unsafeguarded + ' of ' + d.total + ' flow(s) have no recorded Chapter V safeguard.';
+          box.appendChild(m);
+        }
+      }).catch(function () {});
+    })();
+  </script>
+
+  <div class="section-head"><h2>Bulk vendor import</h2></div>
+  <div class="panel">
+    <p class="muted" style="font-size: var(--text-sm);">Paste a CSV of vendors to queue a batch of assessments at once — one line per vendor: <code>subject,type</code> (type defaults to <code>vendor_risk</code>). Onboard a whole program without one-by-one intake. Each row becomes a pending assessment on the worklist above.</p>
+    <textarea id="pv-bulk" rows="4" aria-label="Vendor CSV, one vendor per line: subject,type" style="width:100%; font-family: var(--font-mono, monospace); font-size: var(--text-sm);" placeholder="Acme Corp,vendor_risk&#10;Globex HRIS,pia&#10;Initech Payroll,dpia"></textarea>
+    <div style="display:flex; gap: var(--space-2); align-items:center; margin-top: var(--space-2);">
+      <button class="btn btn--primary" id="pv-bulk-go" type="button">Queue assessments</button>
+      <span class="muted" id="pv-bulk-msg" role="status" aria-live="polite" style="font-size: var(--text-sm);"></span>
+    </div>
+  </div>
+  <script>
+    (function () {
+      const btn = document.getElementById('pv-bulk-go');
+      if (!btn) return;
+      btn.addEventListener('click', async function () {
+        const ta = document.getElementById('pv-bulk');
+        const msg = document.getElementById('pv-bulk-msg');
+        const csv = (ta.value || '').trim();
+        if (!csv) { msg.textContent = 'Paste at least one vendor first.'; return; }
+        btn.disabled = true; msg.textContent = 'Queuing…';
+        try {
+          const r = await fetch('/api/v1/assess/bulk-import', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ csv: csv })
+          });
+          const d = await r.json();
+          if (!r.ok) { msg.textContent = d.detail || ('Failed: ' + r.status); return; }
+          msg.textContent = d.created_count + ' assessment(s) queued' +
+            (d.error_count ? ', ' + d.error_count + ' row(s) skipped' : '') + '. Reloading…';
+          setTimeout(function () { location.reload(); }, 900);
+        } catch (e) {
+          msg.textContent = String(e);
+        } finally { btn.disabled = false; }
+      });
+    })();
+  </script>
+
   <div class="section-head"><h2>Privacy records</h2></div>
   <div class="panel">
     <div class="pw-filters" role="group" aria-label="Record types">

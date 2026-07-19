@@ -1890,6 +1890,10 @@ def decide_assessment(assessment_id: str, decision: str, *,
         record["decided_at"] = time.time()
         record["decided_by"] = decided_by
         record["decision_note"] = (note or "").strip()[:4000]
+        # A fresh decision clears any forced-review trigger: the reviewer just
+        # looked at it, so the ad-hoc "due now" flag is satisfied.
+        record.pop("review_forced_at", None)
+        record.pop("review_trigger_reason", None)
         if decision == "approved" and cadence_days:
             record["cadence_days"] = int(cadence_days)
             record["next_review_at"] = (record["decided_at"]
@@ -1902,6 +1906,80 @@ def decide_assessment(assessment_id: str, decision: str, *,
         "ASSESSMENT_DECIDED", decided_by,
         assessment=assessment_id, decision=decision,
         cadence_days=int(cadence_days or 0),
+    )
+    return _rewrite_saved(
+        assessment_id, _mutate, expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
+
+
+def accept_risk(assessment_id: str, *, accepted_by: str = "",
+                rationale: str = "", expires_days: int = 365,
+                expected_revision: int | None = None) -> dict | None:
+    """Formally accept the residual risk on an assessment with a named owner,
+    a rationale, and an expiry. A risk acceptance is a dated decision, not a
+    permanent waiver: when it expires the record comes due again."""
+    rationale = (rationale or "").strip()
+    if not rationale:
+        raise ValueError("a rationale is required to accept risk")
+    days = int(expires_days or 0)
+    if days <= 0:
+        raise ValueError("risk acceptance must have a positive expiry (days)")
+
+    def _mutate(record: dict) -> None:
+        if record.get("status") not in ("approved", "pending_review"):
+            raise AssessmentTransitionError(
+                "only an approved or pending assessment can carry a risk "
+                "acceptance")
+        now = time.time()
+        record["risk_acceptance"] = {
+            "accepted_by": accepted_by,
+            "rationale": rationale[:4000],
+            "accepted_at": now,
+            "expires_at": now + days * 86400,
+        }
+
+    receipt = _audit_receipt(
+        "RISK_ACCEPTED", accepted_by,
+        assessment=assessment_id, expires_days=days,
+    )
+    return _rewrite_saved(
+        assessment_id, _mutate, expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
+
+
+def trigger_review(assessment_id: str, *, reason: str = "", by: str = "",
+                   expected_revision: int | None = None) -> dict | None:
+    """Force an assessment due for re-review now, ahead of its cadence -- the
+    hook for external events: a contract renewal, a new sub-processor, or any
+    material change to the processing."""
+    reason = (reason or "").strip() or "external trigger"
+
+    def _mutate(record: dict) -> None:
+        record["review_forced_at"] = time.time()
+        record["review_trigger_reason"] = reason[:400]
+
+    receipt = _audit_receipt(
+        "REVIEW_TRIGGERED", by, assessment=assessment_id, reason=reason[:120],
+    )
+    return _rewrite_saved(
+        assessment_id, _mutate, expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
+
+
+def set_renewal(assessment_id: str, *, renewal_at: float | None, by: str = "",
+                expected_revision: int | None = None) -> dict | None:
+    """Record a contract-renewal (or review-by) date. When it passes, the
+    record automatically flips due for re-review -- no manual trigger needed."""
+    ts = float(renewal_at) if renewal_at else 0.0
+
+    def _mutate(record: dict) -> None:
+        record["renewal_at"] = ts or None
+
+    receipt = _audit_receipt(
+        "RENEWAL_SET", by, assessment=assessment_id, renewal_at=ts,
     )
     return _rewrite_saved(
         assessment_id, _mutate, expected_revision=expected_revision,
@@ -1931,6 +2009,27 @@ def list_saved() -> list[dict]:
         revision = _record_revision(data, label="assessment")
         res = data.get("result", {})
         fups = data.get("followups") or []
+        now = time.time()
+        acceptance = data.get("risk_acceptance") or {}
+        acc_expires = acceptance.get("expires_at")
+        acc_expired = bool(acc_expires and now >= float(acc_expires))
+        forced = data.get("review_forced_at")
+        renewal = data.get("renewal_at")
+        renewal_due = bool(renewal and now >= float(renewal))
+        cadence_due = (data.get("status") == "approved"
+                       and bool(data.get("next_review_at"))
+                       and now >= float(data.get("next_review_at") or 0))
+        # Why the record is due -- most specific reason first.
+        if forced:
+            due_reason = data.get("review_trigger_reason") or "external trigger"
+        elif acc_expired:
+            due_reason = "risk acceptance expired"
+        elif renewal_due:
+            due_reason = "renewal date reached"
+        elif cadence_due:
+            due_reason = "review cadence elapsed"
+        else:
+            due_reason = ""
         out.append({
             "id": data.get("id", p.stem),
             "type": data.get("type", "?"),
@@ -1950,12 +2049,32 @@ def list_saved() -> list[dict]:
             "open_followups": sum(1 for f in fups if not f.get("answer")),
             "decided_at": data.get("decided_at"),
             "next_review_at": data.get("next_review_at"),
-            "review_due": (data.get("status") == "approved"
-                           and bool(data.get("next_review_at"))
-                           and time.time()
-                           >= float(data.get("next_review_at") or 0)),
+            "review_due": bool(cadence_due or forced or renewal_due
+                               or acc_expired),
+            "review_due_reason": due_reason,
+            "renewal_at": renewal or None,
+            "risk_accepted": bool(acceptance),
+            "acceptance_expires_at": acc_expires,
+            "acceptance_expired": acc_expired,
         })
     return sorted(out, key=lambda r: r["created_at"], reverse=True)
+
+
+def risk_trend(subject: str, assessment_type: str = "", *,
+               limit: int = 12) -> list[dict]:
+    """The residual-risk history for a subject (optionally one type), oldest
+    first. Powers the re-review delta -- a vendor's risk moving up or down
+    across successive assessments instead of a single point in time."""
+    subj = (subject or "").strip().lower()
+    if not subj:
+        return []
+    rows = [r for r in list_saved()
+            if str(r["subject"]).strip().lower() == subj
+            and (not assessment_type or r["type"] == assessment_type)]
+    rows.sort(key=lambda r: r["created_at"])
+    return [{"id": r["id"], "created_at": r["created_at"],
+             "residual_risk": r["residual_risk"],
+             "inherent_risk": r["inherent_risk"]} for r in rows][-limit:]
 
 
 def _load_saved_raw(assessment_id: str) -> dict | None:
@@ -2210,6 +2329,11 @@ __all__ = [
     "save_session",
     "list_saved",
     "load_saved",
+    "decide_assessment",
+    "accept_risk",
+    "trigger_review",
+    "set_renewal",
+    "risk_trend",
     "render_questions_text",
     "render_questions_json",
     "render_result_text",

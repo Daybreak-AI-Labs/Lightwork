@@ -768,6 +768,29 @@ class AssessmentDecideIn(BaseModel):
     expected_revision: int = Field(..., ge=0)
 
 
+class RiskAcceptIn(BaseModel):
+    """Formally accept the residual risk on an assessment with a named owner,
+    a rationale, and an expiry (days). Comes due again when it expires."""
+    rationale: str = Field(..., min_length=1, max_length=4000)
+    expires_days: int = Field(365, ge=1, le=3650)
+    expected_revision: int = Field(..., ge=0)
+
+
+class ReviewTriggerIn(BaseModel):
+    """Force an assessment due for re-review now (a contract renewal, a new
+    sub-processor, a material change) -- optionally with a renewal date that
+    flips it due automatically when reached."""
+    reason: str = Field("", max_length=400)
+    renewal_at: float | None = Field(default=None, ge=0)
+    expected_revision: int = Field(..., ge=0)
+
+
+class BulkAssessmentImportIn(BaseModel):
+    """Queue a batch of assessments from a pasted CSV (subject,type[,note])
+    -- onboarding a whole vendor list without one-by-one intake."""
+    csv: str = Field(..., min_length=1, max_length=200_000)
+
+
 class DocDiscoverIn(BaseModel):
     """Search connected document sources (Microsoft Graph / Slack / Google
     Drive) for documents related to an assessment subject -- the SOW,
