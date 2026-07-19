@@ -2,12 +2,23 @@
 {% block title %}PIA Concierge{% endblock %}
 {% block body %}
 <div class="page-head">
+  {% if standalone %}
+  <div class="eyebrow">Privacy assessment agent · Standalone</div>
+  <h1>PIA Concierge</h1>
+  <p>The privacy-assessment agent, running on its own: it takes the intake
+     (chat, voice, or guided), scores the risk, files into OneTrust, and a
+     human reviews and approves there. The governance layer — signed audit
+     chain, approval queue, program workspace, control-catalog citations, and
+     learning — <b>comes with Lightwork</b>.
+     <a href="/about">See the full comparison →</a></p>
+  {% else %}
   <div class="eyebrow">Governed digital workforce · Demo harness</div>
   <h1>PIA Concierge</h1>
   <p>This window is the <b>world outside Lightwork</b>: the ticketing system, the requester's
      inbox and questionnaire, and the OneTrust tenant. Everything else — the goal timeline,
      the risk scoring, the approvals queue, the signed audit chain — happens in the
      <b>real Lightwork dashboard</b>.</p>
+  {% endif %}
 </div>
 
 <div class="card">
@@ -29,8 +40,12 @@
   <div class="flow">
     <a class="btn" href="/servicenow">Start: open the ticketing system →</a>
     <a class="btn ghost" href="/onetrust">Review queue: OneTrust →</a>
+    {% if not standalone %}
     <a class="btn ghost" href="{{ dashboard_url }}/goals" target="lightwork">Lightwork: goals ↗</a>
     <a class="btn ghost" href="{{ dashboard_url }}/audit" target="lightwork">Lightwork: audit chain ↗</a>
+    {% else %}
+    <a class="btn ghost" href="/about">What you get vs. Lightwork →</a>
+    {% endif %}
   </div>
 </div>
 

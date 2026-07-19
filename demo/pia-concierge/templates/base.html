@@ -211,14 +211,26 @@
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="dot"></span> PIA Concierge <small>· external systems (demo)</small></div>
+  <div class="brand"><span class="dot"></span> PIA Concierge
+    <small>· {{ 'standalone agent' if standalone else 'external systems (demo)' }}</small></div>
   <nav class="stages">
     <a href="/servicenow" class="{{ 'active' if active=='servicenow' }}">1 · ServiceNow</a>
     <a href="/mail" class="{{ 'active' if active=='mail' }}">2 · Requester inbox{% if n_mail %}<span class="badge">{{ n_mail }}</span>{% endif %}</a>
     <a href="/onetrust" class="{{ 'active' if active=='onetrust' }}">3 · OneTrust review{% if n_filed %}<span class="badge">{{ n_filed }}</span>{% endif %}</a>
-    <a href="{{ dashboard_url }}/audit" target="lightwork">Audit ↗ Lightwork</a>
+    {% if not standalone %}<a href="{{ dashboard_url }}/audit" target="lightwork">Audit ↗ Lightwork</a>{% endif %}
   </nav>
 </header>
+{% if standalone %}
+<div style="background: color-mix(in srgb, var(--accent) 12%, transparent);
+            border-bottom: 1px solid var(--accent-dim); padding: 8px 20px;
+            font-size: 12.5px; color: var(--ink-dim); display: flex; gap: 10px;
+            align-items: center; flex-wrap: wrap;">
+  <strong style="color: var(--accent);">Standalone agent</strong>
+  <span>Running without the Lightwork platform — no signed audit chain,
+    governance workspace, control-catalog citations, learning, or connectors.
+    <a href="/about" style="color: var(--accent);">What you get vs. Lightwork →</a></span>
+</div>
+{% endif %}
 <main>
   {% block body %}{% endblock %}
 </main>

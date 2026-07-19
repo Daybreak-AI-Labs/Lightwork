@@ -39,7 +39,6 @@ def demo_app():
 def _fresh_world(tmp_path, monkeypatch, demo_app):
     from maverick import config, world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
-    monkeypatch.setattr(demo_app, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -97,24 +96,21 @@ def _mkcase(demo_app, subject="Acme CRM", case_id="LW-PIA-T001",
     return case
 
 
-def _fake_onetrust_tool(demo_app):
-    """Simulate the tenant endpoint the real tool would POST to (the HTTP hop
-    needs a live server; the record shape is identical)."""
-    class _Tool:
-        @staticmethod
-        def fn(payload):
-            body = payload["body"]
-            ot_id = demo_app.STORE.next_onetrust_id()
-            demo_app.STORE.onetrust[ot_id] = demo_app.OneTrustAssessment(
-                assessment_id=ot_id, name=body["name"],
-                template=body["templateName"], subject=body["subject"],
-                status=body.get("status") or "Under Review",
-                risk_level=body.get("riskLevel", "unknown"),
-                result=body.get("result") or {},
-                case_id=body.get("caseId", ""),
-                controls=body.get("controls") or [])
-            return f'ok (201): {{"assessmentId": "{ot_id}"}}'
-    return _Tool()
+def _fake_file_onetrust(demo_app):
+    """Simulate the OneTrust POST the backend would make (the HTTP hop needs a
+    live server; the record shape is identical)."""
+    def _file(body):
+        ot_id = demo_app.STORE.next_onetrust_id()
+        demo_app.STORE.onetrust[ot_id] = demo_app.OneTrustAssessment(
+            assessment_id=ot_id, name=body["name"],
+            template=body["templateName"], subject=body["subject"],
+            status=body.get("status") or "Under Review",
+            risk_level=body.get("riskLevel", "unknown"),
+            result=body.get("result") or {},
+            case_id=body.get("caseId", ""),
+            controls=body.get("controls") or [])
+        return f'ok (201): {{"assessmentId": "{ot_id}"}}'
+    return _file
 
 
 def _upload(name: str, data: bytes, mime: str = "application/pdf") -> UploadFile:
@@ -170,8 +166,8 @@ def test_interpret_asks_for_clarification_instead_of_guessing(demo_app):
 # OneTrust-first: submit files Under Review; the decision happens in OneTrust
 # --------------------------------------------------------------------------- #
 def _submit(demo_app, monkeypatch, case):
-    monkeypatch.setattr(demo_app, "onetrust_tool",
-                        lambda: _fake_onetrust_tool(demo_app))
+    monkeypatch.setattr(demo_app.backend, "file_onetrust",
+                        _fake_file_onetrust(demo_app))
     for qid, (ans, note) in demo_app._DEMO_ANSWERS.items():
         case.answers[qid] = {"answer": ans, "note": note}
     asyncio.run(demo_app.intake_submit(_request("POST"), case.id))
