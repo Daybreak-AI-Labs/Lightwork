@@ -458,6 +458,23 @@ here.
   deadline, by kind) and a **cross-border transfer map**
   (`/privacy/transfer-map`: flows drawn from the Art. 30 register and TIAs
   with a Chapter V safeguard flag).
+- **Verified OneTrust wire protocol** (`demo/pia-concierge/
+  onetrust_client.py`, reference: `demo/pia-concierge/
+  ONETRUST-INTEGRATION.md`) — the concierge files assessments through the
+  protocol a live OneTrust tenant actually accepted: launch (v3, org group +
+  respondent), export-first response writes (option answers with optionId +
+  responseKey; justifications as entries in the responses array — the
+  top-level field is silently dropped; PERSONAL_DATA as catalog triples
+  whose write replaces the row set), submit with locally-computed
+  completeness (the server under-reports), stage self-check by re-read,
+  two-step attachments onto the vendor record (assessment-level ops are
+  session-gated), typo-tolerant inventory dedup (vendors created only on
+  true no-match; entities never), the Enterprise Policy notices API, and a
+  deterministic notice cross-check (contradictions with published promises
+  escalate the filed rating) + jurisdiction-driven contract instrument
+  guard + per-work-product value ledger. The mock tenant (`ot_mock.py`)
+  enforces every trap, so the test suite proves wire compatibility offline;
+  autonomy stops at Under Review — the human gate.
 - **Privacy command center** (`/privacy/board`, `GET /api/v1/privacy/board`,
   operate-gated) — the whole program on one live executive board, every
   number from the operating record: KPI tiles with 30-day delta chips and

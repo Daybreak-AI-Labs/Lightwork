@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
-import json
 import os
 import re
 import time
@@ -38,7 +37,10 @@ from typing import Any
 # backend seam only -- so the same app is the Lightwork-bundled build AND the
 # sold-on-its-own standalone agent, depending on capabilities.
 import backend
+import contract_guard
 import httpx
+import notice_check
+import value_ledger
 from backend import (
     AssessmentSession,
     find_controls,
@@ -1430,39 +1432,222 @@ async def intake_submit(request: Request, case_id: str) -> RedirectResponse:
     return RedirectResponse(f"/intake/{case_id}?submitted=1", status_code=303)
 
 
+def _protocol_facts(case: Case) -> dict:
+    """The deterministic facts the wire answers are built from — intake
+    answers and the scored result only, never model prose."""
+    result = case.result or {}
+    answer_text = " ".join(
+        f"{rec.get('answer', '')} {rec.get('note', '')}"
+        for rec in case.answers.values()) + f" {case.data_types}"
+    low = f" {answer_text.lower()} "
+    risk = {"minimal": "Low", "low": "Low", "medium": "Medium",
+            "high": "High"}.get(str(result.get("risk_rating", "medium")),
+                                "Medium")
+    return {
+        "risk_option": risk,
+        "ai": bool(re.search(r"\b(ai|artificial intelligence|machine "
+                             r"learning|llm|model)\b", low)),
+        "sold": bool(re.search(r"\b(sell|sold|sale of data)\b", low)),
+        "autofilled": sum(1 for rec in case.answers.values()
+                          if rec.get("auto")),
+        "rationale": "; ".join(
+            f"[{f.get('severity', '?')}] {f.get('section', '?')}: "
+            f"{f.get('question', '?')}"
+            for f in (result.get("findings") or [])[:6]) or
+            "No adverse findings; risk from in-scope severities.",
+        "regions_text": answer_text,
+    }
+
+
+def _run_onetrust_protocol(case: Case) -> dict:
+    """Drive the VERIFIED OneTrust protocol end-to-end (sync; runs in a
+    thread): launch → dedup-link the vendor → resolve personal-data triples
+    against the live catalogs → notice cross-check (contradictions escalate
+    the filed rating BEFORE submit) → write every answer shape in one call →
+    submit → SELF-CHECK the stage → attach deliverables to the vendor record.
+    Autonomy stops at Under Review — the human gate."""
+    client = backend.onetrust_client()
+    facts = _protocol_facts(case)
+    steps: list[str] = []
+
+    aid = client.launch(
+        "tmpl-pia",
+        org_group_id=os.environ.get("ONETRUST_ORG_GROUP", "og-demo"),
+        respondent=case.requester_email or "requester@example.com",
+        name=f"PIA — {case.subject}")
+    steps.append(f"Launched {aid} (v3, org group + respondent)")
+
+    vendor = client.ensure_vendor(case.subject)
+    steps.append(("Created vendor record " if vendor.get("created")
+                  else "Linked existing vendor record ")
+                 + f"{vendor['id']} ({vendor['name']}) — dedup-first, "
+                   "entities never created")
+
+    triples = client.resolve_personal_data(
+        f"{case.data_types} name email address")
+    categories = sorted({t["category"]["name"] for t in triples})
+
+    # Notice cross-check BEFORE the write: a contradiction with a published
+    # promise escalates the rating that gets filed.
+    notices = client.notices()
+    picked, siblings = notice_check.pick_notice(
+        os.environ.get("PIA_CONTRACTING_ENTITY", ""), notices,
+        default_name=os.environ.get("ONETRUST_DEFAULT_NOTICE",
+                                    "Global Vacation Clubs"))
+    check = {"contradictions": [], "gaps": [], "escalate": False}
+    if picked:
+        check = notice_check.cross_check(
+            notice_text=client.notice_text(picked["guid"]),
+            facts={"data_sold": facts["sold"],
+                   "shared_with_third_parties": False},
+            data_categories=categories)
+        steps.append(f"Cross-checked notice {picked['name']!r}: "
+                     f"{len(check['contradictions'])} contradiction(s), "
+                     f"{len(check['gaps'])} gap(s)")
+    risk_option = "High" if check["escalate"] else facts["risk_option"]
+    rationale = facts["rationale"]
+    if check["escalate"]:
+        rationale = (check["contradictions"][0]["finding"] + " " + rationale)
+
+    qs = {q["questionId"]: q for q in client.questions(aid)}
+    entries: list[dict] = []
+    entries += client.answer_text(qs["q-name"], case.subject)
+    entries += client.answer_text(
+        qs["q-summary"],
+        f"{(case.result or {}).get('answered', 0)}/"
+        f"{(case.result or {}).get('total', 0)} answered; "
+        f"{len((case.result or {}).get('findings') or [])} findings; "
+        f"source ticket {case.ticket_number}.")
+    entries += client.answer_option(qs["q-risk"], risk_option)
+    entries += client.justification(qs["q-risk"], rationale)
+    entries += client.answer_option(qs["q-ai"],
+                                    "Yes" if facts["ai"] else "No")
+    entries += client.answer_option(qs["q-sold"],
+                                    "Yes" if facts["sold"] else "No")
+    entries += client.answer_record(qs["q-vendor"], vendor)
+    entries += client.personal_data_rows(qs["q-personal-data"], triples)
+    client.write_responses(aid, entries)
+    steps.append(f"Wrote {len(entries)} response entries in one call "
+                 "(answers + justification + personal-data triples)")
+
+    sub = client.submit(aid)
+    if not sub.get("advanced"):
+        # Self-advance once: the only honest auto-fix is a justification we
+        # actually have; unanswered compliance questions are never invented.
+        fixes: list[dict] = []
+        for o in sub.get("outstanding", []):
+            if o["reason"] == "missing justification" \
+                    and o["questionId"] in qs:
+                fixes += client.justification(qs[o["questionId"]], rationale)
+        if fixes:
+            client.write_responses(aid, fixes)
+            sub = client.submit(aid)
+            steps.append("Retried once after writing the missing "
+                         "justification")
+    advanced = bool(sub.get("advanced"))
+    if advanced:
+        steps.append("Self-check: export status is Under Review (verified "
+                     "by re-read, not by the POST returning)")
+
+    # AI branch: an AI-supported process gets its own linked AI Model
+    # Assessment, finalized to Under Review in the same run.
+    ai_id = ""
+    if advanced and facts["ai"]:
+        ai_id = client.launch(
+            "tmpl-ai",
+            org_group_id=os.environ.get("ONETRUST_ORG_GROUP", "og-demo"),
+            respondent=case.requester_email or "requester@example.com",
+            name=f"AI Model Assessment — {case.subject}")
+        aqs = {q["questionId"]: q for q in client.questions(ai_id)}
+        a_entries = client.answer_text(aqs["q-ai-name"], case.subject)
+        # Oversight is a fact of this process: the Under-Review human gate.
+        a_entries += client.answer_option(aqs["q-ai-oversight"], "Yes")
+        client.write_responses(ai_id, a_entries)
+        client.link_assessments(aid, [ai_id])
+        client.submit(ai_id)
+        steps.append(f"AI detected → launched {ai_id}, linked to {aid}, "
+                     "finalized to Under Review")
+
+    # Contract instrument: decided from the answers, never from prose.
+    instrument = contract_guard.decide_instrument(
+        regions_text=facts["regions_text"],
+        external_processing=True, personal_data=bool(triples))
+
+    # Deliverables land on the VENDOR record (assessment-level attach is
+    # session-gated on real tenants).
+    report = (f"Risk analysis — {case.subject}\nRating filed: {risk_option}"
+              f"\nRationale: {rationale}\nInstrument: "
+              f"{instrument['instrument'] or 'none required'} — "
+              f"{instrument['reason']}\n")
+    client.attach_to_record(vendor["id"], f"risk-analysis-{case.id}.txt",
+                            report.encode())
+    client.attach_to_record(
+        vendor["id"], f"notice-crosscheck-{case.id}.txt",
+        notice_check.recommendations_doc(case.subject, picked, check,
+                                         siblings).encode())
+    steps.append("Attached risk analysis + notice recommendations to the "
+                 "vendor record (two-step upload → link)")
+
+    value = value_ledger.case_value(
+        kind="ai_assessment" if facts["ai"] else "privacy_assessment",
+        answers_autofilled=facts["autofilled"],
+        contract_drafted=bool(instrument["instrument"]),
+        notice_checked=bool(picked))
+    return {"ok": advanced, "assessment_id": aid, "ai_assessment_id": ai_id,
+            "vendor": vendor, "steps": steps,
+            "outstanding": sub.get("outstanding", []),
+            "instrument": instrument, "notice": check, "value": value}
+
+
 async def _file_under_review(case: Case) -> None:
     """File the scored assessment into OneTrust as "Under Review" through the
-    REAL integration tool — input + analysis are the agent's job; the human
-    approves inside OneTrust."""
+    verified wire protocol — input + analysis are the agent's job; the human
+    approves inside OneTrust. The agent can never mark anything Complete."""
     gid = getattr(case, "goal_id", None)
-    body = {
-        "name": f"PIA — {case.subject}",
-        "templateName": "Privacy Impact Assessment",
-        "subject": case.subject,
-        "status": "Under Review",
-        "riskLevel": (case.result or {}).get("risk_rating", "unknown"),
-        "result": case.result,
-        "controls": case.controls,
-        "sourceTicket": case.ticket_number,
-        "caseId": case.id,
-    }
-    filed = await asyncio.to_thread(backend.file_onetrust, body)
-    _audit("TOOL_CALL", ANALYST, gid, tool="onetrust", op="post",
-           path="/api/assessment/v2/assessments", case=case.id,
-           status="Under Review", outcome=filed[:120])
-    if filed.startswith("ok"):
-        case.onetrust_id = _extract_ot_id(filed)
+    from onetrust_client import OneTrustError  # cached by the module import
+    try:
+        run = await asyncio.to_thread(_run_onetrust_protocol, case)
+    except OneTrustError as exc:
+        case.stage = "pending_review"
+        case.log(f"OneTrust protocol run failed: {exc}")
+        _audit("TOOL_CALL", ANALYST, gid, tool="onetrust", op="protocol",
+               case=case.id, outcome=f"error: {exc}"[:200])
+        return
+    _audit("TOOL_CALL", ANALYST, gid, tool="onetrust", op="protocol",
+           path="/api/assessment/v3/assessments", case=case.id,
+           status="Under Review" if run["ok"] else "incomplete",
+           outcome="; ".join(run["steps"])[:400])
+    if run["ok"]:
+        case.onetrust_id = run["assessment_id"]
         case.stage = "in_onetrust_review"
-        case.log(f"Filed to OneTrust as {case.onetrust_id} (Under Review).")
+        for step in run["steps"]:
+            case.log(f"OneTrust: {step}.")
+        v = run["value"]
+        case.log(f"Value ledger: {v['hours']}h saved "
+                 f"(privacy team {v['privacy_hours']}h · business "
+                 f"{v['business_hours']}h) ≈ ${v['dollars']:,.0f} at "
+                 f"${v['rate']:,.0f}/h.")
+        # Demo-side linkage so the tenant viewer shows the case's analysis.
+        rec = STORE.onetrust.get(run["assessment_id"])
+        if rec is not None:
+            rec.case_id = case.id
+            rec.result = case.result or {}
+            rec.controls = case.controls
         if gid:
             _post_event(gid, ANALYST, "artifact",
                         f"Filed in OneTrust as {case.onetrust_id} — status "
-                        f"UNDER REVIEW (POST /api/assessment/v2/assessments, "
-                        f"confirm-gated). Review & approve happens in OneTrust.")
+                        f"UNDER REVIEW via the verified protocol (launch → "
+                        f"responses incl. justification + personal-data "
+                        f"triples → submit → stage self-check). Review & "
+                        f"approve happens in OneTrust.")
     else:
-        # The tenant refused: keep the case reviewable from Lightwork.
         case.stage = "pending_review"
-        case.log(f"OneTrust filing did not confirm: {filed[:120]}")
+        outstanding = "; ".join(
+            f"{o['questionId']} ({o['reason']})"
+            for o in run["outstanding"]) or "unknown"
+        case.log("OneTrust submit did not advance — outstanding required "
+                 f"questions: {outstanding}. Nothing was fabricated; the "
+                 "case stays reviewable from Lightwork.")
 
 
 # ===========================================================================
@@ -1649,50 +1834,12 @@ async def _send_back_case(case: Case, decided_by: str, *, via: str) -> None:
         ticket.note(f"Assessment sent back by privacy team ({case.decided_by}).")
 
 
-def _extract_ot_id(msg: str) -> str:
-    """Pull the assessment id out of the onetrust tool's 'ok (201): {json}' reply."""
-    try:
-        payload = json.loads(msg[msg.index("{"):])
-        return payload.get("assessmentId", payload.get("id", "OT-ASMT-?"))
-    except Exception:
-        return "OT-ASMT-?"
-
-
 # ===========================================================================
-# Mock OneTrust — tenant API + viewer
+# Mock OneTrust — tenant API (the verified wire protocol) + viewer
 # ===========================================================================
-@app.post("/ot-api/api/assessment/v2/assessments")
-async def ot_create_assessment(request: Request) -> JSONResponse:
-    auth = request.headers.get("authorization", "")
-    if not auth.startswith("Bearer "):
-        return JSONResponse({"error": "missing bearer token"}, status_code=401)
-    body = await request.json()
-    ot_id = STORE.next_onetrust_id()
-    status = body.get("status") or "Under Review"
-    STORE.onetrust[ot_id] = OneTrustAssessment(
-        assessment_id=ot_id,
-        name=body.get("name", "Assessment"),
-        template=body.get("templateName", "PIA"),
-        subject=body.get("subject", ""),
-        status=status,
-        risk_level=body.get("riskLevel", "unknown"),
-        result=body.get("result") or {},
-        case_id=body.get("caseId", ""),
-        controls=body.get("controls") or [],
-    )
-    return JSONResponse({"assessmentId": ot_id, "status": status,
-                         "created": True})
+from ot_mock import router as _ot_router  # noqa: E402
 
-
-@app.get("/ot-api/api/assessment/v2/assessments")
-async def ot_list_assessments(request: Request) -> JSONResponse:
-    return JSONResponse({
-        "content": [{
-            "assessmentId": a.assessment_id, "name": a.name,
-            "status": a.status, "riskLevel": a.risk_level, "subject": a.subject,
-        } for a in STORE.onetrust.values()],
-        "totalElements": len(STORE.onetrust),
-    })
+app.include_router(_ot_router)
 
 
 @app.get("/onetrust", response_class=HTMLResponse)

@@ -107,29 +107,15 @@ def send_email(to: str, subject: str, body: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# OneTrust filing — governed tool on the platform; direct HTTP standalone.
+# OneTrust — the verified wire client (platform and standalone alike; the
+# protocol was proven against a live tenant, see ONETRUST-INTEGRATION.md).
+# Point ONETRUST_HOSTNAME at a real tenant and the same calls file there.
 # --------------------------------------------------------------------------- #
-def file_onetrust(body: dict) -> str:
-    """POST an assessment to the OneTrust tenant. Returns the tool-shaped
-    reply string ('ok (201): {json}' / 'error ...') the app already parses."""
-    path = "/api/assessment/v2/assessments"
-    if not STANDALONE:
-        from maverick.tools.onetrust_tool import onetrust_tool
-        return onetrust_tool().fn({
-            "op": "post", "path": path, "body": body, "confirm": True})
-    # Standalone: the same confirm-gated POST, without the governed tool.
-    import httpx
-    base = os.environ.get("ONETRUST_HOSTNAME", "http://127.0.0.1:8890/ot-api")
-    token = os.environ.get("ONETRUST_TOKEN", "demo-bearer-token")
-    try:
-        r = httpx.post(f"{base}{path}", json=body,
-                       headers={"Authorization": f"Bearer {token}"},
-                       timeout=10)
-        if r.status_code // 100 == 2:
-            return f"ok ({r.status_code}): {r.text}"
-        return f"error ({r.status_code}): {r.text[:200]}"
-    except Exception as exc:  # pragma: no cover - demo resilience
-        return f"error: {exc}"
+def onetrust_client():
+    """A configured client for the tenant (real or the in-process mock).
+    Tests patch this to bind the client to the mock over ASGI."""
+    from onetrust_client import OneTrustClient
+    return OneTrustClient()
 
 
 # --------------------------------------------------------------------------- #
