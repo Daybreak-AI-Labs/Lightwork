@@ -59,6 +59,46 @@ def test_accept_risk_records_owner_rationale_and_expiry():
                              "expected_revision": 999}).status_code == 409
 
 
+def test_re_decision_clears_a_stale_risk_acceptance():
+    # A short acceptance that has already lapsed must not keep the record
+    # flagged due after the reviewer re-approves it.
+    import time as _t
+
+    from maverick.assessment import list_saved, load_saved
+    s = _seed(risky=False)
+    client.post(f"/api/v1/assess/sessions/{s.id}/decide",
+                json={"decision": "approved", "cadence_days": 365,
+                      "expected_revision": _rev(s.id)})
+    client.post(f"/api/v1/assess/sessions/{s.id}/accept-risk",
+                json={"rationale": "temporary", "expires_days": 1,
+                      "expected_revision": _rev(s.id)})
+    # Fast-forward past the acceptance expiry: the record is due.
+    real = _t.time
+    import maverick.assessment as A
+    A.time.time = lambda: real() + 2 * 86400  # type: ignore[assignment]
+    try:
+        row = [r for r in list_saved() if r["id"] == s.id][0]
+        assert row["review_due"] and row["acceptance_expired"]
+        # Re-approve: the stale acceptance is cleared, record no longer due.
+        client.post(f"/api/v1/assess/sessions/{s.id}/decide",
+                    json={"decision": "approved", "cadence_days": 365,
+                          "expected_revision": _rev(s.id)})
+        assert load_saved(s.id).get("risk_acceptance") is None
+        row = [r for r in list_saved() if r["id"] == s.id][0]
+        assert not row["review_due"] and not row["risk_accepted"]
+    finally:
+        A.time.time = real  # type: ignore[assignment]
+
+
+def test_bulk_import_caps_row_count():
+    from maverick_dashboard.api import _BULK_IMPORT_MAX_ROWS
+    n = _BULK_IMPORT_MAX_ROWS + 5
+    csv = "\n".join(f"Vendor {i},vendor_risk" for i in range(n))
+    d = client.post("/api/v1/assess/bulk-import", json={"csv": csv}).json()
+    assert d["created_count"] == _BULK_IMPORT_MAX_ROWS
+    assert d["skipped_over_cap"] == 5
+
+
 # --- B14 re-review triggers ------------------------------------------------
 def test_trigger_review_forces_due_and_renewal_flips_due():
     s = _seed(risky=False)

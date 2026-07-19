@@ -1300,8 +1300,8 @@ async def dsar_aging(request: Request) -> dict:
                 else "d30_plus")
         bands[band] += 1
         k = str(r.get("kind", "other"))
-        kb = by_kind.setdefault(k, dict(bands, overdue=0, d0_7=0, d8_14=0,
-                                        d15_30=0, d30_plus=0, total=0))
+        kb = by_kind.setdefault(k, {"overdue": 0, "d0_7": 0, "d8_14": 0,
+                                    "d15_30": 0, "d30_plus": 0, "total": 0})
         kb[band] += 1
         kb["total"] += 1
     return {"open": len(open_rows), "bands": bands, "by_kind": by_kind,
@@ -1315,7 +1315,9 @@ async def transfer_map(request: Request) -> dict:
     Art. 30 register and any Transfer Impact Assessments -- destination,
     recipients, and whether a Chapter V safeguard is recorded. The map behind
     the paperwork."""
-    require_permission(request, "view")
+    # Operate-gated to match /privacy/ropa: this surfaces the register's
+    # recipient and destination content, not the viewer-tier summary rows.
+    require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     from maverick.assessment import list_saved
     ropa = await run_in_threadpool(ops.list_ropa)
@@ -1776,13 +1778,17 @@ async def assessment_risk_trend(
             "direction": direction}
 
 
+_BULK_IMPORT_MAX_ROWS = 500
+
+
 @router.post("/assess/bulk-import")
 async def bulk_import_assessments(
     request: Request, body: BulkAssessmentImportIn,
 ) -> dict:
     """Queue a batch of assessments from a pasted CSV (subject,type[,note]).
     Onboards a whole vendor list without one-by-one intake: each row becomes a
-    pending assessment stub ready to be interviewed. Audited per row."""
+    pending assessment stub ready to be interviewed. Bounded to
+    ``_BULK_IMPORT_MAX_ROWS`` per request; emits one summary audit event."""
     require_permission(request, "operate")
     import csv as _csv
     import io
@@ -1796,16 +1802,22 @@ async def bulk_import_assessments(
     rows = list(_csv.reader(io.StringIO(body.csv)))
     created: list[dict] = []
     errors: list[dict] = []
-    seen_header = False
+    skipped_over_cap = 0
     for i, row in enumerate(rows):
         cells = [c.strip() for c in row if c is not None]
         if not cells or not any(cells):
             continue
         subject = cells[0]
         atype = (cells[1].lower() if len(cells) > 1 and cells[1] else "vendor_risk")
-        # Tolerate a header row (subject,type,...).
-        if not seen_header and subject.lower() in ("subject", "vendor", "name"):
-            seen_header = True
+        # Tolerate a single header row -- only ever the first line, so a real
+        # vendor literally named "Vendor" on a later row is not dropped.
+        if i == 0 and subject.lower() in ("subject", "vendor", "name"):
+            continue
+        # Bound the synchronous per-row work (each save_session is a disk
+        # write + memory-plane record); report the overflow rather than
+        # silently truncating.
+        if len(created) >= _BULK_IMPORT_MAX_ROWS:
+            skipped_over_cap += 1
             continue
         if atype not in TEMPLATES:
             errors.append({"row": i + 1, "subject": subject,
@@ -1825,7 +1837,8 @@ async def bulk_import_assessments(
     except Exception:  # pragma: no cover -- audit write never blocks the import
         pass
     return {"created": created, "errors": errors,
-            "created_count": len(created), "error_count": len(errors)}
+            "created_count": len(created), "error_count": len(errors),
+            "skipped_over_cap": skipped_over_cap}
 
 
 @router.get("/assessment-memory/similar")

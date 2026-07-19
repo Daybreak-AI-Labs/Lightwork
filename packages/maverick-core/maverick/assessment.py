@@ -1890,10 +1890,14 @@ def decide_assessment(assessment_id: str, decision: str, *,
         record["decided_at"] = time.time()
         record["decided_by"] = decided_by
         record["decision_note"] = (note or "").strip()[:4000]
-        # A fresh decision clears any forced-review trigger: the reviewer just
-        # looked at it, so the ad-hoc "due now" flag is satisfied.
+        # A fresh decision supersedes the ad-hoc "due now" flags AND any prior
+        # risk acceptance: the reviewer just looked at the record, so a stale
+        # (possibly expired) acceptance must not keep it flagged due after
+        # approval. If the reviewer still wants to accept the residual risk,
+        # that is a fresh accept_risk with a new expiry.
         record.pop("review_forced_at", None)
         record.pop("review_trigger_reason", None)
+        record.pop("risk_acceptance", None)
         if decision == "approved" and cadence_days:
             record["cadence_days"] = int(cadence_days)
             record["next_review_at"] = (record["decided_at"]
