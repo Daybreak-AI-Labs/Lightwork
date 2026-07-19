@@ -21,6 +21,13 @@ capability to the platform or its standalone stand-in). The app never branches
 on the mode itself — set `PIA_STANDALONE=1` to preview the standalone SKU on a
 machine that has the platform installed.
 
+**Installing for a client?** See **[DEPLOYMENT.md](DEPLOYMENT.md)** — the
+partner install guide covering Docker (`Dockerfile.standalone` +
+`requirements-standalone.txt`), AWS (App Runner / ECS / EC2), GCP (Cloud Run /
+GCE), Azure (Container Apps / VM), Linux systemd, Windows, and macOS, plus the
+TLS/auth requirements, environment reference, backups, upgrades, and the
+go-live checklist.
+
 **What a standalone client gives up (and what unlocks it):** the signed audit
 chain, the governed approval queue and program workspace, the full framework
 catalog with control citations, cross-run memory / suggested answers,
