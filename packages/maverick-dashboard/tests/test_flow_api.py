@@ -552,7 +552,9 @@ def test_release_revocation_does_not_hold_a_lock_through_long_execution(
 
     def _agent(_brief, _data):
         executor_started.set()
-        assert finish_executor.wait(timeout=5)
+        # Generous ceiling: must stay well ABOVE the unpublished.wait below,
+        # or a lock-blocked unpublish could ride out this timeout and pass.
+        assert finish_executor.wait(timeout=30)
         return "done", 1.0
 
     monkeypatch.setattr(
@@ -578,12 +580,15 @@ def test_release_revocation_does_not_hold_a_lock_through_long_execution(
     revoker = threading.Thread(target=_unpublish)
     revoker.start()
     # The per-flow activation lock covers only execution-start linearization,
-    # not minutes/hours of agent work.
-    assert unpublished.wait(timeout=2)
+    # not minutes/hours of agent work. A correct unpublish returns in
+    # milliseconds; a lock-blocked one cannot fire before the executor's 30s
+    # ceiling, so 10s discriminates the two even on a starved CI runner
+    # (2s flaked there while the code was correct).
+    assert unpublished.wait(timeout=10)
     assert worker.is_alive()
     finish_executor.set()
-    worker.join(timeout=5)
-    revoker.join(timeout=5)
+    worker.join(timeout=10)
+    revoker.join(timeout=10)
 
     assert not worker.is_alive() and not revoker.is_alive()
     assert store.load_run(run_id).status == "completed"
