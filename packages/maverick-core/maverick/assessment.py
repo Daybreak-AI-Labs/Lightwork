@@ -550,9 +550,201 @@ _TIA = AssessmentTemplate(
     ),
 )
 
+_DPIA = AssessmentTemplate(
+    type="dpia",
+    title="Data Protection Impact Assessment",
+    framework="GDPR Art. 35",
+    description="The formal Art. 35 assessment triggered by high-risk "
+                "processing: the systematic description, necessity and "
+                "proportionality test, risks to rights and freedoms, and the "
+                "mitigating measures — with the Art. 36 prior-consultation "
+                "trigger. Deeper than the lightweight PIA screen.",
+    questions=(
+        _q("dpia_description", "Art. 35(7)(a)",
+           "Is there a systematic description of the processing operations, "
+           "purposes, and (where relevant) the controller's legitimate "
+           "interest?",
+           "no", "medium", "Document the processing end to end: data flows, "
+           "purposes, recipients, retention (Art. 35(7)(a))."),
+        _q("dpia_necessity", "Art. 35(7)(b)",
+           "Is the processing necessary and proportionate in relation to the "
+           "purposes?",
+           "no", "high", "Justify necessity and proportionality; minimise "
+           "data and purposes (Art. 35(7)(b))."),
+        _q("dpia_risk_assessment", "Art. 35(7)(c)",
+           "Have the risks to the rights and freedoms of data subjects been "
+           "assessed?",
+           "no", "high", "Assess likelihood and severity of harm to "
+           "individuals (Art. 35(7)(c))."),
+        _q("dpia_measures", "Art. 35(7)(d)",
+           "Are measures to address the risks identified (safeguards, "
+           "security, mechanisms to demonstrate compliance)?",
+           "no", "high", "Define mitigating measures and residual-risk "
+           "treatment (Art. 35(7)(d))."),
+        _q("dpia_dpo", "Consultation",
+           "Has the Data Protection Officer been consulted and their advice "
+           "recorded (Art. 35(2))?",
+           "no", "medium", "Seek and document the DPO's advice on the DPIA."),
+        _q("dpia_subject_views", "Consultation",
+           "Where appropriate, have the views of data subjects or their "
+           "representatives been sought (Art. 35(9))?",
+           "no", "low", "Seek data-subject views where proportionate, or "
+           "record why it was not appropriate."),
+        _q("dpia_residual_high", "Prior consultation",
+           "After mitigation, does a high residual risk remain that requires "
+           "prior consultation with the supervisory authority (Art. 36)?",
+           "yes", "high", "Consult the supervisory authority before "
+           "processing where high residual risk remains (Art. 36)."),
+        _q("dpia_monitoring", "High-risk triggers",
+           "Does it involve systematic monitoring of a publicly accessible "
+           "area on a large scale?",
+           "yes", "medium", "Systematic large-scale monitoring is a "
+           "high-risk trigger — ensure the DPIA and safeguards are complete."),
+        _q("dpia_automated", "High-risk triggers",
+           "Does it involve automated decision-making, including profiling, "
+           "with legal or similarly significant effects?",
+           "yes", "medium", "Add human oversight and an Art. 22 "
+           "safeguard/exception for significant automated decisions."),
+        _q("dpia_review", "Ongoing review",
+           "Is the DPIA reviewed when the risk posed by the processing "
+           "changes (Art. 35(11))?",
+           "no", "low", "Set a review trigger for material changes to the "
+           "processing."),
+    ),
+)
+
+_LIA = AssessmentTemplate(
+    type="lia",
+    title="Legitimate Interest Assessment",
+    framework="GDPR Art. 6(1)(f)",
+    description="The three-part test for relying on legitimate interests: the "
+                "purpose test (is there a real interest?), the necessity test "
+                "(is processing needed for it?), and the balancing test (do "
+                "the individual's rights override it?).",
+    questions=(
+        _q("lia_interest", "Purpose test",
+           "Is a specific legitimate interest clearly identified and "
+           "articulated (yours or a third party's)?",
+           "no", "high", "State the legitimate interest precisely; a vague "
+           "or generic interest cannot be balanced."),
+        _q("lia_lawful_interest", "Purpose test",
+           "Is that interest lawful, real, and present rather than "
+           "speculative or contrary to law?",
+           "no", "medium", "Confirm the interest is lawful and current, not "
+           "hypothetical."),
+        _q("lia_necessity", "Necessity test",
+           "Is the processing necessary to achieve that interest, with no "
+           "reasonable less-intrusive means?",
+           "no", "high", "Show the processing is necessary — if a less "
+           "intrusive route exists, legitimate interests does not apply."),
+        _q("lia_alternative", "Necessity test",
+           "Could the purpose reasonably be achieved with less data or a "
+           "different, more appropriate lawful basis?",
+           "yes", "medium", "If consent or another basis fits better, or "
+           "less data would do, reconsider relying on legitimate interests."),
+        _q("lia_expectation", "Balancing test",
+           "Would data subjects reasonably expect this processing at the "
+           "time and in the context the data was collected?",
+           "no", "high", "If the processing is unexpected, the balance tips "
+           "against you — add transparency or reconsider the basis."),
+        _q("lia_impact", "Balancing test",
+           "Is the processing likely to have an unjustified adverse impact "
+           "on the individual's interests, rights, or freedoms?",
+           "yes", "high", "Where adverse impact is likely and unjustified, "
+           "legitimate interests fails the balancing test."),
+        _q("lia_vulnerable", "Balancing test",
+           "Does it involve children's data or vulnerable individuals "
+           "without additional safeguards?",
+           "yes", "high", "Give special weight to children/vulnerable "
+           "groups; add safeguards or do not rely on this basis."),
+        _q("lia_safeguards", "Balancing test",
+           "Are safeguards in place (data minimisation, transparency, "
+           "opt-out) that tip the balance in your favour?",
+           "no", "medium", "Add safeguards that reduce the impact on "
+           "individuals and strengthen the balance."),
+        _q("lia_objection", "Right to object",
+           "Is an easy, effective mechanism to object to the processing "
+           "provided (Art. 21)?",
+           "no", "medium", "Provide a simple right-to-object route and honour "
+           "objections."),
+        _q("lia_documented", "Accountability",
+           "Is the LIA outcome documented, dated, and available for review?",
+           "no", "low", "Record the LIA and its conclusion so the basis can "
+           "be demonstrated (Art. 5(2))."),
+    ),
+)
+
+_CCPA = AssessmentTemplate(
+    type="ccpa",
+    title="CCPA / CPRA Assessment",
+    framework="CCPA / CPRA (California)",
+    description="Assess a processing activity against the California Consumer "
+                "Privacy Act as amended by the CPRA: consumer notices, rights, "
+                "opt-outs, sensitive-PI limits, purpose limitation, and "
+                "service-provider contracts.",
+    questions=(
+        _q("ccpa_notice", "Notices",
+           "Are consumers given notice at or before collection of the "
+           "categories of personal information and the purposes (§1798.100)?",
+           "no", "high", "Publish a notice at collection listing categories "
+           "and purposes before collecting."),
+        _q("ccpa_do_not_sell", "Opt-out",
+           "If personal information is sold or shared, is a \"Do Not Sell or "
+           "Share My Personal Information\" opt-out provided (§1798.135)?",
+           "no", "high", "Add the Do-Not-Sell/Share link and honour "
+           "opt-out preference signals."),
+        _q("ccpa_sensitive_pi", "Sensitive PI",
+           "Where sensitive personal information is used beyond permitted "
+           "purposes, is a \"Limit the Use of My Sensitive Personal "
+           "Information\" control offered (§1798.121)?",
+           "no", "medium", "Offer the sensitive-PI limitation right where "
+           "required."),
+        _q("ccpa_rights", "Consumer rights",
+           "Can consumers exercise the rights to know, delete, correct, and "
+           "opt out (§1798.105-.130)?",
+           "no", "high", "Wire up know / delete / correct / opt-out request "
+           "handling within statutory timelines."),
+        _q("ccpa_methods", "Consumer rights",
+           "Are at least two designated methods offered for submitting "
+           "requests (e.g. toll-free number and web form)?",
+           "no", "low", "Provide the required request submission methods for "
+           "your business type."),
+        _q("ccpa_purpose_limit", "Purpose limitation",
+           "Is the use of personal information limited to the disclosed, "
+           "compatible purposes (CPRA data minimisation)?",
+           "no", "medium", "Limit use to disclosed purposes and minimise to "
+           "what is reasonably necessary."),
+        _q("ccpa_retention", "Retention",
+           "Are retention periods (or the criteria for them) disclosed and "
+           "enforced per category (§1798.100(a)(3))?",
+           "no", "medium", "Disclose and enforce retention per category of "
+           "personal information."),
+        _q("ccpa_service_providers", "Contracts",
+           "Are CCPA-compliant contracts in place with service providers, "
+           "contractors, and third parties (§1798.140)?",
+           "no", "high", "Execute service-provider / contractor agreements "
+           "with the required CCPA terms."),
+        _q("ccpa_non_discrimination", "Non-discrimination",
+           "Are consumers protected from discrimination for exercising their "
+           "privacy rights (§1798.125)?",
+           "no", "medium", "Ensure price/service parity for consumers who "
+           "exercise rights, within the statute's financial-incentive rules."),
+        _q("ccpa_minors", "Minors",
+           "Is opt-in consent obtained before selling or sharing the data of "
+           "consumers under 16 (§1798.120(c))?",
+           "no", "high", "Obtain opt-in (13-15) or parental consent (under "
+           "13) before selling/sharing minors' data."),
+        _q("ccpa_risk_assessment", "Accountability",
+           "For processing that presents significant risk, is a CPRA risk "
+           "assessment / cybersecurity audit performed (§1798.185)?",
+           "no", "medium", "Perform and retain the CPRA risk assessment / "
+           "audit for high-risk processing."),
+    ),
+)
+
 TEMPLATES: dict[str, AssessmentTemplate] = {
     t.type: t for t in (
-        _PIA, _AIRA, _VENDOR_RISK, _TIA,
+        _PIA, _DPIA, _LIA, _CCPA, _AIRA, _VENDOR_RISK, _TIA,
         _SOX_CONTROL, _FRAUD_RISK, _ITGC, _CREDIT_RISK, _CLOSE_READINESS,
         _HIPAA, _SOC2, _PCI_DSS,
     )
