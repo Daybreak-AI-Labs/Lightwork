@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # PIA Concierge demo launcher.
 #
-# Starts TWO processes sharing one MAVERICK_HOME (world.db + signed audit chain):
-#   :8765  the REAL Lightwork dashboard  — goals, approvals, assessments, audit
+# Starts both servers in ONE process sharing one MAVERICK_HOME (world.db +
+# signed audit chain):
+#   :8765  the REAL Lightwork dashboard  — goals, workspaces, audit (part 2)
 #   :8890  the external world            — mock ServiceNow, requester inbox +
-#          questionnaire, mock OneTrust tenant
+#          chat/guided questionnaire, mock OneTrust tenant where the human
+#          reviews & approves (part 1)
 #
 # No external accounts and no LLM key required. Real platform code does the
-# work; only the ServiceNow/OneTrust *tenants* are simulated.
+# work; only the ServiceNow/OneTrust *tenants* are simulated. Optional:
+# ANTHROPIC_API_KEY upgrades ambiguous chat replies to a model-assisted read.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +31,9 @@ export PIA_BASE_URL="${PIA_BASE_URL:-http://127.0.0.1:$WORLD_PORT}"
 export LIGHTWORK_DASHBOARD_URL="${LIGHTWORK_DASHBOARD_URL:-http://127.0.0.1:$DASH_PORT}"
 export ONETRUST_HOSTNAME="${ONETRUST_HOSTNAME:-$PIA_BASE_URL/ot-api}"
 export ONETRUST_TOKEN="${ONETRUST_TOKEN:-demo-bearer-token}"
+
+# --- lived-in tenant: a year of backdated OneTrust history (0 = clean slate)
+export PIA_SEED_TENANT="${PIA_SEED_TENANT:-1}"
 
 # --- shield hardening for anything shown to a security audience
 export MAVERICK_SHIELD_PROFILE="${MAVERICK_SHIELD_PROFILE:-strict}"

@@ -329,6 +329,138 @@ def _prior_summary(ot: OneTrustAssessment) -> dict:
     }
 
 
+# ---- Lived-in tenant history (opt-out fixtures, PIA_SEED_TENANT) -----------
+_TENANT_VENDORS: tuple[tuple[str, str], ...] = (
+    ("Acme CRM", "high"), ("Globex HRIS", "medium"), ("Initech Payroll", "low"),
+    ("Umbrella Health Portal", "high"), ("Stark Analytics", "medium"),
+    ("Wayne Payments", "high"), ("Pied Piper Storage", "low"),
+    ("Hooli Ads Platform", "medium"), ("Soylent Survey Tool", "low"),
+    ("Tyrell Recruiting", "high"), ("Aperture Support Desk", "medium"),
+    ("Cyberdyne Vision API", "high"), ("Oceanic Booking", "low"),
+    ("Duff Loyalty", "medium"), ("Vandelay Imports EDI", "low"),
+    ("Wonka Logistics", "medium"), ("Gringotts Billing", "high"),
+    ("Prestige Telecom CDR", "medium"), ("Oscorp Labs LIMS", "high"),
+    ("Bluth Docs eSign", "low"), ("Dunder Mifflin Print", "low"),
+    ("Sirius Chat Widget", "medium"), ("MomCorp IoT Fleet", "high"),
+    ("Planet Express Tracking", "low"), ("Massive Dynamic A/B", "medium"),
+    ("Virtucon Badging", "medium"), ("Rekall VR Training", "high"),
+)
+
+_FINDINGS_BY_RISK = {
+    "high": ["Unsafeguarded transfer to us-east-1 (Chapter V).",
+             "Art. 28 DPA not countersigned.",
+             "No defined retention period."],
+    "medium": ["Privacy notice does not cover this processing.",
+               "Sub-processor list is stale."],
+    "low": ["Access review cadence undocumented."],
+}
+
+_SEED_REQUESTERS = ("Jordan Diaz", "Sam Patel", "Alex Kim",
+                    "Riley Moore", "Casey Lee")
+
+
+def _seed_tenant() -> None:
+    """A year of backdated OneTrust history (PIA_SEED_TENANT=1, the launcher
+    default): completed reviews, a live Under Review queue, one sent-back, a
+    couple of addenda — so the tenant, the ticket list, and the speed strip
+    read as sustained use. Pure demo-store fixtures: nothing is written to
+    the world model or the signed audit chain. PIA_SEED_TENANT=0 for a
+    clean-slate run."""
+    if os.environ.get("PIA_SEED_TENANT", "0") != "1" or STORE.onetrust:
+        return
+    import random
+    rng = random.Random(42)
+    now = time.time()
+    tpl = get_template("pia")
+    reviewers = ("A. Novak (Privacy)", "L. Chen (Privacy)",
+                 "R. Okafor (Legal)", "Privacy Reviewer")
+    n = len(_TENANT_VENDORS)
+    for i, (vendor, risk) in enumerate(_TENANT_VENDORS):
+        # Oldest first; the newest three are still in the review queue and
+        # one mid-history record was sent back.
+        frac = (n - 1 - i) / (n - 1)
+        age_days = 1.0 + frac * 420 * rng.uniform(0.85, 1.15)
+        status = ("Under Review" if i >= n - 3
+                  else "Sent back" if i == 9 else "Completed")
+        created = now - age_days * 86400
+        case_id = STORE.next_case_id()
+        ticket_no = STORE.next_ticket_number()
+        auto_n = rng.randint(2, 7)
+        answers: dict[str, dict] = {}
+        result_answers: list[dict] = []
+        for j, q in enumerate(tpl.questions):
+            ans = "no" if (risk == "high" and j in (0, 7, 8)) else "yes"
+            rec: dict[str, Any] = {"answer": ans, "note": ""}
+            if j < auto_n:
+                src = rng.choice((f"{vendor} — DPA (signed).pdf",
+                                  f"{vendor} — Security Overview.pdf",
+                                  f"ServiceNow ticket {ticket_no}",
+                                  "last review"))
+                rec.update({"auto": True, "source": src,
+                            "note": f"Auto-answered from {src}"})
+            answers[q.id] = rec
+            result_answers.append({"question": q.text, "answer": ans,
+                                   "note": rec["note"], "by": ""})
+        findings = [{"severity": risk, "section": "Assessment", "text": t,
+                     "guidance": "Remediate before contract renewal."}
+                    for t in _FINDINGS_BY_RISK[risk]]
+        case = Case(id=case_id, ticket_number=ticket_no, subject=vendor,
+                    requester=rng.choice(_SEED_REQUESTERS),
+                    requester_email="requester@example.test",
+                    data_types="customer contact data")
+        case.created_at = created
+        case.submitted_at = created + rng.uniform(90, 420)
+        case.answers = answers
+        filed_at = case.submitted_at + rng.uniform(15, 40)
+        decided_at = (filed_at + rng.uniform(300, 7200)
+                      if status != "Under Review" else 0.0)
+        ot = OneTrustAssessment(
+            assessment_id=STORE.next_onetrust_id(),
+            name=f"PIA — {vendor}", template="Privacy Impact Assessment",
+            subject=vendor, status=status, risk_level=risk,
+            result={"risk_rating": risk, "inherent_risk": risk,
+                    "residual_risk": "medium" if risk == "high" else "low",
+                    "risks_in_scope": 10,
+                    "controls_in_place": 10 - len(findings),
+                    "answered": 10, "total": 10,
+                    "findings": findings, "answers": result_answers},
+            case_id=case_id, decided_at=decided_at,
+            decided_by=rng.choice(reviewers) if decided_at else "")
+        ot.filed_at = filed_at
+        if status == "Completed" and i in (4, 12):
+            re_review = i == 12
+            ot.addenda.append({
+                "at": decided_at + 6 * 86400,
+                "filename": f"{vendor} — DPA amendment.pdf",
+                "summary": ("Art. 28 clause review: 8 of 10 clauses present, "
+                            "residual risk "
+                            + ("MEDIUM. Missing clauses flagged — re-review "
+                               "recommended." if re_review else "LOW. No new "
+                               "gaps — filed for the record.")),
+                "gaps": (["audit rights", "retention schedule"]
+                         if re_review else []),
+                "re_review": re_review, "dpa_review_id": ""})
+            ot.needs_re_review = re_review
+        case.stage = ("in_onetrust_review" if status == "Under Review"
+                      else "filed" if status == "Completed" else "rejected")
+        case.onetrust_id = ot.assessment_id
+        case.decided_by = ot.decided_by
+        STORE.cases[case_id] = case
+        STORE.onetrust[ot.assessment_id] = ot
+        ticket = Ticket(
+            number=ticket_no,
+            short_description=f"Privacy assessment: {vendor}",
+            requester=case.requester,
+            requester_email=case.requester_email,
+            system_name=vendor, data_types=case.data_types,
+            state="Resolved" if status == "Completed" else "In Progress",
+            case_id=case_id)
+        ticket.created_at = created
+        STORE.tickets[ticket_no] = ticket
+    print(f"[seed] tenant history: {len(STORE.onetrust)} OneTrust records "
+          f"(disable with PIA_SEED_TENANT=0)")
+
+
 @app.on_event("startup")
 async def _startup() -> None:
     # This public demo route explicitly opts into ambient document credentials,
@@ -358,6 +490,7 @@ async def _startup() -> None:
         print(f"[mailsink] capturing SMTP on {host}:{port}")
     except Exception as exc:  # pragma: no cover
         print(f"[mailsink] could not bind {host}:{port}: {exc}")
+    _seed_tenant()
     app.state.watcher = asyncio.create_task(_approval_watcher())
     print(f"[graph-sim] simulated SharePoint tenant at {graph_sim_base}")
 
@@ -970,14 +1103,20 @@ async def intake_carry_forward(case_id: str) -> JSONResponse:
         return JSONResponse({"ok": False}, status_code=404)
     prior_ot = _latest_prior_record(case.subject)
     prior_case = STORE.cases.get(prior_ot.case_id) if prior_ot else None
-    if (prior_ot is None or prior_case is None
-            or not getattr(prior_case, "assessment_id", "")):
+    if prior_ot is None or prior_case is None:
         return JSONResponse({"ok": True, "prefilled": []})
-    from maverick.assessment import load_saved
-    record = await asyncio.to_thread(load_saved, prior_case.assessment_id)
+    prior_answers: dict[str, dict] = {}
+    if getattr(prior_case, "assessment_id", ""):
+        from maverick.assessment import load_saved
+        record = await asyncio.to_thread(load_saved, prior_case.assessment_id)
+        prior_answers = (record or {}).get("answers") or {}
+    if not prior_answers:
+        # Seeded/legacy history has no saved platform record; the demo case
+        # still remembers the interview.
+        prior_answers = prior_case.answers
     source = f"last review {prior_ot.assessment_id}"
     hits: list[dict] = []
-    for qid, rec in ((record or {}).get("answers") or {}).items():
+    for qid, rec in prior_answers.items():
         ans = (rec.get("answer") or "").strip()
         if ans not in _ANSWER_LABELS:
             continue

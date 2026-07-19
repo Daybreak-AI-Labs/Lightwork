@@ -39,6 +39,24 @@ model-assisted read, degrading back to a scripted clarification on any error.
 Voice input uses the browser's Web Speech API (Chrome; allow the mic) and
 "Read questions aloud" speaks the agent's side — no server dependency.
 
+**The agent answers what it can prove.** Attached documents, the ticket's
+own data-types declaration, and the vendor's last review pre-answer intake
+questions with quoted provenance ("Yes — from Acme DPA.pdf: '…'"); the
+interview skips them visibly and the reviewer sees every source in the
+answer notes. A known vendor opens with the full memory (last record, risk,
+who decided, when, documents on file) and offers "just adding documents" —
+appended files get an on-the-spot Art. 28 clause review diffed against the
+last review's gaps. The landing page's **speed story** strip counts it all:
+median ticket→decision minutes, evidence-answered ratio, and hours saved
+against an explicitly labeled baseline (`PIA_MANUAL_BASELINE_HOURS`,
+default 6).
+
+The launcher seeds **a year of backdated OneTrust history** (27 records:
+a live Under Review queue, completed reviews, a sent-back, addenda) so the
+tenant reads as sustained use — set `PIA_SEED_TENANT=0` for a clean slate.
+Fixtures live only in the demo store; the world model and signed audit
+chain stay clean.
+
 ## Run it
 
 ```bash
@@ -95,43 +113,56 @@ flow — everything below runs on real records:
 `Govern → Finance` is the same chassis over SOX / fraud / ITGC / credit /
 close-readiness — the "one workspace per department" proof.
 
-## Demo script (~6 minutes)
+## Demo script (~6 minutes) — Part 1: the agent alone, Part 2: the platform
 
-Two browser windows: **left** = external world (:8890), **right** = Lightwork
-dashboard (:8765).
+Two browser windows: **left** = external world (:8890) — this is ALL of
+Part 1: the agent plus the tools the customer already uses (ServiceNow,
+email, OneTrust). **right** = Lightwork dashboard (:8765) — Part 2, the
+governance layer, shown after the value lands.
 
-1. **[left → ServiceNow]** File the pre-filled privacy request. *"An employee
-   asks for a privacy review the way they already do — a ticket. They never
-   learn a new tool."*
-2. **[left → Requester inbox]** Open the intake email, click the link. The
-   interview opens in **Chat** mode — tap the 🎤 and *talk* an answer, type
-   another in plain words, then flip the toggle to **Guided** to show the
-   one-click version. Attach a file or hit ⚡ Auto-fill and submit. *"A real
-   conversation, not a form — and every answer still lands in the same
-   governed template, with the requester's own words kept for the reviewer.
-   Two minutes, no privacy-team time."*
-3. **[left → OneTrust]** The money shot: the assessment is **already in
-   OneTrust, Under Review** — open it: the full interview verbatim, findings,
-   and required controls with GDPR / ISO 27001 / SOC 2 / NIST citations.
-   Click **Approve**. *"The agent did the input and the analysis; your team
-   reviews and approves in the tool they already live in. Nothing is
-   Completed until a person clicks."*
-4. **[left]** The record flips to Completed; the ServiceNow ticket is
-   Resolved with the risk rating in the work notes; the requester got a
-   completion email. *"Repoint one hostname at your OneTrust tenant and this
-   is live."*
-5. **[left → OneTrust record]** Click **＋ Add document to this vendor** and
-   drop the updated DPA. *"Already assessed the vendor and just have new
-   paperwork? The addendum is analyzed clause-by-clause on the spot and the
-   record is flagged for re-review only if the risk picture changed."* (The
-   same thing works from chat: a new ticket for a known vendor is offered
-   "just adding documents" — no second interview.)
-6. **[right → Govern → Audit]** The silent governance: GOAL_START →
-   TOOL_CALL(email) → ASSESSMENT_REVIEW → AUTONOMY_GATED → TOOL_CALL(onetrust)
-   → APPROVAL_DECISION (via onetrust). *"Your reviewer never left OneTrust,
-   yet every step — including their click — is on a tamper-evident,
-   Ed25519-signed chain. That's how these assessments get 5× faster without
-   losing the audit."*
+**Part 1 — the agent (left window only):**
+
+1. **[ServiceNow]** File the pre-filled privacy request. *"An employee asks
+   for a privacy review the way they already do — a ticket. They never learn
+   a new tool."*
+2. **[Requester inbox]** Open the intake email, click the link. The interview
+   opens in **Chat** mode — tap the 🎤 and *talk* an answer, type another in
+   plain words, then flip the toggle to **Guided** to show the one-click
+   version. Click **Find my documents**: the DPA and security overview attach
+   AND auto-answer their questions with quoted evidence — the interview skips
+   them visibly. *"The agent asks only what the paperwork can't prove. Every
+   skipped question shows its source, and the requester's own words are kept
+   for the reviewer."*
+3. **[OneTrust]** The money shot: your assessment is **already at the top of
+   the queue, Under Review**, in a tenant that shows a year of history — open
+   it: the full interview verbatim with the provenance notes, findings,
+   required controls with GDPR / ISO 27001 / SOC 2 / NIST citations, and the
+   **Agent speed** row. Click **Approve**. *"The agent did the input and the
+   analysis; your team reviews and approves in the tool they already live
+   in. Nothing is Completed until a person clicks."*
+4. The record flips to Completed; the ServiceNow ticket is Resolved with the
+   risk rating in the work notes; the requester got a completion email; the
+   landing page's **speed story** strip updates. *"Repoint one hostname at
+   your OneTrust tenant and this is live."*
+5. **[OneTrust record]** Click **＋ Add document to this vendor** and drop the
+   updated DPA. *"Already assessed the vendor and just adding stuff? The
+   addendum is clause-reviewed on the spot, diffed against the last review's
+   gaps, and flagged for re-review only if the risk picture changed."* (Same
+   from chat: a new ticket for a known vendor opens with everything we know
+   and offers "just adding documents" — or a fresh assessment that carries
+   the old answers forward.)
+
+**Part 2 — the platform (right window):**
+
+6. **[Govern → Privacy]** The program of record behind the agent: worklist
+   with re-review cadences, DPA reviews, AI registry, RoPA, DSARs,
+   incidents, the board-pack report.
+7. **[Govern → Audit]** The silent governance: GOAL_START → TOOL_CALL(email)
+   → INTAKE_PREFILL → ASSESSMENT_REVIEW → AUTONOMY_GATED →
+   TOOL_CALL(onetrust) → APPROVAL_DECISION (via onetrust). *"Your reviewer
+   never left OneTrust, yet every step — including their click and every
+   auto-answered question — is on a tamper-evident, Ed25519-signed chain.
+   That's how assessments get faster without losing the audit."*
 
 Optional closer (terminal):
 
