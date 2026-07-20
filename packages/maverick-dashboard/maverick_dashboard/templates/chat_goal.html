@@ -1125,8 +1125,11 @@
           body: JSON.stringify({ text: text }),
         }).then(function (r) {
           if (!r.ok) {
-            // No TTS backend / disabled: fall back to the browser's own voice.
-            if ('speechSynthesis' in window) {
+            // No TTS backend / disabled: fall back to the browser — through
+            // the natural-voice layer (ranked voice, humanized text), never
+            // the bare default utterance.
+            if (window.lwVoice) { window.lwVoice.speak(text); }
+            else if ('speechSynthesis' in window) {
               window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
             }
             return null;

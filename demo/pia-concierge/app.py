@@ -66,6 +66,13 @@ ANALYST = "privacy-analyst-agent"
 
 app = FastAPI(title="PIA Concierge — external world (ServiceNow / mail / OneTrust)")
 
+# The concierge's own assets (the natural-voice module). Standalone-safe:
+# starlette ships StaticFiles; the directory travels in the deployment kit.
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+app.mount("/static", StaticFiles(directory=str(HERE / "static")),
+          name="static")
+
 
 def _world():
     """The governed world model, or None in the standalone agent (no goals /

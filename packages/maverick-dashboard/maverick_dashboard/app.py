@@ -5535,6 +5535,18 @@ async def shell_behaviors_js() -> FileResponse:
     )
 
 
+@app.get("/static/lightwork-voice.js")
+async def natural_voice_js() -> FileResponse:
+    """The natural-voice layer: ranked speech voices, humanized text, and
+    sentence-chunked delivery for every browser read-aloud fallback — the
+    bare default utterance is what makes an agent sound robotic."""
+    return FileResponse(
+        _STATIC_DIR / "lightwork-voice.js",
+        media_type="application/javascript; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @app.get("/static/daybreak-logo.jpg")
 async def brand_logo() -> FileResponse:
     """The Daybreak Labs brand logo, served same-origin for the sidebar brand,

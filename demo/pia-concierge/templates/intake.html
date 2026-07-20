@@ -264,6 +264,7 @@ document.querySelectorAll('.fu-q').forEach(function (row) {
   </div>
 </dialog>
 
+<script src="/static/concierge-voice.js"></script>
 <script>
 const CASE = "{{ case.id }}";
 const DTOKEN = "{{ delegation.token if delegation else '' }}";
@@ -278,6 +279,7 @@ let idx = 0;
 // switchable mid-interview, both drive the same governed template.
 let MODE = localStorage.getItem('pia-mode') || 'chat';
 let SPEAK = false;
+let ackCount = 0;   // rotates the acknowledgment phrasing
 const delegated = {};   // qid -> colleague name (skip in this session's flow)
 Object.keys(PRE_DELEGATED).forEach(function (t) {
   if (t === DTOKEN) return;  // a delegate still answers their own set
@@ -301,10 +303,16 @@ function bubble(who, text) {
   d.appendChild(b);
   thread.appendChild(d);
   thread.scrollTop = thread.scrollHeight;
-  if (who === 'bot' && SPEAK && window.speechSynthesis) {
+  if (who === 'bot' && SPEAK) {
     try {
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      // The natural-voice layer: ranked voice, humanized text, sentence
+      // delivery. Falls back to the bare utterance only if the module is
+      // missing entirely.
+      if (window.lwVoice) { window.lwVoice.speak(text); }
+      else if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+      }
     } catch (e) { /* voice output is best-effort */ }
   }
 }
@@ -462,8 +470,29 @@ function renderChatControls(q) {
   speak.type = 'button';
   speak.className = 'btn ghost sm';
   speak.textContent = SPEAK ? '🔊 Voice replies on' : '🔈 Read questions aloud';
-  speak.onclick = () => { SPEAK = !SPEAK; renderControls(); };
+  speak.onclick = () => {
+    SPEAK = !SPEAK;
+    if (!SPEAK && window.lwVoice) lwVoice.stop();
+    renderControls();
+  };
   sub.appendChild(speak);
+  if (SPEAK && window.lwVoice && lwVoice.options().length > 1) {
+    // Which voice speaks is a preference, not a default: ranked best first,
+    // persisted across the session.
+    const pick = document.createElement('select');
+    pick.className = 'btn ghost sm';
+    pick.setAttribute('aria-label', 'Choose the reading voice');
+    const current = lwVoice.best();
+    lwVoice.options().slice(0, 8).forEach((v) => {
+      const o = document.createElement('option');
+      o.value = v.name;
+      o.textContent = v.name.replace(/\s*\(.*\)$/, '');
+      if (current && v.name === current.name) o.selected = true;
+      pick.appendChild(o);
+    });
+    pick.onchange = () => { lwVoice.setVoice(pick.value); };
+    sub.appendChild(pick);
+  }
   if (!DTOKEN) {
     const del = document.createElement('button');
     del.className = 'btn ghost sm';
@@ -552,7 +581,21 @@ async function sendFree(q, text) {
     renderControls();
     return;
   }
-  bubble('bot', 'Got it — recorded as ' + r.label + '. Your words stay on the record for the reviewer.');
+  // A person doesn't say the same sentence forty times: rotate the
+  // acknowledgment, and explain the on-the-record part only once.
+  const ACKS = [
+    (l) => 'Got it — ' + l + ' it is.',
+    (l) => 'Perfect, I\'ve put that down as ' + l + '.',
+    (l) => 'Thanks — recorded as ' + l + '.',
+    (l) => l + ' — noted.',
+    (l) => 'Great, that\'s a ' + l + ' then.',
+  ];
+  let ack = ACKS[ackCount % ACKS.length](r.label);
+  if (ackCount === 0) {
+    ack += ' Your own words stay on the record for the reviewer.';
+  }
+  ackCount++;
+  bubble('bot', ack);
   ANSWERED[q.id] = true;
   idx++;
   setTimeout(ask, 350);
@@ -823,7 +866,7 @@ if (appendzone) {
 const autofillBtn = document.getElementById('autofill');
 if (autofillBtn) autofillBtn.onclick = async () => {
   await fetch(`/intake/${CASE}/autofill`, {method:'POST'});
-  bubble('bot', "(Auto-filled with realistic demo answers.)");
+  bubble('bot', "Done — I filled the rest in with realistic demo answers so you can see the whole flow.");
   idx = QUESTIONS.length;
   ask();
 };
