@@ -16,7 +16,14 @@
 </style>
 
 <div class="page-head">
-  <div class="eyebrow">{{ caps_summary.mode }}</div>
+  <div class="eyebrow">{{ caps_summary.mode }}
+    {% set lic = caps_summary.license %}
+    {% if lic and lic.mode == 'licensed' %}
+      · licensed to <b>{{ lic.customer }}</b> ({{ lic.sku }})
+    {% elif lic and lic.mode == 'evaluation' %}
+      · <b>evaluation mode</b> — {{ lic.reason }} · open-case cap {{ lic.open_case_cap }}
+    {% endif %}
+  </div>
   <h1>The agent on its own — and what Lightwork adds</h1>
   <p>PIA Concierge is sold two ways from the same product. The <b>standalone
      agent</b> takes the intake, scores the risk, files into OneTrust, and lets

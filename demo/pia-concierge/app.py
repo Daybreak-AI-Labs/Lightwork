@@ -734,9 +734,33 @@ async def servicenow_ticket(request: Request, number: str) -> HTMLResponse:
 # ===========================================================================
 # Intake webhook — "submitted via anything" lands here, becomes a REAL goal
 # ===========================================================================
+AGENT_VERSION = "1.1.0"
+
+
+def _license_gate() -> str | None:
+    """Evaluation-mode cap (standalone only): a friendly refusal when a NEW
+    case would exceed the open-case cap, else None. A licensed key or the
+    platform build lifts the cap — never a mid-flight cripple."""
+    from capabilities import LICENSE
+    if not STANDALONE or LICENSE.get("mode") == "licensed":
+        return None
+    cap = LICENSE.get("open_case_cap") or 0
+    open_cases = sum(1 for c in STORE.cases.values()
+                     if c.stage not in ("approved", "rejected"))
+    if cap and open_cases >= cap:
+        return (f"Evaluation mode ({LICENSE.get('reason', 'no license')}): "
+                f"{open_cases} cases are open and the evaluation cap is "
+                f"{cap}. Close a case, or set LIGHTWORK_LICENSE to lift "
+                f"the cap — a license is a key swap, not a reinstall.")
+    return None
+
+
 @app.post("/webhook/pia")
 async def webhook_pia(request: Request) -> JSONResponse:
     body = await request.json()
+    gate = _license_gate()
+    if gate:
+        return JSONResponse({"ok": False, "error": gate}, status_code=403)
     number = body.get("ticket_number", "")
     ticket = STORE.tickets.get(number)
     if not ticket:
@@ -1623,6 +1647,7 @@ async def _file_under_review(case: Case) -> None:
         for step in run["steps"]:
             case.log(f"OneTrust: {step}.")
         v = run["value"]
+        case.value = v
         case.log(f"Value ledger: {v['hours']}h saved "
                  f"(privacy team {v['privacy_hours']}h · business "
                  f"{v['business_hours']}h) ≈ ${v['dollars']:,.0f} at "
@@ -2085,3 +2110,21 @@ async def intake_append_doc(case_id: str, file: UploadFile) -> JSONResponse:
 async def health() -> JSONResponse:
     return JSONResponse({"ok": True, "cases": len(STORE.cases),
                         "tickets": len(STORE.tickets), "filed": len(STORE.onetrust)})
+
+
+@app.get("/value.json")
+async def value_json() -> JSONResponse:
+    """The agent's counted value ledger — sums the per-case value recorded
+    when each protocol run filed (never re-estimated after the fact). The
+    partner fleet console rolls these up across deployments."""
+    cases = [c for c in STORE.cases.values() if c.value]
+    return JSONResponse({
+        "agent": "pia-concierge", "version": AGENT_VERSION,
+        "cases": len(cases),
+        "hours": round(sum(c.value["hours"] for c in cases), 1),
+        "dollars": round(sum(c.value["dollars"] for c in cases), 2),
+        "privacy_hours": round(sum(c.value["privacy_hours"]
+                                   for c in cases), 1),
+        "business_hours": round(sum(c.value["business_hours"]
+                                    for c in cases), 1),
+    })

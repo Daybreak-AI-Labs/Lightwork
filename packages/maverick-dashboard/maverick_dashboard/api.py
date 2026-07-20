@@ -98,6 +98,7 @@ from .api_schemas import (
     OutcomeByKeyIn,
     OutcomeIn,
     OutcomeLinkIn,
+    PartnerTenantIn,
     RedactIn,
     ReparentIn,
     RetitleIn,
@@ -1585,8 +1586,246 @@ async def privacy_board(request: Request) -> dict:
                             "ai": len(ai_rows), "dsar": len(dsar_rows)}
     payload["posture"] = _board_posture(sessions, dsar_rows, incidents,
                                         dpa, flows)
+    from maverick.assessment import acceptance_metrics
+
+    from .app import PRIVACY_ASSESSMENT_TYPES
+    payload["learning"] = await run_in_threadpool(
+        acceptance_metrics, types=set(PRIVACY_ASSESSMENT_TYPES))
     payload["generated_at"] = now
     return payload
+
+
+# ---- partner fleet (multi-tenant console) ----------------------------------
+
+def _probe_tenant(t: dict) -> dict:
+    """One synchronous probe of a client deployment: /health for liveness
+    and latency, /value.json (best-effort) for the agent's own counted value
+    ledger. Never raises -- the fleet view shows the error instead."""
+    import httpx
+    base = t["base_url"].rstrip("/")
+    headers = ({"Authorization": f"Bearer {t['token']}"}
+               if t.get("token") else {})
+    out: dict = {"checked_at": time.time(), "ok": False, "latency_ms": None,
+                 "agent": "", "version": "", "value": None, "error": ""}
+    t0 = time.monotonic()
+    try:
+        r = httpx.get(f"{base}/health", headers=headers, timeout=4)
+        out["latency_ms"] = round((time.monotonic() - t0) * 1000, 1)
+        out["ok"] = r.status_code == 200
+        if not out["ok"]:
+            out["error"] = f"health HTTP {r.status_code}"
+            return out
+    except Exception as exc:
+        out["error"] = str(exc)[:200]
+        return out
+    try:
+        v = httpx.get(f"{base}/value.json", headers=headers, timeout=4)
+        if v.status_code == 200:
+            d = v.json()
+            out["agent"] = str(d.get("agent", ""))[:60]
+            out["version"] = str(d.get("version", ""))[:20]
+            out["value"] = {"cases": int(d.get("cases") or 0),
+                            "hours": round(float(d.get("hours") or 0), 1),
+                            "dollars": round(float(d.get("dollars") or 0), 2)}
+    except Exception:  # value ledger is optional on older agents
+        pass
+    return out
+
+
+@router.get("/partner/tenants")
+async def partner_list_tenants(request: Request) -> dict:
+    """The partner fleet registry (tokens never echoed)."""
+    require_permission(request, "operate")
+    from . import partner_store
+    rows = await run_in_threadpool(partner_store.list_tenants)
+    return {"tenants": [partner_store.public_row(r) for r in rows]}
+
+
+@router.post("/partner/tenants", status_code=201)
+async def partner_add_tenant(request: Request,
+                             body: PartnerTenantIn) -> dict:
+    """Register a client deployment. Admin-gated: the row can carry a
+    bearer token and the console probes the URL server-side."""
+    require_permission(request, "admin")
+    from . import partner_store
+    row = await run_in_threadpool(
+        lambda: partner_store.upsert_tenant(
+            name=body.name, base_url=body.base_url, token=body.token,
+            theme=body.theme, notes=body.notes))
+    return partner_store.public_row(row)
+
+
+@router.delete("/partner/tenants/{tenant_id}")
+async def partner_delete_tenant(request: Request, tenant_id: str) -> dict:
+    require_permission(request, "admin")
+    from . import partner_store
+    ok = await run_in_threadpool(partner_store.delete_tenant,
+                                 tenant_id[:20])
+    if not ok:
+        raise HTTPException(status_code=404, detail="no such tenant")
+    return {"deleted": tenant_id[:20]}
+
+
+@router.post("/partner/tenants/{tenant_id}/check")
+async def partner_check_tenant(request: Request, tenant_id: str) -> dict:
+    require_permission(request, "operate")
+    from . import partner_store
+    row = next((r for r in await run_in_threadpool(
+        partner_store.list_tenants) if r["id"] == tenant_id[:20]), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="no such tenant")
+    result = await run_in_threadpool(_probe_tenant, row)
+    await run_in_threadpool(partner_store.record_check, row["id"], result)
+    return {"tenant": partner_store.public_row({**row,
+                                                "last_check": result})}
+
+
+@router.get("/partner/fleet")
+async def partner_fleet(request: Request, check: int = 0) -> dict:
+    """The rollup the partner console renders: every tenant with its last
+    (or, with ?check=1, a fresh) probe, plus fleet totals -- healthy count
+    and the summed value ledgers of every reachable agent."""
+    require_permission(request, "operate")
+    from . import partner_store
+    rows = await run_in_threadpool(partner_store.list_tenants)
+    if check:
+        for row in rows:
+            result = await run_in_threadpool(_probe_tenant, row)
+            await run_in_threadpool(partner_store.record_check,
+                                    row["id"], result)
+            row["last_check"] = result
+    tenants = [partner_store.public_row(r) for r in rows]
+    checks = [t.get("last_check") or {} for t in tenants]
+    values = [c.get("value") for c in checks if c.get("value")]
+    return {"tenants": tenants,
+            "fleet": {
+                "total": len(tenants),
+                "healthy": sum(1 for c in checks if c.get("ok")),
+                "cases": sum(v["cases"] for v in values),
+                "hours": round(sum(v["hours"] for v in values), 1),
+                "dollars": round(sum(v["dollars"] for v in values), 2),
+            }}
+
+
+# ---- audit binder (the regulator-grade evidence pack) ----------------------
+
+def _binder_payload(days: int = 90) -> dict:
+    """Everything an auditor asks for, assembled from the records themselves:
+    per-day chain verification over the signed audit log, the event summary,
+    approvals with identity + quorum, the assessment register with revisions
+    and decisions, the privacy registers, and the acceptance-learning KPIs.
+    Nothing here is narrative -- every number has a record behind it."""
+    from maverick.assessment import acceptance_metrics, list_saved
+    from maverick.audit import default_audit_log
+    from maverick.audit.signing import verify_chain
+
+    now = time.time()
+    cutoff = now - days * 86400
+    log = default_audit_log()
+    chain: list[dict] = []
+    kinds: dict[str, int] = {}
+    first_ts: float | None = None
+    last_ts: float | None = None
+    events_seen = 0
+    for path in sorted(log.audit_dir.glob("*.ndjson")):
+        try:
+            day_ts = _dt.datetime.strptime(
+                path.stem, "%Y-%m-%d").replace(
+                tzinfo=_dt.timezone.utc).timestamp()
+        except ValueError:
+            continue
+        if day_ts < cutoff - 86400:
+            continue
+        breaks = [{"line": b.line_no, "reason": b.reason,
+                   "detail": str(getattr(b, "detail", ""))[:200]}
+                  for b in verify_chain(path)]
+        rows = 0
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                rows += 1
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                events_seen += 1
+                kinds[str(e.get("kind", "?"))] = \
+                    kinds.get(str(e.get("kind", "?")), 0) + 1
+                ts = float(e.get("ts") or 0)
+                if ts:
+                    first_ts = ts if first_ts is None else min(first_ts, ts)
+                    last_ts = ts if last_ts is None else max(last_ts, ts)
+        except OSError:
+            pass
+        chain.append({"day": path.stem, "events": rows,
+                      "intact": not breaks, "breaks": breaks[:20]})
+
+    w = _world()
+    approvals = [{
+        "id": a.id, "action": a.action, "risk": a.risk, "status": a.status,
+        "requested_by": a.requested_by, "requested_at": a.requested_at,
+        "decided_by": a.decided_by, "decided_at": a.decided_at,
+        "approvals_required": a.approvals_required,
+    } for a in w.list_approvals(limit=300)
+        if float(a.requested_at or 0) >= cutoff]
+
+    assessments = [{
+        "id": s["id"], "type": s["type"], "subject": s["subject"],
+        "inherent": s["inherent_risk"], "residual": s["residual_risk"],
+        "status": s["status"], "revision": s["revision"],
+        "template_digest": (s.get("template_digest") or "")[:16],
+        "created_at": s["created_at"], "decided_at": s.get("decided_at"),
+        "review_due": s.get("review_due"),
+    } for s in list_saved()[:300]]
+
+    from maverick import privacy_ops
+    registers: dict = {"enabled": privacy_ops.enabled()}
+    if registers["enabled"]:
+        dsar_rows = privacy_ops.list_dsars()
+        registers.update({
+            "ropa": len(privacy_ops.list_ropa()),
+            "dpa": len(privacy_ops.list_dpa_reviews()),
+            "ai": len(privacy_ops.list_ai_systems()),
+            "dsar": len(dsar_rows),
+            "incidents": len(privacy_ops.list_incidents()),
+            "dsar_aging": _dsar_aging_payload(dsar_rows),
+        })
+
+    return {
+        "window_days": days,
+        "generated_at": now,
+        "chain": {"files": chain,
+                  "intact": all(c["intact"] for c in chain) if chain
+                  else None,
+                  "events": events_seen,
+                  "first_ts": first_ts, "last_ts": last_ts,
+                  "kinds": dict(sorted(kinds.items(),
+                                       key=lambda kv: -kv[1]))},
+        "approvals": approvals,
+        "assessments": assessments,
+        "registers": registers,
+        "learning": acceptance_metrics(),
+    }
+
+
+@router.get("/audit/binder")
+async def audit_binder(request: Request, days: int = 90) -> dict:
+    """The evidence pack as JSON -- the machine-readable twin of the
+    /audit/binder page. Audit-gated like the log it summarizes."""
+    require_permission(request, "audit")
+    return await run_in_threadpool(_binder_payload,
+                                   max(1, min(days, 730)))
+
+
+@router.get("/assess/question-roi")
+async def assessment_question_roi(request: Request, type: str) -> dict:
+    """Which questions earn their place: per-question fire-rate and
+    rating-impact evidence across every saved assessment of a type -- the
+    data behind pruning a questionnaire without losing signal."""
+    require_permission(request, "operate")
+    from maverick.assessment import question_roi
+    return await run_in_threadpool(question_roi, type[:40])
 
 
 @router.post("/privacy/dsar", status_code=201)

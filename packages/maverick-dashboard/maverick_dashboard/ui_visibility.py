@@ -133,6 +133,10 @@ PAGES: tuple[dict, ...] = (
     # types (SOX control / fraud risk / ITGC / credit risk / close readiness).
     {"path": "/finance", "label": "Finance", "group": "Govern", "icon": "spend",
      "floor": "operate", "default": "operate"},
+    # The partner fleet console: client deployments a partner operates.
+    # Operate floor -- rows carry probe endpoints; mutations are admin (API).
+    {"path": "/partner", "label": "Partner fleet", "group": "Govern",
+     "icon": "graph", "floor": "operate", "default": "operate"},
     {"path": "/permissions", "label": "Permissions", "group": "Govern", "icon": "key",
      "floor": "view", "default": "operate"},
     {"path": "/simulate", "label": "Simulate", "group": "Govern", "icon": "graph",

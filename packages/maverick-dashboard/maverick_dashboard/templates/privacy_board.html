@@ -309,6 +309,24 @@
     <div class="pb-registers" id="pb-registers"></div>
   </section>
 
+  <section class="pb-card" aria-labelledby="pb-t-learn">
+    <h2 id="pb-t-learn">Learning — first-pass acceptance</h2>
+    <p class="pb-sub">Approved with no follow-ups = the reviewer accepted the agent's draft as-is. The trend is the proof the agent is getting better.</p>
+    <div id="pb-learning"></div>
+  </section>
+
+  <section class="pb-card pb-span8" aria-labelledby="pb-t-roi">
+    <h2 id="pb-t-roi">Question ROI — evidence to prune</h2>
+    <p class="pb-sub">Per-question evidence across every saved assessment: which questions change ratings, which only inform, and which have never fired.</p>
+    <div style="margin-bottom: var(--space-2);">
+      <label class="muted" style="font-size: var(--text-sm);">Framework
+        <select id="pb-roi-type" class="ctl" style="margin-inline-start: 8px;"></select>
+      </label>
+      <span class="muted" id="pb-roi-summary" style="font-size: var(--text-sm); margin-inline-start: 12px;"></span>
+    </div>
+    <div id="pb-roi" style="overflow-x: auto;"></div>
+  </section>
+
   <section class="pb-card pb-span12" aria-labelledby="pb-t-drill">
     <h2 id="pb-t-drill">Drill-through</h2>
     <p class="pb-sub">The records behind the numbers on this board, riskiest first — filtered by whatever is selected above.</p>
@@ -1044,6 +1062,137 @@
     }
   }
 
+  // ---- learning (first-pass acceptance) -----------------------------------
+  function renderLearning() {
+    var box = $('pb-learning');
+    box.textContent = '';
+    var L = DATA.learning || {};
+    if (!L.decided) {
+      box.appendChild(el('p', 'pb-empty',
+        'No decided assessments yet — the acceptance trend starts with the '
+        + 'first approval.'));
+      return;
+    }
+    var hero = el('div');
+    hero.style.display = 'flex';
+    hero.style.alignItems = 'baseline';
+    hero.style.gap = '10px';
+    var pct = el('span', '', (L.first_pass_rate == null ? '—'
+      : L.first_pass_rate.toFixed(0) + '%'));
+    pct.style.fontSize = 'var(--text-3xl)';
+    pct.style.fontWeight = 'var(--font-semibold)';
+    hero.appendChild(pct);
+    hero.appendChild(el('span', 'muted', 'accepted first pass'));
+    box.appendChild(hero);
+    var bars = el('div');
+    bars.style.display = 'flex';
+    bars.style.alignItems = 'flex-end';
+    bars.style.gap = '3px';
+    bars.style.height = '52px';
+    bars.style.margin = 'var(--space-2) 0';
+    bars.setAttribute('role', 'img');
+    bars.setAttribute('aria-label', 'Monthly first-pass acceptance rate');
+    (L.trend || []).forEach(function (r) {
+      var b = el('div');
+      b.style.flex = '1';
+      b.style.borderRadius = '3px 3px 0 0';
+      b.style.minHeight = '2px';
+      b.style.height = (r.rate == null ? 2 : Math.max(4, r.rate * 0.5)) + 'px';
+      b.style.background = r.rate == null ? 'var(--surface-sunken)'
+        : r.rate >= 70 ? 'var(--accent)'
+        : r.rate >= 40 ? 'var(--warn)' : 'var(--danger)';
+      b.title = r.month + ': ' + (r.rate == null ? 'no decisions'
+        : r.rate + '% first pass (' + r.first_pass + '/' + r.decided + ')');
+      bars.appendChild(b);
+    });
+    box.appendChild(bars);
+    box.appendChild(el('p', 'pb-sub',
+      fmt(L.decided) + ' decided · ' + fmt(L.qualified) +
+      ' approved after follow-ups · ' + fmt(L.rejected) + ' rejected · ' +
+      (L.median_days_to_decision == null ? '—'
+        : L.median_days_to_decision + 'd') + ' median to decision'));
+  }
+
+  // ---- question ROI -------------------------------------------------------
+  var ROI_VERDICT_CLS = { 'load-bearing': 'done', informative: 'info',
+                          inert: 'blocked', unproven: 'warn' };
+  function renderRoiTable(d) {
+    var box = $('pb-roi');
+    box.textContent = '';
+    $('pb-roi-summary').textContent = fmt(d.assessed) + ' assessed · ' +
+      d.load_bearing + ' load-bearing · ' + d.inert +
+      ' inert (prune candidates)';
+    if (!d.assessed) {
+      box.appendChild(el('p', 'pb-empty',
+        'No saved assessments of this framework yet.'));
+      return;
+    }
+    var table = el('table');
+    var hr = el('tr');
+    ['question', 'section', 'asked', 'fired', 'moved rating', 'verdict']
+      .forEach(function (h) {
+        var th = el('th', '', h);
+        th.scope = 'col';
+        hr.appendChild(th);
+      });
+    var thead = el('thead');
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    var tbody = el('tbody');
+    d.questions.slice(0, 14).forEach(function (q) {
+      var tr = el('tr');
+      var qt = el('td', '', q.text);
+      qt.style.maxWidth = '26rem';
+      qt.style.overflow = 'hidden';
+      qt.style.textOverflow = 'ellipsis';
+      qt.style.whiteSpace = 'nowrap';
+      qt.title = q.text;
+      tr.appendChild(qt);
+      tr.appendChild(el('td', 'muted-sm', q.section));
+      tr.appendChild(el('td', '', fmt(q.asked)));
+      tr.appendChild(el('td', '', fmt(q.fired) +
+        (q.fire_rate == null ? '' : ' (' + q.fire_rate + '%)')));
+      tr.appendChild(el('td', '', fmt(q.rating_impact)));
+      var vd = el('td');
+      vd.appendChild(el('span',
+        'badge ' + (ROI_VERDICT_CLS[q.verdict] || 'info'), q.verdict));
+      tr.appendChild(vd);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    box.appendChild(table);
+    if (d.questions.length > 14) {
+      box.appendChild(el('p', 'pb-sub',
+        (d.questions.length - 14) + ' more question(s) in the API payload.'));
+    }
+  }
+  function loadRoi(type) {
+    fetch('/api/v1/assess/question-roi?type=' + encodeURIComponent(type))
+      .then(function (r) { return r.json(); })
+      .then(renderRoiTable)
+      .catch(function () {
+        $('pb-roi').textContent = '';
+        $('pb-roi').appendChild(el('p', 'pb-empty',
+          'Could not load question ROI.'));
+      });
+  }
+  var roiInit = false;
+  function renderRoi() {
+    var sel = $('pb-roi-type');
+    var types = (DATA.by_type || []).map(function (r) { return r.type; });
+    if (!types.length) types = ['pia'];
+    if (!roiInit) {
+      roiInit = true;
+      types.forEach(function (t) {
+        var o = el('option', '', t.replace(/_/g, ' '));
+        o.value = t;
+        sel.appendChild(o);
+      });
+      sel.addEventListener('change', function () { loadRoi(sel.value); });
+      loadRoi(types[0]);
+    }
+  }
+
   // ---- shell --------------------------------------------------------------
   function renderAll() {
     if (!DATA) return;
@@ -1057,6 +1206,8 @@
     renderDsar();
     renderTransfers();
     renderAi();
+    renderLearning();
+    renderRoi();
     renderDrill();
   }
   function stamp() {

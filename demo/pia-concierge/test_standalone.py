@@ -17,6 +17,21 @@ from starlette.requests import Request
 
 HERE = Path(__file__).resolve().parent
 
+# The two agent SKUs share module NAMES (backend, capabilities, ...) by
+# design -- each directory is a self-contained deployable. In one pytest
+# process that collides in sys.modules, so every loader purges the shared
+# names before executing its app.
+_SHARED_MODULES = ("backend", "capabilities", "license_kit", "mailsink",
+                   "value_ledger", "store", "pia_engine", "dsar_engine",
+                   "ot_mock", "onetrust_client", "notice_check",
+                   "contract_guard", "serve_standalone")
+
+
+def _purge_shared_modules():
+    for _m in _SHARED_MODULES:
+        sys.modules.pop(_m, None)
+
+
 
 @pytest.fixture(scope="module")
 def sa_app(tmp_path_factory):
@@ -26,8 +41,8 @@ def sa_app(tmp_path_factory):
     os.environ["PIA_DATA_DIR"] = str(data)
     sys.path.insert(0, str(HERE))
     # Fresh import so capabilities.STANDALONE is evaluated with the env set.
-    for mod in ("capabilities", "backend", "pia_engine", "app"):
-        sys.modules.pop(mod, None)
+    _purge_shared_modules()
+    sys.modules.pop("app", None)
     try:
         spec = importlib.util.spec_from_file_location(
             "pia_standalone_app", HERE / "app.py")

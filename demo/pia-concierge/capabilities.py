@@ -80,6 +80,17 @@ _LABELS: dict[str, str] = {
 }
 
 
+# The signed license (standalone only — a platform install is licensed by
+# its contract). Evaluation mode = fully functional, bounded open-case cap.
+if STANDALONE:
+    import license_kit
+    LICENSE = license_kit.load_license()
+else:
+    LICENSE = {"mode": "platform", "customer": "", "sku": "platform",
+               "expires_at": None, "capabilities": [], "reason": "",
+               "open_case_cap": None}
+
+
 def caps_summary() -> dict:
     """What's active vs. what needs Lightwork, for the UI banner."""
     active = [_LABELS[k] for k, on in CAPS.items() if on]
@@ -89,4 +100,5 @@ def caps_summary() -> dict:
         "mode": "Standalone agent" if STANDALONE else "Lightwork platform",
         "active": active,
         "gated": gated,
+        "license": LICENSE,
     }
