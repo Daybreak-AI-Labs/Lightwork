@@ -93,6 +93,9 @@ class Case:
     approval_id: str = ""
     decided_by: str = ""
     onetrust_id: str = ""
+    # The counted value ledger for this case, set when the protocol run
+    # files it (value_ledger.case_value output) — /value.json sums these.
+    value: dict[str, Any] | None = None
     created_at: float = field(default_factory=_now)
     submitted_at: float = 0.0
     events: list[dict] = field(default_factory=list)

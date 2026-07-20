@@ -2348,6 +2348,36 @@ async def audit_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/partner", response_class=HTMLResponse)
+async def partner_page(request: Request) -> HTMLResponse:
+    """The partner fleet console: every client deployment this partner
+    operates -- health, latency, agent version, white-label theme, and the
+    summed value ledgers. Reading is operate-tier; adding/removing tenants
+    (which carry probe URLs + optional tokens) is admin via the API."""
+    require_permission(request, "operate")
+    return templates.TemplateResponse(request, "partner.html", {})
+
+
+@app.get("/audit/binder", response_class=HTMLResponse)
+async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
+    """The audit binder: a print-friendly, regulator-grade evidence pack --
+    signed-chain verification, approvals with identity and quorum, the
+    assessment register with revisions and decisions, the privacy registers,
+    and the acceptance-learning KPIs. Audit-gated like /audit; the product
+    generates its own workpapers."""
+    require_permission(request, "audit")
+    import time as _time
+
+    from starlette.concurrency import run_in_threadpool as _rit
+
+    from .api import _binder_payload
+    b = await _rit(_binder_payload, max(1, min(days, 730)))
+    b["generated"] = _time.strftime("%Y-%m-%d %H:%M UTC",
+                                    _time.gmtime(b["generated_at"]))
+    return templates.TemplateResponse(request, "audit_binder.html",
+                                      {"b": b, "days": b["window_days"]})
+
+
 @app.get("/replay", response_class=HTMLResponse)
 async def replay_page(request: Request) -> HTMLResponse:
     """Flight recorder: reconstruct a run's action timeline from the signed

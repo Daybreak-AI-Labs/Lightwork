@@ -13,7 +13,7 @@ _STANDALONE_MODULES = ("app.py", "backend.py", "capabilities.py",
                        "pia_engine.py", "store.py", "mailsink.py",
                        "onetrust_client.py", "ot_mock.py", "notice_check.py",
                        "contract_guard.py", "value_ledger.py",
-                       "serve_standalone.py")
+                       "license_kit.py", "serve_standalone.py")
 
 
 def _top_level_imports(path: Path) -> set[str]:

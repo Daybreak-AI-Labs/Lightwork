@@ -3610,6 +3610,142 @@ def risk_trend(subject: str, assessment_type: str = "", *, limit: int = 12) -> l
     ][-limit:]
 
 
+def _iter_saved_raw():
+    d = _assessments_dir()
+    if not d.exists():
+        return
+    for p in d.glob("*.json"):
+        if not _ASSESSMENT_ID_RE.fullmatch(p.stem):
+            continue
+        data = _load_saved_raw(p.stem)
+        if data is not None:
+            yield data
+
+
+def acceptance_metrics(*, types: frozenset[str] | set[str] | None = None,
+                       months: int = 12) -> dict:
+    """Reviewer-acceptance KPIs over decided assessments -- the measurable
+    learning loop. FIRST-PASS means approved with no follow-up thread: the
+    reviewer accepted the agent's draft as-is. QUALIFIED is approved after
+    follow-ups. The monthly trend (by decision date) is the chart that shows
+    the agent getting better -- or not -- with evidence, not vibes."""
+    now = time.time()
+    t = time.gmtime(now)
+    y, m = t.tm_year, t.tm_mon
+    keys: list[str] = []
+    for _ in range(max(1, months)):
+        keys.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    keys.reverse()
+    trend = {k: {"month": k, "decided": 0, "first_pass": 0} for k in keys}
+    decided = first_pass = qualified = rejected = 0
+    latencies: list[float] = []
+    for data in _iter_saved_raw():
+        if types is not None and data.get("type") not in types:
+            continue
+        status = data.get("status")
+        if status not in ("approved", "rejected") \
+                or not data.get("decided_at"):
+            continue
+        decided += 1
+        fups = data.get("followups") or []
+        if status == "rejected":
+            rejected += 1
+        elif fups:
+            qualified += 1
+        else:
+            first_pass += 1
+        created = float(data.get("created_at") or 0)
+        at = float(data["decided_at"])
+        if created and at >= created:
+            latencies.append((at - created) / 86400.0)
+        row = trend.get(time.strftime("%Y-%m", time.gmtime(at)))
+        if row is not None:
+            row["decided"] += 1
+            if status == "approved" and not fups:
+                row["first_pass"] += 1
+    for row in trend.values():
+        row["rate"] = (round(100.0 * row["first_pass"] / row["decided"], 1)
+                       if row["decided"] else None)
+    latencies.sort()
+    return {
+        "decided": decided, "first_pass": first_pass,
+        "qualified": qualified, "rejected": rejected,
+        "first_pass_rate": (round(100.0 * first_pass / decided, 1)
+                            if decided else None),
+        "median_days_to_decision": (round(latencies[len(latencies) // 2], 1)
+                                    if latencies else None),
+        "trend": [trend[k] for k in keys],
+    }
+
+
+# A question needs this many askings with zero findings before the evidence
+# says "inert" -- below it the verdict stays "unproven", never "prune".
+_ROI_MIN_ASKED = 5
+
+
+def question_roi(assessment_type: str) -> dict:
+    """Which questions earn their place, with evidence: per-question stats
+    across every saved assessment of this type. LOAD-BEARING = removing its
+    finding would lower at least one assessment's residual rating on the
+    same rollup the scorer uses. INFORMATIVE = has produced findings without
+    ever being decisive alone. INERT = asked >= _ROI_MIN_ASKED times without
+    a single finding -- the evidence-based prune list."""
+    tpl = get_template(assessment_type)
+    if tpl is None:
+        return {"type": assessment_type, "assessed": 0, "questions": [],
+                "inert": 0, "load_bearing": 0}
+    stats = {q.id: {"question_id": q.id, "text": q.text,
+                    "section": q.section, "severity": q.severity,
+                    "asked": 0, "fired": 0, "rating_impact": 0}
+             for q in tpl.questions}
+    assessed = 0
+    for data in _iter_saved_raw():
+        if data.get("type") != assessment_type:
+            continue
+        assessed += 1
+        answers = data.get("answers") or {}
+        findings = (data.get("result") or {}).get("findings") or []
+        sev_by_q: dict[str, list[str]] = {}
+        for f in findings:
+            qid = f.get("question_id")
+            if qid:
+                sev_by_q.setdefault(qid, []).append(
+                    str(f.get("severity", "low")))
+        all_sevs = [str(f.get("severity", "low")) for f in findings]
+        baseline = _rollup(all_sevs)
+        for qid, row in stats.items():
+            if qid in answers:
+                row["asked"] += 1
+            fired = sev_by_q.get(qid)
+            if not fired:
+                continue
+            row["fired"] += 1
+            rest = list(all_sevs)
+            for s in fired:
+                rest.remove(s)
+            if _rollup(rest) != baseline:
+                row["rating_impact"] += 1
+    rows = []
+    for row in stats.values():
+        row["fire_rate"] = (round(100.0 * row["fired"] / row["asked"], 1)
+                            if row["asked"] else None)
+        row["verdict"] = ("load-bearing" if row["rating_impact"]
+                          else "informative" if row["fired"]
+                          else "inert" if row["asked"] >= _ROI_MIN_ASKED
+                          else "unproven")
+        rows.append(row)
+    rows.sort(key=lambda r: (-r["rating_impact"], -r["fired"],
+                             r["question_id"]))
+    return {"type": assessment_type, "assessed": assessed,
+            "questions": rows,
+            "inert": sum(1 for r in rows if r["verdict"] == "inert"),
+            "load_bearing": sum(1 for r in rows
+                                if r["verdict"] == "load-bearing")}
+
+
 def _load_saved_raw(assessment_id: str) -> dict | None:
     from .file_lock import cross_process_lock
 
@@ -3882,6 +4018,8 @@ __all__ = [
     "trigger_review",
     "set_renewal",
     "risk_trend",
+    "acceptance_metrics",
+    "question_roi",
     "render_questions_text",
     "render_questions_json",
     "render_result_text",

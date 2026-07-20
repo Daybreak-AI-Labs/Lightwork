@@ -458,6 +458,43 @@ here.
   deadline, by kind) and a **cross-border transfer map**
   (`/privacy/transfer-map`: flows drawn from the Art. 30 register and TIAs
   with a Chapter V safeguard flag).
+- **Audit binder** (`/audit/binder`, `GET /api/v1/audit/binder`,
+  audit-gated) — the regulator-grade evidence pack assembled from the
+  records themselves: per-day signed-chain verification over the audit log,
+  the event summary, approvals with identity + quorum, the assessment
+  register with CAS revisions and template digests, the privacy registers,
+  and the acceptance-learning KPIs. Print-friendly; the product generates
+  its own workpapers.
+- **Partner fleet console** (`/partner`, `/api/v1/partner/*`) — the
+  multi-tenant view for a partner operating client deployments: registry
+  (admin-gated writes; tokens never echoed), live `/health` +
+  `/value.json` probes per tenant, white-label theme per row, and fleet
+  rollups of the agents' own counted value ledgers.
+- **Learning KPI** (`acceptance_metrics`, on the command center and the
+  binder) — first-pass acceptance (approved with no follow-up thread = the
+  reviewer took the agent's draft as-is), qualified-after-follow-ups,
+  rejections, median days to decision, and the 12-month trend. The
+  measurable learning loop: evidence the agent is getting better.
+- **Question ROI** (`question_roi`, `GET /api/v1/assess/question-roi`,
+  command-center panel) — per-question evidence across every saved
+  assessment: fire rate, rating impact (re-rolled on the scorer's own
+  rollup), and a verdict (load-bearing / informative / inert / unproven).
+  The evidence-based questionnaire prune list.
+- **Signed license keys** (`maverick.licensing` + each SKU's
+  `license_kit.py`) — Ed25519 tokens (`LW1.payload.sig`) minted by the
+  vendor CLI, verified agent-side from `LIGHTWORK_LICENSE` +
+  `LIGHTWORK_LICENSE_PUBKEY`. Unlicensed standalone agents run in
+  evaluation mode (fully functional, open-case cap, honest banner); an
+  upsell or renewal is a key swap, not a reinstall.
+- **DSAR Concierge** (`demo/dsar-concierge/`) — the second sellable
+  standalone agent on the capability seam: subject-facing intake + a
+  deterministic message detector, the emailed identity-verification loop,
+  the statutory clock with SLA aging, access/portability packages built
+  ONLY from operator-provided extracts, the deliberately non-destructive
+  erasure handoff, `/value.json` for the fleet console, licensing, and a
+  full deployment kit (Dockerfile, launcher, env reference). With
+  Lightwork the same agent mirrors into the privacy workspace registers
+  and the signed audit chain.
 - **Verified OneTrust wire protocol** (`demo/pia-concierge/
   onetrust_client.py`, reference: `demo/pia-concierge/
   ONETRUST-INTEGRATION.md`) — the concierge files assessments through the

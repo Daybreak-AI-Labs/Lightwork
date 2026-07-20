@@ -1284,3 +1284,13 @@ class SecuritySuiteConfigIn(BaseModel):
         if self.response_execution and not self.env_hunt:
             raise ValueError("response execution requires env_hunt")
         return self
+class PartnerTenantIn(BaseModel):
+    """One client deployment in the partner fleet registry. The base URL is
+    the agent's root (its /health and /value.json hang off it); the optional
+    bearer token is stored server-side and never echoed back."""
+    name: str = Field(..., min_length=1, max_length=120)
+    base_url: str = Field(..., min_length=8, max_length=300,
+                          pattern="^https?://")
+    token: str = Field("", max_length=300)
+    theme: str = Field("", max_length=60)
+    notes: str = Field("", max_length=500)

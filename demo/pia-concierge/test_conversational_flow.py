@@ -16,8 +16,24 @@ from starlette.requests import Request
 
 HERE = Path(__file__).resolve().parent
 
+# The two agent SKUs share module NAMES (backend, capabilities, ...) by
+# design -- each directory is a self-contained deployable. In one pytest
+# process that collides in sys.modules, so every loader purges the shared
+# names before executing its app.
+_SHARED_MODULES = ("backend", "capabilities", "license_kit", "mailsink",
+                   "value_ledger", "store", "pia_engine", "dsar_engine",
+                   "ot_mock", "onetrust_client", "notice_check",
+                   "contract_guard", "serve_standalone")
+
+
+def _purge_shared_modules():
+    for _m in _SHARED_MODULES:
+        sys.modules.pop(_m, None)
+
+
 
 def _load_demo_app():
+    _purge_shared_modules()
     sys.path.insert(0, str(HERE))
     try:
         spec = importlib.util.spec_from_file_location(
