@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Model Risk &amp; AI Assurance - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .mr-stats { display:grid; grid-template-columns:repeat(3,minmax(8rem,1fr)); gap:var(--space-3); margin:var(--space-4) 0; }
+  .mr-stat { padding:var(--space-3); border:1px solid var(--border); border-radius:8px; background:var(--surface-2); }
+  .mr-stat strong { display:block; font-size:var(--text-xl); }
+  .mr-table { overflow-x:auto; }
+  .mr-note { border-left:4px solid var(--warning); padding-left:var(--space-3); }
+  @media (max-width:900px) { .mr-stats { grid-template-columns:1fr; } }
+</style>
+
+<h1 class="page-title">Model Risk &amp; AI Assurance Officer</h1>
+<p class="page-subtitle">Governed AI-asset inventory, expiring evaluation evidence,
+  incidents, risk acceptance, deployment lineage, and exact-payload promotion controls.</p>
+
+<p class="mr-note"><strong>Decision boundary:</strong> framework mappings are advisory.
+  Lightwork does not certify a deployment or make a legal classification. EU AI Act
+  applicability remains undetermined until a dated human assertion is reviewed.</p>
+
+{% if not enabled %}
+  <section class="panel">
+    <p>Disabled. Enable both <code>[evidence_graph] enable = true</code> and
+      <code>[model_risk_assurance] enable = true</code>. Promotion interlock remains
+      separately controlled by <code>gate_promotions = true</code>.</p>
+  </section>
+{% else %}
+  <div class="mr-stats" aria-label="Model risk program totals">
+    <div class="mr-stat"><strong>{{ totals.assets }}</strong><span>governed AI assets</span></div>
+    <div class="mr-stat"><strong>{{ totals.evidence }}</strong><span>evaluation records</span></div>
+    <div class="mr-stat"><strong>{{ totals.findings }}</strong><span>current findings</span></div>
+  </div>
+  <section class="panel">
+    <h2>Current deterministic findings</h2>
+    <div class="mr-table"><table>
+      <thead><tr><th>finding</th><th>severity</th><th>asset</th><th>citations</th></tr></thead>
+      <tbody>{% for row in findings %}<tr>
+        <td>{{ row.summary }}<br><code>{{ row.finding_type }}</code></td>
+        <td>{{ row.severity }}</td><td><code>{{ row.asset_id }}</code></td>
+        <td>{{ row.citations|length }}</td>
+      </tr>{% else %}<tr><td colspan="4">No current model-risk findings.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}
+
+<p><a class="btn" href="/security">Back to Security &amp; GRC</a></p>
+{% endblock %}

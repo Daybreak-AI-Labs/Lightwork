@@ -27,6 +27,10 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/security", tags=["security"])
 
+from .model_risk_api import router as model_risk_router  # noqa: E402
+
+router.include_router(model_risk_router)
+
 
 def _actor(request: Request) -> str:
     # Import lazily: api.py mounts this router after defining the stricter

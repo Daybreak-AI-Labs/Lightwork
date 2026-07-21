@@ -21,6 +21,11 @@ Key resolution (first match wins):
      can inject a KMS-derived key without it ever touching disk.
   2. ``~/.maverick/keys/at_rest.key`` — generated on first use, ``chmod 600``.
 
+Every Postgres governed authority additionally requires the injected key plus
+``MAVERICK_ENCRYPTION_KEY_DIGEST=sha256:<full digest>``â€”including an explicitly
+selected single-replica deployment. The digest is verified from decoded key
+bytes before shared I/O; node-local rotation-keyring files are refused.
+
 Sealed blobs carry a magic header (:data:`_MAGIC`), so :func:`unseal` transparently
 returns plaintext written *before* encryption was enabled — a gradual migration
 with no flag-day re-encrypt.
@@ -46,9 +51,15 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import hmac
 import logging
 import os
+import re
 import secrets
+import threading
+from collections.abc import Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from . import file_lock
@@ -66,6 +77,55 @@ _NONCE_BYTES = 12
 _KEY_BYTES = 32              # AES-256
 _KEYID_BYTES = 8             # short key fingerprint embedded in v2 blobs
 _KEY_PATH = data_dir("keys", "at_rest.key")
+_KEY_ENV = "MAVERICK_ENCRYPTION_KEY"
+_KEY_DIGEST_ENV = "MAVERICK_ENCRYPTION_KEY_DIGEST"
+_SHA256_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+
+# Shared governed records cannot depend on node-local tenant DEKs. They opt into
+# the deployment at-rest key while performing Postgres I/O. Context-local state
+# keeps concurrent tenant requests isolated and prevents a process-wide change
+# to ordinary tenant-scoped seals.
+_FORCE_DEPLOYMENT_KEY = ContextVar(
+    "maverick_force_deployment_at_rest_key",
+    default=False,
+)
+_FORCE_EXTERNAL_FLEET_KEY = ContextVar(
+    "maverick_force_external_fleet_at_rest_key",
+    default=False,
+)
+_SHARED_KEY_IDENTITY_LOCK = threading.Lock()
+_SHARED_KEY_IDENTITY_DIGEST: str | None = None
+_SHARED_KEY_BYTES: bytes | None = None
+
+
+@contextmanager
+def deployment_key_scope():
+    """Use the deployment at-rest key for shared authority I/O only.
+
+    This is not a general encryption-mode switch. Callers keep the scope around
+    only the governed-record operation whose ciphertext must be decryptable by
+    every replica using the externally pinned fleet key.
+    """
+    token = _FORCE_DEPLOYMENT_KEY.set(True)
+    try:
+        yield
+    finally:
+        _FORCE_DEPLOYMENT_KEY.reset(token)
+
+
+@contextmanager
+def external_fleet_key_scope():
+    """Use only the admitted external key for process-wide shared seals.
+
+    Tenant envelope encryption remains tenant-scoped. This closes the
+    verification/use race in which a node-local rotation key could appear
+    after the fleet key was checked but before a shared record was sealed.
+    """
+    token = _FORCE_EXTERNAL_FLEET_KEY.set(True)
+    try:
+        yield
+    finally:
+        _FORCE_EXTERNAL_FLEET_KEY.reset(token)
 
 
 class EncryptionUnavailable(RuntimeError):
@@ -155,6 +215,115 @@ def at_rest_enabled() -> bool:
         return False
 
 
+def _deployment_compliance_encryption_floor(
+    config: Mapping[str, object],
+) -> tuple[bool, bool]:
+    """Return ``(policy_valid, floor_required)`` from one global snapshot."""
+    compliance = config.get("compliance")
+    if compliance is None:
+        return True, False
+    if not isinstance(compliance, Mapping):
+        return False, False
+    profiles = compliance.get("profiles", [])
+    if not isinstance(profiles, (list, tuple)):
+        return False, False
+    try:
+        from .compliance_profiles import FLOOR_ENCRYPTION_AT_REST, required_floors
+
+        return True, FLOOR_ENCRYPTION_AT_REST in required_floors(profiles)
+    except Exception:
+        return False, False
+
+
+def _deployment_secure_defaults_enabled(
+    config: Mapping[str, object],
+) -> bool | None:
+    """Resolve the umbrella secure-default setting; ``None`` means invalid."""
+    secure_env = os.environ.get("MAVERICK_SECURE_DEFAULT")
+    if secure_env is not None and secure_env.strip() != "":
+        normalized = secure_env.strip().lower()
+        if normalized in {
+            "1", "true", "yes", "on", "enable", "enabled", "y", "t",
+        }:
+            return True
+        if normalized in {
+            "0", "false", "no", "off", "disable", "disabled", "n", "f",
+        }:
+            return False
+        # Runtime ignores an unrecognized umbrella value and reads config.
+    security = config.get("security")
+    if security is None:
+        return True
+    if not isinstance(security, Mapping):
+        return None
+    value = security.get("secure_defaults")
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not _falsey(value)
+    return value if isinstance(value, bool) else None
+
+
+def deployment_at_rest_enabled(
+    *,
+    config: object | None = None,
+    source_errors: object | None = None,
+) -> bool:
+    """Resolve the deployment-global at-rest floor without tenant overlays.
+
+    Shared-authority admission cannot use :func:`at_rest_enabled` because that
+    compatibility resolver intentionally reads the active tenant overlay and
+    fails soft. This resolver evaluates one trusted global snapshot, mirrors
+    the runtime precedence, and returns ``False`` on malformed or unreadable
+    policy so a key digest alone cannot manufacture a green readiness result.
+    """
+    if config is None or source_errors is None:
+        try:
+            from .config import config_source_errors, load_global_config
+
+            if config is None:
+                config = load_global_config()
+            if source_errors is None:
+                source_errors = config_source_errors(include_tenant=False)
+        except Exception:
+            return False
+    if source_errors or not isinstance(config, Mapping):
+        return False
+
+    compliance_valid, compliance_floor = (
+        _deployment_compliance_encryption_floor(config)
+    )
+    if not compliance_valid:
+        return False
+    if compliance_floor:
+        return True
+
+    env = os.environ.get("MAVERICK_ENCRYPT_AT_REST")
+    if env is not None and env.strip() != "":
+        return not _falsey(env)
+    encryption = config.get("encryption")
+    if encryption is not None:
+        if not isinstance(encryption, Mapping):
+            return False
+        if "at_rest" in encryption:
+            value = encryption.get("at_rest")
+            if isinstance(value, str):
+                return not _falsey(value)
+            if not isinstance(value, bool):
+                return False
+            return value
+
+    try:
+        from .enterprise import deployment_enterprise_enabled
+
+        if deployment_enterprise_enabled(config=config, source_errors=()):
+            return True
+    except Exception:
+        return False
+
+    return _deployment_secure_defaults_enabled(config) is True
+
+
 def per_tenant_at_rest() -> bool:
     """Opt-in per-tenant envelope encryption (default off).
 
@@ -216,6 +385,156 @@ def _decode_injected_key(raw: str) -> bytes:
         ) from e
 
 
+def shared_authority_key_identity_required() -> bool:
+    """Whether this deployment needs one externally proven fleet key.
+
+    Every Postgres governed authority shares encrypted rows, including an
+    explicitly selected single-replica deployment. Allowing a node to generate
+    ``at_rest.key`` or a local rotation keyring in that posture makes the
+    persistence plane shared but decryptability node-local. Configuration
+    uncertainty is security-significant and therefore returns ``True``.
+    """
+    raw_replicas = str(os.environ.get("MAVERICK_REPLICA_COUNT") or "1").strip()
+    try:
+        replicas = int(raw_replicas)
+    except (TypeError, ValueError, OverflowError):
+        return True
+    if replicas < 1 or raw_replicas != str(replicas):
+        return True
+    if replicas > 1:
+        return True
+    try:
+        from .config import (
+            governed_records_config_source_errors,
+            load_governed_records_config,
+        )
+        from .enterprise import deployment_enterprise_enabled
+
+        config = load_governed_records_config()
+        errors = governed_records_config_source_errors()
+        if errors or not isinstance(config, dict):
+            return True
+        governed = config.get("governed_records") or {}
+        world = config.get("world_model") or {}
+        if not isinstance(governed, dict) or not isinstance(world, dict):
+            return True
+        configured = (
+            os.environ.get("MAVERICK_GOVERNED_RECORDS_BACKEND")
+            or governed.get("backend")
+            or "auto"
+        )
+        backend = str(configured).strip().lower()
+        if backend not in {"auto", "local", "postgres"}:
+            return True
+        world_backend = str(
+            os.environ.get("MAVERICK_WORLD_BACKEND")
+            or world.get("backend")
+            or "sqlite"
+        ).strip().lower()
+        # Postgres is shared process authority even for an explicitly declared
+        # single replica. Its encrypted rows must never depend on a node-local
+        # rotation keyring that another process cannot resolve.
+        if backend == "postgres" or (
+            backend != "local" and world_backend == "postgres"
+        ):
+            return True
+        return deployment_enterprise_enabled(
+            config=config,
+            source_errors=errors,
+        )
+    except Exception:
+        return True
+
+
+def require_shared_deployment_key_identity() -> str:
+    """Verify the externally injected fleet encryption-key identity.
+
+    Returns the canonical full SHA-256 digest after verification.  The digest
+    is an operator-supplied trust anchor, not a digest learned from whichever
+    key a node happened to load.  Local rotation-keyring files are refused:
+    they are node-local and the current file format has no deployment-global
+    keyring authority or externally pinned ring manifest.
+    """
+    if not deployment_at_rest_enabled():
+        raise EncryptionUnavailable(
+            "shared authority application at-rest encryption is disabled or unverified"
+        )
+    raw = os.environ.get(_KEY_ENV)
+    if raw is None or not raw.strip():
+        raise EncryptionUnavailable(
+            "shared authority encryption requires an externally injected key"
+        )
+    key = _decode_injected_key(raw)
+    if len(key) != _KEY_BYTES:
+        raise EncryptionUnavailable(
+            f"{_KEY_ENV} must decode to {_KEY_BYTES} bytes, got {len(key)}"
+        )
+
+    expected = str(os.environ.get(_KEY_DIGEST_ENV) or "").strip()
+    if not _SHA256_DIGEST.fullmatch(expected):
+        raise EncryptionUnavailable(
+            "shared authority encryption requires a canonical external key digest"
+        )
+    actual = "sha256:" + hashlib.sha256(key).hexdigest()
+    if not hmac.compare_digest(expected, actual):
+        raise EncryptionUnavailable(
+            "shared authority encryption key does not match its deployment digest"
+        )
+
+    ring = _keyring_dir()
+    try:
+        ring_keys = tuple(ring.glob("*.key")) if ring.exists() else ()
+    except OSError as exc:
+        raise EncryptionUnavailable(
+            "shared authority encryption keyring cannot be inspected"
+        ) from exc
+    if ring_keys:
+        raise EncryptionUnavailable(
+            "shared authority encryption refuses node-local rotation keys"
+        )
+    global _SHARED_KEY_BYTES, _SHARED_KEY_IDENTITY_DIGEST
+    with _SHARED_KEY_IDENTITY_LOCK:
+        admitted = _SHARED_KEY_IDENTITY_DIGEST
+        if admitted is None:
+            _SHARED_KEY_IDENTITY_DIGEST = actual
+            _SHARED_KEY_BYTES = bytes(key)
+        elif not hmac.compare_digest(admitted, actual):
+            raise EncryptionUnavailable(
+                "shared authority encryption key identity changed after process admission"
+            )
+        elif _SHARED_KEY_BYTES is None or not hmac.compare_digest(
+            _SHARED_KEY_BYTES,
+            key,
+        ):
+            raise EncryptionUnavailable(
+                "shared authority encryption key changed after process admission"
+            )
+    return actual
+
+
+def _admitted_shared_key() -> bytes:
+    """Return a detached copy of the process-pinned external fleet key."""
+    with _SHARED_KEY_IDENTITY_LOCK:
+        key = _SHARED_KEY_BYTES
+    if key is None:
+        require_shared_deployment_key_identity()
+        with _SHARED_KEY_IDENTITY_LOCK:
+            key = _SHARED_KEY_BYTES
+    if key is None:  # pragma: no cover - verifier above either pins or raises
+        raise EncryptionUnavailable(
+            "shared authority encryption key identity is unavailable"
+        )
+    return bytes(key)
+
+
+def _reset_shared_key_identity_for_testing() -> None:
+    """Clear process admission state for isolated tests only."""
+    global _SHARED_KEY_BYTES, _SHARED_KEY_IDENTITY_DIGEST
+    with _SHARED_KEY_IDENTITY_LOCK:
+        _SHARED_KEY_BYTES = None
+        _SHARED_KEY_IDENTITY_DIGEST = None
+
+
 def _secure_key_dir() -> None:
     """Ensure the on-disk key directory is private before touching key material."""
     try:
@@ -257,7 +576,7 @@ def _write_new_key_file(key: bytes) -> None:
 
 
 def _load_or_create_key() -> bytes:
-    raw = os.environ.get("MAVERICK_ENCRYPTION_KEY")
+    raw = os.environ.get(_KEY_ENV)
     if raw:
         key = _decode_injected_key(raw)
         if len(key) != _KEY_BYTES:
@@ -404,6 +723,11 @@ def rotate_at_rest_key() -> str:
     flag-day. Applies to the process-wide at-rest key (per-tenant envelope keys
     rotate via their own KMS). Takes effect for new seals right away.
     """
+    if shared_authority_key_identity_required():
+        raise EncryptionUnavailable(
+            "shared authority deployments require externally coordinated key "
+            "rotation; node-local rotation keys are refused"
+        )
     if not _have_crypto():
         raise EncryptionUnavailable(
             "at-rest encryption needs the 'cryptography' package."
@@ -446,7 +770,7 @@ def seal(plaintext: bytes) -> bytes:
     # Per-tenant mode: route through the tenant's own data key. Output carries the
     # tenant magic header, so unseal()/is_sealed() handle it transparently and
     # globally-sealed data written before the switch still opens.
-    if per_tenant_at_rest():
+    if not _FORCE_DEPLOYMENT_KEY.get() and per_tenant_at_rest():
         from .paths import current_tenant_id
         from .tenant.kms import seal_for_tenant
         return seal_for_tenant(current_tenant_id(), plaintext)
@@ -461,12 +785,20 @@ def seal(plaintext: bytes) -> bytes:
     # If the rotation keyring has been initialised (an operator ran
     # `maverick encryption rotate`), seal under the active key and embed its id
     # (v2). Otherwise keep the legacy single-key v1 path byte-for-byte unchanged.
-    active = _active_keyring_key()
+    active = (
+        None
+        if _FORCE_EXTERNAL_FLEET_KEY.get()
+        else _active_keyring_key()
+    )
     if active is not None:
         key, keyid = active
         ct = AESGCM(key).encrypt(nonce, plaintext, None)
         return _MAGIC_V2 + keyid + nonce + ct
-    key = _load_or_create_key()
+    key = (
+        _admitted_shared_key()
+        if _FORCE_EXTERNAL_FLEET_KEY.get()
+        else _load_or_create_key()
+    )
     ct = AESGCM(key).encrypt(nonce, plaintext, None)
     return _MAGIC + nonce + ct
 
@@ -484,6 +816,10 @@ def _unseal_with_key_cache(
     # mode is toggled). The current tenant must match the one it was sealed under
     # — GCM authentication fails otherwise, which is the cross-tenant guarantee.
     if blob[: len(_TENANT_MAGIC)] == _TENANT_MAGIC:
+        if _FORCE_EXTERNAL_FLEET_KEY.get() or _FORCE_DEPLOYMENT_KEY.get():
+            raise EncryptionUnavailable(
+                "shared authority refuses tenant-envelope ciphertext"
+            )
         from .paths import current_tenant_id
         from .tenant.kms import unseal_for_tenant
         return unseal_for_tenant(current_tenant_id(), blob)
@@ -499,6 +835,10 @@ def _unseal_with_key_cache(
     # v2 (keyring): MAGIC_V2 || keyid(8) || nonce(12) || ct+tag. Resolve the key
     # by its embedded id so blobs sealed under a now-superseded key still open.
     if blob[: len(_MAGIC_V2)] == _MAGIC_V2:
+        if _FORCE_EXTERNAL_FLEET_KEY.get():
+            raise EncryptionUnavailable(
+                "shared authority refuses node-local rotation-keyring ciphertext"
+            )
         body = blob[len(_MAGIC_V2):]
         if len(body) < _KEYID_BYTES + _NONCE_BYTES + 16:
             raise EncryptionUnavailable(
@@ -533,7 +873,12 @@ def _unseal_with_key_cache(
     cache_key = ("v1", b"")
     cipher = key_cache.get(cache_key)
     if cipher is None:
-        cipher = AESGCM(_load_or_create_key())
+        key = (
+            _admitted_shared_key()
+            if _FORCE_EXTERNAL_FLEET_KEY.get()
+            else _load_or_create_key()
+        )
+        cipher = AESGCM(key)
         key_cache[cache_key] = cipher
     try:
         return cipher.decrypt(nonce, ct, None)
@@ -655,5 +1000,10 @@ __all__ = [
     "unseal_many_from_str",
     "rotate_at_rest_key",
     "backup_key_material",
+    "deployment_key_scope",
+    "deployment_at_rest_enabled",
+    "external_fleet_key_scope",
+    "require_shared_deployment_key_identity",
+    "shared_authority_key_identity_required",
     "EncryptionUnavailable",
 ]

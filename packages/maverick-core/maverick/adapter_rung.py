@@ -2100,6 +2100,16 @@ def _apply_prepared_adapter(
     out: AdapterUpliftResult, *, plan: AdapterActivationPlan,
     preparation, provision: _ServingProvision, controller, store: AdapterStore,
 ) -> AdapterUpliftResult:
+    authorization = controller.authorize_prepared(
+        preparation,
+        artifact=plan.before,
+    )
+    if not authorization.ok:
+        out.reason = (
+            "gate refused before adapter activation: "
+            f"{authorization.blocking_reason}"
+        )
+        return out
     try:
         if provision.activate is not None:
             provision.activate()

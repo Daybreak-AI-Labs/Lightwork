@@ -141,6 +141,25 @@ auto_evolve = false      # revert a node rewrite the loop measures as a regressi
 auto_apply  = false      # apply a proven improvement forward without a human
                          # (needs auto_evolve on for the revert safety net)
 
+[governed_records]
+# Shared CAS record authority used by assurance products. "auto" keeps
+# single-replica installs local and selects configured Postgres when required.
+# Postgres requires application encryption plus MAVERICK_ENCRYPTION_KEY and a
+# matching MAVERICK_ENCRYPTION_KEY_DIGEST="sha256:..." on every replica.
+backend = "auto"          # auto | local | postgres
+
+[evidence_graph]
+# Review-gated evidence metadata and cryptographic bindings. Required by the
+# Model Risk & AI Assurance Officer.
+enable = false
+
+[model_risk_assurance]
+# Governed AI inventory, evidence, findings, incidents, decisions, deployment
+# lineage, and signed assurance packs. Both switches must be true for the
+# fail-closed DGM promotion gate.
+enable = false
+gate_promotions = false
+
 [persona]
 # Appended to every agent's system prompt. Optional.
 name      = "Lightwork"

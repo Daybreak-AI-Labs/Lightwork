@@ -43,6 +43,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+from collections.abc import Mapping
 from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
@@ -98,6 +99,7 @@ class EgressBlocked(RuntimeError):
 
 _TRUE_WORDS = {"1", "true", "yes", "on", "enable", "enabled", "y", "t"}
 _FALSE_WORDS = {"0", "false", "no", "off", "disable", "disabled", "n", "f", ""}
+_UNSET = object()
 
 
 def _truthy(value: object) -> bool:
@@ -114,6 +116,116 @@ def _env_tristate(value: str) -> bool | None:
     if v in _FALSE_WORDS:
         return False
     return None
+
+
+def deployment_enterprise_enabled(
+    *,
+    config: object = _UNSET,
+    source_errors: object = _UNSET,
+) -> bool:
+    """Resolve the deployment-global enterprise floor without tenant overlays.
+
+    Authority-bearing shared ingress and deployment admission must not change
+    with the tenant active in the current request.  Callers that already loaded
+    global policy pass that snapshot and its source errors here so compliance,
+    the enterprise knob, and the deployment profile are evaluated atomically
+    from the same policy view.  Omitted arguments are loaded deployment-globally.
+
+    Any unreadable or malformed security policy fails closed to enterprise-on.
+    """
+    if config is _UNSET or source_errors is _UNSET:
+        try:
+            from .config import config_source_errors, load_global_config
+
+            if config is _UNSET:
+                config = load_global_config()
+            if source_errors is _UNSET:
+                source_errors = config_source_errors(include_tenant=False)
+        except Exception:
+            log.exception(
+                "enterprise: deployment-global policy is unavailable; failing closed",
+            )
+            return True
+    if source_errors:
+        log.error(
+            "enterprise: deployment-global config source is unreadable; failing closed",
+        )
+        return True
+    if not isinstance(config, Mapping):
+        log.error(
+            "enterprise: deployment-global config root is malformed; failing closed",
+        )
+        return True
+
+    # Compliance is evaluated directly from the supplied snapshot.  Calling
+    # requires_floor() here would re-read load_config() and admit a tenant overlay.
+    try:
+        from .compliance_profiles import FLOOR_EGRESS_LOCK, required_floors
+
+        compliance = config.get("compliance") or {}
+        profiles = compliance.get("profiles") if isinstance(compliance, Mapping) else ()
+        configured_profiles = profiles if isinstance(profiles, (list, tuple)) else ()
+        if FLOOR_EGRESS_LOCK in required_floors(configured_profiles):
+            return True
+    except Exception:
+        log.exception(
+            "enterprise: deployment-global compliance floor is unavailable; "
+            "failing closed",
+        )
+        return True
+
+    env = os.environ.get("MAVERICK_ENTERPRISE")
+    if env is not None and env.strip() != "":
+        decided = _env_tristate(env)
+        if decided is not None:
+            return decided
+        log.error(
+            "MAVERICK_ENTERPRISE=%r is not a recognized boolean; failing "
+            "closed to enterprise mode",
+            env,
+        )
+        return True
+
+    section = config.get("enterprise")
+    if section is not None and not isinstance(section, Mapping):
+        log.error("enterprise.mode policy is malformed; failing closed")
+        return True
+    value = (section or {}).get("mode")
+    if value is not None:
+        if isinstance(value, bool):
+            return value
+        log.error("enterprise.mode must be a boolean; failing closed")
+        return True
+
+    # Resolve the named deployment profile from the same snapshot instead of
+    # is_enterprise_profile(), whose load_config() call includes a tenant overlay.
+    try:
+        from .profile import ENTERPRISE, _normalize
+
+        profile_env = os.environ.get("MAVERICK_PROFILE")
+        decided_profile = None
+        if profile_env is not None and profile_env.strip() != "":
+            decided_profile = _normalize(profile_env)
+            if decided_profile is None:
+                log.warning(
+                    "MAVERICK_PROFILE=%r is not a recognized profile; reading "
+                    "deployment-global config",
+                    profile_env,
+                )
+        if decided_profile is None:
+            profile_section = config.get("profile") or {}
+            profile_name = (
+                profile_section.get("name")
+                if isinstance(profile_section, Mapping)
+                else None
+            )
+            decided_profile = _normalize(profile_name)
+        return decided_profile == ENTERPRISE
+    except Exception:
+        log.exception(
+            "enterprise: deployment-global profile is unavailable; failing closed",
+        )
+        return True
 
 
 def enterprise_enabled() -> bool:
@@ -437,6 +549,7 @@ __all__ = [
     "EgressBlocked",
     "egress_permitted",
     "enterprise_egress_denial",
+    "deployment_enterprise_enabled",
     "enterprise_enabled",
     "is_local_provider",
     "assert_provider_allowed",

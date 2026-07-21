@@ -1,7 +1,7 @@
 # Security & GRC
 
-Lightwork packages one defensive Security & GRC suite in four deployment
-shapes: the integrated platform and three reduced standalone products. The
+Lightwork packages one defensive Security & GRC suite in five deployment
+shapes: the integrated platform and four reduced standalone products. The
 platform combines control-program records, evidence-backed deterministic
 engines, human approval, connected telemetry, and the signed audit chain. The
 standalone products keep useful local engines while making the missing platform
@@ -304,20 +304,20 @@ expired, missing, or mismatched authorization must fail closed. Deployments can
 keep environment hunting enabled permanently while leaving response execution
 disabled.
 
-## One platform, three standalone products
+## One platform, four standalone products
 
-| Capability | Integrated platform | GRC Concierge standalone | Platform Hunter standalone | Environment Hunter standalone |
-|---|---:|---:|---:|---:|
-| Deterministic local analysis | Yes | Yes | Yes | Yes |
-| Cited evidence | Yes | Yes | Yes | Yes |
-| Raw hunter telemetry retained by product | No | N/A | No | No |
-| Local derived-record store | Yes | Yes, unsigned | Yes, unsigned | Yes, unsigned |
-| Full framework catalog and crosswalk | Yes | No | N/A | N/A |
-| Managed enterprise connectors | Yes | No | No | No |
-| Signed tamper-evident audit | Yes | No | No | No |
-| Governed platform approval | Yes | No | No | No |
-| Cross-run learning / fleet context | When enabled | No | No | No |
-| Response execution | Explicit human-approved opt-in | N/A | No | No; proposal-only |
+| Capability | Integrated platform | GRC Concierge | Platform Hunter | Environment Hunter | Model Risk Officer |
+|---|---:|---:|---:|---:|---:|
+| Deterministic local analysis | Yes | Yes | Yes | Yes | Yes |
+| Cited evidence | Yes | Yes | Yes | Yes | User-supplied references |
+| Raw hunter telemetry retained by product | No | N/A | No | No | N/A |
+| Local derived-record store | Yes | Yes, unsigned | Yes, unsigned | Yes, unsigned | Yes, unsigned |
+| Full framework catalog and crosswalk | Yes | No | N/A | N/A | Advisory mapping only |
+| Managed enterprise connectors | Yes | No | No | No | No |
+| Signed tamper-evident audit | Yes | No | No | No | No |
+| Governed platform approval | Yes | No | No | No | No |
+| Cross-run learning / fleet context | When enabled | No | No | No | No |
+| External effects | Approval-bound opt-ins only | None | None | Proposal-only | None; readiness report only |
 
 Both standalone hunters are proposal-only and have no response-execution
 method. Governed execution is available only in the integrated platform, where
@@ -331,6 +331,7 @@ product boundaries, not only UI labels.
 cd demo/grc-concierge && bash run_standalone.sh
 cd demo/platform-threat-hunter && bash run_standalone.sh
 cd demo/environment-threat-hunter && bash run_standalone.sh
+cd demo/model-risk-ai-assurance-officer && bash run_standalone.sh
 ```
 
 The launchers force `GRC_STANDALONE=1`, `PLATFORM_HUNTER_STANDALONE=1`, and
@@ -338,7 +339,11 @@ The launchers force `GRC_STANDALONE=1`, `PLATFORM_HUNTER_STANDALONE=1`, and
 local-only; the two hunter backends can use a compatible installed analysis
 engine but retain reduced-SKU storage and authority boundaries. Their backend
 seams bind application behavior; route handlers and templates do not silently
-claim integrated-platform governance.
+claim integrated-platform governance. The Model Risk standalone forces
+`MODEL_RISK_OFFICER_STANDALONE=1`; it can produce a readiness report but has no
+promotion, deployment, rollback, discovery, or provider-effect route. See
+[`MODEL_RISK_ASSURANCE.md`](./MODEL_RISK_ASSURANCE.md) for the integrated DGM
+gate and assurance boundaries.
 
 ## Regulatory clocks and jurisdiction
 

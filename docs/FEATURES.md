@@ -605,13 +605,25 @@ here.
   mutating `ResponseExecutorRegistry` ships empty and requires explicit client
   registration. The reduced standalone's generic JSON ingestion is the
   compatibility floor for a client source without a named adapter.
-- **Three reduced standalone security SKUs** (`demo/grc-concierge/`,
-  `demo/platform-threat-hunter/`, `demo/environment-threat-hunter/`) — each has
+- **Model Risk & AI Assurance Officer** (`model_risk_assurance.py`, dashboard
+  `/security/assurance`, opt-in `[model_risk_assurance] enable`) - governed
+  inventory, declarations, review-gated evidence, deterministic findings,
+  incidents, time-bounded risk acceptance, exact DGM promotion authority,
+  deployment lineage, and signed assurance packs. The required opt-in
+  `[evidence_graph] enable` projects approved evidence without treating raw
+  collection as proof. Framework and legal mappings are advisory; applicability
+  and every consequential decision remain human-owned. See
+  [`MODEL_RISK_ASSURANCE.md`](./MODEL_RISK_ASSURANCE.md).
+- **Four reduced standalone security SKUs** (`demo/grc-concierge/`,
+  `demo/platform-threat-hunter/`, `demo/environment-threat-hunter/`,
+  `demo/model-risk-ai-assurance-officer/`) — each has
   an explicit standalone capability layer, backend seam, vendored
   engine that imports no `maverick` code in forced mode, launcher, accessible
   UI, `/about` capability matrix, and focused isolation tests. GRC keeps a
   local unsigned starter catalog/risk/POA&M store; both hunters persist derived
-  records only. They do not claim the platform's signed audit, governed
+  records only; Model Risk keeps declared metadata, local human decisions, and
+  non-executing DGM readiness reports. They do not claim the platform's signed
+  audit, governed
   approvals, managed connectors, or cross-run learning. Both hunter SKUs are
   proposal-only; response execution is exclusive to the integrated platform's
   exact approval-bound, explicitly enabled executor seam.

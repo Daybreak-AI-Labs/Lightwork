@@ -7,6 +7,7 @@ mcp/server.py.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hmac
 import ipaddress
 import json
@@ -2164,6 +2165,36 @@ async def security_report_page(request: Request) -> HTMLResponse:
         request,
         "security_report.html",
         {"r": report},
+    )
+
+
+@app.get("/security/assurance", response_class=HTMLResponse)
+async def model_risk_assurance_page(request: Request) -> HTMLResponse:
+    """Governed Model Risk & AI Assurance operator console."""
+    require_permission(request, "operate")
+    from maverick import model_risk_assurance
+
+    enabled = model_risk_assurance.enabled()
+    if enabled:
+        assets, evidence, findings = await asyncio.gather(
+            run_in_threadpool(model_risk_assurance.list_inventory),
+            run_in_threadpool(model_risk_assurance.list_evidence),
+            run_in_threadpool(model_risk_assurance.findings),
+        )
+    else:
+        assets, evidence, findings = [], [], []
+    return templates.TemplateResponse(
+        request,
+        "model_risk_assurance.html",
+        {
+            "enabled": enabled,
+            "totals": {
+                "assets": len(assets),
+                "evidence": len(evidence),
+                "findings": len(findings),
+            },
+            "findings": findings[:20],
+        },
     )
 
 

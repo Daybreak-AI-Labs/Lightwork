@@ -63,6 +63,20 @@ def test_wizard_written_sections_are_known_to_config_lint():
     assert not missing, f"wizard writes sections config-lint will false-flag: {missing}"
 
 
+def test_model_risk_literal_sections_are_known_to_config_lint():
+    from maverick.migrate import KNOWN_SECTIONS
+    from maverick_installer import wizard
+
+    rendered = wizard._cfg_security_suite({
+        "security_ops": True,
+        "evidence_graph": True,
+        "model_risk_assurance": True,
+    })
+    sections = set(tomllib.loads("\n".join(rendered)))
+    missing = sorted(sections - set(KNOWN_SECTIONS))
+    assert not missing, f"model-risk sections config-lint will false-flag: {missing}"
+
+
 # ---------- new CHANNELS entries ----------
 
 def test_new_channels_added():

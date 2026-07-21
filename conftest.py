@@ -62,3 +62,18 @@ def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+
+
+@pytest.fixture(autouse=True)
+def _reset_governed_process_authority_pin():
+    """Keep process-lifetime production admission state isolated per test."""
+    try:
+        from maverick import governed_records
+    except ImportError:
+        yield
+        return
+    governed_records._reset_process_authority_pin_for_testing()
+    try:
+        yield
+    finally:
+        governed_records._reset_process_authority_pin_for_testing()
