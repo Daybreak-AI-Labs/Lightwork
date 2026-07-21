@@ -1093,6 +1093,12 @@ def _promote_one_locked(
         return state, "stop"
     try:
         check_learning_halt("factory_learning", "apply")
+        authorization = controller.authorize_prepared(
+            preparation,
+            artifact=before_revision,
+        )
+        if not authorization.ok:
+            return state, "skipped"
         observed = _cas_install_locked(path, before=before, after=after)
     except Halted:
         # PREPARE is durable, so a HALT that lands at the final apply boundary

@@ -202,6 +202,10 @@ class Verdict:
     # (maverick.approval), or None when human approval was a boolean / not
     # required. Recorded in the signed audit line for a promotion.
     approver_id: str | None = None
+    # Exact binding that the Model Risk verifier actually checked.  This is
+    # captured during evaluation and carried into PREPARE so mutable candidate
+    # state cannot swap the journaled payload after authorization.
+    model_risk_payload_sha256: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -229,6 +233,11 @@ class PromotionRecord:
     approver_id: str | None = None
     payload_sha256: str | None = None
     approval_signature: str | None = None
+    # Exact actual-payload binding used to re-read Model Risk authority at the
+    # artifact-application, COMMIT, and crash-recovery boundaries.  This is
+    # separate from ``payload_sha256`` because that legacy field exists only
+    # when an Ed25519 human-approval signature is present.
+    model_risk_payload_sha256: str | None = None
     # Evidence/provenance is part of the authoritative receipt, not merely a
     # best-effort audit event.  Defaults preserve compatibility with journals
     # written before evidence-bearing external-artifact transactions existed.
@@ -256,6 +265,8 @@ class PromotionRecord:
             data["effect_ci_low"] = self.effect_ci_low
         if self.provenance:
             data["provenance"] = self.provenance
+        if self.model_risk_payload_sha256 is not None:
+            data["model_risk_payload_sha256"] = self.model_risk_payload_sha256
         return data
 
 
@@ -465,6 +476,9 @@ class SelfImprovementController:
     # process-global environment variables while another tenant is evaluating
     # a candidate.  It returns the trusted approver id or ``None``.
     approval_verifier: Callable[[Candidate], str | None] | None = None
+    # Optional request-scoped Model Risk verifier. The default verifier reads
+    # governed officer policy and the exact current CAS authorization.
+    model_risk_verifier: Callable[..., tuple[bool, str]] | None = None
     rung_policy: dict[str, dict[str, Any]] = field(
         default_factory=lambda: {k: dict(v) for k, v in _RUNG_POLICY.items()})
 
@@ -560,14 +574,25 @@ class SelfImprovementController:
         else:
             gates.append(GateResult("capability", True, ""))
 
-        # 4. Human approval -- required at code/weights, and for any rung above
+        # 4. Model-risk authority. When enabled, this binds authorization to
+        #    the actual candidate payload rather than candidate-supplied metadata.
+        model_risk_ok, model_risk_reason, model_risk_binding = (
+            self._model_risk_approval(cand)
+        )
+        gates.append(GateResult(
+            "model_risk_assurance",
+            model_risk_ok,
+            "" if model_risk_ok else model_risk_reason,
+        ))
+
+        # 5. Human approval -- required at code/weights, and for any rung above
         #    ``max_auto_rung`` (a deployment-wide ceiling on autonomous promotion).
         needs_human = bool(policy["require_human"]) or (
             _rung_rank(cand.rung) > _ceiling_rank(self.max_auto_rung))
         human_ok, approver, human_reason = self._human_approval(cand, needs_human)
         gates.append(GateResult("human_approval", human_ok, "" if human_ok else human_reason))
 
-        # 5. Reversibility: never promote a change you can't undo.
+        # 6. Reversibility: never promote a change you can't undo.
         rb_ok = _valid_rollback_handle(cand.rollback)
         gates.append(GateResult("rollback", rb_ok,
                                 "" if rb_ok else "no rollback handle: change is not reversible"))
@@ -575,8 +600,118 @@ class SelfImprovementController:
         failing = [g for g in gates if not g.ok]
         if failing:
             return Verdict(cand.id, cand.rung, False, tuple(gates), failing[0].reason,
-                           approver_id=approver)
-        return Verdict(cand.id, cand.rung, True, tuple(gates), approver_id=approver)
+                           approver_id=approver,
+                           model_risk_payload_sha256=model_risk_binding)
+        return Verdict(
+            cand.id,
+            cand.rung,
+            True,
+            tuple(gates),
+            approver_id=approver,
+            model_risk_payload_sha256=model_risk_binding,
+        )
+
+    def _model_risk_binding_approval(
+        self,
+        *,
+        candidate_id: str,
+        rung: str,
+        payload_sha256: str | None,
+    ) -> tuple[bool, str]:
+        """Re-read Model Risk authority over one persisted exact binding."""
+
+        if payload_sha256 is None:
+            # Transactions written before this binding was introduced remain
+            # recoverable only while the built-in gate is explicitly disabled.
+            # Once assurance is enabled, an unbound PREPARE cannot be promoted.
+            if self.model_risk_verifier is not None:
+                return False, "prepared promotion lacks an exact model-risk payload binding"
+            try:
+                from .model_risk_assurance import promotion_gate_enabled
+
+                if not promotion_gate_enabled():
+                    return True, ""
+            except Exception:
+                return False, "model-risk assurance policy is unavailable"
+            return False, "prepared promotion lacks an exact model-risk payload binding"
+        if (
+            not isinstance(payload_sha256, str)
+            or len(payload_sha256) != 64
+            or any(ch not in "0123456789abcdef" for ch in payload_sha256)
+        ):
+            return False, "prepared promotion has an invalid model-risk payload binding"
+        try:
+            verifier = self.model_risk_verifier
+            if verifier is None:
+                from .model_risk_assurance import verify_promotion_candidate
+
+                # The built-in verifier owns an authoritative record-store
+                # clock.  A controller/replica clock must never influence an
+                # authorization-expiry decision.
+                result = verify_promotion_candidate(
+                    candidate_id=candidate_id,
+                    rung=rung,
+                    payload_sha256=payload_sha256,
+                )
+            else:
+                # Preserve the injectable verifier seam for deterministic
+                # controller tests and downstream integrations.
+                result = verifier(
+                    candidate_id=candidate_id,
+                    rung=rung,
+                    payload_sha256=payload_sha256,
+                    now=self.now(),
+                )
+        except Exception:
+            log.warning("model-risk assurance promotion verification failed", exc_info=True)
+            return False, "model-risk assurance policy is unavailable"
+        if (
+            not isinstance(result, tuple)
+            or len(result) != 2
+            or not isinstance(result[0], bool)
+            or not isinstance(result[1], str)
+        ):
+            return False, "model-risk assurance verifier returned an invalid result"
+        allowed, reason = result
+        if allowed:
+            return True, ""
+        return False, reason or "model-risk assurance authorization denied"
+
+    def _model_risk_approval(self, cand: Candidate) -> tuple[bool, str, str | None]:
+        """Verify current Model Risk authority over the exact candidate bytes.
+
+        ``Candidate.payload_sha256`` is agent-controlled metadata, so the
+        approval request is rebuilt from the actual payload. Any policy,
+        storage, clock, import, or return-shape failure denies promotion.
+        """
+        try:
+            from .approval_signing import ApprovalRequest
+
+            request = ApprovalRequest.for_candidate(cand)
+        except Exception:
+            log.warning("model-risk candidate binding failed", exc_info=True)
+            return False, "model-risk assurance policy is unavailable", None
+        allowed, reason = self._model_risk_binding_approval(
+            candidate_id=request.candidate_id,
+            rung=request.rung,
+            payload_sha256=request.payload_sha256,
+        )
+        # A verifier callback is outside the Candidate trust boundary.  Detect
+        # mutation during that callback before returning an approved verdict.
+        try:
+            current = ApprovalRequest.for_candidate(cand)
+        except Exception:
+            return False, "candidate changed during model-risk verification", None
+        if current != request:
+            return False, "candidate changed during model-risk verification", None
+        return allowed, reason, request.payload_sha256
+
+    def _model_risk_record_approval(self, record: PromotionRecord) -> tuple[bool, str]:
+        return self._model_risk_binding_approval(
+            candidate_id=record.id,
+            rung=record.rung,
+            payload_sha256=record.model_risk_payload_sha256,
+        )
 
     def _human_approval(self, cand: Candidate, needs_human: bool) -> tuple[bool, str | None, str]:
         """Resolve the human-approval gate to ``(ok, approver_id, reason)``.
@@ -635,7 +770,17 @@ class SelfImprovementController:
 
     @staticmethod
     def _promotion_record(cand: Candidate, verdict: Verdict, *, at: float) -> PromotionRecord:
+        from .approval_signing import ApprovalRequest
+
         signed = bool(cand.approval_signature)
+        current_binding = ApprovalRequest.for_candidate(cand)
+        if (
+            verdict.model_risk_payload_sha256 is None
+            or current_binding.candidate_id != verdict.candidate_id
+            or current_binding.rung != verdict.rung
+            or current_binding.payload_sha256 != verdict.model_risk_payload_sha256
+        ):
+            raise ValueError("candidate changed after model-risk authorization")
         return PromotionRecord(
             id=cand.id, rung=cand.rung, summary=cand.summary,
             baseline_score=cand.baseline_score, candidate_score=cand.candidate_score,
@@ -643,6 +788,7 @@ class SelfImprovementController:
             approver_id=verdict.approver_id if signed else None,
             payload_sha256=cand.payload_sha256 if signed else None,
             approval_signature=cand.approval_signature if signed else None,
+            model_risk_payload_sha256=verdict.model_risk_payload_sha256,
             samples=cand.samples,
             effect_ci_low=cand.effect_ci_low,
             provenance=_receipt_provenance(cand.provenance),
@@ -653,7 +799,9 @@ class SelfImprovementController:
         failure = GateResult(gate, False, reason)
         return Verdict(
             verdict.candidate_id, verdict.rung, False,
-            (*verdict.gates, failure), reason, approver_id=verdict.approver_id)
+            (*verdict.gates, failure), reason,
+            approver_id=verdict.approver_id,
+            model_risk_payload_sha256=verdict.model_risk_payload_sha256)
 
     @staticmethod
     def _halt_reason(phase: str) -> str | None:
@@ -740,6 +888,92 @@ class SelfImprovementController:
             provenance=transaction.record.provenance)
         return PromotionPreparation(verdict, transaction)
 
+    def authorize_prepared(
+        self,
+        preparation: PromotionPreparation,
+        *,
+        artifact: ArtifactRevision,
+    ) -> Verdict:
+        """Revalidate exact authority under the caller's artifact/CAS lock.
+
+        Artifact owners must call this immediately before installing ``after``.
+        A denial safely ABORTs only when the exact prepared ``before`` revision
+        is still live; any ambiguous state remains in doubt and blocks reuse.
+        """
+
+        if not preparation.ok or preparation.transaction is None:
+            return preparation.verdict
+        try:
+            if self.ledger is None:
+                raise PromotionLedgerError("promotion ledger is required")
+            current = self.ledger.transaction(preparation.transaction.id)
+            if current is None:
+                raise PromotionLedgerError("promotion transaction does not exist")
+            if (
+                current.record.id != preparation.verdict.candidate_id
+                or current.record.rung != preparation.verdict.rung
+            ):
+                raise PromotionLedgerError("promotion preparation identity does not match ledger")
+            if current.state == "committed":
+                if artifact != current.after:
+                    raise PromotionLedgerError(
+                        "committed promotion does not match the live artifact"
+                    )
+                return preparation.verdict
+            if current.state == "aborted":
+                return self._fail_verdict(
+                    preparation.verdict,
+                    gate="transaction",
+                    reason="promotion transaction was already aborted",
+                )
+            if artifact != current.before:
+                raise PromotionLedgerError(
+                    "pre-apply authorization requires the exact original artifact"
+                )
+            allowed, reason = self._model_risk_record_approval(current.record)
+            if allowed:
+                return preparation.verdict
+            denial = f"model-risk authority changed before artifact application: {reason}"
+            self.ledger.abort(
+                current.id,
+                artifact=artifact,
+                at=self.now(),
+                reason=denial,
+            )
+            failed = self._fail_verdict(
+                preparation.verdict,
+                gate="model_risk_assurance",
+                reason=denial,
+            )
+            self._audit(
+                content="self_improvement_aborted",
+                decision="abort",
+                rung=current.record.rung,
+                candidate=current.record.id,
+                transaction=current.id,
+                reason=denial,
+            )
+            return failed
+        except (PromotionLedgerError, TypeError, ValueError):
+            log.warning(
+                "self-improvement pre-apply authorization is in doubt for %s",
+                preparation.verdict.candidate_id,
+                exc_info=True,
+            )
+            failed = self._fail_verdict(
+                preparation.verdict,
+                gate="transaction",
+                reason="pre-apply authorization is in doubt; recovery required",
+            )
+            self._audit(
+                content="self_improvement_in_doubt",
+                decision="in_doubt",
+                rung=preparation.verdict.rung,
+                candidate=preparation.verdict.candidate_id,
+                transaction=preparation.transaction.id,
+            )
+            return failed
+
     def commit_prepared(
         self, preparation: PromotionPreparation, *, artifact: ArtifactRevision,
     ) -> Verdict:
@@ -751,12 +985,42 @@ class SelfImprovementController:
             if self.ledger is None:
                 raise PromotionLedgerError("promotion ledger is required")
             current = self.ledger.transaction(transaction.id)
-            if current is not None and current.state == "aborted":
+            if current is None:
+                raise PromotionLedgerError("promotion transaction does not exist")
+            if (
+                current.record.id != preparation.verdict.candidate_id
+                or current.record.rung != preparation.verdict.rung
+            ):
+                raise PromotionLedgerError("promotion preparation identity does not match ledger")
+            if current.state == "aborted":
                 return self._fail_verdict(
                     preparation.verdict, gate="transaction",
                     reason="promotion transaction was already aborted")
-            was_committed = current is not None and current.state == "committed"
+            was_committed = current.state == "committed"
+            if not was_committed:
+                if artifact != current.after:
+                    raise PromotionLedgerError(
+                        "runtime artifact does not match the prepared promotion revision"
+                    )
+                allowed, reason = self._model_risk_record_approval(current.record)
+                if not allowed:
+                    denial = f"model-risk authority changed before commit: {reason}"
+                    failed = self._fail_verdict(
+                        preparation.verdict,
+                        gate="model_risk_assurance",
+                        reason=denial,
+                    )
+                    self._audit(
+                        content="self_improvement_in_doubt",
+                        decision="in_doubt",
+                        rung=current.record.rung,
+                        candidate=current.record.id,
+                        transaction=current.id,
+                        reason=denial,
+                    )
+                    return failed
             self.ledger.commit(transaction.id, artifact=artifact, at=self.now())
+            transaction = current
         except (PromotionLedgerError, TypeError, ValueError):
             # The artifact may already be live.  Never manufacture an abort or
             # claim rejection here; retain PREPARE for deterministic recovery.
@@ -835,14 +1099,41 @@ class SelfImprovementController:
         """Reconcile crash-left PREPAREs; unresolved artifacts stay blocked."""
         if self.ledger is None:
             raise PromotionLedgerError("promotion ledger is required")
-        before = {
-            tx.id: tx.state
-            for tx in self.ledger.in_doubt(artifact_identity=artifact_identity)
-        }
-        recovered = self.ledger.recover_in_doubt(
-            inspect, artifact_identity=artifact_identity, at=self.now())
+        pending = self.ledger.in_doubt(artifact_identity=artifact_identity)
+        recovered: list[PromotionTransaction] = []
+        for tx in pending:
+            try:
+                artifact = inspect(tx.before.identity)
+                if not isinstance(artifact, ArtifactRevision):
+                    raise TypeError("artifact inspector returned the wrong type")
+                if artifact == tx.after:
+                    allowed, reason = self._model_risk_record_approval(tx.record)
+                    if not allowed:
+                        self._audit(
+                            content="self_improvement_recovery_denied",
+                            decision="in_doubt",
+                            rung=tx.record.rung,
+                            candidate=tx.record.id,
+                            transaction=tx.id,
+                            reason=(
+                                "model-risk authority changed before recovery commit: "
+                                f"{reason}"
+                            ),
+                        )
+                        latest = self.ledger.transaction(tx.id)
+                        recovered.append(latest if latest is not None else tx)
+                        continue
+                recovered.append(
+                    self.ledger.recover(tx.id, artifact=artifact, at=self.now())
+                )
+            except Exception:
+                log.warning(
+                    "promotion transaction recovery failed for %s", tx.id, exc_info=True
+                )
+                latest = self.ledger.transaction(tx.id)
+                recovered.append(latest if latest is not None else tx)
         for tx in recovered:
-            if before.get(tx.id) == "prepared" and tx.state in {"committed", "aborted"}:
+            if tx.state in {"committed", "aborted"}:
                 self._audit(
                     content="self_improvement_recovered", decision=tx.state,
                     rung=tx.record.rung, candidate=tx.record.id,
@@ -893,6 +1184,21 @@ class SelfImprovementController:
             rec = self._promotion_record(cand, verdict, at=self.now())
             if self.ledger is None:
                 raise PromotionLedgerError("promotion ledger is required")
+            current, reason = self._model_risk_record_approval(rec)
+            if not current:
+                failed = self._fail_verdict(
+                    verdict,
+                    gate="model_risk_assurance",
+                    reason=f"model-risk authority changed before commit: {reason}",
+                )
+                self._audit(
+                    content="self_improvement_rejected",
+                    decision="reject",
+                    rung=cand.rung,
+                    candidate=cand.id,
+                    reason=failed.blocking_reason,
+                )
+                return failed
             # A privileged transition is successful only after its receipt
             # commits. A best-effort audit event is not a substitute for the
             # authoritative promotion journal.
@@ -1092,6 +1398,16 @@ def _record_from_dict(raw: Any) -> PromotionRecord:
                     or not -1.0 <= float(effect_ci_low) <= 1.0):
                 raise TypeError("effect_ci_low is not a finite normalized effect")
             effect_ci_low = float(effect_ci_low)
+        model_risk_payload_sha256 = raw.get("model_risk_payload_sha256")
+        if (
+            model_risk_payload_sha256 is not None
+            and (
+                not isinstance(model_risk_payload_sha256, str)
+                or len(model_risk_payload_sha256) != 64
+                or any(ch not in "0123456789abcdef" for ch in model_risk_payload_sha256)
+            )
+        ):
+            raise TypeError("model_risk_payload_sha256 is not a lowercase SHA-256 digest")
         return PromotionRecord(
             id=str(raw["id"]), rung=str(raw["rung"]),
             summary=str(raw.get("summary", "")),
@@ -1103,6 +1419,7 @@ def _record_from_dict(raw: Any) -> PromotionRecord:
             approver_id=raw.get("approver_id"),
             payload_sha256=raw.get("payload_sha256"),
             approval_signature=raw.get("approval_signature"),
+            model_risk_payload_sha256=model_risk_payload_sha256,
             samples=samples,
             effect_ci_low=effect_ci_low,
             provenance=_receipt_provenance(raw.get("provenance", {})),
@@ -1980,6 +2297,27 @@ def prepare_promotion(
             cand.id, cand.rung, False, (GateResult("error", False, reason),), reason))
 
 
+def authorize_prepared(
+    preparation: PromotionPreparation,
+    *,
+    artifact: ArtifactRevision,
+    controller: SelfImprovementController | None = None,
+) -> Verdict:
+    """Re-read exact authority immediately before artifact application."""
+    try:
+        return (controller or shared()).authorize_prepared(
+            preparation,
+            artifact=artifact,
+        )
+    except Exception:  # pragma: no cover - retain PREPARE for recovery
+        log.warning("self-improvement pre-apply authorization errored", exc_info=True)
+        return SelfImprovementController._fail_verdict(
+            preparation.verdict,
+            gate="transaction",
+            reason="pre-apply authorization is in doubt; recovery required",
+        )
+
+
 def commit_prepared(
     preparation: PromotionPreparation, *, artifact: ArtifactRevision,
     controller: SelfImprovementController | None = None,
@@ -2043,5 +2381,5 @@ __all__ = [
     "ArtifactRevision", "PromotionTransaction", "PromotionPreparation",
     "SelfImprovementController", "PromotionLedger", "PromotionLedgerError",
     "enabled", "shared", "reset_shared", "consider", "prepare_promotion",
-    "commit_prepared", "abort_prepared", "recover_promotions",
+    "authorize_prepared", "commit_prepared", "abort_prepared", "recover_promotions",
 ]

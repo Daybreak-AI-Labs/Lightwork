@@ -23,6 +23,7 @@ SKU_DIRS = (
     Path("demo/grc-concierge"),
     Path("demo/platform-threat-hunter"),
     Path("demo/environment-threat-hunter"),
+    Path("demo/model-risk-ai-assurance-officer"),
 )
 TEXT_SUFFIXES = {".html", ".json", ".md", ".py", ".sh", ".txt", ".toml", ".yaml", ".yml"}
 TEXT_FILENAMES = {"LICENSE"}

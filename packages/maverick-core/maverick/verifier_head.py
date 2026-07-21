@@ -1481,6 +1481,13 @@ def train_and_propose(
                 reason="learning safety check refused verifier activation",
             )
 
+        authorization = active_controller.authorize_prepared(
+            preparation,
+            artifact=before,
+        )
+        if not authorization.ok:
+            return authorization
+
         try:
             activation._activate_locked(expected_before=before)
         except Exception:

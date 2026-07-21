@@ -35,12 +35,12 @@ def test_standalone_sku_archives_are_deterministic_and_self_describing(tmp_path)
     second = builder.build("v0.1.7", "0123456789abcdef", second_dir)
 
     assert [path.name for path in first] == [path.name for path in second]
-    assert len(first) == 5
+    assert len(first) == 6
     for left, right in zip(first, second, strict=True):
         assert left.read_bytes() == right.read_bytes()
 
     archives = sorted(first_dir.glob("*.zip"))
-    assert len(archives) == 3
+    assert len(archives) == 4
     for archive_path in archives:
         with zipfile.ZipFile(archive_path) as archive:
             names = archive.namelist()
@@ -57,10 +57,10 @@ def test_standalone_sku_archives_are_deterministic_and_self_describing(tmp_path)
     bom = json.loads((first_dir / "lightwork-standalone-skus-0.1.7.cdx.json").read_text())
     assert bom["bomFormat"] == "CycloneDX"
     assert bom["specVersion"] == "1.6"
-    assert len([item for item in bom["components"] if item["type"] == "application"]) == 3
+    assert len([item for item in bom["components"] if item["type"] == "application"]) == 4
 
     checksum_lines = (first_dir / "lightwork-standalone-skus-0.1.7.sha256").read_text().splitlines()
-    assert len(checksum_lines) == 4
+    assert len(checksum_lines) == 5
     for line in checksum_lines:
         digest, name = line.split("  ", 1)
         assert hashlib.sha256((first_dir / name).read_bytes()).hexdigest() == digest
@@ -124,5 +124,10 @@ def test_standalone_skus_are_github_source_assets_not_pypi_packages():
     )
     assert "python scripts/build_standalone_skus.py" in release_workflow
     assert "dist/lightwork-*" in release_workflow
-    for sku in ("grc-concierge", "platform-threat-hunter", "environment-threat-hunter"):
+    for sku in (
+        "grc-concierge",
+        "platform-threat-hunter",
+        "environment-threat-hunter",
+        "model-risk-ai-assurance-officer",
+    ):
         assert f"demo/{sku}" not in publish_workflow

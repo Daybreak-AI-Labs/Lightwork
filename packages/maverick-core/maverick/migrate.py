@@ -48,7 +48,7 @@ KNOWN_SECTIONS = frozenset({
     "emergent_codec", "emergent_protocol",
     "email", "embedded", "encryption", "energy", "enterprise", "erp",
     "experience", "features", "federation", "finance", "flows", "github",
-    "governance", "governed_connectors", "grpc", "grpc_dispatch", "intake",
+    "governance", "governed_connectors", "governed_records", "grpc", "grpc_dispatch", "intake",
     "kms", "knowledge",
     "langchain", "latency", "limits", "local_first", "local_runtime",
     "logging", "lsp", "mcp_registries", "mcp_servers", "memory",
@@ -62,6 +62,7 @@ KNOWN_SECTIONS = frozenset({
     "system", "telemetry", "template_registries", "tenancy", "thinking",
     "tools", "tui", "value", "verification", "voice", "webhooks", "workforce",
     "workspace", "world_model", "threat_hunt", "env_hunt",
+    "evidence_graph", "model_risk_assurance",
     # Registry drift, again: these are all read by real load_config() call sites
     # AND written by the installer wizard, yet were missing here -- so an operator
     # who enabled a documented, wizard-offered feature got a false "unknown

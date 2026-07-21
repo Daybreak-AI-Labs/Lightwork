@@ -10,13 +10,15 @@ except ModuleNotFoundError:  # Python 3.10
 def test_pick_security_suite_safe_defaults(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True, False, False])
+    answers = iter([True, False, False, False, False])
     monkeypatch.setattr(
         wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
     )
 
     assert wizard.pick_security_suite() == {
         "security_ops": True,
+        "evidence_graph": False,
+        "model_risk_assurance": False,
         "threat_hunt": False,
         "env_hunt": False,
         "response_execution": False,
@@ -26,7 +28,7 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
 def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True, True, True, True])
+    answers = iter([True, True, True, True, True, True])
     monkeypatch.setattr(
         wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
     )
@@ -73,6 +75,8 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
         capabilities={},
         security_suite={
             "security_ops": True,
+            "evidence_graph": True,
+            "model_risk_assurance": True,
             "threat_hunt": True,
             "env_hunt": True,
             "response_execution": False,
@@ -81,6 +85,12 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
 
     parsed = tomllib.loads((tmp_path / "config.toml").read_text())
     assert parsed["security_ops"]["enable"] is True
+    assert parsed["governed_records"] == {"backend": "auto"}
+    assert parsed["evidence_graph"]["enable"] is True
+    assert parsed["model_risk_assurance"] == {
+        "enable": True,
+        "gate_promotions": True,
+    }
     assert parsed["threat_hunt"]["enable"] is True
     assert parsed["env_hunt"] == {
         "enable": True,

@@ -1395,6 +1395,18 @@ def pick_security_suite() -> dict[str, Any]:
     security_ops = _q_confirm(
         "Enable Security & GRC records and readiness workspace?", default=True
     )
+    evidence_graph = _q_confirm(
+        "Enable the review-gated evidence graph? It stores bounded evidence "
+        "metadata and hashes, never raw telemetry.",
+        default=False,
+    )
+    model_risk_assurance = _q_confirm(
+        "Enable the Model Risk & AI Assurance Officer? Legal applicability, "
+        "risk acceptance, and deployment decisions remain human-owned.",
+        default=False,
+    )
+    if model_risk_assurance:
+        evidence_graph = True
     threat_hunt = _q_confirm(
         "Enable the defensive Lightwork platform threat hunter?", default=False
     )
@@ -1470,6 +1482,8 @@ def pick_security_suite() -> dict[str, Any]:
         )
     result = {
         "security_ops": security_ops,
+        "evidence_graph": evidence_graph,
+        "model_risk_assurance": model_risk_assurance,
         "threat_hunt": threat_hunt,
         "env_hunt": env_hunt,
         "response_execution": response_execution,
@@ -3368,6 +3382,18 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "",
         "[security_ops]",
         f"enable = {'true' if security_suite.get('security_ops', True) else 'false'}",
+        "",
+        "[governed_records]",
+        'backend = "auto"',
+        "",
+        "[evidence_graph]",
+        f"enable = {'true' if security_suite.get('evidence_graph', False) else 'false'}",
+        "",
+        "[model_risk_assurance]",
+        "enable = "
+        f"{'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
+        "gate_promotions = "
+        f"{'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
         "",
         "[threat_hunt]",
         f"enable = {'true' if security_suite.get('threat_hunt', False) else 'false'}",

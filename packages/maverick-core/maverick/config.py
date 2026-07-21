@@ -266,22 +266,35 @@ def dashboard_overrides_path() -> Path:
     return config_path().parent / DASHBOARD_OVERRIDES_BASENAME
 
 
-def config_source_errors(*, include_tenant: bool = True) -> dict[str, str]:
-    """Unreadable/corrupt files among the active config sources.
+def load_governed_records_config() -> dict:
+    """Load only sources allowed to select the governed-record backend.
 
-    ``load_config`` intentionally returns defaults for malformed TOML so a typo
-    does not crash ordinary model-selection calls. Authentication and trust
-    callers inspect this seam immediately after loading and deny remote control
-    if policy may have been lost.
+    Tenant overlays must not select a deployment-global persistence plane.
+    Base/operator configuration and environment variables remain the authority
+    for that selection.
     """
-    paths = [config_path(), dashboard_overrides_path()]
+    _load_wizard_env()
+    cfg = _load_config_file(config_path())
+    overlay = os.environ.get(CONFIG_OVERLAY_ENV)
+    if overlay:
+        cfg = _deep_merge_config(
+            cfg,
+            _load_config_file(Path(overlay).expanduser()),
+        )
+    return cfg
+
+
+def governed_records_config_source_errors() -> dict[str, str]:
+    """Unreadable sources participating in governed-backend selection."""
+    paths = [config_path()]
     overlay = os.environ.get(CONFIG_OVERLAY_ENV)
     if overlay:
         paths.append(Path(overlay).expanduser())
-    if include_tenant:
-        tenant = tenant_config_path()
-        if tenant is not None:
-            paths.append(tenant)
+    return _source_errors(paths)
+
+
+def _source_errors(paths: list[Path]) -> dict[str, str]:
+    """Return current parse/I/O errors for exactly ``paths``."""
     # Optional overlays are skipped by ``load_config`` once they disappear, so
     # a parse error cached while the file existed would otherwise remain
     # security-significant forever. Clear it only when the filesystem
@@ -304,6 +317,25 @@ def config_source_errors(*, include_tenant: bool = True) -> dict[str, str]:
         for path in paths
         if str(path) in _toml_errors
     }
+
+
+def config_source_errors(*, include_tenant: bool = True) -> dict[str, str]:
+    """Unreadable/corrupt files among the active config sources.
+
+    ``load_config`` intentionally returns defaults for malformed TOML so a typo
+    does not crash ordinary model-selection calls. Authentication and trust
+    callers inspect this seam immediately after loading and deny remote control
+    if policy may have been lost.
+    """
+    paths = [config_path(), dashboard_overrides_path()]
+    overlay = os.environ.get(CONFIG_OVERLAY_ENV)
+    if overlay:
+        paths.append(Path(overlay).expanduser())
+    if include_tenant:
+        tenant = tenant_config_path()
+        if tenant is not None:
+            paths.append(tenant)
+    return _source_errors(paths)
 
 
 def governed_learning_default() -> bool:

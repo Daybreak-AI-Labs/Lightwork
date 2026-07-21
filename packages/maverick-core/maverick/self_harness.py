@@ -3052,6 +3052,13 @@ def _gate_and_apply(  # noqa: C901 - durable promotion transaction boundary
         elif preparation.needs_apply:
             try:
                 check_learning_halt("self_harness", "apply")
+                authorization = si.authorize_prepared(
+                    preparation,
+                    artifact=before_revision,
+                    controller=active,
+                )
+                if not authorization.ok:
+                    return False, authorization.blocking_reason or "refused"
                 written = _apply_addendum_locked(
                     proposal, p, before_store, provenance=apply_prov)
                 observed = _addenda_artifact_revision(p, _load_addenda_strict(p))

@@ -22,7 +22,15 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_ENCRYPT_AT_REST", raising=False)
     monkeypatch.delenv("MAVERICK_ENCRYPTION_KEY", raising=False)
     monkeypatch.delenv("MAVERICK_ENTERPRISE", raising=False)
+    monkeypatch.delenv("MAVERICK_REPLICA_COUNT", raising=False)
+    monkeypatch.delenv("MAVERICK_GOVERNED_RECORDS_BACKEND", raising=False)
+    monkeypatch.delenv("MAVERICK_WORLD_BACKEND", raising=False)
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("maverick.config.load_governed_records_config", dict)
+    monkeypatch.setattr(
+        "maverick.config.governed_records_config_source_errors",
+        dict,
+    )
     # Keep the generated key out of the real ~/.maverick.
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "keys" / "at_rest.key")
 
@@ -584,6 +592,16 @@ def test_rotation_keeps_old_data_readable(monkeypatch):
     new_blob = car.seal(b"post-rotation secret")
     assert new_blob[: len(car._MAGIC_V2)] == car._MAGIC_V2
     assert car.unseal(new_blob) == b"post-rotation secret"
+
+
+def test_explicit_postgres_refuses_node_local_key_rotation(monkeypatch):
+    monkeypatch.setenv("MAVERICK_GOVERNED_RECORDS_BACKEND", "postgres")
+    monkeypatch.setenv("MAVERICK_REPLICA_COUNT", "1")
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+
+    assert car.shared_authority_key_identity_required() is True
+    with pytest.raises(car.EncryptionUnavailable, match="externally coordinated"):
+        car.rotate_at_rest_key()
 
 
 @requires_crypto
