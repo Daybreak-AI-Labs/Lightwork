@@ -523,7 +523,9 @@ def test_summary_is_aggregate_and_internal_failures_are_redacted(api_client, mon
 
     class BrokenEngine:
         def list_alerts(self, **_kwargs):
-            raise RuntimeError("postgres://secret-user:secret-password@example.invalid/db")
+            raise RuntimeError(
+                "postgres://secret-user:secret-password@example.invalid/db"  # pragma: allowlist secret
+            )
 
     monkeypatch.setattr(finance_api, "_regulatory_engine", lambda: BrokenEngine())
     failed = client.get("/finance-operations/regulatory/alerts")
