@@ -47,7 +47,7 @@ KNOWN_SECTIONS = frozenset({
     "dashboard", "director", "durable", "ebpf_monitor", "effort", "egress", "ekko",
     "emergent_codec", "emergent_protocol",
     "email", "embedded", "encryption", "energy", "enterprise", "erp",
-    "experience", "features", "federation", "finance", "flows", "github",
+    "experience", "features", "federation", "finance", "finance_operations", "flows", "github",
     "governance", "governed_connectors", "governed_records", "grpc", "grpc_dispatch", "intake",
     "kms", "knowledge",
     "langchain", "latency", "limits", "local_first", "local_runtime",

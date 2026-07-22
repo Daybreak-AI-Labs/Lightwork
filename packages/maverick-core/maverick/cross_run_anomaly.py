@@ -18,6 +18,8 @@ how much.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import statistics
 from dataclasses import dataclass, field
 from typing import Any
@@ -28,6 +30,7 @@ SIGMA = 3.0
 # An event kind is "novel" only when the baseline saw >= this many runs and
 # none of them produced it.
 MIN_BASELINE_RUNS = 5
+DETECTOR_VERSION = "cross-run-anomaly-v1"
 
 
 @dataclass
@@ -172,6 +175,36 @@ def detect(
     return score_run(target, baseline(runs))
 
 
+def to_signal(goal_id: int, anomaly: Anomaly):
+    """Project a native run anomaly into the platform-neutral signal envelope."""
+    from .anomaly_signal import AnomalySignal
+
+    if isinstance(goal_id, bool) or not isinstance(goal_id, int) or goal_id <= 0:
+        raise ValueError("goal_id must be a positive integer")
+    if not isinstance(anomaly, Anomaly):
+        raise TypeError("anomaly must be an Anomaly")
+    material = json.dumps(
+        {
+            "goal_id": goal_id,
+            "kind": anomaly.kind,
+            "severity": anomaly.severity,
+            "detail": anomaly.detail,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return AnomalySignal(
+        detector_id="cross_run_anomaly",
+        detector_version=DETECTOR_VERSION,
+        kind=anomaly.kind,
+        severity=anomaly.severity,
+        subject_ref=f"goal:{goal_id}",
+        detail=anomaly.detail,
+        evidence_sha256s=(hashlib.sha256(material).hexdigest(),),
+    )
+
+
 __all__ = ["RunProfile", "BaselineProfile", "Anomaly", "profile_run",
            "baseline", "score_run", "gather_runs", "detect",
-           "SIGMA", "MIN_BASELINE_RUNS"]
+           "to_signal", "DETECTOR_VERSION", "SIGMA", "MIN_BASELINE_RUNS"]

@@ -2756,13 +2756,17 @@ def create_audit_engagement(
     *,
     due_at: float | None = None,
     created_by: str = "",
+    engagement_id: str = "",
 ) -> dict:
     due = float(due_at) if due_at is not None else None
     if due is not None and (not math.isfinite(due) or due <= 0):
         raise ValueError("due_at must be a positive timestamp")
+    identifier = str(engagement_id or "").strip() or _ENGAGEMENTS.new_id()
+    if re.fullmatch(r"AUD-[A-Za-z0-9_-]{1,60}", identifier) is None:
+        raise ValueError("engagement_id must be a valid AUD identifier")
     now = time.time()
     record = {
-        "id": _ENGAGEMENTS.new_id(),
+        "id": identifier,
         "name": _required(name, "name", 300),
         "framework": _required(framework, "framework", 200),
         "scope": _required(scope, "scope", 4000),

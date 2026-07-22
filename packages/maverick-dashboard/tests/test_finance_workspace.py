@@ -48,6 +48,8 @@ def test_page_renders_finance_worklist_and_catalog():
     assert "Privacy Impact Assessment" not in html
     # No privacy-records UI on the finance chassis.
     assert "Privacy records" not in html and "open DSARs" not in html
+    assert "Deterministic finance operations" in html
+    assert "Finance operations are disabled" in html
 
 
 def test_department_isolation():
@@ -69,3 +71,28 @@ def test_page_empty_state():
     resp = client.get("/finance")
     assert resp.status_code == 200
     assert "No assessments yet" in resp.text
+
+
+def test_enabled_operations_render_honest_licensing_and_review_boundaries(tmp_path):
+    from maverick import config
+
+    (tmp_path / "config.toml").write_text(
+        """[finance_operations]
+enable = true
+regulatory_poll_seconds = 0
+control_test_interval_seconds = 0
+""",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    response = client.get("/finance")
+    assert response.status_code == 200
+    html = response.text
+    assert "Regulatory-change review queue" in html
+    assert "State licensing source packs" in html
+    assert "source_check_required" in html
+    assert "does not claim counsel-verified" in html
+    assert "Finance anomaly findings" in html
+    assert "AML, KYC &amp; sanctions cases" in html
+    assert "two independent reviewers" in html
+    assert "needs_review" in html

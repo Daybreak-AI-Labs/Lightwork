@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import copy
 import hashlib
+import json
 import threading
 
 import pytest
@@ -410,6 +411,121 @@ def test_create_update_and_stale_cas_are_audited(monkeypatch):
             action="stale_update",
             actor="mallory@example.com",
         )
+
+
+def test_public_record_id_scan_is_bounded_and_cursor_rotates(monkeypatch):
+    import maverick.audit as audit
+
+    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: True)
+    store = GovernedRecordStore("test_scan", "TGR", "test_record")
+    for record_id in ("TGR-charlie", "TGR-alpha", "TGR-bravo"):
+        store.create(
+            {"id": record_id, "status": "open"},
+            action="create",
+            actor="operator",
+        )
+
+    first = list(store.iter_record_ids(limit=2))
+    assert [record_id for _cursor, record_id in first] == [
+        "TGR-alpha",
+        "TGR-bravo",
+    ]
+    second = list(store.iter_record_ids(start_after=first[-1][0], limit=2))
+    assert [record_id for _cursor, record_id in second] == [
+        "TGR-charlie",
+        "TGR-alpha",
+    ]
+    assert all(store.get(record_id) is not None for _cursor, record_id in first)
+
+
+def test_local_backend_rejects_oversized_record_before_creating_a_file(
+    tmp_path,
+    monkeypatch,
+):
+    from maverick import privacy_ops
+    from maverick.paths import data_dir
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(privacy_ops, "_MAX_PRIVACY_JSON_BYTES", 1_024)
+    store = GovernedRecordStore("test_oversized", "TGR", "test_record")
+    record_id = store.new_id()
+
+    with pytest.raises(PrivacyStateError, match="16 MiB JSON limit"):
+        store.create(
+            {"id": record_id, "status": "open", "payload": "x" * 2_000},
+            action="create",
+            actor="operator",
+        )
+
+    assert not (data_dir("test_oversized") / f"{record_id}.json").exists()
+
+
+@pytest.mark.parametrize("authority_scope", ["tenant", "deployment_global"])
+def test_local_bounded_list_reads_no_more_than_limit(monkeypatch, authority_scope):
+    import maverick.audit as audit
+
+    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(audit, "record_global", lambda *_args, **_kwargs: True)
+    namespace = f"test_bounded_{authority_scope}"
+    store = GovernedRecordStore(
+        namespace,
+        "TBL",
+        "test_record",
+        authority_scope=authority_scope,
+    )
+    for index in range(5):
+        store.create(
+            {"id": f"TBL-record{index}", "status": "open", "index": index},
+            action="create",
+            actor="operator",
+        )
+
+    disk_store = store._local_backend._store
+    original_read = disk_store._read_path
+    reads = []
+
+    def counted_read(path):
+        reads.append(path)
+        return original_read(path)
+
+    monkeypatch.setattr(disk_store, "_read_path", counted_read)
+    rows = store.list(limit=2)
+
+    assert len(rows) == 2
+    assert len(reads) == 2
+    assert all(row["id"].startswith("TBL-") for row in rows)
+
+
+def test_local_bounded_list_validates_unselected_paths_before_reads(monkeypatch):
+    import maverick.audit as audit
+    from maverick.file_lock import atomic_write_text
+
+    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: True)
+    store = GovernedRecordStore("test_bounded_paths", "TBP", "test_record")
+    for index in range(2):
+        store.create(
+            {"id": f"TBP-record{index}", "status": "open"},
+            action="create",
+            actor="operator",
+        )
+
+    disk_store = store._local_backend._store
+    atomic_write_text(
+        disk_store._dir() / "wrong-prefix.json",
+        json.dumps({"id": "wrong-prefix", "revision": 1}),
+        mode=0o600,
+    )
+    original_read = disk_store._read_path
+    reads = []
+
+    def counted_read(path):
+        reads.append(path)
+        return original_read(path)
+
+    monkeypatch.setattr(disk_store, "_read_path", counted_read)
+    with pytest.raises(PermissionError, match="invalid record path"):
+        store.list(limit=1)
+    assert reads == []
 
 
 def test_failed_audit_is_durable_and_retryable(monkeypatch):

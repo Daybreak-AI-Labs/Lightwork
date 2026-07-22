@@ -507,9 +507,21 @@ class _RecordStore:
             _validated_audit_queue(saved)
         else:
             saved.pop("_audit_pending", None)
+        try:
+            rendered = json.dumps(
+                saved,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exc:
+            raise PrivacyStateError("privacy record is not valid bounded JSON") from exc
+        if len(rendered.encode("utf-8")) > _MAX_PRIVACY_JSON_BYTES:
+            raise PrivacyStateError("privacy record exceeds the 16 MiB JSON limit")
         atomic_write_text(
             path,
-            json.dumps(saved, indent=2, default=str),
+            rendered,
             mode=0o600,
         )
         return saved
@@ -562,6 +574,59 @@ class _RecordStore:
                 raise PermissionError("privacy record path alias is not permitted")
             with cross_process_lock(p, strict=True):
                 record = self._read_path(p)
+            if record is not None:
+                out.append(record)
+        return sorted(out, key=lambda r: r.get("created_at", 0), reverse=True)
+
+    def list_bounded(self, *, limit: int) -> list[dict]:
+        """Read at most ``limit`` records after validating every store path.
+
+        Exact collection-wide ``created_at`` ordering requires deserializing
+        every legacy JSON record because the timestamp is stored only inside
+        the document.  A bounded read instead ranks the fully validated paths
+        by protected-file modification time, reads only that candidate window,
+        and preserves the established ``created_at`` order within the window.
+        Unbounded :meth:`list` retains its exact historical semantics.
+        """
+        from .file_lock import cross_process_lock, private_path_is_restricted
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+            raise ValueError("privacy record list limit must be non-negative")
+        d, _ = _validated_private_directory(self._dir(), must_exist=False)
+        if not d.exists():
+            return []
+        candidates: list[tuple[Path, os.stat_result]] = []
+        for path in d.glob("*.json"):
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                raise PermissionError(
+                    f"privacy record path could not be inspected: {path}"
+                ) from exc
+            record_id = path.stem
+            if (
+                _unsafe_path_alias(path, info)
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or not _RECORD_ID_RE.fullmatch(record_id)
+                or not record_id.startswith(f"{self.prefix}-")
+                or not private_path_is_restricted(path, 0o600)
+            ):
+                raise PermissionError(
+                    "privacy record scan found an invalid record path"
+                )
+            if info.st_size > _MAX_PRIVACY_JSON_BYTES:
+                raise PrivacyStateError(
+                    "privacy record payload exceeds the size limit"
+                )
+            candidates.append((path, info))
+        candidates.sort(
+            key=lambda item: (-item[1].st_mtime_ns, item[0].name),
+        )
+        out = []
+        for path, _info in candidates[:limit]:
+            with cross_process_lock(path, strict=True):
+                record = self._read_path(path)
             if record is not None:
                 out.append(record)
         return sorted(out, key=lambda r: r.get("created_at", 0), reverse=True)

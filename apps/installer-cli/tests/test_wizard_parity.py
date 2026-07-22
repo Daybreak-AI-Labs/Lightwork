@@ -787,6 +787,55 @@ def test_write_config_emits_finance_governance(tmp_path: Path, monkeypatch):
     assert parsed["screening"]["sdn_path"] == "/etc/ofac/sdn.txt"
 
 
+def test_write_config_emits_finance_operations_and_new_regimes(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(
+        tmp_path,
+        monkeypatch,
+        finance={
+            "enable": True,
+            "regimes": ["sox", "dora", "basel_iii", "ifrs_17", "pci"],
+            "require_human_above": 5000.0,
+            "deny_above": 0,
+            "sdn_path": "",
+            "operations_enable": True,
+            "federal_register_enable": True,
+            "texas_register_enable": True,
+            "regulatory_domains": ["finance", "money_transmitter"],
+            "regulatory_poll_seconds": 3600,
+            "control_test_interval_seconds": 86400,
+            "anomaly_enable": True,
+            "sanctions_max_age_hours": 72,
+            "control_owner": "Finance Assurance",
+        },
+    )
+    assert parsed["finance"]["regimes"] == [
+        "sox", "dora", "basel_iii", "ifrs_17", "pci",
+    ]
+    operations = parsed["finance_operations"]
+    assert operations["enable"] is True
+    assert operations["federal_register_enable"] is True
+    assert operations["texas_register_enable"] is True
+    assert operations["regulatory_domains"] == ["finance", "money_transmitter"]
+    assert operations["state_feeds"] == []
+    assert operations["control_owner"] == "Finance Assurance"
+
+
+def test_write_config_can_explicitly_disable_finance_operations(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(
+        tmp_path,
+        monkeypatch,
+        finance={
+            "enable": True,
+            "regimes": ["sox"],
+            "require_human_above": 0,
+            "deny_above": 0,
+            "sdn_path": "",
+            "operations_enable": False,
+        },
+    )
+    assert parsed["finance_operations"] == {"enable": False}
+
+
 def test_write_config_emits_require_fresh_human_approval(tmp_path: Path, monkeypatch):
     # Opt-in per-action oversight: the [governance] scalar is emitted only when
     # the wizard pick set it.

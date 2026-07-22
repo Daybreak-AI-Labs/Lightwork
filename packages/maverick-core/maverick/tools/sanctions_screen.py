@@ -1,16 +1,14 @@
 """Sanctions / watchlist screening — gate every payment + vendor-onboarding path.
 
-A name (payee, vendor, counterparty) is screened against a sanctions list (OFAC
-SDN, or any newline/JSON name list the operator supplies) before money moves or a
-vendor is onboarded (finance-agent-suite §2.6). Read-only and deterministic: the
-matcher normalises names and scores exact + token-overlap matches, so it's a pure,
-unit-tested function; the tool loads the list from ``[screening] sdn_path`` (or
-``~/.maverick/screening/sdn.txt``) and returns hits for a human to clear.
+A name (payee, vendor, counterparty) is screened before money moves or a vendor
+is onboarded (finance-agent-suite §2.6). When finance operations are enabled,
+the tool delegates to the governed AML module: versioned cited lists, the
+typo-tolerant matching ladder, a durable case, and four-eyes disposition. The
+legacy newline/JSON matcher remains available only when that module is disabled.
 
 A hit does **not** auto-block in code — it raises a finding the payment/vendor
 flow routes to a human (an OFAC determination is a human act). This is intentional
-defence-in-depth, not a substitute for a licensed screening provider (no DOB /
-address / fuzzy-alias resolution here — see the honest caveats in the proposal).
+defence-in-depth, not a substitute for a licensed screening provider.
 """
 from __future__ import annotations
 
@@ -115,7 +113,15 @@ _SCHEMA = {
             "type": "number",
             "exclusiveMinimum": 0,
             "maximum": 1,
-            "description": "match threshold >0–1 (default 0.85)",
+            "description": (
+                "legacy matcher threshold >0–1 (default 0.85); governed "
+                "screening uses its fixed, versioned match ladder"
+            ),
+        },
+        "subject_ref": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "optional payment, vendor, or counterparty reference",
         },
     },
     "required": ["name"],
@@ -126,15 +132,65 @@ def _run(args: dict[str, Any]) -> str:
     name = str(args.get("name") or "").strip()
     if not name:
         return "ERROR: name is required"
+    try:
+        threshold = _validate_threshold(args.get("threshold"))
+    except (TypeError, ValueError):
+        return "ERROR: threshold must be a finite number greater than 0 and no more than 1"
+    from ..finance import aml_screening
+
+    if aml_screening.enabled():
+        if args.get("threshold") is not None and threshold != 0.85:
+            return (
+                "ERROR: threshold overrides are not allowed while governed sanctions "
+                "screening is enabled"
+            )
+        try:
+            from ..connections import current_principal
+
+            actor = str(current_principal() or "agent:screen_sanctions")
+            result = aml_screening.screen_subject(
+                name,
+                screened_by=actor,
+                subject_ref=str(args.get("subject_ref") or "").strip()[:256],
+            )
+        except (
+            aml_screening.ScreeningIncompleteError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            return f"ERROR: governed sanctions screening is incomplete: {exc}"
+        except Exception:
+            return "ERROR: governed sanctions screening failed safely"
+        lists = result.get("screened_lists") or []
+        if not result.get("match"):
+            return (
+                f"CLEAR (governed): {name!r} produced no candidate match across "
+                f"{len(lists)} current cited list source(s). This is a screening "
+                "result, not an OFAC determination."
+            )
+        case = result.get("case") or {}
+        lines = [
+            f"POSSIBLE SANCTIONS HIT for {name!r} — governed case "
+            f"{case.get('id', '<pending>')} requires independent human disposition "
+            "(do not proceed):"
+        ]
+        for hit in (result.get("hits") or [])[:10]:
+            citation = hit.get("citation") or {}
+            lines.append(
+                "  - "
+                f"{hit.get('entry_name', '<unknown>')} "
+                f"(score {hit.get('score')}, {hit.get('match_method')}; "
+                f"{citation.get('source_name', 'cited list')} "
+                f"{citation.get('list_version', '')})"
+            )
+        return "\n".join(lines)
+
     path = _list_path()
     sdn = load_list(path)
     if not sdn:
         return (f"ERROR: no sanctions list found at {path}. Set [screening] "
                 "sdn_path to an OFAC SDN export (newline or JSON name list).")
-    try:
-        threshold = _validate_threshold(args.get("threshold"))
-    except (TypeError, ValueError):
-        return "ERROR: threshold must be a finite number greater than 0 and no more than 1"
     result = screen(name, sdn, threshold=threshold)
     if not result["match"]:
         return f"CLEAR: {name!r} not found on the sanctions list ({len(sdn)} names)."
@@ -149,13 +205,13 @@ def sanctions_screen() -> Tool:
         name="screen_sanctions",
         description=(
             "Screen a payee / vendor / counterparty name against a sanctions list "
-            "(OFAC SDN or operator-supplied). op: check (name, threshold). Returns "
-            "CLEAR or possible hits for a human to clear — never auto-proceeds on a "
-            "hit. List path: [screening] sdn_path."
+            "(OFAC SDN or operator-supplied). With finance operations enabled, uses "
+            "governed cited lists, typo-tolerant matching, and a four-eyes case; "
+            "otherwise uses the legacy local list. Never auto-proceeds on a hit."
         ),
         input_schema=_SCHEMA,
         fn=_run,
-        parallel_safe=True,
+        parallel_safe=False,
     )
 
 

@@ -145,8 +145,8 @@ def _amount_table(value: object) -> dict[str, float]:
     return out
 
 
-def _governance_config() -> dict:
-    """One trusted ``[governance]`` snapshot; absence is intentionally empty."""
+def _policy_config_snapshot() -> dict:
+    """Load one trusted config snapshot for every live policy overlay."""
     try:
         from .config import config_source_errors, load_config
 
@@ -160,6 +160,13 @@ def _governance_config() -> dict:
         raise GovernancePolicyError("governance policy source is invalid")
     if not isinstance(snapshot, dict):
         raise GovernancePolicyError("governance config root must be a table")
+    return snapshot
+
+
+def _governance_config(snapshot: dict | None = None) -> dict:
+    """Return ``[governance]`` from one trusted policy snapshot."""
+    if snapshot is None:
+        snapshot = _policy_config_snapshot()
     if "governance" not in snapshot:
         return {}
     cfg = snapshot.get("governance")
@@ -257,6 +264,7 @@ class Policy:
             or self.require_human_min_risk
             or self.deny_above
             or self.require_human_above
+            or self.require_fresh_human_approval
         )
 
     @classmethod
@@ -268,7 +276,8 @@ class Policy:
         raise so the live tool chokepoint can refuse the action instead of
         mistaking policy loss for an intentionally empty policy.
         """
-        cfg = _governance_config()
+        snapshot = _policy_config_snapshot()
+        cfg = _governance_config(snapshot)
 
         fresh = cfg.get("require_fresh_human_approval", False)
         if not isinstance(fresh, bool):
@@ -285,10 +294,10 @@ class Policy:
             require_human_above=_policy_thresholds(cfg, "require_human_above"),
             require_fresh_human_approval=fresh,
         )
-        # Compliance mode profiles (e.g. [compliance] profiles = ["hipaa"]) tighten
-        # the live policy strictest-wins. No profiles configured -> base unchanged,
-        # so default behavior is byte-for-byte identical. Lazy import avoids a
-        # governance <-> compliance_profiles import cycle.
+        # Compliance profiles and finance regime packs tighten the same live
+        # policy strictest-wins. Lazy imports are deliberately below the Policy
+        # definition: finance.regimes constructs Policy values at module import,
+        # but never calls Policy.from_config, avoiding recursive compilation.
         try:
             from . import compliance_profiles
             profiles = compliance_profiles.configured_profiles()
@@ -296,22 +305,27 @@ class Policy:
             raise GovernancePolicyError(
                 "compliance governance policy is unavailable"
             ) from exc
-        if not profiles:
-            return base
         try:
-            from dataclasses import replace
+            from .finance import regimes as finance_regimes
 
-            from .finance.regimes import union_policies
-            merged = union_policies([
-                base,
-                compliance_profiles.compile_policy(profiles),
-            ])
+            regime_keys = finance_regimes.configured_regimes(snapshot)
         except Exception as exc:
             raise GovernancePolicyError(
-                "compliance governance policy could not be compiled"
+                "finance-regime governance policy is unavailable"
             ) from exc
-        # union_policies doesn't carry the fresh-approval flag; preserve it.
-        return replace(merged, require_fresh_human_approval=base.require_fresh_human_approval)
+        if not profiles and not regime_keys:
+            return base
+        policies = [base]
+        try:
+            if profiles:
+                policies.append(compliance_profiles.compile_policy(profiles))
+            if regime_keys:
+                policies.append(finance_regimes.compile_policy(regime_keys))
+            return finance_regimes.union_policies(policies)
+        except Exception as exc:
+            raise GovernancePolicyError(
+                "configured governance overlays could not be compiled"
+            ) from exc
 
 
 def _threshold_for(table: dict[str, float], action: str) -> float | None:

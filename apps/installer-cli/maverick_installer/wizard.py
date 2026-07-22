@@ -1527,8 +1527,11 @@ def pick_finance() -> dict[str, Any]:
 
     Off by default. When enabled, governance pauses money movement for a human,
     you pick the compliance regimes to enforce (strictest-wins), set the
-    delegation-of-authority dollar tiers, and point at an OFAC SDN list. Returns a
-    dict written under ``[governance]`` / ``[finance]`` / ``[screening]``.
+    delegation-of-authority dollar tiers, and point at an OFAC SDN list. The
+    optional finance-operations module adds deterministic regulatory feeds,
+    anomaly rules, governed screening cases, and scheduled GRC evidence work.
+    Returns a dict written under ``[governance]`` / ``[finance]`` /
+    ``[screening]`` / ``[finance_operations]``.
     """
     console.print()
     console.print(
@@ -1541,7 +1544,10 @@ def pick_finance() -> dict[str, Any]:
         return {"enable": False}
     regimes = _q_checkbox(
         "Compliance regimes to enforce (strictest-wins union):",
-        ["sox", "coso", "gaap", "pci", "glba", "aml", "sec", "irs"],
+        [
+            "sox", "coso", "gaap", "pci", "glba", "aml", "sec", "irs",
+            "dora", "basel_iii", "ifrs_17",
+        ],
         default=["sox", "gaap"],
     )
     require_human_above = _safe_float(
@@ -1563,6 +1569,42 @@ def pick_finance() -> dict[str, Any]:
         "  OFAC SDN list path for sanctions screening (blank to set later)",
         default="",
     ).strip()
+    operations_enable = _q_confirm(
+        "  Enable deterministic regulatory monitoring, anomaly cases, governed "
+        "AML screening, and scheduled GRC control tests?",
+        default=True,
+    )
+    operations: dict[str, Any] = {"operations_enable": operations_enable}
+    if operations_enable:
+        operations["federal_register_enable"] = _q_confirm(
+            "  Poll the official Federal Register API?", default=True,
+        )
+        operations["texas_register_enable"] = _q_confirm(
+            "  Poll the official Texas Register RSS and queue each issue for review?",
+            default=False,
+        )
+        operations["regulatory_domains"] = _q_checkbox(
+            "  Regulatory domains to route into the review queue:",
+            ["finance", "money_transmitter", "insurance_producer", "lending"],
+            default=["finance", "money_transmitter", "insurance_producer"],
+        )
+        regulatory_minutes = max(5, min(10_080, _safe_int(
+            _q_text("  Regulatory feed poll interval (minutes)", default="60"),
+            default=60,
+        )))
+        control_hours = max(1, min(744, _safe_int(
+            _q_text("  Finance-to-GRC control test interval (hours)", default="24"),
+            default=24,
+        )))
+        operations.update({
+            "regulatory_poll_seconds": regulatory_minutes * 60,
+            "control_test_interval_seconds": control_hours * 3600,
+            "anomaly_enable": True,
+            "sanctions_max_age_hours": 72,
+            "control_owner": _q_text(
+                "  Finance control/evidence owner", default="Finance Control Owner",
+            ).strip() or "Finance Control Owner",
+        })
     return {
         "enable": True,
         "regimes": regimes,
@@ -1570,6 +1612,7 @@ def pick_finance() -> dict[str, Any]:
         "deny_above": deny_above,
         "require_fresh_human_approval": require_fresh,
         "sdn_path": sdn_path,
+        **operations,
     }
 
 
@@ -3491,6 +3534,26 @@ def _cfg_finance(finance: dict[str, Any] | None) -> list[str]:
         lines.append("")
         lines.append("[screening]")
         _emit_kv(lines, "sdn_path", sdn)
+    if "operations_enable" in finance:
+        lines.append("")
+        lines.append("[finance_operations]")
+        _emit_kv(lines, "enable", finance.get("operations_enable") is True)
+        if finance.get("operations_enable") is True:
+            for key in (
+                "federal_register_enable",
+                "texas_register_enable",
+                "regulatory_domains",
+                "regulatory_poll_seconds",
+                "control_test_interval_seconds",
+                "anomaly_enable",
+                "sanctions_max_age_hours",
+                "control_owner",
+            ):
+                if key in finance:
+                    _emit_kv(lines, key, finance[key])
+            # State register sources are explicit arrays of tables added after
+            # onboarding; an empty list is a clear, safe starting posture.
+            lines.append("state_feeds = []")
     return lines
 
 

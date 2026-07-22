@@ -12,6 +12,8 @@ file, and certify).
 from __future__ import annotations
 
 import logging
+import math
+import time
 
 from ..compliance import ControlCheck
 from . import regimes as _regimes
@@ -74,12 +76,183 @@ def _signing_active() -> tuple[bool, str]:
 
 
 def _sanctions_active() -> tuple[bool, str]:
+    from . import aml_screening
+
+    if aml_screening.enabled():
+        try:
+            versions = aml_screening.list_versions(list_kind="sanctions", limit=10_001)
+            if len(versions) > 10_000:
+                return False, "governed sanctions list inventory exceeds its status bound"
+            if not versions:
+                return False, "ingest at least one governed sanctions list version"
+            latest = max(
+                versions,
+                key=lambda row: float(
+                    (row.get("provenance") or {}).get("retrieved_at") or 0
+                ),
+            )
+            cases = aml_screening.list_cases(limit=10_001)
+            if len(cases) > 10_000:
+                return False, "governed sanctions case inventory exceeds its status bound"
+            open_cases = len([
+                row for row in cases
+                if row.get("status") not in {"cleared", "escalated"}
+            ])
+            return True, (
+                f"governed {latest.get('list_kind')} list {latest.get('id')} "
+                f"version {latest.get('version')} loaded with SHA-256 provenance; "
+                f"{open_cases} case(s) await final disposition"
+            )
+        except Exception as e:
+            log.warning("finance status: governed screening probe failed: %s", e)
+            return False, f"governed sanctions screening is unavailable ({type(e).__name__})"
     from ..tools.sanctions_screen import _list_path, load_list
     path = _list_path()
     names = load_list(path)
     if names:
         return True, f"sanctions list loaded ({len(names)} names) at {path}"
     return False, f"add an OFAC SDN list at {path} (or set [screening] sdn_path)"
+
+
+def _regulatory_monitor_active() -> tuple[bool, str]:
+    try:
+        from ..config import config_source_errors, load_config, load_global_config
+        from .operations_health import success_receipts
+
+        global_section = (load_global_config() or {}).get("finance_operations")
+        if not isinstance(global_section, dict) or global_section.get("enable") is not True:
+            return False, "enable [finance_operations] to start cited regulatory monitoring"
+        if config_source_errors(include_tenant=True):
+            return False, "tenant-effective finance operations configuration is invalid"
+        section = (load_config() or {}).get("finance_operations")
+        if not isinstance(section, dict):
+            return False, "tenant-effective [finance_operations] configuration is missing"
+        federal_raw = section.get("federal_register_enable", True)
+        if not isinstance(federal_raw, bool):
+            return False, "finance_operations.federal_register_enable must be boolean"
+        federal = federal_raw is True
+        texas_raw = section.get("texas_register_enable", False)
+        if not isinstance(texas_raw, bool):
+            return False, "finance_operations.texas_register_enable must be boolean"
+        texas = texas_raw is True
+        state_feeds = section.get("state_feeds", [])
+        if not isinstance(state_feeds, list):
+            return False, "finance_operations.state_feeds must be a list"
+        source_keys = ["federal-register"] if federal else []
+        if texas:
+            source_keys.append("texas-register")
+        for index, value in enumerate(state_feeds):
+            if not isinstance(value, dict) or not str(value.get("key") or "").strip():
+                return False, f"finance_operations.state_feeds[{index}] is invalid"
+            source_keys.append(str(value["key"]).strip().lower())
+        if len(source_keys) != len(set(source_keys)):
+            return False, "finance_operations regulatory feed keys must be unique"
+        source_count = len(source_keys)
+        if source_count == 0:
+            return False, "configure the Federal Register or at least one state register feed"
+        interval = section.get("regulatory_poll_seconds", 3600)
+        if (
+            isinstance(interval, bool)
+            or not isinstance(interval, (int, float))
+            or not math.isfinite(float(interval))
+            or float(interval) <= 0
+        ):
+            return False, "set finance_operations.regulatory_poll_seconds above zero"
+        receipts = {
+            str(row["key"]): row
+            for row in success_receipts(component="regulatory_poll")
+        }
+        freshness = max(600.0, float(interval) * 2.0)
+        now = time.time()
+        missing = [
+            key
+            for key in source_keys
+            if key not in receipts
+            or now - float(receipts[key]["succeeded_at"]) > freshness
+        ]
+        if missing:
+            return False, (
+                f"{source_count} official feed(s) configured, but {len(missing)} lack a "
+                "fresh successful-poll receipt"
+            )
+        newest = max(float(receipts[key]["succeeded_at"]) for key in source_keys)
+        return True, (
+            f"{source_count} configured official feed(s) have fresh successful-poll "
+            f"receipts (newest {max(0.0, now - newest):.0f}s ago); matched changes "
+            "route to the cited human review queue"
+        )
+    except Exception as e:
+        log.warning("finance status: regulatory monitor probe failed: %s", e)
+        return False, f"regulatory monitoring is unavailable ({type(e).__name__})"
+
+
+def _licensing_packs_active() -> tuple[bool, str]:
+    try:
+        from .licensing import load_licensing_pack, validate_licensing_pack
+
+        packs = [
+            load_licensing_pack("money_transmitter"),
+            load_licensing_pack("insurance_producer"),
+        ]
+        for pack in packs:
+            validate_licensing_pack(pack)
+        return False, (
+            "two versioned 50-state source-routing packs validate with renewal "
+            "metadata and citations, but all legal conclusions remain "
+            "source_check_required"
+        )
+    except Exception as e:
+        log.warning("finance status: licensing pack probe failed: %s", e)
+        return False, f"licensing packs are unavailable ({type(e).__name__})"
+
+
+def _anomaly_engine_active() -> tuple[bool, str]:
+    try:
+        from . import anomaly_engine
+
+        if not anomaly_engine.enabled():
+            return False, "set [finance_operations] anomaly_enable = true"
+        anomaly_engine.FinanceAnomalyConfig()
+        return True, (
+            "duplicate, Benford-eligibility, threshold-straddling, split-payment, "
+            "and off-hours rules are loadable; findings require human disposition"
+        )
+    except Exception as e:
+        log.warning("finance status: anomaly engine probe failed: %s", e)
+        return False, f"finance anomaly engine is unavailable ({type(e).__name__})"
+
+
+def _grc_control_loop_active() -> tuple[bool, str]:
+    try:
+        from .. import security_ops
+        from . import control_testing
+        from .operations_health import success_receipts
+
+        if not control_testing.enabled():
+            return False, "enable [finance_operations] for scheduled finance control tests"
+        interval = control_testing.schedule_config()["interval_seconds"]
+        if interval <= 0:
+            return False, "set finance_operations.control_test_interval_seconds above zero"
+        if not security_ops.enabled():
+            return False, "enable [security_ops] so finance observations reach GRC evidence queues"
+        receipts = success_receipts(component="grc_control_cycle")
+        if not receipts:
+            return False, (
+                "finance-to-GRC scheduling is configured, but no successful scheduled "
+                "cycle receipt exists"
+            )
+        age = max(0.0, time.time() - float(receipts[0]["succeeded_at"]))
+        if age > max(600.0, float(interval) * 2.0):
+            return False, (
+                f"the latest successful finance-to-GRC cycle receipt is stale ({age:.0f}s old)"
+            )
+        return True, (
+            f"finance observations have a fresh scheduled Security/GRC receipt ({age:.0f}s "
+            f"old; configured every {interval / 3600:.1f} hour(s)) and remain needs_review"
+        )
+    except Exception as e:
+        log.warning("finance status: GRC control-loop probe failed: %s", e)
+        return False, f"finance-to-GRC loop is unavailable ({type(e).__name__})"
 
 
 def _enc_active() -> tuple[bool, str]:
@@ -120,6 +293,14 @@ def finance_status() -> list[ControlCheck]:
                _amount_tiers_active),
         _check("Tamper-evident book of record", "SOX §404 / §409", _signing_active),
         _check("Sanctions screening", "AML / BSA / OFAC", _sanctions_active),
+        _check("Regulatory-change monitoring", "Federal + state registers",
+               _regulatory_monitor_active),
+        _check("State licensing source packs", "50-state licensing",
+               _licensing_packs_active),
+        _check("Deterministic finance anomaly rules", "Finance monitoring",
+               _anomaly_engine_active),
+        _check("Finance-to-GRC control testing", "GRC evidence workflow",
+               _grc_control_loop_active),
         _check("Encryption at rest", "GLBA / PCI-DSS", _enc_active),
         _check("Data-egress lock", "GLBA / data residency", _egress_active),
     ]
