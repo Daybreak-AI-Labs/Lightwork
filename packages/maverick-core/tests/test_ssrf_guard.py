@@ -55,6 +55,27 @@ def test_guarded_urlopen_allows_public_host(monkeypatch):
     assert seen["url"] == "https://example.com/data"
 
 
+def test_pinned_https_handler_uses_runtime_ssl_context(monkeypatch):
+    """The handler must work across urllib versions without private attrs."""
+    from maverick.tools import http_fetch
+
+    handler = http_fetch._PinnedHTTPSHandler()
+    seen = {}
+
+    def fake_do_open(connection, request, **kwargs):
+        seen.update(connection=connection, request=request, kwargs=kwargs)
+        return object()
+
+    monkeypatch.setattr(handler, "do_open", fake_do_open)
+    request = object()
+    assert handler.https_open(request) is not None
+    assert seen == {
+        "connection": http_fetch._PinnedHTTPSConnection,
+        "request": request,
+        "kwargs": {"context": handler._context},
+    }
+
+
 def test_skill_fetch_url_refuses_private_host():
     from maverick.skills import _fetch_url
     with pytest.raises(ValueError):

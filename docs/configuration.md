@@ -160,6 +160,34 @@ enable = false
 enable = false
 gate_promotions = false
 
+[finance]
+# Regime policies combine strictest-wins. Existing `pci` configurations now
+# identify PCI DSS 4.0.1; the key remains backward compatible.
+regimes = ["sox", "gaap", "dora", "basel_iii", "ifrs_17", "pci"]
+
+[finance_operations]
+# Deterministic regulatory, anomaly, AML/KYC/sanctions, and GRC control-testing
+# operations. Off unless explicitly enabled here or through `maverick init`.
+enable = false
+federal_register_enable = true
+# Safe opt-in built-in. The official RSS is issue-level, so every current Texas
+# Register issue is routed to the finance review queue with source provenance.
+texas_register_enable = false
+regulatory_poll_seconds = 3600       # 0 disables polling; otherwise 300..604800
+regulatory_domains = ["finance", "money_transmitter", "insurance_producer"]
+anomaly_enable = true
+sanctions_max_age_hours = 72
+control_test_interval_seconds = 86400 # 0 disables; otherwise 300..2678400
+evidence_due_days = 7
+control_owner = "Finance Control Owner"
+# Add up to 50 explicit HTTPS state feeds. Supported formats: json, rss, atom.
+# Keep the safe empty default until you have verified the issuing state's URL.
+state_feeds = []
+# Shape of a domain-specific entry (replace every placeholder with the official source).
+# `default_domains` declares that EVERY item in that feed belongs to the domain;
+# omit it for a general-purpose state register and rely on item text or field_map.
+# state_feeds = [{ key = "state-money-transmitter", name = "Official state money-transmitter notices", jurisdiction = "US-XX", url = "https://<official-state-host>/<domain-specific-feed>", format = "rss", default_domains = ["money_transmitter"] }]
+
 [persona]
 # Appended to every agent's system prompt. Optional.
 name      = "Lightwork"

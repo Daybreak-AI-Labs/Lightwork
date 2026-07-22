@@ -9,10 +9,12 @@ SOX + GAAP + SEC + PCI + AML; a private EU company swaps in IFRS.
 
 Pure data + a pure union function, so the compilation is unit-tested. The
 ``finance status`` posture report (:mod:`maverick.finance.status`) surfaces which
-regimes' controls are actually live.
+regimes' controls are actually live. Expanded packs retain primary issuer or
+legislator URLs so downstream evidence can identify the authoritative source.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from ..governance import Policy
@@ -26,6 +28,16 @@ _MONEY_ACTIONS = (
 )
 _FILING_ACTIONS = ("file_with_sec",)
 _TAX_ACTIONS = ("file_return", "file_tax_return", "remit_tax")
+_DORA_ACTIONS = (
+    "report_ict_incident",
+    "change_critical_ict_provider",
+    "approve_ict_third_party",
+)
+_BASEL_III_ACTIONS = (
+    "file_regulatory_capital_report",
+    "approve_risk_weight",
+    "change_regulatory_capital_model",
+)
 
 
 @dataclass(frozen=True)
@@ -34,6 +46,7 @@ class FinanceRegime:
     name: str
     asserts: str
     policy: Policy = field(default_factory=Policy)
+    source_urls: tuple[str, ...] = ()
 
 
 REGIMES: dict[str, FinanceRegime] = {
@@ -58,10 +71,16 @@ REGIMES: dict[str, FinanceRegime] = {
         Policy(require_human_actions=frozenset({"post_journal_entry", "close_period"})),
     ),
     "pci": FinanceRegime(
-        "pci", "PCI-DSS",
-        "Cardholder data protection: no PAN storage; secret/PII redaction; "
-        "tokenization at AR/expense.",
-        Policy(),  # enforced by the redaction floor, not an action policy
+        "pci", "PCI DSS v4.0.1 (June 2024)",
+        "Cardholder-data environment protection: Lightwork's stricter no-PAN-storage "
+        "posture, secret/PII redaction, and tokenization at AR/expense; access, "
+        "logging, testing, and incident-response evidence. Local scope and "
+        "validation method remain entity-specific.",
+        Policy(),  # enforced by security controls, not a finance action policy
+        source_urls=(
+            "https://www.pcisecuritystandards.org/document_library/"
+            "?class=pcidss&doc=pci_dss",
+        ),
     ),
     "glba": FinanceRegime(
         "glba", "GLBA / data residency",
@@ -87,6 +106,45 @@ REGIMES: dict[str, FinanceRegime] = {
         "Filing & remittance obligations: file_return / remit_tax are always human; "
         "a deadline calendar is maintained.",
         Policy(require_human_actions=frozenset(_TAX_ACTIONS)),
+    ),
+    "dora": FinanceRegime(
+        "dora", "DORA (Regulation (EU) 2022/2554)",
+        "EU financial-sector digital operational resilience: ICT-risk governance, "
+        "incident management/reporting, resilience testing, and ICT third-party "
+        "risk. Applicable from 17 January 2025; scope and proportionality remain "
+        "entity-specific.",
+        Policy(require_human_actions=frozenset(_DORA_ACTIONS)),
+        source_urls=(
+            "https://eur-lex.europa.eu/eli/reg/2022/2554/oj/eng",
+        ),
+    ),
+    "basel_iii": FinanceRegime(
+        "basel_iii", "Basel III final reforms (\"endgame\")",
+        "Prudential minimums for internationally active banks: capital quality, "
+        "credit/market/operational-risk RWA, leverage, liquidity, output-floor, "
+        "and disclosure controls. Jurisdiction-specific implementing rules, scope, "
+        "and effective dates remain authoritative.",
+        Policy(require_human_actions=frozenset(_BASEL_III_ACTIONS)),
+        source_urls=(
+            "https://www.bis.org/basel_framework/",
+            "https://www.bis.org/bcbs/publ/d424.htm",
+        ),
+    ),
+    "ifrs_17": FinanceRegime(
+        "ifrs_17", "IFRS 17 Insurance Contracts",
+        "Recognition, measurement, presentation, and disclosure for insurance and "
+        "reinsurance contracts, including fulfilment cash flows and contractual "
+        "service margin. Effective for annual periods beginning on or after "
+        "1 January 2023, subject to the reporting jurisdiction.",
+        Policy(require_human_actions=frozenset({
+            "post_journal_entry",
+            "close_period",
+            "publish_insurance_financials",
+        })),
+        source_urls=(
+            "https://www.ifrs.org/issued-standards/list-of-standards/"
+            "ifrs-17-insurance-contracts/",
+        ),
     ),
 }
 
@@ -120,6 +178,7 @@ def union_policies(policies) -> Policy:
     require_human_min_risk: str | None = None
     deny_above: dict[str, float] = {}
     require_human_above: dict[str, float] = {}
+    require_fresh_human_approval = False
     for p in policies:
         deny_actions |= set(p.deny_actions)
         require_human_actions |= set(p.require_human_actions)
@@ -127,6 +186,9 @@ def union_policies(policies) -> Policy:
         require_human_min_risk = _min_risk(require_human_min_risk, p.require_human_min_risk)
         deny_above = _min_thresholds(deny_above, p.deny_above)
         require_human_above = _min_thresholds(require_human_above, p.require_human_above)
+        require_fresh_human_approval = (
+            require_fresh_human_approval or p.require_fresh_human_approval
+        )
     # An action that is hard-denied need not also be listed as require-human --
     # drop it from both the require-human set AND its per-action threshold, or
     # the compiled policy contradicts itself (a hard-deny plus a require-human
@@ -144,6 +206,7 @@ def union_policies(policies) -> Policy:
         require_human_min_risk=require_human_min_risk,
         deny_above=deny_above,
         require_human_above=require_human_above,
+        require_fresh_human_approval=require_fresh_human_approval,
     )
 
 
@@ -160,17 +223,48 @@ def compile_policy(keys) -> Policy:
     return union_policies(selected)
 
 
-def configured_regimes() -> list[str]:
-    """Regime keys from ``[finance] regimes`` in config (empty when unset)."""
+def configured_regimes(config: Mapping | None = None) -> list[str]:
+    """Return normalized ``[finance].regimes`` keys.
+
+    Passing a trusted snapshot is the strict live-policy path: malformed finance
+    configuration raises instead of silently dropping enforcement. The no-arg
+    posture/reporting helper retains its historical best-effort behavior.
+    """
+    supplied = config is not None
     try:
-        from ..config import load_config
-        cfg = (load_config() or {}).get("finance") or {}
+        if config is None:
+            from ..config import load_config
+
+            config = load_config() or {}
+        if not isinstance(config, Mapping):
+            raise ValueError("finance config root must be a table")
+        if "finance" not in config:
+            return []
+        cfg = config.get("finance")
+        if not isinstance(cfg, Mapping):
+            raise ValueError("[finance] must be a configuration table")
+        if "regimes" not in cfg:
+            return []
         regimes = cfg.get("regimes")
-        if isinstance(regimes, (list, tuple)):
-            return [str(r).strip().lower() for r in regimes if str(r).strip()]
-    except Exception:  # pragma: no cover -- config never blocks compilation
-        pass
-    return []
+        if not isinstance(regimes, (list, tuple)) or not all(
+            isinstance(regime, str) and regime.strip() for regime in regimes
+        ):
+            raise ValueError("finance.regimes must be a list of non-empty strings")
+        normalized = [str(regime).strip().lower() for regime in regimes]
+        if supplied:
+            unknown = sorted(set(normalized) - set(REGIMES))
+            if unknown:
+                raise ValueError(
+                    "finance.regimes contains unknown regime keys: " + ", ".join(unknown)
+                )
+        return normalized
+    except Exception:
+        if supplied:
+            raise
+        # Best-effort status callers historically treat an unreadable optional
+        # finance section as having no declared regimes. Policy.from_config
+        # passes its trusted snapshot and therefore never takes this branch.
+        return []
 
 
 __all__ = [

@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Finance · Lightwork{% endblock %}
 {% block content %}
+  <style>
+    .fin-links { display:flex; gap:var(--space-2); flex-wrap:wrap; margin:var(--space-3) 0 var(--space-5); }
+    .fin-scroll { overflow-x:auto; }
+    .fin-caveat { border-inline-start:3px solid var(--warn); padding-inline-start:var(--space-3); }
+    .fin-digest { display:inline-block; max-width:18rem; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; }
+  </style>
   <h1 class="page-title">Finance</h1>
   <p class="page-subtitle">The finance team's workspace: every control and risk assessment the
     platform has run — SOX controls, fraud risk, ITGC, credit risk, and close readiness — with
@@ -8,6 +14,112 @@
     this screen.</p>
 
   {% include "_workspace_worklist.html" %}
+
+  <div class="section-head"><h2>Deterministic finance operations</h2></div>
+  {% if not operations.enabled %}
+  <section class="panel">
+    <h3 style="margin-top:0;">Finance operations are disabled</h3>
+    <p>Enable <code>[finance_operations] enable = true</code> or rerun
+      <code>maverick init</code>. The assessment worklist above remains available.</p>
+  </section>
+  {% else %}
+    {% if operations.degraded %}
+    <section class="panel" role="status">
+      <h3 style="margin-top:0;">Operations summary degraded</h3>
+      <p>The workspace withheld an incomplete summary after a safe
+        <code>{{ operations.error_type }}</code> failure. The underlying queues remain authoritative.</p>
+    </section>
+    {% endif %}
+
+    <div class="grid" aria-label="Finance operations counts">
+      <div class="stat"><div class="num">{{ operations.regulatory_alerts|length }}</div><div class="label">regulatory alerts</div></div>
+      <div class="stat"><div class="num">{{ operations.anomaly_cases|length }}</div><div class="label">anomaly cases</div></div>
+      <div class="stat"><div class="num">{{ operations.aml_cases|length }}</div><div class="label">AML review cases</div></div>
+      <div class="stat"><div class="num">{{ operations.control_cycles|length }}</div><div class="label">GRC control cycles</div></div>
+    </div>
+    <div class="fin-links">
+      <a class="btn" href="/api/v1/finance-operations/summary">Open aggregate API summary</a>
+      <a class="btn" href="/security">Open Security &amp; GRC evidence workspace</a>
+    </div>
+
+    <section class="panel">
+      <h3 style="margin-top:0;">Regulatory-change review queue</h3>
+      <p class="muted">Official feed records are content-versioned, diffed against enabled
+        regimes/domains, and routed with an official record link and normalized-content digest. No LLM is used.</p>
+      <div class="fin-scroll"><table aria-label="Regulatory change alerts">
+        <thead><tr><th>change</th><th>matched scope</th><th>status</th><th>citation</th></tr></thead>
+        <tbody>
+        {% for row in operations.regulatory_alerts %}
+          <tr>
+            <td>{{ row.title }}<br><code>{{ row.alert_id }}</code></td>
+            <td>{{ (row.matched_regimes + row.matched_domains)|join(', ') or '-' }}</td>
+            <td><span class="badge {{ row.status }}">{{ row.status|replace('_',' ') }}</span></td>
+            <td>{% set citation = (row.citations|first) %}
+              {% if citation %}<a href="{{ citation.url }}" rel="noopener noreferrer">official record</a><br>
+              <code class="fin-digest" title="{{ citation.content_sha256 }}">sha256:{{ citation.content_sha256 }}</code>
+              {% else %}<span class="muted">withheld: no citation</span>{% endif %}</td>
+          </tr>
+        {% else %}<tr><td colspan="4" class="muted">No matched regulatory changes are queued yet.</td></tr>{% endfor %}
+        </tbody>
+      </table></div>
+    </section>
+
+    <section class="panel">
+      <h3 style="margin-top:0;">State licensing source packs</h3>
+      <p class="fin-caveat">These v1 packs cover every state with cited source routing and
+        renewal workflow metadata. Every row remains <code>source_check_required</code>;
+        Lightwork does not claim counsel-verified applicability, fees, exemptions, or deadlines.</p>
+      <div class="fin-scroll"><table aria-label="State licensing packs">
+        <thead><tr><th>vertical</th><th>version / as of</th><th>coverage</th><th>pack digest</th></tr></thead>
+        <tbody>{% for pack in operations.licensing_packs %}
+          <tr><td>{{ pack.title }}</td><td>{{ pack.version }} / {{ pack.as_of }}</td>
+            <td>{{ pack.jurisdictions }} states; {{ pack.source_check_required }} require source review</td>
+            <td><code class="fin-digest" title="{{ pack.content_sha256 }}">sha256:{{ pack.content_sha256 }}</code></td></tr>
+        {% else %}<tr><td colspan="4" class="muted">No licensing packs are available.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </section>
+
+    <section class="panel">
+      <h3 style="margin-top:0;">Finance anomaly findings</h3>
+      <p class="muted">Duplicate payments, Benford eligibility screens, approval-limit
+        straddling, split payments, and off-hours postings create explainable cases for people to disposition.</p>
+      <div class="fin-scroll"><table aria-label="Finance anomaly cases">
+        <thead><tr><th>case</th><th>rule</th><th>severity</th><th>status</th></tr></thead>
+        <tbody>{% for row in operations.anomaly_cases %}<tr>
+          <td><code>{{ row.id }}</code></td><td>{{ row.rule_id|replace('finance.','') }}</td>
+          <td><span class="badge {{ 'danger' if row.severity in ('high','critical') else 'warn' }}">{{ row.severity }}</span></td>
+          <td><span class="badge {{ row.status }}">{{ row.status|replace('_',' ') }}</span></td>
+        </tr>{% else %}<tr><td colspan="4" class="muted">No anomaly cases are open.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </section>
+
+    <section class="panel">
+      <h3 style="margin-top:0;">AML, KYC &amp; sanctions cases</h3>
+      <p class="muted">{{ operations.aml_list_versions }} governed list version(s) are loaded.
+        Case metadata is shown without subject names; final clear or escalate dispositions require two independent reviewers
+        to agree, with a separate two-reviewer adjudication pair after an initial disagreement.</p>
+      <div class="fin-scroll"><table aria-label="AML screening cases">
+        <thead><tr><th>case</th><th>possible hits</th><th>status</th><th>revision</th></tr></thead>
+        <tbody>{% for row in operations.aml_cases %}<tr>
+          <td><code>{{ row.id }}</code></td><td>{{ row.hit_count }}</td>
+          <td><span class="badge {{ row.status }}">{{ row.status|replace('_',' ') }}</span></td><td>{{ row.revision }}</td>
+        </tr>{% else %}<tr><td colspan="4" class="muted">No screening cases are awaiting review.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </section>
+
+    <section class="panel">
+      <h3 style="margin-top:0;">Finance-to-GRC control testing</h3>
+      <p class="muted">Scheduled machine observations enter Security &amp; GRC as
+        <code>needs_review</code> tests with evidence requests. They never self-approve a pass or fail.</p>
+      <div class="fin-scroll"><table aria-label="Finance GRC control cycles">
+        <thead><tr><th>cycle</th><th>status</th><th>GRC engagement</th></tr></thead>
+        <tbody>{% for row in operations.control_cycles %}<tr>
+          <td><code>{{ row.id }}</code></td><td><span class="badge {{ row.status }}">{{ row.status|replace('_',' ') }}</span></td>
+          <td>{% if row.engagement_id %}<code>{{ row.engagement_id }}</code>{% else %}<span class="muted">not created</span>{% endif %}</td>
+        </tr>{% else %}<tr><td colspan="3" class="muted">No scheduled control cycle has run yet.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </section>
+  {% endif %}
 
   {% include "_workspace_memory_catalog.html" %}
 {% endblock %}

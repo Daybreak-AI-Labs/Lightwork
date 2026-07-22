@@ -227,11 +227,10 @@ class LocalGovernedRecordBackend:
         return self._store.load(record_id)
 
     def list(self, *, limit: int | None = None) -> list[dict[str, Any]]:
-        rows = self._store.list()
         if limit is None:
-            return rows
+            return self._store.list()
         bounded = _list_limit(limit)
-        return rows[:bounded]
+        return self._store.list_bounded(limit=bounded)
 
     def iter_record_ids(
         self,
@@ -1826,6 +1825,25 @@ class GovernedRecordStore:
     def list(self, *, limit: int | None = None) -> list[dict[str, Any]]:
         backend = self._backend()
         return backend.list() if limit is None else backend.list(limit=limit)
+
+    def iter_record_ids(
+        self,
+        *,
+        start_after: str = "",
+        limit: int = 100,
+    ) -> Iterator[tuple[str, str]]:
+        """Yield a bounded rotating window of backend cursor and record ids.
+
+        This exposes the narrow scan primitive already required of every
+        governed-record backend without performing any record reads.  Callers
+        must persist the first tuple value as the opaque backend cursor and use
+        the second value with :meth:`get`.
+        """
+
+        return self._backend().iter_record_ids(
+            start_after=str(start_after or ""),
+            limit=limit,
+        )
 
     def retry_pending(self, *, limit: int = 100) -> int:
         """Retry a bounded set of stable audit receipts."""

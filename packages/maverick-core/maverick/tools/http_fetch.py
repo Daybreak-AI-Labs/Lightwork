@@ -296,8 +296,7 @@ class _PinnedHTTPHandler(urllib.request.HTTPHandler):
 class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
     def https_open(self, req):
         return self.do_open(
-            _PinnedHTTPSConnection, req,
-            context=self._context, check_hostname=self._check_hostname,
+            _PinnedHTTPSConnection, req, context=self._context,
         )
 
 

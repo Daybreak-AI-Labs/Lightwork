@@ -78,3 +78,61 @@ def test_tool_errors_without_list(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     out = sanctions_screen().fn({"name": "Anyone"})
     assert out.startswith("ERROR") and "sanctions list" in out
+
+
+def test_tool_uses_governed_screening_and_case_when_enabled(monkeypatch):
+    from maverick.finance import aml_screening
+
+    calls = []
+    monkeypatch.setattr(aml_screening, "enabled", lambda: True)
+    monkeypatch.setattr(
+        aml_screening,
+        "screen_subject",
+        lambda name, **kwargs: calls.append((name, kwargs)) or {
+            "match": True,
+            "screened_lists": [{"list_id": "FSL-test"}],
+            "case": {"id": "FSC-test"},
+            "hits": [{
+                "entry_name": "Acme Shipping",
+                "score": 0.94,
+                "match_method": "character_similarity",
+                "citation": {
+                    "source_name": "OFAC fixture",
+                    "list_version": "2026-07-22",
+                },
+            }],
+        },
+    )
+
+    out = sanctions_screen().fn({"name": "Acme Shiping", "subject_ref": "vendor-42"})
+
+    assert "POSSIBLE SANCTIONS HIT" in out
+    assert "FSC-test" in out
+    assert "character_similarity" in out
+    assert calls[0][0] == "Acme Shiping"
+    assert calls[0][1]["subject_ref"] == "vendor-42"
+
+
+def test_governed_screening_never_falls_back_or_accepts_threshold_override(monkeypatch):
+    from maverick.finance import aml_screening
+
+    monkeypatch.setattr(aml_screening, "enabled", lambda: True)
+    monkeypatch.setattr(
+        sanctions_mod,
+        "load_list",
+        lambda _path: (_ for _ in ()).throw(AssertionError("legacy fallback used")),
+    )
+    monkeypatch.setattr(
+        aml_screening,
+        "screen_subject",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            aml_screening.ScreeningIncompleteError("no complete list scope")
+        ),
+    )
+
+    incomplete = sanctions_screen().fn({"name": "Anyone"})
+    override = sanctions_screen().fn({"name": "Anyone", "threshold": 0.9})
+
+    assert incomplete.startswith("ERROR: governed sanctions screening is incomplete")
+    assert "no complete list scope" in incomplete
+    assert override.startswith("ERROR: threshold overrides")

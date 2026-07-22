@@ -12,7 +12,22 @@ primitives (``governance``, ``capability``, ``audit``, ``assessment``):
   * :mod:`maverick.finance.regimes` — finance compliance-regime packs (SOX, COSO,
     GAAP/IFRS, PCI, GLBA, AML, SEC, IRS) compiling to a governance ``Policy`` (§5).
   * :mod:`maverick.finance.status` — the ``finance status`` posture report (§5).
+  * :mod:`maverick.finance.regulatory_change` — cited deterministic feed diffs.
+  * :mod:`maverick.finance.licensing` — versioned 50-state source-routing packs.
+  * :mod:`maverick.finance.anomaly_engine` — explainable finance anomaly rules.
+  * :mod:`maverick.finance.aml_screening` — governed list and four-eyes cases.
+  * :mod:`maverick.finance.control_testing` — scheduled Security/GRC bridge.
 """
 from __future__ import annotations
 
-__all__ = ["sod_linter", "regimes", "status"]
+__all__ = [
+    "aml_screening",
+    "anomaly_engine",
+    "control_testing",
+    "licensing",
+    "operations_health",
+    "regimes",
+    "regulatory_change",
+    "sod_linter",
+    "status",
+]

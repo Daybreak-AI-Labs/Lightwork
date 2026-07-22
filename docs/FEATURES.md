@@ -2070,8 +2070,25 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   dollar tiers), a segregation-of-duties linter (`maverick finance lint-sod`),
   OFAC/SDN sanctions screening (`screen_sanctions`), finance assessment templates
   (sox_control / fraud_risk / itgc / credit_risk / close_readiness),
-  compliance-regime packs (SOX/COSO/GAAP/PCI/GLBA/AML/SEC/IRS, strictest-wins),
-  and the `maverick finance status` posture report (`maverick/finance/`).
+  compliance-regime packs (SOX/COSO/GAAP/PCI DSS 4.0.1/GLBA/AML/SEC/IRS plus
+  DORA, Basel III final reforms, and IFRS 17; strictest-wins), and the
+  `maverick finance status` posture report (`maverick/finance/`). The opt-in
+  `[finance_operations]` control plane adds: SSRF-guarded Federal Register,
+  opt-in official Texas Register RSS, and configured state-register polling;
+  atomic deterministic content versioning,
+  enabled-scope matching, field diffs, and a citation-bearing review queue;
+  versioned 50-state money-transmitter and insurance-producer source-routing
+  packs persisted into the same register; duplicate-payment, Benford-eligibility,
+  approval-threshold/split-payment, and off-hours anomaly rules with exact,
+  bounded evidence; governed AML/KYC/sanctions list versions, fail-closed
+  completeness, transparent typo-tolerant matching, and four-eyes case
+  disposition; and crash-resumable scheduled finance observations routed into the existing
+  Security/GRC audit and evidence-request APIs as `needs_review` tests, with
+  evidence-backed human dispositions reconciled to finance cycles. The
+  finance-suite-gated `/finance` workspace and 24 permission-tiered
+  `/api/v1/finance-operations/*` routes expose the queues. No LLM makes a
+  regulatory, anomaly, sanctions, or
+  audit decision. See [`FINANCE_OPERATIONS.md`](./FINANCE_OPERATIONS.md).
 - **maverick-knowledge** — per-domain vector RAG package backing
   `knowledge_search`; config-selected embedders (`embed.py`): hosted **Voyage**
   (or any OpenAI-compatible endpoint), **Cohere** (`/v2/embed`, typed
