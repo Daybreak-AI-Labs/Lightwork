@@ -34,7 +34,7 @@ instances over one data directory).
 | Variable | Default | Meaning |
 |---|---|---|
 | `PIA_STANDALONE` | auto | `1` forces the standalone build (also automatic when the platform isn't installed). Set it explicitly in every standalone deployment. |
-| `PIA_HOST` | `127.0.0.1` | Bind address. Keep loopback for desktop installs; set `0.0.0.0` **only** behind TLS + auth (see §8) or inside a container. |
+| `PIA_HOST` | `127.0.0.1` | Bind address. Keep loopback for desktop installs; containers listen on `0.0.0.0` internally, but publish host ports to `127.0.0.1` unless a TLS/auth proxy or firewall is already enforcing access (see §8). |
 | `WORLD_PORT` | `8890` | HTTP port. |
 | `PIA_DATA_DIR` | `./.pia-standalone` | Persistent state (assessment records). Back this up. |
 | `PIA_BASE_URL` | `http://127.0.0.1:8890` | The public URL the agent puts in intake emails/links. Set to the real HTTPS URL in production. |
@@ -58,7 +58,7 @@ The container is the same artifact on AWS, GCP, Azure, and on-prem. From the
 docker build -f Dockerfile.standalone -t pia-concierge:1.0 .
 
 docker run -d --name pia --restart unless-stopped \
-  -p 8890:8890 \
+  -p 127.0.0.1:8890:8890 \
   -v pia-data:/data \
   -e PIA_BASE_URL=https://pia.client.example \
   -e ONETRUST_HOSTNAME=https://customer.my.onetrust.com \
@@ -67,7 +67,7 @@ docker run -d --name pia --restart unless-stopped \
 ```
 
 Verify: `curl -s http://127.0.0.1:8890/health` → `{"ok": true}`, then open
-`/about` for the capability matrix. Put your TLS/auth proxy in front (§8).
+`/about` for the capability matrix. Only a local reverse proxy should reach the container port; put TLS/auth in front (§8) before exposing it to a network.
 
 To ship the image to a client without a registry:
 `docker save pia-concierge:1.0 | gzip > pia-concierge-1.0.tgz` → they
