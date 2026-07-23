@@ -61,6 +61,25 @@ def test_launch_requires_org_group_and_respondent(demo, client):
     assert aid.startswith("OT-ASMT-")
 
 
+def test_mock_sensitive_endpoints_require_bearer(demo, client):
+    aid = _launch(client)
+    tc = client._http
+
+    assert tc.get(f"/ot-api/api/assessment/v2/assessments/{aid}/export"
+                  ).status_code == 401
+    assert tc.post(f"/ot-api/api/assessment/v2/assessments/{aid}/responses",
+                   json={"responses": []}).status_code == 401
+    assert tc.post(
+        f"/ot-api/api/assessment/v2/assessments/{aid}/submit",
+        params={"disclaimerAccepted": "true"}).status_code == 401
+    assert tc.post("/ot-api/api/document/v2/attachments",
+                   data={"attachment": "{}"}).status_code == 401
+    assert tc.post("/ot-api/api/inventory/v2/inventories/ven-1/attachments",
+                   json=[]).status_code == 401
+    assert tc.post("/ot-api/api/assessment/v2/assessments/assessment-links",
+                   json={"fromId": aid, "toIds": []}).status_code == 401
+
+
 def test_plain_read_403s_but_export_works(demo, client):
     aid = _launch(client)
     with pytest.raises(demo["Error"]) as err:
