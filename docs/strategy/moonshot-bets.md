@@ -531,19 +531,33 @@ the compensating-action saga. What shipped:
   without one refuses to start (fail-closed before any effect), and a mid-saga
   failure rolls the completed prefix back in reverse, recording failed
   compensations rather than swallowing them.
-- **Provable.** Cards, hits/misses, graduations, demotions, and operator
-  revocations are signed audit events (`consequence_card`,
-  `autonomy_graduation`); both stores verify VALID/BROKEN from the file alone.
-  `maverick earned-autonomy [--reconcile]` is the operator surface.
+- **Shadow Mode — the preview→approve→execute centerpiece.** `shadow_execute`
+  composes the card + dial + saga into the actual product flow: a
+  `ConsequencePreview` from a connector's `preview_write` (effect, exposure in
+  dollars, touched entities, predicted outcome) is gated — **auto-approved
+  when the action type has earned it, otherwise routed to the human callback**
+  — then executed inside the compensating saga, signing the sim → approve →
+  execute chain (`shadow_execution`). A consequence card is pinned ONLY when
+  the effect commits, so a denied / refused / rolled-back action never becomes
+  a prediction reality would mis-grade. The preview/gate/execute/sign flow is
+  valuable standalone (not gated by the learning switch); the earned dial only
+  changes *who approves*. End-to-end this is the compounding loop: a
+  human-approved shadow execution is graded by reality, and a proven streak
+  flips the same action type to auto next time.
+- **Provable.** Cards, hits/misses, graduations, demotions, operator
+  revocations, and shadow executions are signed audit events
+  (`consequence_card`, `autonomy_graduation`, `shadow_execution`); both stores
+  verify VALID/BROKEN from the file alone. `maverick earned-autonomy
+  [--reconcile]` is the operator surface.
 
-OFF by default (config knob + wizard step). 41 deterministic tests (the
+OFF by default (config knob + wizard step). 49 deterministic tests (the
 tranche was adversarially reviewed — 60 agents, findings fixed: action-level
 trust unit, same-episode collapse, cross-process chain safety, forced demote
 rows, live-risk recomputation, stale-grant sweep); the engine's
 grant/revoke/audit/clock are injected callables so the decision logic is
-fully offline-testable. Remaining to reach the full bet: dry-run
-adapters per connector (the `Connector.preview_write` seam exists), exposure
-figures on cards from simulators, and a design partner for real
+fully offline-testable. Remaining to reach the full bet: real per-connector
+`preview_write` adapters that populate the exposure figure (the seam and the
+`ConsequencePreview` shape are now in place), and a design partner for real
 predicted-vs-actual volume.
 
 ### How the four bets relate

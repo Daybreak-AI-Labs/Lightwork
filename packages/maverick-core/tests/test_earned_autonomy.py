@@ -688,3 +688,188 @@ async def test_agent_does_not_pin_held_verdicts(tmp_path, fake_llm, monkeypatch)
         assert ea.shared().cards.cards() == []  # and never became evidence
     finally:
         ea.reset_shared()
+
+
+# -- Shadow Mode: preview -> gate -> execute -> sign -----------------------
+
+
+def _preview(*, action="wire_transfer", risk="high", predicted=0.9,
+             reversible=True, exposure=240000.0):
+    return ea.ConsequencePreview(
+        action=action, predicted_outcome=predicted, risk=risk,
+        effect=f"would move ${exposure:,.0f} via {action}",
+        exposure_dollars=exposure, entities=("INV-42", "INV-43"),
+        reversible=reversible)
+
+
+def _steps(trail, *, fail=False):
+    def _do():
+        trail.append("do")
+        if fail:
+            raise RuntimeError("wire rejected")
+        return "posted"
+
+    return [ea.SagaStep("wire", _do, lambda: trail.append("undo") or "reversed")]
+
+
+def test_shadow_human_approves_then_executes_and_pins_card(tmp_path):
+    audits, trail = [], []
+    engine = _engine(tmp_path, audits=audits)
+    res = ea.shadow_execute(
+        _preview(), _steps(trail), principal="cfo-bot", goal_id=1,
+        episode_id=5, approve=lambda view: True, engine=engine)
+    assert res.approved and res.executed and res.committed
+    assert res.auto_approved is False and res.card_id is not None
+    assert trail == ["do"]
+    rows = engine.cards.cards()
+    assert len(rows) == 1 and rows[0]["source"] == "simulate"
+    assert rows[0]["exposure_dollars"] == 240000.0
+    # The chain is signed: a shadow_execution audit row with the exposure.
+    kinds = [k for k, _p in audits if k == "shadow_execution"]
+    assert kinds == ["shadow_execution"]
+    payload = next(p for k, p in audits if k == "shadow_execution")
+    assert payload["decision"] == "approved" and payload["committed"] is True
+    assert payload["exposure"] == 240000.0
+
+
+def test_shadow_denied_does_not_execute_or_pin_a_card(tmp_path):
+    audits, trail = [], []
+    engine = _engine(tmp_path, audits=audits)
+    res = ea.shadow_execute(
+        _preview(), _steps(trail), principal="cfo-bot", goal_id=1,
+        episode_id=5, approve=lambda view: False, engine=engine)
+    assert res.approved is False and res.executed is False
+    assert res.card_id is None and trail == []          # nothing ran
+    assert engine.cards.cards() == []                   # nothing gradeable
+    assert next(p for k, p in audits if k == "shadow_execution")["decision"] == "denied"
+
+
+def test_shadow_approval_error_is_a_denial(tmp_path):
+    trail = []
+    engine = _engine(tmp_path)
+
+    def _boom(view):
+        raise RuntimeError("approver offline")
+
+    res = ea.shadow_execute(
+        _preview(), _steps(trail), principal="cfo-bot", goal_id=1,
+        episode_id=5, approve=_boom, engine=engine)
+    assert res.approved is False and trail == []
+
+
+def test_shadow_auto_approves_a_graduated_action_type(tmp_path):
+    trail = []
+    engine = _engine(tmp_path)
+    _graduate(engine)  # wire_transfer earns auto-approval
+    assert engine.decide("wire_transfer", risk="high").auto is True
+    consulted = []
+    res = ea.shadow_execute(
+        _preview(), _steps(trail), principal="cfo-bot", goal_id=1,
+        episode_id=9, approve=lambda view: consulted.append(view) or False,
+        engine=engine)
+    assert res.auto_approved is True and res.executed and res.committed
+    assert consulted == []  # the human gate was skipped -- trust was earned
+    assert trail == ["do"]
+
+
+def test_shadow_refuses_irreversible_without_undo_before_any_effect(tmp_path):
+    trail = []
+    engine = _engine(tmp_path)
+    steps = [ea.SagaStep("wire", lambda: trail.append("do") or "posted", None)]
+    res = ea.shadow_execute(
+        _preview(reversible=False), steps, principal="cfo-bot", goal_id=1,
+        episode_id=5, approve=lambda view: True, engine=engine)
+    assert res.approved is True and res.executed is False
+    assert res.committed is False and res.card_id is None
+    assert trail == []                        # refused before any effect
+    assert engine.cards.cards() == []         # and never became evidence
+    assert "without an inverse" in res.reason
+
+
+def test_shadow_rolls_back_and_pins_no_card_on_failure(tmp_path):
+    trail = []
+    engine = _engine(tmp_path)
+    steps = [
+        ea.SagaStep("hold", lambda: trail.append("hold") or "ok",
+                    lambda: trail.append("undo-hold") or "released"),
+        ea.SagaStep("wire", lambda: (_ for _ in ()).throw(RuntimeError("no")),
+                    lambda: "n/a"),
+    ]
+    res = ea.shadow_execute(
+        _preview(), steps, principal="cfo-bot", goal_id=1, episode_id=5,
+        approve=lambda view: True, engine=engine)
+    assert res.executed is True and res.committed is False
+    assert res.card_id is None                       # rolled back -> not graded
+    assert engine.cards.cards() == []
+    assert trail == ["hold", "undo-hold"]            # prefix compensated
+
+
+def test_shadow_card_view_bounds_content_and_omits_raw_params(tmp_path):
+    engine = _engine(tmp_path)
+    captured = {}
+    ea.shadow_execute(
+        ea.ConsequencePreview(
+            action="wire_transfer", predicted_outcome=0.9, risk="high",
+            effect="x" * 5000, exposure_dollars=1000.0,
+            entities=tuple(f"e{i}" for i in range(100)), reversible=True,
+            params_sha256="deadbeef"),
+        [ea.SagaStep("w", lambda: "ok", lambda: "ok")],
+        principal="p", goal_id=1, episode_id=5,
+        approve=lambda view: captured.update(view) or True, engine=engine)
+    assert len(captured["effect"]) <= 300          # bounded
+    assert len(captured["entities"]) == 32         # capped
+    assert "params_sha256" not in captured         # raw params never shown
+
+
+def test_shadow_end_to_end_earns_autonomy_from_real_outcomes(tmp_path):
+    """The compounding loop: human-approved shadow executions get graded by
+    reality, and after a proven streak the action graduates to auto."""
+    engine = _engine(tmp_path)
+    for ep in (1, 2, 3):
+        res = ea.shadow_execute(
+            _preview(), [ea.SagaStep("w", lambda: "ok", lambda: "ok")],
+            principal="cfo-bot", goal_id=1, episode_id=ep,
+            approve=lambda view: True, engine=engine)
+        assert res.committed and res.card_id is not None
+    # Reality confirms every prediction -> the streak graduates the action.
+    report = engine.reconcile(resolve=lambda g, e: 1.0)
+    assert report.graduated == ("wire_transfer",)
+    assert engine.decide("wire_transfer", risk="high").auto is True
+
+
+def test_shadow_gate_uses_live_risk_not_the_preview_label(tmp_path, monkeypatch):
+    """Regression: an under-declared preview risk must NOT let an already-
+    graduated action auto-execute once its live risk exceeds the ceiling."""
+    trail = []
+    # Ceiling is medium; the action graduates while its live risk is medium...
+    engine = _engine(tmp_path, policy=ea.GraduationPolicy(
+        min_streak=3, min_samples=3, max_auto_risk="medium",
+        require_reversible=True, armed=True))
+    import importlib
+    trm = importlib.import_module("maverick.safety.tool_risk")
+    monkeypatch.setattr(trm, "tool_risk", lambda n, overrides=None: "medium")
+    for ep in (1, 2, 3):
+        _card(engine, episode_id=ep, action="send_campaign", risk="medium")
+    assert engine.reconcile(resolve=lambda g, e: 1.0).graduated == ("send_campaign",)
+    # ...then the action is reclassified UP to high (or the ceiling tightens).
+    monkeypatch.setattr(trm, "tool_risk", lambda n, overrides=None: "high")
+    # A preview under-declares the risk as 'medium' to try to skip the human.
+    consulted = []
+    res = ea.shadow_execute(
+        _preview(action="send_campaign", risk="medium"), _steps(trail),
+        principal="cfo-bot", goal_id=1, episode_id=9,
+        approve=lambda view: consulted.append(view) or False, engine=engine)
+    # The live-risk recheck keeps the human: auto is refused, approve consulted,
+    # and (approve said no) nothing executes.
+    assert res.auto_approved is False
+    assert len(consulted) == 1 and res.executed is False and trail == []
+
+
+def test_shadow_empty_steps_is_signed(tmp_path):
+    audits = []
+    engine = _engine(tmp_path, audits=audits)
+    res = ea.shadow_execute(
+        _preview(), [], principal="p", goal_id=1, episode_id=5,
+        approve=lambda view: True, engine=engine)
+    assert res.approved is True and res.executed is False
+    assert next(p for k, p in audits if k == "shadow_execution")["committed"] is False

@@ -800,8 +800,16 @@ here.
   ACTION` is the incident-response path and works while disabled. `run_saga`
   is the compensating half: steps ship their undo, an irreversible step
   refuses to start, and a mid-saga failure rolls the completed prefix back in
-  reverse. Every card, hit/miss, graduation, and demotion is a signed audit
-  event (`consequence_card`, `autonomy_graduation`).
+  reverse. **Shadow Mode** (`shadow_execute`) is the centerpiece that ties it
+  together: a `ConsequencePreview` from a connector's `preview_write` ("this
+  would move $240k, touch these records") is gated — auto-approved if the
+  action type has *earned* it, otherwise routed to a human — then executed
+  inside the compensating saga, with a consequence card pinned **only when the
+  effect commits** (a denied, refused, or rolled-back action never becomes a
+  mis-gradeable prediction), and the whole sim → approve → execute chain
+  signed. Every card, hit/miss, graduation, demotion, and shadow execution is
+  a signed audit event (`consequence_card`, `autonomy_graduation`,
+  `shadow_execution`).
 - **Emergent Substrate — an auditable coordination shorthand** (`emergent_protocol.py`
   + `emergent_tokens.py`, `maverick codebook` / `codec-learn` / `codec-probe`,
   opt-in `[emergent_protocol]` / `[emergent_codec]` / `MAVERICK_EMERGENT_CODEC`) —

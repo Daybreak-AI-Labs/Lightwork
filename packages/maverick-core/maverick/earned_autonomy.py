@@ -508,8 +508,10 @@ def _action_risk_rank(risk: str) -> int:
     level to ``medium``, which would let a mislabeled or novel level (e.g.
     ``critical``) slip under a ``medium`` ceiling.
     """
-    from .safety.tool_risk import RISK_LEVELS
-
+    try:
+        from .safety.tool_risk import RISK_LEVELS
+    except Exception:  # pragma: no cover -- taxonomy gone: fail closed (high)
+        return 99
     try:
         return RISK_LEVELS.index(str(risk))
     except ValueError:
@@ -1051,6 +1053,179 @@ def run_saga(steps: list[SagaStep] | tuple[SagaStep, ...], *,
 
 
 # ---------------------------------------------------------------------------
+# Shadow Mode: preview the irreversible action, gate on the simulated outcome,
+# execute inside the compensating saga, sign the sim -> approve -> execute chain
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConsequencePreview:
+    """A dry-run's forecast of one high-stakes action, made BEFORE it runs.
+
+    Built from a governed connector's ``preview_write`` (the existing
+    no-side-effect seam, :mod:`maverick.governed_connectors`) or a simulator.
+    ``effect`` is the human-readable forecast ("would wire $240k to ACME"),
+    ``exposure_dollars`` the magnitude at stake, ``entities`` the records it
+    would touch ("close these 3 tickets"), and ``predicted_outcome`` the [0, 1]
+    confidence the action ends well -- the exact number reality later grades.
+    ``reversible`` declares whether the action ships an inverse.
+    """
+
+    action: str
+    predicted_outcome: float
+    effect: str = ""
+    exposure_dollars: float | None = None
+    entities: tuple[str, ...] = ()
+    reversible: bool = False
+    params_sha256: str = ""
+    risk: str = ""
+
+    def card_view(self) -> dict:
+        """The bounded, side-effect-free summary a human/policy approves."""
+        return {
+            "action": _safe_text(self.action, max_len=120),
+            "risk": _safe_text(self.risk, max_len=32),
+            "effect": _safe_text(self.effect),
+            "exposure_dollars": self.exposure_dollars,
+            "entities": [_safe_text(e, max_len=120) for e in self.entities[:32]],
+            "reversible": self.reversible,
+            "predicted_outcome": _clamp01(self.predicted_outcome),
+        }
+
+
+@dataclass(frozen=True)
+class ShadowResult:
+    """The receipt of one shadow-mode preview -> gate -> execute cycle."""
+
+    action: str
+    approved: bool
+    auto_approved: bool
+    executed: bool
+    committed: bool
+    reason: str = ""
+    card_id: str | None = None
+    saga: SagaResult | None = None
+
+
+def _safe_approve(approve: Callable[[dict], bool], card_view: dict) -> bool:
+    """Resolve the human/policy approval gate. Any error is a denial."""
+    try:
+        return bool(approve(card_view))
+    except Exception:
+        log.warning("shadow-mode approval callback failed; treating as denied",
+                    exc_info=True)
+        return False
+
+
+def _shadow_kind() -> str:
+    try:
+        from .audit import EventKind
+
+        return EventKind.SHADOW_EXECUTION
+    except Exception:  # pragma: no cover -- audit is best-effort
+        return "shadow_execution"
+
+
+def shadow_execute(preview: ConsequencePreview,
+                   steps: list[SagaStep] | tuple[SagaStep, ...], *,
+                   principal: str, goal_id: int, episode_id: int,
+                   approve: Callable[[dict], bool],
+                   allow_irreversible: bool = False,
+                   engine: EarnedAutonomyEngine | None = None) -> ShadowResult:
+    """Preview an irreversible action, gate it, then execute under the saga.
+
+    The Bet-5 centerpiece, composed from the pieces the engine already owns:
+
+    1. **Gate.** If the action type has *earned* auto-approval
+       (:meth:`EarnedAutonomyEngine.decide`), the human is skipped; otherwise
+       ``approve(card_view)`` -- the operator seeing "this would move $240k" --
+       must return truthy. Any approval error is a denial (fail-closed).
+    2. **Guaranteed undo.** Execution runs through :func:`run_saga`, which
+       refuses before any effect unless every step declares an inverse (pass
+       ``allow_irreversible=True`` only when the caller accepts no rollback),
+       and rolls the completed prefix back on any failure.
+    3. **Evidence, only when the effect stands.** A consequence card (source
+       ``simulate``) is pinned ONLY when the saga commits -- a denied, refused,
+       or rolled-back action never becomes a prediction reality would mis-grade
+       against the episode's outcome (the same rule as a held rehearsal
+       verdict).
+    4. **Provenance.** The gate decision and the execution outcome are signed
+       into the audit chain (``shadow_execution``).
+
+    Deciding fails toward keeping the human: a disabled or unarmed engine grants
+    no auto-approval, so every action still routes through ``approve``. The
+    preview/gate/execute/sign flow itself is valuable standalone and is NOT
+    gated by ``[earned_autonomy] enable`` -- only the card evidence is (a
+    disabled engine simply records no card).
+    """
+    engine = engine or shared()
+    action = str(getattr(preview, "action", ""))
+    risk = str(getattr(preview, "risk", "") or "")
+    view = preview.card_view()
+    kind = _shadow_kind()
+
+    # 1. Gate -- earned auto-approval, else the human/policy callback. The
+    #    action's risk is recomputed LIVE inside decide() (risk omitted on
+    #    purpose): the preview's declared label is provenance only and must
+    #    never set the auto-approval ceiling, or a mislabeled/stale preview
+    #    could sneak an over-ceiling action past the human.
+    decision = engine.decide(action)
+    auto = bool(decision.auto)
+    approved = auto or _safe_approve(approve, view)
+    if not approved:
+        engine._audit(kind, decision="denied", action=action, goal_id=goal_id,
+                      exposure=view.get("exposure_dollars"), auto=auto)
+        return ShadowResult(
+            action, approved=False, auto_approved=auto, executed=False,
+            committed=False,
+            reason=("approval withheld" if not auto else decision.reason))
+
+    steps = tuple(steps)
+    if not steps:
+        engine._audit(kind, decision="auto" if auto else "approved",
+                      action=action, goal_id=goal_id, card=None,
+                      exposure=view.get("exposure_dollars"),
+                      committed=False, auto=auto)
+        return ShadowResult(action, approved=True, auto_approved=auto,
+                            executed=False, committed=False,
+                            reason="no execution steps supplied")
+
+    # 2. Execute under the compensating saga (refuses irreversible-without-undo
+    #    before any effect; rolls back the prefix on failure).
+    saga = run_saga(steps, allow_irreversible=allow_irreversible)
+
+    # 3. Pin the card ONLY when the effect stands, so a refused/rolled-back
+    #    action is never graded against the episode outcome it didn't produce.
+    #    Evidence is best-effort: a committed effect must never surface a
+    #    card-recording error to the caller (the action already happened).
+    card_id: str | None = None
+    if saga.committed:
+        try:
+            card_id = engine.record_card(
+                principal=principal, action=action, risk=risk or "high",
+                predicted_outcome=float(getattr(preview, "predicted_outcome", 0.0)),
+                goal_id=goal_id, episode_id=episode_id,
+                effect=getattr(preview, "effect", ""),
+                exposure_dollars=getattr(preview, "exposure_dollars", None),
+                reversible=bool(getattr(preview, "reversible", False)),
+                source="simulate",
+                params_sha256=str(getattr(preview, "params_sha256", "")))
+        except Exception:  # pragma: no cover -- evidence never breaks execution
+            log.warning("shadow-mode card recording failed after commit for %s",
+                        action, exc_info=True)
+
+    # 4. Sign the sim -> approve -> execute chain.
+    engine._audit(kind, decision="auto" if auto else "approved", action=action,
+                  goal_id=goal_id, card=card_id,
+                  exposure=view.get("exposure_dollars"),
+                  committed=saga.committed, auto=auto)
+    return ShadowResult(
+        action, approved=True, auto_approved=auto,
+        executed=bool(saga.results), committed=saga.committed,
+        reason=saga.reason, card_id=card_id, saga=saga)
+
+
+# ---------------------------------------------------------------------------
 # run-path wiring
 # ---------------------------------------------------------------------------
 
@@ -1108,6 +1283,7 @@ def capture_prediction(verdict, *, principal: str, action: str, risk: str,
 __all__ = [
     "CardStore",
     "ConsequenceCard",
+    "ConsequencePreview",
     "EarnedAutonomyEngine",
     "EarnedDecision",
     "EarnedVerdict",
@@ -1116,6 +1292,7 @@ __all__ = [
     "ReconcileReport",
     "SagaResult",
     "SagaStep",
+    "ShadowResult",
     "StepResult",
     "TrustLedger",
     "TrustState",
@@ -1125,5 +1302,6 @@ __all__ = [
     "policy_from_config",
     "reset_shared",
     "run_saga",
+    "shadow_execute",
     "shared",
 ]
