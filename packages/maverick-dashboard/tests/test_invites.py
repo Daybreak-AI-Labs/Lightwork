@@ -36,6 +36,14 @@ def test_disabled_by_default():
     assert invites.invites_enabled() is False
 
 
+def test_local_login_mode_disabled_for_proxy_sso(monkeypatch):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    monkeypatch.setattr("maverick.proxy_auth.proxy_auth_enabled", lambda: True)
+    monkeypatch.setattr("maverick.oidc.login_enabled", lambda: False)
+    from maverick_dashboard import invites
+    assert invites.local_login_mode() is False
+
+
 def test_create_peek_consume_roundtrip(monkeypatch):
     from maverick_dashboard import invites
     inv, token = invites.create_invite("Bob@Corp.com", "operator", created_by="me")

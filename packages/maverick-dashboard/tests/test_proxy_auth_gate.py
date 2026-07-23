@@ -18,6 +18,7 @@ def _req(headers=None, host="127.0.0.1", path="/metrics"):
         url=SimpleNamespace(path=path),
         client=SimpleNamespace(host=host),
         state=SimpleNamespace(),
+        cookies={},
     )
 
 
@@ -74,3 +75,25 @@ def test_require_auth_proxy_without_header_fails_closed(monkeypatch):
         assert exc.status_code == 401
     else:  # pragma: no cover - assertion clarity
         raise AssertionError("missing proxy identity header should fail closed")
+
+
+def test_require_auth_proxy_rejects_invite_session_without_header(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_REQUIRE_AUTH", "1")
+    monkeypatch.setattr(auth, "proxy_auth_enabled", lambda: True)
+    monkeypatch.setattr(auth, "proxy_trusts", lambda host: True)
+    monkeypatch.setattr(auth, "proxy_header_name", lambda: "X-Forwarded-User")
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: False)
+
+    from maverick_dashboard import invites
+    req = _req(headers={}, host="127.0.0.1")
+    req.cookies["mvk_session"] = invites.mint_local_session("victim@example.com")
+
+    try:
+        auth.require_principal(req)
+    except auth.HTTPException as exc:
+        assert exc.status_code == 401
+        assert exc.detail == "proxy identity header required"
+    else:  # pragma: no cover - assertion clarity
+        raise AssertionError("invite session must not bypass proxy SSO")

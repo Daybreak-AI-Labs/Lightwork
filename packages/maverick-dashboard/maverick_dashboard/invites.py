@@ -282,6 +282,12 @@ def local_login_mode() -> bool:
     if not invites_enabled():
         return False
     try:
+        from maverick.proxy_auth import proxy_auth_enabled
+        if proxy_auth_enabled():
+            return False
+    except Exception:  # pragma: no cover - proxy config never blocks this gate
+        pass
+    try:
         from maverick.oidc import login_enabled
         return not login_enabled()
     except Exception:  # pragma: no cover - oidc config never blocks this gate

@@ -84,6 +84,15 @@ def _dashboard_require_auth_enabled() -> bool:
         return False
 
 
+def _enforce_missing_proxy_principal() -> bool:
+    """Return True when proxy SSO is enabled but supplied no identity."""
+    if not proxy_auth_enabled():
+        return False
+    if _dashboard_require_auth_enabled():
+        raise HTTPException(status_code=401, detail="proxy identity header required")
+    return True
+
+
 def _proxy_principal(request: Request) -> VerifiedPrincipal | None:
     """Reverse-proxy SSO: a principal from a forwarded identity header.
 
@@ -484,6 +493,8 @@ def require_principal(
         return pp
 
     if not oidc_enabled():
+        if _enforce_missing_proxy_principal():
+            return None
         # Email-invite local sessions (no IdP): a locally-minted mvk_session
         # cookie establishes the principal so RBAC roles bind to invited users.
         # Inert unless [dashboard] invites is on AND the cookie verifies; the
@@ -493,8 +504,6 @@ def require_principal(
             request.state.principal = lp
             _pin_tenant_from_principal(request, lp)
             return lp
-        if _dashboard_require_auth_enabled() and proxy_auth_enabled():
-            raise HTTPException(status_code=401, detail="proxy identity header required")
         return None
 
     # Session-cookie identity (browser login). Only active when login is
