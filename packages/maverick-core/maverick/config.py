@@ -1985,6 +1985,45 @@ def get_consequence() -> dict:
         cfg, "enable", governed_learning_default())}
 
 
+def get_earned_autonomy() -> dict:
+    """Return the ``[earned_autonomy]`` section (Bet 5: consequence-proven trust).
+
+    Agents earn policy-auto-approval per action type by proving they predict
+    consequences correctly (maverick.earned_autonomy). OFF by default: enabling
+    it only records evidence; ``auto_graduate`` is the separate authority-
+    widening arming switch and is strict-parsed -- a truthy string never arms
+    it. ``max_auto_risk`` defaults to ``medium`` so graduating irreversible
+    high-risk action types is an explicit operator decision; an unknown value
+    fails closed (nothing graduates). Never raises.
+    """
+    cfg = load_config().get("earned_autonomy", {})
+
+    def _num(key: str, default: float, cast=float, lo: float = 0.0, hi: float | None = None):
+        try:
+            value = cast(cfg.get(key, default))
+        except (TypeError, ValueError):
+            return default
+        if not math.isfinite(float(value)) or value < lo:
+            return default
+        if hi is not None and value > hi:
+            return default
+        return value
+
+    return {
+        "enable": _strict_config_bool(cfg, "enable", False),
+        # Authority-widening: only a real TOML `true` arms graduation.
+        "auto_graduate": cfg.get("auto_graduate") is True,
+        "min_streak": _num("min_streak", 10, int, lo=1),
+        "min_samples": _num("min_samples", 10, int, lo=1),
+        "min_accuracy": _num("min_accuracy", 0.9, float, lo=0.0, hi=1.0),
+        "tolerance": _num("tolerance", 0.25, float, lo=0.0, hi=1.0),
+        "max_auto_risk": str(cfg.get("max_auto_risk", "medium")).strip().lower() or "medium",
+        # Malformed value restores the guarantee (invalid=True tightens).
+        "require_reversible": _strict_config_bool(
+            cfg, "require_reversible", True, invalid=True),
+    }
+
+
 def get_deployment() -> dict:
     """Return the ``[deployment]`` section (install provenance).
 

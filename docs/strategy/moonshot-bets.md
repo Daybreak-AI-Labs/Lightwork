@@ -492,6 +492,49 @@ declaring victory; (2) make the calibrated verifier central (not optional) and
 Bet 5's shadow layer is also his answer to "you can't RL high-stakes actions on
 production" — it's the safe environment that makes the architecture trainable.
 
+### Build log — Bet 5 step one (shipped)
+
+The synthesis layer exists: **`maverick.earned_autonomy`** — consequence
+cards, the predicted-vs-actual join, the evidence-driven autonomy dial, and
+the compensating-action saga. What shipped:
+
+- **Consequence cards.** Every rehearsed high-stakes action now pins its
+  predicted outcome into a hash-chained, append-only card store *before* it
+  runs (the agent loop captures the rehearsal verdict; PROCEED predictions
+  used to vanish). A card is a commitment reality can grade.
+- **The join.** `reconcile` scores unscored cards against real outcomes landing
+  through the existing Consequence Engine (`consequence.resolve`, keyed
+  `(goal_id, episode_id)`) — hit/miss per `(agent, action type)`, idempotent,
+  event-sourced into a second hash-chained trust ledger.
+- **Earned Autonomy dial.** A proven streak (default 10 consecutive accurate
+  predictions, ≥90% overall) graduates an action type from "human approves" to
+  "policy auto-approves" — implemented as a revocable standing consent-ledger
+  grant, which the existing agent approval path already honours (zero new
+  hot-path authority code). One miss demotes instantly; revoke happens BEFORE
+  the evidence write so authority never outruns its record. Interlocks:
+  refused while `calibration.learning_frozen()`, during a learning HALT, above
+  the `max_auto_risk` ceiling (default `medium`; graduating high-risk
+  irreversible types is an explicit operator decision), and for action types
+  whose cards don't declare an inverse. Arming is separate from enabling
+  (`auto_graduate`, strict-parsed) and graduation never widens the capability
+  envelope — it changes who approves an already-permitted action, never what
+  is permitted.
+- **Compensating-action saga.** `run_saga`: every step ships its undo, a step
+  without one refuses to start (fail-closed before any effect), and a mid-saga
+  failure rolls the completed prefix back in reverse, recording failed
+  compensations rather than swallowing them.
+- **Provable.** Cards, hits/misses, graduations, demotions, and operator
+  revocations are signed audit events (`consequence_card`,
+  `autonomy_graduation`); both stores verify VALID/BROKEN from the file alone.
+  `maverick earned-autonomy [--reconcile]` is the operator surface.
+
+OFF by default (config knob + wizard step). 26 deterministic tests; the
+engine's grant/revoke/audit/clock are injected callables so the decision
+logic is fully offline-testable. Remaining to reach the full bet: dry-run
+adapters per connector (the `Connector.preview_write` seam exists), exposure
+figures on cards from simulators, and a design partner for real
+predicted-vs-actual volume.
+
 ### How the four bets relate
 
 | Bet | One-liner | Tense | Primary buyer pull |

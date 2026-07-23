@@ -2041,6 +2041,16 @@ def pick_advanced() -> dict[str, Any]:
             "learns from reality. Reality is the reward signal; on by default.",
             default=True,
         ),
+        "earned_autonomy": _q_confirm(
+            "Earned autonomy? Agents earn the right to act, action type by action type, "
+            "by proving they predict consequences correctly: each rehearsed high-stakes "
+            "action pins a consequence card, reality grades it, and a proven streak "
+            "graduates the action from 'a human approves' to 'policy auto-approves' -- "
+            "with instant demotion on one miss and a guaranteed undo until it's earned. "
+            "Enabling only records evidence; graduation stays off until you also arm "
+            "auto_graduate. Off by default.",
+            default=False,
+        ),
         "flows": _q_confirm(
             "Flow engine? A deterministic skeleton -- branch, switch, loop, parallel, "
             "approval, delay, wait-for-event, try/catch -- over steps that are either a "
@@ -3840,6 +3850,18 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("# (invoice paid, ticket reopened) overrides the model's self-graded")
         lines.append("# proxy reward, so the data engine learns from reality (maverick.consequence).")
         lines.append("enable = true")
+    if advanced.get("earned_autonomy"):
+        lines.append("")
+        lines.append("[earned_autonomy]")
+        lines.append("# Consequence-proven trust (maverick.earned_autonomy): pin a consequence")
+        lines.append("# card per rehearsed high-stakes action, score it against reality, and")
+        lines.append("# graduate a proven action type to policy-auto-approval -- demoted on")
+        lines.append("# one miss. Enabling records evidence only; arming graduation is the")
+        lines.append("# separate auto_graduate switch below.")
+        lines.append("enable = true")
+        lines.append("# auto_graduate = true      # arm the dial (authority-widening)")
+        lines.append('# max_auto_risk = "medium"  # raise to "high" only deliberately')
+        lines.append("# min_streak = 10           # consecutive accurate predictions required")
     if advanced.get("flows"):
         lines.append("")
         lines.append("[flows]")
