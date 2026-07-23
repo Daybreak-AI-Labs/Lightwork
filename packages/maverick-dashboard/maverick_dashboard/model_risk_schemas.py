@@ -88,6 +88,7 @@ def _validate_assurance_json(
 
 _MODEL_RISK_DIGEST = "^(?:sha256:)?[0-9a-fA-F]{64}$"
 _MODEL_RISK_ASSET_ID = "^MAA-[0-9a-f]{32}$"
+_TRAINING_RECEIPT_ID = r"^[A-Za-z0-9][A-Za-z0-9._:+/@-]{0,127}$"
 
 
 class ModelRiskObservationIn(BaseModel):
@@ -242,6 +243,23 @@ class ModelRiskEvidenceIn(BaseModel):
             max_string_chars=4000,
             max_key_chars=128,
         )
+        return self
+
+
+class ModelRiskTrainingReceiptEvidenceIn(BaseModel):
+    """Register one tenant-private receipt using server-side trust policy."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    receipt_id: str = Field(..., pattern=_TRAINING_RECEIPT_ID)
+    actor: str = Field(..., min_length=1, max_length=256)
+    valid_until: float = Field(..., gt=0)
+
+    @model_validator(mode="after")
+    def validate_training_receipt_boundary(self):
+        if self.actor != self.actor.strip():
+            raise ValueError("actor must not have leading or trailing whitespace")
         return self
 
 

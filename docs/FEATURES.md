@@ -1960,6 +1960,25 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   `training/rlaif.py`, `[training]` extra). OFF by default AND inert until
   `base_model` is set (never hard-coded; wizard suggests an Apache-2.0 base).
   Proof: `python proof/adapter_rung_proof.py` — 6 guarantees.
+- **Governed specialist-model improvement** (`training/environments.py`,
+  `training/specialist_models.py`, `training/qualification.py`,
+  `training/receipts.py`, `[model_improvement]`) — locked deterministic PIA,
+  DSAR, and Article 28 environments; structured tenant consent and redaction
+  evidence; strict source-span citation rewards; immutable-revision candidate
+  research; non-weakenable exact runtime/hardware qualification; and
+  dual-signed, hash-chained, tenant-private training receipts verified against
+  server-owned trust policy. Public seed packs are bakeoff fixtures and
+  deliberately fail promotion readiness because their holdout answers are
+   published. Cross-tenant training is refused. Optional Verifiers/prime-rl
+   integration uses separate pinned Prime v0.7.0/Verifiers v0.2.0 and standalone
+   Verifiers v0.2.1 profiles, is operator-provisioned, and never auto-installs or
+   uploads. Prime v0.7 specs use the Verifiers v1 taskset shape, replace inherited
+   `PYTHONPATH` with the exact verified bundle source, and verify the bundle's
+   digest-bound, self-contained scorer before execution. Live pointers bind the
+   effective policy and resolve approver
+  fingerprints through global deployment trust. The complete design, model
+  matrix, and rollout gates are in
+  [`MODEL_IMPROVEMENT_PLATFORM.md`](./MODEL_IMPROVEMENT_PLATFORM.md).
 - **Domain packs** — spawn domain agents from profiles (legal / privacy / generic
   packs) on the sector-seal foundation.
 - **Pack output contract** — a pack's optional `[output]` block declares the

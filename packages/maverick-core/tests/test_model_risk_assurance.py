@@ -17,6 +17,39 @@ def _hex(label: str) -> str:
     return hashlib.sha256(label.encode("utf-8")).hexdigest()
 
 
+def _training_commitment(artifact_digest: str, *, label: str = "one") -> dict[str, str]:
+    return {
+        "schema": "lightwork.training-transparency-commitment.v1",
+        "dataset_sha256": _hex(f"training-dataset:{label}"),
+        "environment_sha256": _hex(f"training-environment:{label}"),
+        "base_model_artifact_sha256": _hex(f"base-model:{label}"),
+        "adapter_sha256": artifact_digest,
+        "approval_subject_sha256": _hex(f"approval-subject:{label}"),
+        "receipt_payload_sha256": _hex(f"receipt-payload:{label}"),
+        "event_hash": _hex(f"receipt-event:{label}"),
+        "key_id": _hex(f"receipt-key:{label}")[:16],
+    }
+
+
+def _training_assurance_commitment(
+    artifact_digest: str,
+    *,
+    label: str = "one",
+) -> dict[str, str]:
+    return {
+        "schema": "lightwork.training-assurance-commitment.v1",
+        "dataset_sha256": _hex(f"training-dataset:{label}"),
+        "base_model_license_id": "Apache-2.0",
+        "base_model_license_evidence_sha256": _hex(f"license:{label}"),
+        "evaluation_run_sha256": _hex(f"evaluation-run:{label}"),
+        "sealed_holdout_sha256": _hex(f"sealed-holdout:{label}"),
+        "qualification_evidence_sha256": _hex(f"qualification:{label}"),
+        "qualification_policy_sha256": _hex(f"qualification-policy:{label}"),
+        "adapter_sha256": artifact_digest,
+        "receipt_payload_sha256": _hex(f"receipt-payload:{label}"),
+    }
+
+
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -114,6 +147,7 @@ def _approved_evidence(
     label: str | None = None,
     result: str = "passed",
     lifetime: float = 3600,
+    scope_digest: str | None = None,
 ):
     now = time.time()
     row = officer.record_evidence(
@@ -121,7 +155,7 @@ def _approved_evidence(
         source_id=label or f"{kind}-run-1",
         evidence_kind=kind,
         result=result,
-        scope_digest=_hex(f"scope:{kind}:{label or 'one'}"),
+        scope_digest=scope_digest or _hex(f"scope:{kind}:{label or 'one'}"),
         artifact_digest=observation["version_digest"],
         evaluator_digest=evaluator["version_digest"],
         summary=f"Bounded {kind} result for the exact artifact and evaluator.",
@@ -139,12 +173,82 @@ def _approved_evidence(
     )
 
 
-def _promotion_fixture(officer: mra.ModelRiskAssuranceOfficer):
+def _approved_training_evidence(
+    officer: mra.ModelRiskAssuranceOfficer,
+    observation: dict,
+    *,
+    lifetime: float = 3600,
+    label: str = "one",
+):
+    now = time.time()
+    commitment = _training_commitment(
+        observation["version_digest"],
+        label=label,
+    )
+    assurance = _training_assurance_commitment(
+        observation["version_digest"],
+        label=label,
+    )
+    row = officer._record_evidence(  # noqa: SLF001 - verified-boundary fixture
+        observation["asset_id"],
+        source_id=f"training_receipt:{commitment['receipt_payload_sha256']}",
+        evidence_kind="training_run",
+        result="passed",
+        scope_digest=mra._training_evidence_scope(  # noqa: SLF001
+            commitment,
+            assurance,
+        ),
+        artifact_digest=observation["version_digest"],
+        evaluator_digest=None,
+        summary="Verified tenant-private training receipt commitment.",
+        metrics={
+            "training_receipt_commitment": commitment,
+            "training_assurance_commitment": assurance,
+        },
+        observed_at=now,
+        valid_until=now + lifetime,
+        actor="training-receipt-verifier",
+        verified_training_commitment=commitment,
+        verified_training_assurance=assurance,
+    )
+    return officer.review_evidence(
+        row["id"],
+        decision="approved",
+        rationale="Receipt commitment and exact adapter binding reviewed.",
+        reviewer="assurance-reviewer",
+        expected_revision=row["revision"],
+    )
+
+
+def _promotion_fixture(
+    officer: mra.ModelRiskAssuranceOfficer,
+    *,
+    training_lifetime: float = 3600,
+    data_scope_matches: bool = True,
+):
     artifact = _observe(officer, "candidate-model")
     evaluator = _observe(officer, "frozen-evaluator", asset_type="tool")
     declaration = _declare(officer, artifact)
     evaluation = _approved_evidence(officer, artifact, evaluator, "evaluation")
     red_team = _approved_evidence(officer, artifact, evaluator, "red_team")
+    training_run = _approved_training_evidence(
+        officer,
+        artifact,
+        lifetime=training_lifetime,
+    )
+    data_assessment = _approved_evidence(
+        officer,
+        artifact,
+        evaluator,
+        "data_assessment",
+        scope_digest=(
+            training_run["metrics"]["training_receipt_commitment"][
+                "dataset_sha256"
+            ]
+            if data_scope_matches
+            else _hex("different-training-dataset")
+        ),
+    )
     payload = _hex("candidate-payload")
     authorization = officer.authorize_promotion_candidate(
         candidate_id="candidate-001",
@@ -157,7 +261,12 @@ def _promotion_fixture(officer: mra.ModelRiskAssuranceOfficer):
         evaluator_asset_id=evaluator["asset_id"],
         evaluator_revision=evaluator["revision"],
         evaluator_digest=evaluator["version_digest"],
-        evidence_ids=[evaluation["id"], red_team["id"]],
+        evidence_ids=[
+            evaluation["id"],
+            red_team["id"],
+            training_run["id"],
+            data_assessment["id"],
+        ],
         reviewer="change-advisory-board",
         rationale="Exact candidate, evaluator, and current assurance receipts reviewed.",
         expires_at=time.time() + 1800,
@@ -371,6 +480,193 @@ def test_evidence_is_bounded_review_gated_expiring_and_citation_bound():
     assert node["attributes"]["evidence_payload_sha256"] == reviewed["payload_sha256"]
 
 
+def test_verified_training_receipt_registers_only_commitment_and_needs_review(
+    monkeypatch,
+):
+    from maverick.training import receipts as training_receipts
+
+    officer = mra.ModelRiskAssuranceOfficer()
+    raw_private_receipt = {
+        "receipt_id": "tenant-private-receipt-1",
+        "public_key": "self-disclosed-key-must-not-be-trusted",
+        "private_training_content": "DO-NOT-PERSIST",
+    }
+    receipt_trust = {"0123456789abcdef": "external-receipt-trust"}
+    approver_trust = {"fedcba9876543210": "external-approver-trust"}
+    calls = {}
+
+    def _read(receipt_id, **kwargs):
+        assert receipt_id == "tenant-private-receipt-1"
+        calls["read"] = kwargs
+        return raw_private_receipt
+
+    def _verify(receipt, **kwargs):
+        assert receipt is raw_private_receipt
+        calls.update(kwargs)
+        return _training_commitment(_hex("tenant-adapter"))
+
+    def _assure(receipt, **kwargs):
+        assert receipt is raw_private_receipt
+        calls.update(kwargs)
+        return _training_assurance_commitment(_hex("tenant-adapter"))
+
+    monkeypatch.setattr(
+        training_receipts,
+        "read_verified_training_receipt",
+        _read,
+    )
+    monkeypatch.setattr(
+        training_receipts,
+        "public_transparency_commitment",
+        _verify,
+    )
+    monkeypatch.setattr(
+        training_receipts,
+        "model_risk_assurance_commitment",
+        _assure,
+    )
+    monkeypatch.setattr(
+        training_receipts,
+        "server_training_trust_registries",
+        lambda: (receipt_trust, approver_trust),
+    )
+
+    with tenant_scope(tenant="alpha"):
+        artifact = _observe(
+            officer,
+            "tenant-trained-adapter",
+            digest=_hex("tenant-adapter"),
+        )
+        row = officer.record_verified_training_receipt_evidence(
+            artifact["asset_id"],
+            receipt_id="tenant-private-receipt-1",
+            actor="training-receipt-verifier",
+            valid_until=time.time() + 600,
+        )
+
+        assert row["evidence_kind"] == "training_run"
+        assert row["status"] == "pending_review"
+        assert row["result"] == "passed"
+        assert set(row["metrics"]) == {
+            "training_receipt_commitment",
+            "training_assurance_commitment",
+        }
+        assert (
+            row["metrics"]["training_assurance_commitment"][
+                "base_model_license_id"
+            ]
+            == "Apache-2.0"
+        )
+        serialized = json.dumps(row)
+        assert "DO-NOT-PERSIST" not in serialized
+        assert "self-disclosed-key" not in serialized
+        assert "tenant-private-receipt-1" not in serialized
+        assert calls == {
+            "read": {
+                "trusted_receipt_pubkeys": receipt_trust,
+                "trusted_approver_pubkeys": approver_trust,
+                "expected_tenant_id": "alpha",
+            },
+            "trusted_receipt_pubkeys": receipt_trust,
+            "trusted_approver_pubkeys": approver_trust,
+            "expected_tenant_id": "alpha",
+        }
+
+        now = time.time()
+        with pytest.raises(ValueError, match="verified tenant-private receipt"):
+            officer.record_evidence(
+                artifact["asset_id"],
+                source_id="caller-asserted-training-run",
+                evidence_kind="training_run",
+                result="passed",
+                scope_digest=_hex("caller-scope"),
+                artifact_digest=artifact["version_digest"],
+                metrics={"training_receipt_commitment": row["metrics"]},
+                observed_at=now,
+                valid_until=now + 60,
+                actor="untrusted-caller",
+            )
+
+        approved = officer.review_evidence(
+            row["id"],
+            decision="approved",
+            rationale="External trust and exact receipt commitment reviewed.",
+            reviewer="model-risk-reviewer",
+            expected_revision=row["revision"],
+        )
+        assert approved["status"] == "approved"
+
+
+def test_unverified_or_artifact_mismatched_training_receipt_is_not_registered(
+    monkeypatch,
+):
+    from maverick.training import receipts as training_receipts
+
+    officer = mra.ModelRiskAssuranceOfficer()
+    with tenant_scope(tenant="alpha"):
+        artifact = _observe(
+            officer,
+            "mismatched-training-adapter",
+            digest=_hex("expected-adapter"),
+        )
+        monkeypatch.setattr(
+            training_receipts,
+            "read_verified_training_receipt",
+            lambda _receipt_id, **_kwargs: (_ for _ in ()).throw(
+                ValueError("unverified"),
+            ),
+        )
+        monkeypatch.setattr(
+            training_receipts,
+            "server_training_trust_registries",
+            lambda: ({}, {}),
+        )
+        with pytest.raises(mra.ModelRiskStateError, match="could not be verified"):
+            officer.record_verified_training_receipt_evidence(
+                artifact["asset_id"],
+                receipt_id="unverified-receipt",
+                actor="training-receipt-verifier",
+                valid_until=time.time() + 600,
+            )
+        assert officer.list_evidence() == []
+
+        monkeypatch.setattr(
+            training_receipts,
+            "read_verified_training_receipt",
+            lambda _receipt_id, **_kwargs: {"public_key": "self-disclosed"},
+        )
+        monkeypatch.setattr(
+            training_receipts,
+            "public_transparency_commitment",
+            lambda *_args, **_kwargs: _training_commitment(
+                _hex("different-adapter"),
+            ),
+        )
+        monkeypatch.setattr(
+            training_receipts,
+            "model_risk_assurance_commitment",
+            lambda *_args, **_kwargs: _training_assurance_commitment(
+                _hex("different-adapter"),
+            ),
+        )
+        monkeypatch.setattr(
+            training_receipts,
+            "server_training_trust_registries",
+            lambda: (
+                {"0123456789abcdef": "external"},
+                {"fedcba9876543210": "external"},
+            ),
+        )
+        with pytest.raises(mra.ModelRiskStateError, match="different artifact bytes"):
+            officer.record_verified_training_receipt_evidence(
+                artifact["asset_id"],
+                receipt_id="mismatched-receipt",
+                actor="training-receipt-verifier",
+                valid_until=time.time() + 600,
+            )
+        assert officer.list_evidence() == []
+
+
 def test_promotion_gate_binds_exact_candidate_artifact_evaluator_and_evidence():
     officer = mra.ModelRiskAssuranceOfficer()
     artifact, evaluator, _, _, _, payload, authorization = _promotion_fixture(officer)
@@ -403,6 +699,171 @@ def test_promotion_gate_binds_exact_candidate_artifact_evaluator_and_evidence():
     assert allowed is False
     assert "evaluator observation authority is stale" in reason
     assert officer.get_observation(artifact["asset_id"])["version_digest"] == artifact["version_digest"]
+
+
+@pytest.mark.parametrize(
+    "missing_kind",
+    ["training_run", "data_assessment", "evaluation", "red_team"],
+)
+def test_weights_gate_requires_complete_exact_evidence_set(missing_kind):
+    officer = mra.ModelRiskAssuranceOfficer()
+    artifact = _observe(officer, f"missing-{missing_kind}-model")
+    evaluator = _observe(
+        officer,
+        f"missing-{missing_kind}-evaluator",
+        asset_type="tool",
+    )
+    declaration = _declare(officer, artifact)
+    evidence = {
+        "training_run": _approved_training_evidence(
+            officer,
+            artifact,
+            label=missing_kind,
+        ),
+        "data_assessment": _approved_evidence(
+            officer,
+            artifact,
+            evaluator,
+            "data_assessment",
+            label=f"data-{missing_kind}",
+        ),
+        "evaluation": _approved_evidence(
+            officer,
+            artifact,
+            evaluator,
+            "evaluation",
+            label=f"evaluation-{missing_kind}",
+        ),
+        "red_team": _approved_evidence(
+            officer,
+            artifact,
+            evaluator,
+            "red_team",
+            label=f"red-team-{missing_kind}",
+        ),
+    }
+    payload = _hex(f"candidate-missing-{missing_kind}")
+    officer.authorize_promotion_candidate(
+        candidate_id=f"candidate-missing-{missing_kind}",
+        rung="weights",
+        payload_sha256=payload,
+        asset_id=artifact["asset_id"],
+        artifact_revision=artifact["revision"],
+        artifact_digest=artifact["version_digest"],
+        declaration_revision=declaration["revision"],
+        evaluator_asset_id=evaluator["asset_id"],
+        evaluator_revision=evaluator["revision"],
+        evaluator_digest=evaluator["version_digest"],
+        evidence_ids=[
+            row["id"] for kind, row in evidence.items() if kind != missing_kind
+        ],
+        reviewer="change-advisory-board",
+        rationale="Exercise one missing evidence class at a time.",
+        expires_at=time.time() + 600,
+    )
+
+    allowed, reason = officer.verify_promotion_candidate(
+        candidate_id=f"candidate-missing-{missing_kind}",
+        rung="weights",
+        payload_sha256=payload,
+    )
+    assert allowed is False
+    assert missing_kind in reason
+
+
+def test_enabled_gate_preserves_non_weights_evidence_requirements(monkeypatch):
+    officer = mra.ModelRiskAssuranceOfficer()
+    artifact = _observe(officer, "non-weights-model")
+    evaluator = _observe(officer, "non-weights-evaluator", asset_type="tool")
+    declaration = _declare(officer, artifact)
+    evaluation = _approved_evidence(officer, artifact, evaluator, "evaluation")
+    red_team = _approved_evidence(officer, artifact, evaluator, "red_team")
+    payload = _hex("non-weights-candidate")
+    officer.authorize_promotion_candidate(
+        candidate_id="non-weights-candidate",
+        rung="config",
+        payload_sha256=payload,
+        asset_id=artifact["asset_id"],
+        artifact_revision=artifact["revision"],
+        artifact_digest=artifact["version_digest"],
+        declaration_revision=declaration["revision"],
+        evaluator_asset_id=evaluator["asset_id"],
+        evaluator_revision=evaluator["revision"],
+        evaluator_digest=evaluator["version_digest"],
+        evidence_ids=[evaluation["id"], red_team["id"]],
+        reviewer="change-advisory-board",
+        rationale="The existing non-weights assurance set remains sufficient.",
+        expires_at=time.time() + 600,
+    )
+    monkeypatch.setattr(mra, "_DEFAULT", officer)
+
+    assert mra.promotion_gate_enabled() is True
+    assert mra.verify_promotion_candidate(
+        candidate_id="non-weights-candidate",
+        rung="config",
+        payload_sha256=payload,
+    ) == (True, "exact model-risk authority is current and approved")
+
+
+def test_weights_gate_rejects_data_assessment_for_other_training_data():
+    officer = mra.ModelRiskAssuranceOfficer()
+    _, _, _, _, _, payload, _ = _promotion_fixture(
+        officer,
+        data_scope_matches=False,
+    )
+
+    allowed, reason = officer.verify_promotion_candidate(
+        candidate_id="candidate-001",
+        rung="weights",
+        payload_sha256=payload,
+    )
+    assert allowed is False
+    assert reason == "data-assessment evidence covers different training data"
+
+
+def test_stale_or_revoked_training_run_evidence_fails_weights_gate_closed():
+    with tenant_scope(tenant="stale-training"):
+        stale_officer = mra.ModelRiskAssuranceOfficer()
+        _, _, _, _, _, payload, _ = _promotion_fixture(
+            stale_officer,
+            training_lifetime=30,
+        )
+        stale_training = next(
+            row for row in stale_officer.list_evidence()
+            if row["evidence_kind"] == "training_run"
+        )
+        stale_officer._clock = (  # noqa: SLF001 - authority-clock expiry regression
+            lambda: float(stale_training["valid_until"]) + 1
+        )
+        allowed, reason = stale_officer.verify_promotion_candidate(
+            candidate_id="candidate-001",
+            rung="weights",
+            payload_sha256=payload,
+        )
+        assert allowed is False
+        assert "evidence expired" in reason
+
+    with tenant_scope(tenant="revoked-training"):
+        revoked_officer = mra.ModelRiskAssuranceOfficer()
+        _, _, _, _, _, payload, _ = _promotion_fixture(revoked_officer)
+        training = next(
+            row for row in revoked_officer.list_evidence()
+            if row["evidence_kind"] == "training_run"
+        )
+        revoked_officer.review_evidence(
+            training["id"],
+            decision="revoked",
+            rationale="The trusted receipt authority revoked this training run.",
+            reviewer="assurance-reviewer",
+            expected_revision=training["revision"],
+        )
+        allowed, reason = revoked_officer.verify_promotion_candidate(
+            candidate_id="candidate-001",
+            rung="weights",
+            payload_sha256=payload,
+        )
+        assert allowed is False
+        assert "evidence authority is stale" in reason
 
 
 def test_promotion_expiry_uses_authority_clock_not_caller_clock():

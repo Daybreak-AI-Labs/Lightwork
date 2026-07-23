@@ -1407,6 +1407,20 @@ def pick_security_suite() -> dict[str, Any]:
     )
     if model_risk_assurance:
         evidence_graph = True
+    model_improvement = _q_confirm(
+        "Enable governed specialist-model improvement plumbing? Training and "
+        "weight promotion remain separately approval-gated.",
+        default=False,
+    )
+    allow_hosted_training = False
+    if model_improvement:
+        evidence_graph = True
+        model_risk_assurance = True
+        allow_hosted_training = _q_confirm(
+            "Allow hosted training only for cases with an exact hosted-training "
+            "consent scope? Cross-tenant training remains refused.",
+            default=False,
+        )
     threat_hunt = _q_confirm(
         "Enable the defensive Lightwork platform threat hunter?", default=False
     )
@@ -1484,6 +1498,8 @@ def pick_security_suite() -> dict[str, Any]:
         "security_ops": security_ops,
         "evidence_graph": evidence_graph,
         "model_risk_assurance": model_risk_assurance,
+        "model_improvement": model_improvement,
+        "allow_hosted_training": allow_hosted_training,
         "threat_hunt": threat_hunt,
         "env_hunt": env_hunt,
         "response_execution": response_execution,
@@ -3447,6 +3463,16 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         f"{'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
         "gate_promotions = "
         f"{'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
+        "",
+        "[model_improvement]",
+        "enable = "
+        f"{'true' if security_suite.get('model_improvement', False) else 'false'}",
+        "allow_hosted = "
+        f"{'true' if security_suite.get('allow_hosted_training', False) else 'false'}",
+        "allow_cross_tenant = false",
+        "require_signed_receipt = true",
+        "minimum_train_families = 20",
+        "minimum_holdout_families = 20",
         "",
         "[threat_hunt]",
         f"enable = {'true' if security_suite.get('threat_hunt', False) else 'false'}",

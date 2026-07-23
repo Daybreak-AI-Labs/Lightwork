@@ -11,14 +11,25 @@ import pytest
 from maverick import adapter_rung as ar
 from maverick.self_harness_eval import corpus_split
 
+_TEST_GLOBAL_APPROVER_KEYS: list[str] = []
+
 
 @pytest.fixture(autouse=True)
-def _reset_adapter_caches():
+def _reset_adapter_caches(monkeypatch):
     """The config/pointer memo caches are module-global; clear them around each
     test so mtime-keyed entries never leak across the isolated per-test HOMEs."""
+    from maverick import approval_signing
+
+    _TEST_GLOBAL_APPROVER_KEYS.clear()
+    monkeypatch.setattr(
+        approval_signing,
+        "trusted_global_approver_keys",
+        lambda: list(_TEST_GLOBAL_APPROVER_KEYS),
+    )
     ar._reset_caches()
     yield
     ar._reset_caches()
+    _TEST_GLOBAL_APPROVER_KEYS.clear()
 
 
 def _examples() -> list[ar.TrainExample]:
@@ -737,6 +748,8 @@ def _external_approval(keydir: Path):
 
     private_hex = (keydir / "operator.priv.hex").read_text(encoding="utf-8").strip()
     public_hex = (keydir / "operator.pub").read_bytes().hex()
+    if public_hex not in _TEST_GLOBAL_APPROVER_KEYS:
+        _TEST_GLOBAL_APPROVER_KEYS.append(public_hex)
 
     def approve(request):
         return signing.sign_request(request, private_hex)
@@ -833,8 +846,29 @@ def test_govern_adapter_change_promotes_and_activates(tmp_path):
     }
     assert rec.approval_signature and rec.payload_sha256 == \
         hashlib.sha256(approved_payload.encode("utf-8")).hexdigest()
+    assert res.pointer["receipt"]["version"] == 3
+    assert "approval_key_id" in res.pointer["receipt"]
+    assert "approval_pubkey" not in res.pointer["receipt"]
     # Serving artifacts point at the tuned model.
     assert ar.tuned_model_name(m) in res.serving["create_command"]
+
+
+def test_live_pointer_refuses_self_nominated_or_revoked_approver_root(
+    tmp_path,
+    monkeypatch,
+):
+    store, _manifest_value, result, _ledger = _promote_for_serving(
+        tmp_path,
+        monkeypatch,
+    )
+    assert _TEST_GLOBAL_APPROVER_KEYS
+    _TEST_GLOBAL_APPROVER_KEYS.clear()
+
+    with pytest.raises(ValueError, match="server-trusted|trust registry"):
+        ar._verify_authoritative_pointer(
+            result.pointer,
+            artifact_identity=store.artifact_identity,
+        )
 
 
 def test_external_approval_promotes_without_private_key_or_env_mutation(

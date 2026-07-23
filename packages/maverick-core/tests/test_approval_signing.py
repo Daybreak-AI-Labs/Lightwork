@@ -116,6 +116,45 @@ class TestSignVerify:
 
 
 class TestEnforcement:
+    def test_global_trust_roots_ignore_tenant_merged_configuration(
+        self,
+        monkeypatch,
+    ):
+        from maverick import config
+
+        _priv, global_pub = _keypair()
+        _priv, tenant_pub = _keypair()
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS_DIR", raising=False)
+        monkeypatch.setattr(
+            config,
+            "load_global_config",
+            lambda: {"self_improvement": {"approver_keys": [global_pub]}},
+        )
+        monkeypatch.setattr(
+            config,
+            "load_config",
+            lambda: {"self_improvement": {"approver_keys": [tenant_pub]}},
+        )
+        monkeypatch.setattr(config, "config_source_errors", dict)
+
+        assert ap.trusted_global_approver_keys() == [global_pub]
+
+    def test_global_trust_roots_reject_malformed_keys(self, monkeypatch):
+        from maverick import config
+
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS_DIR", raising=False)
+        monkeypatch.setattr(
+            config,
+            "load_global_config",
+            lambda: {"self_improvement": {"approver_keys": ["not-a-key"]}},
+        )
+        monkeypatch.setattr(config, "config_source_errors", dict)
+
+        with pytest.raises(RuntimeError, match="malformed key"):
+            ap.trusted_global_approver_keys()
+
     def test_not_enforced_without_keys(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
         monkeypatch.delenv("MAVERICK_APPROVER_KEYS_DIR", raising=False)

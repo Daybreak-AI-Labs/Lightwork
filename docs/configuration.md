@@ -160,6 +160,22 @@ enable = false
 enable = false
 gate_promotions = false
 
+[model_improvement]
+# Specialist-model tasksets, qualification, training receipts, and optional
+# external-backend exports. Inert until enabled. Hosted execution is a second
+# opt-in. Cross-tenant training remains structurally refused in v1 even though
+# the reserved key is explicit.
+enable = false
+allow_hosted = false
+allow_cross_tenant = false
+require_signed_receipt = true
+minimum_train_families = 20
+minimum_holdout_families = 20
+# Signed receipts are mandatory whenever enable = true. With an active tenant,
+# global enable/allow_hosted are ceilings and the tenant must opt in separately.
+# Family floors combine by maximum. Mutation boundaries reject malformed or
+# unknown keys instead of silently falling back.
+
 [finance]
 # Regime policies combine strictest-wins. Existing `pci` configurations now
 # identify PCI DSS 4.0.1; the key remains backward compatible.

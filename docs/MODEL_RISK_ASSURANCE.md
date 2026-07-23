@@ -87,6 +87,42 @@ as denial at the enforcement boundary.
   the platform audit key. Verification requires an external trusted-key
   registry rather than trusting a key disclosed by the pack itself.
 
+### Specialist-model training evidence
+
+A weights-rung promotion has a stricter evidence floor than a prompt, policy,
+or code change. It requires current, human-approved, passing evidence of all
+four kinds:
+
+- `training_run` — a verified tenant-private training receipt;
+- `data_assessment` — scoped to the receipt's exact training-dataset digest;
+- `evaluation` — bound to the approved artifact and evaluator;
+- `red_team` — bound to the same approved artifact and evaluator.
+
+Generic evidence writes cannot self-assert `training_run`. An authenticated
+operator registers a receipt through
+`POST /api/v1/security/assurance/model-risk/evidence/training-receipts`.
+Lightwork resolves the receipt only from the active tenant's private append-only
+store, verifies every chain row through the selected receipt, resolves the
+separate platform and human signatures only through protected server-side
+audit and global approver registries, checks that it covers the observed
+artifact bytes, and persists only its content-free public commitment. Request
+bodies cannot nominate trust keys. The
+receipt still needs a separate Model Risk evidence review; registering it is
+not approval.
+
+The weights promotion gate revalidates the receipt commitment, dataset scope,
+evaluator identity, evidence-graph authority, expiry, revocation, and promotion
+authorization at use time. The adapter promotion pointer separately binds the
+exact receipt identities and qualification decision into the externally signed
+activation authority. Neither path silently selects or reroutes a runtime
+model.
+
+The activation pointer stores only the approver fingerprint, re-resolves it
+through deployment policy at use time, and stops routing after revocation. The
+row chain detects mutation, deletion before a later row, insertion, and
+detached-row substitution. Detecting rollback of a valid signed tail requires
+publishing or otherwise externally anchoring the latest public commitment.
+
 ## Standalone product
 
 `demo/model-risk-ai-assurance-officer/` is a self-contained, loopback-only

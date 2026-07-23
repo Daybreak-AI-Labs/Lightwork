@@ -170,6 +170,29 @@ async def record_model_risk_evidence(
     )
 
 
+@router.post("/model-risk/evidence/training-receipts")
+async def record_verified_training_receipt_evidence(
+    request: Request,
+    body: schemas.ModelRiskTrainingReceiptEvidenceIn,
+) -> dict[str, Any]:
+    """Register only the commitment from a verified tenant-private receipt."""
+    require_permission(request, "operate")
+    request_actor = _actor(request)
+    if body.actor != request_actor:
+        raise HTTPException(
+            status_code=403,
+            detail="actor must match the authenticated caller",
+        )
+    officer = _module("model_risk_assurance", "model_risk_assurance")
+    payload = body.model_dump()
+    asset_id = payload.pop("asset_id")
+    return await _call(
+        officer.record_verified_training_receipt_evidence,
+        asset_id,
+        **payload,
+    )
+
+
 @router.post("/model-risk/evidence/{evidence_id}/review")
 async def review_model_risk_evidence(
     request: Request,

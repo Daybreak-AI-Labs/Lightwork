@@ -66,6 +66,7 @@ _RISK_TIERS = frozenset({"low", "medium", "high", "critical"})
 _EVIDENCE_KINDS = frozenset({
     "evaluation",
     "red_team",
+    "training_run",
     "drift_monitoring",
     "model_card",
     "data_assessment",
@@ -127,6 +128,34 @@ _SOURCE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]{0,63}\Z")
 _ASSET_RE = re.compile(r"MAA-[0-9a-f]{32}\Z")
 _DIGEST_RE = re.compile(r"(?:sha256:)?[0-9a-f]{64}\Z")
 _TOKEN_RE = re.compile(r"[a-z][a-z0-9_:-]{0,63}\Z")
+_TRAINING_KEY_ID_RE = re.compile(r"[0-9a-f]{16}\Z")
+_TRAINING_LICENSE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:+/-]{0,127}\Z")
+
+_TRAINING_COMMITMENT_SCHEMA = "lightwork.training-transparency-commitment.v1"
+_TRAINING_COMMITMENT_FIELDS = frozenset({
+    "schema",
+    "dataset_sha256",
+    "environment_sha256",
+    "base_model_artifact_sha256",
+    "adapter_sha256",
+    "approval_subject_sha256",
+    "receipt_payload_sha256",
+    "event_hash",
+    "key_id",
+})
+_TRAINING_ASSURANCE_SCHEMA = "lightwork.training-assurance-commitment.v1"
+_TRAINING_ASSURANCE_FIELDS = frozenset({
+    "schema",
+    "dataset_sha256",
+    "base_model_license_id",
+    "base_model_license_evidence_sha256",
+    "evaluation_run_sha256",
+    "sealed_holdout_sha256",
+    "qualification_evidence_sha256",
+    "qualification_policy_sha256",
+    "adapter_sha256",
+    "receipt_payload_sha256",
+})
 
 _MAX_JSON_BYTES = 64 * 1024
 _MAX_COLLECTION = 256
@@ -350,6 +379,97 @@ def _bounded_json(value: object, label: str, *, max_fields: int = 64) -> object:
     if len(_canonical(out)) > _MAX_JSON_BYTES:
         raise ValueError(f"{label} exceeds {_MAX_JSON_BYTES} bytes")
     return out
+
+
+def _training_commitment(value: object) -> dict[str, str]:
+    """Return the strict, content-free commitment emitted by receipt verification."""
+
+    if not isinstance(value, Mapping) or set(value) != _TRAINING_COMMITMENT_FIELDS:
+        raise ValueError("training receipt commitment has missing or unexpected fields")
+    if value.get("schema") != _TRAINING_COMMITMENT_SCHEMA:
+        raise ValueError("training receipt commitment schema is invalid")
+    key_id = value.get("key_id")
+    if not isinstance(key_id, str) or not _TRAINING_KEY_ID_RE.fullmatch(key_id):
+        raise ValueError("training receipt commitment key id is invalid")
+    return {
+        "schema": _TRAINING_COMMITMENT_SCHEMA,
+        "dataset_sha256": _digest(value.get("dataset_sha256"), "dataset digest"),
+        "environment_sha256": _digest(
+            value.get("environment_sha256"),
+            "environment digest",
+        ),
+        "base_model_artifact_sha256": _digest(
+            value.get("base_model_artifact_sha256"),
+            "base-model artifact digest",
+        ),
+        "adapter_sha256": _digest(value.get("adapter_sha256"), "adapter digest"),
+        "approval_subject_sha256": _digest(
+            value.get("approval_subject_sha256"),
+            "approval-subject digest",
+        ),
+        "receipt_payload_sha256": _digest(
+            value.get("receipt_payload_sha256"),
+            "receipt-payload digest",
+        ),
+        "event_hash": _digest(value.get("event_hash"), "receipt event hash"),
+        "key_id": key_id,
+    }
+
+
+def _training_assurance_commitment(value: object) -> dict[str, str]:
+    """Return strict qualification commitments derived from a private receipt."""
+
+    if not isinstance(value, Mapping) or set(value) != _TRAINING_ASSURANCE_FIELDS:
+        raise ValueError("training assurance commitment has missing or unexpected fields")
+    if value.get("schema") != _TRAINING_ASSURANCE_SCHEMA:
+        raise ValueError("training assurance commitment schema is invalid")
+    license_id = _required_text(
+        value.get("base_model_license_id"),
+        "base-model license id",
+        128,
+    )
+    if not _TRAINING_LICENSE_ID_RE.fullmatch(license_id):
+        raise ValueError("base-model license id must be a bounded opaque identifier")
+    return {
+        "schema": _TRAINING_ASSURANCE_SCHEMA,
+        "dataset_sha256": _digest(value.get("dataset_sha256"), "dataset digest"),
+        "base_model_license_id": license_id,
+        "base_model_license_evidence_sha256": _digest(
+            value.get("base_model_license_evidence_sha256"),
+            "base-model license-evidence digest",
+        ),
+        "evaluation_run_sha256": _digest(
+            value.get("evaluation_run_sha256"),
+            "evaluation-run digest",
+        ),
+        "sealed_holdout_sha256": _digest(
+            value.get("sealed_holdout_sha256"),
+            "sealed-holdout digest",
+        ),
+        "qualification_evidence_sha256": _digest(
+            value.get("qualification_evidence_sha256"),
+            "qualification-evidence digest",
+        ),
+        "qualification_policy_sha256": _digest(
+            value.get("qualification_policy_sha256"),
+            "qualification-policy digest",
+        ),
+        "adapter_sha256": _digest(value.get("adapter_sha256"), "adapter digest"),
+        "receipt_payload_sha256": _digest(
+            value.get("receipt_payload_sha256"),
+            "receipt-payload digest",
+        ),
+    }
+
+
+def _training_evidence_scope(
+    receipt: Mapping[str, Any],
+    assurance: Mapping[str, Any],
+) -> str:
+    return _sha256({
+        "training_receipt_commitment": receipt,
+        "training_assurance_commitment": assurance,
+    })
 
 
 def stable_asset_id(asset_type: str, source: str, source_id: str) -> str:
@@ -945,6 +1065,43 @@ class ModelRiskAssuranceOfficer:
     ) -> dict[str, Any]:
         """Persist immutable, expiring evidence; human review is separate."""
 
+        return self._record_evidence(
+            asset_id,
+            source_id=source_id,
+            evidence_kind=evidence_kind,
+            result=result,
+            scope_digest=scope_digest,
+            artifact_digest=artifact_digest,
+            actor=actor,
+            observed_at=observed_at,
+            valid_until=valid_until,
+            evaluator_digest=evaluator_digest,
+            summary=summary,
+            metrics=metrics,
+            verified_training_commitment=None,
+            verified_training_assurance=None,
+        )
+
+    def _record_evidence(
+        self,
+        asset_id: str,
+        *,
+        source_id: str,
+        evidence_kind: str,
+        result: str,
+        scope_digest: str,
+        artifact_digest: str,
+        actor: str,
+        observed_at: float,
+        valid_until: float,
+        evaluator_digest: str | None = None,
+        summary: str = "",
+        metrics: Mapping[str, Any] | None = None,
+        verified_training_commitment: Mapping[str, Any] | None,
+        verified_training_assurance: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Internal persistence seam for ordinary or receipt-verified evidence."""
+
         _require_evidence_graph_dependency()
         asset = _asset_id(asset_id)
         observation = self.get_observation(asset)
@@ -952,6 +1109,41 @@ class ModelRiskAssuranceOfficer:
             raise ModelRiskStateError("evidence requires an observed asset")
         source = _required_text(source_id, "source_id", 256)
         kind = _token(evidence_kind, "evidence_kind", _EVIDENCE_KINDS)
+        if kind == "training_run":
+            if (
+                verified_training_commitment is None
+                or verified_training_assurance is None
+            ):
+                raise ValueError(
+                    "training_run evidence requires a verified tenant-private receipt"
+                )
+            training_commitment = _training_commitment(
+                verified_training_commitment,
+            )
+            training_assurance = _training_assurance_commitment(
+                verified_training_assurance,
+            )
+            if (
+                training_commitment["dataset_sha256"]
+                != training_assurance["dataset_sha256"]
+                or training_commitment["adapter_sha256"]
+                != training_assurance["adapter_sha256"]
+                or training_commitment["receipt_payload_sha256"]
+                != training_assurance["receipt_payload_sha256"]
+            ):
+                raise ModelRiskStateError(
+                    "training receipt and assurance commitments do not match"
+                )
+        else:
+            if (
+                verified_training_commitment is not None
+                or verified_training_assurance is not None
+            ):
+                raise ModelRiskStateError(
+                    "a training receipt commitment cannot authorize another evidence kind"
+                )
+            training_commitment = None
+            training_assurance = None
         outcome = _token(result, "result", _EVIDENCE_RESULTS)
         scope = _digest(scope_digest, "scope_digest")
         artifact = _digest(artifact_digest, "artifact_digest")
@@ -964,6 +1156,13 @@ class ModelRiskAssuranceOfficer:
         expiry = _expiry(valid_until, observed)
         note = _optional_text(summary, "summary", 4000)
         measurements = _bounded_json(dict(metrics or {}), "metrics", max_fields=128)
+        if training_commitment is not None and measurements != {
+            "training_receipt_commitment": training_commitment,
+            "training_assurance_commitment": training_assurance,
+        }:
+            raise ModelRiskStateError(
+                "training_run evidence may persist only verified receipt commitments"
+            )
         immutable = {
             "asset_id": asset,
             "source_id": source,
@@ -1031,6 +1230,112 @@ class ModelRiskAssuranceOfficer:
         if node.get("id") != graph_node_id:
             raise ModelRiskStateError("evidence graph returned an unexpected identity")
         return saved
+
+    def record_verified_training_receipt_evidence(
+        self,
+        asset_id: str,
+        *,
+        receipt_id: str,
+        actor: str,
+        valid_until: float,
+    ) -> dict[str, Any]:
+        """Verify one private receipt and persist only its public commitment.
+
+        The receipt is resolved from the active tenant's private store. Trust
+        anchors come only from protected server-side audit and approver
+        registries; neither receipt keys nor arbitrary caller-provided receipt
+        bodies are accepted here. Human Model Risk review remains a separate
+        required transition.
+        """
+
+        asset = _asset_id(asset_id)
+        observation = self.get_observation(asset)
+        if observation is None:
+            raise ModelRiskStateError("training evidence requires an observed asset")
+        reference = _required_text(receipt_id, "receipt_id", 128)
+        operator = _required_text(actor, "actor", 256)
+        observed = self._now()
+        expiry = _expiry(valid_until, observed)
+        from .paths import current_tenant_id_strict
+
+        tenant_id = current_tenant_id_strict()
+        if not tenant_id:
+            raise ModelRiskStateError(
+                "training receipt evidence requires an explicit tenant scope"
+            )
+        try:
+            from .training import receipts as training_receipts
+
+            (
+                trusted_receipt_pubkeys,
+                trusted_approver_pubkeys,
+            ) = training_receipts.server_training_trust_registries()
+            receipt = training_receipts.read_verified_training_receipt(
+                reference,
+                trusted_receipt_pubkeys=trusted_receipt_pubkeys,
+                trusted_approver_pubkeys=trusted_approver_pubkeys,
+                expected_tenant_id=tenant_id,
+            )
+            commitment = training_receipts.public_transparency_commitment(
+                receipt,
+                trusted_receipt_pubkeys=trusted_receipt_pubkeys,
+                trusted_approver_pubkeys=trusted_approver_pubkeys,
+                expected_tenant_id=tenant_id,
+            )
+            normalized = _training_commitment(commitment)
+            assurance_commitment = (
+                training_receipts.model_risk_assurance_commitment(
+                    receipt,
+                    trusted_receipt_pubkeys=trusted_receipt_pubkeys,
+                    trusted_approver_pubkeys=trusted_approver_pubkeys,
+                    expected_tenant_id=tenant_id,
+                )
+            )
+            assurance = _training_assurance_commitment(
+                assurance_commitment,
+            )
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            raise ModelRiskStateError(
+                "tenant-private training receipt could not be verified"
+            ) from None
+        if normalized["adapter_sha256"] != observation.get("version_digest"):
+            raise ModelRiskStateError(
+                "verified training receipt covers different artifact bytes"
+            )
+        if (
+            normalized["dataset_sha256"] != assurance["dataset_sha256"]
+            or normalized["adapter_sha256"] != assurance["adapter_sha256"]
+            or normalized["receipt_payload_sha256"]
+            != assurance["receipt_payload_sha256"]
+        ):
+            raise ModelRiskStateError(
+                "verified training receipt commitments do not match"
+            )
+        scope_digest = _training_evidence_scope(normalized, assurance)
+        return self._record_evidence(
+            asset,
+            source_id=(
+                "training_receipt:"
+                f"{normalized['receipt_payload_sha256']}"
+            ),
+            evidence_kind="training_run",
+            result="passed",
+            scope_digest=scope_digest,
+            artifact_digest=normalized["adapter_sha256"],
+            actor=operator,
+            observed_at=observed,
+            valid_until=expiry,
+            evaluator_digest=None,
+            summary="Verified tenant-private training receipt commitment.",
+            metrics={
+                "training_receipt_commitment": normalized,
+                "training_assurance_commitment": assurance,
+            },
+            verified_training_commitment=normalized,
+            verified_training_assurance=assurance,
+        )
 
     def get_evidence(self, evidence_id: str, *, now: float | None = None) -> dict[str, Any] | None:
         record_id = _required_text(evidence_id, "evidence_id", 64)
@@ -1743,6 +2048,8 @@ class ModelRiskAssuranceOfficer:
         if not isinstance(bound_evidence, list) or not bound_evidence:
             return False, "promotion has no bound assurance evidence", authorization
         kinds: set[str] = set()
+        training_dataset_digests: set[str] = set()
+        data_assessment_scopes: set[str] = set()
         for citation in bound_evidence:
             if not isinstance(citation, dict):
                 return False, "promotion evidence binding is malformed", authorization
@@ -1760,11 +2067,59 @@ class ModelRiskAssuranceOfficer:
             if evidence.get("artifact_digest") != authority.get("artifact_digest"):
                 return False, "promotion evidence covers different artifact bytes", authorization
             evidence_kind = str(evidence.get("evidence_kind") or "")
+            if evidence_kind == "data_assessment":
+                data_assessment_scopes.add(str(evidence.get("scope_digest") or ""))
             if (
                 evidence_kind in {"evaluation", "red_team"}
                 and evidence.get("evaluator_digest") != authority.get("evaluator_digest")
             ):
                 return False, "promotion evidence covers a different evaluator", authorization
+            if evidence_kind == "training_run":
+                measurements = evidence.get("metrics")
+                exact_training_fields = {
+                    "training_receipt_commitment",
+                    "training_assurance_commitment",
+                }
+                raw_commitment = None
+                raw_assurance = None
+                if (
+                    isinstance(measurements, Mapping)
+                    and set(measurements) == exact_training_fields
+                ):
+                    raw_commitment = measurements.get(
+                        "training_receipt_commitment"
+                    )
+                    raw_assurance = measurements.get(
+                        "training_assurance_commitment"
+                    )
+                try:
+                    commitment = _training_commitment(raw_commitment)
+                    assurance = _training_assurance_commitment(raw_assurance)
+                except ValueError:
+                    return (
+                        False,
+                        "training-run evidence commitment is missing or malformed",
+                        authorization,
+                    )
+                if (
+                    commitment["dataset_sha256"]
+                    != assurance["dataset_sha256"]
+                    or commitment["adapter_sha256"]
+                    != assurance["adapter_sha256"]
+                    or commitment["receipt_payload_sha256"]
+                    != assurance["receipt_payload_sha256"]
+                    or evidence.get("scope_digest")
+                    != _training_evidence_scope(commitment, assurance)
+                    or evidence.get("artifact_digest") != commitment["adapter_sha256"]
+                    or evidence.get("source_id")
+                    != f"training_receipt:{commitment['receipt_payload_sha256']}"
+                ):
+                    return (
+                        False,
+                        "training-run evidence commitment is stale or mismatched",
+                        authorization,
+                    )
+                training_dataset_digests.add(commitment["dataset_sha256"])
             node_id = str(evidence.get("evidence_node_id") or "")
             from . import evidence_graph
 
@@ -1805,9 +2160,21 @@ class ModelRiskAssuranceOfficer:
                     authorization,
                 )
             kinds.add(evidence_kind)
-        missing = {"evaluation", "red_team"} - kinds
+        required_kinds = {"evaluation", "red_team"}
+        if risk_rung == "weights":
+            required_kinds.update({"training_run", "data_assessment"})
+        missing = required_kinds - kinds
         if missing:
             return False, f"required promotion evidence is missing: {', '.join(sorted(missing))}", authorization
+        if (
+            risk_rung == "weights"
+            and not training_dataset_digests.issubset(data_assessment_scopes)
+        ):
+            return (
+                False,
+                "data-assessment evidence covers different training data",
+                authorization,
+            )
 
         blocking = []
         for finding in self.findings(now=now):
@@ -2282,6 +2649,13 @@ def record_evidence(asset_id: str, **kwargs: Any) -> dict[str, Any]:
     return _DEFAULT.record_evidence(asset_id, **kwargs)
 
 
+def record_verified_training_receipt_evidence(
+    asset_id: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    return _DEFAULT.record_verified_training_receipt_evidence(asset_id, **kwargs)
+
+
 def get_evidence(
     evidence_id: str, *, now: float | None = None,
 ) -> dict[str, Any] | None:
@@ -2399,6 +2773,7 @@ __all__ = [
     "record_deployment",
     "record_evidence",
     "record_incident",
+    "record_verified_training_receipt_evidence",
     "render_assurance_pack",
     "review_declaration",
     "review_evidence",
