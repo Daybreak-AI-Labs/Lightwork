@@ -71,6 +71,7 @@ from .auth import (
     require_permission,
     require_principal,
     require_principal_in_request_context,
+    require_suite,
     stored_automation_identity,
     websocket_caller_principal,
 )
@@ -1918,6 +1919,7 @@ async def finance_page(request: Request) -> HTMLResponse:
     assessment types — SOX controls, fraud risk, ITGC, credit risk, and
     close readiness — with the shared review pop-out."""
     require_permission(request, "operate")
+    require_suite(request, "finance")
     return templates.TemplateResponse(
         request, "finance.html", _workspace_ctx("finance"))
 

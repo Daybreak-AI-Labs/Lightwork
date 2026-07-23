@@ -132,6 +132,7 @@ from .auth import (
     require_global_permission,
     require_permission,
     require_suite,
+    scope_to_suites,
     stored_automation_identity,
 )
 
@@ -1200,6 +1201,17 @@ async def delete_assessment_template(request: Request,
             "builtin_restored": assessment_type[:64] in TEMPLATES}
 
 
+def _assessment_suite(record: dict) -> str:
+    """Department suite for a saved assessment session record."""
+    from maverick.assessment import template_department
+
+    return template_department(str(record.get("type", "")))
+
+
+def _require_assessment_suite(request: Request, record: dict) -> None:
+    require_suite(request, _assessment_suite(record))
+
+
 @router.get("/assess/sessions")
 async def list_assessment_sessions(request: Request) -> dict:
     """Summaries of every saved third-party assessment session (PIA / AIRA /
@@ -1207,7 +1219,9 @@ async def list_assessment_sessions(request: Request) -> dict:
     ``pending_review`` or ``needs_more`` (open follow-ups outstanding)."""
     require_permission(request, "operate")
     from maverick.assessment import list_saved
-    return {"sessions": await run_in_threadpool(list_saved)}
+    sessions = await run_in_threadpool(list_saved)
+    return {"sessions": scope_to_suites(
+        request, sessions, suite_of=_assessment_suite, keep_none=False)}
 
 
 @router.get("/assess/sessions/{assessment_id}")
@@ -1220,6 +1234,7 @@ async def get_assessment_session(request: Request, assessment_id: str) -> dict:
     record = await run_in_threadpool(load_saved, assessment_id[:64])
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
+    _require_assessment_suite(request, record)
     # Enrich with the template's question text + section so the pop-out
     # shows real questions, never raw ids like "pia_necessity".
     tpl = get_template(str(record.get("type", "")))
@@ -1238,7 +1253,11 @@ async def add_assessment_followups(
     ``needs_more`` until every follow-up is answered; the respondent-facing
     harness (intake portal) picks them up and re-interviews. Audited."""
     require_permission(request, "operate")
-    from maverick.assessment import add_followups
+    from maverick.assessment import add_followups, load_saved
+    existing = await run_in_threadpool(load_saved, assessment_id[:64])
+    if existing is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    _require_assessment_suite(request, existing)
     who = ""
     try:
         principal = getattr(request.state, "principal", None)
@@ -1248,8 +1267,7 @@ async def add_assessment_followups(
     record = await run_in_threadpool(
         add_followups, assessment_id[:64], body.questions, who or "reviewer")
     if record is None:
-        raise HTTPException(status_code=404,
-                            detail="no such assessment (or empty questions)")
+        raise HTTPException(status_code=400, detail="empty questions")
     try:
         from maverick.audit import record as audit_record
         audit_record("ASSESSMENT_FOLLOWUP", agent=who or "reviewer",
@@ -1268,7 +1286,11 @@ async def decide_assessment_session(
     next review -- the workspace surfaces the record again when it comes due,
     and the follow-up cycle re-opens it. Audited."""
     require_permission(request, "operate")
-    from maverick.assessment import decide_assessment
+    from maverick.assessment import decide_assessment, load_saved
+    existing = await run_in_threadpool(load_saved, assessment_id[:64])
+    if existing is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    _require_assessment_suite(request, existing)
     who = ""
     try:
         principal = getattr(request.state, "principal", None)

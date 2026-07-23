@@ -16,6 +16,7 @@ def _fresh_world(tmp_path, monkeypatch):
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
     config.reset_config_cache()
     import maverick_dashboard.api as api
     api._world_cache.clear()
@@ -69,3 +70,53 @@ def test_page_empty_state():
     resp = client.get("/finance")
     assert resp.status_code == 200
     assert "No assessments yet" in resp.text
+
+
+def _as(monkeypatch, principal):
+    from maverick_dashboard import api, auth
+
+    monkeypatch.setattr(auth, "caller_principal", lambda request: principal)
+    monkeypatch.setattr(api, "caller_principal", lambda request: principal)
+
+
+def test_finance_page_requires_finance_suite(monkeypatch):
+    from maverick_dashboard import suite_grants
+
+    suite_grants.set_suites("user:legal", ["legal"])
+    _as(monkeypatch, "user:legal")
+
+    resp = client.get("/finance")
+
+    assert resp.status_code == 403
+    assert "department" in resp.json()["detail"]
+
+
+def test_assessment_session_api_scopes_records_by_suite(monkeypatch):
+    finance = _seed("sox_control", "Q3 revenue controls")
+    privacy = _seed("pia", "Acme CRM")
+    from maverick_dashboard import suite_grants
+
+    suite_grants.set_suites("user:legal", ["legal"])
+    _as(monkeypatch, "user:legal")
+
+    listing = client.get("/api/v1/assess/sessions")
+    assert listing.status_code == 200
+    assert listing.json()["sessions"] == []
+    assert client.get(f"/api/v1/assess/sessions/{finance.id}").status_code == 403
+    assert client.post(
+        f"/api/v1/assess/sessions/{finance.id}/followups",
+        json={"questions": ["Who approved this?"]},
+    ).status_code == 403
+    assert client.post(
+        f"/api/v1/assess/sessions/{finance.id}/decide",
+        json={"decision": "approved"},
+    ).status_code == 403
+
+    suite_grants.set_suites("user:fin", ["finance"])
+    _as(monkeypatch, "user:fin")
+
+    listing = client.get("/api/v1/assess/sessions")
+    assert listing.status_code == 200
+    assert [s["id"] for s in listing.json()["sessions"]] == [finance.id]
+    assert client.get(f"/api/v1/assess/sessions/{finance.id}").status_code == 200
+    assert client.get(f"/api/v1/assess/sessions/{privacy.id}").status_code == 403
