@@ -72,9 +72,9 @@ KNOWN_SECTIONS = frozenset({
     # lifecycle (self_harness/self_improvement/dreaming/fleet_memory/rehearsal/
     # memory_guard) plus actions/domains/fairness_monitor/speculative/tax.
     # Guarded against future drift by test_wizard_parity's wizard-section check.
-    "actions", "domains", "dreaming", "fairness_monitor", "fleet_memory",
-    "memory_guard", "rehearsal", "self_harness", "self_improvement",
-    "speculative", "tax",
+    "actions", "domains", "dreaming", "earned_autonomy", "fairness_monitor",
+    "fleet_memory", "memory_guard", "rehearsal", "self_harness",
+    "self_improvement", "speculative", "tax",
     # Structured rubric verifier + JitRL test-time adaptation: read by
     # load_config (config.get_reasoning_reward / get_jit_rl) and written by the
     # wizard's advanced opt-out steps.

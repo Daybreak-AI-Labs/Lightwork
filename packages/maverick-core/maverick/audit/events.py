@@ -200,6 +200,18 @@ class EventKind:
     # not rest on the mutable world-model `approvals` row alone (audit H28).
     # payload: approval_id:int, status:str (approved|denied), decided_by:str.
     APPROVAL_DECISION = "approval_decision"
+    # Earned Autonomy (maverick.earned_autonomy): a consequence card pinned a
+    # prediction for a high-stakes action BEFORE it ran, so predicted-vs-actual
+    # accuracy is provable from the chain. payload: card:str, principal:str,
+    # action:str, risk:str, predicted:float, episode_id:int, reversible:bool,
+    # source:str (rehearsal|simulate|declared).
+    CONSEQUENCE_CARD = "consequence_card"
+    # Earned Autonomy dial movement: an action type earned policy-auto-approval,
+    # lost it on a missed prediction, or an operator withdrew it. payload:
+    # decision:str (graduate|demote|revoke), principal:str, action:str, plus
+    # streak/hits/misses ints on graduate, card:str on demote, reason:str on
+    # revoke.
+    AUTONOMY_GRADUATION = "autonomy_graduation"
     # AI system lifecycle: an AI system/component was retired (decommissioned).
     # Closes the ISO/IEC 42001 A.6.2 lifecycle at the far end — the signed chain
     # records the deliberate end-of-life the same way it records learning

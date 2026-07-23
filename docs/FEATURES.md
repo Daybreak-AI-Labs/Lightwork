@@ -772,6 +772,27 @@ here.
   grading its own work. Newest outcome wins, clamped to [0,1]; when disabled the
   verifier proxy passes through unchanged. The HTTP entry point a CRM/ERP/ticketing
   connector calls once reality reports back.
+- **Earned Autonomy — consequence-proven trust** (`earned_autonomy.py`,
+  `maverick earned-autonomy`, opt-in `[earned_autonomy] enable` /
+  `MAVERICK_EARNED_AUTONOMY`; graduation additionally requires arming
+  `auto_graduate`, strict-parsed) — agents earn the right to act, action type
+  by action type, by proving they predict consequences correctly. Each
+  rehearsed high-stakes action pins a **consequence card** (hash-chained,
+  append-only) with the predicted outcome BEFORE it runs; when reality reports
+  back through the Consequence Engine, `reconcile` scores predicted-vs-actual
+  per `(agent, action type)`. A proven streak (default 10 consecutive
+  accurate, ≥90% overall) **graduates** the action from "a human approves" to
+  "policy auto-approves" — implemented as a revocable standing consent-ledger
+  grant the existing approval path already honours — and one miss **demotes
+  instantly** (revoke-before-record, so authority never outruns evidence).
+  Interlocks fail toward the human: no graduation while `calibration` is
+  frozen or a learning HALT is active, `max_auto_risk` defaults to `medium`
+  (graduating irreversible high-risk types is an explicit operator decision),
+  and `require_reversible` demands every card declare an inverse. `run_saga`
+  is the compensating half: steps ship their undo, an irreversible step
+  refuses to start, and a mid-saga failure rolls the completed prefix back in
+  reverse. Every card, hit/miss, graduation, and demotion is a signed audit
+  event (`consequence_card`, `autonomy_graduation`).
 - **Emergent Substrate — an auditable coordination shorthand** (`emergent_protocol.py`
   + `emergent_tokens.py`, `maverick codebook` / `codec-learn` / `codec-probe`,
   opt-in `[emergent_protocol]` / `[emergent_codec]` / `MAVERICK_EMERGENT_CODEC`) —

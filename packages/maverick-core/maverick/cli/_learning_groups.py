@@ -241,6 +241,43 @@ def workforce_graduation(db_path: str | None) -> None:
     click.echo("  [[workforce.agents]]\n  name = \"<agent>\"\n  onboarding = false")
 
 
+@main.command("earned-autonomy")
+@click.option("--reconcile", "do_reconcile", is_flag=True,
+              help="Score unscored consequence cards against landed real "
+                   "outcomes first (may graduate or demote action types).")
+def earned_autonomy(do_reconcile: bool) -> None:
+    """Which action types have earned policy-auto-approval, and how?
+
+    The Earned Autonomy dial (maverick.earned_autonomy): per (agent, action
+    type), how many predictions reality confirmed, the current accurate
+    streak, and whether the action type has graduated from "a human approves"
+    to "policy auto-approves". Without --reconcile this is read-only.
+    """
+    from ..earned_autonomy import enabled, shared
+    engine = shared()
+    if do_reconcile:
+        from . import _run_learning_cli
+        report = _run_learning_cli("earned_autonomy", engine.reconcile)
+        click.echo(f"Reconciled {report.scored} card(s): {report.hits} hit(s), "
+                   f"{report.misses} miss(es); graduated "
+                   f"{list(report.graduated) or 'none'}, demoted "
+                   f"{list(report.demoted) or 'none'}.")
+    states = engine.status()
+    if not enabled():
+        click.echo("Earned autonomy is disabled ([earned_autonomy] enable / "
+                   "MAVERICK_EARNED_AUTONOMY).")
+    if not states:
+        click.echo("No consequence-card evidence yet (cards are pinned when "
+                   "rehearsed high-risk actions run, and scored when reality "
+                   "reports back via `maverick record-outcome`).")
+        return
+    click.echo(f"Cards: {engine.cards.verify()}  Ledger: {engine.ledger.verify()}")
+    for s in states:
+        dial = "AUTO (graduated)" if s.graduated else "human approves"
+        click.echo(f"  {s.principal} / {s.action}: {dial} -- "
+                   f"{s.hits}/{s.samples} accurate, streak {s.streak}")
+
+
 @main.command("domains-eval")
 @click.option("--check", "check_only", is_flag=True,
               help="Lint the eval suite against the roster and exit (no provider needed).")
