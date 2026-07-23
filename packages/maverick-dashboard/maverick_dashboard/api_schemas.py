@@ -1284,6 +1284,23 @@ class SecuritySuiteConfigIn(BaseModel):
         if self.response_execution and not self.env_hunt:
             raise ValueError("response execution requires env_hunt")
         return self
+class LicenseIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    jurisdiction: str = Field(..., min_length=1, max_length=120)
+    authority: str = Field(..., min_length=1, max_length=200)
+    license_number: str = Field(..., min_length=1, max_length=120)
+    holder: str | None = Field(None, max_length=200)
+    status: str = Field("active",
+                        pattern="^(active|pending|lapsed|surrendered)$")
+    renewal_at: float | None = Field(None, ge=0)
+    cadence_days: int = Field(365, ge=1, le=3650)
+
+
+class LicenseNoteIn(BaseModel):
+    note: str | None = Field(None, max_length=2000)
+    filename: str | None = Field(None, max_length=300)
+
+
 class PartnerTenantIn(BaseModel):
     """One client deployment in the partner fleet registry. The base URL is
     the agent's root (its /health and /value.json hang off it); the optional

@@ -92,6 +92,8 @@ from .api_schemas import (
     JDDraftIn,
     JDMatchIn,
     LearningToggleIn,
+    LicenseIn,
+    LicenseNoteIn,
     OAuthAuthorizeIn,
     OAuthExchangeIn,
     OneTrustImportIn,
@@ -1595,6 +1597,143 @@ async def privacy_board(request: Request) -> dict:
     return payload
 
 
+def _finance_session_rows() -> list[dict]:
+    """Saved assessments filtered to the finance department's types --
+    the same chassis the privacy board runs on, different department."""
+    from maverick.assessment import custom_template_records, list_saved
+
+    from .app import FINANCE_ASSESSMENT_TYPES
+    types = set(FINANCE_ASSESSMENT_TYPES) | {
+        t for t, rec in custom_template_records().items()
+        if rec.get("department") == "finance"}
+    return [s for s in list_saved() if s.get("type") in types]
+
+
+def _decision_rate(sessions: list[dict], kinds: tuple[str, ...]) -> dict:
+    """Approved-vs-rejected pass rate over decided records of the given
+    types -- control tests and close readiness read straight off the
+    register, never estimated."""
+    rows = [s for s in sessions if s.get("type") in kinds
+            and s.get("status") in ("approved", "rejected")]
+    ok = sum(1 for s in rows if s.get("status") == "approved")
+    return {"passed": ok, "total": len(rows),
+            "pct": round(100.0 * ok / len(rows), 1) if rows else None}
+
+
+def _finance_sod() -> dict:
+    """Structural SoD lint over the shipped finance/banking packs -- the
+    record/authorize/custody/reconcile separation, checked statically."""
+    try:
+        from maverick.domain import builtin_dir, load_domains
+        from maverick.finance.sod_linter import lint_roster
+        packs = {n: d for n, d in load_domains(builtin_dir()).items()
+                 if n.startswith(("finance", "bank"))}
+        conflicts = lint_roster(packs)
+        return {"packs": len(packs), "conflicts": len(conflicts),
+                "detail": [str(c) for c in conflicts[:5]]}
+    except Exception as exc:  # pragma: no cover -- packs dir varies by install
+        return {"packs": 0, "conflicts": None, "error": str(exc)[:200]}
+
+
+def _finance_posture() -> dict:
+    """The finance control-coverage report. Control coverage, not an audit
+    opinion -- the disclaimer ships with the numbers."""
+    from dataclasses import asdict
+
+    from maverick.finance.status import FINANCE_DISCLAIMER, finance_status
+    checks = [asdict(c) for c in finance_status()]
+    return {"controls": checks,
+            "active": sum(1 for c in checks if c.get("status") == "active"),
+            "total": len(checks),
+            "disclaimer": FINANCE_DISCLAIMER}
+
+
+@router.get("/finance/board")
+async def finance_board(request: Request) -> dict:
+    """The finance command center in one round trip -- the board chassis
+    parameterized to the finance department: assessment KPIs and learning
+    over the finance types, control-test and close-readiness pass rates
+    from decided records, the SoD lint, the finance control-coverage
+    posture (with its not-an-audit-opinion disclaimer), and the regulatory
+    license renewal runway."""
+    require_permission(request, "operate")
+    now = time.time()
+    sessions = await run_in_threadpool(_finance_session_rows)
+    payload = _board_assessment_plane(sessions, now)
+    payload["sessions"] = _board_session_rows(sessions)
+    payload["control_tests"] = _decision_rate(sessions,
+                                              ("sox_control", "itgc"))
+    payload["close_readiness"] = _decision_rate(sessions,
+                                                ("close_readiness",))
+    payload["fraud_open"] = sum(
+        1 for s in sessions if s.get("type") == "fraud_risk"
+        and s.get("status") in ("pending_review", "needs_more"))
+    payload["sod"] = await run_in_threadpool(_finance_sod)
+    payload["finance_posture"] = await run_in_threadpool(_finance_posture)
+    from maverick.license_registry import runway
+    payload["licenses"] = await run_in_threadpool(runway)
+    from maverick.assessment import acceptance_metrics
+
+    from .app import FINANCE_ASSESSMENT_TYPES
+    payload["learning"] = await run_in_threadpool(
+        acceptance_metrics, types=set(FINANCE_ASSESSMENT_TYPES))
+    payload["generated_at"] = now
+    return payload
+
+
+# ---- regulatory license register (state-by-state renewals) -----------------
+
+@router.get("/licenses")
+async def list_regulatory_licenses(request: Request) -> dict:
+    """The license inventory with computed renewal runway, soonest first."""
+    require_permission(request, "operate")
+    from maverick.license_registry import list_licenses, runway
+    return {"licenses": await run_in_threadpool(list_licenses),
+            "runway": await run_in_threadpool(runway)}
+
+
+@router.post("/licenses", status_code=201)
+async def add_regulatory_license(request: Request, body: LicenseIn) -> dict:
+    require_permission(request, "operate")
+    from maverick.license_registry import add_license
+    return await run_in_threadpool(
+        lambda: add_license(
+            name=body.name, jurisdiction=body.jurisdiction,
+            authority=body.authority, license_number=body.license_number,
+            holder=body.holder or "", status=body.status,
+            renewal_at=body.renewal_at, cadence_days=body.cadence_days,
+            added_by=_request_actor(request)))
+
+
+@router.post("/licenses/{license_id}/renew")
+async def renew_regulatory_license(request: Request, license_id: str,
+                                   body: LicenseNoteIn) -> dict:
+    """Record a completed renewal (clock advances FROM the deadline).
+    Humans file with the authority; the register only records that."""
+    require_permission(request, "operate")
+    from maverick.license_registry import renew
+    rec = await run_in_threadpool(
+        lambda: renew(license_id[:40], note=body.note or "",
+                      by=_request_actor(request)))
+    if rec is None:
+        raise HTTPException(status_code=404, detail="no such license")
+    return rec
+
+
+@router.post("/licenses/{license_id}/evidence")
+async def license_evidence(request: Request, license_id: str,
+                           body: LicenseNoteIn) -> dict:
+    require_permission(request, "operate")
+    from maverick.license_registry import attach_evidence
+    rec = await run_in_threadpool(
+        lambda: attach_evidence(license_id[:40], note=body.note or "",
+                                filename=body.filename or "",
+                                by=_request_actor(request)))
+    if rec is None:
+        raise HTTPException(status_code=404, detail="no such license")
+    return rec
+
+
 # ---- partner fleet (multi-tenant console) ----------------------------------
 
 def _probe_tenant(t: dict) -> dict:
@@ -1709,6 +1848,14 @@ async def partner_fleet(request: Request, check: int = 0) -> dict:
 
 # ---- audit binder (the regulator-grade evidence pack) ----------------------
 
+def _binder_finance_section() -> dict:
+    """Finance evidence for the binder: posture (with its disclaimer), the
+    structural SoD lint, and the license renewal runway."""
+    from maverick.license_registry import runway
+    return {"posture": _finance_posture(), "sod": _finance_sod(),
+            "licenses": runway()}
+
+
 def _binder_payload(days: int = 90) -> dict:
     """Everything an auditor asks for, assembled from the records themselves:
     per-day chain verification over the signed audit log, the event summary,
@@ -1806,6 +1953,10 @@ def _binder_payload(days: int = 90) -> dict:
         "assessments": assessments,
         "registers": registers,
         "learning": acceptance_metrics(),
+        # Finance evidence: control coverage, not an audit opinion — the
+        # disclaimer travels with the numbers. Plus the SoD lint and the
+        # regulatory-license renewal runway.
+        "finance": _binder_finance_section(),
     }
 
 

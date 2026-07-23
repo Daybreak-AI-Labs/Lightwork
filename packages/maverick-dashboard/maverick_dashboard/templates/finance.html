@@ -11,7 +11,102 @@
   <p class="page-subtitle">The finance team's workspace: every control and risk assessment the
     platform has run — SOX controls, fraud risk, ITGC, credit risk, and close readiness — with
     risk ratings, aging, and open follow-ups. Review and send questions back without leaving
-    this screen.</p>
+    this screen. <a href="/finance/board">Command center →</a></p>
+
+  <div class="section-head"><h2>Licenses &amp; renewals</h2></div>
+  <div class="panel">
+    <p class="muted" style="font-size: var(--text-sm);">The state-by-state regulatory license
+      register: every license with its renewal clock. Renewing records the act and advances the
+      clock from the deadline — humans file with the authority; the register keeps the evidence.</p>
+    <form id="lic-form" style="display:flex; gap:var(--space-2); flex-wrap:wrap; margin-bottom:var(--space-3);">
+      <label style="flex:1; min-width:10rem;"><span>License</span>
+        <input class="ctl" name="name" required maxlength="200" placeholder="Money transmitter"></label>
+      <label><span>Jurisdiction</span>
+        <input class="ctl" name="jurisdiction" required maxlength="120" placeholder="NY"></label>
+      <label style="flex:1; min-width:10rem;"><span>Authority</span>
+        <input class="ctl" name="authority" required maxlength="200" placeholder="NYDFS"></label>
+      <label><span>License #</span>
+        <input class="ctl" name="license_number" required maxlength="120" placeholder="MT-104512"></label>
+      <label><span>Renews (days)</span>
+        <input class="ctl" name="days" type="number" min="1" max="3650" value="365"></label>
+      <button class="btn btn--primary" type="submit" style="align-self:end;">Register</button>
+      <span class="muted" id="lic-msg" role="status" aria-live="polite" style="align-self:end; font-size:var(--text-sm);"></span>
+    </form>
+    <div id="lic-table" class="pw-scroll" style="overflow-x:auto;"></div>
+  </div>
+  <script>
+  (function () {
+    'use strict';
+    function load() {
+      fetch('/api/v1/licenses').then(function (r) { return r.json(); }).then(function (d) {
+        var box = document.getElementById('lic-table');
+        box.textContent = '';
+        var rows = d.licenses || [];
+        if (!rows.length) {
+          var p = document.createElement('p');
+          p.className = 'muted';
+          p.textContent = 'No licenses registered yet — the renewal runway starts here.';
+          box.appendChild(p);
+          return;
+        }
+        var tbl = document.createElement('table');
+        var hd = tbl.createTHead().insertRow();
+        ['license', 'jurisdiction', 'authority', 'number', 'status', 'renewal', 'evidence', ''].forEach(function (h) {
+          var th = document.createElement('th');
+          th.scope = 'col'; th.textContent = h; hd.appendChild(th);
+        });
+        var tb = tbl.createTBody();
+        rows.forEach(function (r) {
+          var tr = tb.insertRow();
+          tr.insertCell().textContent = r.name;
+          tr.insertCell().textContent = r.jurisdiction;
+          tr.insertCell().textContent = r.authority;
+          tr.insertCell().textContent = r.license_number;
+          var st = tr.insertCell();
+          var badge = document.createElement('span');
+          badge.className = 'badge ' + (r.status === 'active' ? 'done' : r.status === 'lapsed' ? 'blocked' : 'info');
+          badge.textContent = r.status;
+          st.appendChild(badge);
+          var due = tr.insertCell();
+          due.textContent = r.overdue ? Math.abs(r.days_left) + 'd overdue' : r.days_left + 'd left';
+          if (r.overdue || r.days_left <= 30) due.style.color = 'var(--danger)';
+          tr.insertCell().textContent = (r.evidence || []).length + ' item(s)';
+          var act = tr.insertCell();
+          var btn = document.createElement('button');
+          btn.type = 'button'; btn.className = 'btn';
+          btn.textContent = 'Record renewal';
+          btn.onclick = function () {
+            var note = window.prompt('Evidence note for this renewal (filing receipt, confirmation #):');
+            if (note === null) return;
+            fetch('/api/v1/licenses/' + encodeURIComponent(r.id) + '/renew', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ note: note })
+            }).then(load);
+          };
+          act.appendChild(btn);
+        });
+        box.appendChild(tbl);
+      }).catch(function () {});
+    }
+    document.getElementById('lic-form').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var f = ev.target;
+      var msg = document.getElementById('lic-msg');
+      fetch('/api/v1/licenses', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: f.name.value, jurisdiction: f.jurisdiction.value,
+          authority: f.authority.value, license_number: f.license_number.value,
+          cadence_days: parseInt(f.days.value, 10) || 365
+        })
+      }).then(function (r) {
+        msg.textContent = r.ok ? 'Registered.' : 'Failed: ' + r.status;
+        if (r.ok) { f.reset(); load(); }
+      });
+    });
+    load();
+  })();
+  </script>
 
   {% include "_workspace_worklist.html" %}
 

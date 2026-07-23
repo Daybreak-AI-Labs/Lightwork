@@ -2282,6 +2282,17 @@ async def environment_threats_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/finance/board", response_class=HTMLResponse)
+async def finance_board_page(request: Request) -> HTMLResponse:
+    """The finance command center: the board chassis parameterized to the
+    finance department — control tests, close readiness, SoD lint, the
+    coverage posture (never an audit opinion), the license renewal runway,
+    and the learning loop over finance decisions. Data from
+    GET /api/v1/finance/board."""
+    require_permission(request, "operate")
+    return templates.TemplateResponse(request, "finance_board.html", {})
+
+
 @app.get("/finance", response_class=HTMLResponse)
 async def finance_page(request: Request) -> HTMLResponse:
     """The Finance workspace: the same chassis over the finance team's
