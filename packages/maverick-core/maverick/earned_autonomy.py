@@ -3,9 +3,9 @@
 The biggest blocker to enterprise agents isn't quality, it's trust to take
 irreversible action. Everyone ships agents that draft; almost no one ships
 agents that *act*, because the downside is catastrophic and unprovable. This
-module makes autonomy something an agent **earns, action type by action type,
-by proving it predicts consequences correctly -- with a guaranteed undo until
-it has.**
+module makes autonomy something the workforce **earns, action type by action
+type, by proving it predicts consequences correctly -- with a guaranteed undo
+until it has.**
 
 Three pieces, fused:
 
@@ -13,32 +13,39 @@ Three pieces, fused:
   a high-stakes action runs, its *predicted* outcome (from the rehearsal twin
   or a governed-action simulation) is pinned into a hash-chained, append-only
   card store -- closing the gap where rehearsal predictions vanished on
-  PROCEED. A card is a commitment: "we predicted THIS before acting".
+  PROCEED. A card is a commitment: "we predicted THIS before acting". Only
+  actions that actually PROCEED are pinned -- a held action is never graded by
+  an outcome it didn't produce.
 * **The predicted-vs-actual join** (:meth:`EarnedAutonomyEngine.reconcile`):
   when reality reports back through the existing Consequence Engine
-  (:mod:`maverick.consequence`, keyed ``(goal_id, episode_id)``), each card is
-  scored hit/miss against the real outcome. The accuracy record per
-  ``(principal, action)`` is the trust evidence -- reality grades the
-  predictor, so the signal can't be gamed by the model grading itself.
-* **The autonomy dial driven by evidence**: an action type whose predictions
-  keep landing graduates from "a human approves" to "policy auto-approves" --
-  implemented as a *revocable standing consent grant*
+  (:mod:`maverick.consequence`, keyed ``(goal_id, episode_id)``), cards are
+  scored hit/miss against the real outcome. One episode outcome grades ONE
+  prediction per action type -- same-episode duplicates are collapsed as
+  ``superseded`` so a single observed consequence can never mint a streak.
+* **The autonomy dial driven by evidence**: the trust unit is the **action
+  type, deployment-wide** -- exactly the unit the enforcement surface grants
+  at (a standing consent grant carries no per-agent scope), so authority is
+  never wider than the evidence that minted it. Events keep the acting
+  agent's identity for provenance, and a miss by ANY agent demotes the action
+  type. Graduation is a *revocable standing consent grant*
   (:func:`maverick.safety.consent.grant_persistent`), so the existing agent
-  gate chain honours it with no new hot-path code. One miss demotes instantly
-  (trust is asymmetric); demotion revokes the grant before it records the
-  evidence, so authority is never ahead of the record.
+  gate chain honours it with no new hot-path code. One miss demotes
+  instantly; the revoke runs BEFORE the evidence write, is re-attempted on
+  every subsequent miss, and a stale-grant sweep at each reconcile retries
+  any revoke that previously failed -- authority never outruns evidence.
 
 Interlocks (all fail toward "keep the human"): graduation is refused while
 :func:`maverick.calibration.learning_frozen` (a drifting verifier must not
 mint autonomy), during a learning HALT, for action types above the
-``max_auto_risk`` ceiling (default ``medium`` -- graduating irreversible
-high-risk actions is an explicit operator decision), and for action types
-whose cards don't declare reversibility when ``require_reversible`` is on.
-Graduation only ever converts require-human into auto-approve for an action
-the capability envelope, governance rules, and budget caps ALREADY permit --
-it changes who approves, never what is permitted, so it cannot widen the
-envelope. Every card, hit, miss, graduation, and demotion is signed into the
-audit chain.
+``max_auto_risk`` ceiling (default ``medium``; the action's risk is
+recomputed from :func:`maverick.safety.tool_risk.tool_risk`, never trusted
+from the card, and an unknown risk level ranks above every ceiling), and for
+action types whose cards don't declare reversibility when
+``require_reversible`` is on. Graduation only ever converts require-human
+into auto-approve for an action the capability envelope, governance rules,
+and budget caps ALREADY permit -- it changes who approves, never what is
+permitted. Every card, hit, miss, graduation, and demotion is a signed audit
+event.
 
 The compensating half of the bet -- "every action ships its inverse" -- is
 :func:`run_saga`: a sequence of :class:`SagaStep` (do + undo) that refuses to
@@ -49,7 +56,12 @@ Posture: OFF by default (kernel rule 1) behind ``[earned_autonomy] enable`` /
 ``MAVERICK_EARNED_AUTONOMY``; and even when on, graduation takes effect only
 once the operator arms ``auto_graduate`` (the authority-widening switch is
 strict-parsed -- a truthy string never arms it). Recording evidence is
-harmless; deciding fails closed.
+harmless; deciding fails closed. NOTE: disabling the feature stops evidence
+capture and the demotion loop but does NOT withdraw grants already minted --
+they live in the consent ledger, which is enforcement's source of truth.
+``maverick earned-autonomy --revoke <action>`` (or
+:meth:`EarnedAutonomyEngine.revoke`) works regardless of the enable switch
+and is the incident-response path.
 """
 from __future__ import annotations
 
@@ -120,53 +132,105 @@ class _ChainedLog:
     The tamper-evident spine both the card store and the trust ledger sit on:
     genesis is 64 zeros, each row's hash covers all its fields plus the
     previous hash (the :mod:`maverick.governed_actions` lineage recipe).
-    ``path=None`` keeps the chain in memory (tests / ephemeral runs). Appends
-    never raise; they return False on any persistence failure.
+    Multi-writer safe: every persisted append happens under the file's
+    :func:`maverick.file_lock.cross_process_lock` and re-reads any rows other
+    writers appended first, so the on-disk chain never forks. ``path=None``
+    keeps the chain in memory (tests / ephemeral runs). Appends never raise;
+    they return False on any persistence/lock failure. ``force=True`` lets a
+    safety-critical row (a demotion/revocation) through even at capacity --
+    the bound is a growth guard, never a reason to keep stale authority.
     """
 
     def __init__(self, path: Path | None = None, *, max_rows: int = _MAX_ROWS) -> None:
         self.path = Path(path) if path is not None else None
         self.max_rows = max_rows
         self._rows: list[dict] = []
-        self._lock = threading.Lock()
+        self._size = -1
+        self._lock = threading.RLock()
         if self.path is not None:
-            self._load()
+            with self._lock:
+                self._refresh_unlocked()
 
     @staticmethod
     def _row_hash(fields: dict, prev: str) -> str:
         material = json.dumps({**fields, "prev": prev}, sort_keys=True, default=str)
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
-    def append(self, fields: dict) -> bool:
-        with self._lock:
-            if len(self._rows) >= self.max_rows:
-                log.warning("earned-autonomy log at capacity; row dropped")
+    def _refresh_unlocked(self) -> None:
+        """Re-read the file when another writer grew it (fork-free chaining)."""
+        if self.path is None:
+            return
+        try:
+            size = self.path.stat().st_size
+        except OSError:
+            return
+        if size == self._size:
+            return
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                lines = fh.readlines()
+        except OSError:
+            return
+        rows: list[dict] = []
+        for raw in lines:
+            try:
+                row = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and "hash" in row:
+                rows.append(row)
+        self._rows = rows
+        self._size = size
+
+    def _append_unlocked(self, fields: dict, *, force: bool) -> bool:
+        if len(self._rows) >= self.max_rows and not force:
+            log.warning("earned-autonomy log at capacity; row dropped")
+            return False
+        prev = self._rows[-1]["hash"] if self._rows else _GENESIS
+        row = dict(fields)
+        row["prev"] = prev
+        row["hash"] = self._row_hash(fields, prev)
+        if self.path is not None:
+            line = json.dumps(row, sort_keys=True) + "\n"
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                with open(
+                    os.open(self.path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600),
+                    "a", encoding="utf-8",
+                ) as fh:
+                    fh.write(line)
+            except Exception:  # pragma: no cover -- best-effort persistence
+                log.debug("earned-autonomy append failed", exc_info=True)
                 return False
-            prev = self._rows[-1]["hash"] if self._rows else _GENESIS
-            row = dict(fields)
-            row["prev"] = prev
-            row["hash"] = self._row_hash(fields, prev)
-            if self.path is not None:
-                try:
-                    self.path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(
-                        os.open(self.path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600),
-                        "a", encoding="utf-8",
-                    ) as fh:
-                        fh.write(json.dumps(row, sort_keys=True) + "\n")
-                except Exception:  # pragma: no cover -- best-effort persistence
-                    log.debug("earned-autonomy append failed", exc_info=True)
-                    return False
-            self._rows.append(row)
-            return True
+            self._size += len(line.encode("utf-8"))
+        self._rows.append(row)
+        return True
+
+    def append(self, fields: dict, *, force: bool = False) -> bool:
+        with self._lock:
+            if self.path is None:
+                return self._append_unlocked(fields, force=force)
+            try:
+                from .file_lock import cross_process_lock
+
+                with cross_process_lock(self.path):
+                    self._refresh_unlocked()
+                    return self._append_unlocked(fields, force=force)
+            except Exception:
+                # No lock -> no unserialized write: a refused append is safe,
+                # a forked chain is not.
+                log.warning("earned-autonomy append refused (no lock)", exc_info=True)
+                return False
 
     def rows(self) -> list[dict]:
         with self._lock:
+            self._refresh_unlocked()
             return list(self._rows)
 
     def verify(self) -> str:
         """Recompute the chain: ``VALID: ...`` or ``BROKEN: link i ...``."""
         with self._lock:
+            self._refresh_unlocked()
             prev = _GENESIS
             for i, row in enumerate(self._rows):
                 fields = {k: v for k, v in row.items() if k not in ("prev", "hash")}
@@ -177,20 +241,6 @@ class _ChainedLog:
                 prev = row["hash"]
             head = prev[:12] if self._rows else _GENESIS[:12]
             return f"VALID: {len(self._rows)} link(s), head {head}"
-
-    def _load(self) -> None:
-        try:
-            with open(self.path, encoding="utf-8") as fh:
-                lines = fh.readlines()
-        except OSError:
-            return
-        for raw in lines[: self.max_rows]:
-            try:
-                row = json.loads(raw)
-            except ValueError:
-                continue
-            if isinstance(row, dict) and "hash" in row:
-                self._rows.append(row)
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +257,10 @@ class ConsequenceCard:
     action ships an inverse (a saga/compensation path). ``params_sha256``
     pins *what* was predicted without persisting raw arguments. The
     ``(goal_id, episode_id)`` key is the join back to reality via
-    :func:`maverick.consequence.resolve`.
+    :func:`maverick.consequence.resolve`. ``principal`` records who acted
+    (provenance); trust itself accrues to the action type. ``risk`` is the
+    recorder's label, kept for the audit trail -- graduation recomputes the
+    action's live risk and never trusts this field.
     """
 
     principal: str
@@ -260,20 +313,25 @@ class CardStore:
 
 
 # ---------------------------------------------------------------------------
-# trust ledger: hit/miss evidence and graduation state per (principal, action)
+# trust ledger: hit/miss evidence and graduation state per action type
 # ---------------------------------------------------------------------------
+
+_SCORING_KINDS = ("hit", "miss", "superseded")
+_EVENT_KINDS = _SCORING_KINDS + ("graduate", "demote", "revoke")
+# Losing authority must never be blocked by a full ledger.
+_FORCED_KINDS = frozenset({"demote", "revoke"})
 
 
 @dataclass(frozen=True)
 class TrustState:
-    """Reduced evidence for one ``(principal, action)`` pair."""
+    """Reduced evidence for one action type (deployment-wide)."""
 
-    principal: str
     action: str
     hits: int = 0
     misses: int = 0
     streak: int = 0
     graduated: bool = False
+    ever_graduated: bool = False
     last_event_ts: float = 0.0
 
     @property
@@ -289,10 +347,14 @@ class TrustState:
 class TrustLedger:
     """Event-sourced, hash-chained record of scoring and graduation events.
 
-    Events: ``hit`` / ``miss`` (a card scored against reality), ``graduate``
+    Events: ``hit`` / ``miss`` (a card scored against reality),
+    ``superseded`` (a same-episode duplicate collapsed into the scored card
+    -- enters the idempotency set, never the counts), ``graduate``
     (auto-approval granted), ``demote`` (a miss withdrew it), ``revoke`` (an
-    operator withdrew it). State is a pure reduction over the chain, so the
-    evidence behind any authority change is replayable from the file alone.
+    operator withdrew it). Trust state is a pure reduction over the chain
+    keyed by ACTION TYPE -- the same unit enforcement grants at -- with each
+    event keeping the acting agent for provenance. Demote/revoke rows append
+    even at capacity (``force``): shedding authority is never rate-limited.
     """
 
     path: Path | None = None
@@ -303,15 +365,15 @@ class TrustLedger:
         if self._log is None:
             self._log = _ChainedLog(self.path, max_rows=self.max_rows)
 
-    def record_event(self, kind: str, principal: str, action: str, *,
+    def record_event(self, kind: str, action: str, *, principal: str = "",
                      card_id: str = "", predicted: float | None = None,
                      actual: float | None = None, reason: str = "",
                      ts: float | None = None) -> bool:
-        if kind not in ("hit", "miss", "graduate", "demote", "revoke"):
+        if kind not in _EVENT_KINDS:
             return False
         row = {
-            "kind": kind, "principal": str(principal)[:120],
-            "action": str(action)[:120], "card_id": str(card_id)[:32],
+            "kind": kind, "action": str(action)[:120],
+            "principal": str(principal)[:120], "card_id": str(card_id)[:32],
             "ts": ts if ts is not None else time.time(),
             "reason": _safe_text(reason, max_len=200),
         }
@@ -319,42 +381,47 @@ class TrustLedger:
             row["predicted"] = _clamp01(predicted)
         if actual is not None:
             row["actual"] = _clamp01(actual)
-        return self._log.append(row)
+        return self._log.append(row, force=kind in _FORCED_KINDS)
 
     def scored_ids(self) -> frozenset[str]:
-        """Card ids already scored -- the reconcile idempotency set."""
+        """Card ids already consumed -- the reconcile idempotency set."""
         return frozenset(
             r["card_id"] for r in self._log.rows()
-            if r.get("kind") in ("hit", "miss") and r.get("card_id"))
+            if r.get("kind") in _SCORING_KINDS and r.get("card_id"))
 
-    def state(self, principal: str, action: str) -> TrustState:
-        return self.states().get(
-            (str(principal), str(action)),
-            TrustState(principal=str(principal), action=str(action)))
+    def state(self, action: str) -> TrustState:
+        return self.states().get(str(action), TrustState(action=str(action)))
 
-    def states(self) -> dict[tuple[str, str], TrustState]:
-        """Reduce the event chain to per-(principal, action) trust state."""
-        out: dict[tuple[str, str], TrustState] = {}
+    def states(self) -> dict[str, TrustState]:
+        """Reduce the event chain to per-action trust state. Never raises on
+        type-corrupt rows -- a bad row is skipped, not a crash."""
+        out: dict[str, TrustState] = {}
         for r in self._log.rows():
-            key = (str(r.get("principal", "")), str(r.get("action", "")))
-            s = out.get(key) or TrustState(principal=key[0], action=key[1])
-            kind = r.get("kind")
-            ts = float(r.get("ts", 0.0) or 0.0)
-            if kind == "hit":
-                s = TrustState(key[0], key[1], s.hits + 1, s.misses,
-                               s.streak + 1, s.graduated, ts)
-            elif kind == "miss":
-                s = TrustState(key[0], key[1], s.hits, s.misses + 1,
-                               0, s.graduated, ts)
-            elif kind == "graduate":
-                s = TrustState(key[0], key[1], s.hits, s.misses,
-                               s.streak, True, ts)
-            elif kind in ("demote", "revoke"):
-                s = TrustState(key[0], key[1], s.hits, s.misses,
-                               s.streak, False, ts)
-            else:  # pragma: no cover -- record_event rejects unknown kinds
+            try:
+                action = str(r.get("action", ""))
+                kind = r.get("kind")
+                ts = float(r.get("ts", 0.0) or 0.0)
+            except (TypeError, ValueError):
                 continue
-            out[key] = s
+            if not action or kind not in _EVENT_KINDS:
+                continue
+            s = out.get(action) or TrustState(action=action)
+            if kind == "hit":
+                s = TrustState(action, s.hits + 1, s.misses, s.streak + 1,
+                               s.graduated, s.ever_graduated, ts)
+            elif kind == "miss":
+                s = TrustState(action, s.hits, s.misses + 1, 0,
+                               s.graduated, s.ever_graduated, ts)
+            elif kind == "graduate":
+                s = TrustState(action, s.hits, s.misses, s.streak,
+                               True, True, ts)
+            elif kind in ("demote", "revoke"):
+                s = TrustState(action, s.hits, s.misses, s.streak,
+                               False, s.ever_graduated, ts)
+            else:  # superseded: idempotency only, no evidence weight
+                s = TrustState(action, s.hits, s.misses, s.streak,
+                               s.graduated, s.ever_graduated, ts)
+            out[action] = s
         return out
 
     def verify(self) -> str:
@@ -412,9 +479,8 @@ class GateResult:
 
 @dataclass(frozen=True)
 class EarnedVerdict:
-    """Whether one (principal, action) pair may graduate. AND of all gates."""
+    """Whether one action type may graduate. AND of all gates."""
 
-    principal: str
     action: str
     graduate: bool
     gates: tuple[GateResult, ...]
@@ -436,9 +502,18 @@ def _ceiling_rank(level: str) -> int:
 
 
 def _action_risk_rank(risk: str) -> int:
-    from .safety.tool_risk import risk_rank
+    """Rank of an action's risk; unknown = ABOVE every ceiling (fail closed).
 
-    return risk_rank(risk)
+    Deliberately not ``tool_risk.risk_rank`` -- that helper maps an unknown
+    level to ``medium``, which would let a mislabeled or novel level (e.g.
+    ``critical``) slip under a ``medium`` ceiling.
+    """
+    from .safety.tool_risk import RISK_LEVELS
+
+    try:
+        return RISK_LEVELS.index(str(risk))
+    except ValueError:
+        return len(RISK_LEVELS)
 
 
 def evaluate_graduation(state: TrustState, *, risk: str, reversible_share: float,
@@ -494,7 +569,7 @@ def evaluate_graduation(state: TrustState, *, risk: str, reversible_share: float
 
     failing = [g for g in gates if not g.ok]
     return EarnedVerdict(
-        state.principal, state.action, not failing, tuple(gates),
+        state.action, not failing, tuple(gates),
         failing[0].reason if failing else "")
 
 
@@ -531,6 +606,21 @@ def _default_revoke_fn(action: str) -> None:
     revoke(action)
 
 
+def _live_risk(action: str) -> str | None:
+    """The action's CURRENT risk class, or None when it can't be resolved.
+
+    Graduation and decisions consult the live classification -- never a
+    card-declared label -- so a mislabeled recorder can't sneak an action
+    under the ceiling. Unresolvable risk keeps the human.
+    """
+    try:
+        from .safety.tool_risk import tool_risk
+
+        return tool_risk(action)
+    except Exception:
+        return None
+
+
 @dataclass(frozen=True)
 class EarnedDecision:
     """The dial's answer for one action right now."""
@@ -544,6 +634,7 @@ class ReconcileReport:
     scored: int = 0
     hits: int = 0
     misses: int = 0
+    superseded: int = 0
     graduated: tuple[str, ...] = ()
     demoted: tuple[str, ...] = ()
 
@@ -557,8 +648,9 @@ class EarnedAutonomyEngine:
     standing grant (which the existing agent approval path already honours)
     and revoke it. Order of operations is asymmetric on purpose: a demotion
     revokes authority BEFORE recording the event (losing authority must never
-    lag), while a graduation takes authority only AFTER the grant succeeded
-    and is compensated if the evidence write then fails.
+    lag), the revoke is re-attempted on every later miss and by the
+    stale-grant sweep, while a graduation takes authority only AFTER the
+    grant succeeded and is compensated if the evidence write then fails.
     """
 
     cards: CardStore = field(default_factory=CardStore)
@@ -569,6 +661,7 @@ class EarnedAutonomyEngine:
     grant_fn: Callable[[str], None] = _default_grant_fn
     revoke_fn: Callable[[str], None] = _default_revoke_fn
     now: Callable[[], float] = time.time
+    _reconcile_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def _policy(self) -> GraduationPolicy:
         return self.policy if self.policy is not None else policy_from_config()
@@ -584,6 +677,15 @@ class EarnedAutonomyEngine:
             self.audit_fn(kind, **payload)
         except Exception:  # pragma: no cover -- audit sink must never block
             log.debug("earned-autonomy audit sink failed", exc_info=True)
+
+    def _revoke_grant(self, action: str) -> None:
+        """Attempt the authority withdrawal; failures are logged, then retried
+        by every later miss and the per-reconcile stale-grant sweep."""
+        try:
+            self.revoke_fn(action)
+        except Exception:
+            log.warning("earned-autonomy grant revoke failed for %s", action,
+                        exc_info=True)
 
     # -- recording ---------------------------------------------------------
 
@@ -621,13 +723,45 @@ class EarnedAutonomyEngine:
 
     # -- the join ----------------------------------------------------------
 
+    @staticmethod
+    def _card_key(row: dict) -> tuple[int, int, str] | None:
+        """The (goal, episode, action) join group, or None when unjoinable."""
+        try:
+            goal_id = int(row.get("goal_id", 0) or 0)
+            episode_id = int(row.get("episode_id", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        action = str(row.get("action", ""))
+        if episode_id <= 0 or not action:
+            return None
+        return (goal_id, episode_id, action)
+
+    def _unscored_groups(self, scored_ids: frozenset[str]) -> dict:
+        """Unscored cards grouped by join key; each group sorted oldest-first."""
+        groups: dict[tuple[int, int, str], list[dict]] = {}
+        for row in self.cards.cards():
+            if not row.get("id") or row.get("id") in scored_ids:
+                continue
+            key = self._card_key(row)
+            if key is None:
+                continue
+            groups.setdefault(key, []).append(row)
+        for rows in groups.values():
+            rows.sort(key=lambda r: float(r.get("ts", 0.0) or 0.0)
+                      if isinstance(r.get("ts", 0.0), (int, float)) else 0.0)
+        return groups
+
     def reconcile(self, *, resolve: Callable[[int, int], float | None] | None = None,
                   ) -> ReconcileReport:
         """Score unscored cards against reality; graduate/demote on the result.
 
         ``resolve(goal_id, episode_id) -> actual | None`` defaults to the
-        Consequence Engine's grounded-outcome join. Idempotent: a card is
-        scored at most once (the ledger's hit/miss events are the record).
+        Consequence Engine's grounded-outcome join. One episode outcome grades
+        ONE prediction per action type: the latest card of a same-episode
+        group is scored, earlier duplicates are recorded ``superseded`` (they
+        enter the idempotency set with no evidence weight). Idempotent, and
+        serialized against concurrent reconciles (in-process lock plus the
+        ledger file's cross-process lock) so evidence is never double-counted.
         """
         if not enabled():
             return ReconcileReport()
@@ -635,73 +769,110 @@ class EarnedAutonomyEngine:
 
         if not learning_write_allowed("earned_autonomy", "reconcile"):
             return ReconcileReport()
+        with self._reconcile_lock:
+            if self.ledger.path is not None:
+                try:
+                    from .file_lock import cross_process_lock
+
+                    with cross_process_lock(self.ledger.path):
+                        return self._reconcile_locked(resolve)
+                except Exception:
+                    log.warning("earned-autonomy reconcile refused (no lock)",
+                                exc_info=True)
+                    return ReconcileReport()
+            return self._reconcile_locked(resolve)
+
+    def _reconcile_locked(self, resolve) -> ReconcileReport:
         if resolve is None:
             from .consequence import resolve as _resolve
 
             resolve = _resolve
         policy = self._policy()
-        scored_ids = self.ledger.scored_ids()
-        touched: dict[tuple[str, str], str] = {}
-        scored = hits = misses = 0
+        touched: set[str] = set()
+        scored = hits = misses = superseded = 0
         demoted: list[str] = []
-        for row in self.cards.cards():
-            if row.get("id") in scored_ids or int(row.get("episode_id", 0) or 0) <= 0:
-                continue
+        groups = self._unscored_groups(self.ledger.scored_ids())
+        for (goal_id, episode_id, action), rows in groups.items():
             try:
-                actual = resolve(int(row["goal_id"]), int(row["episode_id"]))
+                actual = resolve(goal_id, episode_id)
             except Exception:  # pragma: no cover -- a broken join scores nothing
                 continue
             if actual is None:
                 continue
+            row = rows[-1]  # the latest prediction is the one reality grades
+            principal = str(row.get("principal", ""))
             hit = abs(_clamp01(row.get("predicted_outcome", 0.0)) - _clamp01(actual)
                       ) <= policy.tolerance
-            key = (str(row.get("principal", "")), str(row.get("action", "")))
-            self.ledger.record_event(
-                "hit" if hit else "miss", key[0], key[1], card_id=str(row.get("id", "")),
-                predicted=row.get("predicted_outcome"), actual=actual, ts=self.now())
+            if not self.ledger.record_event(
+                    "hit" if hit else "miss", action, principal=principal,
+                    card_id=str(row.get("id", "")),
+                    predicted=row.get("predicted_outcome"), actual=actual,
+                    ts=self.now()):
+                # Evidence that can't be persisted is not evidence; the card
+                # stays unscored and is retried next pass. A miss still sheds
+                # authority NOW -- the demote row is forced, so it lands even
+                # when the ledger is at capacity and the miss row was dropped.
+                if not hit:
+                    self._demote(action, principal=principal,
+                                 card_id=str(row.get("id", "")), demoted=demoted)
+                continue
+            for extra in rows[:-1]:
+                if self.ledger.record_event(
+                        "superseded", action, principal=str(extra.get("principal", "")),
+                        card_id=str(extra.get("id", "")),
+                        reason="same-episode duplicate; one outcome grades one prediction",
+                        ts=self.now()):
+                    superseded += 1
             scored += 1
             hits += int(hit)
             misses += int(not hit)
-            touched[key] = str(row.get("risk", "medium"))
+            touched.add(action)
             if not hit:
-                self._demote(key[0], key[1], card_id=str(row.get("id", "")),
-                             demoted=demoted)
+                self._demote(action, principal=principal,
+                             card_id=str(row.get("id", "")), demoted=demoted)
         graduated = self._graduate_touched(touched, policy)
+        self._sweep_stale_grants()
         return ReconcileReport(scored=scored, hits=hits, misses=misses,
-                               graduated=tuple(graduated), demoted=tuple(demoted))
+                               superseded=superseded, graduated=tuple(graduated),
+                               demoted=tuple(demoted))
 
-    def _demote(self, principal: str, action: str, *, card_id: str,
+    def _demote(self, action: str, *, principal: str, card_id: str,
                 demoted: list[str]) -> None:
-        """One missed prediction withdraws auto-approval immediately."""
-        if not self.ledger.state(principal, action).graduated:
+        """One missed prediction withdraws the action type's auto-approval.
+
+        The revoke is attempted on EVERY miss (not only while the ledger says
+        graduated) so a previously failed withdrawal is retried, and it runs
+        before the demote event -- authority sheds first, evidence follows.
+        """
+        self._revoke_grant(action)
+        if not self.ledger.state(action).graduated:
             return
-        try:
-            self.revoke_fn(action)
-        except Exception:  # pragma: no cover -- keep demoting even if no grant
-            log.warning("earned-autonomy grant revoke failed for %s", action,
-                        exc_info=True)
-        self.ledger.record_event(
-            "demote", principal, action, card_id=card_id,
-            reason="prediction missed reality; trust is withdrawn on one miss",
-            ts=self.now())
+        if not self.ledger.record_event(
+                "demote", action, principal=principal, card_id=card_id,
+                reason="prediction missed reality; trust is withdrawn on one miss",
+                ts=self.now()):
+            log.warning("earned-autonomy demote event not persisted for %s", action)
         demoted.append(action)
         from .audit import EventKind
 
         self._audit(EventKind.AUTONOMY_GRADUATION, decision="demote",
                     principal=principal, action=action, card=card_id)
 
-    def _graduate_touched(self, touched: dict[tuple[str, str], str],
+    def _graduate_touched(self, touched: set[str],
                           policy: GraduationPolicy) -> list[str]:
-        """Evaluate every pair the reconcile touched; grant on a full pass."""
+        """Evaluate every action the reconcile touched; grant on a full pass."""
         graduated: list[str] = []
         frozen = self._frozen()
-        for (principal, action), risk in touched.items():
-            state = self.ledger.state(principal, action)
+        for action in sorted(touched):
+            state = self.ledger.state(action)
             if state.graduated:
                 continue
+            risk = _live_risk(action)
+            if risk is None:
+                continue  # can't classify -> keep the human
             verdict = evaluate_graduation(
                 state, risk=risk,
-                reversible_share=self._reversible_share(principal, action),
+                reversible_share=self._reversible_share(action),
                 policy=policy, frozen=frozen)
             if not verdict.graduate:
                 continue
@@ -712,41 +883,49 @@ class EarnedAutonomyEngine:
                             exc_info=True)
                 continue  # no grant -> no graduation record
             if not self.ledger.record_event(
-                    "graduate", principal, action,
+                    "graduate", action,
                     reason=f"{state.streak} consecutive accurate predictions "
                            f"({state.hits}/{state.samples} overall)",
                     ts=self.now()):
                 # Authority must never outlive its evidence: compensate.
-                try:
-                    self.revoke_fn(action)
-                except Exception:  # pragma: no cover
-                    log.warning("earned-autonomy grant compensation failed for %s",
-                                action, exc_info=True)
+                self._revoke_grant(action)
                 continue
             graduated.append(action)
             from .audit import EventKind
 
             self._audit(EventKind.AUTONOMY_GRADUATION, decision="graduate",
-                        principal=principal, action=action, streak=state.streak,
+                        action=action, streak=state.streak,
                         hits=state.hits, misses=state.misses)
         return graduated
 
-    def _reversible_share(self, principal: str, action: str) -> float:
-        rows = [r for r in self.cards.cards()
-                if r.get("principal") == principal and r.get("action") == action]
+    def _sweep_stale_grants(self) -> None:
+        """Retry the withdrawal for any action that lost its graduation.
+
+        A revoke that failed at demote time (consent ledger unavailable, full,
+        corrupted key) must not leave a live grant behind forever; every
+        reconcile re-runs the withdrawal for demoted/revoked action types.
+        Revoking an absent grant is a cheap no-op, so this is idempotent.
+        """
+        for action, state in self.ledger.states().items():
+            if state.ever_graduated and not state.graduated:
+                self._revoke_grant(action)
+
+    def _reversible_share(self, action: str) -> float:
+        rows = [r for r in self.cards.cards() if r.get("action") == action]
         if not rows:
             return 0.0
         return sum(1 for r in rows if r.get("reversible") is True) / len(rows)
 
     # -- deciding ----------------------------------------------------------
 
-    def decide(self, principal: str, action: str, *, risk: str | None = None,
-               ) -> EarnedDecision:
-        """May ``action`` auto-run for ``principal`` right now?
+    def decide(self, action: str, *, risk: str | None = None) -> EarnedDecision:
+        """May ``action`` auto-run right now?
 
         Read-only; every uncertainty resolves to "keep the human". The live
         enforcement path is the consent-ledger grant the graduation wrote --
-        this is the queryable answer (CLI / dashboard / integrations).
+        this is the queryable answer (CLI / dashboard / integrations). When
+        ``risk`` is omitted the action's live classification is used; an
+        unresolvable or unknown risk level keeps the human.
         """
         if not enabled():
             return EarnedDecision(False, "earned autonomy disabled")
@@ -763,16 +942,13 @@ class EarnedAutonomyEngine:
         if self._frozen():
             return EarnedDecision(False, "learning frozen: autonomy suspended")
         if risk is None:
-            try:
-                from .safety.tool_risk import tool_risk
-
-                risk = tool_risk(action)
-            except Exception:
+            risk = _live_risk(action)
+            if risk is None:
                 return EarnedDecision(False, "action risk unavailable")
         if _action_risk_rank(risk) > _ceiling_rank(policy.max_auto_risk):
             return EarnedDecision(
                 False, f"{risk!r} risk is above the max_auto_risk ceiling")
-        state = self.ledger.state(principal, action)
+        state = self.ledger.state(action)
         if not state.graduated:
             return EarnedDecision(
                 False, f"not graduated: streak {state.streak}, "
@@ -780,16 +956,13 @@ class EarnedAutonomyEngine:
         return EarnedDecision(
             True, f"graduated: {state.hits}/{state.samples} accurate predictions")
 
-    def revoke(self, principal: str, action: str, *, reason: str = "operator revoke",
-               ) -> bool:
-        """Operator withdrawal of an earned grant. Always available."""
-        try:
-            self.revoke_fn(action)
-        except Exception:  # pragma: no cover -- revoke the record regardless
-            log.warning("earned-autonomy grant revoke failed for %s", action,
-                        exc_info=True)
-        ok = self.ledger.record_event("revoke", principal, action, reason=reason,
-                                      ts=self.now())
+    def revoke(self, action: str, *, reason: str = "operator revoke",
+               principal: str = "operator") -> bool:
+        """Operator withdrawal of an earned grant. Works even while the
+        feature is disabled -- this is the incident-response path."""
+        self._revoke_grant(action)
+        ok = self.ledger.record_event("revoke", action, principal=principal,
+                                      reason=reason, ts=self.now())
         from .audit import EventKind
 
         self._audit(EventKind.AUTONOMY_GRADUATION, decision="revoke",
@@ -797,7 +970,7 @@ class EarnedAutonomyEngine:
         return ok
 
     def status(self) -> list[TrustState]:
-        """Every (principal, action) trust state, most-proven first."""
+        """Every action type's trust state, most-proven first."""
         return sorted(self.ledger.states().values(),
                       key=lambda s: (-int(s.graduated), -s.streak, -s.hits))
 
@@ -909,13 +1082,17 @@ def capture_prediction(verdict, *, principal: str, action: str, risk: str,
                        engine: EarnedAutonomyEngine | None = None) -> str | None:
     """Pin a rehearsal verdict as a consequence card. Never raises.
 
-    The default-off hook the agent loop calls after the rehearsal twin speaks:
-    a verdict the model actually vouched for (``known``) becomes evidence; the
-    disabled/no-support placeholder (predicted 0.5, ``known=False``) is
-    filtered so sentinels can't launder into accuracy.
+    The default-off hook the agent loop calls after the rehearsal twin speaks.
+    Only a PROCEED verdict the model actually vouched for (``known``) becomes
+    evidence: the disabled/no-support placeholder (predicted 0.5,
+    ``known=False``) is filtered so sentinels can't launder into accuracy,
+    and a held (BLOCK/ESCALATE) action never executes, so its prediction was
+    never tested by reality and must not be graded by the episode's outcome.
     """
     try:
         if not enabled() or not getattr(verdict, "known", False):
+            return None
+        if str(getattr(verdict, "decision", "")) != "proceed":
             return None
         return (engine or shared()).record_card(
             principal=principal, action=action, risk=risk,

@@ -1999,8 +1999,13 @@ def get_earned_autonomy() -> dict:
     cfg = load_config().get("earned_autonomy", {})
 
     def _num(key: str, default: float, cast=float, lo: float = 0.0, hi: float | None = None):
+        raw = cfg.get(key, default)
+        if isinstance(raw, bool):
+            # bool is an int subclass; `min_streak = true` must not collapse
+            # the graduation bar to 1 -- numeric policy keys demand numbers.
+            return default
         try:
-            value = cast(cfg.get(key, default))
+            value = cast(raw)
         except (TypeError, ValueError):
             return default
         if not math.isfinite(float(value)) or value < lo:

@@ -2203,18 +2203,20 @@ class Agent:
             from .rehearsal_runtime import gate_tool
             v = gate_tool(domain=self.domain, role=self.role,
                           last_tool=self._last_tool(), tool_name=name)
-            try:  # pin the prediction as earned-autonomy evidence (default-off,
-                # module self-gated); PROCEED verdicts used to vanish, and they
-                # are exactly the predictions reality later grades.
-                from .earned_autonomy import capture_prediction
-                capture_prediction(
-                    v, principal=getattr(self, "_autonomy_name", self.role),
-                    action=name, risk="high",
-                    goal_id=int(self.ctx.goal_id or 0),
-                    episode_id=int(getattr(self.ctx, "episode_id", 0) or 0))
-            except Exception:  # pragma: no cover -- capture never breaks the loop
-                pass
             if v.decision == rehearsal.PROCEED:
+                try:  # pin the prediction as earned-autonomy evidence
+                    # (default-off, module self-gated). Only PROCEED verdicts:
+                    # they used to vanish, and they are exactly the predictions
+                    # reality later grades -- a held action never executes, so
+                    # its prediction must not be scored against the outcome.
+                    from .earned_autonomy import capture_prediction
+                    capture_prediction(
+                        v, principal=getattr(self, "_autonomy_name", self.role),
+                        action=name, risk="high",
+                        goal_id=int(self.ctx.goal_id or 0),
+                        episode_id=int(getattr(self.ctx, "episode_id", 0) or 0))
+                except Exception:  # pragma: no cover -- never breaks the loop
+                    pass
                 return None
             try:  # tamper-evident record of the hold; never block on audit
                 from .audit import EventKind, record

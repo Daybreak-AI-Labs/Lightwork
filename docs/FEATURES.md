@@ -777,18 +777,27 @@ here.
   `MAVERICK_EARNED_AUTONOMY`; graduation additionally requires arming
   `auto_graduate`, strict-parsed) — agents earn the right to act, action type
   by action type, by proving they predict consequences correctly. Each
-  rehearsed high-stakes action pins a **consequence card** (hash-chained,
-  append-only) with the predicted outcome BEFORE it runs; when reality reports
-  back through the Consequence Engine, `reconcile` scores predicted-vs-actual
-  per `(agent, action type)`. A proven streak (default 10 consecutive
-  accurate, ≥90% overall) **graduates** the action from "a human approves" to
-  "policy auto-approves" — implemented as a revocable standing consent-ledger
-  grant the existing approval path already honours — and one miss **demotes
-  instantly** (revoke-before-record, so authority never outruns evidence).
+  rehearsed high-stakes action that PROCEEDS pins a **consequence card**
+  (hash-chained, append-only, multi-writer safe) with the predicted outcome
+  BEFORE it runs; when reality reports back through the Consequence Engine,
+  `reconcile` scores predicted-vs-actual **per action type** — the same unit
+  the enforcement surface grants at, so authority is never wider than its
+  evidence — with the acting agent kept on every event for provenance, and
+  same-episode duplicates collapsed so one observed outcome grades one
+  prediction. A proven streak (default 10 consecutive accurate, ≥90% overall)
+  **graduates** the action from "a human approves" to "policy auto-approves"
+  — implemented as a revocable standing consent-ledger grant the existing
+  approval path already honours — and one miss by ANY agent **demotes
+  instantly** (revoke-before-record, retried on every later miss plus a
+  stale-grant sweep each reconcile, so authority never outruns evidence).
   Interlocks fail toward the human: no graduation while `calibration` is
   frozen or a learning HALT is active, `max_auto_risk` defaults to `medium`
-  (graduating irreversible high-risk types is an explicit operator decision),
-  and `require_reversible` demands every card declare an inverse. `run_saga`
+  (graduating irreversible high-risk types is an explicit operator decision;
+  the action's risk is recomputed live, never trusted from the card, and an
+  unknown level ranks above every ceiling), and `require_reversible` demands
+  every card declare an inverse. Disabling the feature stops evidence and
+  demotion but not grants already minted — `maverick earned-autonomy --revoke
+  ACTION` is the incident-response path and works while disabled. `run_saga`
   is the compensating half: steps ship their undo, an irreversible step
   refuses to start, and a mid-saga failure rolls the completed prefix back in
   reverse. Every card, hit/miss, graduation, and demotion is a signed audit

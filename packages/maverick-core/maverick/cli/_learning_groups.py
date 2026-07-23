@@ -245,27 +245,37 @@ def workforce_graduation(db_path: str | None) -> None:
 @click.option("--reconcile", "do_reconcile", is_flag=True,
               help="Score unscored consequence cards against landed real "
                    "outcomes first (may graduate or demote action types).")
-def earned_autonomy(do_reconcile: bool) -> None:
+@click.option("--revoke", "revoke_action", default=None, metavar="ACTION",
+              help="Withdraw an earned grant for ACTION now. Works even while "
+                   "the feature is disabled (incident response).")
+def earned_autonomy(do_reconcile: bool, revoke_action: str | None) -> None:
     """Which action types have earned policy-auto-approval, and how?
 
-    The Earned Autonomy dial (maverick.earned_autonomy): per (agent, action
-    type), how many predictions reality confirmed, the current accurate
-    streak, and whether the action type has graduated from "a human approves"
-    to "policy auto-approves". Without --reconcile this is read-only.
+    The Earned Autonomy dial (maverick.earned_autonomy): per action type, how
+    many predictions reality confirmed, the current accurate streak, and
+    whether it has graduated from "a human approves" to "policy
+    auto-approves". Without --reconcile/--revoke this is read-only.
     """
     from ..earned_autonomy import enabled, shared
     engine = shared()
+    if revoke_action:
+        ok = engine.revoke(revoke_action)
+        click.echo(f"Revoked earned auto-approval for {revoke_action!r}"
+                   + ("" if ok else " (grant withdrawn; ledger write failed)"))
     if do_reconcile:
-        from . import _run_learning_cli
+        from . import _learning_cli_preflight, _run_learning_cli
+        _learning_cli_preflight("earned_autonomy")
         report = _run_learning_cli("earned_autonomy", engine.reconcile)
         click.echo(f"Reconciled {report.scored} card(s): {report.hits} hit(s), "
-                   f"{report.misses} miss(es); graduated "
-                   f"{list(report.graduated) or 'none'}, demoted "
+                   f"{report.misses} miss(es), {report.superseded} superseded; "
+                   f"graduated {list(report.graduated) or 'none'}, demoted "
                    f"{list(report.demoted) or 'none'}.")
     states = engine.status()
     if not enabled():
         click.echo("Earned autonomy is disabled ([earned_autonomy] enable / "
-                   "MAVERICK_EARNED_AUTONOMY).")
+                   "MAVERICK_EARNED_AUTONOMY). Note: disabling stops evidence "
+                   "and demotion but does NOT withdraw grants already minted; "
+                   "use --revoke ACTION to withdraw one.")
     if not states:
         click.echo("No consequence-card evidence yet (cards are pinned when "
                    "rehearsed high-risk actions run, and scored when reality "
@@ -274,7 +284,7 @@ def earned_autonomy(do_reconcile: bool) -> None:
     click.echo(f"Cards: {engine.cards.verify()}  Ledger: {engine.ledger.verify()}")
     for s in states:
         dial = "AUTO (graduated)" if s.graduated else "human approves"
-        click.echo(f"  {s.principal} / {s.action}: {dial} -- "
+        click.echo(f"  {s.action}: {dial} -- "
                    f"{s.hits}/{s.samples} accurate, streak {s.streak}")
 
 
