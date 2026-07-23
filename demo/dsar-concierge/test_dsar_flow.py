@@ -33,6 +33,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DSAR_STANDALONE", "1")
     monkeypatch.setenv("DSAR_DATA_DIR", str(tmp_path / "store"))
     monkeypatch.delenv("LIGHTWORK_LICENSE", raising=False)
+    monkeypatch.setenv("DSAR_OPERATOR_TOKEN", "test-operator-token")
     sys.path.insert(0, str(HERE))
     _purge_shared_modules()
     try:
@@ -42,7 +43,8 @@ def client(tmp_path, monkeypatch):
         spec.loader.exec_module(module)
         module.INBOX.clear()
         # No SMTP listener in tests; backend inserts into INBOX directly.
-        yield TestClient(module.app), module
+        yield TestClient(module.app), module, {
+            "auth": ("operator", "test-operator-token")}
     finally:
         sys.path.remove(str(HERE))
 
@@ -56,7 +58,7 @@ def _mail_link(module, needle="/verify/"):
 
 
 def test_full_access_flow(client):
-    tc, module = client
+    tc, module, operator = client
     r = tc.post("/request", data={"subject_id": "jordan@example.test",
                                   "kind": "access", "note": "everything"})
     assert r.status_code == 200 and "opened" in r.text
@@ -67,9 +69,9 @@ def test_full_access_flow(client):
     rid = next(iter(module.engine.list_requests()))["id"]
     r = tc.post(f"/case/{rid}/fulfill",
                 data={"extracts": "CRM: name, email\nBilling: 3 invoices"},
-                follow_redirects=True)
+                follow_redirects=True, **operator)
     assert r.status_code == 200
-    pkg = tc.get(f"/case/{rid}/package.json")
+    pkg = tc.get(f"/case/{rid}/package.json", **operator)
     assert pkg.status_code == 200
     assert set(pkg.json()["data"]) == {"CRM", "Billing"}
     # The subject got the cover note.
@@ -81,7 +83,7 @@ def test_full_access_flow(client):
 
 
 def test_webhook_detector_and_erasure_handoff(client):
-    tc, module = client
+    tc, module, operator = client
     r = tc.post("/webhook/message", json={
         "text": "Under Article 17 please delete my data.",
         "sender": "sam@example.test"})
@@ -94,17 +96,33 @@ def test_webhook_detector_and_erasure_handoff(client):
     token = _mail_link(module).rsplit("/", 1)[-1]
     tc.get(f"/verify/{token}")
     r = tc.post(f"/case/{rid}/erasure", data={"systems": "CRM\nBilling"},
-                follow_redirects=True)
+                follow_redirects=True, **operator)
     assert "deliberately" in r.text or "non-destructive" in r.text
     rec = module.engine.get(rid)
     assert rec["status"] == "awaiting_erasure"
     tc.post(f"/case/{rid}/close", data={"reason": "confirmed"},
-            follow_redirects=True)
+            follow_redirects=True, **operator)
     assert module.engine.get(rid)["status"] == "closed"
 
 
+def test_operator_console_rejects_unauthenticated_clients(client):
+    tc, module, operator = client
+    opened = tc.post("/request", data={
+        "subject_id": "privacy@example.test", "kind": "access"})
+    assert opened.status_code == 200
+    rid = next(iter(module.engine.list_requests()))["id"]
+    for path in ("/", f"/case/{rid}", f"/case/{rid}/package.json"):
+        response = tc.get(path)
+        assert response.status_code == 401
+        assert response.headers["www-authenticate"].startswith("Basic")
+    for path in (f"/case/{rid}/fulfill", f"/case/{rid}/erasure",
+                 f"/case/{rid}/close"):
+        assert tc.post(path, data={}).status_code == 401
+    assert tc.get("/", **operator).status_code == 200
+
+
 def test_evaluation_mode_caps_open_requests(client):
-    tc, module = client
+    tc, module, _operator = client
     assert module.LICENSE["mode"] == "evaluation"
     cap = module.LICENSE["open_case_cap"]
     for i in range(cap):

@@ -66,3 +66,20 @@ def test_launcher_bind_honors_deployment_env(monkeypatch):
     assert mod.bind() == ("127.0.0.1", 9101)
     monkeypatch.setenv("DSAR_HOST", "0.0.0.0")
     assert mod.bind() == ("0.0.0.0", 9101)
+
+
+def test_operator_routes_require_auth_dependency():
+    app_py = (HERE / "app.py").read_text(encoding="utf-8")
+    protected_routes = (
+        '@app.get("/", response_class=HTMLResponse,',
+        '@app.get("/case/{rid}", response_class=HTMLResponse,',
+        '@app.post("/case/{rid}/fulfill",',
+        '@app.post("/case/{rid}/erasure",',
+        '@app.post("/case/{rid}/close",',
+        '@app.get("/case/{rid}/package.json",')
+    for route in protected_routes:
+        start = app_py.index(route)
+        end = app_py.index("async def", start)
+        assert "Depends(require_operator)" in app_py[start:end]
+    assert "DSAR_OPERATOR_TOKEN must be set" in app_py
+    assert "secrets.compare_digest" in app_py
