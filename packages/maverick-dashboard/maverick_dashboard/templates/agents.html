@@ -225,6 +225,12 @@
         {% endif %}
       </div>
 
+      {% if selected %}
+      <div style="display:flex; gap:var(--space-2); align-items:center; margin-bottom:var(--space-3);">
+        <button type="button" class="btn btn--primary" id="btn-jobcard">📋 View job card</button>
+        <span class="sub">the specialist's job description, manager scorecard &amp; cost tier</span>
+      </div>
+      {% endif %}
       {% if selected or creating %}
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
       <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-creating="{{ '1' if creating else '' }}">
@@ -820,6 +826,156 @@
         else show('Failed: ' + (data.detail || ('HTTP ' + status)), false);
       });
     })();
+  </script>
+  {% endif %}
+
+  {% if selected %}
+  <style>
+    #jobcard-dlg { border:none; border-radius:var(--radius-lg); padding:0;
+                   max-width:720px; width:92vw; box-shadow:var(--shadow-lg);
+                   background:var(--panel); color:var(--text); }
+    #jobcard-dlg::backdrop { background:var(--scrim); }
+    .jc-wrap { padding:var(--space-5); }
+    .jc-head { display:flex; align-items:flex-start; gap:var(--space-3); }
+    .jc-head h2 { margin:0; font-size:var(--text-xl); }
+    .jc-role { color:var(--muted); font-size:var(--text-sm); margin-top:2px; }
+    .jc-close { margin-inline-start:auto; border:0; background:transparent;
+                color:var(--muted); font-size:1.3rem; cursor:pointer; }
+    .jc-cards { display:grid; grid-template-columns:repeat(4,1fr);
+                gap:var(--space-2); margin:var(--space-4) 0; }
+    .jc-stat { background:var(--surface-sunken); border:1px solid var(--hairline);
+               border-radius:var(--radius-md); padding:var(--space-3); }
+    .jc-stat .n { font-size:var(--text-lg); font-weight:var(--font-semibold);
+                  font-variant-numeric:tabular-nums; }
+    .jc-stat .l { font-size:var(--text-xs); color:var(--muted);
+                  text-transform:uppercase; letter-spacing:0.04em; }
+    .jc-sec { margin-top:var(--space-4); }
+    .jc-sec h3 { font-size:var(--text-xs); text-transform:uppercase;
+                 letter-spacing:0.06em; color:var(--muted);
+                 margin:0 0 var(--space-2); }
+    .jc-sec p { margin:0; font-size:var(--text-sm); line-height:1.5; }
+    .jc-steps { margin:0; padding-inline-start:1.1rem; font-size:var(--text-sm); }
+    .jc-steps li { margin-bottom:4px; }
+    .jc-chips { display:flex; flex-wrap:wrap; gap:6px; }
+    .jc-chip { font-size:var(--text-xs); border:1px solid var(--hairline);
+               border-radius:var(--radius-pill); padding:2px 10px;
+               background:var(--surface-sunken); }
+    .jc-chip.deny { border-color:var(--danger); color:var(--danger); }
+    .jc-tier { display:inline-flex; align-items:center; gap:6px; }
+    .jc-tier select { font-size:var(--text-sm); }
+    .jc-band { font-size:var(--text-xs); font-weight:var(--font-semibold);
+               border-radius:var(--radius-pill); padding:2px 10px; }
+    .jc-band.low { background:var(--success-subtle); color:var(--accent); }
+    .jc-band.medium { background:var(--info-subtle); color:var(--info); }
+    .jc-band.high { background:var(--warn-subtle); color:var(--warn); }
+    .jc-band.very_high { background:var(--danger-subtle); color:var(--danger); }
+    .jc-grid2 { display:grid; grid-template-columns:1fr 1fr; gap:var(--space-4); }
+    @media (max-width:640px){ .jc-cards{grid-template-columns:repeat(2,1fr);}
+      .jc-grid2{grid-template-columns:1fr;} }
+  </style>
+  <dialog id="jobcard-dlg" aria-labelledby="jc-name">
+    <div class="jc-wrap">
+      <div class="jc-head">
+        <div>
+          <h2 id="jc-name">…</h2>
+          <div class="jc-role" id="jc-role"></div>
+        </div>
+        <button type="button" class="jc-close" id="jc-close" aria-label="Close">✕</button>
+      </div>
+      <div class="jc-cards" id="jc-stats"></div>
+      <div class="jc-sec"><h3>Cost tier</h3>
+        <div class="jc-tier">
+          <span class="jc-band" id="jc-band"></span>
+          <span class="sub" id="jc-model"></span>
+          <span style="margin-inline-start:auto;"></span>
+          <label class="sub" for="jc-band-set">Set band</label>
+          <select id="jc-band-set" class="ctl">
+            <option value="">— derived —</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="very_high">Very High</option>
+          </select>
+        </div>
+      </div>
+      <div class="jc-sec"><h3>Mission</h3><p id="jc-mission"></p></div>
+      <div class="jc-sec"><h3>Responsibilities</h3><ol class="jc-steps" id="jc-resp"></ol></div>
+      <div class="jc-grid2">
+        <div class="jc-sec"><h3>Delivers</h3><p id="jc-deliver"></p></div>
+        <div class="jc-sec"><h3>Guardrails — never does</h3><div class="jc-chips" id="jc-guard"></div></div>
+      </div>
+      <div class="jc-sec"><h3>Tools it can use</h3><div class="jc-chips" id="jc-tools"></div></div>
+    </div>
+  </dialog>
+  <script>
+  (function () {
+    'use strict';
+    var NAME = {{ selected.name | tojson }};
+    var dlg = document.getElementById('jobcard-dlg');
+    var CAN_SET = false;
+    function el(id){ return document.getElementById(id); }
+    function chips(box, items, cls){
+      box.textContent='';
+      (items||[]).forEach(function(t){
+        var s=document.createElement('span'); s.className='jc-chip'+(cls?' '+cls:'');
+        s.textContent=t; box.appendChild(s);
+      });
+      if(!(items||[]).length){ box.textContent='—'; }
+    }
+    function stat(n,l){ return '<div class="jc-stat"><div class="n">'+n+
+      '</div><div class="l">'+l+'</div></div>'; }
+    function money(v){ return v==null?'—':'$'+Number(v).toLocaleString(undefined,{maximumFractionDigits:0}); }
+    function render(d){
+      var jd=d.job_description||{}, sc=d.scorecard||{}, ct=d.cost_tier||{};
+      el('jc-name').textContent=jd.name||NAME;
+      el('jc-role').textContent=(jd.role||'')+(jd.suite?(' · '+jd.suite):'');
+      el('jc-mission').textContent=jd.mission||'—';
+      var resp=el('jc-resp'); resp.textContent='';
+      (jd.responsibilities||[]).forEach(function(w){
+        var li=document.createElement('li'); li.textContent=w.name?(w.name+' — '+(w.instruction||'')):String(w); resp.appendChild(li);
+      });
+      if(!(jd.responsibilities||[]).length){ resp.innerHTML='<li class="sub">no playbook steps declared</li>'; }
+      el('jc-deliver').textContent=(jd.deliverable||'—')+
+        (jd.cadence?(' · '+jd.cadence):'')+(jd.gate?(' · gate: '+jd.gate):'');
+      chips(el('jc-tools'), jd.tools);
+      chips(el('jc-guard'), jd.guardrails, 'deny');
+      el('jc-stats').innerHTML =
+        stat(money(sc.value), 'Value delivered') +
+        stat(money(sc.cost), 'Cost') +
+        stat(sc.roi_multiple!=null?(sc.roi_multiple+'×'):'—', 'ROI') +
+        stat(sc.success_rate!=null?(sc.success_rate+'%'):'—', 'Success rate');
+      var band=ct.band||'medium';
+      var b=el('jc-band'); b.className='jc-band '+band; b.textContent=(ct.label||band)+' cost';
+      el('jc-model').textContent=(ct.model||'')+(ct.overridden?' (set)':'')+
+        (ct.blended_rate!=null?(' · $'+ct.blended_rate.toFixed(1)+'/Mtok'):'');
+      el('jc-band-set').value=ct.overridden?band:'';
+      el('jc-band-set').dataset.model=ct.model||'';
+    }
+    function open(){
+      dlg.showModal();
+      el('jc-name').textContent='Loading…';
+      fetch('/api/v1/agents/'+encodeURIComponent(NAME)+'/jobcard')
+        .then(function(r){ return r.json(); }).then(render)
+        .catch(function(){ el('jc-name').textContent='Could not load the job card.'; });
+    }
+    var btn=el('btn-jobcard'); if(btn) btn.addEventListener('click', open);
+    el('jc-close').addEventListener('click', function(){ dlg.close(); });
+    dlg.addEventListener('click', function(e){ if(e.target===dlg) dlg.close(); });
+    el('jc-band-set').addEventListener('change', function(){
+      var model=this.dataset.model; if(!model) return;
+      var band=this.value||null;
+      fetch('/api/v1/model-cost-tiers', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:model, band:band})})
+        .then(function(r){ if(r.ok) return r.json(); throw new Error('HTTP '+r.status); })
+        .then(function(ct){
+          var b=el('jc-band'); b.className='jc-band '+ct.band; b.textContent=(ct.label||ct.band)+' cost';
+          el('jc-model').textContent=(ct.model||'')+(ct.overridden?' (set)':'')+
+            (ct.blended_rate!=null?(' · $'+ct.blended_rate.toFixed(1)+'/Mtok'):'');
+        })
+        .catch(function(){ /* admin-gated; leave the derived band shown */ });
+    });
+  })();
   </script>
   {% endif %}
 {% endblock %}

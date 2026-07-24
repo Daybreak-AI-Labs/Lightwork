@@ -330,12 +330,22 @@ def test_list_invalid_cursor_raises():
 
 
 def test_expired_task_is_purged():
-    import time
+    from concurrent.futures import wait as _future_wait
     store = TaskStore(lambda n, a: _ok("x"))
     try:
-        task = store.create("maverick_start", {}, {"ttl": 1})  # 1ms ttl
-        store.result(task.id)  # let it finish
-        time.sleep(0.05)
+        # A comfortable ttl so result() reliably reaches a terminal state -- a
+        # 1ms ttl races the purge inside _require and can vanish before it
+        # finishes on a slow runner.
+        task = store.create("maverick_start", {}, {"ttl": 60000})
+        store.result(task.id)  # block until it finishes
+        # result() returns when the terminal-status event fires, which can be a
+        # hair before the worker Future is marked done(); an un-done Future still
+        # "occupies capacity", so the purge would keep the task. Wait for the
+        # Future to settle, then rewind the creation epoch past the ttl so it is
+        # deterministically expired on the next access, on any runner.
+        if task.future is not None:
+            _future_wait([task.future])
+        task._created_epoch -= 3600
         with pytest.raises(TaskError) as ei:
             store.get(task.id)  # purged on access
         assert ei.value.code == -32602

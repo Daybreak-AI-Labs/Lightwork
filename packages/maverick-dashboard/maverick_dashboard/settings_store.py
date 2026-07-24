@@ -354,6 +354,14 @@ def _dump(data: dict) -> str:
                 lines.append(f"{k} = {_toml_value(tbl[k])}")
             lines.append("")
     _dump_value(lines, data.get("value") or {})
+    # [model_cost_tiers] -- manager-set cost bands per model. Keys are model
+    # ids that can contain '/' or '.', so they are always quoted.
+    tiers = data.get("model_cost_tiers") or {}
+    if tiers:
+        lines.append("[model_cost_tiers]")
+        for model in sorted(tiers):
+            lines.append(f"{_toml_str(model)} = {_toml_str(str(tiers[model]))}")
+        lines.append("")
     # [webhooks] secret -- the signing key the Settings page manages. Written
     # verbatim (never logged or re-displayed).
     whk = data.get("webhooks") or {}
@@ -448,6 +456,28 @@ def set_toggle(section: str, name: str, enabled: bool) -> None:
     with _locked():
         data = _load_overlay_for_update()
         data.setdefault(section, {})[name] = bool(enabled)
+        _write(data)
+
+
+def set_model_cost_tier(model: str, band: str | None) -> None:
+    """Persist a manager's cost-band override for a model in
+    ``[model_cost_tiers]``. ``band=None`` clears the override (back to the
+    price-derived band). Validated against the known bands."""
+    from maverick.model_cost_tier import BANDS
+    model = (model or "").strip()
+    if not model:
+        raise ValueError("model is required")
+    if band is not None and band not in BANDS:
+        raise ValueError(f"band must be one of {BANDS} or null")
+    with _locked():
+        data = _load_overlay_for_update()
+        tiers = data.setdefault("model_cost_tiers", {})
+        if band is None:
+            tiers.pop(model, None)
+            if not tiers:
+                data.pop("model_cost_tiers", None)
+        else:
+            tiers[model] = band
         _write(data)
 
 
