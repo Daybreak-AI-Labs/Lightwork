@@ -56,6 +56,8 @@ def test_dockerfile_copies_every_standalone_module():
     assert "PIA_STANDALONE=1" in dockerfile
     assert "USER pia" in dockerfile          # never root
     assert "HEALTHCHECK" in dockerfile
+    assert "-p 127.0.0.1:8890:8890" in dockerfile
+    assert "-p 8890:8890" not in dockerfile
     # The standalone Dockerfile must never pull the platform in.
     assert "maverick" not in dockerfile.lower().replace(
         "no maverick", "")
@@ -81,6 +83,8 @@ def test_launcher_bind_honors_deployment_env(monkeypatch):
 
 def test_deployment_guide_covers_every_target():
     guide = (HERE / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    assert "-p 127.0.0.1:8890:8890" in guide
+    assert "-p 8890:8890" not in guide
     for probe in ("Docker", "App Runner", "ECS", "Cloud Run", "Compute Engine",
                   "Container Apps", "systemd", "Windows", "macOS", "PIA_HOST",
                   "ONETRUST_TOKEN", "/health", "Backup", "TLS"):

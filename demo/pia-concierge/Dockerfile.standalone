@@ -6,7 +6,7 @@
 # TLS/auth requirements, and the environment reference.
 #
 #   docker build -f Dockerfile.standalone -t pia-concierge:latest .
-#   docker run -d -p 8890:8890 -v pia-data:/data \
+#   docker run -d -p 127.0.0.1:8890:8890 -v pia-data:/data \
 #     -e ONETRUST_HOSTNAME=https://customer.my.onetrust.com \
 #     -e ONETRUST_TOKEN=***  pia-concierge:latest
 FROM python:3.12-slim
