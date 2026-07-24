@@ -10,15 +10,18 @@ the signed audit chain (see capabilities.py / backend.py — the seam).
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import datetime as _dt
 import os
+import secrets
 from pathlib import Path
 
 import backend
 import dsar_engine as engine
 import value_ledger
 from capabilities import CAPS, LICENSE, STANDALONE, caps_summary
-from fastapi import FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from mailsink import INBOX, start_mailsink
@@ -31,6 +34,8 @@ templates.env.filters["dt"] = (
 
 AGENT_VERSION = "1.0.0"
 BASE_URL = os.environ.get("DSAR_BASE_URL", "http://127.0.0.1:8891")
+OPERATOR_USER = os.environ.get("DSAR_OPERATOR_USER", "operator")
+OPERATOR_TOKEN = os.environ.get("DSAR_OPERATOR_TOKEN", "")
 
 app = FastAPI(title="DSAR Concierge")
 
@@ -50,6 +55,42 @@ def _page(request: Request, name: str, **ctx) -> HTMLResponse:
     ctx.setdefault("caps_summary", caps_summary())
     ctx.setdefault("standalone", STANDALONE)
     return templates.TemplateResponse(request, name, ctx)
+
+
+def _auth_error(status_code: int, detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail=detail,
+        headers={"WWW-Authenticate": 'Basic realm="DSAR operator"'})
+
+
+def _basic_credentials(authorization: str) -> tuple[str, str] | None:
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "basic" or not token:
+        return None
+    try:
+        decoded = base64.b64decode(token, validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    username, sep, password = decoded.partition(":")
+    if not sep:
+        return None
+    return username, password
+
+
+def require_operator(authorization: str = Header("")) -> None:
+    """Protect DSAR operator-only screens and state-changing actions."""
+    if not OPERATOR_TOKEN:
+        raise _auth_error(
+            503,
+            "DSAR_OPERATOR_TOKEN must be set before using operator routes.")
+    creds = _basic_credentials(authorization)
+    if creds is None:
+        raise _auth_error(401, "Operator authentication required.")
+    username, password = creds
+    if not (secrets.compare_digest(username, OPERATOR_USER)
+            and secrets.compare_digest(password, OPERATOR_TOKEN)):
+        raise _auth_error(401, "Operator authentication required.")
 
 
 def _license_gate() -> str | None:
@@ -153,7 +194,8 @@ async def verify_token(request: Request, token: str) -> HTMLResponse:
 # --------------------------------------------------------------------------- #
 # Operator console
 # --------------------------------------------------------------------------- #
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse,
+         dependencies=[Depends(require_operator)])
 async def queue(request: Request) -> HTMLResponse:
     rows = engine.list_requests()
     done = [engine.get(r["id"]) for r in rows
@@ -170,7 +212,8 @@ async def queue(request: Request) -> HTMLResponse:
                  license=LICENSE, mail=INBOX[:8])
 
 
-@app.get("/case/{rid}", response_class=HTMLResponse)
+@app.get("/case/{rid}", response_class=HTMLResponse,
+         dependencies=[Depends(require_operator)])
 async def case_page(request: Request, rid: str) -> HTMLResponse:
     rec = engine.get(rid)
     if rec is None:
@@ -178,7 +221,8 @@ async def case_page(request: Request, rid: str) -> HTMLResponse:
     return _page(request, "case.html", rec=rec)
 
 
-@app.post("/case/{rid}/fulfill")
+@app.post("/case/{rid}/fulfill",
+          dependencies=[Depends(require_operator)])
 async def case_fulfill(rid: str, extracts: str = Form("")):
     """Access/portability: one 'System: extracted data' line per system —
     only what the operator provides goes into the package."""
@@ -199,7 +243,8 @@ async def case_fulfill(rid: str, extracts: str = Form("")):
     return RedirectResponse(f"/case/{rid}", status_code=303)
 
 
-@app.post("/case/{rid}/erasure")
+@app.post("/case/{rid}/erasure",
+          dependencies=[Depends(require_operator)])
 async def case_erasure(rid: str, systems: str = Form("")):
     rec = engine.erasure_handoff(
         rid, [s for s in systems.splitlines() if s.strip()])
@@ -208,7 +253,8 @@ async def case_erasure(rid: str, systems: str = Form("")):
     return RedirectResponse(f"/case/{rid}", status_code=303)
 
 
-@app.post("/case/{rid}/close")
+@app.post("/case/{rid}/close",
+          dependencies=[Depends(require_operator)])
 async def case_close(rid: str, reason: str = Form("")):
     rec = engine.close(rid, reason=reason)
     if rec is not None:
@@ -217,7 +263,8 @@ async def case_close(rid: str, reason: str = Form("")):
     return RedirectResponse(f"/case/{rid}", status_code=303)
 
 
-@app.get("/case/{rid}/package.json")
+@app.get("/case/{rid}/package.json",
+         dependencies=[Depends(require_operator)])
 async def case_package(rid: str) -> JSONResponse:
     rec = engine.get(rid)
     if rec is None or not rec.get("package"):

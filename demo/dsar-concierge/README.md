@@ -29,7 +29,9 @@ audit chain, and can use the platform's real subject-data export machinery.
 ## Run it
 
 ```bash
-bash run_standalone.sh          # http://127.0.0.1:8891  (operator queue)
+DSAR_OPERATOR_TOKEN=$(openssl rand -hex 24) bash run_standalone.sh
+                                # http://127.0.0.1:8891  (operator queue;
+                                # sign in as operator with DSAR_OPERATOR_TOKEN)
                                 # /request  (subject-facing form)
                                 # /about    (capability + license matrix)
 ```
@@ -46,6 +48,7 @@ names below.
 | `DSAR_HOST` / `DSAR_PORT` | `127.0.0.1` / `8891` | bind (set `DSAR_HOST=0.0.0.0` in containers) |
 | `DSAR_DATA_DIR` | `.dsar-data` | the request store (mount `/data` in containers) |
 | `DSAR_BASE_URL` | `http://127.0.0.1:8891` | public URL used in verification links |
+| `DSAR_OPERATOR_USER` / `DSAR_OPERATOR_TOKEN` | `operator` / unset | HTTP Basic credentials required for the operator queue, case pages, package downloads, and workflow actions |
 | `DSAR_SLA_DAYS` | `30` | the statutory clock |
 | `EMAIL_USER` / `EMAIL_SMTP_PORT` | — | outbound mail identity (standalone captures locally) |
 | `LIGHTWORK_LICENSE` / `LIGHTWORK_LICENSE_PUBKEY` | unset | signed license token + vendor public key |

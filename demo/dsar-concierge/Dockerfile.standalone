@@ -7,7 +7,8 @@
 #
 #   docker build -f Dockerfile.standalone -t dsar-concierge:latest .
 #   docker run -d -p 8891:8891 -v dsar-data:/data \
-#     -e DSAR_BASE_URL=https://dsar.example.com  dsar-concierge:latest
+#     -e DSAR_BASE_URL=https://dsar.example.com \
+#     -e DSAR_OPERATOR_TOKEN=<long-random-secret>  dsar-concierge:latest
 FROM python:3.12-slim
 
 # Never run an internet-facing agent as root.
