@@ -1,0 +1,651 @@
+"""Structured consequence previews for governed connector writes.
+
+The property under test throughout: **reversibility is earned, never
+asserted.** A plan reports ``reversible=True`` only when it is holding the
+thing that inverts the write -- prior field values read back from the record,
+or a created record's id it will read out of the create response. Every gap (a
+failed restore read, a field the read didn't return, a full-replace PUT, a
+DELETE, an unknown connector, restore reads switched off) must fail closed to
+``undo=None``, which makes ``run_saga`` refuse before any effect.
+
+Network-free: connector I/O is scripted, so the adapter is exercised without
+touching the network, and every read/write it *would* have made is asserted.
+"""
+from __future__ import annotations
+
+import json
+
+import pytest
+from maverick import connector_previews as cp
+from maverick import earned_autonomy as ea
+from maverick.governed_rest import RestConnector
+
+SF_PATH = "/services/data/v60.0/sobjects/Opportunity/006xx0000000001AAA"
+SF_COLLECTION = "/services/data/v60.0/sobjects/Opportunity"
+#: A fabricated 32-hex ServiceNow sys_id -- the shape the Table API uses.
+SN_ID = "a1b2c3d4e5f60718293a4b5c6d7e8f90"  # pragma: allowlist secret
+SN_PATH = f"/api/now/table/incident/{SN_ID}"
+
+
+class FakeConnector:
+    """A governed connector with scripted I/O and the REAL ``preview_write``.
+
+    Delegating the preview keeps the no-network validation path identical to
+    production while letting a test dictate exactly what the API returns.
+    """
+
+    def __init__(self, name="salesforce", *, read="", writes=()):
+        self.name = name
+        self._read = read
+        self._writes = list(writes)
+        self.reads: list[dict] = []
+        self.writes: list[dict] = []
+        self._inner = RestConnector(
+            name=name, base_url_env="X_BASE", token_env="X_TOKEN")
+
+    def preview_write(self, params: dict) -> str:
+        return self._inner.preview_write(params)
+
+    def read(self, params: dict) -> str:
+        self.reads.append(dict(params))
+        return self._read() if callable(self._read) else self._read
+
+    def write(self, params: dict) -> str:
+        self.writes.append(dict(params))
+        if self._writes:
+            nxt = self._writes.pop(0)
+            return nxt() if callable(nxt) else nxt
+        return json.dumps({"id": "006NEW0000000001AAA", "success": True})
+
+
+#: Salesforce's optimistic-concurrency token, as a capture read returns it.
+SF_STAMP = "2026-07-01T12:00:00.000+0000"
+#: The same stamp after our own write moved it -- what an undo compares against.
+SF_AFTER = "2026-07-01T12:00:05.000+0000"
+#: The query the Salesforce dialect sends to capture a one-field Amount patch.
+SF_AMOUNT_QUERY = {"fields": "Amount,LastModifiedDate"}
+#: The ServiceNow capture query for a one-field cost patch: raw values only.
+SN_COST_QUERY = {
+    "sysparm_display_value": "false",
+    "sysparm_exclude_reference_link": "true",
+    "sysparm_fields": "cost,sys_mod_count",
+}
+
+
+def _sf_record(stamp=SF_STAMP, **fields) -> str:
+    return json.dumps({"Id": "006xx0000000001AAA", "Name": "Acme",
+                       "LastModifiedDate": stamp, **fields})
+
+
+def _sn_record(mod_count="3", **fields) -> str:
+    return json.dumps({"result": {"sys_id": "a" * 32,
+                                  "sys_mod_count": mod_count, **fields}})
+
+
+def _patch(path=SF_PATH, **body):
+    return {"op": "patch", "path": path, "body": body}
+
+
+class TestDialects:
+    def test_salesforce_parses_object_and_id_from_an_sobject_path(self):
+        d = cp.dialect_for("salesforce")
+        assert d.target(SF_PATH) == ("Opportunity", "006xx0000000001AAA")
+        assert d.entity(SF_PATH) == "Opportunity/006xx0000000001AAA"
+
+    def test_salesforce_collection_path_is_not_a_record(self):
+        # POSTing to the collection creates a record; it addresses none yet.
+        assert cp.dialect_for("salesforce").target(SF_COLLECTION) is None
+
+    def test_servicenow_parses_table_and_sys_id(self):
+        d = cp.dialect_for("servicenow")
+        assert d.target(SN_PATH) == ("incident", SN_ID)
+
+    def test_servicenow_unwraps_result_envelope(self):
+        d = cp.dialect_for("servicenow")
+        assert d.unwrap({"result": {"number": "INC1"}}) == {"number": "INC1"}
+        assert d.unwrap({"result": [{"number": "INC1"}]}) == {"number": "INC1"}
+        # Ambiguous: a query matching several rows is not "the" record.
+        assert d.unwrap({"result": [{"a": 1}, {"b": 2}]}) is None
+        assert d.unwrap({"result": []}) is None
+
+    def test_created_id_read_from_each_vendors_create_response(self):
+        assert cp.dialect_for("salesforce").created_id(
+            {"id": "006NEW0000000001AAA", "success": True}) == "006NEW0000000001AAA"
+        assert cp.dialect_for("servicenow").created_id(
+            {"result": {"sys_id": "f" * 32}}) == "f" * 32
+        assert cp.dialect_for("salesforce").created_id({"success": True}) is None
+
+    def test_a_query_string_does_not_defeat_record_detection(self):
+        # The id is the last PATH segment. Matching against the raw string would
+        # read the id as "a1b2...?sysparm_fields=cost", find no record, and
+        # silently downgrade a perfectly restorable write to irreversible.
+        d = cp.dialect_for("servicenow")
+        assert d.target(
+            f"{SN_PATH}?sysparm_fields=cost&sysparm_limit=1") == (
+                "incident", SN_ID)
+        assert cp.dialect_for("salesforce").target(f"{SF_PATH}?fields=Amount") == (
+            "Opportunity", "006xx0000000001AAA")
+
+    def test_a_percent_encoded_path_matches_its_decoded_form(self):
+        encoded = "/services/data/v60.0/sobjects%2FOpportunity%2F006xx0000000001AAA"
+        assert cp.dialect_for("salesforce").target(encoded) == (
+            "Opportunity", "006xx0000000001AAA")
+
+    def test_unknown_connector_gets_the_incapable_generic_dialect(self):
+        d = cp.dialect_for("workday")
+        assert d.name == "generic"
+        assert d.target(SF_PATH) is None  # knows no vendor's URL grammar
+        assert d.is_money("Amount") is False
+        assert d.restore_query(["Amount"]) == {}
+        # No token field means it can never promise a non-clobbering restore.
+        assert d.concurrency_field == ""
+
+
+class TestMoneyCoercion:
+    @pytest.mark.parametrize(("raw", "expected"), [
+        (120000, 120000.0),
+        (120000.50, 120000.50),
+        ("120000.50", 120000.50),
+        ("$120,000.50", 120000.50),
+        ("USD;1200.00", 1200.0),          # ServiceNow currency field
+        ({"value": "1200.00"}, 1200.0),   # ServiceNow display/value object
+    ])
+    def test_parses_the_shapes_these_apis_actually_return(self, raw, expected):
+        assert cp._as_money(raw) == expected
+
+    @pytest.mark.parametrize("raw", ["", "N/A", None, True, ["1"], {"x": 1}])
+    def test_non_money_is_none_not_zero(self, raw):
+        # Zero would silently understate exposure; None means "no figure".
+        assert cp._as_money(raw) is None
+
+
+class TestUpdateEarnsItsUndo:
+    def test_patch_with_a_captured_record_is_reversible_and_restores_it(self):
+        conn = FakeConnector(read=_sf_record(Amount=100000, StageName="Prospect"))
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+
+        assert plan.reversible is True
+        assert plan.restore.kind == "fields"
+        assert plan.restore.captured is True
+        # Prior values are held for exactly the fields being changed -- not the
+        # whole record, which would replay non-writable system fields.
+        assert plan.restore.prior == {"Amount": 100000}
+        assert conn.reads == [{"path": SF_PATH, "params": SF_AMOUNT_QUERY}]
+        assert plan.warnings == ()
+
+        result = ea.run_saga(plan.steps)
+        assert result.committed is True
+        undo = plan.steps[0].undo
+        assert undo is not None
+        undo()
+        assert conn.writes[-1] == {
+            "op": "patch", "path": SF_PATH, "body": {"Amount": 100000}}
+
+    def test_exposure_is_the_delta_not_the_new_value(self):
+        # Moving an opportunity from $100k to $120k puts $20k at risk. The
+        # captured restore point is what makes the true figure computable.
+        conn = FakeConnector(read=_sf_record(Amount=100000))
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        assert plan.preview.exposure_dollars == 20000.0
+
+    def test_exposure_falls_back_to_the_whole_figure_without_a_prior_read(self):
+        # Overstating exposure keeps a human in the loop; understating wouldn't.
+        conn = FakeConnector(read="ERROR: 403 forbidden")
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        assert plan.preview.exposure_dollars == 120000.0
+
+    def test_non_money_fields_produce_no_exposure_figure(self):
+        conn = FakeConnector(read=_sf_record(StageName="Prospect"))
+        plan = cp.plan_write(conn, _patch(StageName="Closed Won"), capture=True)
+        assert plan.preview.exposure_dollars is None
+        assert plan.reversible is True
+
+    def test_entities_name_the_record_touched(self):
+        conn = FakeConnector(read=_sf_record(Amount=1))
+        plan = cp.plan_write(conn, _patch(Amount=2), capture=True)
+        assert plan.preview.entities == ("Opportunity/006xx0000000001AAA",)
+
+    def test_servicenow_patch_earns_its_undo_through_the_result_envelope(self):
+        conn = FakeConnector(name="servicenow", read=_sn_record(cost="USD;500.00"))
+        plan = cp.plan_write(
+            conn, {"op": "patch", "path": SN_PATH, "body": {"cost": "750.00"}},
+            capture=True)
+        assert plan.reversible is True
+        assert plan.restore.prior == {"cost": "USD;500.00"}
+        assert plan.preview.exposure_dollars == 250.0
+
+
+class TestCaptureReadIsNarrowedAndRaw:
+    """What the capture GET asks for decides whether the restore can restore."""
+
+    def test_salesforce_reads_only_the_fields_being_changed_plus_the_stamp(self):
+        # Reading the whole record and replaying it would clobber every field
+        # the agent never touched. The stamp rides along to detect a race.
+        conn = FakeConnector(read=_sf_record(Amount=1, StageName="Prospect"))
+        cp.plan_write(conn, _patch(Amount=2, StageName="Closed Won"), capture=True)
+        assert conn.reads == [{
+            "path": SF_PATH,
+            "params": {"fields": "Amount,StageName,LastModifiedDate"}}]
+
+    def test_servicenow_capture_demands_raw_values_not_display_values(self):
+        # A display-value read returns "New" for a choice field and a nested
+        # object for a reference -- neither is writable back, so a restore built
+        # on them would report success and change nothing.
+        conn = FakeConnector(name="servicenow", read=_sn_record(cost="USD;5.00"))
+        cp.plan_write(
+            conn, {"op": "patch", "path": SN_PATH, "body": {"cost": "7.00"}},
+            capture=True)
+        assert conn.reads == [{"path": SN_PATH, "params": SN_COST_QUERY}]
+
+    def test_a_delete_reads_the_whole_record_because_it_must_price_all_of_it(self):
+        conn = FakeConnector(name="servicenow", read=_sn_record(cost="USD;5.00"))
+        cp.plan_write(
+            conn, {"op": "delete", "path": SN_PATH, "body": {}}, capture=True)
+        assert "sysparm_fields" not in conn.reads[0]["params"]
+        assert conn.reads[0]["params"]["sysparm_display_value"] == "false"
+
+
+class TestConcurrentEditsCannotBeSilentlyOverwritten:
+    """A restore that overwrites somebody else's edit is not an undo."""
+
+    def test_an_ordinary_undo_survives_our_own_writes_token_bump(self):
+        # The regression that would have made the whole feature dead on arrival:
+        # our own PATCH moves LastModifiedDate, so an undo compared against the
+        # PLAN-time stamp would read "somebody edited this" every single time and
+        # never restore anything. The reference is the stamp as of OUR write.
+        reads = iter([_sf_record(Amount=100000),          # capture
+                      _sf_record(stamp=SF_AFTER, Amount=120000),  # post-write
+                      _sf_record(stamp=SF_AFTER, Amount=120000)])  # undo check
+        conn = FakeConnector(read=lambda: next(reads), writes=["{}", "{}"])
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        assert plan.restore.token == SF_STAMP
+
+        plan.steps[0].do()
+        plan.steps[0].undo()
+        assert [w["op"] for w in conn.writes] == ["patch", "patch"]
+        assert conn.writes[-1]["body"] == {"Amount": 100000}
+
+    def test_undo_refuses_when_the_record_moved_since_our_write(self):
+        reads = iter([_sf_record(Amount=100000),
+                      _sf_record(stamp=SF_AFTER, Amount=120000),
+                      _sf_record(stamp="2026-07-02T09:30:00.000+0000",
+                                 Amount=999999)])
+        conn = FakeConnector(read=lambda: next(reads), writes=["{}"])
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        plan.steps[0].do()
+        with pytest.raises(cp.PlanError, match="changed since the write"):
+            plan.steps[0].undo()
+        # The refusal happened BEFORE the restore write, not after it.
+        assert [w["op"] for w in conn.writes] == ["patch"]
+        assert conn.writes[-1]["body"] == {"Amount": 120000}
+
+    def test_undo_refuses_when_the_record_cannot_be_re_read(self):
+        reads = iter([_sf_record(Amount=100000),
+                      _sf_record(stamp=SF_AFTER, Amount=120000),
+                      "ERROR: rest (403): forbidden"])
+        conn = FakeConnector(read=lambda: next(reads), writes=["{}"])
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        plan.steps[0].do()
+        with pytest.raises(cp.PlanError, match="cannot confirm"):
+            plan.steps[0].undo()
+        assert len(conn.writes) == 1  # no blind restore
+
+    def test_undo_refuses_when_our_own_writes_effect_was_never_observed(self):
+        # The write went through but neither its echo nor the follow-up read
+        # showed us the resulting token. We now have no honest reference point,
+        # so the undo refuses rather than restoring over an unknown state.
+        reads = iter([_sf_record(Amount=100000), "ERROR: rest (503): gateway"])
+        conn = FakeConnector(read=lambda: next(reads), writes=["{}"])
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        plan.steps[0].do()
+        with pytest.raises(cp.PlanError, match="never observed"):
+            plan.steps[0].undo()
+        assert len(conn.writes) == 1
+
+    def test_a_write_that_echoes_the_record_costs_no_extra_read(self):
+        # ServiceNow returns the updated record from a PATCH, so the post-write
+        # token is already in hand: capture read, write, undo-check read.
+        reads = iter([_sn_record(cost="100"), _sn_record(mod_count="4", cost="100")])
+        conn = FakeConnector(name="servicenow", read=lambda: next(reads),
+                             writes=[_sn_record(mod_count="4", cost="250"), "{}"])
+        plan = cp.plan_write(
+            conn, {"op": "patch", "path": SN_PATH, "body": {"cost": "250"}},
+            capture=True)
+        plan.steps[0].do()
+        plan.steps[0].undo()
+        assert len(conn.reads) == 2
+        assert conn.writes[-1]["body"] == {"cost": "100"}
+
+    def test_a_read_without_the_token_earns_no_undo_at_all(self):
+        # Field-level security can hide LastModifiedDate. Without it there is no
+        # way to tell a genuine undo from clobbering a concurrent edit, so the
+        # plan fails closed rather than promising a restore it cannot police.
+        conn = FakeConnector(read=json.dumps(
+            {"Id": "006xx0000000001AAA", "Amount": 100000}))
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        assert plan.reversible is False
+        assert plan.steps[0].undo is None
+        assert any("LastModifiedDate" in w for w in plan.warnings)
+
+    def test_a_json_null_token_counts_as_absent_not_as_the_text_None(self):
+        # str(None) is truthy. If a null stamp stringified into the token slot
+        # the emptiness check would pass and the undo would compare "None"
+        # against a real stamp forever -- so nulls must read as absent.
+        conn = FakeConnector(read=json.dumps(
+            {"Id": "006xx0000000001AAA", "Amount": 100000,
+             "LastModifiedDate": None}))
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        assert plan.reversible is False
+        assert plan.restore.token == ""
+
+
+class TestUpdateFailsClosed:
+    def test_a_system_managed_field_earns_no_inverse(self):
+        # ExpectedRevenue is Amount x Probability -- a formula. Its prior value
+        # reads back perfectly and then silently fails to apply, so a restore
+        # built on it would report success while changing nothing.
+        conn = FakeConnector(read=_sf_record(ExpectedRevenue=50000))
+        plan = cp.plan_write(conn, _patch(ExpectedRevenue=60000), capture=True)
+        assert plan.reversible is False
+        assert plan.steps[0].undo is None
+        assert any("system-managed" in w for w in plan.warnings)
+
+    def test_writing_an_audit_stamp_also_fails_closed(self):
+        conn = FakeConnector(read=_sf_record(Amount=1))
+        plan = cp.plan_write(conn, _patch(CreatedDate="2020-01-01"), capture=True)
+        assert plan.reversible is False
+
+    def test_servicenow_auto_number_is_unrestorable(self):
+        conn = FakeConnector(name="servicenow", read=_sn_record(number="INC0001"))
+        plan = cp.plan_write(
+            conn, {"op": "patch", "path": SN_PATH, "body": {"number": "INC9999"}},
+            capture=True)
+        assert plan.reversible is False
+        assert any("system-managed" in w for w in plan.warnings)
+
+    def test_a_failed_restore_read_makes_the_write_irreversible(self):
+        conn = FakeConnector(read="ERROR: rest (403): upstream request failed")
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        assert plan.reversible is False
+        assert plan.steps[0].undo is None
+        assert plan.restore.kind == "none"
+        assert any("restore read failed" in w for w in plan.warnings)
+
+    def test_a_field_missing_from_the_read_blocks_a_partial_restore(self):
+        # Field-level read permission can hide a field we are about to change.
+        # Restoring the others is not an inverse -- it would leave that field
+        # changed forever, so the whole plan fails closed.
+        conn = FakeConnector(read=_sf_record(Amount=100000))
+        plan = cp.plan_write(
+            conn, _patch(Amount=120000, Description="new"), capture=True)
+        assert plan.reversible is False
+        assert any("Description" in w for w in plan.warnings)
+
+    def test_a_read_that_raises_is_absorbed_not_propagated(self):
+        def _boom():
+            raise RuntimeError("socket died")
+
+        conn = FakeConnector(read=_boom)
+        plan = cp.plan_write(conn, _patch(Amount=1), capture=True)
+        assert plan.reversible is False
+        assert any("RuntimeError" in w for w in plan.warnings)
+
+    def test_a_non_record_path_is_never_read_and_never_reversible(self):
+        conn = FakeConnector()
+        plan = cp.plan_write(conn, _patch("/services/data/v60.0/query", Amount=1),
+                             capture=True)
+        assert conn.reads == []  # nothing to read; don't guess at a URL
+        assert plan.reversible is False
+        assert any("does not address a single" in w for w in plan.warnings)
+
+    def test_disabling_restore_reads_makes_updates_irreversible_with_no_get(self):
+        conn = FakeConnector(read=_sf_record(Amount=100000))
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=False)
+        assert conn.reads == []
+        assert plan.reversible is False
+        assert any("restore_points" in w for w in plan.warnings)
+
+    def test_unknown_connector_earns_nothing(self):
+        conn = FakeConnector(name="workday", read=_sf_record(Amount=100000))
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        assert conn.reads == []
+        assert plan.reversible is False
+
+
+class TestCreateAndDestroy:
+    def test_post_is_reversible_by_deleting_the_id_the_create_returns(self):
+        conn = FakeConnector(writes=[
+            json.dumps({"id": "006NEW0000000001AAA", "success": True}), "{}"])
+        plan = cp.plan_write(
+            conn, {"op": "post", "path": SF_COLLECTION,
+                   "body": {"Name": "Acme", "Amount": 90000}}, capture=True)
+        assert conn.reads == []  # nothing exists yet to read
+        assert plan.reversible is True
+        assert plan.restore.kind == "created"
+        # The id doesn't exist at plan time -- that's why captured is False.
+        assert plan.restore.captured is False
+        assert plan.preview.exposure_dollars == 90000.0
+
+        plan.steps[0].do()
+        plan.steps[0].undo()
+        assert conn.writes[-1] == {
+            "op": "delete", "path": f"{SF_COLLECTION}/006NEW0000000001AAA",
+            "body": {}}
+
+    def test_undo_before_the_create_ran_raises_rather_than_no_opping(self):
+        plan = cp.plan_write(
+            FakeConnector(), {"op": "post", "path": SF_COLLECTION,
+                              "body": {"Name": "Acme"}}, capture=True)
+        with pytest.raises(cp.PlanError, match="never reported a response"):
+            plan.steps[0].undo()
+
+    def test_undo_raises_loudly_when_the_create_hid_the_id(self):
+        # A silent no-op undo is worse than a failed one: the saga would report
+        # a clean rollback while the record still exists.
+        conn = FakeConnector(writes=[json.dumps({"success": True})])
+        plan = cp.plan_write(
+            conn, {"op": "post", "path": SF_COLLECTION, "body": {"Name": "A"}},
+            capture=True)
+        plan.steps[0].do()
+        with pytest.raises(cp.PlanError, match="no record id"):
+            plan.steps[0].undo()
+
+    def test_put_is_irreversible_because_system_fields_are_not_writable(self):
+        conn = FakeConnector(read=_sf_record(Amount=100000))
+        plan = cp.plan_write(
+            conn, {"op": "put", "path": SF_PATH, "body": {"Amount": 120000}},
+            capture=True)
+        assert plan.reversible is False
+        assert any("non-writable system fields" in w for w in plan.warnings)
+
+    def test_servicenow_put_is_reversible_because_it_merges_like_patch(self):
+        # The Table API's PUT does NOT null omitted fields -- it behaves exactly
+        # like PATCH. Calling it a full replace here would refuse a write that
+        # is genuinely restorable and stall the autonomy dial on a false
+        # negative; the vendor fact belongs in the dialect, not in the verb.
+        conn = FakeConnector(name="servicenow", read=_sn_record(cost="USD;500.00"),
+                             writes=["{}"])
+        plan = cp.plan_write(
+            conn, {"op": "put", "path": SN_PATH, "body": {"cost": "750.00"}},
+            capture=True)
+        assert plan.reversible is True
+        assert plan.restore.prior == {"cost": "USD;500.00"}
+        plan.steps[0].do()
+        plan.steps[0].undo()
+        # The restore goes back as a PATCH -- the minimal, field-scoped inverse.
+        assert conn.writes[-1] == {
+            "op": "patch", "path": SN_PATH, "body": {"cost": "USD;500.00"}}
+
+    def test_delete_is_irreversible_and_prices_the_record_it_destroys(self):
+        conn = FakeConnector(read=_sf_record(Amount=250000))
+        plan = cp.plan_write(
+            conn, {"op": "delete", "path": SF_PATH, "body": {}}, capture=True)
+        assert plan.reversible is False
+        assert any("new id" in w for w in plan.warnings)
+        # The read still happened -- to price what is about to be destroyed.
+        assert plan.preview.exposure_dollars == 250000.0
+
+
+class TestErrorStringsBecomeFailures:
+    """The load-bearing adapter: connectors *return* errors, sagas need raises."""
+
+    def test_a_write_that_returns_an_error_string_raises(self):
+        conn = FakeConnector(read=_sf_record(Amount=1),
+                             writes=["ERROR: salesforce (500): upstream failed"])
+        plan = cp.plan_write(conn, _patch(Amount=2), capture=True)
+        with pytest.raises(cp.PlanError, match="500"):
+            plan.steps[0].do()
+
+    def test_a_failed_write_rolls_the_saga_back_instead_of_committing(self):
+        # Without the ERROR->raise adapter, run_saga would book this rejected
+        # write as committed and never compensate.
+        conn = FakeConnector(read=_sf_record(Amount=1),
+                             writes=["ERROR: salesforce (500): upstream failed"])
+        plan = cp.plan_write(conn, _patch(Amount=2), capture=True)
+        result = ea.run_saga(plan.steps)
+        assert result.committed is False
+        assert result.results[0].ok is False
+
+    def test_a_failed_restore_write_is_reported_as_a_failed_undo(self):
+        conn = FakeConnector(read=_sf_record(Amount=1),
+                             writes=["{}", "ERROR: salesforce (409): conflict"])
+        plan = cp.plan_write(conn, _patch(Amount=2), capture=True)
+        plan.steps[0].do()
+        with pytest.raises(cp.PlanError, match="409"):
+            plan.steps[0].undo()
+
+
+class TestRefusedPlans:
+    def test_an_invalid_op_yields_a_plan_with_no_steps(self):
+        plan = cp.plan_write(FakeConnector(), {"op": "get", "path": SF_PATH})
+        assert plan.steps == ()
+        assert plan.reversible is False
+        assert plan.preview.predicted_outcome == 0.0
+        assert "op must be" in plan.preview.effect
+
+    def test_a_missing_path_is_refused_before_any_io(self):
+        conn = FakeConnector()
+        plan = cp.plan_write(conn, {"op": "patch", "path": "", "body": {}})
+        assert plan.steps == ()
+        assert conn.reads == [] and conn.writes == []
+
+    def test_a_connector_whose_preview_explodes_never_propagates(self):
+        class Exploding(FakeConnector):
+            def preview_write(self, params):
+                raise ValueError("bad connector")
+
+        plan = cp.plan_write(Exploding(), _patch(Amount=1))
+        assert plan.steps == ()
+        assert "ValueError" in plan.preview.effect
+
+
+class TestPreviewContent:
+    def test_the_effect_is_the_connectors_own_no_network_sentence(self):
+        # preview_write stays the single source of the human sentence and of
+        # op/path validation; plan_write adds structure around it.
+        conn = FakeConnector(read=_sf_record(Amount=1))
+        plan = cp.plan_write(conn, _patch(Amount=2), capture=True)
+        assert plan.preview.effect.startswith("would PATCH salesforce")
+        assert "Amount" in plan.preview.effect
+
+    def test_params_digest_commits_to_the_params_without_storing_them(self):
+        params = _patch(Amount=120000)
+        digest = cp.params_digest(params)
+        assert len(digest) == 64
+        assert cp.params_digest(dict(reversed(list(params.items())))) == digest
+        assert cp.params_digest(_patch(Amount=1)) != digest
+
+    def test_card_view_omits_raw_params_and_keeps_the_structure(self):
+        conn = FakeConnector(read=_sf_record(Amount=100000))
+        view = cp.plan_write(conn, _patch(Amount=120000), capture=True
+                             ).preview.card_view()
+        assert view["exposure_dollars"] == 20000.0
+        assert view["reversible"] is True
+        assert view["entities"] == ["Opportunity/006xx0000000001AAA"]
+        assert "params_sha256" not in view and "body" not in view
+
+    def test_an_irreversible_plan_predicts_more_humbly_than_a_reversible_one(self):
+        record = _sf_record(Amount=100000)
+        reversible = cp.plan_write(
+            FakeConnector(read=record), _patch(Amount=1), capture=True)
+        blind = cp.plan_write(
+            FakeConnector(read=record), _patch(Amount=1), capture=False)
+        assert blind.preview.predicted_outcome < reversible.preview.predicted_outcome
+
+    def test_an_explicit_prediction_overrides_the_structural_prior(self):
+        conn = FakeConnector(read=_sf_record(Amount=1))
+        plan = cp.plan_write(conn, _patch(Amount=2), capture=True, predicted=0.42)
+        assert plan.preview.predicted_outcome == 0.42
+
+
+class TestShadowModeIntegration:
+    """The point of the whole module: these plans drive Shadow Mode."""
+
+    @pytest.fixture(autouse=True)
+    def _on(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_EARNED_AUTONOMY", "1")
+
+    def _engine(self, tmp_path):
+        return ea.EarnedAutonomyEngine(
+            cards=ea.CardStore(path=tmp_path / "cards.ndjson"),
+            ledger=ea.TrustLedger(path=tmp_path / "trust.ndjson"),
+            frozen_fn=lambda: False, audit_fn=lambda kind, **p: None,
+            now=lambda: 100.0)
+
+    def test_a_reversible_plan_executes_under_human_approval(self, tmp_path):
+        conn = FakeConnector(read=_sf_record(Amount=100000), writes=["{}"])
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        out = ea.shadow_execute(
+            plan.preview, plan.steps, principal="alice", goal_id=1,
+            episode_id=1, approve=lambda card: True,
+            engine=self._engine(tmp_path))
+        assert out.executed is True and out.committed is True
+        assert conn.writes[-1]["body"] == {"Amount": 120000}
+
+    def test_an_unearned_undo_refuses_before_any_effect(self, tmp_path):
+        conn = FakeConnector(read="ERROR: 403 forbidden")
+        plan = cp.plan_write(conn, _patch(Amount=120000), capture=True)
+        out = ea.shadow_execute(
+            plan.preview, plan.steps, principal="alice", goal_id=1,
+            episode_id=1, approve=lambda card: True,
+            engine=self._engine(tmp_path))
+        assert out.committed is False
+        assert conn.writes == []  # refused BEFORE touching the system of record
+
+    def test_the_approver_sees_the_dollars_and_the_reversibility(self, tmp_path):
+        seen: list[dict] = []
+        conn = FakeConnector(read=_sf_record(Amount=100000), writes=["{}"])
+        plan = cp.plan_write(conn, _patch(Amount=350000), capture=True)
+        ea.shadow_execute(
+            plan.preview, plan.steps, principal="alice", goal_id=1,
+            episode_id=1, approve=lambda card: bool(seen.append(card)) or True,
+            engine=self._engine(tmp_path))
+        assert seen[0]["exposure_dollars"] == 250000.0
+        assert seen[0]["reversible"] is True
+
+
+class TestConfigKnob:
+    def test_restore_points_default_on_so_autonomy_can_be_earned(self, monkeypatch):
+        monkeypatch.delenv("MAVERICK_GOVERNED_RESTORE_POINTS", raising=False)
+        import maverick.config as config
+        monkeypatch.setattr(config, "load_config", dict)
+        assert config.get_governed_connectors()["restore_points"] is True
+
+    def test_env_override_turns_restore_reads_off(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_GOVERNED_RESTORE_POINTS", "0")
+        import maverick.config as config
+        monkeypatch.setattr(
+            config, "load_config", lambda: {"governed_connectors":
+                                            {"restore_points": True}})
+        assert config.get_governed_connectors()["restore_points"] is False
+        assert cp.restore_points_enabled() is False
+
+    def test_unreadable_config_disables_the_read_rather_than_defaulting_on(
+            self, monkeypatch):
+        import maverick.config as config
+
+        def _boom():
+            raise OSError("config gone")
+
+        monkeypatch.setattr(config, "get_governed_connectors", _boom)
+        assert cp.restore_points_enabled() is False

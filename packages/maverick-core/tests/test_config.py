@@ -162,18 +162,24 @@ def test_load_config_with_models_section():
 
 def test_get_governed_connectors_defaults_off(monkeypatch):
     import maverick.config as cfg_mod
+    monkeypatch.delenv("MAVERICK_GOVERNED_RESTORE_POINTS", raising=False)
     monkeypatch.setattr(cfg_mod, "load_config", lambda *a, **k: {})
     gc = cfg_mod.get_governed_connectors()
-    assert gc == {"enable": False, "connectors": [], "approver": ""}
+    # restore_points defaults ON: it only takes effect once connectors are
+    # enabled, and without it every in-place update is irreversible.
+    assert gc == {"enable": False, "connectors": [], "approver": "",
+                  "restore_points": True}
 
 
 def test_get_governed_connectors_parses_list_and_csv(monkeypatch):
     import maverick.config as cfg_mod
+    monkeypatch.delenv("MAVERICK_GOVERNED_RESTORE_POINTS", raising=False)
     monkeypatch.setattr(cfg_mod, "load_config", lambda *a, **k: {
         "governed_connectors": {"enable": True, "connectors": ["salesforce", " servicenow "],
                                 "approver": "ops@corp"}})
     assert cfg_mod.get_governed_connectors() == {
-        "enable": True, "connectors": ["salesforce", "servicenow"], "approver": "ops@corp"}
+        "enable": True, "connectors": ["salesforce", "servicenow"],
+        "approver": "ops@corp", "restore_points": True}
     # A CSV string (an operator hand-edit) is tolerated and split.
     monkeypatch.setattr(cfg_mod, "load_config", lambda *a, **k: {
         "governed_connectors": {"enable": True, "connectors": "salesforce, servicenow"}})

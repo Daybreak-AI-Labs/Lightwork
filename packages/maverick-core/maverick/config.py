@@ -954,12 +954,25 @@ def get_governed_connectors() -> dict:
         names = [str(s).strip() for s in raw if str(s).strip()]
     else:
         names = []
+    env_restore = os.environ.get("MAVERICK_GOVERNED_RESTORE_POINTS")
+    restore_points = (
+        env_restore.strip().lower() in ("1", "true", "yes", "on")
+        if env_restore is not None
+        else bool(cfg.get("restore_points", True))
+    )
     return {
         "enable": bool(cfg.get("enable", False)),
         "connectors": names,
         # Standing approver of record for governed connector writes in the live
         # tool path (the agent can't self-approve). Env: MAVERICK_GOVERNED_APPROVER.
         "approver": str(cfg.get("approver", "")).strip(),
+        # Let maverick.connector_previews.plan_write issue ONE read-only GET to
+        # capture prior state before an in-place update, so the write earns a
+        # real undo. Without it every update is irreversible and routes to a
+        # human -- correct, but the autonomy dial never earns anything. Turn it
+        # off for a write-only service account. Env:
+        # MAVERICK_GOVERNED_RESTORE_POINTS.
+        "restore_points": restore_points,
     }
 
 

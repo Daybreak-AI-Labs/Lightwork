@@ -560,6 +560,94 @@ fully offline-testable. Remaining to reach the full bet: real per-connector
 `ConsequencePreview` shape are now in place), and a design partner for real
 predicted-vs-actual volume.
 
+### Build log — Bet 5 step two: the connector adapters (shipped)
+
+Step one left Shadow Mode holding a *sentence*. `preview_write` returns "would
+PATCH salesforce/… with fields ['Amount']" — no dollars, no entities, and no
+`undo`, so every governed write was structurally irreversible and the autonomy
+dial had nothing it could ever grade. **`maverick.connector_previews`** closes
+that gap. `plan_write(conn, params)` turns one connector write into a
+`WritePlan`: a populated `ConsequencePreview` plus the saga steps that can
+execute *and compensate* it.
+
+The whole module exists to enforce one rule: **an action is reversible only
+when we are holding the thing that inverts it.** Never asserted, never
+inferred from the verb alone.
+
+- **What earns an undo.** A PATCH earns one by capturing the record's prior
+  values for exactly the fields being changed — not the whole record, which
+  would replay fields nobody touched. A POST earns one from the id the create
+  response returns; because that id doesn't exist at plan time, the undo
+  closes over the response and **raises** if the id never arrives (a silent
+  no-op rollback is worse than a loud failure — the saga would report a clean
+  rollback while the record still exists). A full-replace PUT and a DELETE
+  earn nothing: replaying a prior record means writing system-managed fields
+  the API refuses, and a recreated record has a new id and leaves every
+  reference to the old one dangling. That is a different record, not a
+  restoration.
+- **Three ways a capture is a lie, all handled.** *System-managed fields* —
+  audit stamps, auto-numbers, Salesforce formulas (`ExpectedRevenue`) and
+  roll-ups, ServiceNow `sys_*` — read back perfectly and then silently fail to
+  apply, so a write touching one forfeits its inverse entirely rather than
+  shipping a restore that reports success and changes nothing. *Concurrent
+  edits* — the dialect's optimistic-concurrency token (`LastModifiedDate`,
+  `sys_mod_count`) is captured alongside the priors, and the undo re-reads it
+  before restoring; if the record moved, it refuses. Restoring over somebody
+  else's edit is not an undo, it is a second incident. The reference value is
+  the token as of *our own* write, not the plan-time one — our write bumps the
+  token itself, so comparing against the capture would flag every undo as a
+  stranger's edit and quietly make the whole feature dead. The do-step
+  therefore records what the write left behind, preferring the response echo
+  (ServiceNow returns the updated record) and paying for one GET only where
+  the write answers with a bare 204 (Salesforce PATCH). *Display
+  values* — ServiceNow returns `"New"` for a choice field and a nested object
+  for a reference unless the read demands raw values, and neither is writable
+  back, so the capture GET pins `sysparm_display_value=false`.
+- **Honest dollars.** Exposure is the *delta* where a prior was captured
+  (moving an opportunity from $100k to $120k risks $20k, not $120k) and the
+  whole written figure where it was not. Overstating exposure keeps a human in
+  the loop; understating it would not. A DELETE is priced at everything on the
+  record — which is why the capture read still happens for a verb that can
+  never be undone.
+- **Vendor knowledge lives in a dialect, not in the verb.** `RestDialect` +
+  `SalesforceDialect` + `ServiceNowDialect` carry the URL grammar, the
+  money-bearing fields, the unrestorable set, the token field, and the capture
+  query. An unknown connector falls back to a deliberately *incapable* generic
+  dialect: it matches no record path, captures nothing, and earns no
+  reversibility — degrading to "route this to a human" rather than guessing at
+  another vendor's grammar. The dialect is also where a false negative gets
+  fixed: ServiceNow's PUT *merges* like PATCH rather than replacing, so
+  treating every PUT as irreversible would stall the dial on writes that are
+  genuinely restorable.
+- **Two contract seams bridged.** `preview_write` keeps its no-network
+  guarantee (a REST write cannot be dry-run server-side, and a test asserts
+  the silence), so the single read-only GET that earns an undo lives in the
+  separate `plan_write` seam, gated by `[governed_connectors] restore_points`
+  — and `plan_write` still calls `preview_write` first, keeping validation and
+  the human sentence in exactly one place. Second: `RestConnector` reports
+  failure by *returning* an `ERROR:`-prefixed string, while `run_saga`
+  compensates only when a step *raises*. Unbridged, a rejected write is booked
+  as committed and never rolled back; `_checked()` converts one convention
+  into the other.
+- **A live safety hole closed on the way.** `tool_risk("salesforce")` was
+  `high`, but the governed action that actually posts to the system of record
+  is named `salesforce.write` — absent from the table, so it fell through to
+  the `medium` default and slipped under the default `max_auto_risk="medium"`
+  ceiling. A namespaced action now inherits its namespace's classification,
+  **upward only**, so a suffix can raise the floor but never launder a
+  high-risk connector down.
+
+Every gap — a failed restore read, a field the read didn't return, a missing
+token, a system-managed field, an unrecognized connector, restore reads
+switched off — fails closed to `undo=None`, which makes `run_saga` refuse
+**before any effect**. `maverick connectors plan` is the operator surface: it
+prints the consequence card, the restore point, and every warning, and commits
+nothing. 64 deterministic tests, all network-free (connector I/O is scripted
+and every read the adapter *would* have issued is asserted).
+
+Remaining to reach the full bet: a design partner for real
+predicted-vs-actual volume.
+
 ### How the four bets relate
 
 | Bet | One-liner | Tense | Primary buyer pull |
