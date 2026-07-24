@@ -52,7 +52,7 @@ KNOWN_SECTIONS = frozenset({
     "kms", "knowledge",
     "langchain", "latency", "limits", "local_first", "local_runtime",
     "logging", "lsp", "mcp_registries", "mcp_servers", "memory",
-    "model_proxy", "models", "notifications", "oauth", "observability",
+    "model_cost_tiers", "model_proxy", "models", "notifications", "oauth", "observability",
     "obsidian", "operations_scientist",
     "perf", "persona", "planning", "plugins", "privacy",
     "privacy_ops", "provider_failover", "providers", "queue", "quotas", "reflexion",

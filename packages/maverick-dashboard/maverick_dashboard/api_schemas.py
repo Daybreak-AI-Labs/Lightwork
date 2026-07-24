@@ -1284,6 +1284,11 @@ class SecuritySuiteConfigIn(BaseModel):
         if self.response_execution and not self.env_hunt:
             raise ValueError("response execution requires env_hunt")
         return self
+class ModelCostTierIn(BaseModel):
+    model: str = Field(..., min_length=1, max_length=200)
+    band: str | None = Field(None, pattern="^(low|medium|high|very_high)$")
+
+
 class LicenseIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     jurisdiction: str = Field(..., min_length=1, max_length=120)

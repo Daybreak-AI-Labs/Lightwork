@@ -94,6 +94,7 @@ from .api_schemas import (
     LearningToggleIn,
     LicenseIn,
     LicenseNoteIn,
+    ModelCostTierIn,
     OAuthAuthorizeIn,
     OAuthExchangeIn,
     OneTrustImportIn,
@@ -6612,6 +6613,88 @@ async def get_agent_endpoint(request: Request, name: str) -> dict:
     # existence is public), 403 on grant, mirroring /departments/{key}.
     require_suite(request, suite_for(name))
     return view
+
+
+def _agent_model(view: dict) -> str:
+    """The model a specialist runs on: its pack override if any, else the
+    deployment's default agent-role model."""
+    models = view.get("models") or {}
+    for role in ("agent", "worker", "default"):
+        if models.get(role):
+            return str(models[role])
+    if models:
+        return str(next(iter(models.values())))
+    from maverick.llm import MODEL_SONNET
+    try:
+        from maverick.config import get_role_model
+        return get_role_model("agent") or MODEL_SONNET
+    except Exception:  # pragma: no cover -- config read never breaks the card
+        return MODEL_SONNET
+
+
+@router.get("/agents/{name}/jobcard")
+async def agent_jobcard(request: Request, name: str, days: int = 90) -> dict:
+    """The Agent Manager card in one call: the specialist's job description
+    (role, mission, responsibilities, deliverable, tools, guardrails, risk,
+    department), its manager scorecard (runs, cost, value, ROI, success rate),
+    and its model's cost tier. Read-only. Suite-scoped like /agents/{name}."""
+    from maverick.domain import suite_for
+    from maverick.domain_edit import resolved_view
+    view = await run_in_threadpool(resolved_view, name)
+    if view is None:
+        raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
+    require_suite(request, suite_for(name))
+
+    from maverick import agent_scorecard, model_cost_tier
+    model = _agent_model(view)
+    days = max(1, min(int(days), 730))
+
+    def _score() -> dict:
+        return agent_scorecard.for_agent(_world(), name,
+                                         window_days=days).to_dict()
+
+    scorecard = await run_in_threadpool(_score)
+    output = view.get("output") or {}
+    jd = {
+        "name": view["name"], "suite": view.get("suite"),
+        "role": view.get("description", ""),
+        "mission": view.get("persona", ""),
+        "responsibilities": view.get("workflow") or [],
+        "deliverable": output.get("deliverable", ""),
+        "consumers": output.get("consumers") or [],
+        "cadence": output.get("cadence", ""),
+        "gate": view.get("enforced_gate", ""),
+        "tools": view.get("allow_tools") or [],
+        "guardrails": view.get("deny_tools") or [],
+        "max_risk": view.get("max_risk", ""),
+        "knowledge_sources": view.get("knowledge_sources") or [],
+    }
+    return {"job_description": jd, "scorecard": scorecard,
+            "cost_tier": model_cost_tier.band_detail(model)}
+
+
+@router.get("/model-cost-tiers")
+async def list_model_cost_tiers(request: Request) -> dict:
+    """The settable cost-tier table: every priced model with its band (Low /
+    Medium / High / Very High) and whether it was operator-set."""
+    require_permission(request, "view")
+    from maverick import model_cost_tier
+    return {"bands": list(model_cost_tier.BANDS),
+            "models": await run_in_threadpool(model_cost_tier.catalog)}
+
+
+@router.post("/model-cost-tiers")
+async def set_model_cost_tier_endpoint(
+    request: Request, body: ModelCostTierIn) -> dict:
+    """Set (or clear, with band=null) a model's cost band. Admin-gated: it
+    shapes routing economics deployment-wide."""
+    require_permission(request, "admin")
+    from maverick_dashboard import settings_store
+    await run_in_threadpool(settings_store.set_model_cost_tier,
+                            body.model, body.band)
+    from maverick import config, model_cost_tier
+    config.reset_config_cache()
+    return model_cost_tier.band_detail(body.model)
 
 
 @router.post("/agents/{name}/validate")
