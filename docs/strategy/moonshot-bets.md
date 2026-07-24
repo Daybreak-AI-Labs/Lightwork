@@ -591,11 +591,29 @@ inferred from the verb alone.
   writing system-managed fields the API refuses, and a recreated record has a
   new id and leaves every reference to the old one dangling. That is a
   different record, not a restoration. A write path carrying a **query
-  string** earns nothing either: an in-place undo re-sends that same path, and
-  a query string is not inert — ServiceNow's `sysparm_input_display_value`
-  makes the API read submitted values as display labels, so replaying a raw
-  prior through it writes a *different* value than the one captured. Which
-  parameters are safe is per-vendor knowledge we do not have.
+  string** earns nothing either, for any verb: an in-place undo re-sends that
+  same path, and a query string is not inert — ServiceNow's
+  `sysparm_input_display_value` makes the API read submitted values as display
+  labels, so replaying a raw prior through it writes a *different* value than
+  the one captured. Creates are not the exception they first look like: a
+  create's inverse rests entirely on the id coming back in the response, and
+  the parameters that reshape a write reshape what it answers with —
+  `sysparm_fields` prunes the echo, `sysparm_display_value=all` re-types it. An
+  inverse whose evidence may never arrive is not an inverse, and promising one
+  costs more than refusing, because the undo would fail only *after* the record
+  already exists. Which parameters are safe is per-vendor knowledge we do not
+  have.
+- **Evidence gets validated before it is trusted as an address.** The
+  compensating DELETE is built by concatenating an id the *service* chose, so
+  a response carrying traversal, a query string, or simply something the wrong
+  shape would aim that DELETE at an endpoint nobody approved. The id must match
+  the dialect's record-id grammar first; a dialect with no grammar earns no
+  create inverse at all. The same reasoning anchors the path patterns
+  themselves — an unanchored suffix match claims any prefix as this vendor's,
+  and the collection match is what licenses the concatenation in the first
+  place. (The grammar earned its keep immediately: it caught a 19-character
+  "Salesforce id" that had been sitting in our own test fixtures, where real
+  ids are 15 or 18.)
 - **Three ways a capture is a lie, all handled.** *System-managed fields* —
   audit stamps, auto-numbers, Salesforce formulas (`ExpectedRevenue`) and
   roll-ups, ServiceNow `sys_*` — read back perfectly and then silently fail to
@@ -632,7 +650,21 @@ inferred from the verb alone.
   and tolerantly enough that a service answering `"7"` for an integer is not
   mistaken for an edit. Field level is the right granularity: a stranger
   touching some *other* field is no reason to refuse, because the undo only
-  ever replays ours. *Display values* — ServiceNow returns `"New"` for a
+  ever replays ours. That comparison spans two shapes of the same value, and
+  gets the tolerance asymmetric on purpose. The capture GET is *narrowed* —
+  raw, dereferenced, named fields — but a write's echo is whatever the service
+  volunteers, so a ServiceNow reference field is bare from the read and
+  `{"link": …, "value": …}` from the echo of the write that set it. Compared
+  raw, the record would not appear to hold what we just wrote, the reference
+  snapshot would be forfeited, and the undo the card advertised would refuse on
+  every reference field — so the dialect normalizes the shapes, and an echo
+  that *still* does not corroborate is treated as no echo at all and pays for
+  the GET rather than silently giving the undo up. In the other direction the
+  comparison refuses to be lossy: reading a value as a number discards currency
+  codes and leading zeros, so it is licensed only when one side really is a
+  number. `"USD;100"` and `"EUR;100"` are different values, and calling them
+  equal would let the undo destroy an edit while reporting the field untouched.
+  *Display values* — ServiceNow returns `"New"` for a
   choice field and a nested object for a reference unless the read demands raw
   values, and neither is writable back, so the capture GET pins
   `sysparm_display_value=false`.
@@ -682,13 +714,16 @@ inferred from the verb alone.
 
 Every gap — a failed restore read, a field the read didn't return, a missing
 token, a system-managed field, an unrecognized connector, a POST to a path
-that isn't a modelled collection, a query string on the write path, an
-unparseable path, restore reads switched off — fails closed to `undo=None`,
-which makes `run_saga` refuse **before any effect**. `maverick connectors
-plan` is the operator surface: it prints the consequence card, the restore
-point, and every warning, and commits nothing. 94 deterministic tests, all
-network-free (connector I/O is scripted and every read the adapter *would*
-have issued is asserted).
+that isn't a modelled collection, a create response whose id isn't one, a query
+string on the write path, an unparseable path, restore reads switched off —
+fails closed to `undo=None`, which makes `run_saga` refuse **before any
+effect**. Over-refusal costs a human review; under-refusal costs somebody's
+edit, so every judgment call above is settled in that direction. `maverick
+connectors plan` is the operator surface: it prints the consequence card, the
+restore point, and every warning, and commits nothing. 120 deterministic tests,
+all network-free (connector I/O is scripted and every read the adapter *would*
+have issued is asserted), and each guard above is mutation-checked — flipped
+off one at a time to confirm a test actually dies for it.
 
 Remaining to reach the full bet: a design partner for real
 predicted-vs-actual volume.

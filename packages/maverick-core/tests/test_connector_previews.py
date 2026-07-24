@@ -55,7 +55,7 @@ class FakeConnector:
         if self._writes:
             nxt = self._writes.pop(0)
             return nxt() if callable(nxt) else nxt
-        return json.dumps({"id": "006NEW0000000001AAA", "success": True})
+        return json.dumps({"id": "006NEW000000001AAA", "success": True})
 
 
 #: Salesforce's optimistic-concurrency token, as a capture read returns it.
@@ -130,7 +130,7 @@ class TestDialects:
 
     def test_created_id_read_from_each_vendors_create_response(self):
         assert cp.dialect_for("salesforce").created_id(
-            {"id": "006NEW0000000001AAA", "success": True}) == "006NEW0000000001AAA"
+            {"id": "006NEW000000001AAA", "success": True}) == "006NEW000000001AAA"
         assert cp.dialect_for("servicenow").created_id(
             {"result": {"sys_id": "f" * 32}}) == "f" * 32
         assert cp.dialect_for("salesforce").created_id({"success": True}) is None
@@ -151,6 +151,39 @@ class TestDialects:
         assert cp.dialect_for("salesforce").target(encoded) == (
             "Opportunity", "006xx0000000001AAA")
 
+    def test_path_matching_is_anchored_rather_than_a_suffix_match(self):
+        # An unanchored pattern accepts ANY prefix, so a path that merely ends
+        # the right way is claimed as this vendor's. That matters most for the
+        # collection: matching it is what licenses a POST to earn a DELETE built
+        # by concatenation, so a near-miss path would earn a compensation aimed
+        # at a URL this dialect never modelled. Refusing costs a human review;
+        # accepting costs an unrelated destructive write.
+        sf, sn = cp.dialect_for("salesforce"), cp.dialect_for("servicenow")
+        assert sf.collection(SF_COLLECTION) == "Opportunity"
+        assert sn.collection("/api/now/table/incident") == "incident"
+        for near_miss in ("/proxy/services/data/v60.0/sobjects/Opportunity",
+                          "/sobjects/Opportunity",
+                          "/services/data/v60.0/sobjects/Opportunity/extra"):
+            assert sf.collection(near_miss) is None
+            assert sf.target(f"{near_miss}/006xx0000000001AAA") is None
+        for near_miss in ("/proxy/api/now/table/incident", "/table/incident"):
+            assert sn.collection(near_miss) is None
+            assert sn.target(f"{near_miss}/{SN_ID}") is None
+
+    def test_servicenow_normalises_a_decorated_field_to_its_raw_value(self):
+        # The capture GET pins sysparm_exclude_reference_link=true, but that is
+        # a READ parameter with no write-echo equivalent: the same reference
+        # field is bare from the capture and decorated in the echo.
+        d = cp.dialect_for("servicenow")
+        assert d.field_value(
+            {"link": "https://x.service-now.com/api/now/table/sys_user/abc",
+             "value": "abc"}) == "abc"
+        assert d.field_value({"display_value": "Bob", "value": "abc"}) == "abc"
+        assert d.field_value("plain") == "plain"
+        # The generic dialect claims no such knowledge and changes nothing.
+        assert cp.dialect_for("workday").field_value({"value": "abc"}) == {
+            "value": "abc"}
+
     def test_unknown_connector_gets_the_incapable_generic_dialect(self):
         d = cp.dialect_for("workday")
         assert d.name == "generic"
@@ -159,6 +192,9 @@ class TestDialects:
         assert d.restore_query(["Amount"]) == {}
         # No token field means it can never promise a non-clobbering restore.
         assert d.concurrency_field == ""
+        # And no id grammar means it can never vouch for a create response's id
+        # well enough to concatenate it into a delete address.
+        assert d.id_re is None
 
 
 class TestMoneyCoercion:
@@ -177,6 +213,44 @@ class TestMoneyCoercion:
     def test_non_money_is_none_not_zero(self, raw):
         # Zero would silently understate exposure; None means "no figure".
         assert cp._as_money(raw) is None
+
+
+class TestValueComparisonRefusesToLaunderDifferences:
+    """The comparison that decides "is somebody else's edit sitting here?".
+
+    It is used in both directions -- the do-step corroborating its post-write
+    snapshot, and the undo checking what it is about to overwrite -- so a false
+    "same" is the failure that matters: it hands the undo a licence to destroy
+    an edit while reporting the field untouched. A false "different" only
+    forfeits an undo and routes to a human.
+    """
+
+    @pytest.mark.parametrize(("readback", "written"), [
+        (7, 7), ("7", 7), (7, "7"), (120000, 120000.0),
+        ("120000.00", 120000), ("$120,000.00", 120000),
+        ("Closed Won", "Closed Won"), (" Closed Won ", "Closed Won"),
+        (None, None),
+    ])
+    def test_a_service_restating_our_own_value_is_not_an_edit(
+            self, readback, written):
+        assert cp._same_value(readback, written) is True
+
+    @pytest.mark.parametrize(("readback", "written"), [
+        # Reading a value as a number is LOSSY: it discards the currency code
+        # and the leading zeros alike. Applying it to two strings would make a
+        # colleague's edit indistinguishable from our own write.
+        ("USD;100.00", "EUR;100.00"),
+        ("0042", "42"),
+        ("PO-0100", "PO-100"),
+        # str(None) is "None"; a cleared field must not equal the literal text.
+        (None, "None"),
+        ("", None),
+        (95000, 120000),
+        ("Negotiation", "Closed Won"),
+    ])
+    def test_a_genuine_difference_is_never_read_as_the_same_value(
+            self, readback, written):
+        assert cp._same_value(readback, written) is False
 
 
 class TestUpdateEarnsItsUndo:
@@ -474,6 +548,73 @@ class TestConcurrentEditsCannotBeSilentlyOverwritten:
         plan.steps[0].undo()
         assert conn.writes[-1]["body"] == {"Amount": 100000}
 
+    def test_a_reference_field_echoed_decorated_still_corroborates_our_write(
+            self):
+        # The shape asymmetry that would have made reference fields silently
+        # irreversible: the capture GET asks for raw values
+        # (sysparm_exclude_reference_link=true), but that is a READ parameter --
+        # the echo of the write that SET the field comes back as
+        # {"link": ..., "value": ...}. Compared raw, the record does not appear
+        # to hold what we just wrote, the reference snapshot is forfeited, and
+        # the undo the card promised refuses on every reference field.
+        ref = {"link": "https://x.service-now.com/api/now/table/sys_user/u9",
+               "value": "u9"}
+        reads = _script(_sn_record(assigned_to="u1"),
+                        _sn_record(assigned_to="u1"),
+                        _sn_record(mod_count="4", assigned_to="u9"))
+        conn = FakeConnector(
+            name="servicenow", read=reads,
+            writes=[_sn_record(mod_count="4", assigned_to=ref), "{}"])
+        plan = cp.plan_write(
+            conn, {"op": "patch", "path": SN_PATH,
+                   "body": {"assigned_to": "u9"}}, capture=True)
+        assert plan.reversible is True
+
+        plan.steps[0].do()
+        # The echo corroborated on its own: no fallback GET was needed.
+        assert len(conn.reads) == 2
+        plan.steps[0].undo()
+        assert conn.writes[-1]["body"] == {"assigned_to": "u1"}
+
+    def test_an_echo_that_does_not_show_our_write_falls_back_to_a_read(self):
+        # The echo is an optimization, not the authority: it is whatever the
+        # service volunteered, and may be truncated or shaped in a way this
+        # dialect does not model. Believing it would forfeit a good undo over a
+        # formatting difference, so an echo that does not visibly carry our
+        # write is treated as no echo at all and the narrowed GET decides.
+        reads = _script(_sn_record(cost="100"), _sn_record(cost="100"),
+                        _sn_record(mod_count="4", cost="250"),
+                        _sn_record(mod_count="4", cost="250"))
+        conn = FakeConnector(
+            name="servicenow", read=reads,
+            # A token, but the cost field is missing from the echo entirely.
+            writes=[_sn_record(mod_count="4"), "{}"])
+        plan = cp.plan_write(
+            conn, {"op": "patch", "path": SN_PATH, "body": {"cost": "250"}},
+            capture=True)
+        plan.steps[0].do()
+        assert len(conn.reads) == 3  # capture, pre-write, fallback
+        plan.steps[0].undo()
+        assert conn.writes[-1]["body"] == {"cost": "100"}
+
+    def test_every_field_the_write_touched_must_corroborate_not_just_one(self):
+        # The snapshot is the undo's whole reference, and the undo replays every
+        # field in the body. One field agreeing while another has already moved
+        # means the record is not our write's effect, so adopting it would let
+        # the restore overwrite the field that moved.
+        reads = _script(
+            _sf_record(Amount=100000, StageName="Prospect"),
+            _sf_record(Amount=100000, StageName="Prospect"),
+            # Amount is ours; StageName is somebody's, already past our write.
+            _sf_record(stamp=SF_AFTER, Amount=120000, StageName="Closed Lost"))
+        conn = FakeConnector(read=reads, writes=["{}"])
+        plan = cp.plan_write(
+            conn, _patch(Amount=120000, StageName="Closed Won"), capture=True)
+        plan.steps[0].do()
+        with pytest.raises(cp.PlanError, match="never observed"):
+            plan.steps[0].undo()
+        assert len(conn.writes) == 1  # no partial, no blind restore
+
     def test_a_readback_restating_our_value_differently_does_not_block_restore(self):
         # The undo's value check is the same tolerant comparison the do-step
         # uses, so a service answering "120000" for the integer we sent must
@@ -511,6 +652,23 @@ class TestTheApprovedWriteIsTheExecutedWrite:
         assert plan.preview.params_sha256 == digest
         assert plan.preview.exposure_dollars == 20000.0
 
+    def test_a_value_that_cannot_be_deep_copied_still_gets_its_body_detached(
+            self):
+        # deepcopy is the snapshot's first choice, but the params come from an
+        # agent and can carry anything. Falling back to nothing would hand the
+        # do-step the caller's own dict back; the one-level copy still detaches
+        # the body, which is the mutation that changes what executes.
+        class Exotic:
+            def __deepcopy__(self, memo):
+                raise TypeError("not copyable")
+
+        params = {"op": "patch", "path": SF_PATH,
+                  "body": {"Amount": 120000}, "client": Exotic()}
+        snap = cp._snapshot(params)
+        params["body"]["Amount"] = 5000000
+        assert snap["body"] == {"Amount": 120000}
+        assert isinstance(snap["client"], Exotic)  # passed through, not dropped
+
 
 class TestMalformedPathsRefuseRatherThanRaise:
     """Planning promises never to raise; the path comes from an agent."""
@@ -541,6 +699,18 @@ class TestAQueryStringOnTheWritePathForfeitsTheInverse:
                    "body": {"cost": "250"}}, capture=True)
         assert plan.reversible is False
         assert plan.steps[0].undo is None
+        assert any("query string" in w for w in plan.warnings)
+
+    def test_a_decorated_servicenow_put_earns_no_undo_either(self):
+        # PUT merges on this API, so it is normally reversible -- which is
+        # exactly why the forfeit has to be checked before the verb rather than
+        # inside the PATCH branch alone.
+        conn = FakeConnector(name="servicenow", read=_sn_record(cost="100"))
+        plan = cp.plan_write(
+            conn, {"op": "put",
+                   "path": f"{SN_PATH}?sysparm_input_display_value=true",
+                   "body": {"cost": "250"}}, capture=True)
+        assert plan.reversible is False
         assert any("query string" in w for w in plan.warnings)
 
     def test_the_capture_read_still_happens_so_exposure_is_still_priced(self):
@@ -630,7 +800,7 @@ class TestUpdateFailsClosed:
 class TestCreateAndDestroy:
     def test_post_is_reversible_by_deleting_the_id_the_create_returns(self):
         conn = FakeConnector(writes=[
-            json.dumps({"id": "006NEW0000000001AAA", "success": True}), "{}"])
+            json.dumps({"id": "006NEW000000001AAA", "success": True}), "{}"])
         plan = cp.plan_write(
             conn, {"op": "post", "path": SF_COLLECTION,
                    "body": {"Name": "Acme", "Amount": 90000}}, capture=True)
@@ -644,7 +814,7 @@ class TestCreateAndDestroy:
         plan.steps[0].do()
         plan.steps[0].undo()
         assert conn.writes[-1] == {
-            "op": "delete", "path": f"{SF_COLLECTION}/006NEW0000000001AAA",
+            "op": "delete", "path": f"{SF_COLLECTION}/006NEW000000001AAA",
             "body": {}}
 
     def test_a_post_to_an_unmodelled_connector_earns_no_inverse(self):
@@ -673,24 +843,69 @@ class TestCreateAndDestroy:
         assert plan.reversible is False
         assert plan.steps[0].undo is None
 
-    def test_a_query_string_does_not_land_inside_the_delete_target(self):
-        # Appending the id to the raw path would build
-        # ".../incident?sysparm_x=1/<sys_id>" -- the id ends up inside the
-        # QUERY, so the compensation addresses the table, not the new record.
-        new_id = "f" * 32
+    def test_a_query_string_on_a_create_path_earns_no_inverse_either(self):
+        # A create's whole inverse rests on the id coming back in the response,
+        # and the parameters that reshape a write reshape what it answers with:
+        # sysparm_fields prunes the echo, sysparm_display_value=all re-types it.
+        # An inverse whose evidence may never arrive is not an inverse -- and
+        # promising one costs more than refusing, because the undo would fail
+        # only after the record already exists.
         conn = FakeConnector(name="servicenow", writes=[
-            json.dumps({"result": {"sys_id": new_id}}), "{}"])
+            json.dumps({"result": {"sys_id": "f" * 32}})])
         plan = cp.plan_write(
             conn, {"op": "post",
                    "path": "/api/now/table/incident?sysparm_input_display_value=true",
                    "body": {"short_description": "printer down"}}, capture=True)
-        assert plan.reversible is True
+        assert plan.reversible is False
+        assert plan.steps[0].undo is None
+        assert any("query string" in w for w in plan.warnings)
 
-        plan.steps[0].do()
-        plan.steps[0].undo()
+    def test_the_delete_target_is_built_from_the_path_component(self):
+        # Belt to the forfeit's braces, asserted where the concatenation
+        # actually lives: appending the id to a raw path would build
+        # ".../incident?sysparm_x=1/<sys_id>", landing the id inside the QUERY
+        # so the compensation addresses the table rather than the new record.
+        new_id = "f" * 32
+        conn = FakeConnector(name="servicenow", writes=["{}"])
+        _restore, undo, _warn = cp._inverse_for_create(
+            conn, cp.dialect_for("servicenow"),
+            "/api/now/table/incident?sysparm_input_display_value=true",
+            [json.dumps({"result": {"sys_id": new_id}})])
+        assert undo is not None
+        undo()
         assert conn.writes[-1] == {
             "op": "delete", "path": f"/api/now/table/incident/{new_id}",
             "body": {}}
+
+    def test_an_id_that_is_not_an_id_never_reaches_the_delete_address(self):
+        # The delete address is built by concatenating a value the SERVICE
+        # chose. A response carrying traversal, a query string, or simply
+        # something the wrong shape would aim the compensation at an endpoint
+        # nobody approved -- so the id must look like this vendor's before it is
+        # allowed into a URL, and the undo fails loudly when it does not.
+        for bogus in ("../../../services/data/v60.0/sobjects/Account/001xx0",
+                      "006xx0000000001AAA?cascade=true", "006xx", "a" * 40):
+            conn = FakeConnector(writes=[json.dumps({"id": bogus})])
+            plan = cp.plan_write(
+                conn, {"op": "post", "path": SF_COLLECTION,
+                       "body": {"Name": "Acme"}}, capture=True)
+            plan.steps[0].do()
+            with pytest.raises(cp.PlanError, match="not a salesforce record id"):
+                plan.steps[0].undo()
+            assert [w["op"] for w in conn.writes] == ["post"]  # no blind delete
+
+    def test_the_card_names_the_create_target_the_way_the_restore_point_does(
+            self):
+        # A create addresses a collection, so the path names no record. If the
+        # card fell back to the raw path while the restore point said
+        # "Opportunity/(new)", one write would be described two ways and an
+        # operator reconciling the record would be reading about two.
+        conn = FakeConnector(writes=[json.dumps({"id": "006NEW000000001AAA"})])
+        plan = cp.plan_write(
+            conn, {"op": "post", "path": SF_COLLECTION, "body": {"Name": "A"}},
+            capture=True)
+        assert plan.restore.entity == "Opportunity/(new)"
+        assert plan.preview.entities == ("Opportunity/(new)",)
 
     def test_undo_before_the_create_ran_raises_rather_than_no_opping(self):
         plan = cp.plan_write(

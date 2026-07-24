@@ -826,15 +826,21 @@ here.
   vendor's URL grammar. A full-replace PUT and a DELETE earn nothing, because
   replaying system fields fails and a recreated record has a new id and
   dangling references; a write path carrying a **query string** earns nothing
-  either, since a parameter like `sysparm_input_display_value` changes how the
-  service reads the values being submitted, so replaying a raw prior through
-  it writes something other than what was captured. Every gap fails closed to
+  either — for any verb, creates included, since a parameter like
+  `sysparm_input_display_value` changes how the service reads the values being
+  submitted (so replaying a raw prior writes something other than what was
+  captured) and parameters like `sysparm_fields` reshape what the write
+  *answers* with, which is the create's only evidence. Every gap fails closed to
   `undo=None`, which makes `run_saga` refuse **before any effect** and routes
   the action to a human. Per-service knowledge lives in a `RestDialect`
   (`SalesforceDialect`, `ServiceNowDialect`; an unknown connector gets a
   deliberately incapable generic one that earns nothing): which fields carry
-  money, how a path names a record, which paths are create-into collections,
-  and three facts that decide whether a restore can actually
+  money, how a path names a record, which paths are create-into collections
+  (matched **anchored**, since a suffix match would claim any prefix at all as
+  this vendor's and earn a compensation aimed at a URL the dialect never
+  modelled), what a record id must look like before the response's id is
+  concatenated into a compensating DELETE address, and three facts that decide
+  whether a restore can actually
   restore — **system-managed fields** (audit stamps, auto-numbers, formulas,
   roll-ups) whose priors read back perfectly and then silently fail to apply,
   so touching one forfeits the inverse; the **optimistic-concurrency token**
@@ -852,7 +858,16 @@ here.
   adopted only if it still carries the values we just wrote, field by field —
   a fallback GET can otherwise hand us a stranger's state and license the undo
   to overwrite it, while a stranger touching some *other* field is no reason
-  to refuse, because the undo only ever replays ours. The approved params are
+  to refuse, because the undo only ever replays ours. That comparison has to
+  survive two shapes of the same value: the capture GET is *narrowed* (raw,
+  dereferenced) but a write's echo is whatever the service volunteers, so a
+  ServiceNow reference field is bare from the read and
+  `{"link": …, "value": …}` from the echo — the dialect normalizes it, and an
+  echo that still does not corroborate is treated as no echo at all rather than
+  silently forfeiting the undo. The comparison is deliberately *not* lossy in
+  the other direction: `"USD;100"` and `"EUR;100"` are different values, and
+  reading them as equal would let the undo destroy an edit while reporting the
+  field untouched. The approved params are
   snapshotted at planning time, so a caller mutating its dict while the card
   awaits approval cannot change the write that executes. Exposure is the
   *delta* where a prior was captured ($100k → $120k risks $20k) and the whole
