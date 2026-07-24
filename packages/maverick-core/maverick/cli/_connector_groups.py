@@ -96,3 +96,41 @@ def connectors_simulate_cmd(action, params_json) -> None:
         "requires_approval": preview.requires_approval,
         "committed": False,
     }, indent=2))
+
+
+@connectors_group.command("plan")
+@click.argument("connector")
+@click.option("--params", "params_json", default="{}",
+              help='Typed write params as a JSON object, e.g. '
+                   '\'{"op":"patch","path":"/services/data/v60.0/sobjects/'
+                   'Opportunity/006xx0000000001AAA","body":{"Amount":120000}}\'.')
+def connectors_plan_cmd(connector, params_json) -> None:
+    """Show the structured consequence of a write, and whether it can be undone.
+
+    Unlike ``simulate`` (which never touches the network), planning may issue
+    ONE read-only GET to read the record's prior values -- that captured
+    restore point is what earns ``reversible: true``. It performs no write.
+    """
+    _ga, registered = _configured()
+    name = str(connector).strip().lower()
+    if name not in {str(k).strip().lower() for k in registered}:
+        raise click.ClickException(
+            f"{connector!r} is not a registered governed connector "
+            f"(have: {', '.join(sorted(registered)) or 'none'})")
+    try:
+        params = _json.loads(params_json)
+        if not isinstance(params, dict):
+            raise ValueError("params must be a JSON object")
+    except ValueError as e:
+        raise click.ClickException(f"invalid --params JSON: {e}") from e
+    from ..connector_previews import plan_write
+    from ..governed_rest import GOVERNED_REST_FACTORIES
+    plan = plan_write(GOVERNED_REST_FACTORIES[name](), params)
+    click.echo(_json.dumps({
+        **plan.preview.card_view(),
+        "restore": {"kind": plan.restore.kind, "entity": plan.restore.entity,
+                    "captured": plan.restore.captured,
+                    "detail": plan.restore.detail},
+        "warnings": list(plan.warnings),
+        "committed": False,
+    }, indent=2))

@@ -1322,7 +1322,19 @@ def pick_governed_connectors() -> dict[str, Any]:
     approver = _q_text(
         "  Approver of record for governed writes (blank = refuse agent writes "
         "without out-of-band approval):", default="").strip()
-    return {"enable": True, "connectors": selected, "approver": approver}
+    # Restore points: one read-only GET before an in-place update, so the write
+    # carries a real undo instead of an asserted one. Without it every update is
+    # irreversible and routes to a human -- safe, but nothing ever earns
+    # autonomy. Off is the right answer for a write-only service account.
+    console.print(
+        "[dim]  Restore points read a record's prior values before changing "
+        "them (one read-only GET), so the write ships a genuine undo. Off = "
+        "every update is treated as irreversible.[/dim]"
+    )
+    restore_points = _q_confirm(
+        "  Capture restore points before in-place updates?", default=True)
+    return {"enable": True, "connectors": selected, "approver": approver,
+            "restore_points": restore_points}
 
 
 def pick_durable() -> dict[str, Any]:

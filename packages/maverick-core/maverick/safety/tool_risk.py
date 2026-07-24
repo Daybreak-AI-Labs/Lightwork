@@ -372,6 +372,18 @@ def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
         return _read_connector_risks().get(name, "high")
     if name in _enterprise_connector_names():
         return "high"
+    # A namespaced action (``salesforce.write``, ``servicenow.read``) inherits
+    # its namespace's classification when it has none of its own -- UPWARD
+    # ONLY, so a suffix can raise the floor but never launder a high-risk
+    # connector down to the medium default. Without this, ``salesforce`` is
+    # high while ``salesforce.write`` -- the governed action that actually
+    # posts to the system of record -- landed on medium and slipped under a
+    # max_risk="medium" ceiling.
+    namespace = name.split(".", 1)[0]
+    if namespace and namespace != name:
+        inherited = tool_risk(namespace, overrides)
+        if risk_rank(inherited) > risk_rank(_DEFAULT_RISK_LEVEL):
+            return inherited
     return _DEFAULT_RISK_LEVEL
 
 

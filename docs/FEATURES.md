@@ -810,6 +810,35 @@ here.
   signed. Every card, hit/miss, graduation, demotion, and shadow execution is
   a signed audit event (`consequence_card`, `autonomy_graduation`,
   `shadow_execution`).
+- **Connector consequence adapters — reversibility that is earned, not
+  asserted** (`connector_previews.py`, `maverick connectors plan`, gated by
+  `[governed_connectors] restore_points` / `MAVERICK_GOVERNED_RESTORE_POINTS`)
+  — the governed REST connectors' `preview_write` returns a *sentence*
+  ("would PATCH salesforce/… with fields ['Amount']"); Shadow Mode needs the
+  dollars, the entities, and above all a real `undo`. `plan_write` supplies
+  them, and enforces one rule: **an action is reversible only when we are
+  holding the thing that inverts it.** A PATCH earns its undo by capturing the
+  record's prior values for exactly the fields being changed; a POST earns its
+  undo from the id the create response returns (the undo *raises* rather than
+  no-ops if that id never arrives); a full-replace PUT and a DELETE earn
+  nothing, because replaying system fields fails and a recreated record has a
+  new id and dangling references. Every gap fails closed to `undo=None`, which
+  makes `run_saga` refuse **before any effect** and routes the action to a
+  human. Per-service knowledge lives in a `RestDialect` (`SalesforceDialect`,
+  `ServiceNowDialect`; an unknown connector gets a deliberately incapable
+  generic one that earns nothing): which fields carry money, how a path names
+  a record, and three facts that decide whether a restore can actually
+  restore — **system-managed fields** (audit stamps, auto-numbers, formulas,
+  roll-ups) whose priors read back perfectly and then silently fail to apply,
+  so touching one forfeits the inverse; the **optimistic-concurrency token**
+  (`LastModifiedDate` / `sys_mod_count`) re-read before restoring and compared
+  against the value our own write left behind, so an undo refuses rather than
+  overwriting somebody else's edit; and the **raw-value capture** ServiceNow
+  requires (display values are not writable back). Exposure is the *delta* where a
+  prior was captured ($100k → $120k risks $20k) and the whole figure where it
+  was not — overstating keeps a human in the loop, understating would not.
+  `preview_write` keeps its no-network guarantee; the single read-only GET
+  that earns the undo lives in this separate seam and is operator-gated.
 - **Emergent Substrate — an auditable coordination shorthand** (`emergent_protocol.py`
   + `emergent_tokens.py`, `maverick codebook` / `codec-learn` / `codec-probe`,
   opt-in `[emergent_protocol]` / `[emergent_codec]` / `MAVERICK_EMERGENT_CODEC`) —
