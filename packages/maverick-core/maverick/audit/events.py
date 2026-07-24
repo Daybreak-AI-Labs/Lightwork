@@ -212,6 +212,13 @@ class EventKind:
     # streak/hits/misses ints on graduate, card:str on demote, reason:str on
     # revoke.
     AUTONOMY_GRADUATION = "autonomy_graduation"
+    # Earned Autonomy "Shadow Mode" (maverick.earned_autonomy.shadow_execute):
+    # a high-stakes action was previewed, gated (earned-auto or human-approved),
+    # and executed under the compensating saga -- the signed sim -> approve ->
+    # execute chain. payload: decision:str (denied|approved|auto), action:str,
+    # auto:bool, exposure:float|None; on execution also card:str|None and
+    # committed:bool.
+    SHADOW_EXECUTION = "shadow_execution"
     # AI system lifecycle: an AI system/component was retired (decommissioned).
     # Closes the ISO/IEC 42001 A.6.2 lifecycle at the far end — the signed chain
     # records the deliberate end-of-life the same way it records learning
