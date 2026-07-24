@@ -156,6 +156,166 @@ def test_model_risk_http_flow_keeps_classification_and_review_human_governed():
     assert stale.status_code == 409
 
 
+def test_verified_training_receipt_route_uses_server_trust_and_active_tenant(
+    monkeypatch,
+):
+    from maverick import model_risk_assurance
+    from maverick.paths import current_tenant_id_strict
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    calls = {}
+
+    def _record(asset_id, **kwargs):
+        calls["tenant_id"] = current_tenant_id_strict()
+        calls["asset_id"] = asset_id
+        calls.update(kwargs)
+        return {
+            "id": "MRE-training-receipt",
+            "evidence_kind": "training_run",
+            "status": "pending_review",
+        }
+
+    monkeypatch.setattr(
+        model_risk_assurance,
+        "record_verified_training_receipt_evidence",
+        _record,
+    )
+    valid_until = time.time() + 600
+    response = _ok(client.post(
+        "/api/v1/security/assurance/model-risk/evidence/training-receipts",
+        json={
+            "asset_id": "MAA-" + ("a" * 32),
+            "receipt_id": "tenant-private-receipt-1",
+            "actor": "local:dashboard",
+            "valid_until": valid_until,
+        },
+    ))
+
+    assert response["evidence_kind"] == "training_run"
+    assert calls == {
+        "tenant_id": "alpha",
+        "asset_id": "MAA-" + ("a" * 32),
+        "receipt_id": "tenant-private-receipt-1",
+        "actor": "local:dashboard",
+        "valid_until": valid_until,
+    }
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "trusted_receipt_pubkeys",
+        "trusted_approver_pubkeys",
+    ],
+)
+def test_training_receipt_route_rejects_caller_supplied_trust_registries(
+    monkeypatch,
+    field,
+):
+    from maverick import model_risk_assurance
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    monkeypatch.setattr(
+        model_risk_assurance,
+        "record_verified_training_receipt_evidence",
+        lambda *_args, **_kwargs: pytest.fail("invalid input reached the officer"),
+    )
+    body = {
+        "asset_id": "MAA-" + ("a" * 32),
+        "receipt_id": "tenant-private-receipt-1",
+        "actor": "local:dashboard",
+        "valid_until": time.time() + 600,
+    }
+    body[field] = {"attacker-chosen": "trust-anchor"}
+    response = client.post(
+        "/api/v1/security/assurance/model-risk/evidence/training-receipts",
+        json=body,
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("receipt", {"public_key": "11" * 32, "private_training_content": "raw"}),
+        ("public_key", "11" * 32),
+        ("private_key", "22" * 32),
+        ("tenant_id", "different-tenant"),
+    ],
+)
+def test_training_receipt_route_rejects_raw_self_disclosed_or_tenant_fields(
+    monkeypatch,
+    field,
+    value,
+):
+    from maverick import model_risk_assurance
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    monkeypatch.setattr(
+        model_risk_assurance,
+        "record_verified_training_receipt_evidence",
+        lambda *_args, **_kwargs: pytest.fail("forbidden input reached the officer"),
+    )
+    body = {
+        "asset_id": "MAA-" + ("a" * 32),
+        "receipt_id": "tenant-private-receipt-1",
+        "actor": "local:dashboard",
+        "valid_until": time.time() + 600,
+        field: value,
+    }
+    response = client.post(
+        "/api/v1/security/assurance/model-risk/evidence/training-receipts",
+        json=body,
+    )
+    assert response.status_code == 422
+
+
+def test_training_receipt_route_requires_auth_and_binds_actor(monkeypatch):
+    from maverick import model_risk_assurance
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "training-operator-token")
+    monkeypatch.setattr(
+        model_risk_assurance,
+        "record_verified_training_receipt_evidence",
+        lambda _asset_id, **_kwargs: {"status": "pending_review"},
+    )
+    body = {
+        "asset_id": "MAA-" + ("a" * 32),
+        "receipt_id": "tenant-private-receipt-1",
+        "actor": "auth:dashboard-token",
+        "valid_until": time.time() + 600,
+    }
+    path = "/api/v1/security/assurance/model-risk/evidence/training-receipts"
+    assert client.post(path, json=body).status_code == 401
+
+    headers = {
+        "Authorization": "Bearer training-operator-token",
+        "Origin": "http://testserver",
+    }
+    mismatched = dict(body, actor="impersonated:operator")
+    assert client.post(path, json=mismatched, headers=headers).status_code == 403
+    assert client.post(path, json=body, headers=headers).status_code == 200
+
+
+def test_generic_evidence_route_refuses_unverified_training_run():
+    now = time.time()
+    response = client.post(
+        "/api/v1/security/assurance/model-risk/evidence",
+        json={
+            "asset_id": "MAA-" + ("a" * 32),
+            "source_id": "caller-asserted-receipt",
+            "evidence_kind": "training_run",
+            "result": "passed",
+            "scope_digest": hashlib.sha256(b"scope").hexdigest(),
+            "artifact_digest": hashlib.sha256(b"adapter").hexdigest(),
+            "observed_at": now,
+            "valid_until": now + 600,
+        },
+    )
+    assert response.status_code == 422
+
+
 
 
 def test_model_risk_assurance_page_is_available():

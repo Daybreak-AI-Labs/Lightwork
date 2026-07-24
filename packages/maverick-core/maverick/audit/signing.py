@@ -510,6 +510,23 @@ def _read_disk_keypair(key_dir: Path, key_id: str) -> tuple[bytes, bytes, str]:
         raise ValueError("audit Ed25519 key files must each contain 32 raw bytes")
     if hashlib.sha256(pub).hexdigest()[:16] != key_id:
         raise ValueError("audit public key does not match its key id")
+    try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+    except ImportError as exc:
+        raise ValueError(
+            "cryptography is required to validate audit signing keys",
+        ) from exc
+    derived_pub = (
+        ed25519.Ed25519PrivateKey.from_private_bytes(priv)
+        .public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    )
+    if derived_pub != pub:
+        raise ValueError("audit private/public signing key files do not match")
     return priv, pub, key_id
 
 
@@ -987,6 +1004,55 @@ def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
     return breaks
 
 
+def trusted_audit_public_keys() -> dict[str, str]:
+    """Return the protected local audit-key registry as ``key_id -> hex``.
+
+    Merely dropping a ``*.pub`` file into the key directory is not enough to
+    create trust. Each key needs either its protected private-key sibling or
+    the marker written when an externally managed signing key was injected.
+    Any malformed registry entry fails the whole snapshot so a privileged
+    verifier never operates on a silently partial trust set.
+    """
+    key_dir = _key_dir()
+    if not key_dir.exists():
+        return {}
+    ensure_private_directory(key_dir)
+    registry: dict[str, str] = {}
+    try:
+        entries = sorted(key_dir.glob("*.pub"))
+    except OSError as exc:
+        raise ValueError("audit public-key registry is unavailable") from exc
+    for public_path in entries:
+        key_id = public_path.stem
+        if not _is_valid_key_id(key_id):
+            raise ValueError("audit public-key registry contains an invalid key id")
+        public_path_checked, private_path = _key_paths_for_id(key_id)
+        if public_path_checked is None or private_path is None:
+            raise ValueError("audit public-key registry contains an invalid path")
+        marker = _injected_marker_for_id(key_id)
+        if private_path.exists():
+            _private, raw, loaded_key_id = _read_disk_keypair(key_dir, key_id)
+            if loaded_key_id != key_id:
+                raise ValueError(
+                    "audit public-key registry contains a mismatched keypair",
+                )
+        elif marker is not None and marker.exists():
+            ensure_private_file(marker, 0o600)
+            ensure_private_file(public_path_checked, 0o644)
+            raw = atomic_read_bytes(public_path_checked)
+        else:
+            raise ValueError(
+                "audit public-key registry contains an unprovisioned public key",
+            )
+        if (
+            len(raw) != 32
+            or hashlib.sha256(raw).hexdigest()[:16] != key_id
+        ):
+            raise ValueError("audit public-key registry contains a malformed key")
+        registry[key_id] = raw.hex()
+    return registry
+
+
 # ---- cross-file tip-ledger (#462/#443) -------------------------------------
 
 def _file_tip_and_count(path: Path) -> tuple[str, int]:
@@ -1329,6 +1395,7 @@ def reanchor_file(path: Path, *, force: bool = False, preverified: bool = False)
 
 __all__ = [
     "AuditSigner",
+    "trusted_audit_public_keys",
     "verify_chain",
     "verify_ed25519",
     "ChainBreak",

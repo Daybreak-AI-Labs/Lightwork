@@ -261,6 +261,61 @@ def trusted_approver_keys() -> list[str]:
     return _trusted_approver_keys(cfg)
 
 
+def trusted_global_approver_keys() -> list[str]:
+    """Resolve only deployment-owned approver roots, never tenant overlays.
+
+    Tenant configuration may narrow or opt into model-improvement behavior, but
+    it cannot nominate a key that becomes its own promotion trust anchor.
+    Environment and key-directory inputs remain deployment process policy.
+    """
+    from .config import config_source_errors, load_global_config
+
+    snapshot = load_global_config()
+    if config_source_errors():
+        raise RuntimeError("global approver trust policy is unavailable or invalid")
+    raw = snapshot.get("self_improvement", {})
+    if not isinstance(raw, dict):
+        raise RuntimeError("global approver trust policy is unavailable or invalid")
+    raw_keys = raw.get("approver_keys", [])
+    if (
+        not isinstance(raw_keys, list)
+        or any(not isinstance(value, str) for value in raw_keys)
+    ):
+        raise RuntimeError("global approver trust policy is unavailable or invalid")
+    raw_dir = raw.get("approver_keys_dir")
+    if raw_dir is not None and not isinstance(raw_dir, str):
+        raise RuntimeError("global approver trust policy is unavailable or invalid")
+    if (
+        "require_signed_approval" in raw
+        and not isinstance(raw.get("require_signed_approval"), bool)
+    ):
+        raise RuntimeError("global approver trust policy is unavailable or invalid")
+    keys = list(_keys_from_env())
+    keys.extend(value.strip() for value in raw_keys if value.strip())
+    keys.extend(
+        _keys_from_dir(
+            os.environ.get("MAVERICK_APPROVER_KEYS_DIR")
+            or (raw_dir.strip() if isinstance(raw_dir, str) else None),
+        ),
+    )
+    normalized: list[str] = []
+    for raw_key in keys:
+        key = raw_key.strip().lower()
+        try:
+            decoded = bytes.fromhex(key)
+        except ValueError as exc:
+            raise RuntimeError(
+                "global approver trust policy contains a malformed key",
+            ) from exc
+        if len(decoded) != 32 or len(key) != 64:
+            raise RuntimeError(
+                "global approver trust policy contains a malformed key",
+            )
+        if key not in normalized:
+            normalized.append(key)
+    return normalized
+
+
 def signing_enforced() -> bool:
     """Whether a valid approver signature is REQUIRED at human-gated rungs.
 
@@ -306,5 +361,6 @@ __all__ = [
     "verify",
     "verify_candidate",
     "trusted_approver_keys",
+    "trusted_global_approver_keys",
     "signing_enforced",
 ]

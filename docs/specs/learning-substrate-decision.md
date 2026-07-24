@@ -1,4 +1,11 @@
-# Decision: park the learning substrate (keep what's wired, don't close the loop yet)
+# Decision: park the general learning loop (specialist plumbing superseded)
+
+> **July 2026 update:** This decision still governs the general in-kernel
+> trajectory-learning loop. It is partially superseded by
+> [`model-improvement-decision.md`](model-improvement-decision.md), which
+> authorizes vendor-neutral specialist-model taskset, governance,
+> qualification, receipt, and backend-export plumbing while keeping real GPU
+> training demand-driven.
 
 **Status:** Decided — park, don't close, don't prune · **Roadmap ref:** [`ROADMAP.md`](../ROADMAP.md) → "Current state & gap analysis" (C2) · **Date:** June 2026
 

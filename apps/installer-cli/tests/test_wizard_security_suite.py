@@ -10,7 +10,7 @@ except ModuleNotFoundError:  # Python 3.10
 def test_pick_security_suite_safe_defaults(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True, False, False, False, False])
+    answers = iter([True, False, False, False, False, False])
     monkeypatch.setattr(
         wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
     )
@@ -19,6 +19,8 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "security_ops": True,
         "evidence_graph": False,
         "model_risk_assurance": False,
+        "model_improvement": False,
+        "allow_hosted_training": False,
         "threat_hunt": False,
         "env_hunt": False,
         "response_execution": False,
@@ -28,7 +30,7 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
 def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True, True, True, True, True, True])
+    answers = iter([True, True, True, True, True, True, True, True])
     monkeypatch.setattr(
         wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
     )
@@ -42,6 +44,8 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: next(text_answers))
 
     picked = wizard.pick_security_suite()
+    assert picked["model_improvement"] is True
+    assert picked["allow_hosted_training"] is True
     assert picked["env_hunt"] is True
     assert picked["response_execution"] is True
     assert picked["connectors"]["cloudtrail"] == {
@@ -77,6 +81,8 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
             "security_ops": True,
             "evidence_graph": True,
             "model_risk_assurance": True,
+            "model_improvement": True,
+            "allow_hosted_training": False,
             "threat_hunt": True,
             "env_hunt": True,
             "response_execution": False,
@@ -90,6 +96,14 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
     assert parsed["model_risk_assurance"] == {
         "enable": True,
         "gate_promotions": True,
+    }
+    assert parsed["model_improvement"] == {
+        "enable": True,
+        "allow_hosted": False,
+        "allow_cross_tenant": False,
+        "require_signed_receipt": True,
+        "minimum_train_families": 20,
+        "minimum_holdout_families": 20,
     }
     assert parsed["threat_hunt"]["enable"] is True
     assert parsed["env_hunt"] == {

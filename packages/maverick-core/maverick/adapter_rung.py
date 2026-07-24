@@ -49,9 +49,10 @@ import tempfile
 import time
 import unicodedata
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -179,6 +180,9 @@ OLLAMA_API_RESPONSE_BYTES = 8 * 1024**2
 SERVING_ALIAS_REVERIFY_SECONDS = 0.0
 MAX_APPROVAL_PAYLOAD_BYTES = 128 * 1024
 ADAPTER_AUTHORITY_PAYLOAD_VERSION = 1
+MODEL_IMPROVEMENT_BINDING_SCHEMA = (
+    "lightwork.adapter-model-improvement-binding.v1"
+)
 
 
 def _is_allowed_payload_file(name: str, suffix: str) -> bool:
@@ -726,6 +730,328 @@ def _validated_approval_public_keys(
     return tuple(keys)
 
 
+def _validated_model_improvement_binding(  # noqa: C901
+    value: object,
+) -> dict[str, Any]:
+    """Validate the content-free evidence bundle carried by a live pointer."""
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema",
+        "policy_sha256",
+        "training_receipt",
+        "qualification",
+    }:
+        raise ValueError("adapter model-improvement binding has an invalid shape")
+    if value.get("schema") != MODEL_IMPROVEMENT_BINDING_SCHEMA:
+        raise ValueError("adapter model-improvement binding schema is unsupported")
+
+    def digest(raw: object, field: str) -> str:
+        if (
+            not isinstance(raw, str)
+            or len(raw) != 64
+            or any(char not in "0123456789abcdef" for char in raw)
+        ):
+            raise ValueError(f"{field} must be a lowercase SHA-256 digest")
+        return raw
+
+    def timestamp(raw: object, field: str) -> str:
+        if not isinstance(raw, str) or not raw.endswith("Z"):
+            raise ValueError(f"{field} must be an RFC 3339 UTC timestamp")
+        try:
+            parsed = datetime.fromisoformat(raw[:-1] + "+00:00")
+        except ValueError as exc:
+            raise ValueError(f"{field} must be an RFC 3339 UTC timestamp") from exc
+        if parsed.tzinfo != timezone.utc:
+            raise ValueError(f"{field} must be UTC")
+        return raw
+
+    receipt_raw = value.get("training_receipt")
+    receipt: dict[str, str] | None
+    if receipt_raw is None:
+        receipt = None
+    else:
+        receipt_fields = {
+            "receipt_payload_sha256",
+            "event_hash",
+            "key_id",
+            "approval_subject_sha256",
+            "training_run_id",
+            "training_completed_at",
+            "receipt_issued_at",
+            "dataset_sha256",
+            "environment_sha256",
+            "environment_id",
+            "adapter_id",
+            "adapter_sha256",
+            "training_backend",
+            "base_model_id",
+            "base_model_revision",
+            "base_model_license_id",
+            "base_model_license_evidence_sha256",
+            "base_model_artifact_sha256",
+            "base_model_artifact_manifest_sha256",
+            "base_model_tokenizer_sha256",
+            "base_model_artifact_format",
+            "adapter_artifact_format",
+            "adapter_checkpoint_sha256",
+            "adapter_runtime_compatibility_sha256",
+            "evaluation_protocol_sha256",
+            "evaluation_run_sha256",
+            "sealed_holdout_sha256",
+            "qualification_evidence_sha256",
+            "qualification_policy_sha256",
+        }
+        if not isinstance(receipt_raw, Mapping) or set(receipt_raw) != receipt_fields:
+            raise ValueError("adapter training-receipt binding has an invalid shape")
+        key_id = receipt_raw.get("key_id")
+        revision = receipt_raw.get("base_model_revision")
+        token_fields = (
+            "training_run_id",
+            "environment_id",
+            "adapter_id",
+            "training_backend",
+            "base_model_id",
+            "base_model_license_id",
+            "base_model_artifact_format",
+            "adapter_artifact_format",
+        )
+        if (
+            not isinstance(key_id, str)
+            or not re.fullmatch(r"[0-9a-f]{16}", key_id)
+        ):
+            raise ValueError("adapter training-receipt key id is invalid")
+        if (
+            not isinstance(revision, str)
+            or not re.fullmatch(
+                r"(?:[0-9a-f]{40}|[0-9a-f]{64}|sha256:[0-9a-f]{64})",
+                revision,
+            )
+        ):
+            raise ValueError("adapter base-model revision is invalid")
+        if any(
+            not isinstance(receipt_raw.get(field), str)
+            or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._:+/@-]{0,127}",
+                str(receipt_raw.get(field)),
+            )
+            for field in token_fields
+        ):
+            raise ValueError("adapter training-receipt identity is invalid")
+        receipt = {
+            "receipt_payload_sha256": digest(
+                receipt_raw.get("receipt_payload_sha256"),
+                "training receipt payload",
+            ),
+            "event_hash": digest(
+                receipt_raw.get("event_hash"), "training receipt event",
+            ),
+            "key_id": key_id,
+            "approval_subject_sha256": digest(
+                receipt_raw.get("approval_subject_sha256"),
+                "training approval subject",
+            ),
+            "training_run_id": str(receipt_raw.get("training_run_id")),
+            "training_completed_at": timestamp(
+                receipt_raw.get("training_completed_at"),
+                "training completion",
+            ),
+            "receipt_issued_at": timestamp(
+                receipt_raw.get("receipt_issued_at"),
+                "training receipt issuance",
+            ),
+            "dataset_sha256": digest(
+                receipt_raw.get("dataset_sha256"),
+                "training dataset",
+            ),
+            "environment_sha256": digest(
+                receipt_raw.get("environment_sha256"),
+                "training environment",
+            ),
+            "environment_id": str(receipt_raw.get("environment_id")),
+            "adapter_id": str(receipt_raw.get("adapter_id")),
+            "adapter_sha256": digest(
+                receipt_raw.get("adapter_sha256"),
+                "training adapter artifact",
+            ),
+            "training_backend": str(receipt_raw.get("training_backend")),
+            "base_model_id": str(receipt_raw.get("base_model_id")),
+            "base_model_revision": revision,
+            "base_model_license_id": str(
+                receipt_raw.get("base_model_license_id"),
+            ),
+            "base_model_license_evidence_sha256": digest(
+                receipt_raw.get("base_model_license_evidence_sha256"),
+                "training base-model license evidence",
+            ),
+            "base_model_artifact_sha256": digest(
+                receipt_raw.get("base_model_artifact_sha256"),
+                "training base-model artifact",
+            ),
+            "base_model_artifact_manifest_sha256": digest(
+                receipt_raw.get("base_model_artifact_manifest_sha256"),
+                "training base-model artifact manifest",
+            ),
+            "base_model_tokenizer_sha256": digest(
+                receipt_raw.get("base_model_tokenizer_sha256"),
+                "training base-model tokenizer",
+            ),
+            "base_model_artifact_format": str(
+                receipt_raw.get("base_model_artifact_format"),
+            ),
+            "adapter_artifact_format": str(
+                receipt_raw.get("adapter_artifact_format"),
+            ),
+            "adapter_checkpoint_sha256": digest(
+                receipt_raw.get("adapter_checkpoint_sha256"),
+                "training adapter checkpoint",
+            ),
+            "adapter_runtime_compatibility_sha256": digest(
+                receipt_raw.get("adapter_runtime_compatibility_sha256"),
+                "training adapter runtime compatibility",
+            ),
+            "evaluation_protocol_sha256": digest(
+                receipt_raw.get("evaluation_protocol_sha256"),
+                "training evaluation protocol",
+            ),
+            "evaluation_run_sha256": digest(
+                receipt_raw.get("evaluation_run_sha256"),
+                "training evaluation run",
+            ),
+            "sealed_holdout_sha256": digest(
+                receipt_raw.get("sealed_holdout_sha256"),
+                "training sealed holdout",
+            ),
+            "qualification_evidence_sha256": digest(
+                receipt_raw.get("qualification_evidence_sha256"),
+                "signed qualification evidence",
+            ),
+            "qualification_policy_sha256": digest(
+                receipt_raw.get("qualification_policy_sha256"),
+                "signed qualification policy",
+            ),
+        }
+
+    qualification_raw = value.get("qualification")
+    if not isinstance(qualification_raw, Mapping) or set(qualification_raw) != {
+        "evidence_sha256",
+        "policy_sha256",
+        "run_id",
+        "profile",
+        "catalog_id",
+        "catalog_sha256",
+        "dataset_sha256",
+        "evaluation_run_sha256",
+        "sealed_holdout_sha256",
+        "measured_at",
+        "expires_at",
+        "runtime_attestation_sha256",
+        "engine",
+        "engine_version",
+        "context_tokens",
+        "concurrency",
+        "base_model_license_id",
+        "base_model_license_evidence_sha256",
+        "base_model_artifact_sha256",
+        "base_model_artifact_manifest_sha256",
+        "base_model_tokenizer_sha256",
+        "adapter_checkpoint_sha256",
+        "adapter_runtime_compatibility_sha256",
+        "deployment_manifest_sha256",
+        "container_or_lock_sha256",
+        "hardware_profile_sha256",
+        "base_model_id",
+        "base_model_revision",
+        "base_model_artifact_format",
+        "adapter_artifact_format",
+    }:
+        raise ValueError("adapter qualification binding has an invalid shape")
+    run_id = qualification_raw.get("run_id")
+    profile = qualification_raw.get("profile")
+    if (
+        not isinstance(run_id, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:+/@-]{0,127}", run_id)
+        or profile not in {"edge", "standard", "throughput"}
+    ):
+        raise ValueError("adapter qualification identity is invalid")
+    qualification = {
+        field: digest(qualification_raw.get(field), f"qualification {field}")
+        for field in (
+            "evidence_sha256",
+            "policy_sha256",
+            "catalog_sha256",
+            "dataset_sha256",
+            "evaluation_run_sha256",
+            "sealed_holdout_sha256",
+            "runtime_attestation_sha256",
+            "base_model_license_evidence_sha256",
+            "base_model_artifact_sha256",
+            "base_model_artifact_manifest_sha256",
+            "base_model_tokenizer_sha256",
+            "adapter_checkpoint_sha256",
+            "adapter_runtime_compatibility_sha256",
+            "deployment_manifest_sha256",
+            "container_or_lock_sha256",
+            "hardware_profile_sha256",
+        )
+    }
+    qualification_token_fields = (
+        "base_model_id",
+        "catalog_id",
+        "engine",
+        "engine_version",
+        "base_model_license_id",
+        "base_model_artifact_format",
+        "adapter_artifact_format",
+    )
+    if any(
+        not isinstance(qualification_raw.get(field), str)
+        or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:+/@-]{0,127}",
+            str(qualification_raw.get(field)),
+        )
+        for field in qualification_token_fields
+    ):
+        raise ValueError("adapter qualification artifact identity is invalid")
+    model_revision = qualification_raw.get("base_model_revision")
+    if (
+        not isinstance(model_revision, str)
+        or not re.fullmatch(r"[0-9a-f]{40}", model_revision)
+    ):
+        raise ValueError("adapter qualification base-model revision is invalid")
+    qualification["run_id"] = run_id
+    qualification["profile"] = str(profile)
+    qualification["measured_at"] = timestamp(
+        qualification_raw.get("measured_at"),
+        "qualification measurement",
+    )
+    qualification["expires_at"] = timestamp(
+        qualification_raw.get("expires_at"),
+        "qualification expiry",
+    )
+    for integer_field in ("context_tokens", "concurrency"):
+        raw_integer = qualification_raw.get(integer_field)
+        if (
+            not isinstance(raw_integer, int)
+            or isinstance(raw_integer, bool)
+            or raw_integer <= 0
+        ):
+            raise ValueError(
+                f"qualification {integer_field} must be a positive integer",
+            )
+        qualification[integer_field] = raw_integer
+    for token_field in qualification_token_fields:
+        qualification[token_field] = str(qualification_raw.get(token_field))
+    qualification["base_model_revision"] = model_revision
+    return {
+        "schema": MODEL_IMPROVEMENT_BINDING_SCHEMA,
+        "policy_sha256": digest(
+            value.get("policy_sha256"),
+            "model-improvement policy",
+        ),
+        "training_receipt": receipt,
+        "qualification": qualification,
+    }
+
+
 def _authority_payload(
     pointer: dict, *, artifact_identity: str, ledger_path: Path | str,
 ) -> str:
@@ -758,6 +1084,10 @@ def _authority_payload(
         "payload_sha256": str(pointer.get("payload_sha256", "")),
         "serving": serving,
     }
+    if "model_improvement" in pointer:
+        bound_pointer["model_improvement"] = _validated_model_improvement_binding(
+            pointer["model_improvement"],
+        )
     try:
         payload = json.dumps(
             {
@@ -776,13 +1106,56 @@ def _authority_payload(
     return payload
 
 
+def _server_approval_key_registry() -> dict[str, str]:
+    """Return deployment-owned adapter-promotion roots keyed by fingerprint."""
+    from . import approval_signing
+
+    try:
+        values = approval_signing.trusted_global_approver_keys()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ValueError(
+            "adapter promotion trust registry is unavailable",
+        ) from exc
+    try:
+        canonical_keys = _validated_approval_public_keys(values)
+    except ValueError as exc:
+        raise ValueError(
+            "adapter promotion trust registry is empty or invalid",
+        ) from exc
+    registry: dict[str, str] = {}
+    for public_key in canonical_keys:
+        identifier = approval_signing.key_id(public_key)
+        existing = registry.get(identifier)
+        if existing is not None and existing != public_key:
+            raise ValueError("adapter promotion trust registry has a collision")
+        registry[identifier] = public_key
+    return registry
+
+
 def _validate_pointer_receipt(
     value: dict | None, *, tenant_id: str, serving: dict | None, record_id: str,
 ) -> dict:
     """Validate the durable receipt binding required for production routing."""
-    if not isinstance(value, dict) or value.get("version") != 2:
+    if not isinstance(value, dict) or value.get("version") not in {2, 3}:
         raise ValueError("governed adapter pointer has no valid receipt binding")
     receipt = dict(value)
+    common_fields = {
+        "version",
+        "tenant_id",
+        "record_id",
+        "ledger_path",
+        "payload_sha256",
+        "approval_signature",
+        "approved_payload",
+        "artifact_identity",
+    }
+    expected_fields = (
+        common_fields | {"approval_pubkey"}
+        if receipt["version"] == 2
+        else common_fields | {"approval_key_id"}
+    )
+    if set(receipt) != expected_fields:
+        raise ValueError("adapter receipt binding has missing or unexpected fields")
     if _validated_tenant_id(receipt.get("tenant_id", "")) != tenant_id:
         raise ValueError("adapter receipt binding belongs to another tenant")
     if receipt.get("record_id") != record_id:
@@ -803,9 +1176,32 @@ def _validate_pointer_receipt(
     if (not isinstance(signature, str) or not signature or len(signature) > 8192
             or any(ord(ch) < 32 for ch in signature)):
         raise ValueError("adapter receipt binding has an invalid approval signature")
-    public_key = receipt.get("approval_pubkey")
-    receipt["approval_pubkey"] = _validated_approval_public_keys(
-        [public_key] if isinstance(public_key, str) else None)[0]
+    registry = _server_approval_key_registry()
+    if receipt["version"] == 2:
+        public_key = receipt.get("approval_pubkey")
+        canonical_key = _validated_approval_public_keys(
+            [public_key] if isinstance(public_key, str) else None,
+        )[0]
+        from . import approval_signing
+
+        approval_key_id = approval_signing.key_id(canonical_key)
+        if registry.get(approval_key_id) != canonical_key:
+            raise ValueError(
+                "adapter receipt approval key is not server-trusted",
+            )
+        receipt.pop("approval_pubkey", None)
+        receipt["version"] = 3
+        receipt["approval_key_id"] = approval_key_id
+    else:
+        approval_key_id = receipt.get("approval_key_id")
+        if (
+            not isinstance(approval_key_id, str)
+            or not re.fullmatch(r"[0-9a-f]{16}", approval_key_id)
+            or approval_key_id not in registry
+        ):
+            raise ValueError(
+                "adapter receipt approval key is not server-trusted",
+            )
     approved_payload = receipt.get("approved_payload")
     if (not isinstance(approved_payload, str) or not approved_payload
             or len(approved_payload.encode("utf-8")) > MAX_APPROVAL_PAYLOAD_BYTES):
@@ -1132,17 +1528,20 @@ class AdapterStore:
     def plan_activation(
         self, manifest: AdapterManifest, *, record_id: str,
         activated_at: float | None = None, serving: dict | None = None,
+        model_improvement: dict[str, Any] | None = None,
     ) -> AdapterActivationPlan:
         """Snapshot an exact tenant-bound before/after pointer transition."""
         with self.transaction_locked():
             return self._plan_activation_locked(
                 manifest, record_id=record_id, activated_at=activated_at,
-                serving=serving, receipt=None)
+                serving=serving, receipt=None,
+                model_improvement=model_improvement)
 
     def _plan_activation_locked(
         self, manifest: AdapterManifest, *, record_id: str,
         activated_at: float | None = None, serving: dict | None = None,
         receipt: dict | None = None,
+        model_improvement: dict[str, Any] | None = None,
     ) -> AdapterActivationPlan:
         _require_manifest_tenant(manifest, self.tenant_id)
         _validate_manifest(manifest)
@@ -1173,6 +1572,10 @@ class AdapterStore:
         }
         if serving is not None:
             pointer["serving"] = dict(serving)
+        if model_improvement is not None:
+            pointer["model_improvement"] = _validated_model_improvement_binding(
+                model_improvement,
+            )
         if receipt is not None:
             pointer["receipt"] = _validate_pointer_receipt(
                 receipt, tenant_id=self.tenant_id, serving=serving,
@@ -1308,6 +1711,210 @@ def _receipt_integrity_stamp(pointer: dict | None) -> tuple | None:
     return (_stat_sig(path), _stat_sig(Path(f"{path}.journal")))
 
 
+def _model_improvement_runtime_requirement(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return the exact content-free runtime a provisioner must observe."""
+    binding = _validated_model_improvement_binding(value)
+    receipt = binding["training_receipt"]
+    qualification = binding["qualification"]
+    if receipt is None or qualification is None:
+        raise ValueError("model-improvement runtime requires signed qualification")
+    return {
+        "schema": "lightwork.serving-runtime-attestation.v1",
+        "runtime_attestation_sha256": qualification[
+            "runtime_attestation_sha256"
+        ],
+        "engine": qualification["engine"],
+        "engine_version": qualification["engine_version"],
+        "base_model_artifact_format": qualification[
+            "base_model_artifact_format"
+        ],
+        "base_model_artifact_sha256": qualification[
+            "base_model_artifact_sha256"
+        ],
+        "base_model_artifact_manifest_sha256": qualification[
+            "base_model_artifact_manifest_sha256"
+        ],
+        "base_model_tokenizer_sha256": qualification[
+            "base_model_tokenizer_sha256"
+        ],
+        "adapter_artifact_format": qualification["adapter_artifact_format"],
+        "adapter_sha256": receipt["adapter_sha256"],
+        "adapter_checkpoint_sha256": qualification[
+            "adapter_checkpoint_sha256"
+        ],
+        "adapter_runtime_compatibility_sha256": qualification[
+            "adapter_runtime_compatibility_sha256"
+        ],
+        "deployment_manifest_sha256": qualification[
+            "deployment_manifest_sha256"
+        ],
+        "container_or_lock_sha256": qualification["container_or_lock_sha256"],
+        "hardware_profile_sha256": qualification["hardware_profile_sha256"],
+        "context_tokens": qualification["context_tokens"],
+        "concurrency": qualification["concurrency"],
+    }
+
+
+def _revalidate_model_improvement_pointer(  # noqa: C901
+    pointer: Mapping[str, Any],
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Recheck time, catalog, receipt, and serving-runtime bindings.
+
+    This runs on the routing hot path, including cache hits. A promotion-time
+    qualification is not an indefinite serving authorization.
+    """
+    raw = pointer.get("model_improvement")
+    if raw is None:
+        return
+    binding = _validated_model_improvement_binding(raw)
+    receipt = binding["training_receipt"]
+    qualification = binding["qualification"]
+    if receipt is None or qualification is None:
+        raise ValueError(
+            "model-improvement routing requires receipt and qualification bindings",
+        )
+    current_policy = _model_improvement_policy()
+    if not current_policy.get("enable"):
+        raise ValueError("model-improvement serving policy is disabled")
+    if (
+        binding["policy_sha256"]
+        != _model_improvement_policy_digest(current_policy)
+    ):
+        raise ValueError("model-improvement serving policy differs from promotion")
+
+    from .training.qualification import (
+        MAX_FUTURE_SKEW,
+        RuntimeEvidence,
+        qualification_expires_at,
+        runtime_attestation_sha256,
+    )
+    from .training.specialist_models import (
+        load_catalog,
+        matches_catalog_artifact,
+    )
+
+    measured_at = datetime.fromisoformat(
+        qualification["measured_at"][:-1] + "+00:00",
+    )
+    expires_at = datetime.fromisoformat(
+        qualification["expires_at"][:-1] + "+00:00",
+    )
+    current = now or datetime.now(timezone.utc)
+    if not isinstance(current, datetime) or current.tzinfo is None:
+        raise ValueError("model-improvement routing clock must be timezone-aware")
+    current = current.astimezone(timezone.utc)
+    if (
+        qualification["expires_at"]
+        != qualification_expires_at(qualification["measured_at"])
+    ):
+        raise ValueError("qualification expiry is not derived from its measurement")
+    if measured_at > current + MAX_FUTURE_SKEW:
+        raise ValueError("qualification measurement is future-dated")
+    if expires_at <= current:
+        raise ValueError("qualification has expired")
+
+    catalog = load_catalog()
+    if qualification["catalog_sha256"] != catalog.digest:
+        raise ValueError("qualification catalog is no longer current")
+    candidate = catalog.get(qualification["catalog_id"])
+    if qualification["base_model_license_id"] != candidate.license_id:
+        raise ValueError("qualification license differs from the current catalog")
+    if qualification["context_tokens"] > candidate.context_tokens:
+        raise ValueError("qualification context exceeds the current catalog maximum")
+    if not matches_catalog_artifact(
+        candidate,
+        repository_id=qualification["base_model_id"],
+        revision=qualification["base_model_revision"],
+        artifact_format=qualification["base_model_artifact_format"],
+    ):
+        raise ValueError("qualification artifact is absent from the current catalog")
+
+    runtime = RuntimeEvidence(
+        engine=qualification["engine"],
+        engine_version=qualification["engine_version"],
+        base_model_artifact_format=qualification["base_model_artifact_format"],
+        base_model_artifact_sha256=qualification["base_model_artifact_sha256"],
+        base_model_artifact_manifest_sha256=(
+            qualification["base_model_artifact_manifest_sha256"]
+        ),
+        base_model_tokenizer_sha256=qualification["base_model_tokenizer_sha256"],
+        adapter_artifact_format=qualification["adapter_artifact_format"],
+        adapter_sha256=str(pointer.get("payload_sha256") or ""),
+        adapter_checkpoint_sha256=qualification["adapter_checkpoint_sha256"],
+        adapter_runtime_compatibility_sha256=(
+            qualification["adapter_runtime_compatibility_sha256"]
+        ),
+        deployment_manifest_sha256=qualification["deployment_manifest_sha256"],
+        container_or_lock_sha256=qualification["container_or_lock_sha256"],
+        hardware_profile_sha256=qualification["hardware_profile_sha256"],
+        context_tokens=qualification["context_tokens"],
+        concurrency=qualification["concurrency"],
+    )
+    runtime_digest = runtime_attestation_sha256(runtime)
+    if runtime_digest != qualification["runtime_attestation_sha256"]:
+        raise ValueError("qualification runtime attestation is inconsistent")
+
+    exact_receipt_values = {
+        "training_run_id": qualification["run_id"],
+        "dataset_sha256": qualification["dataset_sha256"],
+        "base_model_id": qualification["base_model_id"],
+        "base_model_revision": qualification["base_model_revision"],
+        "base_model_license_id": qualification["base_model_license_id"],
+        "base_model_license_evidence_sha256": (
+            qualification["base_model_license_evidence_sha256"]
+        ),
+        "base_model_artifact_sha256": qualification["base_model_artifact_sha256"],
+        "base_model_artifact_manifest_sha256": (
+            qualification["base_model_artifact_manifest_sha256"]
+        ),
+        "base_model_tokenizer_sha256": qualification["base_model_tokenizer_sha256"],
+        "base_model_artifact_format": qualification["base_model_artifact_format"],
+        "adapter_artifact_format": qualification["adapter_artifact_format"],
+        "adapter_checkpoint_sha256": qualification["adapter_checkpoint_sha256"],
+        "adapter_runtime_compatibility_sha256": (
+            qualification["adapter_runtime_compatibility_sha256"]
+        ),
+        "evaluation_run_sha256": qualification["evaluation_run_sha256"],
+        "sealed_holdout_sha256": qualification["sealed_holdout_sha256"],
+        "qualification_evidence_sha256": qualification["evidence_sha256"],
+        "qualification_policy_sha256": qualification["policy_sha256"],
+    }
+    if any(receipt.get(key) != value for key, value in exact_receipt_values.items()):
+        raise ValueError("qualification no longer matches its signed training receipt")
+    if (
+        receipt["adapter_id"] != pointer.get("adapter_id")
+        or receipt["adapter_sha256"] != pointer.get("payload_sha256")
+        or receipt["dataset_sha256"] != pointer.get("dataset_sha256")
+        or receipt["base_model_id"] != _model_id(str(pointer.get("base_model") or ""))
+        or receipt["dataset_sha256"] != qualification["dataset_sha256"]
+    ):
+        raise ValueError("model-improvement pointer relabels signed provenance")
+
+    serving = pointer.get("serving")
+    if not isinstance(serving, Mapping):
+        raise ValueError("model-improvement pointer has no serving binding")
+    mode = serving.get("mode")
+    if mode == "modelfile" and qualification["engine"].lower() != "ollama":
+        raise ValueError("Ollama routing requires an Ollama qualification")
+    if mode not in {"manual", "modelfile"}:
+        raise ValueError("model-improvement serving mode is unsupported")
+    if mode == "modelfile":
+        deployment = serving.get("deployment")
+        if not isinstance(deployment, Mapping):
+            raise ValueError("model-improvement routing has no deployment attestation")
+        required_runtime = _model_improvement_runtime_requirement(binding)
+        if (
+            deployment.get("model_improvement_runtime") != required_runtime
+            or deployment.get("model_improvement_runtime_sha256")
+            != runtime_digest
+        ):
+            raise ValueError("serving runtime differs from the qualified runtime")
+
+
 def _verify_authoritative_pointer(pointer: dict, *, artifact_identity: str) -> None:
     """Cryptographically bind the exact routed pointer to its durable receipt."""
     if pointer.get("authority") != "governed-v1":
@@ -1327,6 +1934,7 @@ def _verify_authoritative_pointer(pointer: dict, *, artifact_identity: str) -> N
     approved_digest = hashlib.sha256(approved_payload.encode("utf-8")).hexdigest()
     if approved_digest != receipt["payload_sha256"]:
         raise ValueError("adapter pointer approved-payload digest does not match")
+    _revalidate_model_improvement_pointer(pointer)
     from .self_improvement import PromotionLedger
     ledger = PromotionLedger(path=Path(receipt["ledger_path"]))
     record = ledger.get(receipt["record_id"])
@@ -1342,13 +1950,17 @@ def _verify_authoritative_pointer(pointer: dict, *, artifact_identity: str) -> N
         candidate_id=receipt["record_id"], rung="weights",
         payload_sha256=approved_digest)
     approver_id = approval_signing.verify(
-        request, receipt["approval_signature"], [receipt["approval_pubkey"]])
+        request,
+        receipt["approval_signature"],
+        [_server_approval_key_registry()[receipt["approval_key_id"]]],
+    )
     if not approver_id or approver_id != record.approver_id:
         raise ValueError("adapter receipt signature does not verify cryptographically")
 
 
 def _verify_live_deployment(pointer: dict) -> None:
     """Fail closed unless Ollama's live alias still matches its attestation."""
+    _revalidate_model_improvement_pointer(pointer)
     serving = pointer.get("serving")
     if not isinstance(serving, dict):
         raise ValueError("adapter pointer has no serving binding")
@@ -1356,6 +1968,17 @@ def _verify_live_deployment(pointer: dict) -> None:
         return
     if serving.get("mode") != "modelfile":
         raise ValueError("adapter pointer has an unsupported serving mode")
+    improvement = pointer.get("model_improvement")
+    if improvement is not None:
+        qualification = _validated_model_improvement_binding(
+            improvement,
+        )["qualification"]
+        if qualification is None:
+            raise ValueError("model-improvement pointer has no qualification")
+        if _ollama_engine_version() != qualification["engine_version"]:
+            raise ValueError(
+                "live Ollama engine version differs from qualification",
+            )
     attestation = _validate_deployment_attestation(serving)
     model_name = serving.get("model_name")
     if not isinstance(model_name, str) or not model_name:
@@ -1510,9 +2133,10 @@ def tuned_model_name(manifest: AdapterManifest) -> str:
 
 def render_modelfile(manifest: AdapterManifest, adapter_dir: Path | str) -> str:
     """The Ollama Modelfile that binds base + adapter for serving. Written
-    next to the payload by :func:`emit_serving_artifacts`; applied by the
-    operator with ``ollama create`` (we render the exact command, we do not
-    reach into a daemon at promotion time)."""
+    next to the payload by :func:`emit_serving_artifacts`. Governed promotion
+    either stages and verifies it through the bounded Ollama management path or
+    requires a custom provisioner to return an independently observed
+    deployment attestation."""
     _validate_manifest(manifest)
     tenant = _validated_tenant_id(manifest.tenant_id)
     resolved = Path(adapter_dir).resolve()
@@ -1634,7 +2258,11 @@ def emit_serving_artifacts(
     }
 
 
-def _validate_deployment_attestation(binding: dict) -> dict:
+def _validate_deployment_attestation(
+    binding: dict,
+    *,
+    required_runtime: Mapping[str, Any] | None = None,
+) -> dict:
     """Validate proof that the deterministic local model was installed."""
     deployment = binding.get("deployment")
     if not isinstance(deployment, dict) or deployment.get("version") != 1:
@@ -1646,6 +2274,21 @@ def _validate_deployment_attestation(binding: dict) -> dict:
         raise ValueError("adapter serving attestation names another model")
     if attestation.get("source_modelfile_sha256") != binding.get("modelfile_sha256"):
         raise ValueError("adapter serving attestation binds another Modelfile")
+    if required_runtime is not None:
+        actual_runtime = attestation.get("model_improvement_runtime")
+        expected = dict(required_runtime)
+        if actual_runtime != expected:
+            raise ValueError(
+                "adapter serving attestation binds another qualified runtime",
+            )
+        runtime_digest = expected.get("runtime_attestation_sha256")
+        if (
+            not isinstance(runtime_digest, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", runtime_digest)
+            or attestation.get("model_improvement_runtime_sha256")
+            != runtime_digest
+        ):
+            raise ValueError("adapter serving runtime digest is inconsistent")
     digest = attestation.get("model_digest")
     if (not isinstance(digest, str) or len(digest) != 64
             or any(ch not in "0123456789abcdef" for ch in digest)):
@@ -1672,6 +2315,25 @@ def _ollama_api_origin() -> str:
             or parsed.path not in {"", "/"}):
         raise ValueError("OLLAMA_HOST must be an HTTP(S) origin without credentials or a path")
     return urlunsplit((parsed.scheme, parsed.netloc, "", "", "")).rstrip("/")
+
+
+def _ollama_engine_version() -> str:
+    """Read Ollama's bounded live engine version from its management API."""
+    from urllib.request import Request, urlopen
+
+    request = Request(f"{_ollama_api_origin()}/api/version", method="GET")
+    with urlopen(request, timeout=OLLAMA_API_TIMEOUT_SECONDS) as response:  # noqa: S310
+        raw = response.read(4097)
+    if len(raw) > 4096:
+        raise RuntimeError("Ollama version response exceeded the response limit")
+    payload = json.loads(raw.decode("utf-8"))
+    version = payload.get("version") if isinstance(payload, dict) else None
+    if (
+        not isinstance(version, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}", version)
+    ):
+        raise RuntimeError("Ollama returned an invalid engine version")
+    return version
 
 
 def _ollama_model_digest(model_name: str) -> str | None:
@@ -1811,6 +2473,7 @@ class _ServingProvision:
 def _provision_serving_model(
     binding: dict, *, provisioner: Callable[[dict], dict] | None,
     allow_uninstalled_dev: bool,
+    required_runtime: Mapping[str, Any] | None = None,
 ) -> _ServingProvision:
     """Stage serving evidence and defer production alias mutation until approval.
 
@@ -1826,10 +2489,24 @@ def _provision_serving_model(
         # a provider request.
         return _ServingProvision(dict(binding), False)
     if provisioner is not None:
-        attestation = provisioner(dict(binding))
+        request = dict(binding)
+        if required_runtime is not None:
+            request["required_model_improvement_runtime"] = dict(
+                required_runtime,
+            )
+        attestation = provisioner(request)
         enriched = {**binding, "deployment": dict(attestation)}
-        _validate_deployment_attestation(enriched)
+        _validate_deployment_attestation(
+            enriched,
+            required_runtime=required_runtime,
+        )
         return _ServingProvision(enriched, True)
+    if required_runtime is not None:
+        raise ValueError(
+            "model-improvement Ollama routing requires a provisioner that "
+            "independently attests engine, version, context, concurrency, "
+            "hardware, lock, and deployment-manifest identity",
+        )
     attestation, stage = _ollama_stage_and_attest(binding)
     enriched = {**binding, "deployment": dict(attestation)}
     _validate_deployment_attestation(enriched)
@@ -1942,14 +2619,21 @@ def _promotion_receipt_binding(
     if hashlib.sha256(approved_payload.encode("utf-8")).hexdigest() != digest:
         raise ValueError("adapter serving authority payload digest is inconsistent")
     public_key = _validated_approval_public_keys([approval_pubkey])[0]
+    from . import approval_signing
+
+    approval_key_id = approval_signing.key_id(public_key)
+    if _server_approval_key_registry().get(approval_key_id) != public_key:
+        raise ValueError(
+            "adapter serving authority requires a server-trusted approver key",
+        )
     return {
-        "version": 2,
+        "version": 3,
         "tenant_id": _active_tenant_id(),
         "record_id": str(candidate.id),
         "ledger_path": str(Path(path).expanduser().resolve()),
         "payload_sha256": str(digest),
         "approval_signature": str(signature),
-        "approval_pubkey": public_key,
+        "approval_key_id": approval_key_id,
         "approved_payload": approved_payload,
         "artifact_identity": artifact_identity,
     }
@@ -2045,6 +2729,7 @@ def _finalize_adapter_approval(
     store: AdapterStore, approve: Callable[[Any], str | None] | None,
     approval_signature: str | None, approval_public_keys: tuple[str, ...],
     ledger_path: Path | str,
+    model_improvement: dict[str, Any] | None,
 ):
     proposed_pointer = {
         "authority": "governed-v1",
@@ -2056,6 +2741,10 @@ def _finalize_adapter_approval(
         "payload_sha256": manifest.payload_sha256,
         "serving": serving_binding,
     }
+    if model_improvement is not None:
+        proposed_pointer["model_improvement"] = (
+            _validated_model_improvement_binding(model_improvement)
+        )
     approved_payload = _authority_payload(
         proposed_pointer, artifact_identity=store.artifact_identity,
         ledger_path=ledger_path)
@@ -2160,6 +2849,7 @@ def _execute_locked_adapter_transaction(
     out: AdapterUpliftResult, *, cand, manifest: AdapterManifest,
     serving_binding: dict, receipt: dict | None, provision: _ServingProvision,
     controller, store: AdapterStore, ledger_path: Path | str,
+    model_improvement: dict[str, Any] | None,
 ) -> AdapterUpliftResult:
     with store.transaction_locked():
         try:
@@ -2170,7 +2860,9 @@ def _execute_locked_adapter_transaction(
             return out
         if existing is not None:
             if (_pointer_matches_manifest(current, manifest, cand.id)
-                    and not existing.rolled_back):
+                    and not existing.rolled_back
+                    and existing.payload_sha256 == cand.payload_sha256
+                    and existing.provenance == cand.provenance):
                 out.promoted = True
                 out.approver_id = existing.approver_id
                 out.pointer = current
@@ -2182,7 +2874,8 @@ def _execute_locked_adapter_transaction(
         try:
             plan = store._plan_activation_locked(
                 manifest, record_id=cand.id, activated_at=controller.now(),
-                serving=serving_binding, receipt=receipt)
+                serving=serving_binding, receipt=receipt,
+                model_improvement=model_improvement)
             if (_authority_payload(
                     plan.pointer, artifact_identity=store.artifact_identity,
                     ledger_path=ledger_path)
@@ -2218,6 +2911,7 @@ def _execute_adapter_transaction(
     approval_signature: str | None,
     approval_public_keys: tuple[str, ...],
     allow_uninstalled_dev: bool,
+    model_improvement: dict[str, Any] | None,
 ) -> AdapterUpliftResult:
     """Approve exact staged state, then PREPARE/effect/inspect/COMMIT."""
     provision: _ServingProvision | None = None
@@ -2227,6 +2921,23 @@ def _execute_adapter_transaction(
         out.serving = emit_serving_artifacts(
             manifest, adapter_dir, tenant_id=store.tenant_id,
             binding=serving_binding)
+        runtime_requirement = None
+        if model_improvement is not None:
+            qualification = model_improvement.get("qualification")
+            if not isinstance(qualification, Mapping):
+                raise ValueError(
+                    "model-improvement serving requires a qualification binding",
+                )
+            if (
+                serving_binding.get("mode") == "modelfile"
+                and str(qualification.get("engine") or "").lower() != "ollama"
+            ):
+                raise ValueError(
+                    "Ollama serving requires an Ollama-qualified runtime",
+                )
+            runtime_requirement = _model_improvement_runtime_requirement(
+                model_improvement,
+            )
     except Exception as exc:
         out.reason = f"adapter serving preparation failed: {exc}"
         return out
@@ -2237,7 +2948,8 @@ def _execute_adapter_transaction(
             return out
         provision = _provision_serving_model(
             serving_binding, provisioner=serving_provisioner,
-            allow_uninstalled_dev=allow_uninstalled_dev)
+            allow_uninstalled_dev=allow_uninstalled_dev,
+            required_runtime=runtime_requirement)
         serving_binding = provision.binding
         out.serving["binding"] = serving_binding
         if serving_binding.get("deployment") is not None:
@@ -2258,7 +2970,8 @@ def _execute_adapter_transaction(
                     store=store, approve=approve,
                     approval_signature=approval_signature,
                     approval_public_keys=approval_public_keys,
-                    ledger_path=ledger_path)
+                    ledger_path=ledger_path,
+                    model_improvement=model_improvement)
         except Exception as exc:
             out.reason = f"external adapter approval failed: {exc}"
             return out
@@ -2278,7 +2991,8 @@ def _execute_adapter_transaction(
         return _execute_locked_adapter_transaction(
             out, cand=cand, manifest=manifest, serving_binding=serving_binding,
             receipt=receipt, provision=provision,
-            controller=controller, store=store, ledger_path=ledger_path)
+            controller=controller, store=store, ledger_path=ledger_path,
+            model_improvement=model_improvement)
     finally:
         if provision is not None and provision.cleanup is not None:
             try:
@@ -2333,6 +3047,309 @@ def _adapter_min_improvement_from_config() -> float:
     ):
         raise ValueError("adapter promotion min_improvement is invalid")
     return float(raw_margin)
+
+
+def _model_improvement_policy() -> dict[str, Any]:
+    """Return trusted model-improvement policy or refuse a malformed source.
+
+    Ordinary config reads are intentionally fail-soft.  Adapter activation is
+    a privileged mutation boundary, so it must not reinterpret an unreadable
+    or structurally invalid policy as "feature disabled".
+    """
+    from .config import get_model_improvement_mutation_policy
+
+    return dict(get_model_improvement_mutation_policy())
+
+
+def _model_improvement_policy_digest(policy: Mapping[str, Any]) -> str:
+    """Content address the strict effective policy bound to a live pointer."""
+    try:
+        encoded = json.dumps(
+            dict(policy),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("model-improvement policy is not canonical JSON") from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _model_improvement_receipt_required() -> bool:
+    policy = _model_improvement_policy()
+    if policy["enable"] and policy["require_signed_receipt"] is not True:
+        raise ValueError(
+            "enabled model improvement requires signed training receipts",
+        )
+    return bool(policy["enable"])
+
+
+def _model_improvement_enabled() -> bool:
+    return bool(_model_improvement_policy()["enable"])
+
+
+def _verified_training_receipt_binding(
+    *,
+    receipt_id: str | None,
+    manifest: AdapterManifest,
+    adapter_sha256: str,
+    model_improvement_policy: Mapping[str, Any] | None = None,
+) -> dict[str, str] | None:
+    """Verify and bind the exact private training run to a staged adapter.
+
+    The caller supplies only a receipt identifier. The receipt itself is
+    recovered from the active tenant's private store, and both trust roots come
+    from protected server-side registries. The returned provenance is
+    content-free.
+    """
+    receipt_required = (
+        _model_improvement_receipt_required()
+        if model_improvement_policy is None
+        else bool(model_improvement_policy.get("enable"))
+    )
+    if (
+        receipt_required
+        and model_improvement_policy is not None
+        and model_improvement_policy.get("require_signed_receipt") is not True
+    ):
+        raise ValueError(
+            "enabled model improvement requires signed training receipts",
+        )
+    if not receipt_required:
+        return None
+    if not isinstance(receipt_id, str) or not receipt_id.strip():
+        raise ValueError(
+            "model-improvement adapter promotion requires a training receipt id"
+        )
+    if receipt_id != receipt_id.strip() or len(receipt_id) > 128:
+        raise ValueError("training receipt id is invalid")
+
+    from .training import receipts as training_receipts
+
+    tenant_id = _active_tenant_id()
+    if not tenant_id:
+        raise ValueError(
+            "model-improvement training receipts require an explicit tenant"
+        )
+    trusted_receipt_pubkeys, trusted_approver_pubkeys = (
+        training_receipts.server_training_trust_registries()
+    )
+    receipt = training_receipts.read_verified_training_receipt(
+        receipt_id,
+        trusted_receipt_pubkeys=trusted_receipt_pubkeys,
+        trusted_approver_pubkeys=trusted_approver_pubkeys,
+        expected_tenant_id=tenant_id,
+    )
+
+    evidence = receipt.get("evidence")
+    if not isinstance(evidence, Mapping):
+        raise ValueError("verified training receipt has no run evidence")
+    adapter = evidence.get("adapter")
+    base_model = evidence.get("base_model")
+    training = evidence.get("training")
+    evaluation = evidence.get("evaluation")
+    if (
+        not isinstance(adapter, Mapping)
+        or not isinstance(base_model, Mapping)
+        or not isinstance(training, Mapping)
+        or not isinstance(evaluation, Mapping)
+    ):
+        raise ValueError("verified training receipt has incomplete artifact evidence")
+    if adapter.get("artifact_sha256") != adapter_sha256:
+        raise ValueError("training receipt covers different adapter bytes")
+    if evidence.get("dataset_sha256") != manifest.dataset_sha256:
+        raise ValueError("training receipt covers a different training dataset")
+    if base_model.get("model_id") != _model_id(manifest.base_model):
+        raise ValueError("training receipt covers a different base model")
+    if adapter.get("adapter_id") != manifest.adapter_id:
+        raise ValueError("training receipt covers a different adapter identity")
+    if training.get("backend") != manifest.trainer:
+        raise ValueError("training receipt covers a different trainer")
+
+    commitment = training_receipts.public_transparency_commitment(
+        receipt,
+        trusted_receipt_pubkeys=trusted_receipt_pubkeys,
+        trusted_approver_pubkeys=trusted_approver_pubkeys,
+        expected_tenant_id=tenant_id,
+    )
+    return {
+        "receipt_payload_sha256": str(commitment["receipt_payload_sha256"]),
+        "event_hash": str(commitment["event_hash"]),
+        "key_id": str(commitment["key_id"]),
+        "approval_subject_sha256": str(
+            commitment["approval_subject_sha256"]
+        ),
+        "training_run_id": str(evidence["run_id"]),
+        "training_completed_at": str(evidence["completed_at"]),
+        "receipt_issued_at": str(receipt["issued_at"]),
+        "dataset_sha256": str(evidence["dataset_sha256"]),
+        "environment_sha256": str(evidence["environment_sha256"]),
+        "environment_id": str(evidence["environment_id"]),
+        "adapter_id": str(adapter["adapter_id"]),
+        "adapter_sha256": str(adapter["artifact_sha256"]),
+        "training_backend": str(training["backend"]),
+        "base_model_id": str(base_model["model_id"]),
+        "base_model_revision": str(base_model["revision"]),
+        "base_model_license_id": str(base_model["license_id"]),
+        "base_model_license_evidence_sha256": str(
+            base_model["license_evidence_sha256"],
+        ),
+        "base_model_artifact_sha256": str(base_model["artifact_sha256"]),
+        "base_model_artifact_manifest_sha256": str(
+            base_model["artifact_manifest_sha256"],
+        ),
+        "base_model_tokenizer_sha256": str(base_model["tokenizer_sha256"]),
+        "base_model_artifact_format": str(base_model["artifact_format"]),
+        "adapter_artifact_format": str(adapter["artifact_format"]),
+        "adapter_checkpoint_sha256": str(adapter["checkpoint_sha256"]),
+        "adapter_runtime_compatibility_sha256": str(
+            adapter["runtime_compatibility_sha256"],
+        ),
+        "evaluation_protocol_sha256": str(
+            evaluation["protocol_sha256"]
+        ),
+        "evaluation_run_sha256": str(
+            evaluation["run_sha256"]
+        ),
+        "sealed_holdout_sha256": str(
+            evaluation["sealed_holdout_sha256"]
+        ),
+        "qualification_evidence_sha256": str(
+            evaluation["qualification_evidence_sha256"],
+        ),
+        "qualification_policy_sha256": str(
+            evaluation["qualification_policy_sha256"],
+        ),
+    }
+
+
+def _verified_qualification_binding(
+    *,
+    evidence: Any,
+    policy: Any,
+    receipt_binding: Mapping[str, str] | None,
+    adapter_sha256: str,
+    model_improvement_policy: Mapping[str, Any] | None = None,
+) -> dict[str, str] | None:
+    """Evaluate the exact deployment tuple and bind it to the training run."""
+    improvement_enabled = (
+        _model_improvement_enabled()
+        if model_improvement_policy is None
+        else model_improvement_policy.get("enable") is True
+    )
+    if not improvement_enabled:
+        return None
+
+    from .training.qualification import (
+        QualificationEvidence,
+        QualificationPolicy,
+        evaluate_qualification,
+    )
+
+    if not isinstance(evidence, QualificationEvidence):
+        raise ValueError("model-improvement promotion requires qualification evidence")
+    if not isinstance(policy, QualificationPolicy):
+        raise ValueError("model-improvement promotion requires a qualification policy")
+    decision = evaluate_qualification(evidence, policy)
+    if not decision.qualified:
+        raise ValueError(
+            "deployment qualification failed: "
+            + "; ".join(decision.failures[:8]),
+        )
+    if evidence.runtime.adapter_sha256 != adapter_sha256:
+        raise ValueError("qualification covers different adapter bytes")
+    if receipt_binding is None:
+        raise ValueError("qualification requires a verified training receipt")
+    runtime = evidence.runtime
+    exact_values = {
+        "training_run_id": evidence.run_id,
+        "dataset_sha256": evidence.dataset_sha256,
+        "base_model_id": evidence.base_model_id,
+        "base_model_revision": evidence.model_revision,
+        "base_model_license_id": evidence.base_model_license_id,
+        "base_model_license_evidence_sha256": (
+            evidence.base_model_license_evidence_sha256
+        ),
+        "base_model_artifact_sha256": runtime.base_model_artifact_sha256,
+        "base_model_artifact_manifest_sha256": (
+            runtime.base_model_artifact_manifest_sha256
+        ),
+        "base_model_tokenizer_sha256": runtime.base_model_tokenizer_sha256,
+        "base_model_artifact_format": runtime.base_model_artifact_format,
+        "adapter_artifact_format": runtime.adapter_artifact_format,
+        "adapter_checkpoint_sha256": runtime.adapter_checkpoint_sha256,
+        "adapter_runtime_compatibility_sha256": (
+            runtime.adapter_runtime_compatibility_sha256
+        ),
+        "evaluation_protocol_sha256": evidence.evaluation_protocol_sha256,
+        "evaluation_run_sha256": evidence.evaluation_run_sha256,
+        "sealed_holdout_sha256": evidence.sealed_holdout_sha256,
+        "qualification_evidence_sha256": decision.evidence_sha256,
+        "qualification_policy_sha256": decision.policy_sha256,
+    }
+    if (
+        evidence.environment_sha256s.get(receipt_binding["environment_id"])
+        != receipt_binding["environment_sha256"]
+    ):
+        raise ValueError("qualification covers a different environment")
+    for binding_field, actual in exact_values.items():
+        if receipt_binding.get(binding_field) != actual:
+            raise ValueError(
+                "qualification and signed receipt disagree on "
+                f"{binding_field}",
+            )
+    measured_at = datetime.fromisoformat(
+        evidence.measured_at[:-1] + "+00:00",
+    )
+    completed_at = datetime.fromisoformat(
+        receipt_binding["training_completed_at"][:-1] + "+00:00",
+    )
+    issued_at = datetime.fromisoformat(
+        receipt_binding["receipt_issued_at"][:-1] + "+00:00",
+    )
+    if measured_at < completed_at or measured_at > issued_at:
+        raise ValueError(
+            "qualification measurement is outside the signed training-receipt timeline",
+        )
+    return {
+        "evidence_sha256": decision.evidence_sha256,
+        "policy_sha256": decision.policy_sha256,
+        "runtime_attestation_sha256": decision.runtime_attestation_sha256,
+        "run_id": evidence.run_id,
+        "profile": policy.profile,
+        "catalog_id": evidence.catalog_id,
+        "catalog_sha256": evidence.catalog_sha256,
+        "dataset_sha256": evidence.dataset_sha256,
+        "evaluation_run_sha256": evidence.evaluation_run_sha256,
+        "sealed_holdout_sha256": evidence.sealed_holdout_sha256,
+        "measured_at": evidence.measured_at,
+        "expires_at": decision.expires_at,
+        "engine": runtime.engine,
+        "engine_version": runtime.engine_version,
+        "context_tokens": runtime.context_tokens,
+        "concurrency": runtime.concurrency,
+        "base_model_id": evidence.base_model_id,
+        "base_model_revision": evidence.model_revision,
+        "base_model_license_id": evidence.base_model_license_id,
+        "base_model_license_evidence_sha256": (
+            evidence.base_model_license_evidence_sha256
+        ),
+        "base_model_artifact_format": runtime.base_model_artifact_format,
+        "base_model_artifact_sha256": runtime.base_model_artifact_sha256,
+        "base_model_artifact_manifest_sha256": (
+            runtime.base_model_artifact_manifest_sha256
+        ),
+        "base_model_tokenizer_sha256": runtime.base_model_tokenizer_sha256,
+        "adapter_artifact_format": runtime.adapter_artifact_format,
+        "adapter_checkpoint_sha256": runtime.adapter_checkpoint_sha256,
+        "adapter_runtime_compatibility_sha256": (
+            runtime.adapter_runtime_compatibility_sha256
+        ),
+        "deployment_manifest_sha256": runtime.deployment_manifest_sha256,
+        "container_or_lock_sha256": runtime.container_or_lock_sha256,
+        "hardware_profile_sha256": runtime.hardware_profile_sha256,
+    }
 
 
 def _configure_adapter_governance(
@@ -2450,6 +3467,9 @@ def govern_adapter_change(
     approval_public_keys: list[str] | tuple[str, ...] | None = None,
     serving_provisioner: Callable[[dict], dict] | None = None,
     unsafe_dev_auto_sign: bool = False,
+    training_receipt_id: str | None = None,
+    qualification_evidence: Any = None,
+    qualification_policy: Any = None,
 ) -> AdapterUpliftResult:
     """Decide whether a trained adapter may be promoted and activated.
 
@@ -2510,6 +3530,44 @@ def govern_adapter_change(
     if not _model_id(manifest.base_model).strip():
         out.reason = f"manifest base_model has no model id: {manifest.base_model!r}"
         return out
+    try:
+        improvement_policy = _model_improvement_policy()
+        training_receipt_binding = _verified_training_receipt_binding(
+            receipt_id=training_receipt_id,
+            manifest=manifest,
+            adapter_sha256=digest,
+            model_improvement_policy=improvement_policy,
+        )
+    except Exception as exc:
+        out.reason = f"training receipt refused: {exc}"
+        return out
+    try:
+        qualification_binding = _verified_qualification_binding(
+            evidence=qualification_evidence,
+            policy=qualification_policy,
+            receipt_binding=training_receipt_binding,
+            adapter_sha256=digest,
+            model_improvement_policy=improvement_policy,
+        )
+    except Exception as exc:
+        out.reason = f"deployment qualification refused: {exc}"
+        return out
+    model_improvement_binding = (
+        {
+            "schema": MODEL_IMPROVEMENT_BINDING_SCHEMA,
+            "policy_sha256": _model_improvement_policy_digest(
+                improvement_policy,
+            ),
+            "training_receipt": training_receipt_binding,
+            "qualification": qualification_binding,
+        }
+        if qualification_binding is not None
+        else None
+    )
+    # The receipt and qualification above authorize these exact bytes. Keep
+    # that digest across the later copy into immutable storage so a mutable
+    # source directory cannot win a time-of-check/time-of-use race.
+    authorized_digest = digest
 
     # 2. Fitness on the held-out split (the gate judges ONLY unseen cases).
     tuned_ref = f"{manifest.base_model}+adapter:{manifest.adapter_id}"
@@ -2524,6 +3582,12 @@ def govern_adapter_change(
         digest = manifest.payload_sha256
     except Exception as exc:
         out.reason = f"adapter immutable staging failed: {exc}"
+        return out
+    if digest != authorized_digest:
+        out.reason = (
+            "adapter immutable staging refused: payload bytes changed after "
+            "training receipt and qualification"
+        )
         return out
 
     # 3. Candidate at the weights rung. Non-escalation is structural: the
@@ -2548,9 +3612,12 @@ def govern_adapter_change(
         provenance={
             "tenant_id": st.tenant_id,
             "artifact_identity": st.artifact_identity,
+            "adapter_payload_sha256": digest,
             "dataset_sha256": manifest.dataset_sha256,
             "provenance_counts": manifest.provenance_counts,
             "trainer": manifest.trainer,
+            "training_receipt": training_receipt_binding,
+            "qualification": qualification_binding,
             "capability_evidence": "payload hygiene boundary: no executable content; "
                                    "tool authority unchanged by weights",
         },
@@ -2566,7 +3633,8 @@ def govern_adapter_change(
         serving_provisioner=serving_provisioner,
         approve=approve, approval_signature=approval_signature,
         approval_public_keys=approval_public_keys,
-        allow_uninstalled_dev=unsafe_dev_auto_sign)
+        allow_uninstalled_dev=unsafe_dev_auto_sign,
+        model_improvement=model_improvement_binding)
     if not out.promoted:
         return out
     serve_hint = out.serving.get("create_command") or out.serving.get("note", "")

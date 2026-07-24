@@ -121,6 +121,17 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "blocked_apps",
         "provider_egress",
     },
+    # Specialist-model training and promotion is a high-authority mutation
+    # boundary.  Keep its schema closed so misspelled receipt, boundary, or
+    # sample-floor controls cannot silently fall back to defaults.
+    "model_improvement": {
+        "enable",
+        "allow_hosted",
+        "allow_cross_tenant",
+        "require_signed_receipt",
+        "minimum_train_families",
+        "minimum_holdout_families",
+    },
     # --- dynamic / open-ended sections (any subkey accepted) ---
     "providers": None,
     "models": None,
@@ -202,6 +213,16 @@ _NUMERIC_KEYS: dict[str, set[str]] = {
     },
 }
 
+# Integer-valued controls. These are kept separate from ``_NUMERIC_KEYS``:
+# accepting ``20.5`` as a number would make config lint report success while
+# the runtime safely falls back to 20, obscuring an operator mistake.
+_INTEGER_KEYS: dict[str, set[str]] = {
+    "model_improvement": {
+        "minimum_train_families",
+        "minimum_holdout_families",
+    },
+}
+
 # Keys that, when present, must be a bool. Section -> key. Plus the universal
 # ``enabled``/``enable`` toggle, handled separately for every known section.
 _BOOL_KEYS: dict[str, set[str]] = {
@@ -226,9 +247,17 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "allow_mcp_acquisition", "allow_provider_egress", "distill_local",
     },
     "ekko": {"provider_egress"},
+    "model_improvement": {
+        "enable",
+        "allow_hosted",
+        "allow_cross_tenant",
+        "require_signed_receipt",
+    },
 }
 
 _UNIVERSAL_BOOL_KEYS = ("enabled", "enable")
+_MODEL_IMPROVEMENT_FAMILY_MIN = 20
+_MODEL_IMPROVEMENT_FAMILY_MAX = 1_000_000
 
 
 # Key names that carry secrets. A literal (non-``${ENV}``) string under one of
@@ -345,6 +374,7 @@ def lint_config(cfg: dict) -> list[Finding]:
 
         allowed = KNOWN_SCHEMA[section]
         numeric_keys = _NUMERIC_KEYS.get(section, set())
+        integer_keys = _INTEGER_KEYS.get(section, set())
         bool_keys = _BOOL_KEYS.get(section, set())
 
         for key, kval in value.items():
@@ -368,7 +398,42 @@ def lint_config(cfg: dict) -> list[Finding]:
                 continue
 
             # Type checks (conservative; only knowable cases).
-            if key in numeric_keys and not _is_number(kval):
+            if key in integer_keys and (
+                not isinstance(kval, int) or isinstance(kval, bool)
+            ):
+                findings.append(
+                    Finding(
+                        section=section,
+                        key=key,
+                        severity="error",
+                        message=(
+                            f"{section}.{key} must be an integer, got "
+                            f"{type(kval).__name__}"
+                        ),
+                    )
+                )
+            elif (
+                section == "model_improvement"
+                and key in integer_keys
+                and not (
+                    _MODEL_IMPROVEMENT_FAMILY_MIN
+                    <= kval
+                    <= _MODEL_IMPROVEMENT_FAMILY_MAX
+                )
+            ):
+                findings.append(
+                    Finding(
+                        section=section,
+                        key=key,
+                        severity="error",
+                        message=(
+                            f"{section}.{key} must be between "
+                            f"{_MODEL_IMPROVEMENT_FAMILY_MIN} and "
+                            f"{_MODEL_IMPROVEMENT_FAMILY_MAX}, got {kval!r}"
+                        ),
+                    )
+                )
+            elif key in numeric_keys and not _is_number(kval):
                 findings.append(
                     Finding(
                         section=section,
@@ -410,6 +475,35 @@ def lint_config(cfg: dict) -> list[Finding]:
                         ),
                     )
                 )
+            elif (
+                section == "model_improvement"
+                and key == "allow_cross_tenant"
+                and kval is True
+            ):
+                findings.append(Finding(
+                    section=section,
+                    key=key,
+                    severity="error",
+                    message=(
+                        "model_improvement.allow_cross_tenant is reserved and "
+                        "unsupported; it must remain false"
+                    ),
+                ))
+            elif (
+                section == "model_improvement"
+                and key == "require_signed_receipt"
+                and kval is False
+                and value.get("enable") is True
+            ):
+                findings.append(Finding(
+                    section=section,
+                    key=key,
+                    severity="error",
+                    message=(
+                        "enabled model improvement requires "
+                        "model_improvement.require_signed_receipt = true"
+                    ),
+                ))
             elif section == "ekko" and key == "provider_egress" and kval is True:
                 findings.append(Finding(
                     section=section,

@@ -36,6 +36,9 @@ def test_rotation_mints_new_active_key_and_keeps_old():
     os.utime(key_dir / f"{kid_b}.key", None)
     _, _, active = signing._load_or_create_keypair()
     assert active == kid_b
+    registry = signing.trusted_audit_public_keys()
+    assert set(registry) == {kid_a, kid_b}
+    assert all(len(public_key) == 64 for public_key in registry.values())
 
 
 def test_rotation_wins_even_when_mtimes_tie():
@@ -143,3 +146,5 @@ def test_signer_rejects_mismatched_private_and_public_key(tmp_path):
 
     with pytest.raises(ValueError, match="private/public signing key files do not match"):
         signing.AuditSigner(tmp_path / "audit" / "2026-06-18.ndjson")
+    with pytest.raises(ValueError, match="private/public signing key files do not match"):
+        signing.trusted_audit_public_keys()
