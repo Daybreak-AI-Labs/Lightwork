@@ -189,6 +189,10 @@ def _bearer_ok(request: Request) -> bool:
     return request.headers.get("authorization", "").startswith("Bearer ")
 
 
+def _missing_bearer() -> JSONResponse:
+    return JSONResponse({"error": "missing bearer token"}, status_code=401)
+
+
 def _rec(aid: str) -> OneTrustAssessment | None:
     return STORE.onetrust.get(aid)
 
@@ -207,7 +211,7 @@ def _questions(rec: OneTrustAssessment) -> dict[str, dict]:
 @router.post("/api/assessment/v3/assessments")
 async def ot_launch(request: Request) -> JSONResponse:
     if not _bearer_ok(request):
-        return JSONResponse({"error": "missing bearer token"}, status_code=401)
+        return _missing_bearer()
     body = await request.json()
     template = TEMPLATES.get(str(body.get("templateId", "")))
     if template is None or not body.get("orgGroupId") \
@@ -232,7 +236,7 @@ async def ot_launch(request: Request) -> JSONResponse:
 @router.post("/api/assessment/v3/assessments/list")
 async def ot_list(request: Request) -> JSONResponse:
     if not _bearer_ok(request):
-        return JSONResponse({"error": "missing bearer token"}, status_code=401)
+        return _missing_bearer()
     page = int(request.query_params.get("page", 0))
     size = int(request.query_params.get("size", 50))
     statuses = request.query_params.get("assessmentStatuses", "")
@@ -251,6 +255,8 @@ async def ot_list(request: Request) -> JSONResponse:
 
 @router.get("/api/assessment/v2/assessments/{aid}/export")
 async def ot_export(aid: str, request: Request) -> JSONResponse:
+    if not _bearer_ok(request):
+        return _missing_bearer()
     rec = _rec(aid)
     if rec is None:
         return JSONResponse({"errorCode": "NOT_FOUND"}, status_code=404)
@@ -327,6 +333,8 @@ def _validate_entry(rec: OneTrustAssessment, entry: dict,
 
 @router.post("/api/assessment/v2/assessments/{aid}/responses")
 async def ot_write_responses(aid: str, request: Request) -> JSONResponse:
+    if not _bearer_ok(request):
+        return _missing_bearer()
     rec = _rec(aid)
     if rec is None:
         return JSONResponse({"errorCode": "NOT_FOUND"}, status_code=404)
@@ -370,6 +378,8 @@ async def ot_write_responses(aid: str, request: Request) -> JSONResponse:
 # --------------------------------------------------------------------------- #
 @router.post("/api/assessment/v2/assessments/{aid}/submit")
 async def ot_submit(aid: str, request: Request) -> JSONResponse:
+    if not _bearer_ok(request):
+        return _missing_bearer()
     rec = _rec(aid)
     if rec is None:
         return JSONResponse({"errorCode": "NOT_FOUND"}, status_code=404)
@@ -430,6 +440,8 @@ async def ot_assessment_attach(aid: str) -> JSONResponse:
 
 @router.post("/api/assessment/v2/assessments/assessment-links")
 async def ot_link(request: Request) -> JSONResponse:
+    if not _bearer_ok(request):
+        return _missing_bearer()
     body = await request.json()
     if not body.get("fromId") or not isinstance(body.get("toIds"), list):
         return JSONResponse({"errorCode": "INVALID_REQUEST_INPUT"},
@@ -475,6 +487,8 @@ async def ot_create_entity() -> JSONResponse:
 
 @router.post("/api/inventory/v2/inventories/{record_id}/attachments")
 async def ot_record_attach(record_id: str, request: Request) -> JSONResponse:
+    if not _bearer_ok(request):
+        return _missing_bearer()
     body = await request.json()
     if not isinstance(body, list) or not body \
             or not body[0].get("attachmentId"):
@@ -490,6 +504,8 @@ async def ot_record_attach(record_id: str, request: Request) -> JSONResponse:
 
 @router.post("/api/document/v2/attachments")
 async def ot_upload(request: Request) -> JSONResponse:
+    if not _bearer_ok(request):
+        return _missing_bearer()
     form = await request.form()
     blob = form.get("file")
     meta = form.get("attachment")
