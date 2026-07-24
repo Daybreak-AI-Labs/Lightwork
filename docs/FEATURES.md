@@ -819,26 +819,47 @@ here.
   them, and enforces one rule: **an action is reversible only when we are
   holding the thing that inverts it.** A PATCH earns its undo by capturing the
   record's prior values for exactly the fields being changed; a POST earns its
-  undo from the id the create response returns (the undo *raises* rather than
-  no-ops if that id never arrives); a full-replace PUT and a DELETE earn
-  nothing, because replaying system fields fails and a recreated record has a
-  new id and dangling references. Every gap fails closed to `undo=None`, which
-  makes `run_saga` refuse **before any effect** and routes the action to a
-  human. Per-service knowledge lives in a `RestDialect` (`SalesforceDialect`,
-  `ServiceNowDialect`; an unknown connector gets a deliberately incapable
-  generic one that earns nothing): which fields carry money, how a path names
-  a record, and three facts that decide whether a restore can actually
+  undo from the id the create response returns — but only when the path
+  addresses a collection the dialect actually models, because the same verb
+  drives RPC endpoints (`/actions/standard/emailSimple`) that no DELETE
+  recalls, and appending an id to an unmodelled path guesses at another
+  vendor's URL grammar. A full-replace PUT and a DELETE earn nothing, because
+  replaying system fields fails and a recreated record has a new id and
+  dangling references; a write path carrying a **query string** earns nothing
+  either, since a parameter like `sysparm_input_display_value` changes how the
+  service reads the values being submitted, so replaying a raw prior through
+  it writes something other than what was captured. Every gap fails closed to
+  `undo=None`, which makes `run_saga` refuse **before any effect** and routes
+  the action to a human. Per-service knowledge lives in a `RestDialect`
+  (`SalesforceDialect`, `ServiceNowDialect`; an unknown connector gets a
+  deliberately incapable generic one that earns nothing): which fields carry
+  money, how a path names a record, which paths are create-into collections,
+  and three facts that decide whether a restore can actually
   restore — **system-managed fields** (audit stamps, auto-numbers, formulas,
   roll-ups) whose priors read back perfectly and then silently fail to apply,
   so touching one forfeits the inverse; the **optimistic-concurrency token**
-  (`LastModifiedDate` / `sys_mod_count`) re-read before restoring and compared
-  against the value our own write left behind, so an undo refuses rather than
-  overwriting somebody else's edit; and the **raw-value capture** ServiceNow
-  requires (display values are not writable back). Exposure is the *delta* where a
-  prior was captured ($100k → $120k risks $20k) and the whole figure where it
-  was not — overstating keeps a human in the loop, understating would not.
-  `preview_write` keeps its no-network guarantee; the single read-only GET
-  that earns the undo lives in this separate seam and is operator-gated.
+  (`LastModifiedDate` / `sys_mod_count`), which guards *both* windows a
+  stranger's edit can land in — re-read immediately before the write, so an
+  edit made while the card sat in front of a human aborts with no effect at
+  all rather than being quietly reverted later, and re-read again before
+  restoring, so an undo refuses rather than overwriting somebody else's edit.
+  The token is necessary but not sufficient — Salesforce stamps
+  `LastModifiedDate` only to the second, so a colleague saving inside the same
+  second as our own write carries an identical token forever — so the undo
+  also compares the **values** it is about to overwrite against the ones our
+  write left behind. Third: the **raw-value capture** ServiceNow requires
+  (display values are not writable back). The post-write snapshot that becomes the undo's reference is
+  adopted only if it still carries the values we just wrote, field by field —
+  a fallback GET can otherwise hand us a stranger's state and license the undo
+  to overwrite it, while a stranger touching some *other* field is no reason
+  to refuse, because the undo only ever replays ours. The approved params are
+  snapshotted at planning time, so a caller mutating its dict while the card
+  awaits approval cannot change the write that executes. Exposure is the
+  *delta* where a prior was captured ($100k → $120k risks $20k) and the whole
+  figure where it was not — overstating keeps a human in the loop,
+  understating would not. `preview_write` keeps its no-network guarantee; the
+  read-only GETs that earn and re-confirm the undo live in this separate seam
+  and are operator-gated.
 - **Emergent Substrate — an auditable coordination shorthand** (`emergent_protocol.py`
   + `emergent_tokens.py`, `maverick codebook` / `codec-learn` / `codec-probe`,
   opt-in `[emergent_protocol]` / `[emergent_codec]` / `MAVERICK_EMERGENT_CODEC`) —
