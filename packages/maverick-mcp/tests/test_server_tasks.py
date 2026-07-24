@@ -330,12 +330,15 @@ def test_list_invalid_cursor_raises():
 
 
 def test_expired_task_is_purged():
-    import time
     store = TaskStore(lambda n, a: _ok("x"))
     try:
-        task = store.create("maverick_start", {}, {"ttl": 1})  # 1ms ttl
-        store.result(task.id)  # let it finish
-        time.sleep(0.05)
+        # A comfortable ttl so result() reliably reaches a terminal state -- a
+        # 1ms ttl races the purge inside _require and can vanish before it
+        # finishes on a slow runner. Force expiry deterministically afterwards
+        # by rewinding the creation epoch past the ttl.
+        task = store.create("maverick_start", {}, {"ttl": 60000})
+        store.result(task.id)  # block until it finishes
+        task._created_epoch -= 3600  # now well past its ttl on any runner
         with pytest.raises(TaskError) as ei:
             store.get(task.id)  # purged on access
         assert ei.value.code == -32602
