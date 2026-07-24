@@ -51,11 +51,12 @@ governed connectors and Earned Autonomy.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -128,9 +129,69 @@ def _as_money(value: Any) -> float | None:
         return None
 
 
+def _is_number(value: Any) -> bool:
+    """A real JSON number. ``True``/``False`` are ints in Python; not here."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _same_value(readback: Any, written: Any) -> bool:
+    """Whether a readback still carries the value we wrote, across type drift.
+
+    A service is free to answer with ``"7"`` for an integer we sent, or
+    ``120000.0`` for ``120000``. Comparing the raw objects would report every
+    such round trip as a stranger's edit, so a numeric round trip is tolerated.
+
+    But reading a value as a number is LOSSY: :func:`_as_money` strips currency
+    codes, thousands separators and leading zeros alike, so applying it to two
+    *strings* would make ``"USD;100"`` equal ``"EUR;100"`` and ``"0042"`` equal
+    ``"42"``. This comparison decides whether somebody else's edit is sitting in
+    a field we are about to overwrite, so a false "same" is exactly the failure
+    that matters. The lossy reading is therefore licensed only when one side
+    really is a number; two strings are compared as strings.
+
+    Exactly one side being ``None`` is a difference, never a match: ``str(None)``
+    is ``"None"``, and letting a cleared field equal the literal text would wave
+    through the very edit this check exists to catch.
+    """
+    if readback == written:
+        return True
+    if readback is None or written is None:
+        return False
+    if _is_number(readback) or _is_number(written):
+        left, right = _as_money(readback), _as_money(written)
+        if left is not None and right is not None:
+            return left == right
+    return str(readback).strip() == str(written).strip()
+
+
+def _snapshot(params: dict) -> dict:
+    """A private copy of a write, immune to the caller mutating theirs."""
+    try:
+        return copy.deepcopy(params)
+    except Exception:  # noqa: BLE001 -- an exotic value still gets one level
+        return {k: (dict(v) if isinstance(v, dict) else v)
+                for k, v in params.items()}
+
+
 # ---------------------------------------------------------------------------
 # Per-service dialects
 # ---------------------------------------------------------------------------
+def _split(path: str) -> tuple[str, str]:
+    """``(path, query)`` for a URL-ish string, or ``("", "")`` if unparseable.
+
+    ``urlsplit`` RAISES on an unbalanced bracket in the authority (``//[x`` ->
+    "Invalid IPv6 URL"), and the path here comes from an agent. Planning
+    promises never to raise, so a string this malformed resolves to the empty
+    path: it addresses no record, which routes the write to a human instead of
+    to a traceback.
+    """
+    try:
+        parts = urlsplit(str(path or ""))
+    except ValueError:
+        return "", ""
+    return unquote(parts.path), parts.query
+
+
 def _path_only(path: str) -> str:
     """The path component of a URL-ish string, percent-decoded.
 
@@ -138,7 +199,7 @@ def _path_only(path: str) -> str:
     id of ``abc123?sysparm_fields=x``, and an encoded segment must match the
     same way its decoded form would.
     """
-    return unquote(urlsplit(str(path or "")).path)
+    return _split(path)[0]
 
 
 class RestDialect:
@@ -156,11 +217,30 @@ class RestDialect:
     money_fields: frozenset[str] = frozenset()
 
     #: Matches a path addressing ONE existing record; group 1 = object/table,
-    #: group 2 = record id. ``None`` means "this dialect can't tell".
+    #: group 2 = record id. ``None`` means "this dialect can't tell". Anchor
+    #: both ends: a suffix match claims any prefix at all as this vendor's.
     record_re: re.Pattern[str] | None = None
+
+    #: Matches a path addressing a COLLECTION that a POST creates into; group 1
+    #: = object/table. ``None`` means "this dialect can't tell", and a create
+    #: then earns no inverse: appending the new id to an unmodelled path is a
+    #: guess at another vendor's URL grammar, and a guess that resolves to some
+    #: OTHER endpoint turns a compensation into an unrelated destructive write.
+    #: A POST is not automatically a create either -- an RPC endpoint
+    #: (``/actions/standard/emailSimple``) sends an email that no DELETE recalls.
+    #: Anchored for the same reason ``record_re`` is.
+    collection_re: re.Pattern[str] | None = None
 
     #: Keys a create response may carry the new record's id under.
     id_keys: tuple[str, ...] = ("id", "Id", "sys_id")
+
+    #: The grammar a record id must satisfy before it is pasted into a URL. The
+    #: create response is the SERVICE's word for where the new record lives, and
+    #: the compensating DELETE address is built by concatenating it, so an id
+    #: carrying ``../``, a query string or a whole other path would aim that
+    #: DELETE somewhere nobody approved. ``None`` means "this dialect cannot
+    #: vouch for an id", and the create then earns no inverse.
+    id_re: re.Pattern[str] | None = None
 
     #: Lower-cased fields that can be READ but never written back: audit stamps,
     #: auto-numbers, formula and roll-up fields. Their prior values look like a
@@ -186,6 +266,13 @@ class RestDialect:
         match = self.record_re.search(_path_only(path))
         return (match.group(1), match.group(2)) if match else None
 
+    def collection(self, path: str) -> str | None:
+        """The object/table name when ``path`` addresses a create-into collection."""
+        if self.collection_re is None:
+            return None
+        match = self.collection_re.search(_path_only(path))
+        return match.group(1) if match else None
+
     def restore_query(self, fields: list[str] | None) -> dict:
         """Query params for the capture GET.
 
@@ -204,6 +291,18 @@ class RestDialect:
     def unwrap(self, payload: Any) -> dict | None:
         """The record dict inside a GET response, or ``None``."""
         return payload if isinstance(payload, dict) else None
+
+    def field_value(self, raw: Any) -> Any:
+        """One field, normalized to the shape the capture read returns it in.
+
+        The capture GET is *narrowed* -- it names its fields and, where the API
+        offers it, demands raw dereferenced values. A write's echo is not: it is
+        whatever the service volunteers. So the same field can come back in two
+        different shapes from the same record, and comparing them raw would read
+        a service's own round trip as somebody else's edit. Normalizing the echo
+        to the read's shape is what lets the two be compared at all.
+        """
+        return raw
 
     def created_id(self, payload: Any) -> str | None:
         """The id of a record a POST just created, or ``None``."""
@@ -236,7 +335,12 @@ class SalesforceDialect(RestDialect):
     """
 
     name = "salesforce"
-    record_re = re.compile(r"/sobjects/([A-Za-z0-9_]+)/([A-Za-z0-9]{15,18})/?$")
+    record_re = re.compile(
+        r"\A/services/data/v\d+\.\d+/sobjects/([A-Za-z0-9_]+)"
+        r"/([A-Za-z0-9]{15,18})/?\Z")
+    collection_re = re.compile(
+        r"\A/services/data/v\d+\.\d+/sobjects/([A-Za-z0-9_]+)/?\Z")
+    id_re = re.compile(r"\A[A-Za-z0-9]{15,18}\Z")
     money_fields = frozenset({
         "amount", "expectedrevenue", "totalprice", "unitprice", "listprice",
         "annualrevenue", "grandtotal", "subtotal", "totalamount", "netamount",
@@ -278,7 +382,10 @@ class ServiceNowDialect(RestDialect):
 
     name = "servicenow"
     record_re = re.compile(
-        r"/api/now/(?:v\d+/)?table/([A-Za-z0-9_]+)/([0-9a-fA-F]{32})/?$")
+        r"\A/api/now/(?:v\d+/)?table/([A-Za-z0-9_]+)/([0-9a-fA-F]{32})/?\Z")
+    collection_re = re.compile(
+        r"\A/api/now/(?:v\d+/)?table/([A-Za-z0-9_]+)/?\Z")
+    id_re = re.compile(r"\A[0-9a-fA-F]{32}\Z")
     money_fields = frozenset({
         "price", "cost", "amount", "list_price", "total_cost", "sale_price",
         "estimated_cost", "unit_price", "cost_per_unit", "purchase_price",
@@ -297,6 +404,20 @@ class ServiceNowDialect(RestDialect):
             wanted = list(dict.fromkeys([*fields, self.concurrency_field]))
             query["sysparm_fields"] = ",".join(wanted)
         return query
+
+    def field_value(self, raw: Any) -> Any:
+        # The capture GET pins sysparm_exclude_reference_link=true, but that is
+        # a READ parameter with no write-echo equivalent: the same reference
+        # field comes back bare from the capture and as
+        # {"link": "https://.../sys_user/<id>", "value": "<id>"} from the echo
+        # of the write that set it. Comparing those raw would say the record
+        # does not hold what we just wrote, forfeit the reference snapshot, and
+        # make the undo we advertised refuse on every reference field. Both
+        # decorated shapes (link and display_value) keep the raw value under
+        # "value" -- which is exactly what the narrowed read returns.
+        if isinstance(raw, dict) and "value" in raw:
+            return raw["value"]
+        return raw
 
     def unwrap(self, payload: Any) -> dict | None:
         if isinstance(payload, dict) and "result" in payload:
@@ -351,8 +472,11 @@ class RestorePoint:
     captured: bool = False
     detail: str = ""
     #: Value of the dialect's optimistic-concurrency token when ``prior`` was
-    #: read. The undo re-checks it and refuses if the record moved -- restoring
-    #: over somebody else's edit is not an undo, it is a second incident.
+    #: read. Guards BOTH windows a stranger's edit can land in, because
+    #: restoring over somebody else's edit is not an undo, it is a second
+    #: incident: the do-step re-reads this value before writing and aborts
+    #: without effect if the record moved while the card awaited approval, and
+    #: the undo re-reads again and refuses if it moved after the write.
     token: str = ""
 
 
@@ -437,6 +561,31 @@ def _read_record(conn: Any, dialect: RestDialect, path: str,
     return record, ""
 
 
+def _drifted(fields: Iterable[str], left: dict | None, right: dict | None,
+             dialect: RestDialect) -> list[str]:
+    """Which of ``fields`` ``left`` no longer holds the ``right`` value for.
+
+    One rule, shared by the two places that ask "is this still our write's
+    effect?" -- the do-step corroborating its post-write snapshot, and the undo
+    checking the values it is about to overwrite. Both compare a read against a
+    payload the service has echoed or we have sent, so both need the dialect's
+    field normalization and the same tolerance for type drift.
+
+    Only the named fields are examined. That is the granularity the whole design
+    turns on: the restore replays exactly the fields we changed, so a stranger
+    editing some OTHER field is no reason to refuse.
+    """
+    lhs, rhs = left or {}, right or {}
+    return sorted(k for k in fields
+                  if not _same_value(dialect.field_value(lhs.get(k)),
+                                     dialect.field_value(rhs.get(k))))
+
+
+def _corroborates(snap: Any, body: dict, dialect: RestDialect) -> bool:
+    """Whether ``snap`` still carries every value the write just sent."""
+    return isinstance(snap, dict) and not _drifted(body, snap, body, dialect)
+
+
 def _token_of(record: dict | None, dialect: RestDialect) -> str:
     """The record's optimistic-concurrency token, or ``""`` if it has none.
 
@@ -473,6 +622,9 @@ def _inverse_for_update(conn: Any, dialect: RestDialect, path: str, body: dict,
     check compares against the token as of OUR OWN write, not the plan-time
     one: our write bumps the token itself, so comparing to the plan-time value
     would flag every undo as somebody else's edit and never restore anything.
+    The token is necessary but not sufficient -- Salesforce's is only
+    second-granular -- so the undo also compares the values it is about to
+    overwrite against the ones our write left behind.
     """
     entity = dialect.entity(path)
     if record is None:
@@ -511,7 +663,8 @@ def _inverse_for_update(conn: Any, dialect: RestDialect, path: str, body: dict,
 
     def _undo() -> str:
         if token:
-            expected = _token_of(after[-1] if after else None, dialect)
+            mine = after[-1] if after else None
+            expected = _token_of(mine, dialect)
             if not expected:
                 raise PlanError(
                     f"the write's own effect on {entity} was never observed; a "
@@ -526,6 +679,22 @@ def _inverse_for_update(conn: Any, dialect: RestDialect, path: str, body: dict,
                     f"{entity} changed since the write "
                     f"({dialect.concurrency_field} {expected!r} -> {now!r}); "
                     "restoring would overwrite that edit")
+            # A matching token is necessary but NOT sufficient, because the
+            # token can be too coarse to resolve the edit we care about:
+            # Salesforce stamps LastModifiedDate to the second (the API always
+            # answers .000), so a colleague saving in the same second as our
+            # own write carries a token identical to ours -- forever, however
+            # long the undo is deferred. The values are the finer signal, and
+            # we already hold the ones our write left behind, so compare them
+            # directly. Only the fields the restore would actually overwrite
+            # are checked: a stranger editing some OTHER field is none of our
+            # business, exactly as when the snapshot was taken.
+            stale = _drifted(body, current, mine, dialect)
+            if stale:
+                raise PlanError(
+                    f"{entity} fields {stale} no longer hold what our write "
+                    "left there; somebody edited them, and restoring would "
+                    "overwrite that edit")
         return _checked(
             lambda: conn.write({"op": "patch", "path": path, "body": prior}),
             f"restore {entity}")()
@@ -538,13 +707,32 @@ def _inverse_for_update(conn: Any, dialect: RestDialect, path: str, body: dict,
 
 def _inverse_for_create(conn: Any, dialect: RestDialect, path: str,
                         responses: list[str],
-                        ) -> tuple[RestorePoint, Callable[[], str]]:
+                        ) -> tuple[RestorePoint, Callable[[], str] | None, list[str]]:
     """POST: the inverse is deleting the record the create returns.
+
+    Only a POST into a collection this dialect actually models earns that. A
+    POST is not synonymous with a create: the same verb drives RPC endpoints
+    that send email, run approvals or kick off jobs, and no DELETE unsends an
+    email. Requiring a known collection path is what separates the two, and it
+    is also what makes the delete address real rather than guessed.
 
     The id only exists after the do-step, so the undo closes over the same
     response list the do-step appends to, and raises if the id never shows up
     -- an undo that quietly does nothing is worse than one that fails loudly.
     """
+    collection = dialect.collection(path)
+    if collection is None:
+        return (RestorePoint(
+            "none", dialect.entity(path),
+            detail="not a create into a known collection"), None,
+            [f"{path!r} is not a {dialect.name} collection this dialect "
+             "models; a POST there may not be a create at all, and the "
+             "address of any new record cannot be derived, so no inverse "
+             "can be earned"])
+    # Build the delete address from the PATH component only. The caller's path
+    # may carry a query string, and appending the id to it would land the id
+    # inside the query -- addressing the collection, not the new record.
+    base = _path_only(path).rstrip("/")
 
     def _undo() -> str:
         if not responses:
@@ -554,14 +742,24 @@ def _inverse_for_create(conn: Any, dialect: RestDialect, path: str,
             raise PlanError(
                 "create response carried no record id; the new record must be "
                 "removed by hand")
-        target = f"{path.rstrip('/')}/{new_id}"
+        # The delete address is built by CONCATENATING that id, and the id is
+        # the service's word, not ours -- a compromised or merely surprising
+        # response could carry "../../other/thing" or a query string and aim
+        # the compensation at an endpoint nobody approved. It has to look like
+        # this vendor's record id before it is allowed into a URL.
+        if dialect.id_re is None or not dialect.id_re.match(new_id):
+            raise PlanError(
+                f"create response returned {new_id!r}, which is not a "
+                f"{dialect.name} record id; refusing to build a delete address "
+                "from it. The new record must be removed by hand")
+        target = f"{base}/{new_id}"
         return _checked(
             lambda: conn.write({"op": "delete", "path": target, "body": {}}),
             f"delete created {new_id}")()
 
     return (RestorePoint(
-        "created", dialect.entity(path),
-        detail="inverse is deleting the id returned by the create"), _undo)
+        "created", f"{collection}/(new)",
+        detail="inverse is deleting the id returned by the create"), _undo, [])
 
 
 def _plan_inverse(conn: Any, dialect: RestDialect, op: str, path: str,
@@ -570,9 +768,29 @@ def _plan_inverse(conn: Any, dialect: RestDialect, op: str, path: str,
                   ) -> tuple[RestorePoint, Callable[[], str] | None, list[str]]:
     """Dispatch to the verb's inverse. Everything unhandled fails closed."""
     entity = dialect.entity(path)
+    if _split(path)[1]:
+        # A query string is not inert: ServiceNow's sysparm_input_display_value
+        # makes the API read submitted values as display labels, so an in-place
+        # undo -- which re-sends this same path, query string and all -- writes
+        # a DIFFERENT value than the one captured. Which params are safe is
+        # per-vendor knowledge we do not have, so a decorated path earns
+        # nothing.
+        #
+        # This is checked BEFORE the verb, creates included. A create's inverse
+        # rests entirely on the id coming back in the response, and the same
+        # parameters that reshape a write reshape what it answers with:
+        # sysparm_fields prunes the echo, sysparm_display_value=all re-types
+        # it. An inverse whose evidence may never arrive is not an inverse, and
+        # promising one costs more than refusing -- the undo would fail after
+        # the record already exists, where forfeiting merely routes the create
+        # to a human beforehand.
+        return (RestorePoint(
+            "none", entity, detail="write path carries a query string"), None,
+            [f"{path!r} carries a query string; it can change how the service "
+             "interprets the write and what it reports back, so no reliable "
+             "inverse can be earned"])
     if op == "post":
-        point, undo = _inverse_for_create(conn, dialect, path, responses)
-        return point, undo, []
+        return _inverse_for_create(conn, dialect, path, responses)
     if op == "patch":
         return _inverse_for_update(conn, dialect, path, body, record, query, after)
     if op == "put":
@@ -708,9 +926,15 @@ def plan_write(conn: Any, params: dict, *, predicted: float | None = None,
     if not isinstance(effect, str) or effect.strip().startswith(ERROR_PREFIX):
         return _refused(action, str(effect), params)
 
-    op = str(params.get("op", "")).strip().lower()
-    path = str(params.get("path", "")).strip()
-    raw_body = params.get("body")
+    # Everything below -- the priced exposure, the captured prior, the digest
+    # pinned on the card -- describes ``params`` as it reads RIGHT NOW. A
+    # caller that keeps the dict and mutates it while the card sits in front of
+    # a human would otherwise have the do-step send fields nobody approved, at
+    # an exposure nobody saw. The do-step sends this private copy instead.
+    sent = _snapshot(params)
+    op = str(sent.get("op", "")).strip().lower()
+    path = str(sent.get("path", "")).strip()
+    raw_body = sent.get("body")
     body = raw_body if isinstance(raw_body, dict) else {}
     dialect = dialect_for(name)
 
@@ -737,35 +961,81 @@ def plan_write(conn: Any, params: dict, *, predicted: float | None = None,
 
     responses: list[str] = []
     after: list[dict] = []
+    entity = dialect.entity(path)
 
     restore, undo, more = _plan_inverse(
         conn, dialect, op, path, body, record, responses, query, after)
     warnings.extend(more)
     frozen_warnings = tuple(warnings)
     reversible = undo is not None
+    if restore.kind == "created":
+        # A create addresses a collection, so the path names no record and
+        # ``entity`` is just the raw path. The restore point already names the
+        # target the way this dialect models it ("Opportunity/(new)"); the card
+        # must say the same thing, or a reader reconciling the two is looking
+        # at one write described as two.
+        entity = restore.entity
 
     # Only a token-checking undo reads ``after``; anywhere else the snapshot
     # would be a read nobody looks at.
     watch = bool(restore.kind == "fields" and restore.token)
 
     def _do() -> str:
-        out = conn.write(params)
+        if watch:
+            # The prior values were captured at planning time; a human gate can
+            # sit between then and now for as long as it likes. Re-check the
+            # token BEFORE writing, so a colleague's edit inside that window
+            # aborts with no effect at all rather than being quietly reverted
+            # later by an undo replaying values that went stale while the card
+            # waited for approval. (No conditional-write header exists on these
+            # APIs, so this read is the narrowest window we can buy.)
+            fresh, why = _read_record(conn, dialect, path, query)
+            if fresh is None:
+                raise PlanError(f"cannot confirm {entity} is unchanged since "
+                                f"the preview: {why}")
+            moved = _token_of(fresh, dialect)
+            if moved != restore.token:
+                raise PlanError(
+                    f"{entity} changed after the preview was taken "
+                    f"({dialect.concurrency_field} {restore.token!r} -> "
+                    f"{moved!r}); the approved consequence no longer describes "
+                    "this record")
+        out = conn.write(sent)
         if isinstance(out, str) and out.strip().startswith(ERROR_PREFIX):
             raise PlanError(f"{op.upper()} {path} failed: {out.strip()[:200]}")
         responses.append(out if isinstance(out, str) else str(out))
         if watch:
             # Prefer the write's own echo of the updated record (ServiceNow
             # returns it) and fall back to one GET where the write answers with
-            # a bare 204 (Salesforce PATCH). Either way the undo ends up holding
-            # the token as of OUR write, which is the only value a later read
-            # can be honestly compared against.
+            # a bare 204 (Salesforce PATCH).
             snap = dialect.unwrap(_loads(responses[-1]))
-            if not _token_of(snap, dialect):
+            # The echo is an optimization, not the authority. It is whatever the
+            # service volunteered -- possibly truncated at 4000 characters,
+            # possibly carrying fields in shapes the narrowed capture read never
+            # sees -- so an echo that does not visibly hold what we wrote is
+            # treated as no echo at all and we spend the GET. Believing it
+            # instead would forfeit a perfectly good undo over a formatting
+            # difference, which is the same feature-dead-on-arrival failure as
+            # comparing against the plan-time token.
+            if not _token_of(snap, dialect) or not _corroborates(
+                    snap, body, dialect):
                 snap, _why = _read_record(conn, dialect, path, query)
-            after.append(snap if isinstance(snap, dict) else {})
+            # That fallback GET is a second round trip, so it can return a
+            # record somebody else has ALREADY moved on from -- and adopting
+            # their state as the undo's reference would license the undo to
+            # overwrite them. Only a readback still carrying the values we just
+            # wrote proves the snapshot is our write's own effect; anything else
+            # leaves ``after`` empty, and the undo refuses for want of a
+            # reference. Field level is the right granularity: a stranger
+            # touching some OTHER field is no reason to refuse, because the undo
+            # only ever replays ours.
+            if _corroborates(snap, body, dialect):
+                # Normalized on the way in, so the undo's own check compares the
+                # narrowed read against a snapshot in the same shape.
+                after.append({k: dialect.field_value(v)
+                              for k, v in snap.items()})
         return responses[-1]
 
-    entity = dialect.entity(path)
     preview = ConsequencePreview(
         action=action,
         predicted_outcome=(_predicted(op, reversible, frozen_warnings)
@@ -774,7 +1044,7 @@ def plan_write(conn: Any, params: dict, *, predicted: float | None = None,
         exposure_dollars=_exposure(dialect, op, body, record),
         entities=(entity,) if entity else (),
         reversible=reversible,
-        params_sha256=params_digest(params),
+        params_sha256=params_digest(sent),
         risk="high",
     )
     step = SagaStep(name=f"{name}.{op}", do=_do, undo=undo)

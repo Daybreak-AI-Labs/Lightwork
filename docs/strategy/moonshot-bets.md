@@ -580,29 +580,104 @@ inferred from the verb alone.
   response returns; because that id doesn't exist at plan time, the undo
   closes over the response and **raises** if the id never arrives (a silent
   no-op rollback is worse than a loud failure — the saga would report a clean
-  rollback while the record still exists). A full-replace PUT and a DELETE
-  earn nothing: replaying a prior record means writing system-managed fields
-  the API refuses, and a recreated record has a new id and leaves every
-  reference to the old one dangling. That is a different record, not a
-  restoration.
+  rollback while the record still exists). But a POST is not automatically a
+  create: the same verb drives RPC endpoints — Salesforce's
+  `/actions/standard/emailSimple` sends an email that no DELETE recalls — so
+  the id only earns an inverse when the path addresses a collection the
+  dialect explicitly models. Appending an id to an unmodelled path is a guess
+  at another vendor's URL grammar, and a guess that resolves to some *other*
+  endpoint turns a compensation into an unrelated destructive write. A
+  full-replace PUT and a DELETE earn nothing: replaying a prior record means
+  writing system-managed fields the API refuses, and a recreated record has a
+  new id and leaves every reference to the old one dangling. That is a
+  different record, not a restoration. A write path carrying a **query
+  string** earns nothing either, for any verb: an in-place undo re-sends that
+  same path, and a query string is not inert — ServiceNow's
+  `sysparm_input_display_value` makes the API read submitted values as display
+  labels, so replaying a raw prior through it writes a *different* value than
+  the one captured. Creates are not the exception they first look like: a
+  create's inverse rests entirely on the id coming back in the response, and
+  the parameters that reshape a write reshape what it answers with —
+  `sysparm_fields` prunes the echo, `sysparm_display_value=all` re-types it. An
+  inverse whose evidence may never arrive is not an inverse, and promising one
+  costs more than refusing, because the undo would fail only *after* the record
+  already exists. Which parameters are safe is per-vendor knowledge we do not
+  have.
+- **Evidence gets validated before it is trusted as an address.** The
+  compensating DELETE is built by concatenating an id the *service* chose, so
+  a response carrying traversal, a query string, or simply something the wrong
+  shape would aim that DELETE at an endpoint nobody approved. The id must match
+  the dialect's record-id grammar first; a dialect with no grammar earns no
+  create inverse at all. The same reasoning anchors the path patterns
+  themselves — an unanchored suffix match claims any prefix as this vendor's,
+  and the collection match is what licenses the concatenation in the first
+  place. (The grammar earned its keep immediately: it caught a 19-character
+  "Salesforce id" that had been sitting in our own test fixtures, where real
+  ids are 15 or 18.)
 - **Three ways a capture is a lie, all handled.** *System-managed fields* —
   audit stamps, auto-numbers, Salesforce formulas (`ExpectedRevenue`) and
   roll-ups, ServiceNow `sys_*` — read back perfectly and then silently fail to
   apply, so a write touching one forfeits its inverse entirely rather than
   shipping a restore that reports success and changes nothing. *Concurrent
   edits* — the dialect's optimistic-concurrency token (`LastModifiedDate`,
-  `sys_mod_count`) is captured alongside the priors, and the undo re-reads it
-  before restoring; if the record moved, it refuses. Restoring over somebody
-  else's edit is not an undo, it is a second incident. The reference value is
-  the token as of *our own* write, not the plan-time one — our write bumps the
-  token itself, so comparing against the capture would flag every undo as a
-  stranger's edit and quietly make the whole feature dead. The do-step
-  therefore records what the write left behind, preferring the response echo
-  (ServiceNow returns the updated record) and paying for one GET only where
-  the write answers with a bare 204 (Salesforce PATCH). *Display
-  values* — ServiceNow returns `"New"` for a choice field and a nested object
-  for a reference unless the read demands raw values, and neither is writable
-  back, so the capture GET pins `sysparm_display_value=false`.
+  `sys_mod_count`) is captured alongside the priors, and it has to guard **two
+  distinct windows**, not one. The window from capture to write contains an
+  arbitrarily long human approval gate, so the do-step re-reads the token
+  immediately *before* writing and aborts with **no effect at all** if the
+  record moved while the card waited — quietly reverting a colleague later,
+  with values that went stale in the meantime, is not an acceptable substitute
+  for never writing. The window from write to undo is guarded by the same
+  token re-read before restoring; if the record moved, the undo refuses.
+  Restoring over somebody else's edit is not an undo, it is a second incident.
+  A matching token is necessary but not sufficient, because the token can be
+  too coarse to resolve the edit that matters: Salesforce stamps
+  `LastModifiedDate` to the second — the API always answers `.000` — so a rep
+  saving inside the same second as our own write carries a token identical to
+  ours, and carries it forever however long the undo is deferred. The values
+  are the finer signal and we already hold the ones our write left behind, so
+  the undo compares them directly, over exactly the fields the restore would
+  overwrite.
+  The reference value is the token as of *our own* write, not the plan-time
+  one — our write bumps the token itself, so comparing against the capture
+  would flag every undo as a stranger's edit and quietly make the whole
+  feature dead. The do-step therefore records what the write left behind,
+  preferring the response echo (ServiceNow returns the updated record) and
+  paying for one GET only where the write answers with a bare 204 (Salesforce
+  PATCH). That fallback GET is a second round trip, so it can return a record
+  somebody else has *already* moved on from — adopting their state as the
+  undo's reference would license the undo to overwrite them. Only a readback
+  still carrying the values we just wrote is adopted, compared field by field
+  and tolerantly enough that a service answering `"7"` for an integer is not
+  mistaken for an edit. Field level is the right granularity: a stranger
+  touching some *other* field is no reason to refuse, because the undo only
+  ever replays ours. That comparison spans two shapes of the same value, and
+  gets the tolerance asymmetric on purpose. The capture GET is *narrowed* —
+  raw, dereferenced, named fields — but a write's echo is whatever the service
+  volunteers, so a ServiceNow reference field is bare from the read and
+  `{"link": …, "value": …}` from the echo of the write that set it. Compared
+  raw, the record would not appear to hold what we just wrote, the reference
+  snapshot would be forfeited, and the undo the card advertised would refuse on
+  every reference field — so the dialect normalizes the shapes, and an echo
+  that *still* does not corroborate is treated as no echo at all and pays for
+  the GET rather than silently giving the undo up. In the other direction the
+  comparison refuses to be lossy: reading a value as a number discards currency
+  codes and leading zeros, so it is licensed only when one side really is a
+  number. `"USD;100"` and `"EUR;100"` are different values, and calling them
+  equal would let the undo destroy an edit while reporting the field untouched.
+  *Display values* — ServiceNow returns `"New"` for a
+  choice field and a nested object for a reference unless the read demands raw
+  values, and neither is writable back, so the capture GET pins
+  `sysparm_display_value=false`.
+- **The approved write is the executed write.** Everything the card shows —
+  the priced exposure, the captured prior, the pinned digest — describes the
+  params *as of planning time*. A caller that keeps its dict and mutates it
+  while the card sits in front of a human would otherwise have the do-step
+  send fields nobody approved, at an exposure nobody saw. `plan_write` takes a
+  private snapshot and the do-step sends that. Planning also never raises on a
+  hostile path: `urlsplit` throws on an unbalanced bracket in the authority,
+  and the path comes from an agent, so a string that malformed resolves to the
+  empty path — it addresses no record, which routes the write to a human
+  instead of to a traceback.
 - **Honest dollars.** Exposure is the *delta* where a prior was captured
   (moving an opportunity from $100k to $120k risks $20k, not $120k) and the
   whole written figure where it was not. Overstating exposure keeps a human in
@@ -638,12 +713,17 @@ inferred from the verb alone.
   high-risk connector down.
 
 Every gap — a failed restore read, a field the read didn't return, a missing
-token, a system-managed field, an unrecognized connector, restore reads
-switched off — fails closed to `undo=None`, which makes `run_saga` refuse
-**before any effect**. `maverick connectors plan` is the operator surface: it
-prints the consequence card, the restore point, and every warning, and commits
-nothing. 64 deterministic tests, all network-free (connector I/O is scripted
-and every read the adapter *would* have issued is asserted).
+token, a system-managed field, an unrecognized connector, a POST to a path
+that isn't a modelled collection, a create response whose id isn't one, a query
+string on the write path, an unparseable path, restore reads switched off —
+fails closed to `undo=None`, which makes `run_saga` refuse **before any
+effect**. Over-refusal costs a human review; under-refusal costs somebody's
+edit, so every judgment call above is settled in that direction. `maverick
+connectors plan` is the operator surface: it prints the consequence card, the
+restore point, and every warning, and commits nothing. 120 deterministic tests,
+all network-free (connector I/O is scripted and every read the adapter *would*
+have issued is asserted), and each guard above is mutation-checked — flipped
+off one at a time to confirm a test actually dies for it.
 
 Remaining to reach the full bet: a design partner for real
 predicted-vs-actual volume.
