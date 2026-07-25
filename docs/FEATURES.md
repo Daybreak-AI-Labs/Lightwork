@@ -191,6 +191,20 @@ here.
   (`credit.py`) — this is offline, corpus-level, for promotion decisions.
   Default-on via `[self_improvement] causal_promotion`; applies only when
   self-improvement is enabled.
+- **Capability grading on the promotion receipt** — the capability
+  non-escalation gate always refused a widening change, but the durable receipt
+  did not record *what the gate concluded*, so a third party reading the ledger
+  afterwards could not tell "proven bounded" from "never checked". Each
+  `PromotionRecord` now carries `capability_evidence` —
+  `probed_bounded` (the capability algebra was walked over N tools, with N
+  recorded), `declared_bounded` (the caller asserted it), or `unproven` (the rung
+  required no proof and none was supplied) — which is what makes the portable
+  attestation's bounded-self-improvement claim checkable rather than asserted.
+  Additive and backward-compatible: an absent grading is emitted as an absent
+  field, so receipts written before it existed re-serialize byte-identically and
+  their hash-chained journal entries still verify. A verifier must read that
+  absence as *unknown*, never as bounded; an unrecognised grading fails closed
+  rather than being downgraded to a weaker one.
 - **Model-based counterfactual rollouts** — when confounding is so severe that no
   stratum has both arms (zero overlap), stratification is blind; g-computation
   over a tabular transition model fit from the logged `(state, action) ->
@@ -697,6 +711,30 @@ here.
   (with deciders) threaded into one queryable spine, exportable as an
   Ed25519-signed portable **capsule** (decision spine + learned state)
   verifiable offline; tampering fails verification.
+- **Portable attestation — provable to somebody who trusts nobody**
+  (`attestation.py`, `attestation_verify.py`, `maverick attest
+  key|export|verify|export-verifier`) — the capsule proves *integrity* but is
+  self-certifying: `verify_capsule` checks the signature with the public key
+  stored inside the capsule, so it establishes that nobody edited the file and
+  nothing about who signed it. An attestation bundle closes that gap. It binds
+  three claims to evidence a third party can re-derive — every recorded action
+  stayed inside the declared governance envelope; self-improvement never widened
+  its own authority; the decision history is intact and complete (per-day content
+  digests, chain tips, the cross-file anchor ledger) — and **verification
+  requires the publisher's key obtained out of band**, failing closed without
+  one. Each claim reports `HOLDS` / `FAILS` / `INDETERMINATE` /
+  `NOT_APPLICABLE`, and the last two are never softened into the first: an empty
+  governance policy forbids nothing, so "no violations" is reported as
+  inapplicable rather than as a pass, and a sealed-at-rest day-file is
+  `INDETERMINATE` because nobody outside the tenant can walk its chain. Two
+  depths: *signed* (authentic, claims as the issuer recorded them) and
+  *corroborated* (`--evidence <audit-dir>`, claims re-derived from the raw
+  files). A day-file still open at issuance is committed as a **prefix**, so
+  ordinary later activity does not invalidate a bundle while an edit to the
+  attested rows still does. `maverick attest export-verifier` writes the
+  verifier out as a standalone program that imports nothing from maverick and
+  needs only Python plus `cryptography` — the "hand a regulator a USB stick"
+  path.
 - **Memory Guard — governed reads/writes (OWASP ASI06)** (`memory_guard.py`,
   opt-in `[memory_guard] enable` / `MAVERICK_MEMORY_GUARD`) — the screen
   between an agent and its memory store. Every fact write is stamped with

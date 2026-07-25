@@ -805,3 +805,159 @@ def test_consider_promotes_when_enabled(tmp_path, monkeypatch):
     ctrl = _ctrl(ledger=ledger)
     v = consider(_cand(rung="config"), controller=ctrl)
     assert v.ok
+
+
+# -- capability evidence on the receipt (Bet 1 claim 2 made checkable) ------
+#
+# The capability gate always refused a widening change, but the durable receipt
+# did not record WHAT the gate concluded -- so a third party reading the ledger
+# afterwards could not tell "proven bounded" from "never checked". These tests
+# pin the grading and, just as importantly, pin that a missing grading stays
+# missing rather than being read as bounded.
+
+def test_a_walked_probe_is_recorded_as_probed_bounded():
+    v = _ctrl().evaluate(_cand(
+        rung="tool", capability_before=_Grant({"a"}), capability_after=_Grant({"a"}),
+        probe_tools=("a", "b", "c")))
+    assert v.ok
+    assert v.capability_evidence == "probed_bounded"
+    assert v.capability_probe_tools == 3
+
+
+def test_a_declared_verdict_is_recorded_as_weaker_than_a_probe():
+    """'The caller asserted it' and 'the algebra was walked over 3 tools' are
+    different grades of proof; the receipt has to keep them apart."""
+    v = _ctrl().evaluate(_cand(rung="tool", capability_widens=False))
+    assert v.ok
+    assert v.capability_evidence == "declared_bounded"
+    assert v.capability_probe_tools is None
+
+
+def test_a_rung_needing_no_capability_proof_records_unproven():
+    v = _ctrl().evaluate(_cand(rung="config"))
+    assert v.ok
+    assert v.capability_evidence == "unproven"
+
+
+def test_a_widening_change_is_still_refused_and_says_so():
+    v = _ctrl().evaluate(_cand(
+        rung="tool", capability_before=_Grant({"a"}),
+        capability_after=_Grant({"a", "danger"}), probe_tools=("a", "danger")))
+    assert not v.ok
+    assert any(g.gate == "capability" and not g.ok for g in v.gates)
+
+
+def test_an_ill_typed_widening_claim_does_not_masquerade_as_proof():
+    """A truthy string is not a proof about authority."""
+    v = _ctrl().evaluate(_cand(rung="config", capability_widens="false"))
+    assert v.capability_evidence == "unproven"
+
+
+def test_the_grading_survives_a_later_gate_failure():
+    ctrl = _ctrl()
+    v = ctrl.evaluate(_cand(rung="tool", capability_widens=False))
+    failed = ctrl._fail_verdict(v, gate="ledger", reason="boom")
+    assert failed.capability_evidence == "declared_bounded"
+
+
+def test_the_grading_reaches_the_persisted_receipt(tmp_path):
+    ledger = PromotionLedger(path=tmp_path / "ledger.json")
+    ctrl = _ctrl(ledger=ledger)
+    cand = _cand(rung="tool", capability_before=_Grant({"a"}),
+                 capability_after=_Grant({"a"}), probe_tools=("a", "b"))
+    v = ctrl._promotion_record(cand, ctrl.evaluate(cand), at=1.0)
+    assert v.capability_evidence == "probed_bounded"
+    assert v.capability_probe_tools == 2
+    assert v.to_dict()["capability_evidence"] == "probed_bounded"
+
+
+def test_a_receipt_without_a_grading_omits_the_field_entirely():
+    """Backward compatibility is load-bearing here: the journal is hash-chained
+    over ``to_dict()``, so a receipt written before this field existed must
+    re-serialize byte-identically or its recorded hash stops verifying."""
+    rec = PromotionRecord(id="a", rung="config", summary="s", baseline_score=0.1,
+                          candidate_score=0.2, promoted_at=1.0)
+    data = rec.to_dict()
+    assert "capability_evidence" not in data
+    assert "capability_probe_tools" not in data
+    # And the round trip a projection rebuild performs must be lossless.
+    assert PromotionRecord(**data).to_dict() == data
+
+
+def test_a_legacy_journal_hash_still_verifies_after_the_field_was_added(tmp_path):
+    """The concrete regression the omission guards: an existing ledger must
+    still load and verify, not fail closed because the schema grew."""
+    path = tmp_path / "ledger.json"
+    ledger = PromotionLedger(path=path)
+    ledger.add(PromotionRecord(id="legacy", rung="config", summary="s",
+                               baseline_score=0.1, candidate_score=0.2,
+                               promoted_at=1.0))
+    journal = Path(f"{path}.journal")
+    before = journal.read_bytes()
+    reopened = PromotionLedger(path=path)
+    assert [r.id for r in reopened.all()] == ["legacy"]
+    assert reopened.get("legacy").capability_evidence is None
+    assert journal.read_bytes() == before  # loading rewrote nothing
+
+
+def test_an_unrecognised_grading_is_rejected_not_downgraded(tmp_path):
+    """A stronger-sounding invented label must not be quietly accepted as a
+    weaker one -- that is how a future writer or an editor launders a claim."""
+    path = tmp_path / "ledger.json"
+    path.write_text(json.dumps([{
+        "id": "a", "rung": "config", "summary": "s", "baseline_score": 0.1,
+        "candidate_score": 0.2, "promoted_at": 1.0,
+        "capability_evidence": "cryptographically_bounded",
+    }]), encoding="utf-8")
+    with pytest.raises(PromotionLedgerError):
+        PromotionLedger(path=path)
+
+
+def test_a_probe_count_without_a_probed_grading_is_rejected(tmp_path):
+    """A probe count alongside a declared verdict would imply a probe that
+    never ran."""
+    path = tmp_path / "ledger.json"
+    path.write_text(json.dumps([{
+        "id": "a", "rung": "config", "summary": "s", "baseline_score": 0.1,
+        "candidate_score": 0.2, "promoted_at": 1.0,
+        "capability_evidence": "declared_bounded", "capability_probe_tools": 40,
+    }]), encoding="utf-8")
+    with pytest.raises(PromotionLedgerError):
+        PromotionLedger(path=path)
+
+
+def test_a_negative_probe_count_is_rejected(tmp_path):
+    path = tmp_path / "ledger.json"
+    path.write_text(json.dumps([{
+        "id": "a", "rung": "config", "summary": "s", "baseline_score": 0.1,
+        "candidate_score": 0.2, "promoted_at": 1.0,
+        "capability_evidence": "probed_bounded", "capability_probe_tools": -1,
+    }]), encoding="utf-8")
+    with pytest.raises(PromotionLedgerError):
+        PromotionLedger(path=path)
+
+
+def test_a_graded_receipt_round_trips_through_the_ledger(tmp_path):
+    path = tmp_path / "ledger.json"
+    ledger = PromotionLedger(path=path)
+    ledger.add(PromotionRecord(
+        id="a", rung="tool", summary="s", baseline_score=0.1,
+        candidate_score=0.2, promoted_at=1.0,
+        capability_evidence="probed_bounded", capability_probe_tools=40))
+    loaded = PromotionLedger(path=path).get("a")
+    assert loaded.capability_evidence == "probed_bounded"
+    assert loaded.capability_probe_tools == 40
+
+
+def test_marking_a_graded_receipt_rolled_back_preserves_its_grading(tmp_path):
+    path = tmp_path / "ledger.json"
+    ledger = PromotionLedger(path=path)
+    ledger.add(PromotionRecord(
+        id="a", rung="tool", summary="s", baseline_score=0.1,
+        candidate_score=0.2, promoted_at=1.0,
+        capability_evidence="probed_bounded", capability_probe_tools=7))
+    assert ledger.mark_rolled_back("a", at=2.0)
+    rec = PromotionLedger(path=path).get("a")
+    assert rec.rolled_back is True
+    assert rec.capability_evidence == "probed_bounded"
+    assert rec.capability_probe_tools == 7
