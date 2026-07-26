@@ -206,6 +206,12 @@ class Verdict:
     # captured during evaluation and carried into PREPARE so mutable candidate
     # state cannot swap the journaled payload after authorization.
     model_risk_payload_sha256: str | None = None
+    # How the capability gate judged authority, carried out of evaluation so the
+    # promotion receipt can record it. The gate's *decision* is not enough for a
+    # third party: it refuses a widening change, but a receipt that omits the
+    # grading leaves "proven bounded" and "never checked" indistinguishable.
+    capability_evidence: str | None = None
+    capability_probe_tools: int | None = None
 
     @property
     def ok(self) -> bool:
@@ -244,6 +250,15 @@ class PromotionRecord:
     samples: int | None = None
     effect_ci_low: float | None = None
     provenance: dict[str, Any] = field(default_factory=dict)
+    # How the capability non-escalation gate judged THIS promotion, so the claim
+    # "self-improvement never widened its authority" is checkable from the
+    # ledger file rather than taken on the issuer's word. One of
+    # ``probed_bounded`` / ``declared_bounded`` / ``unproven``. ``None`` means the
+    # receipt predates the field -- which a verifier must read as "unknown", NOT
+    # as bounded: a receipt written before anyone recorded the grading cannot
+    # retroactively prove anything about it.
+    capability_evidence: str | None = None
+    capability_probe_tools: int | None = None
 
     def to_dict(self) -> dict:
         data = {
@@ -267,6 +282,10 @@ class PromotionRecord:
             data["provenance"] = self.provenance
         if self.model_risk_payload_sha256 is not None:
             data["model_risk_payload_sha256"] = self.model_risk_payload_sha256
+        if self.capability_evidence is not None:
+            data["capability_evidence"] = self.capability_evidence
+        if self.capability_probe_tools is not None:
+            data["capability_probe_tools"] = self.capability_probe_tools
         return data
 
 
@@ -412,28 +431,65 @@ def _receipt_provenance(value: Any) -> dict[str, Any]:
     return parsed
 
 
-def _capability_widens(cand: Candidate) -> bool | None:
-    """Did the change widen authority? True=widened, False=bounded, None=unknown.
+def _capability_assessment(cand: Candidate) -> tuple[bool | None, str, int | None]:
+    """Judge authority widening AND record *how* it was judged.
 
-    A declared verdict wins (caller used the real ``capability`` algebra). Else,
-    if before/after grants and a tool probe set are supplied, the change widens
-    iff it permits some probed tool the prior grant did not.
+    Returns ``(widens, method, probe_tools)`` where ``widens`` is True=widened /
+    False=bounded / None=unknown, ``method`` names the evidence that produced it
+    (``"declared"``, ``"probed"``, or ``"none"``), and ``probe_tools`` is the
+    size of the probe set when one was actually walked.
+
+    The gate only needs ``widens``, but a promotion *receipt* needs the other
+    two: "the caller asserted authority stayed bounded" and "the capability
+    algebra was walked over 40 tools and permitted none of them newly" are very
+    different grades of proof, and a third party reading the ledger later has no
+    way to tell them apart unless we write down which one happened. Collapsing
+    them would let a bare assertion be read as a probe — the same laundering the
+    evaluator-anchor lock exists to prevent.
     """
     if cand.capability_widens is not None:
         # Strings such as "" or "false" must not masquerade as a proof about
         # authority. Unknown/ill-typed evidence is handled fail-closed by the
         # rung policy below.
-        return cand.capability_widens if isinstance(cand.capability_widens, bool) else None
+        if isinstance(cand.capability_widens, bool):
+            return cand.capability_widens, "declared", None
+        return None, "none", None
     before, after = cand.capability_before, cand.capability_after
     if before is None or after is None or not cand.probe_tools:
-        return None
+        return None, "none", None
     try:
         for tool in cand.probe_tools:
             if after.permits(tool) and not before.permits(tool):
-                return True
-        return False
+                return True, "probed", len(cand.probe_tools)
+        return False, "probed", len(cand.probe_tools)
     except Exception:  # pragma: no cover -- can't prove -> caller treats as unknown
-        return None
+        return None, "none", None
+
+
+def _capability_widens(cand: Candidate) -> bool | None:
+    """Did the change widen authority? True=widened, False=bounded, None=unknown."""
+    return _capability_assessment(cand)[0]
+
+
+# The three honest capability gradings a *promoted* receipt can carry. A
+# widening change never promotes (the gate refuses it), so "widened" is
+# deliberately not among them.
+CAPABILITY_PROBED_BOUNDED = "probed_bounded"
+CAPABILITY_DECLARED_BOUNDED = "declared_bounded"
+CAPABILITY_UNPROVEN = "unproven"
+
+
+def _capability_evidence_label(widens: bool | None, method: str) -> str:
+    """The grading written into a promotion receipt."""
+    if widens is False and method == "probed":
+        return CAPABILITY_PROBED_BOUNDED
+    if widens is False and method == "declared":
+        return CAPABILITY_DECLARED_BOUNDED
+    # widens is None -- the rung did not require capability evidence and none
+    # was supplied. Recorded as unproven rather than omitted: silence in a
+    # receipt reads as "field predates the schema", which is a different and
+    # weaker statement than "we looked and could not prove it".
+    return CAPABILITY_UNPROVEN
 
 
 def _valid_rollback_handle(handle: Any) -> bool:
@@ -564,7 +620,8 @@ class SelfImprovementController:
             gates.append(GateResult("evidence", ev_ok, ev_reason))
 
         # 3. Capability non-escalation -- the core safety property of the moat.
-        widens = _capability_widens(cand)
+        widens, cap_method, cap_probes = _capability_assessment(cand)
+        cap_evidence = _capability_evidence_label(widens, cap_method)
         needs_cap = bool(policy["require_capability_evidence"])
         if widens is True:
             gates.append(GateResult("capability", False, "change widens the capability envelope"))
@@ -601,7 +658,9 @@ class SelfImprovementController:
         if failing:
             return Verdict(cand.id, cand.rung, False, tuple(gates), failing[0].reason,
                            approver_id=approver,
-                           model_risk_payload_sha256=model_risk_binding)
+                           model_risk_payload_sha256=model_risk_binding,
+                           capability_evidence=cap_evidence,
+                           capability_probe_tools=cap_probes)
         return Verdict(
             cand.id,
             cand.rung,
@@ -609,6 +668,8 @@ class SelfImprovementController:
             tuple(gates),
             approver_id=approver,
             model_risk_payload_sha256=model_risk_binding,
+            capability_evidence=cap_evidence,
+            capability_probe_tools=cap_probes,
         )
 
     def _model_risk_binding_approval(
@@ -792,6 +853,8 @@ class SelfImprovementController:
             samples=cand.samples,
             effect_ci_low=cand.effect_ci_low,
             provenance=_receipt_provenance(cand.provenance),
+            capability_evidence=verdict.capability_evidence,
+            capability_probe_tools=verdict.capability_probe_tools,
         )
 
     @staticmethod
@@ -801,7 +864,9 @@ class SelfImprovementController:
             verdict.candidate_id, verdict.rung, False,
             (*verdict.gates, failure), reason,
             approver_id=verdict.approver_id,
-            model_risk_payload_sha256=verdict.model_risk_payload_sha256)
+            model_risk_payload_sha256=verdict.model_risk_payload_sha256,
+            capability_evidence=verdict.capability_evidence,
+            capability_probe_tools=verdict.capability_probe_tools)
 
     @staticmethod
     def _halt_reason(phase: str) -> str | None:
@@ -1207,8 +1272,7 @@ class SelfImprovementController:
             log.warning("self-improvement promotion receipt commit failed for %s",
                         cand.id, exc_info=True)
             failure = GateResult("ledger", False, "promotion ledger persistence failed")
-            failed = Verdict(cand.id, cand.rung, False, (*verdict.gates, failure),
-                             failure.reason, approver_id=verdict.approver_id)
+            failed = self._fail_verdict(verdict, gate="ledger", reason=failure.reason)
             self._audit(content="self_improvement_rejected", decision="reject",
                         rung=cand.rung, candidate=cand.id, reason=failure.reason)
             return failed
@@ -1408,6 +1472,29 @@ def _record_from_dict(raw: Any) -> PromotionRecord:
             )
         ):
             raise TypeError("model_risk_payload_sha256 is not a lowercase SHA-256 digest")
+        capability_evidence = raw.get("capability_evidence")
+        if capability_evidence is not None and capability_evidence not in (
+            CAPABILITY_PROBED_BOUNDED, CAPABILITY_DECLARED_BOUNDED,
+            CAPABILITY_UNPROVEN,
+        ):
+            # An unrecognized grading is rejected rather than downgraded. A
+            # verifier that silently mapped an unknown label to "unproven" would
+            # let a future writer (or an editor) invent a stronger-sounding one
+            # and still be read as a valid, merely-weaker receipt.
+            raise TypeError("capability_evidence is not a recognized grading")
+        capability_probe_tools = raw.get("capability_probe_tools")
+        if (capability_probe_tools is not None
+                and (not isinstance(capability_probe_tools, int)
+                     or isinstance(capability_probe_tools, bool)
+                     or capability_probe_tools < 0
+                     or capability_probe_tools > 1_000_000_000)):
+            raise TypeError("capability_probe_tools is not a valid non-negative integer")
+        if (capability_probe_tools is not None
+                and capability_evidence != CAPABILITY_PROBED_BOUNDED):
+            # A probe count only means something alongside the grading that says
+            # a probe was walked. Accepting one without it would let a receipt
+            # imply a probe it never ran.
+            raise TypeError("capability_probe_tools requires a probed grading")
         return PromotionRecord(
             id=str(raw["id"]), rung=str(raw["rung"]),
             summary=str(raw.get("summary", "")),
@@ -1423,6 +1510,8 @@ def _record_from_dict(raw: Any) -> PromotionRecord:
             samples=samples,
             effect_ci_low=effect_ci_low,
             provenance=_receipt_provenance(raw.get("provenance", {})),
+            capability_evidence=capability_evidence,
+            capability_probe_tools=capability_probe_tools,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise PromotionLedgerError("promotion ledger contains an invalid record") from exc

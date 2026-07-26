@@ -61,6 +61,102 @@ sealed capsule, auditor runs one command, it cryptographically confirms *what th
 AI did, what it learned, and that it never gave itself more power than it was
 granted* — without ever seeing the data.
 
+### Build log — Bet 1 steps two and three (shipped)
+
+Steps 2 and 3 are built. `maverick attest` produces a bundle that binds the
+three claims to evidence, and `maverick attest export-verifier` writes out the
+checker as a standalone program.
+
+**What the capsule could not do.** `operating_record.verify_capsule` checks the
+signature using the public key stored *inside the capsule*. That proves nobody
+edited the file since it was signed, and nothing whatever about who signed it —
+anyone can mint a keypair and sign anything. It is integrity, not provenance,
+and provenance is the entire ask of a party who trusts neither the operator nor
+the model vendor. So the new verifier **requires the publisher's key out of
+band** (`maverick attest key`) and fails closed without it; a re-signed bundle
+embeds the attacker's own key, which will not match.
+
+**What made claim 2 real.** The self-improvement controller's capability gate
+already refused any change that widened authority — but the durable
+`PromotionRecord` never recorded *what the gate concluded*. From the ledger file
+alone, "proven bounded" and "never checked" were indistinguishable, so the
+bundle could only have asserted the claim. Receipts now carry
+`capability_evidence`: `probed_bounded` (the capability algebra was walked over
+N tools, N recorded), `declared_bounded` (the caller asserted it), or `unproven`.
+That distinction is the claim; collapsing it would let a bare assertion read as
+a walked probe. The field is additive and conditionally emitted, so pre-existing
+receipts re-serialize byte-identically and their hash-chained journal entries
+still verify — and a verifier reads an absent grading as **unknown**, never as
+bounded, because a receipt written before anyone recorded the verdict cannot
+retroactively establish it.
+
+**The discipline, inherited from Bet 5's adapters.** A claim is made only when
+the bundle holds what substantiates it. Each claim reports `HOLDS` / `FAILS` /
+`INDETERMINATE` / `NOT_APPLICABLE`, and the last two are never softened into the
+first. Three places that matters most:
+
+- **An empty governance policy forbids nothing**, so "no action violated the
+  envelope" is vacuously true. Reported `NOT_APPLICABLE` — a green badge there
+  would be the most misleading thing the tool could print, and Lightwork's
+  community default is an open policy.
+- **A sealed-at-rest day-file** is `INDETERMINATE`. The content digest still
+  pins the bytes exactly, but nobody outside the tenant can walk the chain
+  inside it, and handing an auditor the at-rest key to prove a point would
+  defeat sealing it. "The publisher verified it in-house" is precisely the
+  assurance this tool exists to replace.
+- **A promotion that cannot show authority stayed bounded** makes the whole
+  claim `INDETERMINATE`, naming the receipts.
+
+**Two verification depths**, so the report never overstates what was checked.
+*Signed*: authentic, with claims as the issuer recorded them. *Corroborated*
+(`--evidence <audit-dir>`): the action list is re-walked from the chain and the
+receipts re-read from the ledger. Corroboration **unions** the issuer's
+disclosures rather than replacing them — a sealed or absent day cannot be
+re-walked, so a re-derived list can be shorter, and replacing would let the
+deeper check quietly forgive a violation the issuer had actually admitted to.
+The one limit stated plainly in the report: risk levels are the issuer's signed,
+inspectable classification, not independently derived, because the standalone
+verifier deliberately cannot call our code.
+
+**Flaws the build surfaced, mostly by pointing the tool at itself.** The export
+writes its own audit row, so a bundle committing to *today's* day-file was
+committing to a moving target and self-invalidated one row later. Open days are
+now committed as a **prefix** — the first N rows and the tip at that point — so
+later activity is expected while an edit to the attested rows still fails. That
+prefix also catches the same-uid re-sign the audit-signing warning calls out: an
+actor holding the key can rewrite history into a chain that verifies cleanly on
+its own terms, but cannot reproduce a tip already committed to. A decryption
+failure was forfeiting the content digest, which is the one commitment an
+outside auditor can always compute; digest and chain tip are now gathered
+independently. A self-review pass then caught three more, all the same shape —
+a report saying more or less than the evidence warrants:
+
+- The history check walked chains with the key **embedded** in the bundle rather
+  than the trusted anchor, so a bundle carrying a signature but no `pubkey`
+  field would have reported every row as unverifiable. A false accusation
+  against an honest customer is as bad a failure as a false pass.
+- An open day committed with **zero rows** attests to nothing beyond the file's
+  existence, but counted toward the re-verified tally.
+- The builder **skipped sealed days when listing actions**. The issuer holds the
+  at-rest key, so that made its own disclosure incomplete — and since the
+  verifier cannot re-walk a sealed day either, an action hidden in one would
+  have been invisible at both depths. Full disclosure by the issuer, partial
+  corroboration by the auditor, is the honest split.
+
+71 deterministic tests for the bundle plus 14 for the receipt grading, all
+network-free, and every guard mutation-checked — 23 mutants, 23 caught,
+including "no anchor required", "a missing grading counts as bounded", "an empty
+envelope passes", "corroboration replaces the issuer's list", and "history walks
+with the embedded key". The standalone verifier is pinned two ways: a test
+asserts it imports nothing from maverick, and its chain walk is cross-checked
+against the shipped `signing.verify_chain` over clean and every tampered
+fixture, so a drift in either shows up as a test failure rather than as a false
+accusation against a customer.
+
+Remaining for the full bet: step 4 (TEE-attested + ZK policy proofs) and
+off-host key custody, which is what turns tamper-evidence against an outside
+editor into tamper-evidence against the operator.
+
 ---
 
 ## Bet 2 — The Institutional Memory: a vendor-neutral plane that compounds and ports
