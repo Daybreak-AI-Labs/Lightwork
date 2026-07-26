@@ -29,11 +29,19 @@ def _engine(tmp_path, *, policy=None, frozen=False, grants=None, revokes=None,
 
 
 def _card(engine, *, episode_id, predicted=0.9, reversible=True,
-          action="wire_transfer", principal="cfo-bot", risk="high"):
+          action="wire_transfer", principal="cfo-bot", risk="high",
+          source="simulate"):
+    """A card from the shadow-mode path by default.
+
+    ``source`` matters: only ``"simulate"`` carries reversibility a preview
+    adapter actually demonstrated, and ``GraduationPolicy.require_reversible``
+    defaults to True, so a card sourced anywhere else cannot satisfy the
+    reversibility gate. The provenance rule itself is pinned below.
+    """
     return engine.record_card(
         principal=principal, action=action, risk=risk,
         predicted_outcome=predicted, goal_id=1, episode_id=episode_id,
-        reversible=reversible, source="rehearsal", ts=float(episode_id))
+        reversible=reversible, source=source, ts=float(episode_id))
 
 
 @pytest.fixture(autouse=True)
@@ -835,6 +843,52 @@ def test_shadow_end_to_end_earns_autonomy_from_real_outcomes(tmp_path):
     report = engine.reconcile(resolve=lambda g, e: 1.0)
     assert report.graduated == ("wire_transfer",)
     assert engine.decide("wire_transfer", risk="high").auto is True
+
+
+@pytest.mark.parametrize("source", ["rehearsal", "declared", "", "adapter"])
+def test_asserted_reversibility_does_not_earn_autonomy(tmp_path, source):
+    """A card that only *claims* an undo must not satisfy the reversibility gate.
+
+    Regression: _reversible_share counted every card with reversible=True
+    regardless of provenance, so a caller passing reversible=True through
+    capture_prediction -- or anything calling record_card directly, which gets
+    source="declared" from the dataclass default -- could graduate an action
+    type past a gate whose failure text promises "a guaranteed undo". The same
+    blended number is what an attestation would have shown an auditor.
+
+    Only a preview adapter that round-tripped the write demonstrates an undo.
+    Everything else keeps the human.
+    """
+    engine = _engine(tmp_path)
+    for ep in (1, 2, 3):
+        _card(engine, episode_id=ep, reversible=True, source=source)
+    assert engine._reversible_share("wire_transfer") == 0.0
+    assert engine.reconcile(resolve=lambda g, e: 1.0).graduated == ()
+    assert engine.decide("wire_transfer", risk="high").auto is False
+
+
+def test_one_asserted_card_blocks_an_otherwise_demonstrated_action(tmp_path):
+    """Unearned cards stay in the denominator; they don't get filtered away.
+
+    Dropping them would let a single demonstrated card carry an action type
+    whose other writes were never previewed. The gate needs share >= 1.0, so a
+    mixed history holds the human until every card is demonstrated.
+    """
+    engine = _engine(tmp_path)
+    _card(engine, episode_id=1, source="simulate")
+    _card(engine, episode_id=2, source="simulate")
+    _card(engine, episode_id=3, source="rehearsal")  # asserted, not demonstrated
+    assert engine._reversible_share("wire_transfer") == pytest.approx(2 / 3)
+    assert engine.reconcile(resolve=lambda g, e: 1.0).graduated == ()
+
+
+def test_irreversible_simulate_card_is_not_counted_either(tmp_path):
+    """Provenance is necessary, not sufficient: the flag still has to be True."""
+    engine = _engine(tmp_path)
+    for ep in (1, 2, 3):
+        _card(engine, episode_id=ep, reversible=False, source="simulate")
+    assert engine._reversible_share("wire_transfer") == 0.0
+    assert engine.reconcile(resolve=lambda g, e: 1.0).graduated == ()
 
 
 def test_shadow_gate_uses_live_risk_not_the_preview_label(tmp_path, monkeypatch):

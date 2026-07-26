@@ -6,7 +6,11 @@ The agent wraps three sinks through this module:
   - on every final output  -> Shield.scan_output
 
 Backends (chosen automatically in order):
-  1. ``agent_shield`` SDK if installed (full F1 0.988 rule pack)
+  1. ``agent_shield`` SDK if installed -- note it is not published on PyPI and is
+     not vendored here, so in every environment we ship, this backend is
+     unavailable and (2) is what actually runs. No detection score is quoted for
+     it: the only measured backend is the builtin one, benchmarked in
+     ``benchmarks/security/RESULTS.md`` (F1 0.821-0.900, TPR 74.2% [57-86]).
   2. ``builtin_rules`` (~20 high-impact rules bundled with maverick-shield)
   3. No-op (only if the user explicitly disabled safety via [safety] profile=off)
 

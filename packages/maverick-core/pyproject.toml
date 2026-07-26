@@ -3,8 +3,10 @@ requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# PyPI distribution name. The 'maverick' name was squatted on PyPI so
-# we publish as 'maverick-agent'. The Python *import* name stays as
+# PyPI distribution name, reserved for when this ships publicly -- nothing is
+# published under it today (pypi.org/project/maverick-agent 404s as of July
+# 2026), so read this as the intended name, not a live one. The bare 'maverick'
+# name was squatted on PyPI, hence the suffix. The Python *import* name stays as
 # `maverick` (see [tool.setuptools.packages.find]) and the CLI is
 # installed under both names -- `maverick` and its Lightwork-brand
 # alias `lightwork` (see [project.scripts]).

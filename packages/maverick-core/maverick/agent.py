@@ -1826,15 +1826,30 @@ class Agent:
         )
 
     def _audit_tool_event(self, kind: str, **payload: Any) -> None:
-        """Record a tool-lifecycle audit event on the signed chain (best-effort).
+        """Record a tool-lifecycle audit event on the signed chain.
 
         Kept off ``_run_tool`` so the audit path adds no control-flow branches to
-        that hot method, and never raises into a running tool call."""
+        that hot method. Best-effort with one deliberate exception:
+
+        ``AuditWriteRefused`` propagates. It is raised only when an active
+        compliance profile mandates signed logs and the signer will not start,
+        and swallowing it turned the writer's refusal to write UNSIGNED into
+        "write nothing and run the tool anyway" -- which is worse than either
+        outcome the writer was choosing between, and silently falsified the
+        profile's central claim that every action is recorded.
+
+        Everything else is still swallowed, but no longer silently: a bare
+        ``pass`` here meant a permanently broken audit path looked identical to
+        a healthy one.
+        """
+        from .audit import AuditWriteRefused, record
         try:
-            from .audit import record
             record(kind, agent=self.name, goal_id=self.ctx.goal_id, **payload)
-        except Exception:  # pragma: no cover
-            pass
+        except AuditWriteRefused:
+            raise
+        except Exception:  # pragma: no cover -- a broken log must not crash a run
+            log.warning("audit: tool-event write failed for kind=%r", kind,
+                        exc_info=True)
 
     async def _run_tool(self, name: str, args: dict) -> str:
         # Record the tool name on this agent's action sequence so a parent can

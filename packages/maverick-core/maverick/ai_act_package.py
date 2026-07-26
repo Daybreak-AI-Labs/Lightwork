@@ -69,9 +69,18 @@ def _oversight() -> dict:
 
 def _logging_posture() -> dict:
     out: dict[str, Any] = {}
+    # Probe the real signing path rather than inferring from config, for the same
+    # reason _oversight() mirrors the real consent resolver. `[audit] sign` is one
+    # of five inputs writer._resolve_signing consults (compliance floor > explicit
+    # arg > MAVERICK_AUDIT_SIGN > [audit] sign > secure-by-default), so reading the
+    # key alone reported "audit chain signing: no" on a default install while
+    # compliance_report() -- which probes -- reported the same control active. Two
+    # compliance artifacts from one deployment disagreeing about one control is
+    # worse for an auditor than either answer alone.
     out["audit_signing"] = _safe(
-        lambda: bool((__import__("maverick.config", fromlist=["load_config"])
-                      .load_config() or {}).get("audit", {}).get("sign")), False)
+        lambda: bool(__import__("maverick.deployment",
+                                fromlist=["_verify_audit_signing"])
+                     ._verify_audit_signing().passed), False)
     out["retention_configured"] = _safe(
         lambda: bool((__import__("maverick.config", fromlist=["load_config"])
                       .load_config() or {}).get("retention")), False)

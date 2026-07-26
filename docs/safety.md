@@ -27,7 +27,13 @@ block_threshold = "high"
 
 ## What gets caught
 
-The **full Agent Shield SDK** (`pip install agent-shield`, ~115 patterns, F1 0.988 on real-world benchmarks) covers the categories below. Without it, Lightwork falls back to a **built-in ~20-pattern** subset — the F1 number does NOT apply to the fallback. The categories below describe the full SDK:
+The **built-in ~20-pattern** layer is what runs in every environment we ship: the
+full Agent Shield SDK (~115 patterns) is **not published on PyPI and not vendored
+here**, so `pip install agent-shield` will not resolve and the fallback is not a
+fallback in practice — it is the product. Measured accuracy for the layer that
+actually runs is in [`benchmarks/security/RESULTS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/security/RESULTS.md):
+**F1 0.821–0.900, TPR 74.2% [57–86]**. The categories below describe the full SDK
+ruleset; treat them as the coverage target, not as shipped coverage:
 
 - **Prompt injection** — system prompt overrides, ChatML/LLaMA delimiters, instruction hijacking
 - **Role hijacking** — DAN mode, developer mode, persona attacks, jailbreaks

@@ -1,7 +1,10 @@
 """Built-in fallback prompt-injection rules.
 
-When ``agent-shield`` (the full SDK with F1 0.988 detection) isn't
-installed, we still want *some* safety, not a wide-open no-op. This
+When the ``agent-shield`` SDK isn't installed -- which is every environment we
+ship, since it is not on PyPI and not vendored -- we still want *some* safety,
+not a wide-open no-op. This module is therefore the backend that actually runs;
+its measured accuracy is in ``benchmarks/security/RESULTS.md`` (F1 0.821-0.900).
+This
 module provides a small but real set of regex rules covering the
 highest-impact attack categories from the agent-shield README:
 

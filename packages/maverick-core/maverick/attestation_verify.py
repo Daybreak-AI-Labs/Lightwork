@@ -32,11 +32,15 @@ exists to replace.
 
 What ``HOLDS`` on the history claim does and does not mean: the signed rows
 present are internally consistent, each row's hash covers its content, each
-signature verifies under the trusted key, and the anchor ledger's recorded tips
-and row counts still match the files -- so a removed row, an edited row, or a
-deleted day-file is detectable. It is not a proof that nothing happened outside
-the chain. No artifact can prove that; a verifier that implied otherwise would
-be worse than none.
+signature verifies under the trusted key, and the digests, tips and row counts
+**the bundle committed to** still match the files -- so a removed row, an edited
+row, or a deleted day-file is detectable. Note what that does not include: this
+verifier never reads the issuer's anchor ledger. The anchors block travels in the
+bundle because it is part of what was signed, but every check here is against the
+bundle's own commitments, and a claim to have cross-checked an external ledger
+would be an overclaim. It is also not a proof that nothing happened outside the
+chain. No artifact can prove that; a verifier that implied otherwise would be
+worse than none.
 """
 from __future__ import annotations
 
@@ -567,7 +571,8 @@ def _check_history(bundle: dict, evidence_root: Path | None,
     return ClaimResult(
         "authentic_history", HOLDS,
         f"{verified} day-file(s) re-verified: hashes link, signatures verify "
-        "under the trusted key, anchors match", notes)
+        "under the trusted key, and the files match what the bundle committed to",
+        notes)
 
 
 # ---- top level --------------------------------------------------------------

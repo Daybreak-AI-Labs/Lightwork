@@ -52,7 +52,7 @@ append-only audit log.
 - **Safety**: the Agent Shield layer screens at three chokepoints (input,
   tool call, output); hard budget caps and a killswitch bound every run.
 - **Surface area** (counts from `FEATURES.md`): 286 built-in tool modules and
-  514 reusable skills; 214 write-capable enterprise REST/GraphQL connectors
+  514 reusable skills; 2,877 write-capable enterprise REST/GraphQL connectors
   plus 37 read-only primary-source / public-data connectors (SEC EDGAR, FRED,
   Treasury, World Bank, FDIC, Census, BLS, EIA, openFDA, NPPES,
   ClinicalTrials, USAspending, SAM.gov, CourtListener, Federal Register,

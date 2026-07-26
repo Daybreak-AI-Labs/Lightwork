@@ -110,7 +110,7 @@ Per the kernel rule, this is the right competitive frame: compete on
    gov, defense) cannot send data to a Paris SaaS. We run in their VPC, on
    their model keys, across 12 providers. Workers Delos has no self-host path.
 4. **Breadth on a governed core.** 2,020 specialists vs ~50; 286 tool modules +
-   214 write-capable enterprise connectors + 37 read-only primary-source
+   2,877 write-capable enterprise connectors + 37 read-only primary-source
    connectors (SEC EDGAR, FRED, Treasury, World Bank, BLS, EIA, ...); 14+
    channels; shield on every I/O boundary; per-principal budget caps.
 5. **Multi-tenant control plane.** Tenancy, KMS, egress policy, billing — we can
@@ -160,7 +160,7 @@ are **packaging and GTM**, plus two real product items and one compliance item.
 
 5. **No-code connector breadth.** Match the "3000+ tools" perception with a
    Zapier/Make/native-connector story surfaced in the UI. We have 286 tool
-   modules + 214 write-capable enterprise connectors + 37 read-only
+   modules + 2,877 write-capable enterprise connectors + 37 read-only
    primary-source connectors (`enterprise_connectors.py`) + `oauth_helper.py` —
    but the *count and discoverability* are the marketing gap. Consider a
    connector marketplace page.
@@ -246,7 +246,7 @@ Match their "3000+ tools" perception with named, discoverable surfaces:
 - **Pack / suite marketplace** — the 2,020 packs plus partner-built and
   **operator/intake-generated packs** (we already synthesize packs from customer
   SOPs). Browsable, deployable, with the persona layer on top.
-- **Connector marketplace** — the 286 tool modules + 214 write-capable
+- **Connector marketplace** — the 286 tool modules + 2,877 write-capable
   enterprise connectors + 37 read-only primary-source connectors
   (`enterprise_connectors.py`) + `oauth_helper.py`, presented as a catalog with
   categories and one-click OAuth, so integration breadth is *countable and

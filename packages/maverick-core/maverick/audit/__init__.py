@@ -32,6 +32,7 @@ from .signing import (  # noqa: F401
 )
 from .writer import (  # noqa: F401
     AuditLog,
+    AuditWriteRefused,
     default_audit_log,
     global_audit_log,
     goal_context,
@@ -46,6 +47,7 @@ __all__ = [
     "AuditEvent",
     "EventKind",
     "AuditLog",
+    "AuditWriteRefused",
     "default_audit_log",
     "global_audit_log",
     "record",

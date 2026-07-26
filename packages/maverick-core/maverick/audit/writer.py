@@ -1,8 +1,16 @@
 """Audit log writer. Append-only NDJSON with daily rotation.
 
-The writer is fail-safe: any exception writing the audit log is logged
-to the regular Python logger and swallowed. The agent kernel must never
-crash because of an audit-path bug.
+The writer is fail-safe by default: ordinary write errors are logged to the
+regular Python logger and swallowed, because the agent kernel must never crash
+because of an audit-path bug.
+
+The one deliberate exception is :class:`AuditWriteRefused`. When an active
+compliance profile mandates signed, tamper-evident logs and the signer will not
+start, the writer refuses rather than silently downgrading to plaintext -- and
+that refusal is meant to reach the caller. A caller that swallows it converts
+"we could not record this action" into "we recorded nothing and did it anyway",
+which is the failure the profile exists to prevent. Catch ``Exception`` on the
+audit path if you must, but re-raise ``AuditWriteRefused``.
 """
 
 from __future__ import annotations
@@ -84,6 +92,22 @@ _live_logs_lock = threading.Lock()
 # bounded (unlike one immortal Lock per tenant/day path); collisions only make
 # unrelated local audit writes briefly serialize, which is safe.
 _APPEND_LOCK_STRIPES = tuple(threading.Lock() for _ in range(64))
+
+
+class AuditWriteRefused(RuntimeError):
+    """A compliance floor mandates signed logs and the signer would not start.
+
+    Distinct from an incidental audit failure, and callers must treat it
+    differently. An audit write is otherwise best-effort -- a broken log must
+    not take down a running agent -- but when a profile like HIPAA asserts
+    "every action is recorded on a tamper-evident chain", proceeding with the
+    action while the record cannot be written breaks the control the profile
+    exists to provide. The unrecorded action is the failure, not the log.
+
+    Subclasses RuntimeError because that is what this path raised before it had
+    a name, so existing handlers keep working; the point of the name is to let a
+    caller re-raise *this* while still swallowing ordinary write errors.
+    """
 
 
 class _file_append_lock:
@@ -395,7 +419,7 @@ class AuditLog:
                         )
                     else:
                         detail = f"the audit signer could not initialize ({type(e).__name__})"
-                    raise RuntimeError(
+                    raise AuditWriteRefused(
                         "audit: an active compliance profile requires signed, "
                         f"tamper-evident audit logs, but {detail} -- refusing to "
                         "write UNSIGNED."
@@ -700,6 +724,7 @@ def reset_signer_after_erase(audit_dir: Path) -> None:
 
 __all__ = [
     "AuditLog",
+    "AuditWriteRefused",
     "DEFAULT_AUDIT_DIR",
     "default_audit_log",
     "record",
