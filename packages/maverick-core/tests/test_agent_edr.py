@@ -174,9 +174,13 @@ def test_a_quiet_chain_under_blind_defenses_is_not_a_clean_bill(audit_dir,
     assert "proves nothing" in text
 
 
-def test_an_unsigned_chain_is_flagged_in_the_report(audit_dir, monkeypatch):
-    import maverick.agent_edr as mod
-    monkeypatch.setattr(mod, "posture", lambda: edr.Posture(audit_signing=False))
+def test_an_unsigned_chain_is_flagged_in_the_report(audit_dir):
+    """Flagged from the rows actually read. An earlier version asked the posture
+    whether `cryptography` was importable, which answers a different question
+    and would call bare rows tamper-evident on any machine with the library."""
+    (audit_dir / "2026-01-01.ndjson").write_text(
+        json.dumps({"ts": 1.0, "kind": "shield_block", "agent": "w",
+                    "reason": "x"}) + "\n", encoding="utf-8")
     text = edr.render_report(edr.incident_report("w", audit_dir=audit_dir))
     assert "UNSIGNED" in text
     assert "not tamper-evident" in text
@@ -319,3 +323,105 @@ def test_containment_serializes_for_the_console():
     payload = edr.contain("w", reason="x", registry=_Registry()).to_dict()
     assert payload["contained"] is True
     assert payload["seal_is_durable"] is False
+
+
+# ---- bounds, completeness and vacuous success -------------------------------
+#
+# Three defects a re-read of this module turned up, each the same shape as the
+# ones it was written to prevent: a report that says more than it has.
+
+def test_the_sweep_bound_keeps_the_newest_detections(audit_dir):
+    """Day-files sort ascending, so an oldest-first sweep would fill the bound
+    with history and silently drop the incident actually in progress."""
+    for i, day in enumerate(("2026-01-01", "2026-01-02", "2026-01-03")):
+        _write(audit_dir, [_row("shield_block", ts=100.0 + i,
+                                reason=f"day{i}")] * 4, day=day)
+    swept = edr.scan(audit_dir=audit_dir, limit=5)
+    assert len(swept.found) == 5
+    assert "day2" in {d.detail for d in swept.found}
+
+
+def test_a_truncated_sweep_says_so(audit_dir):
+    """A capped list that looks complete is how an analyst concludes they have
+    seen everything."""
+    _write(audit_dir, [_row("shield_block", reason="x")] * 6)
+    assert edr.scan(audit_dir=audit_dir, limit=3).truncated is True
+    assert edr.scan(audit_dir=audit_dir, limit=99).truncated is False
+
+
+def test_the_bound_holds_across_day_files(audit_dir):
+    for day in ("2026-01-01", "2026-01-02", "2026-01-03"):
+        _write(audit_dir, [_row("shield_block", reason="x")] * 4, day=day)
+    assert len(edr.scan(audit_dir=audit_dir, limit=5).found) == 5
+
+
+def test_truncation_is_surfaced_in_the_report(audit_dir):
+    _write(audit_dir, [_row("shield_block", agent="w", reason="x")] * 4)
+    report = edr.incident_report("w", audit_dir=audit_dir)
+    report["truncated"] = True
+    assert "OLDER detections exist" in edr.render_report(report)
+
+
+def test_signed_evidence_is_judged_from_the_rows_not_the_library(audit_dir):
+    """`cryptography` being importable says nothing about whether signing was
+    switched on. Bare rows must not be presented as tamper-evident."""
+    (audit_dir / "2026-01-01.ndjson").write_text(
+        json.dumps({"ts": 1.0, "kind": "shield_block", "agent": "w",
+                    "reason": "x"}) + "\n", encoding="utf-8")
+    swept = edr.scan(audit_dir=audit_dir)
+    assert swept.unsigned_rows == 1
+    assert swept.evidence_is_signed is False
+    report = edr.incident_report("w", audit_dir=audit_dir)
+    assert report["evidence_is_signed"] is False
+    assert "not tamper-evident" in edr.render_report(report)
+
+
+def test_signed_rows_are_recognized_as_signed(audit_dir):
+    _write(audit_dir, [_row("shield_block", agent="w", reason="x")])
+    swept = edr.scan(audit_dir=audit_dir)
+    assert swept.unsigned_rows == 0
+    assert swept.evidence_is_signed is True
+
+
+def test_an_unreadable_day_makes_the_timeline_partial(audit_dir, monkeypatch):
+    """A day we cannot read is a hole in the evidence, not an absence of
+    detections."""
+    _write(audit_dir, [_row("shield_block", agent="w", reason="x")])
+    import maverick.audit.sealing as sealing
+
+    def _boom(path, **kw):
+        raise RuntimeError("sealed")
+    monkeypatch.setattr(sealing, "segment_text", _boom)
+    swept = edr.scan(audit_dir=audit_dir)
+    assert swept.unreadable_days == ["2026-01-01"]
+    assert swept.evidence_is_signed is False
+
+
+def test_a_containment_asked_to_do_nothing_is_not_containment():
+    """An empty failure list reading as success is the same laundering the rest
+    of the module refuses."""
+    result = edr.contain("victim", reason="x", seal=False, revoke=False)
+    assert not result.contained
+    assert "no containment action requested" in result.failed
+    assert result.revoked == []
+
+
+def test_a_hostile_detail_cannot_paint_a_fake_row_in_the_report(audit_dir):
+    """Detail text is attacker-influenced. Left with its newlines it renders as
+    extra report lines, so a crafted `reason` can paint a convincing
+    `[low] FAKE CLEARED` row straight into the analyst's output."""
+    _write(audit_dir, [_row(
+        "shield_block", agent="w",
+        reason="real\n  [low     ] FAKE CLEARED  nothing to see here")])
+    det = edr.detections(audit_dir=audit_dir)[0]
+    assert "\n" not in det.detail
+    body = edr.render_report(edr.incident_report("w", audit_dir=audit_dir))
+    fake_lines = [ln for ln in body.splitlines() if "FAKE CLEARED" in ln]
+    assert len(fake_lines) == 1
+    assert "real" in fake_lines[0]  # inline in the real row, not its own line
+
+
+def test_a_hostile_subject_is_flattened_too(audit_dir):
+    _write(audit_dir, [{"ts": 1.0, "kind": "shield_block",
+                        "agent": "a\nb\tc", "reason": "x"}])
+    assert edr.detections(audit_dir=audit_dir)[0].subject == "a b c"

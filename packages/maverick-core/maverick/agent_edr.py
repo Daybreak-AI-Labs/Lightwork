@@ -206,15 +206,27 @@ def _subject_of(row: dict) -> str:
     for key in _SUBJECT_FIELDS:
         value = row.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()[:120]
+            return _flatten(value, 120)
     return "(unattributed)"
+
+
+def _flatten(text: str, limit: int) -> str:
+    """Collapse whitespace and bound the length.
+
+    Detail text is attacker-influenced (a tool name, a shield rule, a blocked
+    URL). Left with its newlines it renders as extra lines in the incident
+    report, so a hostile ``reason`` can paint a convincing fake detection row --
+    ``[low] FAKE CLEARED  nothing to see`` -- straight into the analyst's
+    output. One line in, one line out.
+    """
+    return " ".join(str(text).split())[:limit]
 
 
 def _detail_of(row: dict) -> str:
     for key in ("reason", "rule", "detail", "message", "tool"):
         value = row.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()[:_MAX_DETAIL]
+            return _flatten(value, _MAX_DETAIL)
     return ""
 
 
@@ -238,29 +250,63 @@ def _detection_from(row: dict, day: str) -> Detection | None:
     )
 
 
-def detections(*, since: float | None = None, subject: str = "",
-               min_severity: str = LOW,
-               audit_dir: Path | str | None = None) -> list[Detection]:
-    """Every security detection on the signed chain, newest first.
+@dataclass
+class Scan:
+    """A detection sweep and what it had to leave out."""
+
+    found: list[Detection] = field(default_factory=list)
+    truncated: bool = False
+    unsigned_rows: int = 0
+    unreadable_days: list[str] = field(default_factory=list)
+
+    @property
+    def evidence_is_signed(self) -> bool:
+        """True only if every security row read carried a signature.
+
+        Derived from the rows themselves, never from "is the crypto library
+        importable" -- a deployment with `cryptography` installed but signing
+        switched off writes bare rows, and calling those tamper-evident would
+        put an analyst's weight on a timeline that anyone could have edited.
+        """
+        return not self.unsigned_rows and not self.unreadable_days
+
+
+def scan(*, since: float | None = None, subject: str = "",
+         min_severity: str = LOW, limit: int = _MAX_DETECTIONS,
+         audit_dir: Path | str | None = None) -> Scan:
+    """Sweep the signed chain for security detections, newest first.
 
     Reads only; this never re-runs enforcement. A row that cannot be parsed is
     skipped rather than guessed at -- an unreadable row is not evidence of an
     attack, and a plane that invents detections trains its operator to ignore it.
+
+    Day-files are walked **newest first** and the bound stops the sweep, so a
+    busy deployment keeps its most recent detections. Oldest-first would have
+    filled the bound with history and silently dropped the incident actually in
+    progress -- and :attr:`Scan.truncated` says when anything was left out,
+    because a capped list that looks complete is how an analyst concludes they
+    have seen everything.
     """
     from .audit.sealing import segment_text
     from .audit.signing import day_files
     from .paths import data_dir
 
     root = Path(audit_dir) if audit_dir is not None else data_dir("audit")
+    result = Scan()
     if not root.is_dir():
-        return []
+        return result
     floor = _SEVERITY_RANK.get(min_severity, 0)
-    out: list[Detection] = []
-    for path in day_files(root):
+    for path in reversed(day_files(root)):
+        if len(result.found) >= limit:
+            result.truncated = True
+            break
         try:
-            text = segment_text(path, fail_soft=True)
-        except Exception as e:  # pragma: no cover -- unreadable segment
+            text = segment_text(path, fail_soft=False)
+        except Exception as e:
+            # A day we cannot read is a hole in the evidence, not an absence of
+            # detections. Recorded so the report can say the timeline is partial.
             log.debug("agent_edr: cannot read %s: %s", path.name, e)
+            result.unreadable_days.append(path.stem)
             continue
         for line in text.splitlines():
             if not line.strip():
@@ -274,17 +320,28 @@ def detections(*, since: float | None = None, subject: str = "",
             det = _detection_from(row, path.stem)
             if det is None:
                 continue
+            if not (row.get("sig") and row.get("hash") and row.get("key_id")):
+                result.unsigned_rows += 1
             if since is not None and det.ts < since:
                 continue
             if subject and det.subject != subject:
                 continue
             if _SEVERITY_RANK.get(det.severity, 0) < floor:
                 continue
-            out.append(det)
-            if len(out) >= _MAX_DETECTIONS:
+            result.found.append(det)
+            if len(result.found) >= limit:
+                result.truncated = True
                 break
-    out.sort(key=lambda d: d.ts, reverse=True)
-    return out
+    result.found.sort(key=lambda d: d.ts, reverse=True)
+    return result
+
+
+def detections(*, since: float | None = None, subject: str = "",
+               min_severity: str = LOW,
+               audit_dir: Path | str | None = None) -> list[Detection]:
+    """Detections only. Use :func:`scan` when completeness matters."""
+    return scan(since=since, subject=subject, min_severity=min_severity,
+                audit_dir=audit_dir).found
 
 
 def timeline(subject: str, *, since: float | None = None,
@@ -330,6 +387,12 @@ def contain(subject: str, *, reason: str, registry: Any | None = None,
     result = Containment(subject=subject, reason=reason)
     if not isinstance(subject, str) or not subject.strip():
         result.failed.append("invalid subject")
+        return result
+    if not seal and not revoke:
+        # Nothing was asked for, so nothing was contained. Without this the
+        # result is vacuously `contained` -- an empty failure list reading as
+        # success is the same laundering the rest of this module refuses.
+        result.failed.append("no containment action requested")
         return result
 
     if seal:
@@ -422,7 +485,8 @@ def incident_report(subject: str, *, since: float | None = None,
     from a chain that nobody was signing is a story, not evidence, and the
     report says which it is holding.
     """
-    events = timeline(subject, since=since, audit_dir=audit_dir)
+    swept = scan(subject=subject, since=since, audit_dir=audit_dir)
+    events = sorted(swept.found, key=lambda d: d.ts)
     p = posture()
     contained = False
     try:
@@ -430,6 +494,14 @@ def incident_report(subject: str, *, since: float | None = None,
         contained = bool(is_revoked(subject))
     except Exception as e:  # pragma: no cover
         p.notes.append(f"revocation state unknown: {e}")
+    if swept.unsigned_rows:
+        p.notes.append(
+            f"{swept.unsigned_rows} security row(s) carry no signature: this "
+            "timeline is not tamper-evident")
+    if swept.unreadable_days:
+        p.notes.append(
+            f"{len(swept.unreadable_days)} day-file(s) could not be read; the "
+            "timeline is partial")
     return {
         "schema_version": SCHEMA_VERSION,
         "subject": subject,
@@ -438,7 +510,9 @@ def incident_report(subject: str, *, since: float | None = None,
         "currently_revoked": contained,
         "detections": [d.to_dict() for d in events],
         "summary": summary(events),
-        "evidence_is_signed": p.audit_signing,
+        "truncated": swept.truncated,
+        # From the rows actually read, not from "is the crypto library here".
+        "evidence_is_signed": swept.evidence_is_signed,
     }
 
 
@@ -452,8 +526,11 @@ def render_report(report: dict) -> str:
     lines.append(f"  detections: {s.get('total', 0)}   "
                  f"currently revoked: {report.get('currently_revoked')}")
     if not report.get("evidence_is_signed"):
-        lines.append("  ! the audit chain is UNSIGNED: this timeline is not "
-                     "tamper-evident")
+        lines.append("  ! the security rows read are UNSIGNED or unreadable: "
+                     "this timeline is not tamper-evident")
+    if report.get("truncated"):
+        lines.append("  ! the sweep hit its bound: OLDER detections exist that "
+                     "are not shown")
     blind = (report.get("posture") or {}).get("blind_spots") or []
     if blind:
         lines.append(f"  ! defenses OFF: {', '.join(blind)} "
@@ -473,7 +550,8 @@ def render_report(report: dict) -> str:
 __all__ = [
     "CAPABILITY_BREACH", "CRITICAL", "Containment", "Detection", "EGRESS_BREACH",
     "EXFILTRATION", "HIGH", "INJECTION", "LOW", "MEDIUM", "POLICY_BREACH",
-    "Posture", "SCHEMA_VERSION", "TRUST_BREACH", "contain", "detections",
-    "incident_report", "posture", "release", "render_report", "summary",
-    "timeline",
+    "Posture", "SCHEMA_VERSION", "Scan", "TRUST_BREACH", "contain",
+    "detections",
+    "incident_report", "posture", "release", "render_report", "scan",
+    "summary", "timeline",
 ]

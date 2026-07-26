@@ -340,3 +340,35 @@ def test_the_real_fleet_memory_plane_is_readable_end_to_end(monkeypatch):
     assert ev["available"] and ev["records"] == 1
     assert "microsoft" in ev["vendors"]
     assert ev["unprovenanced_records"] == 0
+
+
+def test_a_vendor_that_is_not_on_the_roster_does_not_count(fleet):
+    """`ingest` is fail-closed on registration, so an ingest naming an
+    unregistered vendor should not exist. Treating one as evidence would let a
+    forged or stale source string manufacture cross-vendor from one
+    contributor."""
+    fleet["roster"]("anthropic")
+    _log_activity(vendors=("anthropic", "microsoft"), records=20)
+    bundle = _bundle()
+    ev = bundle["claims"]["cross_vendor"]
+    assert ev["vendors"] == ["anthropic"]
+    assert any("not on the roster" in w for w in bundle["warnings"])
+    assert _claim(_verify(bundle), "cross_vendor").status == NOT_APPLICABLE
+
+
+def test_negative_costs_cannot_manufacture_a_compounding_curve(fleet):
+    """`improving` is a bare warm < cold comparison, which episodes logged at
+    -$1e9 and -$1e12 satisfy beautifully. The claim's whole value is being the
+    un-fakeable half of the moat."""
+    world = _World([("finance", [-1e9] * 3 + [-1e12] * 3)])
+    curves = mp.compounding_by_department(world)
+    assert curves and curves[0].improving is False
+    assert _claim(_verify(_bundle(world=world)), "compounding").status == FAILS
+
+
+def test_a_zero_cost_baseline_is_not_evidence(fleet):
+    """A cold cost of 0 makes any warm cost look like a regression or a win
+    depending on sign; neither is a measurement."""
+    world = _World([("finance", [0.0] * 3 + [0.0] * 3)])
+    curves = mp.compounding_by_department(world)
+    assert all(not c.improving for c in curves)

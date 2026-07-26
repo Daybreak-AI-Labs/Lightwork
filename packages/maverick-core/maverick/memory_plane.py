@@ -40,6 +40,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,10 +114,28 @@ def compounding_by_department(world: Any, *, window: int = 5,
         DepartmentCurve(
             department=r.task_class, runs=r.runs, cold_cost=r.cold_cost,
             warm_cost=r.warm_cost, cold_success=r.cold_success,
-            warm_success=r.warm_success, improving=r.improving,
+            warm_success=r.warm_success,
+            improving=bool(r.improving) and _is_real_cost_pair(
+                r.cold_cost, r.warm_cost),
         )
         for r in reports
     ]
+
+
+def _is_real_cost_pair(cold: float, warm: float) -> bool:
+    """Are these costs capable of evidencing anything?
+
+    ``CompoundingReport.improving`` is a bare ``warm < cold`` comparison, which
+    a negative or non-finite cost satisfies trivially: episodes logged at
+    -$1e9 and -$1e12 "improve" beautifully. The whole value of this claim is
+    that it is the un-fakeable half of the moat, so a cost that is not a finite
+    positive number disqualifies the curve rather than powering it.
+    """
+    return all(
+        isinstance(v, (int, float)) and not isinstance(v, bool)
+        and math.isfinite(v) and v > 0
+        for v in (cold, warm)
+    )
 
 
 def _fleet_evidence() -> tuple[dict, list[str]]:
@@ -153,10 +172,21 @@ def _fleet_evidence() -> tuple[dict, list[str]]:
     # which is the standard of evidence an attestation should be built on.
     ingests, recalls, unprovenanced, audit_warnings = _audited_fleet_activity()
     warnings.extend(audit_warnings)
-    for source in ingests:
-        if source and ":" in source:
-            vendors.add(source.split(":", 1)[0])
-    total = sum(ingests.values())
+    # A vendor counts only if it is on the roster. `fleet_memory.ingest` is
+    # fail-closed on registration, so an ingest naming a vendor nobody
+    # registered should not exist -- and treating one as evidence would let a
+    # forged or stale source string manufacture the cross-vendor property out
+    # of a single contributor. Counted as an anomaly instead.
+    off_roster = sorted({
+        source.split(":", 1)[0] for source in ingests
+        if ":" in source and source.split(":", 1)[0] not in vendors
+    })
+    if off_roster:
+        warnings.append(
+            f"{len(off_roster)} vendor(s) appear in ingest events but not on "
+            f"the roster ({', '.join(off_roster[:5])}); not counted")
+    total = sum(n for source, n in ingests.items()
+                if ":" in source and source.split(":", 1)[0] in vendors)
     if unprovenanced:
         warnings.append(
             f"{unprovenanced} ingest event(s) carry no vendor:agent_id "
