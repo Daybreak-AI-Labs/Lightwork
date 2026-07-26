@@ -346,3 +346,81 @@ def test_fleet_memory_path_follows_tenant_context_dynamically(tmp_path, monkeypa
     assert shared == tmp_path / "fleet-memory" / "inbox"
     assert tenant_a == tmp_path / "tenants" / "tenant%3Aa" / "fleet-memory" / "inbox"
     assert tenant_b == tmp_path / "tenants" / "tenant-b" / "fleet-memory" / "inbox"
+
+
+# -- audit completeness ----------------------------------------------------
+#
+# `_audit` forwards its payload into `audit.record(kind, *, agent, goal_id,
+# **payload)`. A payload key that collides with one of those named parameters
+# raises TypeError *inside* the audit call, and the broad catch there then drops
+# the row. That is exactly what happened to every ingest: it passed the record's
+# success/failure/lesson class as `kind=`, which shadowed the event kind, so the
+# governed plane's WRITE path left no signed trace while reads logged fine.
+
+def _fleet_rows(monkeypatch):
+    rows: list[dict] = []
+    import maverick.audit as audit
+    monkeypatch.setattr(
+        audit, "record",
+        lambda kind, **kw: rows.append({"kind": kind, **kw}) or True)
+    return rows
+
+
+def test_ingest_lands_on_the_audit_chain(monkeypatch):
+    """The higher-trust operation must not be the unaudited one."""
+    rows = _fleet_rows(monkeypatch)
+    _register()
+    assert fleet_memory.ingest({
+        "agent_id": "order-bot", "vendor": "agentforce", "kind": "lesson",
+        "goal_text": "check stock first", "reflection": "it was backordered"})[0]
+    ingests = [r for r in rows if r.get("fleet") == "ingest"]
+    assert len(ingests) == 1
+    assert ingests[0]["source"] == "agentforce:order-bot"
+    assert ingests[0]["fleet_kind"] == "lesson"
+
+
+def test_every_ingest_kind_is_audited(monkeypatch):
+    """A lesson routes to reflexion and success/failure to the inbox; both are
+    ingestion and both have to be provable."""
+    rows = _fleet_rows(monkeypatch)
+    _register()
+    for kind in ("lesson", "success", "failure"):
+        assert fleet_memory.ingest({
+            "agent_id": "order-bot", "vendor": "agentforce", "kind": kind,
+            "goal_text": f"a {kind} record", "reflection": "why"})[0]
+    kinds = {r.get("fleet_kind") for r in rows if r.get("fleet") == "ingest"}
+    assert kinds == {"lesson", "success", "failure"}
+
+
+def test_a_reserved_payload_key_is_renamed_rather_than_dropped(monkeypatch):
+    """Any future caller passing `kind`/`agent`/`goal_id` gets it preserved
+    under a prefix instead of silently losing the whole row."""
+    rows = _fleet_rows(monkeypatch)
+    fleet_memory._audit("probe", kind="x", agent="y", goal_id=3, source="s")
+    assert rows[0]["fleet_kind"] == "x"
+    assert rows[0]["fleet_agent"] == "y"
+    assert rows[0]["fleet_goal_id"] == 3
+    assert rows[0]["agent"] == "fleet_memory"  # the real emitter, not "y"
+
+
+def test_an_audit_failure_is_logged_not_swallowed(monkeypatch, caplog):
+    """Audit must never block the plane, but a hole in the trail that nobody
+    can see is worse than no trail at all."""
+    import logging
+
+    import maverick.audit as audit
+
+    def _boom(*a, **k):
+        raise RuntimeError("sink down")
+    monkeypatch.setattr(audit, "record", _boom)
+    with caplog.at_level(logging.WARNING):
+        fleet_memory._audit("ingest", source="agentforce:order-bot")
+    assert any("audit write failed" in r.message for r in caplog.records)
+
+
+def test_recall_is_audited_with_the_readers_identity(monkeypatch):
+    rows = _fleet_rows(monkeypatch)
+    _register()
+    fleet_memory.recall("stock", agent_id="order-bot", vendor="agentforce")
+    recalls = [r for r in rows if r.get("fleet") == "recall"]
+    assert recalls and recalls[0]["source"] == "agentforce:order-bot"
