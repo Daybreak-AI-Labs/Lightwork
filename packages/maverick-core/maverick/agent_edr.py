@@ -31,11 +31,20 @@ and is ``contained`` only when every requested action actually succeeded.
 
 *Severity is derived from the event, never self-declared.* A compromised agent
 gets no say in how loudly its own detection rings.
+
+Exposure note: this plane is CLI-facing. Detail text is bounded, stripped of
+terminal control bytes, and already secret-redacted by the audit writer before
+signing, which is enough for a terminal. It is NOT enough to feed an LLM -- if
+these detections are ever wrapped as an agent tool, use the stricter allowlist
+form (:func:`maverick.threat_hunt._sanitize_audit_value`), which exists because
+audit prose returned to a model is an injection surface, not just a display one.
 """
 from __future__ import annotations
 
 import json
 import logging
+import math
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,6 +62,7 @@ CAPABILITY_BREACH = "capability_breach"
 POLICY_BREACH = "policy_breach"
 TRUST_BREACH = "trust_breach"
 EGRESS_BREACH = "egress_breach"
+CONTROL_EVENT = "control_event"
 
 LOW, MEDIUM, HIGH, CRITICAL = "low", "medium", "high", "critical"
 _SEVERITY_RANK = {LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3}
@@ -61,14 +71,39 @@ _SEVERITY_RANK = {LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3}
 #: enforcement path already writes; this table adds no new instrumentation, it
 #: only translates. A kind absent here is not a detection -- silence beats
 #: inventing a threat class for a row we do not understand.
-_KIND_MAP: dict[str, tuple[str, str]] = {
-    "shield_block": (INJECTION, HIGH),
-    "capability_denied": (CAPABILITY_BREACH, HIGH),
-    "governance_denied": (POLICY_BREACH, MEDIUM),
-    "egress_blocked": (EGRESS_BREACH, HIGH),
-    "agent_trust_denied": (TRUST_BREACH, HIGH),
-    "secret_redacted": (EXFILTRATION, MEDIUM),
+#: The attack class each audit kind maps to. SEVERITY IS NOT SET HERE -- it
+#: comes from ``threat_hunt._INDICATORS`` so `maverick hunt` and `maverick
+#: security detections` cannot rate the same signed row differently. Two
+#: security surfaces disagreeing about one event is the "six modules, six
+#: vocabularies" problem this plane exists to end.
+_KIND_CLASS: dict[str, str] = {
+    "shield_block": INJECTION,
+    "capability_denied": CAPABILITY_BREACH,
+    "governance_denied": POLICY_BREACH,
+    "egress_blocked": EGRESS_BREACH,
+    "agent_trust_denied": TRUST_BREACH,
+    "secret_redacted": EXFILTRATION,
+    # Present in threat_hunt and previously invisible here, which made a kill
+    # switch engagement and a refused destructive action unreportable by the
+    # surface that claims to be the single security view.
+    "halt": CONTROL_EVENT,
+    "consent_result": CONTROL_EVENT,
 }
+
+#: Fallback severities for kinds threat_hunt does not rate.
+_LOCAL_SEVERITY: dict[str, str] = {"agent_trust_denied": HIGH}
+
+
+def _severity_for(kind: str) -> str:
+    """The severity `maverick hunt` would give this row."""
+    try:
+        from .threat_hunt import _INDICATORS
+        rated = _INDICATORS.get(kind)
+        if rated and str(rated[1]).lower() in _SEVERITY_RANK:
+            return str(rated[1]).lower()
+    except Exception:  # pragma: no cover -- threat_hunt unavailable
+        pass
+    return _LOCAL_SEVERITY.get(kind, MEDIUM)
 
 #: Fields that may carry the implicated principal, most specific first.
 _SUBJECT_FIELDS = ("agent", "peer", "principal", "actor", "tool")
@@ -183,14 +218,22 @@ def posture() -> Posture:
     except Exception as e:  # pragma: no cover
         p.notes.append(f"agent-trust state unknown: {e}")
     try:
+        # `[egress] deny` is the key air_gap.py actually enforces. The previous
+        # probe read `allow_hosts`/`enable`, which no module writes or reads, so
+        # egress_control was reported off on every deployment -- including
+        # air-gapped ones -- and a blind-spot warning that always fires is the
+        # fastest way to train an operator to ignore the list.
         from .config import load_config
-        egress = (load_config().get("egress") or {})
-        p.egress_control = bool(egress.get("allow_hosts") or egress.get("enable"))
+        p.egress_control = bool((load_config().get("egress") or {}).get("deny"))
     except Exception as e:  # pragma: no cover
         p.notes.append(f"egress state unknown: {e}")
     try:
-        from .audit.signing import _have_crypto
-        p.audit_signing = bool(_have_crypto())
+        # Whether signing is SWITCHED ON, not whether `cryptography` imports.
+        # The library being installed says nothing about `[audit] sign`, and
+        # answering the wrong question here told an analyst the chain was
+        # tamper-evident on a deployment writing bare rows.
+        from .audit.writer import _resolve_signing
+        p.audit_signing = bool(_resolve_signing(None))
     except Exception as e:  # pragma: no cover
         p.notes.append(f"audit signing state unknown: {e}")
     if p.blind_spots:
@@ -210,6 +253,26 @@ def _subject_of(row: dict) -> str:
     return "(unattributed)"
 
 
+#: Anything a terminal would act on rather than print. Attacker-influenced
+#: detail text reaches an analyst's terminal verbatim, and `\x1b[1A\x1b[2K`
+#: erases the real detection line printed above it.
+_CONTROL_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b.|[\x00-\x1f\x7f-\x9f]")
+
+#: `time.gmtime` accepts roughly +/- 1e17 on a 64-bit platform; stay well inside.
+_MAX_TS = 1e12
+
+
+def _finite_ts(value: object) -> float:
+    """A timestamp safe to format, or 0.0. Never raises."""
+    try:
+        ts = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(ts) or abs(ts) > _MAX_TS:
+        return 0.0
+    return ts
+
+
 def _flatten(text: str, limit: int) -> str:
     """Collapse whitespace and bound the length.
 
@@ -219,7 +282,7 @@ def _flatten(text: str, limit: int) -> str:
     ``[low] FAKE CLEARED  nothing to see`` -- straight into the analyst's
     output. One line in, one line out.
     """
-    return " ".join(str(text).split())[:limit]
+    return " ".join(_CONTROL_RE.sub(" ", str(text)).split())[:limit]
 
 
 def _detail_of(row: dict) -> str:
@@ -234,14 +297,15 @@ def _detection_from(row: dict, day: str) -> Detection | None:
     kind = row.get("kind")
     if not isinstance(kind, str):
         return None
-    mapped = _KIND_MAP.get(kind)
-    if mapped is None:
+    cls = _KIND_CLASS.get(kind)
+    if cls is None:
         return None
-    cls, severity = mapped
-    ts = row.get("ts")
-    when = 0.0
-    if isinstance(ts, (int, float)) and not isinstance(ts, bool):
-        when = float(ts)
+    severity = _severity_for(kind)
+    # A non-finite or out-of-range timestamp is not a detection we can place in
+    # a timeline: `time.gmtime` raises on inf/NaN/1e18, so one poisoned row
+    # would take down the whole incident report -- exactly when a hostile row is
+    # present. NaN also silently scrambles the sort. Fall back to 0.0.
+    when = _finite_ts(row.get("ts"))
     return Detection(
         ts=when, kind=cls, severity=severity, subject=_subject_of(row),
         detail=_detail_of(row), source_event=kind, day=day,
@@ -256,8 +320,10 @@ class Scan:
 
     found: list[Detection] = field(default_factory=list)
     truncated: bool = False
+    signed_rows: int = 0
     unsigned_rows: int = 0
     unreadable_days: list[str] = field(default_factory=list)
+    root_missing: bool = False
 
     @property
     def evidence_is_signed(self) -> bool:
@@ -268,7 +334,12 @@ class Scan:
         switched off writes bare rows, and calling those tamper-evident would
         put an analyst's weight on a timeline that anyone could have edited.
         """
-        return not self.unsigned_rows and not self.unreadable_days
+        if self.root_missing or self.unreadable_days or self.unsigned_rows:
+            return False
+        # Zero rows read is zero evidence. Without this an analyst pointed at
+        # the wrong MAVERICK_HOME, or at a host whose audit dir was deleted,
+        # reads a signed-looking all-clear with no warning on it at all.
+        return self.signed_rows > 0
 
 
 def scan(*, since: float | None = None, subject: str = "",
@@ -294,6 +365,7 @@ def scan(*, since: float | None = None, subject: str = "",
     root = Path(audit_dir) if audit_dir is not None else data_dir("audit")
     result = Scan()
     if not root.is_dir():
+        result.root_missing = True
         return result
     floor = _SEVERITY_RANK.get(min_severity, 0)
     for path in reversed(day_files(root)):
@@ -308,7 +380,12 @@ def scan(*, since: float | None = None, subject: str = "",
             log.debug("agent_edr: cannot read %s: %s", path.name, e)
             result.unreadable_days.append(path.stem)
             continue
-        for line in text.splitlines():
+        # Reversed, because rows within a day-file are append order. Walking a
+        # busy day oldest-first filled the bound with that morning and dropped
+        # the incident in progress -- the same defect the newest-first day walk
+        # above was added to fix, one level down, and the report then told the
+        # analyst the opposite ("OLDER detections exist").
+        for line in reversed(text.splitlines()):
             if not line.strip():
                 continue
             try:
@@ -320,7 +397,9 @@ def scan(*, since: float | None = None, subject: str = "",
             det = _detection_from(row, path.stem)
             if det is None:
                 continue
-            if not (row.get("sig") and row.get("hash") and row.get("key_id")):
+            if row.get("sig") and row.get("hash") and row.get("key_id"):
+                result.signed_rows += 1
+            else:
                 result.unsigned_rows += 1
             if since is not None and det.ts < since:
                 continue
@@ -458,6 +537,9 @@ def release(subject: str, *, registry: Any | None = None,
             unrevoke: bool = True) -> Containment:
     """Undo a containment. Reports what it actually managed to reverse."""
     result = Containment(subject=subject, reason="released")
+    if registry is None and not unrevoke:
+        result.failed.append("no release action requested")
+        return result
     if registry is not None:
         try:
             registry.unseal_agent(subject)
@@ -488,11 +570,13 @@ def incident_report(subject: str, *, since: float | None = None,
     swept = scan(subject=subject, since=since, audit_dir=audit_dir)
     events = sorted(swept.found, key=lambda d: d.ts)
     p = posture()
-    contained = False
+    # None, not False: a failed lookup means we do not know, and False renders
+    # as a definite "this agent still has its authority".
+    contained: bool | None = None
     try:
         from .revocation import is_revoked
         contained = bool(is_revoked(subject))
-    except Exception as e:  # pragma: no cover
+    except Exception as e:
         p.notes.append(f"revocation state unknown: {e}")
     if swept.unsigned_rows:
         p.notes.append(
@@ -523,18 +607,27 @@ def render_report(report: dict) -> str:
              f"  AGENT-EDR INCIDENT REPORT -- {report.get('subject', '?')}",
              "=" * width]
     s = report.get("summary", {})
+    revoked = report.get("currently_revoked")
+    revoked_text = "unknown" if revoked is None else str(revoked)
     lines.append(f"  detections: {s.get('total', 0)}   "
-                 f"currently revoked: {report.get('currently_revoked')}")
+                 f"currently revoked: {revoked_text}")
     if not report.get("evidence_is_signed"):
         lines.append("  ! the security rows read are UNSIGNED or unreadable: "
                      "this timeline is not tamper-evident")
     if report.get("truncated"):
         lines.append("  ! the sweep hit its bound: OLDER detections exist that "
                      "are not shown")
-    blind = (report.get("posture") or {}).get("blind_spots") or []
+    posture_block = report.get("posture") or {}
+    blind = posture_block.get("blind_spots") or []
     if blind:
         lines.append(f"  ! defenses OFF: {', '.join(blind)} "
                      "-- absence of detections here proves nothing")
+    # The notes carry "the timeline is partial" and "revocation state unknown".
+    # Printing only blind_spots left those in --json alone, so the artifact the
+    # module says you hand to an insurer omitted that days of the chain were
+    # unreadable.
+    for note in posture_block.get("notes") or []:
+        lines.append(f"  ! {note}")
     lines.append("-" * width)
     for d in report.get("detections", []):
         when = time.strftime("%Y-%m-%d %H:%M:%S",

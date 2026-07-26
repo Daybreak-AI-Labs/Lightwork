@@ -457,29 +457,53 @@ def security_posture_cmd(as_json: bool) -> None:
 @security_group.command("detections")
 @click.option("--subject", default="", help="Filter to one principal.")
 @click.option("--min-severity", default="low",
-              type=click.Choice(["low", "medium", "high", "critical"]))
+              type=click.Choice(["low", "medium", "high"]))
+@click.option("--limit", default=500, show_default=True,
+              help="Maximum detections to sweep and show.")
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
-def security_detections_cmd(subject: str, min_severity: str,
+def security_detections_cmd(subject: str, min_severity: str, limit: int,
                             as_json: bool) -> None:
-    """Security detections from the signed audit chain, newest first."""
+    """Security detections from the signed audit chain, newest first.
+
+    Uses ``scan`` rather than ``detections`` so the operator surface -- the one
+    place completeness actually matters -- can say when the sweep was bounded
+    or read unsigned rows, instead of printing a capped list that looks total.
+    """
     import json as _json
 
-    from ..agent_edr import detections, posture, summary
-    found = detections(subject=subject, min_severity=min_severity)
+    from ..agent_edr import posture, scan, summary
+    swept = scan(subject=subject, min_severity=min_severity, limit=limit)
     if as_json:
         click.echo(_json.dumps(
             {"posture": posture().to_dict(),
-             "summary": summary(found),
-             "detections": [d.to_dict() for d in found]}, indent=2, default=str))
+             "summary": summary(swept.found),
+             "truncated": swept.truncated,
+             "unsigned_rows": swept.unsigned_rows,
+             "unreadable_days": swept.unreadable_days,
+             "evidence_is_signed": swept.evidence_is_signed,
+             "detections": [d.to_dict() for d in swept.found]},
+            indent=2, default=str))
         return
     blind = posture().blind_spots
     if blind:
         click.echo(click.style(
             f"! defenses OFF: {', '.join(blind)} — absence of detections "
             "across these proves nothing", fg="yellow"))
-    for d in found[:100]:
+    for d in swept.found:
         click.echo(f"  [{d.severity:8}] {d.kind:18} {d.subject:24} {d.detail}")
-    click.echo(f"{len(found)} detection(s)")
+    click.echo(f"{len(swept.found)} detection(s)")
+    if swept.truncated:
+        click.echo(click.style(
+            f"! the sweep stopped at --limit {limit}: OLDER detections exist "
+            "that are not shown", fg="yellow"))
+    if swept.unsigned_rows:
+        click.echo(click.style(
+            f"! {swept.unsigned_rows} row(s) are unsigned: this list is not "
+            "tamper-evident", fg="yellow"))
+    if swept.unreadable_days:
+        click.echo(click.style(
+            f"! {len(swept.unreadable_days)} day-file(s) unreadable: this list "
+            "is partial", fg="yellow"))
 
 
 @security_group.command("contain")
@@ -514,9 +538,17 @@ def security_release_cmd(subject: str) -> None:
     """Undo a containment for SUBJECT."""
     from ..agent_edr import release
     result = release(subject)
-    click.echo(f"released={result.contained}")
-    for note in result.notes + result.failed:
+    colour = "green" if result.contained else "red"
+    click.echo(click.style(f"released={result.contained}", fg=colour))
+    for note in result.notes:
         click.echo(f"  - {note}")
+    for failure in result.failed:
+        click.echo(click.style(f"  ! {failure}", fg="red"))
+    if not result.contained:
+        # `contain` already exits non-zero on failure. Without the same here a
+        # runbook doing `maverick security release X && echo done` reports
+        # success while the agent is still locked out.
+        raise click.ClickException("release did not fully succeed")
 
 
 @security_group.command("incident")

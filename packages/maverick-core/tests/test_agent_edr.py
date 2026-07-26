@@ -425,3 +425,140 @@ def test_a_hostile_subject_is_flattened_too(audit_dir):
     _write(audit_dir, [{"ts": 1.0, "kind": "shield_block",
                         "agent": "a\nb\tc", "reason": "x"}])
     assert edr.detections(audit_dir=audit_dir)[0].subject == "a b c"
+
+
+# ---- code-review findings ---------------------------------------------------
+
+def test_the_bound_keeps_the_newest_rows_within_one_day_file(audit_dir):
+    """Day-files are walked newest-first, but rows INSIDE a file are append
+    order. Walking those oldest-first refilled the bound with that morning and
+    dropped the incident in progress -- and the report then said the opposite."""
+    _write(audit_dir, [_row("shield_block", ts=1000.0 + i, reason=f"ev{i}")
+                       for i in range(10)])
+    swept = edr.scan(audit_dir=audit_dir, limit=3)
+    assert swept.truncated
+    assert {d.detail for d in swept.found} == {"ev9", "ev8", "ev7"}
+
+
+def test_a_poisoned_timestamp_cannot_crash_the_report(audit_dir):
+    """`time.gmtime` raises on inf/NaN/1e18, so one hostile row would take down
+    the artifact precisely when a hostile row is present."""
+    path = audit_dir / "2026-01-01.ndjson"
+    path.write_text("\n".join(
+        f'{{"ts": {v}, "kind": "shield_block", "agent": "w", "reason": "x"}}'
+        for v in ("Infinity", "NaN", "1e18", "-Infinity")) + "\n",
+        encoding="utf-8")
+    found = edr.detections(audit_dir=audit_dir)
+    assert len(found) == 4
+    assert all(d.ts == 0.0 for d in found)
+    edr.render_report(edr.incident_report("w", audit_dir=audit_dir))
+
+
+def test_terminal_control_bytes_cannot_repaint_the_report(audit_dir):
+    """`str.split()` splits only on whitespace, so ESC survived it: a blocked
+    URL carrying \\x1b[1A\\x1b[2K erases the real detection line above it."""
+    _write(audit_dir, [_row("shield_block", agent="w",
+                            reason="ok\x1b[2K\rFAKE CLEARED\x00 nothing")])
+    detail = edr.detections(audit_dir=audit_dir)[0].detail
+    assert "\x1b" not in detail and "\x00" not in detail and "\r" not in detail
+    assert detail == "ok FAKE CLEARED nothing"
+
+
+def test_posture_reports_whether_signing_is_ON_not_whether_crypto_imports(
+        monkeypatch):
+    """The library being installed says nothing about `[audit] sign`."""
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "0")
+    p = edr.posture()
+    assert p.audit_signing is False
+    assert "audit_signing" in p.blind_spots
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
+    assert edr.posture().audit_signing is True
+
+
+def test_an_air_gapped_deployment_is_not_reported_as_uncontrolled(monkeypatch,
+                                                                  tmp_path):
+    """`[egress] deny` is the key air_gap actually enforces. Probing keys no
+    module writes made egress_control a blind spot on every deployment, and a
+    warning that always fires trains the operator to ignore the list."""
+    import maverick.config as cfg
+    monkeypatch.setattr(cfg, "load_config", lambda: {"egress": {"deny": ["*"]}})
+    assert edr.posture().egress_control is True
+
+
+def test_zero_evidence_is_not_signed_evidence(tmp_path):
+    """An analyst pointed at the wrong home read a signed-looking all-clear."""
+    swept = edr.scan(audit_dir=tmp_path / "nope")
+    assert swept.root_missing is True
+    assert swept.evidence_is_signed is False
+    text = edr.render_report(edr.incident_report("w", audit_dir=tmp_path / "nope"))
+    assert "not tamper-evident" in text
+
+
+def test_a_release_asked_to_do_nothing_is_not_a_release():
+    result = edr.release("x", registry=None, unrevoke=False)
+    assert not result.contained
+    assert "no release action requested" in result.failed
+
+
+def test_the_report_surfaces_the_posture_notes(audit_dir, monkeypatch):
+    """The notes carry 'the timeline is partial' and 'revocation state
+    unknown'; printing only blind_spots left them in --json alone."""
+    _write(audit_dir, [_row("shield_block", agent="w", reason="x")])
+    import maverick.audit.sealing as sealing
+
+    def _boom(path, **kw):
+        raise RuntimeError("sealed")
+    monkeypatch.setattr(sealing, "segment_text", _boom)
+    text = edr.render_report(edr.incident_report("w", audit_dir=audit_dir))
+    assert "timeline is partial" in text
+
+
+def test_an_unknown_revocation_state_never_renders_as_a_bare_none(audit_dir,
+                                                                  monkeypatch):
+    import maverick.revocation as rev
+    monkeypatch.setattr(rev, "is_revoked",
+                        lambda p: (_ for _ in ()).throw(RuntimeError("down")))
+    report = edr.incident_report("w", audit_dir=audit_dir)
+    assert "currently revoked: unknown" in edr.render_report(report)
+
+
+def test_severity_matches_what_threat_hunt_would_say(audit_dir):
+    """Two security surfaces rating the same signed row differently is the
+    'six modules, six vocabularies' problem this plane exists to end."""
+    from maverick.threat_hunt import _INDICATORS
+    _write(audit_dir, [_row(k, reason="x") for k in
+                       ("shield_block", "governance_denied", "secret_redacted")])
+    for d in edr.detections(audit_dir=audit_dir):
+        assert d.severity == _INDICATORS[d.source_event][1].lower()
+
+
+def test_a_kill_switch_engagement_is_visible_to_the_plane(audit_dir):
+    """`halt` and `consent_result` are threat_hunt indicators and produced no
+    detection here, so a kill switch was invisible to the single security view."""
+    _write(audit_dir, [_row("halt", reason="operator engaged HALT"),
+                       _row("consent_result", reason="destructive action denied")])
+    kinds = {d.source_event for d in edr.detections(audit_dir=audit_dir)}
+    assert kinds == {"halt", "consent_result"}
+
+
+def test_an_existing_but_empty_audit_dir_is_not_signed_evidence(audit_dir):
+    """Distinct from a missing root: the directory is there and readable, and
+    still nothing was read. Zero rows is zero evidence either way."""
+    swept = edr.scan(audit_dir=audit_dir)
+    assert swept.root_missing is False
+    assert swept.signed_rows == 0
+    assert swept.evidence_is_signed is False
+    assert "not tamper-evident" in edr.render_report(
+        edr.incident_report("w", audit_dir=audit_dir))
+
+
+def test_one_unsigned_row_among_signed_ones_still_breaks_the_guarantee(audit_dir):
+    """Signed rows present is not the test; ANY unsigned row means the chain
+    is not tamper-evident, so the mixed case has to fail closed."""
+    _write(audit_dir, [_row("shield_block", agent="w", reason="signed")])
+    with open(audit_dir / "2026-01-01.ndjson", "a", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": 2.0, "kind": "shield_block",
+                            "agent": "w", "reason": "bare"}) + "\n")
+    swept = edr.scan(audit_dir=audit_dir)
+    assert swept.signed_rows == 1 and swept.unsigned_rows == 1
+    assert swept.evidence_is_signed is False

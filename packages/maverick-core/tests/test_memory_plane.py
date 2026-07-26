@@ -141,7 +141,7 @@ def test_two_vendors_sharing_the_plane_holds(fleet):
     _log_activity(vendors=("anthropic", "microsoft"), records=20)
     claim = _claim(_verify(_bundle()), "cross_vendor")
     assert claim.status == HOLDS
-    assert "2 vendors" in claim.detail
+    assert "2 contributing vendors" in claim.detail
 
 
 def test_registered_vendors_without_records_prove_nothing(fleet):
@@ -149,7 +149,7 @@ def test_registered_vendors_without_records_prove_nothing(fleet):
     fleet["roster"]("anthropic", "microsoft")  # registered, never contributed
     claim = _claim(_verify(_bundle()), "cross_vendor")
     assert claim.status == NOT_APPLICABLE
-    assert "no records deposited" in claim.detail
+    assert "0 contributing vendor(s)" in claim.detail
 
 
 def test_unattributable_records_fail_the_claim(fleet):
@@ -328,6 +328,10 @@ def test_the_real_fleet_memory_plane_is_readable_end_to_end(monkeypatch):
     """No monkeypatched status: prove the builder works against the module it
     is attesting, not just against a fixture shaped like it."""
     monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
+    # Signing is ON by default in production; the suite's conftest sets
+    # MAVERICK_SECURE_DEFAULT=0, which turns it off. The attestation counts only
+    # signed rows, so the realistic posture has to be restored here.
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
     import maverick.fleet_memory as fm
     assert fm.register_agent("agent-1", "microsoft", description="copilot")
     ok, reason = fm.ingest({
@@ -372,3 +376,79 @@ def test_a_zero_cost_baseline_is_not_evidence(fleet):
     world = _World([("finance", [0.0] * 3 + [0.0] * 3)])
     curves = mp.compounding_by_department(world)
     assert all(not c.improving for c in curves)
+
+
+def test_unsigned_fleet_rows_are_not_counted_as_evidence(fleet, monkeypatch):
+    """The bundle's justification for preferring the chain over the inbox is
+    that an audit row is signed. Counting bare rows would assert cross-vendor
+    totals over evidence nobody signed."""
+    from maverick.paths import data_dir
+    root = data_dir("audit")
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "2026-01-01.ndjson").write_text("\n".join(
+        json.dumps({"ts": 1.0, "kind": "learning_update",
+                    "agent": "fleet_memory", "fleet": "ingest",
+                    "source": f"{v}:agent-1"})
+        for v in ("anthropic", "microsoft")) + "\n", encoding="utf-8")
+    fleet["roster"]("anthropic", "microsoft")
+    bundle = mp.build(now=1767225600.0)
+    assert bundle["claims"]["cross_vendor"]["records"] == 0
+    assert any("carry no signature" in w for w in bundle["warnings"])
+
+
+def test_the_verifier_recomputes_improving_from_the_numbers(fleet):
+    """Trusting the published boolean let a bundle claim a department that got
+    nine times more expensive and eight-tenths less reliable was compounding."""
+    bundle = json.loads(json.dumps(_bundle()))
+    bundle["claims"]["compounding"]["departments"] = [{
+        "department": "sales", "runs": 50, "cold_cost": 1.0, "warm_cost": 9.0,
+        "cold_success": 0.9, "warm_success": 0.1, "improving": True}]
+    bundle.pop("signature")
+    result = _verify(mp.sign(bundle))
+    assert _claim(result, "compounding").status == FAILS
+
+
+def test_the_verifier_rejects_a_negative_cost_curve_it_did_not_build(fleet):
+    """`_is_real_cost_pair` ran only at build time, so a hand-made bundle
+    carrying negative costs graded HOLDS at verify time."""
+    bundle = json.loads(json.dumps(_bundle()))
+    bundle["claims"]["compounding"]["departments"] = [{
+        "department": "sales", "runs": 50, "cold_cost": -1e9,
+        "warm_cost": -1e12, "cold_success": 1.0, "warm_success": 1.0,
+        "improving": True}]
+    bundle.pop("signature")
+    assert _claim(_verify(mp.sign(bundle)), "compounding").status == FAILS
+
+
+def test_a_missing_crypto_library_is_not_a_tamper_accusation(fleet, monkeypatch):
+    """Telling a customer the publisher's signature is bad because an optional
+    extra is absent is the worst possible way to report a missing dependency."""
+    import maverick.memory_plane as mod
+    bundle = _bundle()
+    monkeypatch.setattr(mod, "_have_crypto", lambda: False)
+    result = mp.verify(bundle, trusted_key_hex=_key())
+    assert not result.ok
+    assert "cryptography" in result.reason
+    assert "does not verify" not in result.reason
+
+
+def test_the_activity_scan_is_bounded_and_says_when_it_stopped(fleet,
+                                                               monkeypatch):
+    """Unsealing every day-file of a multi-year audit history on each export is
+    not something an attestation should do, and a short count that looks total
+    understates the very claim the bundle makes."""
+    import maverick.memory_plane as mod
+    from maverick.paths import data_dir
+    monkeypatch.setattr(mod, "_MAX_ACTIVITY_DAYS", 2)
+    root = data_dir("audit")
+    root.mkdir(parents=True, exist_ok=True)
+    from maverick.audit.signing import AuditSigner
+    for day in ("2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"):
+        s = AuditSigner(root / f"{day}.ndjson")
+        assert s.write({"ts": 1.0, "kind": "learning_update",
+                        "agent": "fleet_memory", "fleet": "ingest",
+                        "source": "anthropic:agent-1"})
+    fleet["roster"]("anthropic")
+    bundle = mp.build(now=1767225600.0)
+    assert bundle["claims"]["cross_vendor"]["records"] == 2
+    assert any("lower bound" in w for w in bundle["warnings"])
