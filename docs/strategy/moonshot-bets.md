@@ -241,6 +241,57 @@ walls. You can prove it, and take it with you."
 
 ---
 
+### Build log — Bet 2 step three: the attest half (shipped)
+
+`fleet_memory` already did ingest/recall. `maverick memory-plane` adds **attest**,
+and it rides the *same signed bundle spine as Bet 1* — one implementation of the
+crypto, the out-of-band trust anchor, and the grading vocabulary. That is this
+doc's own thesis about the capsule format made literal rather than restated.
+
+Three claims, graded the way Bet 5 taught us to grade:
+
+- **cross_vendor** is the moat, and the easiest thing here to oversell. A plane
+  with one vendor connected has demonstrated nothing, so it grades
+  `NOT_APPLICABLE`, not a pass — selling the one property the model vendors
+  structurally cannot copy on the strength of an empty room would be the worst
+  thing this bundle could do. Registered-but-never-contributed grades the same
+  way. An ingest that cannot be attributed to a `vendor:agent_id` **fails** the
+  claim outright: a lesson of unknown origin is precisely what a governed plane
+  exists to prevent.
+- **compounding** is the un-fakeable proof, now measured *per department*
+  ("your finance swarm got 40% cheaper" is the sentence a buyer acts on). Below
+  the run floor it is `INDETERMINATE`, because a short curve is noise. A plane
+  that is running and has not paid off grades an honest `FAILS` — the customer
+  is told rather than shown a green badge.
+- **tenant_isolation** is deliberately ungraded. Every record in a bundle sits
+  under that tenant's root because that is the only place we looked; calling
+  that a proof would be a tautology in a signed wrapper. The tenant binding is
+  published as evidence (as a digest, not a path) and the claim says plainly
+  that isolation is established by comparing two tenants' bundles.
+
+**A real bug the work surfaced, and it was in the substrate, not the new code.**
+`fleet_memory._audit` forwards its payload into
+`audit.record(kind, *, agent, goal_id, **payload)`. Ingest passed the record's
+success/failure/lesson class as `kind=`, which collided with the event kind,
+raised `TypeError` inside the audit call, and was swallowed by a bare
+`except Exception: pass`. **Every fleet-memory ingest has been going unaudited**
+— the governed plane's *write* path, the higher-trust operation, left no signed
+trace while reads logged fine. Reserved keys are now re-prefixed rather than
+dropped, and an audit failure logs instead of vanishing: a hole in the trail
+that nobody can see is worse than no trail.
+
+That fix also changed where the attestation reads its evidence. Activity counts
+come from the signed chain rather than the inbox directory `status()` globs,
+because `ingest` routes a *lesson* into the reflexion store and only
+success/failure into the inbox — an inbox count would miss exactly the
+cross-vendor lessons the plane exists for, and could report "no records
+deposited" while a Copilot agent had deposited five hundred.
+
+Remaining for the full bet: the live cross-vendor demo needs a non-Claude agent
+actually wired in, and the memory-portability standard (step 4).
+
+---
+
 ## Bet 3 — Safe Recursive Self-Improvement: the alignment-frontier "wow"
 
 **Thesis.** The most important — and most feared — capability in AI is an agent
@@ -504,6 +555,44 @@ a cross-process PREPARE/CAS/COMMIT apply transaction with recovery; and adversar
 containment tests on the deployment backend. A human signature alone is not
 sufficient. Until then, the defensible claim is “governed self-improvement
 research,” not “recursive self-improvement running in production.”
+
+### Build log — Bet 4 steps one and two: the agent-EDR plane (shipped)
+
+The defense stack was all there and none of it was a *plane*: six modules with
+six vocabularies, fine for the kernel and useless to an analyst. `maverick
+security` is the surface — and it composes the existing enforcement rather than
+re-implementing any of it, so a detection is only ever a claim about a row
+somebody already signed.
+
+- **Detect.** Every security row on the signed chain normalized into one
+  `Detection` with an attack class and a severity **derived from the event**. A
+  compromised agent gets no say in how loudly its own detection rings, and an
+  audit kind the table does not model produces *no detection at all* — a plane
+  that invents threats from rows it does not understand trains its operator to
+  ignore it.
+- **Respond.** `contain()` seals the agent mid-run and revokes its capability
+  subtree in one act. The two are reported separately, and that asymmetry is the
+  point: a compartment seal is **run-scoped and in-memory**, a revocation is
+  **durable on disk**. Blurring them would tell an operator an agent is locked
+  out when the seal evaporates at process exit. `contained` is True only when
+  every requested action landed, and the revocation is confirmed by re-reading
+  the registry rather than assumed — a partial containment reported as success
+  is worse than a failed one, because everyone stops watching a live agent.
+- **Prove.** Containment lands on the signed chain; `incident_report` renders
+  the timeline.
+
+**The rule that shapes the whole module:** every command reports the deployment's
+*posture* alongside its findings. An empty detection list from a deployment with
+the shield off means "not watched", not "not attacked", and an unsigned chain is
+flagged as not tamper-evident rather than presented as evidence. This is the same
+discipline as Bet 1's empty-policy envelope: silence from a control that was
+never on is not a compliance finding.
+
+Remaining for the full bet: the telemetry *standard* — any vendor's agent
+emitting Lightwork-format security events over MCP — and continuous adversarial
+evaluation wired as a scheduled fleet scan rather than a CI gate.
+
+---
 
 ## Bet 5 — Consequence-Proven Autonomy → "Earned Autonomy" (the breakthrough)
 

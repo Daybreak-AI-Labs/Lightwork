@@ -589,6 +589,26 @@ here.
   audit-outbox backed; program insights aggregate framework coverage, control
   status, open work, exception expiry, and crosswalk reuse. Framework prompts
   are readiness aids, not bundled licensed standards text or certification.
+- **Agent Security Plane — agent-EDR: detect, contain, prove** (`agent_edr.py`,
+  `maverick security posture|detections|contain|release|incident`) — the
+  defense stack surfaced as one operator surface instead of six modules with
+  six vocabularies. **Detect**: every security row on the signed audit chain
+  (`shield_block`, `capability_denied`, `governance_denied`, `egress_blocked`,
+  `agent_trust_denied`, `secret_redacted`) normalized into one `Detection`
+  shape with an attack class and a severity **derived from the event, never
+  self-declared** — an audit kind the table does not model produces no
+  detection at all, because a plane that invents threats from rows it does not
+  understand teaches its operator to ignore it. **Respond**: `contain()` seals
+  the agent mid-run and revokes its capability subtree in one act, reporting
+  each separately — a compartment seal is **run-scoped and in-memory**, a
+  revocation is **durable**, and `contained` is True only when every requested
+  action actually landed (a revocation is confirmed by re-reading the registry,
+  never assumed). **Prove**: every containment lands on the signed chain and
+  `incident_report()` renders the forensic timeline. Every command reports the
+  deployment's **posture** alongside its findings: an empty detection list from
+  a deployment with the shield off means "not watched", not "not attacked", and
+  an unsigned chain is flagged as not tamper-evident rather than presented as
+  evidence.
 - **Internal platform threat hunter** (`platform_hunt/`, dashboard
   `/security/threats`, opt-in `[threat_hunt] enable`) — a deterministic,
   model-free detector whose production verdict authority is the verified signed
@@ -697,6 +717,25 @@ here.
   client-data access — the inverse seal of the rest of the suite)
   monitors IRS/state guidance and alerts the firm; agents never edit
   constants directly.
+- **Institutional Memory attestation — is it really compounding, and really
+  yours?** (`memory_plane.py`, `maverick memory-plane compounding|export|verify`)
+  — the `attest` half of Bet 2's ingest/recall/attest API, riding the **same
+  signed bundle spine as the Bet 1 attestation** (one implementation of the
+  crypto, the out-of-band trust anchor, and the
+  HOLDS/FAILS/INDETERMINATE/NOT_APPLICABLE vocabulary). Three claims:
+  **cross_vendor** — how many vendors actually deposited through the governed
+  plane, graded `NOT_APPLICABLE` below two because one vendor has demonstrated
+  nothing, and `FAILS` outright if any ingest cannot be attributed to a
+  `vendor:agent_id`; **compounding** — the cold-vs-warm cost and reliability
+  curve *per department* (`compounding_by_department`), `INDETERMINATE` below
+  the run floor because a short curve is noise, and an honest `FAILS` when the
+  plane is running and has not yet paid off; **tenant_isolation** — deliberately
+  `NOT_APPLICABLE`, because every record in a bundle is under that tenant's root
+  by construction, so isolation is established by comparing two tenants' bundles
+  rather than by reading one. Activity counts come from the **signed audit
+  chain**, not the inbox directory: `ingest` routes a lesson into the reflexion
+  store and only success/failure records into the inbox, so an inbox count would
+  miss exactly the cross-vendor lessons the plane exists for.
 - **Fleet memory — the Learning System of Record** (`fleet_memory.py`,
   opt-in `[fleet_memory] enable`; MCP tools `maverick_fleet_ingest` /
   `maverick_fleet_recall`; CLI `maverick fleet-memory`) — ANY external agent

@@ -203,13 +203,32 @@ def _sanitize(text: str, *, shield: Any | None) -> str | None:
     return safe
 
 
+#: Names ``audit.record`` takes as its own parameters. A payload key that
+#: collides with one of these raises TypeError *inside* the audit call, and the
+#: catch below then drops the row silently -- which is how every fleet ingest
+#: went unaudited while reads were logged fine (``kind=`` was passed through for
+#: the record's success/failure/lesson class and shadowed the event kind).
+_RESERVED_AUDIT_KEYS = ("kind", "agent", "goal_id")
+
+
 def _audit(event: str, **payload) -> None:
+    """Record one fleet-plane event on the signed chain.
+
+    Never blocks the plane, but never *silently* loses a row either: a governed
+    memory plane whose audit trail quietly has holes in it is worse than one
+    with no audit trail, because the holes are invisible to the operator relying
+    on it.
+    """
+    for key in _RESERVED_AUDIT_KEYS:
+        if key in payload:
+            payload[f"fleet_{key}"] = payload.pop(key)
     try:
         from .audit import EventKind, record
         record(EventKind.LEARNING_UPDATE, agent="fleet_memory",
                fleet=event, **payload)
     except Exception:  # pragma: no cover -- audit never blocks the plane
-        pass
+        log.warning("fleet_memory: audit write failed for %r", event,
+                    exc_info=True)
 
 
 def register_agent(agent_id: str, vendor: str, *, description: str = "") -> bool:

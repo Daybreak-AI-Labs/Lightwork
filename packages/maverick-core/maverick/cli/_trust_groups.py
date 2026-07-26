@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import click
 
-from . import main
+from . import main, open_world
 
 
 @main.group("capability")
@@ -421,3 +421,206 @@ def attest_export_verifier_cmd(out: str) -> None:
     click.echo(f"  python {path.name} <bundle.json> --key <pubkey-hex> "
                "[--evidence <audit-dir>]")
     click.echo("Needs only Python and 'cryptography'.")
+
+
+@main.group("security")
+def security_group() -> None:
+    """Agent-EDR: detect, contain and prove compromise across the fleet.
+
+    Reads detections off the signed audit chain, contains a compromised agent
+    in one act, and prints a forensic timeline. Every command reports the
+    deployment's POSTURE alongside its findings: an empty detection list from a
+    deployment with the shield off means "not watched", not "not attacked".
+    """
+
+
+@security_group.command("posture")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def security_posture_cmd(as_json: bool) -> None:
+    """Which defenses are actually switched on."""
+    import json as _json
+
+    from ..agent_edr import posture
+    p = posture().to_dict()
+    if as_json:
+        click.echo(_json.dumps(p, indent=2))
+        return
+    for name in ("shield", "capabilities", "audit_signing", "agent_trust",
+                 "egress_control"):
+        on = p.get(name)
+        click.echo(f"  {name:16} {'ON' if on else 'off'}"
+                   if on else click.style(f"  {name:16} off", fg="yellow"))
+    for note in p.get("notes") or []:
+        click.echo(click.style(f"  ! {note}", fg="yellow"))
+
+
+@security_group.command("detections")
+@click.option("--subject", default="", help="Filter to one principal.")
+@click.option("--min-severity", default="low",
+              type=click.Choice(["low", "medium", "high"]))
+@click.option("--limit", default=500, show_default=True,
+              help="Maximum detections to sweep and show.")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def security_detections_cmd(subject: str, min_severity: str, limit: int,
+                            as_json: bool) -> None:
+    """Security detections from the signed audit chain, newest first.
+
+    Uses ``scan`` rather than ``detections`` so the operator surface -- the one
+    place completeness actually matters -- can say when the sweep was bounded
+    or read unsigned rows, instead of printing a capped list that looks total.
+    """
+    import json as _json
+
+    from ..agent_edr import posture, scan, summary
+    swept = scan(subject=subject, min_severity=min_severity, limit=limit)
+    if as_json:
+        click.echo(_json.dumps(
+            {"posture": posture().to_dict(),
+             "summary": summary(swept.found),
+             "truncated": swept.truncated,
+             "unsigned_rows": swept.unsigned_rows,
+             "unreadable_days": swept.unreadable_days,
+             "evidence_is_signed": swept.evidence_is_signed,
+             "detections": [d.to_dict() for d in swept.found]},
+            indent=2, default=str))
+        return
+    blind = posture().blind_spots
+    if blind:
+        click.echo(click.style(
+            f"! defenses OFF: {', '.join(blind)} — absence of detections "
+            "across these proves nothing", fg="yellow"))
+    for d in swept.found:
+        click.echo(f"  [{d.severity:8}] {d.kind:18} {d.subject:24} {d.detail}")
+    click.echo(f"{len(swept.found)} detection(s)")
+    if swept.truncated:
+        click.echo(click.style(
+            f"! the sweep stopped at --limit {limit}: OLDER detections exist "
+            "that are not shown", fg="yellow"))
+    if swept.unsigned_rows:
+        click.echo(click.style(
+            f"! {swept.unsigned_rows} row(s) are unsigned: this list is not "
+            "tamper-evident", fg="yellow"))
+    if swept.unreadable_days:
+        click.echo(click.style(
+            f"! {len(swept.unreadable_days)} day-file(s) unreadable: this list "
+            "is partial", fg="yellow"))
+
+
+@security_group.command("contain")
+@click.argument("subject")
+@click.option("--reason", default="", help="Why this agent is being contained.")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+def security_contain_cmd(subject: str, reason: str, yes: bool) -> None:
+    """Revoke SUBJECT's authority (durable) and record the response.
+
+    Run from the CLI there is no live swarm to seal, so this revokes future
+    authority; it does not stop an agent already mid-run in another process.
+    The output says so rather than reporting a containment it did not achieve.
+    """
+    from ..agent_edr import contain
+    if not yes:
+        click.confirm(f"Revoke all authority for {subject!r}?", abort=True)
+    result = contain(subject, reason=reason or "operator containment")
+    colour = "green" if result.contained else "red"
+    click.echo(click.style(
+        f"contained={result.contained}  revoked={len(result.revoked)}", fg=colour))
+    for note in result.notes:
+        click.echo(click.style(f"  - {note}", fg="yellow"))
+    for failure in result.failed:
+        click.echo(click.style(f"  ! {failure}", fg="red"))
+    if not result.contained:
+        raise click.ClickException("containment did not fully succeed")
+
+
+@security_group.command("release")
+@click.argument("subject")
+def security_release_cmd(subject: str) -> None:
+    """Undo a containment for SUBJECT."""
+    from ..agent_edr import release
+    result = release(subject)
+    colour = "green" if result.contained else "red"
+    click.echo(click.style(f"released={result.contained}", fg=colour))
+    for note in result.notes:
+        click.echo(f"  - {note}")
+    for failure in result.failed:
+        click.echo(click.style(f"  ! {failure}", fg="red"))
+    if not result.contained:
+        # `contain` already exits non-zero on failure. Without the same here a
+        # runbook doing `maverick security release X && echo done` reports
+        # success while the agent is still locked out.
+        raise click.ClickException("release did not fully succeed")
+
+
+@security_group.command("incident")
+@click.argument("subject")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def security_incident_cmd(subject: str, as_json: bool) -> None:
+    """Forensic incident report for SUBJECT."""
+    import json as _json
+
+    from ..agent_edr import incident_report, render_report
+    report = incident_report(subject)
+    click.echo(_json.dumps(report, indent=2, default=str) if as_json
+               else render_report(report))
+
+
+@main.group("memory-plane")
+def memory_plane_group() -> None:
+    """The Institutional Memory plane: attest what the fleet actually learned.
+
+    Signs a portable statement of the plane's cross-vendor activity, its
+    compounding curve per department, and its tenant binding. Verification
+    needs the publisher's key obtained out of band (``maverick attest key``).
+    """
+
+
+@memory_plane_group.command("compounding")
+@click.option("--window", default=5, show_default=True,
+              help="Runs per cold/warm window.")
+@click.pass_context
+def memory_plane_compounding_cmd(ctx, window: int) -> None:
+    """Cold-vs-warm cost and reliability, per department."""
+    from ..memory_plane import compounding_by_department
+    world = open_world(ctx.obj["db"])
+    curves = compounding_by_department(world, window=window)
+    if not curves:
+        click.echo("no department has enough runs yet — the curve would be "
+                   "noise rather than evidence")
+        return
+    for c in curves:
+        arrow = click.style("compounding", fg="green") if c.improving else \
+            click.style("not yet", fg="yellow")
+        click.echo(f"  {c.department:22} runs={c.runs:<5} "
+                   f"${c.cold_cost:.4f} -> ${c.warm_cost:.4f}   {arrow}")
+
+
+@memory_plane_group.command("export")
+@click.argument("out", type=click.Path())
+@click.pass_context
+def memory_plane_export_cmd(ctx, out: str) -> None:
+    """Build and sign a memory-plane attestation at OUT."""
+    from ..memory_plane import export
+    world = open_world(ctx.obj["db"])
+    try:
+        path = export(out, world)
+    except RuntimeError as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"memory-plane attestation -> {path}")
+    import json as _json
+    bundle = _json.loads(path.read_text(encoding="utf-8"))
+    for warning in bundle.get("warnings") or []:
+        click.echo(click.style(f"  ! {warning}", fg="yellow"))
+
+
+@memory_plane_group.command("verify")
+@click.argument("bundle", type=click.Path(exists=True))
+@click.option("--key", "key_hex", default="", metavar="HEX",
+              help="Publisher's Ed25519 public key, obtained OUT OF BAND.")
+def memory_plane_verify_cmd(bundle: str, key_hex: str) -> None:
+    """Verify BUNDLE against a trusted key (fails closed without one)."""
+    from ..attestation_verify import format_report
+    from ..memory_plane import verify_file
+    result = verify_file(bundle, trusted_key_hex=key_hex)
+    click.echo(format_report(result))
+    if not result.ok:
+        raise click.ClickException("memory-plane verification failed")
