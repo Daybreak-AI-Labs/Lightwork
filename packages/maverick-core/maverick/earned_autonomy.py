@@ -85,6 +85,14 @@ _GENESIS = "0" * 64
 _MAX_ROWS = 100_000
 _MAX_TEXT = 300
 
+#: Card sources whose ``reversible`` flag was *demonstrated* rather than
+#: asserted. Only the shadow-mode path qualifies today: it reads the flag off a
+#: preview the connector adapter actually produced. ``"rehearsal"`` takes the
+#: caller's word for it and ``"declared"`` is the dataclass default, so neither
+#: is evidence. Add a source here only when the adapter behind it round-trips
+#: the write -- this set is what separates a proven undo from a claimed one.
+EARNED_REVERSIBILITY_SOURCES = frozenset({"simulate"})
+
 
 def enabled() -> bool:
     """Whether earned autonomy records evidence / decides. OFF by default."""
@@ -560,8 +568,9 @@ def evaluate_graduation(state: TrustState, *, risk: str, reversible_share: float
         gates.append(GateResult(
             "reversibility", rev_ok,
             "" if rev_ok else
-            "action type has cards without a declared inverse; a guaranteed "
-            "undo is required until autonomy is earned"))
+            "action type has cards whose undo was never demonstrated by a "
+            "preview adapter; a guaranteed undo -- not an asserted one -- is "
+            "required until autonomy is earned"))
     else:
         gates.append(GateResult("reversibility", True, ""))
 
@@ -913,10 +922,30 @@ class EarnedAutonomyEngine:
                 self._revoke_grant(action)
 
     def _reversible_share(self, action: str) -> float:
+        """Share of cards whose undo was *demonstrated*, not merely asserted.
+
+        The reversibility gate exists to require a guaranteed undo before an
+        action type earns autonomy. Only a preview adapter that actually round-
+        tripped the write can establish that; ``source="rehearsal"`` carries a
+        flag the caller passed in, and ``"declared"`` -- the dataclass default,
+        so also what any direct ``record_card`` gets -- is a bare assertion.
+
+        Counting those toward the share let a self-declaration satisfy a gate
+        whose own failure text promises "a guaranteed undo", and the resulting
+        number would have been shown to an auditor as evidence. Unearned cards
+        stay in the denominator rather than being filtered out, so they push the
+        share below 1.0 and hold the human in place: an action type we cannot
+        prove is reversible must not graduate on the strength of being *said* to
+        be reversible.
+        """
         rows = [r for r in self.cards.cards() if r.get("action") == action]
         if not rows:
             return 0.0
-        return sum(1 for r in rows if r.get("reversible") is True) / len(rows)
+        earned = sum(
+            1 for r in rows
+            if r.get("reversible") is True
+            and str(r.get("source") or "") in EARNED_REVERSIBILITY_SOURCES)
+        return earned / len(rows)
 
     # -- deciding ----------------------------------------------------------
 

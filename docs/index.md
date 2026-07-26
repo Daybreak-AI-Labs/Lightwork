@@ -31,7 +31,7 @@ Lightwork is proprietary, commercially licensed software (see
   SAM.gov, CourtListener, Federal Register, GLEIF, OpenCorporates,
   NWS/NOAA, EPA, Climatiq, …) so they cite authoritative sources instead of
   model recall. On by default; kill-switch via `[workforce] data_grounding
-  = false`. Alongside 214 write-capable enterprise REST/GraphQL connectors
+  = false`. Alongside 2,877 write-capable enterprise REST/GraphQL connectors
   and dedicated modules (Salesforce, HubSpot, Stripe, ServiceNow,
   Snowflake, …).
 - **Proven governance**: a roster-wide invariant test suite checks six

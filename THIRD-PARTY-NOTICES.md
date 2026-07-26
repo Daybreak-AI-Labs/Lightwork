@@ -26,7 +26,7 @@ scans only the installed tree — optional extras can slip past it):
 |---|---|---|
 | `psycopg` (psycopg 3) | LGPL-3.0 | Weak copyleft. Optional `[postgres]` extra in `maverick-core` and `maverick-knowledge`. LGPL notice/relink obligations apply. |
 | `python-telegram-bot` | LGPL-3.0 | Weak copyleft. Optional channel dependency. |
-| `caldav` | GPL-3.0 / dual | Verify the exact license of the pinned version; GPL would be incompatible with proprietary redistribution. |
+| `caldav` | `GPL-3.0-or-later OR Apache-2.0` | **Verified against PyPI metadata (`license_expression`), July 2026: dual-licensed, so Apache-2.0 may be elected and there is no copyleft obligation.** Optional `[calendar]` extra, and `calendar_tool._get_caldav_calendar` imports it inside the function body, so it is never bundled. Not a redistribution risk; kept in this table only because the name recurs in scanner output. |
 | `matrix-nio` | ISC (verify) | Generally permissive, but confirm — some optional crypto extras pull copyleft. |
 
 ## Permissive dependencies (attribution required)

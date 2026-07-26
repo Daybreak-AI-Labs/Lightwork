@@ -307,7 +307,7 @@ screened by the same shield/budget/sandbox machinery:
   for any language. Single Python tools need only the `@tool` decorator
   (`tools/decorator.py`).
 - **Channels** — 17 wired adapters (`packages/maverick-channels/`):
-- **Connectors & primary-source grounding** — 214 write-capable enterprise
+- **Connectors & primary-source grounding** — 2,877 write-capable enterprise
   REST/GraphQL connectors plus 37 read-only primary-source / public-data
   connectors (SEC EDGAR, FRED, Treasury, World Bank, FDIC, Census, BLS, EIA,
   openFDA, NPPES, ClinicalTrials, USAspending, SAM.gov, CourtListener, Federal
