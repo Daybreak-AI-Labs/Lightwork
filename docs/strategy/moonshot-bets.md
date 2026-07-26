@@ -41,6 +41,15 @@ substrate). Regulatory tailwind = free distribution (EU AI Act Art. 12/15,
 SR 11-7, AI-liability wave; artifacts already scaffolded in `ai_act_package.py`,
 `dpia.py`, `ropa.py`).
 
+> **Timing correction (July 2026).** The EU Council's Digital Omnibus
+> simplification package (approved 29 June 2026) pushed the stand-alone Annex III
+> high-risk obligations to **2 December 2027** and Annex I embedded systems to
+> **2 August 2028**. Only Article 50 transparency duties still bite on
+> **2 August 2026**. The tailwind is real but 12–24 months later than this
+> section assumed, so Bet 1 should not be sold on a compliance deadline. The
+> insurability argument is the near-term one — and it is what makes candidate
+> Bet 6 below the more urgent commercial story.
+
 **Per-buyer wow.** Anthropic: a verifiable claim that self-improvement stays
 bounded is their north star. Microsoft: Copilot's enterprise blocker is
 governance/system-of-record; we are it, cross-vendor. Google: Vertex/Agentforce
@@ -930,3 +939,184 @@ stay), Bet 3 is the halo (makes the labs covet you), Bet 4 is the hedge (a secon
 buyer universe if the labs stall). Pick the wedge first; the capsule format is the
 shared spine that keeps all four optionalities open.
 
+---
+
+## Candidate bets — research, July 2026 (NOT commitments)
+
+Grounded the same way the five committed bets are: each names substrate that
+already exists on `main`, and each was checked against the live market rather
+than reasoned about from first principles. Nothing here has been built. Two of
+them are as much **risk registers** as opportunities, and those are flagged.
+
+Substrate audit performed at `3c5e82b`: 400 core modules. Present and relevant —
+`attestation.py` / `attestation_verify.py`, `agent_edr.py`, `memory_plane.py`,
+`earned_autonomy.py` (consequence cards carry `exposure_dollars` + `entities`),
+`budget_receipts.py` (signed, hash-chained economic ledger), `workforce_value.py`,
+`savings.py`, `reliability_cert.py`, `perf_sla.py`, `air_gap.py`,
+`confidential_compute.py` (SEV-SNP/TDX detection), `kms_backends.py`,
+`sigstore_signing.py`, `supply_chain.py`, `agent_trust.py`, `soc2.py`,
+`compliance_profiles.py`. Absent entirely — anything matching `insur*`,
+`underwrit*`, `actuar*`, `warrant*`, `escrow*`, `settle*`, `payment*`, `mandate*`,
+`fedramp*`, `nist_800_53*`, `cmmc*`, or any post-quantum algorithm.
+
+### Candidate 6 — Trace-Economic Underwriting: make the agent fleet insurable
+
+**Thesis.** Agent liability is a funded market as of this quarter and the risk is
+explicitly *unpriced*. Carriers cannot underwrite what they cannot measure, and
+the measurement they need is a per-action record of what an agent was authorized
+to do, what it actually did, and what that exposed. Lightwork emits exactly that
+and does not know it.
+
+**What the market says.** Klaimee raised $5.5M (22 July 2026) to write insurance
+warranties for AI agents; Corgi writes affirmative coverage for model errors,
+hallucinations, output liability and agent mistakes; Munich Re/HSB have
+AI-specific liability products. The sector's own diagnosis is that frontier agent
+risk sits as *silent coverage* inside cyber/E&O/GL policies. A July 2026 paper
+("When Agent Automation Becomes Profitable", arXiv 2606.16465) prices autonomous
+agent risk from tool-use traces using **deterministic economic labels rather than
+LLM judges**, reporting pricing error falling from $17.7K MAE to $569, and names
+four platform requirements: detailed execution traces, task-episode records with
+bounded permissions, comparable historical traces, and explicit action→exposure
+associations.
+
+**Why us.** Bet 5 built all four without aiming at this. `ConsequencePreview`
+already carries a dollar exposure and the touched entities; the earned-autonomy
+ledger already computes predicted-vs-actual per action type; `budget_receipts` is
+already a signed economic ledger; the audit chain is already the trace store; and
+`attestation.py` already makes the whole thing portable to a party that trusts
+neither operator nor model vendor — which is precisely an underwriter's position.
+
+**The one feature.** A signed *risk cession bundle*: per action type, the
+exposure distribution, the predicted-vs-actual accuracy, the containment record
+from `agent_edr`, and the reversibility rate from the connector adapters — in a
+format an actuary can price and a third party can verify offline.
+
+**Why it may be the strongest of these.** Different acquirer pool again (carriers,
+reinsurers, brokers), commercial rather than regulatory demand so the EU AI Act
+slip does not touch it, greenfield in-repo, and it makes Bets 1 and 5 revenue-
+bearing rather than merely defensible.
+
+**Honest risk.** We would be selling into an industry that prices risk for a
+living and will not accept our own numbers on faith — which is an argument *for*
+the attestation spine, but it means the claim discipline has to be actuarial, not
+marketing. A single overstated exposure figure discovered in diligence would be
+worse than having no product.
+
+### Candidate 7 — Post-quantum audit evidence (**risk register first**)
+
+**The problem.** Every provable claim Lightwork makes rests on Ed25519 — the
+audit chain, attestations, Operating Record capsules, promotion receipts, budget
+receipts, approval signatures, agent-trust pinned keys. Grep for `ml-dsa`,
+`slh-dsa`, `dilithium`, `sphincs`, `hybrid` returns nothing.
+
+**What the market says.** NIST IR 8547 deprecates 112-bit-security public-key
+algorithms by **2030** and disallows all quantum-vulnerable public-key algorithms
+— explicitly including EdDSA — by **2035**. NSA CNSA 2.0 requires exclusive PQC
+for **software and firmware signing from 1 January 2027**. Executive Order 14412
+directs the FAR Council to require contractor compliance with NIST PQC standards
+(June 2026). NIST IR 8547 endorses **hybrid** classical+PQC signatures.
+
+**Why this bites us harder than most.** The entire Bet 1 pitch is "hand a
+regulator a sealed capsule they can verify years later." Long-retention evidence
+signed with an algorithm that has a published disallowance date is the textbook
+harvest-now/forge-later target, and for federal or defense buyers it becomes a
+procurement gate before it becomes a cryptographic one.
+
+**The bet.** Be the first agent-governance platform whose audit evidence is
+hybrid-signed and therefore still verifiable — and still *compliant* — after
+2030. This is cheap relative to its strategic weight: the signing seam is already
+centralized in `audit/signing.py` and `attestation.py`.
+
+**Honest risk.** Nobody is asking for this yet, which is exactly why it is a
+2027 procurement gate rather than a 2026 feature. It is insurance on the
+credibility of every other bet, not a standalone story.
+
+### Candidate 8 — Governance over standard agent identity (**risk register first**)
+
+**The problem.** `agent_trust.py` identifies every external agent by a **pinned
+Ed25519 public key in a Lightwork-proprietary registry**. The doc's thesis is
+"own the format, own the category." On identity, somebody else is winning the
+format.
+
+**What the market says.** The IETF AIMS draft (March 2026) assigns agents
+WIMSE/SPIFFE identifiers backed by X.509 and Workload Identity Tokens; SPIFFE is
+CNCF-graduated; W3C DID/VC supplies the credential layer; **MCP-I was donated to
+the Decentralized Identity Foundation in March 2026**; the W3C Agent Identity
+Registry Protocol CG is chartered; the FIDO Alliance is developing trusted
+agent-interaction standards; and OAuth 2.0 Token Exchange (RFC 8693) with the
+`act` claim is the recommended way to preserve a delegation chain. Singapore's
+CSA addendum already *requires* verifiable credentials plus short-lived
+OAuth/OIDC tokens and prohibits unauthorized cross-agent delegation.
+
+**The bet.** Stop competing on the registry and become the **governance layer
+over standard identity**: accept a SPIFFE ID / DID / WIT as the principal, and
+keep the capability envelope, the consequence card, the attestation and the
+containment plane as the value. An attestation that names a SPIFFE ID is far more
+portable than one naming our pinned key — this strengthens Bets 1, 2 and 4 rather
+than competing with them.
+
+**Honest risk.** Adopting somebody else's identity format gives up a small moat
+for a large amount of interoperability. That is probably the right trade, but it
+is a trade and should be made deliberately rather than by drift.
+
+### Candidate 9 — AIBOM: provenance for the agent, not just the dependency tree
+
+**Thesis.** 2026 supply-chain security moved from the "visibility era" to the
+"governance era". The AIBOM specification is an SPDX 3.0 extension (36 new
+fields) treating datasets, models and their provenance as first-class supply-chain
+elements; OWASP has an AIBOM project; enterprise contracts are starting to
+specify minimum AIBOM contents (models, datasets, APIs, cloud services, update
+mechanisms).
+
+**Why us, partly.** `sigstore_signing.py` already signs artifacts, skills are
+already signed, and `supply_chain.py` already pins and verifies. **But
+`supply_chain.py` covers the Python distribution set only** — no models, no
+datasets, no tools, no guardrails. For a platform whose whole claim is provenance,
+the inventory stops at `pip`.
+
+**The bet.** Emit a signed AIBOM for the *agent* — which models under which
+role, which learned skills and their lineage from the promotion ledger, which
+connectors and their capability envelopes, which evaluator anchors — chained into
+the Bet 1 capsule. The promotion ledger already carries the lineage; nothing
+assembles it into the format a customer's procurement team now asks for.
+
+**Honest risk.** This is closer to table stakes than to a moonshot. It probably
+belongs as a hardening item under Bet 1 rather than a bet in its own right.
+
+### Candidate 10 — Sovereign / air-gapped governance for federal and defense
+
+**Thesis.** Air-gapped agent deployment is a distinct 2026 procurement category
+(IL4–IL6, Secret/TS), and its stated stack is "model serving, retrieval, agent
+orchestration, and **audit logging mapped to NIST 800-53 controls**", all running
+with no external connectivity.
+
+**Why us, strongly.** `air_gap.py`, `confidential_compute.py` (already detects
+SEV-SNP/TDX), `kms_backends.py`, per-tenant KMS, and — decisive here — the
+attestation verifier shipped in #2332 **imports nothing from maverick and makes
+no network calls**, which is exactly what a classified environment needs to
+verify evidence without egress.
+
+**The gap.** `compliance_profiles.py` ships `hipaa` and `high` only. There is no
+FedRAMP, NIST 800-53, FISMA, CMMC or ITAR mapping anywhere in the repo. The hard
+infrastructure exists; the control mapping that turns it into an ATO package does
+not.
+
+**Honest risk.** Federal procurement cycles are measured in years and the
+literature calls this out as the "execution gap". High-value, slow, and it needs
+a partner who already holds an ATO — a different kind of design partner than the
+other bets need.
+
+### How these relate to the committed five
+
+| candidate | rides | new acquirer pool | greenfield in-repo | urgency |
+|---|---|---|---|---|
+| 6 — Trace-economic underwriting | Bets 1 + 5 | carriers, reinsurers, brokers | yes | **now** (funded this quarter) |
+| 7 — Post-quantum evidence | all five | none (protects existing) | yes | 2027 gate |
+| 8 — Standard agent identity | Bets 1, 2, 4 | none (unlocks existing) | no (replaces) | now, as a trade |
+| 9 — AIBOM | Bet 1 | none | partly | table stakes |
+| 10 — Sovereign / defense | Bets 1 + 4 | federal, defense primes | partly | slow, high value |
+
+Candidate 6 is the only one that is simultaneously greenfield, already
+substrated, commercially urgent, and pointed at buyers none of the five bets
+reach. Candidates 7 and 8 are best read as risks to the existing five that happen
+to have upside if addressed early.
