@@ -116,7 +116,10 @@ useful once a live-model arm adds multiple policy settings or model
 configurations rather than a single deterministic operating point.
 The control snapshot covers all tracked Python sources in `maverick` and
 `maverick_shield`, plus their package/root metadata; changes inside that scope
-require regenerating the published artifact.
+require regenerating the published artifact. The source digest uses strict
+UTF-8 with line endings normalized to LF, making identical Git text portable
+between Windows CRLF and Linux LF checkouts without ignoring substantive
+changes.
 
 ## Honesty guardrails (so the number survives scrutiny)
 

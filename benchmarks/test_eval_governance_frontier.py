@@ -75,6 +75,21 @@ def test_catalog_is_balanced_table_driven_and_uses_mutating_action_controls():
     }
 
 
+def test_source_digests_are_checkout_line_ending_independent(tmp_path):
+    source = tmp_path / "sample.py"
+    source.write_bytes(b"value = 1\nprint(value)\n")
+    lf_source = frontier._sha256(source)
+    lf_inputs = frontier._benchmark_inputs_digest([source])
+
+    source.write_bytes(b"value = 1\r\nprint(value)\r\n")
+    assert frontier._sha256(source) == lf_source
+    assert frontier._benchmark_inputs_digest([source]) == lf_inputs
+
+    source.write_bytes(b"value = 2\r\nprint(value)\r\n")
+    assert frontier._sha256(source) != lf_source
+    assert frontier._benchmark_inputs_digest([source]) != lf_inputs
+
+
 def test_measured_two_arm_metrics_are_green(manifest):
     results = manifest["results"]
     metrics = results["metrics"]

@@ -134,7 +134,10 @@ preserves it, or the exact signed control-source snapshot after a shallow
 checkout, squash, or rebase; and exact deterministic report regeneration.
 The control snapshot covers every tracked Python file under `maverick` and
 `maverick_shield` plus their package/root metadata, so a change anywhere in that
-measured source scope requires regenerating the published artifact.
+measured source scope requires regenerating the published artifact. Source
+content is decoded as strict UTF-8 and line endings are normalized to LF before
+hashing, so Windows CRLF and Linux LF checkouts of identical Git text share the
+same signed snapshot; any other content change still invalidates it.
 
 ## Comparing across providers
 

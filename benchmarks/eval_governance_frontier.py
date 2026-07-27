@@ -56,7 +56,7 @@ DEFAULT_PUBKEY = (
     / "trusted-publisher.pub"
 )
 PINNED_SEEDS = (17, 29, 43)
-SOURCE_SNAPSHOT_POLICY = "ancestor_or_exact_signed_control_trees_v2"
+SOURCE_SNAPSHOT_POLICY = "ancestor_or_exact_signed_control_trees_lf_v3"
 CONTROL_SOURCE_ROOTS = (
     "packages/maverick-core/maverick",
     "packages/maverick-shield/maverick_shield",
@@ -151,8 +151,18 @@ def _isolated_benchmark_env(**values: str | None):
             reset_config()
 
 
+def _canonical_source_bytes(path: Path) -> bytes:
+    """Return strict UTF-8 source bytes with platform-neutral line endings."""
+
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"benchmark source is not readable UTF-8: {path}") from exc
+    return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+
+
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(_canonical_source_bytes(path)).hexdigest()
 
 
 def _control_source_paths() -> tuple[str, ...]:
@@ -172,6 +182,10 @@ def _control_source_scope() -> dict[str, Any]:
         "roots": list(CONTROL_SOURCE_ROOTS),
         "include": ["**/*.py"],
         "metadata": list(CONTROL_SOURCE_METADATA),
+        "content_canonicalization": {
+            "encoding": "utf-8",
+            "line_endings": "lf",
+        },
     }
 
 
@@ -795,6 +809,22 @@ def _benchmark_input_paths(catalog_path: Path) -> list[Path]:
     ]
 
 
+def _benchmark_inputs_digest(paths: list[Path]) -> str:
+    """Hash the fixed v1 text inputs independent of checkout line endings."""
+
+    files: list[tuple[str, Path]] = []
+    for path in paths:
+        if not path.is_file():
+            raise ValueError(f"benchmark input not found: {path}")
+        files.append((path.name, path))
+    digest = hashlib.sha256()
+    for relative_name, path in sorted(files):
+        digest.update(relative_name.encode("utf-8", "replace"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(_canonical_source_bytes(path)).digest())
+    return digest.hexdigest()
+
+
 def run_benchmark(
     catalog_path: Path = DEFAULT_CATALOG,
     seeds: tuple[int, ...] = PINNED_SEEDS,
@@ -954,6 +984,12 @@ def run_benchmark(
                 input_paths=_benchmark_input_paths(catalog_path),
                 started=started,
             )
+            # ``build_manifest`` retains its general raw-byte semantics. This
+            # source-only suite explicitly signs canonical UTF-8/LF content so
+            # Windows and Linux checkouts of the same Git text verify equally.
+            manifest["inputs_digest"] = _benchmark_inputs_digest(
+                _benchmark_input_paths(catalog_path)
+            )
             manifest = sign(manifest)
             signature = manifest.get("signature") or {}
             captured_pubkey = str(audit["public_key_hex"])
@@ -1046,9 +1082,11 @@ def validate_tracked_artifacts(
     if str(signature.get("pubkey") or "").lower() != trusted:
         errors.append("manifest signer does not match the external trusted-key file")
 
-    from maverick.benchmark_reproducibility import digest_config, digest_inputs
+    from maverick.benchmark_reproducibility import digest_config
 
-    expected_inputs = digest_inputs(_benchmark_input_paths(catalog_path))
+    expected_inputs = _benchmark_inputs_digest(
+        _benchmark_input_paths(catalog_path)
+    )
     if manifest.get("inputs_digest") != expected_inputs:
         errors.append("benchmark source/input digest differs from the tracked manifest")
     expected_config = digest_config(_benchmark_config(PINNED_SEEDS))
@@ -1325,7 +1363,9 @@ def render_report(manifest: dict) -> str:
             "signed harness, control-implementation, and config digests; a clean",
             "measured commit; commit ancestry when history preserves it (or the",
             "exact signed control-source snapshot after a shallow checkout, squash,",
-            "or rebase); and deterministic report rendering.",
+            "or rebase); and deterministic report rendering. Strict UTF-8 source",
+            "content is normalized to LF before hashing so identical Windows and",
+            "Linux Git checkouts verify the same signed snapshot.",
             "",
         ]
     )
