@@ -231,7 +231,103 @@ def _initialize() -> None:
                 "maverick_budget_dollars_spent",
                 "Total dollars spent (lifetime)",
             )
+            # latency_budget.note_elapsed has always called record_metric with
+            # this name, but it was never registered -- and record_metric
+            # returns silently for an unknown metric, so every breach was
+            # recorded into nothing. The one signal that says a tool blew its
+            # latency budget was dropped at the last step.
+            _metrics["tool_latency_budget_exceeded"] = Counter(
+                "maverick_tool_latency_budget_exceeded_total",
+                "Tool calls that exceeded [tools] latency_budget_ms", ["tool"],
+            )
+            _register_computed_collector()
             log.info("observability: Prometheus /metrics on %s:%d", addr, port)
+
+
+def _register_computed_collector() -> None:
+    """Export the profiles this process already computes but never published.
+
+    ``tool_latency`` keeps per-tool p50/p95/p99 in a ring buffer and
+    ``provider_health`` keeps per-provider error rates; both were readable only
+    by calling ``report()`` / ``snapshot()`` in-process. An operator scraping
+    /metrics could not see the two numbers they would actually alert on -- so
+    the platform computed per-tool p99 and per-provider error rate and exported
+    neither.
+
+    A scrape-time collector rather than Counters, because these are derived
+    snapshots of a bounded window, not monotonic totals: pushing them into a
+    Counter would misreport a ring buffer that forgets as a value that only
+    grows. Registration is best-effort and never breaks startup.
+    """
+    try:
+        from prometheus_client import REGISTRY
+        from prometheus_client.core import GaugeMetricFamily
+    except ImportError:  # pragma: no cover -- optional extra
+        return
+
+    class _ComputedProfiles:
+        def collect(self):
+            lat = GaugeMetricFamily(
+                "maverick_tool_latency_ms",
+                "Per-tool latency percentiles over the in-process window",
+                labels=["tool", "quantile"])
+            calls = GaugeMetricFamily(
+                "maverick_tool_latency_samples",
+                "Samples in the per-tool latency window", labels=["tool"])
+            try:
+                from . import tool_latency
+
+                for row in tool_latency.report():
+                    tool = str(row.get("tool", "?"))
+                    for q, key in (("0.5", "p50_ms"), ("0.95", "p95_ms"),
+                                   ("0.99", "p99_ms"), ("max", "max_ms")):
+                        lat.add_metric([tool, q], float(row.get(key) or 0.0))
+                    calls.add_metric([tool], float(row.get("count") or 0))
+            except Exception:  # pragma: no cover -- a scrape must not raise
+                log.debug("observability: tool_latency collect failed", exc_info=True)
+            yield lat
+            yield calls
+
+            err = GaugeMetricFamily(
+                "maverick_provider_error_rate",
+                "Provider error rate over the in-process window",
+                labels=["provider", "model"])
+            plat = GaugeMetricFamily(
+                "maverick_provider_latency_ms",
+                "Provider latency percentiles over the in-process window",
+                labels=["provider", "model", "quantile"])
+            try:
+                from . import provider_health
+
+                for row in provider_health.get().snapshot():
+                    p = str(row.get("provider", "?"))
+                    m = str(row.get("model", "?"))
+                    err.add_metric([p, m], float(row.get("error_rate") or 0.0))
+                    for q, key in (("0.5", "p50"), ("0.95", "p95")):
+                        v = row.get(key)
+                        if v is not None:
+                            plat.add_metric([p, m, q], float(v))
+            except Exception:  # pragma: no cover
+                log.debug("observability: provider_health collect failed", exc_info=True)
+            yield err
+            yield plat
+
+            breaches = GaugeMetricFamily(
+                "maverick_tool_latency_budget_breaches",
+                "Recorded latency-budget breaches in this process")
+            try:
+                from . import latency_budget
+
+                breaches.add_metric([], float(len(latency_budget.breaches())))
+            except Exception:  # pragma: no cover
+                log.debug("observability: latency_budget collect failed", exc_info=True)
+            yield breaches
+
+    try:
+        REGISTRY.register(_ComputedProfiles())
+    except Exception:  # pragma: no cover -- duplicate registration on re-init
+        log.debug("observability: computed collector already registered",
+                  exc_info=True)
 
 
 @contextlib.contextmanager
