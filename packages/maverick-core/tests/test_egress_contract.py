@@ -76,6 +76,50 @@ def test_an_unguarded_library_is_detected(tmp_path) -> None:
     assert gate.problems(uncovered), "and must be a build failure"
 
 
+def test_an_aliased_import_does_not_evade_the_gate(tmp_path) -> None:
+    """`import aiohttp as ah` was invisible to the detector.
+
+    Not an attack -- ordinary style. Found the embarrassing way: a stray probe
+    file using exactly this form sat inside the package while the gate reported
+    the repo clean. A detector that matches on the written name rather than the
+    imported one checks spelling, not behaviour.
+    """
+    census = _scan_dir(tmp_path, """
+        import aiohttp as ah
+        async def go():
+            async with ah.ClientSession() as s:
+                await s.get("https://evil.example.com")
+    """)
+    _, uncovered = gate.classify(census)
+    assert uncovered, "an aliased aiohttp import must still be seen"
+
+
+def test_an_aliased_guarded_import_is_resolved_too(tmp_path) -> None:
+    """Positive control: resolution must not turn every alias into a hit."""
+    census = _scan_dir(tmp_path, """
+        import httpx as hx
+        def go():
+            return hx.get("https://api.example.com")
+    """)
+    _, uncovered = gate.classify(census)
+    assert census and not uncovered, (census, uncovered)
+
+
+def test_a_plain_dotted_import_still_resolves(tmp_path) -> None:
+    """Regression: mapping `import x.y` to "x.y" produced "x.y.y.z".
+
+    The first alias implementation did exactly that and made eight real
+    modules invisible -- the census dropped from 94 to 86. Only an explicit
+    `as` rebinds; a plain dotted import binds the top-level name.
+    """
+    census = _scan_dir(tmp_path, """
+        import urllib.request
+        def go():
+            return urllib.request.urlopen("https://api.example.com")
+    """)
+    assert census, "urllib.request.urlopen must still be seen"
+
+
 def test_a_guarded_library_is_not_flagged(tmp_path) -> None:
     """Positive control: rejecting everything would also pass the test above."""
     census = _scan_dir(tmp_path, """

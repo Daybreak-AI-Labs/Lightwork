@@ -104,13 +104,50 @@ def _dotted(node: ast.AST) -> str:
     return ".".join(reversed(parts))
 
 
+def _alias_map(tree: ast.AST) -> dict[str, str]:
+    """Local name -> real dotted name, for every import in the module.
+
+    Without this the gate is trivially evaded by ``import aiohttp as ah``,
+    which is not an attack so much as ordinary style -- and it was found the
+    embarrassing way, by a stray probe file sitting in the package that the
+    gate reported as clean. Covers ``import x as y``, ``import x.y as z``, and
+    ``from x import y as z``.
+    """
+    out: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                # Only an explicit `as` rebinds. Plain `import x.y` binds the
+                # TOP-LEVEL `x`, which already resolves correctly -- mapping it
+                # to "x.y" produced "urllib.request.request.urlopen" and made
+                # eight real modules invisible.
+                if a.asname:
+                    out[a.asname] = a.name
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for a in node.names:
+                out[a.asname or a.name] = f"{node.module}.{a.name}"
+    return out
+
+
+def _resolve(dotted: str, aliases: dict[str, str]) -> str:
+    """Rewrite a call's dotted name through the module's import aliases."""
+    if not dotted:
+        return ""
+    head, _, rest = dotted.partition(".")
+    real = aliases.get(head)
+    if real is None:
+        return dotted
+    return f"{real}.{rest}" if rest else real
+
+
 def _libraries_used(tree: ast.AST) -> set[str]:
     """Libraries this module issues outbound HTTP through."""
+    aliases = _alias_map(tree)
     used: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        lib = _HTTP_CALLS.get(_dotted(node.func))
+        lib = _HTTP_CALLS.get(_resolve(_dotted(node.func), aliases))
         if lib:
             used.add(lib)
     return used
