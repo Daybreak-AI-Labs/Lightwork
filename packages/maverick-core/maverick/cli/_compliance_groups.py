@@ -117,6 +117,61 @@ def ropa_cmd(fmt: str, output) -> None:
         click.echo(payload)
 
 
+@main.group("clause-playbook")
+def clause_playbook_group() -> None:
+    """Your standard contract positions -- what a vendor's paper is redlined to."""
+
+
+@clause_playbook_group.command("init")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write here instead of the configured playbook path.")
+@click.option("--force", is_flag=True,
+              help="Overwrite an existing playbook.")
+def clause_playbook_init(output, force: bool) -> None:
+    """Write a starter clause playbook you can edit.
+
+    The shipped clauses are OUR standard positions; a deployment's are its
+    own. Editing a value changes the exact language every vendor-paper redline
+    demands, with no code change. Clauses you delete fall back to the shipped
+    position, so a partial playbook is a valid one.
+    """
+    from ..paper_review import playbook_path, write_playbook
+    target = Path(output) if output else playbook_path()
+    if target.exists() and not force:
+        raise click.ClickException(
+            f"{target} already exists; pass --force to overwrite")
+    written = write_playbook(path=target)
+    click.echo(f"wrote {written}")
+    click.echo("Edit the 'positions' object, then run "
+               "`maverick clause-playbook show` to confirm what is active.")
+
+
+@clause_playbook_group.command("show")
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]),
+              default="text", help="Output format.")
+def clause_playbook_show(fmt: str) -> None:
+    """Show the clause positions in force, and which ones you have customised."""
+    import json as _json
+
+    from ..paper_review import default_playbook, load_playbook, playbook_path
+    shipped, active = default_playbook(), load_playbook()
+    custom = sorted(k for k, v in active.items() if shipped.get(k) != v)
+    if fmt == "json":
+        click.echo(_json.dumps(
+            {"path": str(playbook_path()), "customised": custom,
+             "positions": active}, indent=2, sort_keys=True))
+        return
+    path = playbook_path()
+    click.echo(f"playbook: {path}"
+               f"{'' if path.exists() else '  (not written yet — shipped positions in force)'}")
+    click.echo(f"clauses:  {len(active)}   customised: {len(custom)}")
+    for key in sorted(active):
+        mark = "*" if key in custom else " "
+        click.echo(f" {mark} {key:24} {active[key][:96]}")
+    if custom:
+        click.echo("\n* = your language, not the shipped position.")
+
+
 @main.command("dpia")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text",
               help="Output format.")

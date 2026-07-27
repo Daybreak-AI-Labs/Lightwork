@@ -262,6 +262,87 @@ OUR_POSITIONS: dict[str, str] = {
 }
 
 
+# --- the operator's playbook ---------------------------------------------
+
+PLAYBOOK_FILENAME = "clause_playbook.json"
+
+
+def playbook_path():
+    """Where the operator's clause playbook lives.
+
+    ``[paper_review] playbook_path`` wins; otherwise it sits beside the other
+    governed data under the Lightwork home."""
+    from pathlib import Path
+    try:
+        from .config import load_config
+        configured = ((load_config() or {}).get("paper_review") or {}).get(
+            "playbook_path")
+        if configured:
+            return Path(str(configured)).expanduser()
+    except Exception:  # pragma: no cover -- config read never breaks a review
+        pass
+    from .paths import data_dir
+    return data_dir("privacy") / PLAYBOOK_FILENAME
+
+
+def default_playbook() -> dict:
+    """The shipped positions, as a plain dict an operator can edit."""
+    return dict(OUR_POSITIONS)
+
+
+def write_playbook(positions: dict | None = None, *, path=None):
+    """Write a starter playbook the operator can edit. Returns the path.
+
+    This is the setup step for a real engagement: the shipped clauses are OUR
+    standard positions, and a customer's are their own."""
+    import json
+    from pathlib import Path
+    target = Path(path) if path else playbook_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "_comment": ("Your standard clause positions. Each key is a clause id "
+                     "from the Art. 28 or CCPA checklist; the value is the "
+                     "exact language a vendor's paper must be redlined to. "
+                     "Keys you omit fall back to the shipped position."),
+        "positions": dict(positions if positions is not None
+                          else default_playbook()),
+    }
+    target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                      encoding="utf-8")
+    try:
+        target.chmod(0o600)
+    except OSError:  # pragma: no cover -- best effort on odd filesystems
+        pass
+    return target
+
+
+def load_playbook() -> dict:
+    """Our positions with the operator's playbook layered on top.
+
+    Falls back to the shipped positions entirely -- a missing, unreadable, or
+    malformed playbook must never leave a redline with empty clauses."""
+    import json
+    positions = default_playbook()
+    try:
+        path = playbook_path()
+        if not path.exists():
+            return positions
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:  # pragma: no cover -- a bad file degrades, never raises
+        log.warning("paper_review: playbook unreadable (%s); using the shipped "
+                    "positions", e)
+        return positions
+    body = raw.get("positions") if isinstance(raw, dict) else None
+    if not isinstance(body, dict):
+        log.warning("paper_review: playbook has no 'positions' object; using "
+                    "the shipped positions")
+        return positions
+    for key, text in body.items():
+        if isinstance(key, str) and isinstance(text, str) and text.strip():
+            positions[key] = text.strip()
+    return positions
+
+
 @dataclass
 class Concern:
     """One departure from our standard position, for the analysis report."""
@@ -479,6 +560,7 @@ def analyze(text: str, *, vendor: str = "", instrument: str = "",
     classification = classify_instrument(text, filename=document_name)
     chosen = instrument if instrument in INSTRUMENTS else classification["instrument"]
     paragraphs = _paragraphs(text)
+    positions = load_playbook()
     concerns: list[Concern] = []
     present = 0
     for key, requirement, citation, severity, patterns in _checklist_for(chosen):
@@ -497,8 +579,8 @@ def analyze(text: str, *, vendor: str = "", instrument: str = "",
             clause_key=key, requirement=requirement, citation=citation,
             severity=severity, status=status,
             their_language=para if status != "missing" else "",
-            our_position=OUR_POSITIONS.get(key, ""),
-            proposed=OUR_POSITIONS.get(key, ""),
+            our_position=positions.get(key, ""),
+            proposed=positions.get(key, ""),
         ))
     return PaperReview(
         vendor=vendor, instrument=chosen, classification=classification,
@@ -592,6 +674,104 @@ def draft_language(review: PaperReview, *, budget_dollars: float = 2.0) -> Paper
     return review
 
 
+_STATUS_LABEL = {
+    "missing": "MISSING",
+    "conflicting": "CONFLICTS WITH OUR POSITION",
+    "unclear": "UNCLEAR / NEGATED",
+    "present": "meets our position",
+}
+
+_RECOMMENDATION_LABEL = {
+    "do_not_sign_without_changes":
+        "DO NOT SIGN as drafted — high-severity gaps must be closed first.",
+    "acceptable_with_changes":
+        "Acceptable once the attached tracked changes are accepted.",
+    "acceptable": "Acceptable — no departures from our standard position.",
+}
+
+
+def analysis_memo(review: PaperReview, *, version: int = 1,
+                  reviewed_by: str = "", redline_filename: str = "",
+                  redline_result=None, now: float | None = None) -> str:
+    """The reviewer-facing memo that accompanies the redline.
+
+    Plain text on purpose: it has to stay readable in a document preview
+    (OneTrust's, a dashboard's), and it must state what was NOT done as
+    plainly as what was."""
+    import time as _time
+    d = review.to_dict()
+    stamp = _time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                           _time.gmtime(now if now is not None else _time.time()))
+    lines = [
+        f"VENDOR PAPER REVIEW — {review.vendor}  (v{version})",
+        "=" * 68,
+        f"Document reviewed : {review.document_name}",
+        f"Instrument        : {d['instrument_label']} "
+        f"({d['classification'].get('confidence', 'unknown')} confidence)",
+        f"                    {d['classification'].get('reason', '')}",
+        f"Reviewed by       : {reviewed_by}",
+        f"Reviewed at       : {stamp}",
+        f"Clause coverage   : {d['clauses_present']} of {d['clauses_total']} "
+        "meet our standard position",
+        f"Departures        : {d['gaps']} "
+        f"({d['high_severity_gaps']} high severity)",
+        "",
+        "RECOMMENDATION",
+        "-" * 68,
+        _RECOMMENDATION_LABEL.get(d["recommendation"], d["recommendation"]),
+        "",
+        "CONCERNS",
+        "-" * 68,
+    ]
+    gaps = review.gaps
+    if not gaps:
+        lines.append("None. Every checked clause meets our standard position.")
+    for i, c in enumerate(gaps, start=1):
+        lines += [
+            f"{i}. [{c.severity.upper()}] {c.requirement}",
+            f"   Basis          : {c.citation}",
+            f"   Status         : {_STATUS_LABEL.get(c.status, c.status)}",
+        ]
+        if c.their_language:
+            lines.append(f"   Their wording  : {c.their_language[:300]}")
+        source = ("model-tailored to their drafting"
+                  if c.drafted_by == "model" else "our standard template")
+        lines += [
+            f"   Required change: {c.proposed[:600]}",
+            f"   Language source: {source}",
+            "",
+        ]
+    if redline_filename:
+        lines += ["TRACKED-CHANGES DOCUMENT", "-" * 68,
+                  f"Attached as: {redline_filename}"]
+    if redline_result is not None:
+        r = redline_result.to_dict()
+        lines.append(
+            f"{r['applied']} clause(s) marked up in place, "
+            f"{r['inserted']} clause(s) proposed as additions.")
+        if r["synthesized"]:
+            lines.append(
+                "The vendor supplied a PDF, so the redline is a reconstruction "
+                "of the text we could read; their original file was not "
+                "modified.")
+        if r["unmatched"]:
+            lines.append(
+                f"{len(r['unmatched'])} required change(s) could NOT be "
+                "anchored to a paragraph and must be applied by hand:")
+            lines += [f"   - {u}" for u in r["unmatched"]]
+    lines += [
+        "",
+        "HOW TO READ THIS",
+        "-" * 68,
+        "Gap findings are produced deterministically from our clause "
+        "checklists — a model cannot create or clear a finding. Where a model "
+        "was available it only re-drafted our required language to match the "
+        "vendor's defined terms, and any draft that weakened our position was "
+        "discarded in favour of the template wording.",
+    ]
+    return "\n".join(lines)
+
+
 def _config() -> dict:
     try:
         from .config import load_config
@@ -621,5 +801,7 @@ def review_paper(text: str, *, vendor: str = "", instrument: str = "",
 
 
 __all__ = ["INSTRUMENTS", "INSTRUMENT_LABELS", "ADDENDUM_CHECKLIST",
-           "OUR_POSITIONS", "Concern", "PaperReview", "classify_instrument",
-           "analyze", "draft_language", "review_paper"]
+           "OUR_POSITIONS", "PLAYBOOK_FILENAME", "Concern", "PaperReview",
+           "classify_instrument", "analyze", "draft_language", "review_paper",
+           "analysis_memo", "playbook_path", "default_playbook",
+           "write_playbook", "load_playbook"]

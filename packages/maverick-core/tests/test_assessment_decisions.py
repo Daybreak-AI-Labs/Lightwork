@@ -275,3 +275,47 @@ def test_full_assessment_audit_outbox_blocks_then_read_recovery(monkeypatch):
         expected_revision=raw["revision"],
     )
     assert recovered["revision"] == raw["revision"] + 1
+
+
+# --- assignment: whose desk is this on? -----------------------------------
+
+def test_assign_puts_a_record_on_a_named_desk_and_unassigns():
+    from maverick.assessment import assign_assessment
+    s = _saved()
+    assert list_saved()[0]["assignee"] == ""      # unassigned by default
+
+    rec = assign_assessment(s.id, "A. Novak", assigned_by="dpo")
+    assert rec["assignee"] == "A. Novak"
+    assert rec["assigned_by"] == "dpo" and rec["assigned_at"] > 0
+    assert list_saved()[0]["assignee"] == "A. Novak"
+
+    # Blank returns it to the pool and clears the provenance with it.
+    rec = assign_assessment(s.id, "", assigned_by="dpo")
+    assert "assignee" not in rec and "assigned_at" not in rec
+    assert list_saved()[0]["assignee"] == ""
+
+
+def test_assign_is_revision_guarded():
+    from maverick.assessment import assign_assessment
+    s = _saved()
+    stale = list_saved()[0]["revision"]
+    assign_assessment(s.id, "A. Novak", expected_revision=stale)
+    with pytest.raises(AssessmentConflict):
+        assign_assessment(s.id, "Someone Else", expected_revision=stale)
+
+
+def test_assign_does_not_gate_who_may_decide():
+    # Routing, not permission: assignment must never become a second, silent
+    # approval gate on top of the real one.
+    from maverick.assessment import assign_assessment
+    s = _saved()
+    assign_assessment(s.id, "A. Novak")
+    rec = decide_assessment(s.id, "approved", decided_by="someone-else",
+                            cadence_days=None)
+    assert rec["status"] == "approved" and rec["decided_by"] == "someone-else"
+    assert rec["assignee"] == "A. Novak"     # and the owner is untouched
+
+
+def test_assign_unknown_assessment_returns_none():
+    from maverick.assessment import assign_assessment
+    assert assign_assessment("no-such-id", "A. Novak") is None

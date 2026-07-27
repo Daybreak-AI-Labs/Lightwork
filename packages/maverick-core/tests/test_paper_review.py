@@ -236,3 +236,89 @@ def test_config_can_forbid_the_model_from_seeing_contracts(monkeypatch, tmp_path
         assert r.gaps and r.recommendation == "do_not_sign_without_changes"
     finally:
         config.reset_config_cache()
+
+
+# --- the operator's clause playbook (the setup path) ----------------------
+
+def test_playbook_defaults_to_the_shipped_positions(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    from maverick import config
+    config.reset_config_cache()
+    try:
+        assert not pr.playbook_path().exists()
+        assert pr.load_playbook() == pr.default_playbook()
+    finally:
+        config.reset_config_cache()
+
+
+def test_written_playbook_overrides_only_what_it_names(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    from maverick import config
+    config.reset_config_cache()
+    try:
+        mine = "Supplier shall not appoint any Sub-Processor without consent."
+        pr.write_playbook({**pr.default_playbook(), "subprocessors": mine})
+        active = pr.load_playbook()
+        assert active["subprocessors"] == mine
+        # Everything untouched still carries our language.
+        assert active["audit"] == pr.OUR_POSITIONS["audit"]
+        # And it is the language the redline actually demands.
+        r = pr.analyze("DATA PROCESSING AGREEMENT under Article 28 GDPR.\n"
+                       "Processor may engage sub-processors at its sole "
+                       "discretion.\n")
+        sub = next(c for c in r.concerns if c.clause_key == "subprocessors")
+        assert sub.proposed == mine
+    finally:
+        config.reset_config_cache()
+
+
+def test_a_broken_playbook_degrades_to_the_shipped_positions(
+        tmp_path, monkeypatch):
+    # A syntactically broken or half-written playbook must never leave a
+    # redline with empty clauses -- that would send a vendor a blank demand.
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    from maverick import config
+    config.reset_config_cache()
+    try:
+        path = pr.playbook_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{ not json at all", encoding="utf-8")
+        assert pr.load_playbook() == pr.default_playbook()
+        path.write_text('{"positions": "not an object"}', encoding="utf-8")
+        assert pr.load_playbook() == pr.default_playbook()
+        # Empty values are ignored rather than blanking a clause.
+        path.write_text('{"positions": {"audit": "   "}}', encoding="utf-8")
+        assert pr.load_playbook()["audit"] == pr.OUR_POSITIONS["audit"]
+    finally:
+        config.reset_config_cache()
+
+
+def test_playbook_path_is_configurable(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.toml"
+    custom = tmp_path / "legal" / "our-clauses.json"
+    cfg.write_text(f'[paper_review]\nplaybook_path = "{custom}"\n',
+                   encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
+    from maverick import config
+    config.reset_config_cache()
+    try:
+        assert pr.playbook_path() == custom
+        pr.write_playbook({**pr.default_playbook(), "audit": "Our audit text."})
+        assert custom.exists()
+        assert pr.load_playbook()["audit"] == "Our audit text."
+    finally:
+        config.reset_config_cache()
+
+
+def test_analysis_memo_is_shared_and_states_its_limits():
+    r = pr.review_paper(DPA_TEXT, vendor="Acme", document_name="a.docx",
+                        use_model=False)
+    memo = pr.analysis_memo(r, version=3, reviewed_by="A. Novak",
+                            redline_filename="acme-dpa-redline.docx")
+    assert "VENDOR PAPER REVIEW — Acme  (v3)" in memo
+    assert "A. Novak" in memo and "acme-dpa-redline.docx" in memo
+    assert "CONFLICTS WITH OUR POSITION" in memo
+    assert "a model cannot create or clear a finding" in memo

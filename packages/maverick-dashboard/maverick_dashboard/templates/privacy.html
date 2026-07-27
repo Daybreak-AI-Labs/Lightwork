@@ -156,7 +156,86 @@
       <button class="btn" data-tab="ai" type="button">AI registry ({{ records.ai | length }})</button>
       <button class="btn" data-tab="ropa" type="button">RoPA ({{ records.ropa | length }})</button>
       <button class="btn" data-tab="dsar" type="button">DSARs ({{ records.dsar | length }})</button>
+      <button class="btn" data-tab="paper" type="button">Vendor paper ({{ records.paper | length }})</button>
       <button class="btn" data-tab="incidents" type="button">Incidents ({{ records.incidents | length }}){% if records.incidents_breached %} <span class="badge blocked">{{ records.incidents_breached }} past 72h</span>{% endif %}</button>
+    </div>
+
+    <div class="pw-tab" id="pw-tab-paper" hidden>
+      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
+        When the vendor insists on <strong>their</strong> paper. Upload it and
+        Lightwork works out whether it is a DPA or a privacy addendum, compares
+        every clause against your playbook, and returns their document marked up
+        with real Word tracked changes. Which clauses fall short is decided
+        deterministically — a model only re-words <em>your</em> clause to match
+        their drafting, and never weakens it.
+      </p>
+      <form class="pw-form" id="pw-paper-form">
+        <div class="pw-form-row">
+          <label><span>Vendor</span>
+            <input class="ctl" id="pw-paper-vendor" maxlength="200" required
+                   placeholder="Acme Corp"></label>
+          <label><span>Instrument</span>
+            <select class="ctl" id="pw-paper-instrument">
+              <option value="">Work it out from the document</option>
+              <option value="dpa">Data Processing Agreement (GDPR Art. 28)</option>
+              <option value="addendum">Privacy Addendum (CCPA/CPRA)</option>
+            </select></label>
+        </div>
+        <label><span>Their document (.docx or a digital PDF)</span>
+          <input class="ctl" type="file" id="pw-paper-file" required
+                 accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label>
+        <div class="pw-form-actions">
+          <button class="btn btn--primary" type="submit" id="pw-paper-go">Review their paper</button>
+          <span class="pw-form-err" id="pw-paper-err" role="alert"></span>
+        </div>
+      </form>
+      <div id="pw-paper-result"></div>
+
+      <details class="pw-form" id="pw-playbook">
+        <summary style="cursor:pointer;">Your clause playbook — the language every redline demands</summary>
+        <p class="muted" style="font-size:var(--text-sm);margin:var(--sp-2) 0;">
+          These are the positions a vendor's paper is redlined <em>to</em>. The
+          shipped text is our standard language; edit any clause to your own and
+          every future redline demands yours instead. Clauses you leave alone
+          keep the shipped position. Also settable with
+          <code>maverick clause-playbook init</code>.
+        </p>
+        <div id="pw-playbook-rows"></div>
+        <div class="pw-form-actions">
+          <button class="btn btn--primary" id="pw-playbook-save" type="button">Save playbook</button>
+          <span class="muted" id="pw-playbook-path" style="font-size:var(--text-xs);"></span>
+          <span class="pw-form-err" id="pw-playbook-err" role="alert"></span>
+        </div>
+      </details>
+
+      {% if records.paper %}
+      <div class="pw-scroll">
+      <table>
+        <thead><tr><th scope="col">vendor</th><th scope="col">instrument</th>
+          <th scope="col">ver</th><th scope="col">clauses OK</th>
+          <th scope="col">departures</th><th scope="col">verdict</th>
+          <th scope="col">reviewed</th><th scope="col"></th></tr></thead>
+        <tbody>
+          {% for r in records.paper %}
+          <tr>
+            <td>{{ r.vendor }}{% if r.document_name %}<br><span class="muted" style="font-size:var(--text-xs);">{{ r.document_name }}</span>{% endif %}</td>
+            <td>{{ r.instrument_label }}</td>
+            <td>v{{ r.version }}</td>
+            <td>{{ r.clauses_present }}/{{ r.clauses_total }}</td>
+            <td>{{ r.gaps }}{% if r.high_severity_gaps %} <span class="muted">({{ r.high_severity_gaps }} high)</span>{% endif %}</td>
+            <td><span class="badge {{ 'blocked' if r.recommendation == 'do_not_sign_without_changes' else 'warn' if r.recommendation == 'acceptable_with_changes' else 'done' }}">
+              {{ 'do not sign as drafted' if r.recommendation == 'do_not_sign_without_changes' else 'acceptable with changes' if r.recommendation == 'acceptable_with_changes' else 'acceptable' }}</span></td>
+            <td>{{ r.created }}</td>
+            <td>
+              <a class="btn" href="/api/v1/privacy/paper-reviews/{{ r.id }}/memo" target="_blank">Memo</a>
+              {% if r.redline_bytes %}<a class="btn" href="/api/v1/privacy/paper-reviews/{{ r.id }}/redline">Redline</a>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% endif %}
     </div>
 
     <div class="pw-tab" id="pw-tab-dpa">
@@ -521,6 +600,132 @@
       });
     });
   });
+
+  // Vendor paper: multipart upload -> review -> redline. Not the JSON path
+  // above, and deliberately not a page reload on submit: the reviewer needs to
+  // read the verdict and grab the redline before the table refreshes.
+  var paperForm = document.getElementById('pw-paper-form');
+  if (paperForm) {
+    paperForm.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var err = document.getElementById('pw-paper-err');
+      var out = document.getElementById('pw-paper-result');
+      var go = document.getElementById('pw-paper-go');
+      var fileEl = document.getElementById('pw-paper-file');
+      err.textContent = '';
+      out.innerHTML = '';
+      if (!fileEl.files || !fileEl.files[0]) {
+        err.textContent = 'Choose their document first.';
+        return;
+      }
+      var fd = new FormData();
+      fd.append('file', fileEl.files[0]);
+      fd.append('vendor', document.getElementById('pw-paper-vendor').value);
+      fd.append('instrument', document.getElementById('pw-paper-instrument').value);
+      go.disabled = true;
+      go.textContent = 'Reading and comparing…';
+      fetch('/api/v1/privacy/paper-reviews', { method: 'POST', body: fd })
+        .then(function (r) {
+          return r.text().then(function (t) {
+            if (!r.ok) { throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 300)); }
+            return JSON.parse(t);
+          });
+        })
+        .then(function (rec) {
+          var verdict = rec.recommendation === 'do_not_sign_without_changes'
+            ? ['blocked', 'Do not sign as drafted']
+            : rec.recommendation === 'acceptable_with_changes'
+              ? ['warn', 'Acceptable with the attached changes']
+              : ['done', 'Acceptable'];
+          var esc = function (s) {
+            return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+              return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+            });
+          };
+          out.innerHTML =
+            '<div class="panel" style="margin-top:var(--sp-3);">' +
+            '<p>That is a <strong>' + esc(rec.instrument_label) + '</strong> (' +
+            esc((rec.classification || {}).confidence) + ' confidence), filed as ' +
+            '<strong>v' + rec.version + '</strong>.<br>' +
+            rec.clauses_present + ' of ' + rec.clauses_total +
+            ' clauses meet your standard position; <strong>' + rec.gaps +
+            '</strong> depart from it (<strong>' + rec.high_severity_gaps +
+            '</strong> high severity).</p>' +
+            '<p><span class="badge ' + verdict[0] + '">' + verdict[1] + '</span></p>' +
+            ((rec.redline && rec.redline.unmatched && rec.redline.unmatched.length)
+              ? '<p class="muted">' + rec.redline.unmatched.length +
+                ' change(s) could not be anchored to a paragraph and must be ' +
+                'applied by hand — the memo lists them.</p>' : '') +
+            '<p><a class="btn" href="/api/v1/privacy/paper-reviews/' + rec.id +
+            '/memo" target="_blank">Read the memo</a> ' +
+            '<a class="btn btn--primary" href="/api/v1/privacy/paper-reviews/' +
+            rec.id + '/redline">Download the tracked-changes document</a></p>' +
+            '</div>';
+        })
+        .catch(function (e) { err.textContent = e.message; })
+        .finally(function () {
+          go.disabled = false;
+          go.textContent = 'Review their paper';
+        });
+    });
+  }
+
+  // The clause playbook editor: loaded lazily the first time it is opened, so
+  // the page does not pay for it on every render.
+  var playbook = document.getElementById('pw-playbook');
+  if (playbook) {
+    var loaded = false;
+    playbook.addEventListener('toggle', function () {
+      if (!playbook.open || loaded) { return; }
+      loaded = true;
+      fetch('/api/v1/privacy/clause-playbook')
+        .then(function (r) { return r.json(); })
+        .then(function (pb) {
+          document.getElementById('pw-playbook-path').textContent =
+            'stored at ' + pb.path;
+          var rows = document.getElementById('pw-playbook-rows');
+          rows.innerHTML = '';
+          Object.keys(pb.positions).sort().forEach(function (key) {
+            var custom = pb.customised.indexOf(key) !== -1;
+            var wrap = document.createElement('label');
+            wrap.style.display = 'block';
+            wrap.style.marginBottom = 'var(--sp-2)';
+            var span = document.createElement('span');
+            span.textContent = key + (custom ? '  (yours)' : '');
+            var ta = document.createElement('textarea');
+            ta.className = 'ctl';
+            ta.rows = 2;
+            ta.dataset.clause = key;
+            ta.value = pb.positions[key];
+            wrap.appendChild(span);
+            wrap.appendChild(ta);
+            rows.appendChild(wrap);
+          });
+        })
+        .catch(function (e) {
+          document.getElementById('pw-playbook-err').textContent = e.message;
+        });
+    });
+    document.getElementById('pw-playbook-save').addEventListener('click', function () {
+      var err = document.getElementById('pw-playbook-err');
+      err.textContent = '';
+      var positions = {};
+      document.querySelectorAll('#pw-playbook-rows textarea[data-clause]')
+        .forEach(function (ta) {
+          if (ta.value.trim()) { positions[ta.dataset.clause] = ta.value.trim(); }
+        });
+      fetch('/api/v1/privacy/clause-playbook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ positions: positions })
+      }).then(function (r) {
+        if (r.ok) { location.reload(); return; }
+        return r.text().then(function (t) {
+          throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 300));
+        });
+      }).catch(function (e) { err.textContent = e.message; });
+    });
+  }
 
   // AI registry: register the system a completed AIRA describes.
   var aiBtn = document.getElementById('pw-ai-register');
