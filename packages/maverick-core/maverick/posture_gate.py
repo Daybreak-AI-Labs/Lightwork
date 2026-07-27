@@ -6,9 +6,12 @@ own it means ~19,000 passing tests describe a configuration no customer runs.
 Production ships secure-by-default: audit signing on, at-rest encryption on,
 consent fail-closed for high-risk actions, and the tool-risk ceiling applied.
 
-Running the suite under the real posture (``MAVERICK_TEST_SECURE_DEFAULT=1``)
-produces **91 failures out of 15,869**. That number is the point of this
-module. It was projected as two to three weeks of work on the premise that
+Running ``packages/maverick-core/tests`` under the real posture
+(``MAVERICK_TEST_SECURE_DEFAULT=1``) produces **91 failures out of 15,869**.
+That number is the point of this module. It is scoped to maverick-core because
+that is where every control the posture flips lives, and because that is the
+tree the baseline was actually measured over -- widening the claim to the whole
+workspace without measuring it would be the defect this repo keeps finding. It was projected as two to three weeks of work on the premise that
 "the breakage is the work"; reading the failures, none is a product bug. They
 are tests that assert a legacy default (``test_off_by_default`` for at-rest
 encryption is correct to fail when encryption defaults on) or fixtures that

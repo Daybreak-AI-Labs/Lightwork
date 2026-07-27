@@ -419,11 +419,20 @@ jobs:
       - name: Test under the production security posture
         env:
           MAVERICK_TEST_SECURE_DEFAULT: "1"
+        # Scoped to maverick-core because that is where the baseline was
+        # measured and where every control the posture flips lives (audit
+        # signing, at-rest encryption, consent, the tool-risk ceiling).
+        # Widening it to the whole workspace needs a measurement first --
+        # asserting a baseline that was never taken is the defect class this
+        # PR exists to close.
+        #
         # `|| true`: the run is EXPECTED to fail while the baseline is
-        # non-empty. The gate below is what decides pass/fail, and it fails
-        # closed on a report with no pytest summary, so a killed run cannot be
-        # mistaken for a clean one.
-        run: pytest -q -p no:randomly --tb=no > posture-report.txt || true
+        # non-empty. The gate below decides pass/fail, and it fails closed on
+        # a report with no pytest summary, so a killed run cannot be mistaken
+        # for a clean one.
+        run: |
+          pytest packages/maverick-core/tests -q -p no:randomly --tb=no \
+            > posture-report.txt || true
       - name: Posture ratchet (the known-failure set may only shrink)
         run: python -m maverick.posture_gate --ci --report posture-report.txt
 
