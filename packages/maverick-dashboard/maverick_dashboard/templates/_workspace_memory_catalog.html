@@ -277,8 +277,39 @@
       document.querySelectorAll('#pw-table tbody tr').forEach(function (tr) {
         var show = f === 'all' ||
           (f === 'high' ? tr.dataset.residual === 'high' :
-           f === 'due' ? tr.dataset.due === '1' : tr.dataset.status === f);
+           f === 'due' ? tr.dataset.due === '1' :
+           f === 'mine' ? tr.dataset.mine === '1' :
+           f === 'unassigned' ? !tr.dataset.assignee : tr.dataset.status === f);
         tr.style.display = show ? '' : 'none';
+      });
+    });
+  });
+
+  // Assign an assessment to a reviewer. The revision comes off the row, so a
+  // stale page loses the CAS and is told to refresh rather than clobbering
+  // someone else's change.
+  document.querySelectorAll('.pw-assign-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var current = btn.dataset.current || '';
+      var who = window.prompt(
+        'Assign to which reviewer? (blank returns it to the pool)', current);
+      if (who === null) { return; }
+      var row = btn.closest('tr');
+      fetch('/api/v1/assess/sessions/' +
+            encodeURIComponent(btn.dataset.assessment) + '/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assignee: who.trim(),
+          expected_revision: parseInt(row.dataset.revision, 10) || 0
+        })
+      }).then(function (r) {
+        if (r.ok) { location.reload(); return; }
+        return r.text().then(function (t) {
+          window.alert(r.status === 409
+            ? 'This assessment changed while the page was open — refresh and try again.'
+            : 'HTTP ' + r.status + ': ' + t.slice(0, 200));
+        });
       });
     });
   });

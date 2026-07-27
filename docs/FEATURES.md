@@ -550,9 +550,10 @@ here.
     or from digital PDFs (stdlib extractor: FlateDecode, Tj/TJ/hex
     operators; scanned PDFs refuse honestly).
   - *Vendor-paper review + tracked-changes redline*
-    (`paper_review.py`, `docx_redline.py`, the concierge's reviewer desk;
-    `[paper_review] use_model`, wizard step) — when a vendor insists on
-    THEIR paper: classify the instrument (GDPR DPA vs CCPA/CPRA privacy
+    (`paper_review.py`, `docx_redline.py`, the **Vendor paper** tab on
+    `/privacy` + `/api/v1/privacy/paper-reviews`, and the concierge's
+    reviewer desk; `[paper_review] use_model`, wizard step) — when a vendor
+    insists on THEIR paper: classify the instrument (GDPR DPA vs CCPA/CPRA privacy
     addendum, scored from the document and filename, ties resolving to the
     stronger instrument), compare it clause-by-clause against our standard
     positions, and emit two deliverables — an analysis memo and the vendor's
@@ -569,6 +570,22 @@ here.
     uploaded `.docx` in place (every other package part preserved) or
     reconstruct from a digital PDF, saying so explicitly. Stdlib OOXML — no
     python-docx.
+    **Setting it up:** the shipped clauses are *our* standard positions; a
+    deployment's are its own. `maverick clause-playbook init` writes an
+    editable playbook (`show` reports what is in force and what you have
+    customised), `[paper_review] playbook_path` relocates it, and the
+    **Your clause playbook** editor on the Vendor paper tab
+    (`GET`/`POST /api/v1/privacy/clause-playbook`, admin to write) does the
+    same without a terminal. Clauses left alone keep the shipped position, so
+    a partial playbook is a valid one, and a missing or malformed one degrades
+    to the shipped language rather than emitting a blank demand.
+- **Assessment assignment** (`assessment.assign_assessment`,
+  `POST /api/v1/assess/sessions/{id}/assign`, the **owner** column plus
+  *Mine* / *Unassigned* filters on every department worklist) — every other
+  field on an assessment is post-hoc attribution (who decided, who answered);
+  this is the only one that says whose job it is NEXT, so a reviewer can ask
+  "what is on my desk?". Revision-guarded and audited like every other
+  assessment mutation. Routing only: it never gates who may decide.
   - *AI systems registry* — EU AI Act tier screening
     (prohibited/high/limited/minimal) using the Act's own tests (Art. 5,
     Annex III, Art. 50) with matched signals + tier obligations; a

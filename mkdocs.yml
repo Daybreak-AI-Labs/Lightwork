@@ -1,8 +1,8 @@
 site_name: Lightwork
 site_description: Recursive multi-agent swarm. Drives Claude / GPT / Kimi / Grok / Gemini / Ollama from one kernel.
-site_url: https://day-ai-labs.github.io/Lightwork/
-repo_url: https://github.com/Day-AI-Labs/Lightwork
-repo_name: Day-AI-Labs/Lightwork
+site_url: https://daybreak-ai-labs.github.io/Lightwork/
+repo_url: https://github.com/Daybreak-AI-Labs/Lightwork
+repo_name: Daybreak-AI-Labs/Lightwork
 edit_uri: edit/main/docs/
 copyright: Proprietary, commercially licensed (see LICENSE). Built for everyone, not just the technical few.
 
@@ -47,6 +47,14 @@ theme:
 plugins:
   - search:
       lang: en
+
+# Many engineering and assurance pages intentionally cite versioned source,
+# workflow, and benchmark artifacts outside MkDocs' docs_dir. MkDocs cannot
+# validate those repository-relative targets, so retain the diagnostics as
+# build information while keeping strict mode for every other warning class.
+validation:
+  links:
+    not_found: info
 
 markdown_extensions:
   - admonition
@@ -95,6 +103,8 @@ nav:
   - Security:
       - Security & GRC suite: SECURITY_GRC.md
       - Model Risk & AI Assurance: MODEL_RISK_ASSURANCE.md
+      - AI Evidence-Ready Gateway: AI_EVIDENCE_GATEWAY.md
+      - Governance Frontier benchmark: https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md
       - Governed model improvement: MODEL_IMPROVEMENT_PLATFORM.md
       - Threat model: security/threat-model.md
       - DGM evaluator evidence: security/dgm-evaluator-evidence.md
@@ -130,7 +140,7 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/Day-AI-Labs/Lightwork
+      link: https://github.com/Daybreak-AI-Labs/Lightwork
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/maverick-agent/
   generator: false

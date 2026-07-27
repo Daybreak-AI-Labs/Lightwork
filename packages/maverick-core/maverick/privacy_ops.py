@@ -728,6 +728,7 @@ _AI = _RecordStore("ai_registry", "AI")
 _ROPA = _RecordStore("ropa", "ROPA")
 _DSAR = _RecordStore("dsar_requests", "DSAR")
 _INCIDENT = _RecordStore("privacy_incidents", "INC")
+_PAPER = _RecordStore("paper_reviews", "PAPR")
 
 
 def _actor_label(actor: str = "") -> str:
@@ -864,6 +865,7 @@ def retry_pending_audits(*, limit: int = 100) -> int:
         ("ropa", _ROPA),
         ("dsar", _DSAR),
         ("incident", _INCIDENT),
+        ("paper_review", _PAPER),
     )
     with _AUDIT_RETRY_STATE_LOCK:
         start = _AUDIT_RETRY_STORE_OFFSET % len(stores)
@@ -1900,6 +1902,108 @@ def list_dpa_reviews() -> list[dict]:
 def get_dpa_review(review_id: str) -> dict | None:
     retry_pending_audits()
     return _DPA.load(review_id)
+
+
+# --------------------------------------------------------------------------- #
+# Vendor-paper reviews -- their paper against our playbook, with the redline
+# --------------------------------------------------------------------------- #
+
+def _redline_dir():
+    from .paths import data_dir
+    return data_dir("paper_redlines")
+
+
+def save_paper_review(review, *, redline: bytes = b"", memo: str = "",
+                      redline_result=None, reviewed_by: str = "",
+                      assessment_id: str = "",
+                      redline_filename: str = "") -> dict:
+    """Persist one vendor-paper review and its tracked-changes document.
+
+    The redline is written beside the record rather than inside it: it is a
+    binary Word package, and a reviewer needs to download exactly the bytes
+    that were reviewed, not a re-render that might differ.
+
+    ``version`` counts prior reviews of the same vendor+instrument, so a
+    renegotiated paper reads as v1, v2, v3 rather than a pile of same-named
+    files."""
+    d = review.to_dict()
+    vendor = (d.get("vendor") or "").strip()[:200]
+    instrument = d.get("instrument") or "dpa"
+    prior = sum(1 for r in _PAPER.list()
+                if (r.get("vendor") or "").strip().lower() == vendor.lower()
+                and r.get("instrument") == instrument)
+    version = prior + 1
+    if not memo:
+        # Built here, not by the caller, so the version stamped on the memo is
+        # the version the record actually got -- one code path, no drift.
+        from .paper_review import analysis_memo
+        memo = analysis_memo(
+            review, version=version, reviewed_by=_actor_label(reviewed_by),
+            redline_filename=redline_filename, redline_result=redline_result)
+    record = {
+        "id": _PAPER.new_id(),
+        "vendor": vendor,
+        "instrument": instrument,
+        "instrument_label": d.get("instrument_label", ""),
+        "document_name": (d.get("document_name") or "")[:300],
+        "created_at": time.time(),
+        "reviewed_by": _actor_label(reviewed_by),
+        "assessment_id": str(assessment_id or "")[:128],
+        "version": version,
+        "status": "pending_review",
+        "classification": d.get("classification") or {},
+        "clauses_present": d.get("clauses_present", 0),
+        "clauses_total": d.get("clauses_total", 0),
+        "gaps": d.get("gaps", 0),
+        "high_severity_gaps": d.get("high_severity_gaps", 0),
+        "recommendation": d.get("recommendation", ""),
+        "drafted_with_model": bool(d.get("drafted_with_model")),
+        "concerns": d.get("concerns") or [],
+        "memo": memo,
+        "redline_filename": redline_filename or "",
+        "redline_bytes": len(redline or b""),
+    }
+    _queue_audit(record, "create", reviewed_by)
+    saved = _PAPER.save(record, expected_revision=0)
+    if redline:
+        directory = _redline_dir()
+        from .file_lock import ensure_private_directory
+        ensure_private_directory(directory)
+        path = directory / f"{saved['id']}.docx"
+        path.write_bytes(redline)
+        try:
+            path.chmod(0o600)
+        except OSError:  # pragma: no cover -- best effort on odd filesystems
+            pass
+    return _audit_mutation(_PAPER, "paper_review", saved)
+
+
+def list_paper_reviews() -> list[dict]:
+    retry_pending_audits()
+    return [{k: r.get(k) for k in
+             ("id", "vendor", "instrument", "instrument_label",
+              "document_name", "created_at", "status", "version",
+              "clauses_present", "clauses_total", "gaps",
+              "high_severity_gaps", "recommendation", "drafted_with_model",
+              "reviewed_by", "redline_bytes", "redline_filename")}
+            for r in _PAPER.list()]
+
+
+def get_paper_review(review_id: str) -> dict | None:
+    retry_pending_audits()
+    return _PAPER.load(review_id)
+
+
+def paper_redline_bytes(review_id: str) -> bytes | None:
+    """The exact tracked-changes package that was filed, or None."""
+    record = _PAPER.load(review_id)
+    if not record:
+        return None
+    path = _redline_dir() / f"{record['id']}.docx"
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
 
 
 # --------------------------------------------------------------------------- #

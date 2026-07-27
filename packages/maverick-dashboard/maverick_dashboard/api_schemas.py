@@ -677,6 +677,15 @@ class UserSuitesIn(BaseModel):
     suites: list[str] = Field(default_factory=list, max_length=64)
 
 
+class ClausePlaybookIn(BaseModel):
+    """This deployment's own standard clause positions.
+
+    Keys are clause ids from the Art. 28 / CCPA checklists; values are the
+    exact language a vendor's paper gets redlined to. Omitted clauses keep the
+    shipped position, so a partial playbook is a valid one."""
+    positions: dict[str, str] = Field(default_factory=dict)
+
+
 class DpaReviewIn(BaseModel):
     """Review a Data Processing Agreement against the Art. 28(3) checklist.
     ``text`` is the agreement body (pasted or extracted); bounded like other
@@ -805,6 +814,13 @@ class TemplateIn(BaseModel):
     expected_revision: int = Field(..., ge=0)
     expected_digest: str = Field(..., max_length=64,
                                  pattern="^([0-9a-f]{64})?$")
+
+
+class AssessmentAssignIn(BaseModel):
+    """Route an assessment to a reviewer. An empty ``assignee`` unassigns it
+    and returns it to the pool."""
+    assignee: str = Field("", max_length=200)
+    expected_revision: int = Field(..., ge=0)
 
 
 class AssessmentDecideIn(BaseModel):
