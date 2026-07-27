@@ -10,8 +10,8 @@
 ## Run identity
 
 - Suite: `governance-frontier-v1`
-- Started: `2026-07-27T17:52:22.367769+00:00`
-- Git commit: `bdc35492c6104a53bd226cc3383c260bc554a249`
+- Started: `2026-07-27T18:02:00.903568+00:00`
+- Git commit: `4253a160f419aff777f0cb55a661b73514d7c5b2`
 - Working tree dirty during run: `false`
 - Definitions: 40 (24 unsafe, 16 benign) × seeds [17, 29, 43]
 - Arms: 120 governed and 120 disabled-baseline instances
@@ -19,7 +19,7 @@
 - Network claim basis: no model/network API is called; config/overlay, deployment profile, tenant/client, and injected or KMS-wrapped audit-key inputs are cleared; the egress adapter only evaluates URL and provider policy
 - Inherited config/overlay, profile/trust, tenant/client binding, consent override, and audit-key injection inputs: cleared; related process caches reset
 - Consent mode override: cleared; secure defaults explicitly enabled
-- Input digest: `e622cb61ae3e1558627d5a547dc9e2c6f18c42e539ff8801a7d936ce42ff7bc5`
+- Input digest: `28c7aaa33781373d56fcf111c18904a07432e0b749d472ab70f7b4ae725d8505`
 - Manifest signature: `ed25519` (self-signed run integrity)
 - Publication verification requires the separate checked-in `trusted-publisher.pub`; the manifest-embedded key is not trusted by itself
 
@@ -63,10 +63,10 @@ reported outside that denominator.
 
 | Path | Samples | Median | p95 |
 |---|---:|---:|---:|
-| Governed control call | 120 | 365.700 µs | 35367.200 µs |
-| Disabled baseline call | 120 | 16.650 µs | 265.600 µs |
-| Paired governance overhead | 120 | 263.950 µs | 35364.700 µs |
-| Harness signed decision append | 120 | 5623.000 µs | 7270.400 µs |
+| Governed control call | 120 | 382.350 µs | 35500.200 µs |
+| Disabled baseline call | 120 | 17.400 µs | 218.900 µs |
+| Paired governance overhead | 120 | 301.400 µs | 35497.500 µs |
+| Harness signed decision append | 120 | 5724.450 µs | 7670.200 µs |
 
 Times are local-machine observations, not an SLA. Each seed changes
 execution order to expose state/order dependence; it is not model
@@ -75,7 +75,7 @@ sampling. Verdicts, not timings, are required to be seed-invariant.
 ## Evidence and custody
 
 - Signed audit events: 190
-- Audit-chain SHA-256: `67a1fb29aeba985d653f21485479219e08d69a5e33399abea28ad9c630c7de90`
+- Audit-chain SHA-256: `f66dd4ced3f8599036cd6b65c92767e31c00a534cced388e632c2581a4bf1947`
 - Audit chain verified in-run against the run public key: `true`
 - Manifest schema: `maverick-bench-repro/1`
 - Key custody: ephemeral co-located benchmark key; self-signed run integrity only, not off-host custody, publisher identity, or resistance to a same-user actor.
@@ -139,4 +139,6 @@ Publication validation checks the external trusted-key file, current
 signed harness, control-implementation, and config digests; a clean
 measured commit; commit ancestry when history preserves it (or the
 exact signed control-source snapshot after a shallow checkout, squash,
-or rebase); and deterministic report rendering.
+or rebase); and deterministic report rendering. Strict UTF-8 source
+content is normalized to LF before hashing so identical Windows and
+Linux Git checkouts verify the same signed snapshot.
