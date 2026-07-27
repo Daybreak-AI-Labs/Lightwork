@@ -60,6 +60,7 @@ from ..file_lock import (
     ensure_private_file,
 )
 from ..paths import data_dir
+from .errors import AuditRefused
 
 log = logging.getLogger(__name__)
 
@@ -74,8 +75,14 @@ _LEGACY_KEY_DIR = data_dir("audit", "keys")
 KEY_DIR = _LEGACY_KEY_DIR
 
 
-class OffHostSigningRequiredError(RuntimeError):
-    """Raised when audit signing must use off-host key material."""
+class OffHostSigningRequiredError(AuditRefused):
+    """Raised when audit signing must use off-host key material.
+
+    An :class:`~maverick.audit.errors.AuditRefused`, not a bare RuntimeError:
+    this is the refusal that fires under the strictest posture the product
+    sells, so a caller hardened against the compliance-floor refusal was
+    missing exactly the case that matters most.
+    """
 
 
 def _key_dir() -> Path:

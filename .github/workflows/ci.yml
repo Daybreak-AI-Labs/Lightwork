@@ -117,6 +117,20 @@ jobs:
         # risk ceiling, a working persona, and its deny list -- the honest-
         # counting receipt behind the catalog claim. Errors fail the build.
         run: maverick domains-lint --ci
+      - name: Audit refusal contract (an audit write may not be swallowed)
+        # The audit subsystem raises AuditRefused when it DECLINES to write --
+        # a compliance floor mandates a signed chain and the signer won't
+        # start, or custody policy forbids a co-located key. A caller that
+        # catches it and continues turns "we could not record this action"
+        # into "we recorded nothing and did it anyway", which is the exact
+        # failure the guarantee exists to prevent.
+        #
+        # This lived in a docstring and was honoured at 1 of ~93 call sites.
+        # The gate ratchets the pre-existing 50 in audit_contract.baseline.json
+        # (a debt register to shrink, not an exemption list) and fails the
+        # build on any NEW one. It also exits non-zero if it inspects zero
+        # files, so a bad path can never be mistaken for a pass.
+        run: python -m maverick.audit_contract --ci
       - name: Sunset gate (past-due deprecations must be removed)
         # The deprecation registry (maverick/deprecations.py) records every
         # deprecated path with its removal version. Once the package version

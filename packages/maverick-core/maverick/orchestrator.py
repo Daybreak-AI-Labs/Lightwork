@@ -1088,13 +1088,13 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
 
     world.set_goal_status(goal_id, "active")
     # Success-path audit: a tamper-evident GOAL_START on the signed chain so the
-    # audit trail records the run beginning, not just denials. Never block a run.
-    try:
-        from .audit import EventKind, record
-        record(EventKind.GOAL_START, goal_id=goal_id, agent="orchestrator",
-               title=goal.title, description=getattr(goal, "description", None))
-    except Exception:  # pragma: no cover
-        pass
+    # audit trail records the run beginning, not just denials. audit_event
+    # swallows write errors; a REFUSAL propagates, because a deployment whose
+    # profile mandates a signed chain must not start a goal it cannot record.
+    from .audit import EventKind, audit_event
+    audit_event(EventKind.GOAL_START, goal_id=goal_id, agent="orchestrator",
+                title=goal.title,
+                description=getattr(goal, "description", None))
     episode_id = resume_episode_id
     if episode_id is None and resume:
         try:
@@ -1152,12 +1152,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
             world.end_episode(episode_id, "input blocked by Shield", "blocked")
         except Exception:  # pragma: no cover
             pass
-        try:  # tamper-evident record of the safety block; never block on audit
-            from .audit import EventKind, record
-            record(EventKind.SHIELD_BLOCK, goal_id=goal_id, stage="input",
-                   reason=reason, score=None)
-        except Exception:  # pragma: no cover
-            pass
+        # tamper-evident record of the safety block; a refusal propagates
+        from .audit import EventKind, audit_event
+        audit_event(EventKind.SHIELD_BLOCK, goal_id=goal_id, stage="input",
+                    reason=reason, score=None)
         log.warning("goal #%s input blocked by Shield: %s", goal_id, reason)
         _record_quota_usage()
         return f"BLOCKED: goal input rejected by Shield ({reason})"
@@ -1218,12 +1216,10 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
                 world.end_episode(episode_id, "brief blocked by Shield", "blocked")
             except Exception:  # pragma: no cover
                 pass
-            try:  # tamper-evident record of the safety block; never block on audit
-                from .audit import EventKind, record
-                record(EventKind.SHIELD_BLOCK, goal_id=goal_id, stage="input",
-                       reason=reason, score=None)
-            except Exception:  # pragma: no cover
-                pass
+            # tamper-evident record of the safety block; a refusal propagates
+            from .audit import EventKind, audit_event
+            audit_event(EventKind.SHIELD_BLOCK, goal_id=goal_id, stage="input",
+                        reason=reason, score=None)
             log.warning("goal #%s assembled brief blocked by Shield: %s", goal_id, reason)
             return f"BLOCKED: goal brief rejected by Shield ({reason})"
 
@@ -1534,15 +1530,14 @@ async def _run_goal_impl(  # noqa: C901  -- core goal-execution loop
         world.set_goal_status(goal_id, "done", result=summary)
         # Success-path audit: GOAL_END on the signed chain records the outcome,
         # closing the GOAL_START..GOAL_END pair for a completed run. Block/denial
-        # exits are already covered by their own audit events. Never block.
-        try:
-            from .audit import EventKind, record
-            _res = summary if isinstance(summary, str) else None
-            record(EventKind.GOAL_END, goal_id=goal_id, agent="orchestrator",
-                   status="succeeded",
-                   result=(_res[:500] + "…") if _res and len(_res) > 500 else _res)
-        except Exception:  # pragma: no cover
-            pass
+        # exits are already covered by their own audit events. A write error is
+        # swallowed; a refusal propagates, so a run cannot be marked done on a
+        # chain that declined to record its completion.
+        from .audit import EventKind, audit_event
+        _res = summary if isinstance(summary, str) else None
+        audit_event(EventKind.GOAL_END, goal_id=goal_id, agent="orchestrator",
+                    status="succeeded",
+                    result=(_res[:500] + "…") if _res and len(_res) > 500 else _res)
         _record_quota_usage()
         # Index this finished goal into the semantic store (#432) so future
         # runs recall it via vector search. No-op unless a [memory] backend is

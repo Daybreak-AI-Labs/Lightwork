@@ -1454,16 +1454,14 @@ class Agent:
         except Exception:  # pragma: no cover -- exchange must never brick a run
             return None
         if ok:
-            try:  # auditable record of the scoped credential this call ran under
-                from .audit import EventKind, record
-                record(
-                    EventKind.TOKEN_EXCHANGE, agent=self.name,
-                    goal_id=self.ctx.goal_id, tool=name, principal=cap.principal,
-                    jti=token.jti, expires_at=token.expires_at,
-                    signed=token.signature is not None,
-                )
-            except Exception:  # pragma: no cover
-                pass
+            # auditable record of the scoped credential this call ran under
+            from .audit import EventKind, audit_event
+            audit_event(
+                EventKind.TOKEN_EXCHANGE, agent=self.name,
+                goal_id=self.ctx.goal_id, tool=name, principal=cap.principal,
+                jti=token.jti, expires_at=token.expires_at,
+                signed=token.signature is not None,
+            )
             return None
         self.ctx.blackboard.post(
             self.name, "error",
@@ -1588,15 +1586,15 @@ class Agent:
         self.ctx.blackboard.post(
             self.name, "error", f"tool={name} GATED by autonomy: {_av.reason}",
         )
-        try:  # tamper-evident record of the gate; never block on audit
-            from .audit import EventKind, record
-            record(
-                EventKind.AUTONOMY_GATED, agent=self.name,
-                goal_id=self.ctx.goal_id, tool=name,
-                effective_max_risk=_av.effective_max_risk,
-            )
-        except Exception:  # pragma: no cover
-            pass
+        # tamper-evident record of the gate. audit_event swallows write
+        # errors but propagates a refusal -- a gate we cannot record is a gate
+        # whose firing we cannot later prove.
+        from .audit import EventKind, audit_event
+        audit_event(
+            EventKind.AUTONOMY_GATED, agent=self.name,
+            goal_id=self.ctx.goal_id, tool=name,
+            effective_max_risk=_av.effective_max_risk,
+        )
         return (
             f"⚠ GATED by autonomy policy: {_av.reason}. The tool was not "
             "executed. Resolve the disagreement (reconcile the divergent "
@@ -1722,23 +1720,20 @@ class Agent:
                     "error",
                     f"tool={name} DENIED: autonomy evaluation unavailable",
                 )
-                try:
-                    from .audit import EventKind, record
+                from .audit import EventKind, audit_event
 
-                    record(
-                        EventKind.GOVERNANCE_DENIED,
-                        agent=self.name,
-                        goal_id=self.ctx.goal_id,
-                        tool=name,
-                        principal=(
-                            getattr(cap, "principal", None)
-                            if cap is not None else None
-                        ),
-                        rule="autonomy:error",
-                        reason="autonomy level evaluation failed closed",
-                    )
-                except Exception:  # pragma: no cover -- audit is best-effort
-                    pass
+                audit_event(
+                    EventKind.GOVERNANCE_DENIED,
+                    agent=self.name,
+                    goal_id=self.ctx.goal_id,
+                    tool=name,
+                    principal=(
+                        getattr(cap, "principal", None)
+                        if cap is not None else None
+                    ),
+                    rule="autonomy:error",
+                    reason="autonomy level evaluation failed closed",
+                )
                 return (
                     "⚠ DENIED by autonomy policy (autonomy:error): "
                     "authority evaluation was unavailable, so the tool was not "
@@ -1752,19 +1747,19 @@ class Agent:
             )
         if _gov is None or _gov.decision is _GovDecision.ALLOW:
             return None
-        from .audit import EventKind, record
+        from .audit import EventKind
         _principal = getattr(cap, "principal", None) if cap is not None else None
         if _gov.decision is _GovDecision.DENY:
             self.ctx.blackboard.post(
                 self.name, "error",
                 f"tool={name} DENIED by governance ({_gov.rule})",
             )
-            try:  # tamper-evident record of the denial; never block on audit
-                record(EventKind.GOVERNANCE_DENIED, agent=self.name,
-                       goal_id=self.ctx.goal_id, tool=name,
-                       principal=_principal, rule=_gov.rule, reason=_gov.reason)
-            except Exception:  # pragma: no cover
-                pass
+            # tamper-evident record of the denial; a refusal propagates
+            from .audit import EventKind, audit_event
+            audit_event(EventKind.GOVERNANCE_DENIED, agent=self.name,
+                        goal_id=self.ctx.goal_id, tool=name,
+                        principal=_principal, rule=_gov.rule,
+                        reason=_gov.reason)
             return (
                 f"⚠ DENIED by org policy ({_gov.rule}): {_gov.reason}. "
                 "The tool was not executed."
@@ -1800,13 +1795,11 @@ class Agent:
             self.name, "error",
             f"tool={name} BLOCKED: governance requires human approval",
         )
-        try:
-            record(EventKind.GOVERNANCE_DENIED, agent=self.name,
-                   goal_id=self.ctx.goal_id, tool=name,
-                   principal=_principal, rule=_gov.rule,
-                   reason="human approval not granted")
-        except Exception:  # pragma: no cover
-            pass
+        from .audit import EventKind, audit_event
+        audit_event(EventKind.GOVERNANCE_DENIED, agent=self.name,
+               goal_id=self.ctx.goal_id, tool=name,
+               principal=_principal, rule=_gov.rule,
+               reason="human approval not granted")
         # Human-override ingestion: the operator's "no" is itself a
         # learning signal — recallable on the next similar goal and
         # consolidated by dreaming. No-op unless [reflexion] is on.
@@ -1831,25 +1824,25 @@ class Agent:
         Kept off ``_run_tool`` so the audit path adds no control-flow branches to
         that hot method. Best-effort with one deliberate exception:
 
-        ``AuditWriteRefused`` propagates. It is raised only when an active
-        compliance profile mandates signed logs and the signer will not start,
-        and swallowing it turned the writer's refusal to write UNSIGNED into
-        "write nothing and run the tool anyway" -- which is worse than either
-        outcome the writer was choosing between, and silently falsified the
-        profile's central claim that every action is recorded.
+        ``AuditRefused`` propagates. It is raised only when the audit subsystem
+        declined to write because writing would have broken a guarantee the
+        deployment asserts, and swallowing it turned that refusal into "write
+        nothing and run the tool anyway" -- worse than either outcome the writer
+        was choosing between, and a silent falsification of the profile's
+        central claim that every action is recorded.
+
+        Catching the BASE matters. This site previously caught only
+        ``AuditWriteRefused``, so the sibling ``OffHostSigningRequiredError`` --
+        the refusal that fires under the strictest posture we sell -- fell
+        through to the ``except Exception`` below and was swallowed. The one
+        hardened call site in the tree was hardened against the wrong half.
 
         Everything else is still swallowed, but no longer silently: a bare
         ``pass`` here meant a permanently broken audit path looked identical to
         a healthy one.
         """
-        from .audit import AuditWriteRefused, record
-        try:
-            record(kind, agent=self.name, goal_id=self.ctx.goal_id, **payload)
-        except AuditWriteRefused:
-            raise
-        except Exception:  # pragma: no cover -- a broken log must not crash a run
-            log.warning("audit: tool-event write failed for kind=%r", kind,
-                        exc_info=True)
+        from .audit import audit_event
+        audit_event(kind, agent=self.name, goal_id=self.ctx.goal_id, **payload)
 
     async def _run_tool(self, name: str, args: dict) -> str:
         # Record the tool name on this agent's action sequence so a parent can
@@ -1879,14 +1872,12 @@ class Agent:
                     self.name, "error",
                     f"tool={name} BLOCKED by Shield: {'; '.join(verdict.reasons)}",
                 )
-                try:  # tamper-evident record of the shield block; never block on audit
-                    from .audit import EventKind, record
-                    record(EventKind.SHIELD_BLOCK, agent=self.name,
-                           goal_id=self.ctx.goal_id, stage="tool",
-                           reason="; ".join(verdict.reasons),
-                           score=getattr(verdict, "score", None))
-                except Exception:  # pragma: no cover
-                    pass
+                # tamper-evident record of the shield block; a refusal propagates
+                from .audit import EventKind, audit_event
+                audit_event(EventKind.SHIELD_BLOCK, agent=self.name,
+                       goal_id=self.ctx.goal_id, stage="tool",
+                       reason="; ".join(verdict.reasons),
+                       score=getattr(verdict, "score", None))
                 self._maybe_seal(q, verdict)
                 return (
                     f"⚠ BLOCKED by Shield ({verdict.severity}): "
@@ -2233,12 +2224,10 @@ class Agent:
                 except Exception:  # pragma: no cover -- never breaks the loop
                     pass
                 return None
-            try:  # tamper-evident record of the hold; never block on audit
-                from .audit import EventKind, record
-                record(EventKind.SHIELD_BLOCK, agent=self.name, goal_id=self.ctx.goal_id,
-                       stage="rehearsal", reason=f"{v.decision}: {v.reason}")
-            except Exception:  # pragma: no cover
-                pass
+            # tamper-evident record of the hold; a refusal propagates
+            from .audit import EventKind, audit_event
+            audit_event(EventKind.SHIELD_BLOCK, agent=self.name, goal_id=self.ctx.goal_id,
+                   stage="rehearsal", reason=f"{v.decision}: {v.reason}")
             return (
                 f"⚠ Held by pre-execution rehearsal ({v.decision}): {v.reason}. "
                 "The tool was not executed; choose another approach or seek approval."
@@ -2262,12 +2251,10 @@ class Agent:
             g = shared().consult(name)
             if g is None:
                 return None
-            try:  # tamper-evident record of the hold; never block on audit
-                from .audit import EventKind, record
-                record(EventKind.SHIELD_BLOCK, agent=self.name, goal_id=self.ctx.goal_id,
-                       stage="guardrail", reason=g.rule)
-            except Exception:  # pragma: no cover
-                pass
+            # tamper-evident record of the hold; a refusal propagates
+            from .audit import EventKind, audit_event
+            audit_event(EventKind.SHIELD_BLOCK, agent=self.name, goal_id=self.ctx.goal_id,
+                   stage="guardrail", reason=g.rule)
             return (
                 f"⚠ Held by a learned guardrail: {g.rule}. The tool was not executed; "
                 "choose another approach (this rule was learned from real outcomes and "

@@ -20,6 +20,7 @@ the agent running. Audit failures should NEVER crash the swarm.
 from __future__ import annotations
 
 from .erase import delete_user, scrub_user  # noqa: F401
+from .errors import AuditRefused  # noqa: F401
 from .events import AuditEvent, EventKind  # noqa: F401
 from .reader import day_files, event_paths, iter_events  # noqa: F401
 from .signing import (  # noqa: F401
@@ -33,6 +34,7 @@ from .signing import (  # noqa: F401
 from .writer import (  # noqa: F401
     AuditLog,
     AuditWriteRefused,
+    audit_event,
     default_audit_log,
     global_audit_log,
     goal_context,
@@ -47,7 +49,9 @@ __all__ = [
     "AuditEvent",
     "EventKind",
     "AuditLog",
+    "AuditRefused",
     "AuditWriteRefused",
+    "audit_event",
     "default_audit_log",
     "global_audit_log",
     "record",
