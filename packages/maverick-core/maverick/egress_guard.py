@@ -126,6 +126,57 @@ def _check(url: str) -> None:
     raise EgressBlocked(reason)
 
 
+#: Attributes a wrapping transport uses to hold the one it delegates to.
+#: ``tools/_ssrf._PinnedTransport`` uses ``_inner``.
+_INNER_ATTRS = ("_inner", "_transport", "transport", "_wrapped", "next")
+
+
+def _is_network_transport(transport: Any, depth: int = 0) -> bool:
+    """Whether a transport performs socket I/O, directly or by delegation.
+
+    An ASGI/WSGI/Mock transport hands the request to an in-process object: no
+    socket opens, nothing crosses the host boundary, and there is nothing for
+    an egress lock to prevent. Blocking those is a false positive with teeth --
+    it refuses in-process ASGI calls under enterprise mode, which is how this
+    was found (every TestClient request in the suite blocked on "testserver").
+
+    Detection is by delegation rather than by a name allowlist, because the
+    names are not knowable in advance: starlette ships ``_TestClientTransport``,
+    not httpx's ``ASGITransport``. And an allowlist of "only HTTPTransport is
+    network" would be worse than useless -- it would skip the check for
+    SSRF-pinned requests, since ``_PinnedTransport`` *wraps* a network
+    transport rather than being one. So: a transport is network if it is an
+    httpx network transport, or if it delegates to something that is.
+
+    Fails closed. An unresolvable or too-deeply-nested transport is treated as
+    reaching the network, and a mock handler that itself makes a real request
+    is checked when that request goes back through a guarded library.
+    """
+    try:
+        import httpx
+        if isinstance(transport, (httpx.HTTPTransport, httpx.AsyncHTTPTransport)):
+            return True
+    except Exception:  # pragma: no cover - httpx absent
+        return True
+    if depth >= 4:  # pragma: no cover - pathological nesting
+        return True
+    for attr in _INNER_ATTRS:
+        inner = getattr(transport, attr, None)
+        if inner is not None and (hasattr(inner, "handle_request")
+                                  or hasattr(inner, "handle_async_request")):
+            return _is_network_transport(inner, depth + 1)
+    return False
+
+
+def _reaches_the_network(client: Any, request: Any) -> bool:
+    """Whether this request will actually leave the process."""
+    try:
+        transport = client._transport_for_url(request.url)
+    except Exception:  # pragma: no cover - unknown client shape; fail closed
+        return True
+    return _is_network_transport(transport)
+
+
 def _patch_httpx(mod: Any) -> None:
     """Wrap httpx at the per-hop seam, not at ``send``.
 
@@ -148,12 +199,14 @@ def _patch_httpx(mod: Any) -> None:
             mod.AsyncClient._send_single_request)
 
         def _sync_one(self, request, *a, **kw):
-            _check(str(request.url))
+            if _reaches_the_network(self, request):
+                _check(str(request.url))
             return _originals["httpx.Client._send_single_request"](
                 self, request, *a, **kw)
 
         async def _async_one(self, request, *a, **kw):
-            _check(str(request.url))
+            if _reaches_the_network(self, request):
+                _check(str(request.url))
             return await _originals["httpx.AsyncClient._send_single_request"](
                 self, request, *a, **kw)
 

@@ -256,6 +256,69 @@ def test_the_first_hop_is_still_permitted(guarded, monkeypatch) -> None:
         httpx.get(UNROUTABLE, timeout=0.5)
 
 
+# -- in-process transports are not egress ----------------------------------
+
+def test_an_in_process_asgi_request_is_not_blocked(guarded) -> None:
+    """A request that never opens a socket cannot leak, so it must not be
+    refused.
+
+    Found the hard way: the guard blocked every TestClient request in the suite
+    (host "testserver") under enterprise mode, taking down five unrelated
+    security tests. That is not a test artifact -- it would refuse any
+    in-process ASGI call a deployment makes.
+    """
+    starlette = pytest.importorskip("starlette.testclient")
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-length", b"2")]})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    # Starlette's TestClient, which is the exact shape that broke: it ships its
+    # own `_TestClientTransport`, not httpx's ASGITransport, which is why the
+    # rule follows delegation rather than a class-name allowlist.
+    # No `with`: entering the client runs the ASGI lifespan, which this bare
+    # app does not implement. The request path is what is under test.
+    assert starlette.TestClient(app).get("/x").status_code == 200
+
+
+def test_a_mock_transport_is_not_blocked(guarded) -> None:
+    def handler(request):
+        return httpx.Response(200, text="ok")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as c:
+        assert c.get("https://denied.example.com/x").status_code == 200
+
+
+def test_a_wrapped_network_transport_is_still_checked(guarded, monkeypatch) -> None:
+    """The negative control that makes the rule above safe.
+
+    `tools/_ssrf._PinnedTransport` WRAPS an httpx network transport rather than
+    being one, so a rule of "only HTTPTransport counts as network" would skip
+    the check for exactly the requests most worth checking. Detection follows
+    delegation instead, and this pins it.
+    """
+    from maverick.tools import _ssrf
+
+    inner = httpx.HTTPTransport()
+    pinned = _ssrf._PinnedTransport("denied.example.com",
+                                    "denied.example.com", "203.0.113.1", inner)
+    from maverick.egress_guard import _is_network_transport
+    assert _is_network_transport(pinned) is True
+    assert _is_network_transport(httpx.MockTransport(lambda r: None)) is False
+
+
+def test_an_unresolvable_transport_fails_closed() -> None:
+    """"We cannot tell what this is" must mean "check it"."""
+    from maverick.egress_guard import _reaches_the_network
+
+    class _Odd:
+        def _transport_for_url(self, url):
+            raise RuntimeError("no idea")
+
+    assert _reaches_the_network(_Odd(), type("R", (), {"url": "x"})()) is True
+
+
 # -- composition with SSRF pinning -----------------------------------------
 
 def test_the_guard_does_not_disable_ssrf_pinning(guarded, monkeypatch) -> None:
