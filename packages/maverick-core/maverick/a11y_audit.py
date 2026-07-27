@@ -22,6 +22,7 @@ maverick.a11y_audit`` prints findings and exits 1 on any (the CI gate).
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -196,8 +197,22 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     p.add_argument("--dir", default=None, help="template directory (default: dashboard)")
     p.add_argument("--ci", action="store_true", help="exit 1 on any finding")
     args = p.parse_args(argv)
-    results = audit_templates(Path(args.dir) if args.dir else None)
+    root = Path(args.dir) if args.dir else _default_template_dir()
+    root = Path(root) if root is not None else None
+    # Anti-vacuity. `--dir /nonexistent` printed "no static accessibility issues
+    # found" and exited 0: a clean bill of health over zero files. A gate that
+    # cannot distinguish "nothing wrong" from "nothing looked at" reports a
+    # guarantee it never checked, which is worse than having no gate.
+    templates = sorted(root.rglob("*.html")) if root and root.is_dir() else []
+    if not templates:
+        print(f"a11y audit: ERROR -- inspected 0 templates under {root}. "
+              "The template directory is missing, empty, or the --dir path is "
+              "wrong; this is a broken gate, not a pass.", file=sys.stderr)
+        return 2
+    results = audit_templates(root)
     print(render(results))
+    print(f"a11y audit: {len(templates)} template(s) inspected, "
+          f"{len(results)} finding(s)")
     return 1 if (args.ci and results) else 0
 
 
