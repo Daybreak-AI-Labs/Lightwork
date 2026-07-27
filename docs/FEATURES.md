@@ -2855,7 +2855,11 @@ tested without spawning py-spy.
   the live counterpart to the static `a11y_tree` extractor.
 - **WebRTC tool** (`tools/webrtc_tool.py`, `[webrtc]` extra): data-channel
   offer/answer/send/close over lazily-imported aiortc (signalling is the
-  caller's; media tracks out of scope, stated honestly).
+  caller's; media tracks out of scope, stated honestly). **Built but not
+  registered by default** — nothing in production imports it; a caller opts in
+  by registering the factory. It holds a bidirectional channel to an arbitrary
+  peer, so it is tiered `high` risk and containment-denied alongside
+  `websocket`.
 - **Audio understanding** (`tools/audio_understanding.py`, `[clap]` extra):
   zero-shot NON-SPEECH classification — a CLAP model embeds the clip and
   free-text labels ("glass breaking", "dog barking", "fire alarm") into one

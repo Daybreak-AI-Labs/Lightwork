@@ -1,10 +1,10 @@
 {
   "_comment": "Which modules production actually reaches. Regenerate with `python -m maverick.reachability --regen`. A module listed UNREACHED must not be cited as shipped capability in docs or strategy.",
   "counts": {
-    "CI_ONLY": 11,
+    "CI_ONLY": 12,
     "CLI_ONLY": 27,
     "PRODUCTION": 886,
-    "TEST_ONLY": 84,
+    "TEST_ONLY": 85,
     "UNREACHED": 6
   },
   "modules": {
@@ -197,6 +197,8 @@
     "maverick.edit_format": "PRODUCTION",
     "maverick.effort": "PRODUCTION",
     "maverick.egress_accounting": "PRODUCTION",
+    "maverick.egress_contract": "CI_ONLY",
+    "maverick.egress_guard": "PRODUCTION",
     "maverick.ekko_control": "PRODUCTION",
     "maverick.ekko_daemon": "PRODUCTION",
     "maverick.embeddable": "PRODUCTION",
@@ -855,7 +857,7 @@
     "maverick.tools.web_archive": "PRODUCTION",
     "maverick.tools.web_recorder": "PRODUCTION",
     "maverick.tools.web_search": "PRODUCTION",
-    "maverick.tools.webrtc_tool": "PRODUCTION",
+    "maverick.tools.webrtc_tool": "TEST_ONLY",
     "maverick.tools.websocket_tool": "PRODUCTION",
     "maverick.tools.what_changed_digest": "PRODUCTION",
     "maverick.tools.whats_changed": "PRODUCTION",

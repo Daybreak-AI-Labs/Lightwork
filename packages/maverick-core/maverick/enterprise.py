@@ -23,10 +23,27 @@ When on, it enforces:
   (``anthropic`` / ``openai`` / ...) raises :class:`EgressBlocked` **before any prompt
   is sent**, and the denial is audited. Sensitive data physically cannot reach a
   third-party API. (Enforced in :func:`maverick.llm.LLM.complete`.)
-- **Tool egress lock.** Outbound *tool* HTTP (``http_fetch``, ``web_search``) is held
-  to local/private endpoints or hosts allow-listed under ``[enterprise]
-  allowed_hosts`` (default-deny), so a tool can't carry data off-box either.
-  (Enforced via :func:`enterprise_egress_denial` at each tool's request.)
+- **Tool egress lock.** Outbound HTTP is held to local/private endpoints or hosts
+  allow-listed under ``[enterprise] allowed_hosts`` (default-deny), so a tool can't
+  carry data off-box either. (Enforced in :mod:`maverick.egress_guard`, which wraps
+  the ``send`` path of every HTTP client library the codebase uses -- ``httpx``,
+  ``requests`` and ``urllib`` -- so a connector is covered whether or not its author
+  called anything. Tools that surface a denial as an error string still call
+  :func:`enterprise_egress_denial` directly for the better message.)
+
+  This clause used to read "enforced at each tool's request", which was false: the
+  check existed at 11 call sites while 87 of the 94 modules that make outbound HTTP
+  had no gate at all, including ``gmail``, ``salesforce``, ``slack_bot`` and the
+  knowledge-store embedder. It is stated here because the boundary is the property
+  this mode is sold on, and the gap between the sentence and the code was three
+  years wide. The remaining hole is recorded, not hidden: see
+  :mod:`maverick.egress_contract`, whose CI gate fails when a module reaches the
+  network through a library the guard does not wrap.
+
+  What it still does not cover: a tool that shells out to ``curl`` or opens a raw
+  socket. There is no packet-level backend (see
+  :mod:`maverick.sandbox.network_policy`), so process-level egress is bounded by the
+  sandbox, not by this lock.
 - **Consent fail-closed.** Destructive-action consent defaults to ``ask`` (and therefore
   *deny* in non-interactive contexts) instead of ``auto-approve``.
   (Enforced in :mod:`maverick.safety.consent`.)

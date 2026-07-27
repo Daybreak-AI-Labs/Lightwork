@@ -144,6 +144,19 @@ jobs:
         # and re-checks the premise of the one exempt-because-unreachable site
         # rather than trusting a comment.
         run: python -m maverick.dispatch_contract --ci
+      - name: Egress contract (no outbound path outside the guarded libraries)
+        # enterprise.py sells one property -- "sensitive data physically cannot
+        # reach a third-party API" -- and documented it as enforced "at each
+        # tool's request". The check existed at 11 call sites; 87 of the 94
+        # modules that make outbound HTTP had none, including gmail,
+        # salesforce, slack_bot and the knowledge-store embedder.
+        #
+        # egress_guard moved enforcement to the send path of httpx, requests
+        # and urllib, which covers every connector including ones not yet
+        # written. This gate keeps that true: it fails when a module reaches
+        # the network through a library the guard does not wrap, and when a
+        # recorded hole is left in the register after being migrated.
+        run: python -m maverick.egress_contract --ci
       - name: Audit refusal contract (an audit write may not be swallowed)
         # The audit subsystem raises AuditRefused when it DECLINES to write --
         # a compliance floor mandates a signed chain and the signer won't

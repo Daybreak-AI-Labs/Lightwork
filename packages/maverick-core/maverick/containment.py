@@ -67,7 +67,7 @@ _PROXY_BYPASS_VARS = ("NO_PROXY", "no_proxy")
 # generic HTTP/web/browser/websocket plus the send-ish messaging connectors
 # (names confirmed against the registered tool names in maverick/tools/).
 DEFAULT_DENY_TOOLS = frozenset({
-    "http_fetch", "web_search", "browser", "websocket",
+    "http_fetch", "web_search", "browser", "websocket", "webrtc",
     "email", "gmail", "ses", "sns", "twilio",
     "slack_bot", "discord_bot", "teams", "notify",
 })
