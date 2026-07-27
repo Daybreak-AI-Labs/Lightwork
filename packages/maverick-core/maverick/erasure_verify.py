@@ -2,13 +2,25 @@
 
 A right-to-erasure (GDPR Art. 17) run that *says* it deleted a subject's data
 is not the same as proving it. This verifies the claim: after an erase, the
-subject must have **zero** residual records across every store Lightwork holds.
+subject must have **zero** residual records in every store this module counts.
 
-It reuses the DSAR export (:func:`maverick.dsar.export_subject_data`), whose
-subject-matching is guaranteed by design to agree with the erase path ("a row
-that *would* be erased is a row that *is* exported"). So a non-zero residual
-count after erasure is, definitionally, an incomplete erasure — the same rule,
-read back. Read-only and fail-soft.
+**Read that scope literally — it is narrower than "everywhere".** The counts
+come from the DSAR export (:func:`maverick.dsar.export_subject_data`):
+conversations, turns, goals, episodes, facts and audit events, plus
+user-scoped facts and knowledge chunks added here. Nine other tables carry a
+foreign key to ``goals`` — ``artifacts``, ``attachments``, ``goal_events``,
+``goal_origins``, ``messages``, ``processed_messages``, ``questions``,
+``share_links``, ``signoffs`` — and are **not** counted, so residual personal
+data in one of them will not stop a ``clean`` verdict. That gap is enumerated
+and CI-enforced in ``tests/test_erasure_coverage.py``, which derives the table
+list from ``PRAGMA foreign_key_list`` and fails when a new goal-linked store
+appears unadjudicated. Closing the gap means teaching this module to count
+those tables; until then, ``clean`` means "clean in the counted stores".
+
+Within its scope the logic is sound: subject-matching is shared with the erase
+path by construction ("a row that *would* be erased is a row that *is*
+exported"), so a non-zero residual count is definitionally an incomplete
+erasure — the same rule, read back. Read-only and fail-soft.
 
 * :func:`verify_erasure` — the post-erasure check: residual counts + a
   ``clean`` verdict (True == nothing left).
