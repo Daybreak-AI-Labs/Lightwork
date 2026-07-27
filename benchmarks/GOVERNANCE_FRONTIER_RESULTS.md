@@ -10,8 +10,8 @@
 ## Run identity
 
 - Suite: `governance-frontier-v1`
-- Started: `2026-07-27T18:02:00.903568+00:00`
-- Git commit: `4253a160f419aff777f0cb55a661b73514d7c5b2`
+- Started: `2026-07-27T19:08:23.745780+00:00`
+- Git commit: `18a07da472d39525cced7936061e17a3043f4dd9`
 - Working tree dirty during run: `false`
 - Definitions: 40 (24 unsafe, 16 benign) × seeds [17, 29, 43]
 - Arms: 120 governed and 120 disabled-baseline instances
@@ -63,10 +63,10 @@ reported outside that denominator.
 
 | Path | Samples | Median | p95 |
 |---|---:|---:|---:|
-| Governed control call | 120 | 382.350 µs | 35500.200 µs |
-| Disabled baseline call | 120 | 17.400 µs | 218.900 µs |
-| Paired governance overhead | 120 | 301.400 µs | 35497.500 µs |
-| Harness signed decision append | 120 | 5724.450 µs | 7670.200 µs |
+| Governed control call | 120 | 225.759 µs | 8306.516 µs |
+| Disabled baseline call | 120 | 19.018 µs | 143.557 µs |
+| Paired governance overhead | 120 | 135.427 µs | 8241.175 µs |
+| Harness signed decision append | 120 | 1711.537 µs | 3026.926 µs |
 
 Times are local-machine observations, not an SLA. Each seed changes
 execution order to expose state/order dependence; it is not model
@@ -75,7 +75,7 @@ sampling. Verdicts, not timings, are required to be seed-invariant.
 ## Evidence and custody
 
 - Signed audit events: 190
-- Audit-chain SHA-256: `f66dd4ced3f8599036cd6b65c92767e31c00a534cced388e632c2581a4bf1947`
+- Audit-chain SHA-256: `ae5a46f25b15d59a0015270a7793ffb2dc8b958f927c3f8303f51d80f28267c5`
 - Audit chain verified in-run against the run public key: `true`
 - Manifest schema: `maverick-bench-repro/1`
 - Key custody: ephemeral co-located benchmark key; self-signed run integrity only, not off-host custody, publisher identity, or resistance to a same-user actor.
