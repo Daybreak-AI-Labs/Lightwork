@@ -40,6 +40,7 @@ import backend
 import contract_guard
 import httpx
 import notice_check
+import paper_desk
 import value_ledger
 from backend import (
     AssessmentSession,
@@ -49,7 +50,13 @@ from backend import (
 )
 from capabilities import CAPS, STANDALONE, caps_summary
 from fastapi import FastAPI, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.templating import Jinja2Templates
 from mailsink import INBOX, start_mailsink
 from store import STORE, Case, OneTrustAssessment, Ticket
@@ -336,6 +343,15 @@ def _prior_summary(ot: OneTrustAssessment) -> dict:
     }
 
 
+# The privacy reviewers work is assigned to. The demo has no identity
+# provider, so a reviewer picks their name at the desk; on the platform the
+# dashboard's verified principal plays this role.
+_REVIEWERS: tuple[str, ...] = (
+    "A. Novak (Privacy)", "L. Chen (Privacy)",
+    "R. Okafor (Legal)", "Privacy Reviewer",
+)
+
+
 # ---- Lived-in tenant history (opt-out fixtures, PIA_SEED_TENANT) -----------
 _TENANT_VENDORS: tuple[tuple[str, str], ...] = (
     ("Acme CRM", "high"), ("Globex HRIS", "medium"), ("Initech Payroll", "low"),
@@ -379,8 +395,7 @@ def _seed_tenant() -> None:
     rng = random.Random(42)
     now = time.time()
     tpl = get_template("pia")
-    reviewers = ("A. Novak (Privacy)", "L. Chen (Privacy)",
-                 "R. Okafor (Legal)", "Privacy Reviewer")
+    reviewers = _REVIEWERS
     n = len(_TENANT_VENDORS)
     for i, (vendor, risk) in enumerate(_TENANT_VENDORS):
         # Oldest first; the newest three are still in the review queue and
@@ -2111,6 +2126,135 @@ async def intake_append_doc(case_id: str, file: UploadFile) -> JSONResponse:
     return JSONResponse({"ok": True, "ot_id": ot.assessment_id,
                          "addendum": entry,
                          "needs_re_review": ot.needs_re_review})
+
+
+# ===========================================================================
+# Reviewer desk — a reviewer's own queue, and the vendor-paper round
+# ===========================================================================
+@app.get("/reviewer", response_class=HTMLResponse)
+async def reviewer_desk(request: Request, who: str = "") -> HTMLResponse:
+    """Sign in as a reviewer and get straight to your numbered queue."""
+    paper_desk.assign_unassigned(list(_REVIEWERS))
+    names = paper_desk.reviewers() or list(_REVIEWERS)
+    who = (who or "").strip()
+    return _page(request, "reviewer.html", reviewers=names, who=who,
+                 queue=paper_desk.queue_for(who) if who else [],
+                 paper_caps=CAPS["paper_redline"])
+
+
+@app.get("/reviewer/case/{case_id}", response_class=HTMLResponse)
+async def reviewer_case(request: Request, case_id: str,
+                        who: str = "") -> HTMLResponse:
+    case = STORE.cases.get(case_id)
+    if not case:
+        return _page(request, "notfound.html")
+    return _page(request, "reviewer_case.html", case=case,
+                 who=(who or case.assigned_to),
+                 rounds=case.paper_reviews,
+                 paper_caps=CAPS["paper_redline"])
+
+
+@app.post("/reviewer/case/{case_id}/paper-source")
+async def reviewer_paper_source(case_id: str,
+                                source: str = Form(...)) -> JSONResponse:
+    """Question one: our paper, or theirs? On our paper the round ends here."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return JSONResponse({"ok": False, "error": "unknown case"},
+                            status_code=404)
+    choice = (source or "").strip().lower()
+    if choice not in paper_desk.PAPER_SOURCES:
+        return JSONResponse(
+            {"ok": False, "error": "answer must be 'ours' or 'theirs'"},
+            status_code=400)
+    case.paper_source = choice
+    if choice == "ours":
+        case.log("Vendor is on OUR paper — no third-party document to review.")
+        return JSONResponse({"ok": True, "source": choice, "upload": False,
+                             "message": "On our paper — nothing to redline. "
+                                        "Our template already governs."})
+    case.log("Vendor is on THEIR paper — document requested for review.")
+    return JSONResponse({"ok": True, "source": choice, "upload": True,
+                         "message": "Please upload their document (.docx or "
+                                    ".pdf) and I'll compare it to our "
+                                    "template."})
+
+
+@app.post("/reviewer/case/{case_id}/paper-upload")
+async def reviewer_paper_upload(case_id: str, file: UploadFile,
+                                who: str = Form(""),
+                                use_model: str = Form("1")) -> JSONResponse:
+    """Read their paper, decide the instrument, compare it to our template,
+    write the memo + tracked-changes redline, and file both onto the vendor
+    record under the next sequential version."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return JSONResponse({"ok": False, "error": "unknown case"},
+                            status_code=404)
+    if not CAPS["paper_redline"]:
+        return JSONResponse(
+            {"ok": False, "error": "vendor-paper redline ships with the "
+                                   "Lightwork platform"}, status_code=501)
+    filename = file.filename or "vendor-paper"
+    mime = file.content_type or "application/octet-stream"
+    if not paper_desk.accepted_upload(filename, mime):
+        return JSONResponse(
+            {"ok": False, "error": "only Word (.docx) and PDF documents can "
+                                   "be reviewed"}, status_code=400)
+    data, err = await _read_upload_bounded(file)
+    if data is None:
+        return JSONResponse({"ok": False, "error": err}, status_code=400)
+
+    ok, msg = await asyncio.to_thread(
+        _store_evidence, case, filename, data, mime, via="vendor paper")
+    if not ok:
+        return JSONResponse({"ok": False, "error": msg}, status_code=400)
+
+    text, extraction = await asyncio.to_thread(
+        backend.document_text, data, mime)
+    if not (text or "").strip():
+        return JSONResponse(
+            {"ok": False, "error": "no text could be read from that file — a "
+                                   "scanned PDF needs OCR before review",
+             "extraction": extraction}, status_code=400)
+
+    reviewer = (who or case.assigned_to or "Privacy Reviewer").strip()
+    review = await asyncio.to_thread(
+        backend.review_vendor_paper, text, vendor=case.subject,
+        document_name=filename, use_model=(use_model != "0"))
+    redline = await asyncio.to_thread(
+        backend.build_redline, review, original=data, mime=mime,
+        date=_dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        title=f"{case.subject} — {review.to_dict()['instrument_label']} "
+              "(Lightwork redline)")
+    entry = await asyncio.to_thread(
+        paper_desk.file_paper_review, case, review, redline,
+        reviewer=reviewer)
+
+    gid = getattr(case, "goal_id", None)
+    _audit("TOOL_CALL", ANALYST, gid, tool="paper_review", case=case_id,
+           vendor=case.subject, instrument=review.instrument,
+           version=entry["version"], gaps=entry["gaps"])
+    if gid:
+        _post_event(gid, ANALYST, "observation",
+                    f"Reviewed {case.subject}'s {entry['instrument_label']} "
+                    f"(v{entry['version']}): {entry['gaps']} departure(s) from "
+                    f"our template, {entry['high']} high severity.")
+    return JSONResponse({"ok": True, "round": entry,
+                         "review": review.to_dict(),
+                         "extraction": extraction})
+
+
+@app.get("/reviewer/case/{case_id}/round/{version}/report")
+async def reviewer_round_report(case_id: str, version: int) -> Response:
+    """The analysis memo as filed — same bytes that went to OneTrust."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return PlainTextResponse("unknown case", status_code=404)
+    for entry in case.paper_reviews:
+        if entry["version"] == version:
+            return PlainTextResponse(entry["report"])
+    return PlainTextResponse("unknown version", status_code=404)
 
 
 @app.get("/health")

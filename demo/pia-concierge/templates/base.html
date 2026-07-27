@@ -217,6 +217,7 @@
     <a href="/servicenow" class="{{ 'active' if active=='servicenow' }}">1 · ServiceNow</a>
     <a href="/mail" class="{{ 'active' if active=='mail' }}">2 · Requester inbox{% if n_mail %}<span class="badge">{{ n_mail }}</span>{% endif %}</a>
     <a href="/onetrust" class="{{ 'active' if active=='onetrust' }}">3 · OneTrust review{% if n_filed %}<span class="badge">{{ n_filed }}</span>{% endif %}</a>
+    <a href="/reviewer" class="{{ 'active' if active=='reviewer' }}">4 · Reviewer desk</a>
     {% if not standalone %}<a href="{{ dashboard_url }}/audit" target="lightwork">Audit ↗ Lightwork</a>{% endif %}
   </nav>
 </header>

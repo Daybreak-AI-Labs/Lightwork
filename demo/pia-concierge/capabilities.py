@@ -47,6 +47,7 @@ CAPS: dict[str, bool] = {
     "assessment_memory": PLATFORM,      # cross-run learning / suggestions
     "privacy_workspace": PLATFORM,      # /privacy program views (Part 2)
     "dpa_clause_review": PLATFORM,      # Art. 28 clause engine on addenda
+    "paper_redline": PLATFORM,          # vendor paper vs our template + redline
     "doc_discovery": _DISCOVERY_PRESENT,  # connected-source find-my-documents
     "llm_assist": PLATFORM,             # model-assisted chat interpretation
     # Always-on agent features (work in both builds):
@@ -68,6 +69,8 @@ _LABELS: dict[str, str] = {
     "assessment_memory": "Cross-run learning & suggested answers",
     "privacy_workspace": "Privacy workspace & program insights",
     "dpa_clause_review": "Art. 28 clause-by-clause DPA review",
+    "paper_redline": ("Vendor-paper review vs our template, with tracked-"
+                      "changes redline and versioned filing"),
     "doc_discovery": "Connected-source document discovery",
     "llm_assist": "Model-assisted conversational understanding",
     "chat_voice_intake": "Chat / voice / guided intake",

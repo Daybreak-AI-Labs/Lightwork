@@ -1378,6 +1378,19 @@ def pick_assessments() -> dict[str, Any]:
                        "assessments)?", default=True)
     ops = _q_confirm("Enable the privacy ops record types (DPA review, AI "
                      "registry, RoPA, DSAR tracker)?", default=True)
+    console.print()
+    console.print(
+        "[dim]Vendor-paper review compares a vendor's own DPA or privacy "
+        "addendum against your standard positions and produces a Word "
+        "tracked-changes redline. Which clauses fall short is always decided "
+        "deterministically from the clause checklists; a model is used only to "
+        "re-word YOUR required clause to match the vendor's drafting, and any "
+        "draft that weakens your position is discarded. Say no and the redline "
+        "uses your template language verbatim -- no model sees the "
+        "contract.[/dim]"
+    )
+    draft = _q_confirm("Let a model re-word your standard clauses to match "
+                       "vendor drafting?", default=True)
     out: dict[str, Any] = {}
     if not discovery:
         out["doc_discovery"] = False
@@ -1385,6 +1398,8 @@ def pick_assessments() -> dict[str, Any]:
         out["learn"] = False
     if not ops:
         out["privacy_ops"] = False
+    if not draft:
+        out["paper_review_use_model"] = False
     return out
 
 
@@ -3444,7 +3459,8 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
         return []
     # Assessment assists + privacy ops are default-on; write tables only when
     # the operator opted OUT of something (write-only-on-divergence).
-    body = {k: v for k, v in assessments.items() if k != "privacy_ops"}
+    body = {k: v for k, v in assessments.items()
+            if k not in ("privacy_ops", "paper_review_use_model")}
     lines: list[str] = []
     if body:
         lines += ["", "[assessments]"]
@@ -3453,6 +3469,9 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     if "privacy_ops" in assessments:
         lines += ["", "[privacy_ops]"]
         _emit_kv(lines, "enable", assessments["privacy_ops"])
+    if "paper_review_use_model" in assessments:
+        lines += ["", "[paper_review]"]
+        _emit_kv(lines, "use_model", assessments["paper_review_use_model"])
     return lines
 
 
