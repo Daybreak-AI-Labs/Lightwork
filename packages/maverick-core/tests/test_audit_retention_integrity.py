@@ -441,6 +441,73 @@ def test_a_delete_destroys_no_concurrently_committed_row(audit_dir) -> None:
     assert present == committed, f"lost {committed - present} committed audit rows"
 
 
+def test_an_unsigned_writer_also_survives_a_concurrent_erase(
+    audit_dir, monkeypatch,
+) -> None:
+    """The half of the erase race that the first fix missed.
+
+    ``AuditSigner.write`` was given the sidecar lock; ``AuditLog.record``'s
+    UNSIGNED branch was not, and it appends under an flock on its own handle --
+    which cannot exclude a rewriter that publishes a new inode via os.replace.
+    So with ``[audit] sign = false`` (a documented, supported posture) an erase
+    still destroyed committed rows while ``record()`` returned True.
+
+    Found by adversarial review of the fix, not by the fix's own tests, which
+    all exercised the signed path. Both paths now take the same lock.
+    """
+    import json as _json
+    import threading
+
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "0")
+    from maverick.audit.events import AuditEvent, EventKind
+    from maverick.audit.writer import AuditLog
+
+    log = AuditLog(audit_dir)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    path = audit_dir / f"{today}.ndjson"
+    for i in range(200):
+        log.record(AuditEvent(ts=time.time(), kind=EventKind.TOOL_CALL,
+                              agent="a", goal_id=None,
+                              payload={"channel": "slack", "user_id": "victim",
+                                       "i": i}))
+    assert log._signer_for(path) is None, "precondition: this is the UNSIGNED path"
+
+    stop = threading.Event()
+    committed = [0]
+
+    def _writer() -> None:
+        w = AuditLog(audit_dir)
+        while not stop.is_set():
+            if w.record(AuditEvent(ts=time.time(), kind=EventKind.TOOL_CALL,
+                                   agent="concurrent", goal_id=None,
+                                   payload={"n": committed[0]})):
+                committed[0] += 1
+            time.sleep(0.0005)
+
+    t = threading.Thread(target=_writer)
+    t.start()
+    try:
+        time.sleep(0.05)
+        erase.scrub_user("slack", "victim", audit_dir=audit_dir)
+        time.sleep(0.05)
+    finally:
+        stop.set()
+        t.join(timeout=10)
+
+    present = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            if _json.loads(line).get("agent") == "concurrent":
+                present += 1
+        except _json.JSONDecodeError:
+            pass
+    assert committed[0] > 5, f"anti-vacuity: only {committed[0]} writes raced"
+    assert present == committed[0], (
+        f"lost {committed[0] - present} rows that record() reported as written")
+
+
 def test_the_chain_still_verifies_after_a_concurrent_erase(audit_dir) -> None:
     """Zero loss is only half of it: the surviving chain must be intact.
 

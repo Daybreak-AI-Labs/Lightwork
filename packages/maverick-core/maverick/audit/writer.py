@@ -368,9 +368,23 @@ class AuditLog:
                     # enter the signed bytes either.
                     return bool(signer.write(payload))
                 line = json.dumps(payload, default=str) + "\n"
-                with open(path, "a", encoding="utf-8") as f:
-                    # Cross-process advisory lock so two processes appending the
-                    # same day-file can't interleave torn records above PIPE_BUF.
+                # Sidecar lock FIRST, exactly as AuditSigner.write does, and for
+                # the same reason: whole-file rewriters (GDPR erase,
+                # reanchor_file) publish a new inode via os.replace, so an
+                # flock on this handle cannot exclude them -- it guards an inode
+                # that is about to be orphaned.
+                #
+                # This path was missed when the signed one was fixed. With
+                # signing off, an erase running concurrently still destroyed
+                # committed rows while record() returned True: measured at 41
+                # lost out of 197 in a natural reproduction, and 4/4 in a
+                # targeted one. Ordering is sidecar -> append lock everywhere,
+                # so the two cannot deadlock.
+                with cross_process_lock(path), \
+                        open(path, "a", encoding="utf-8") as f:
+                    # The append lock still covers the torn-record case: two
+                    # processes appending the same day-file must not interleave
+                    # above PIPE_BUF.
                     with _file_append_lock(f):
                         f.write(line)
                         # fsync so a crash / power loss can't lose a committed
