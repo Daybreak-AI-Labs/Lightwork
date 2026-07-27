@@ -381,6 +381,52 @@ jobs:
       - name: Test
         run: pytest -vvs --tb=long
 
+  posture:
+    # The suite runs with MAVERICK_SECURE_DEFAULT=0, which keeps each control's
+    # explicit on/off mechanics under test but means ~19,000 passing tests
+    # describe a configuration no customer runs. Production ships
+    # secure-by-default: audit signing, at-rest encryption, fail-closed consent
+    # for high-risk actions, and the tool-risk ceiling.
+    #
+    # This job runs the suite under the REAL posture. It does not block: 91 of
+    # 15,869 fail today, and none is a product bug -- they are tests asserting
+    # a legacy default, or fixtures that never granted consent because consent
+    # used to auto-approve. A job that is red on every PR gets switched off,
+    # and then nothing measures the posture at all. So the failing set is
+    # committed and ratcheted instead: a NEW failure fails this job, and a
+    # fixed one must be removed from the baseline. The list only shrinks.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install packages
+        run: |
+          set -x
+          pip install -e ./packages/maverick-core
+          pip install --no-deps -e ./packages/maverick-shield
+          pip install --no-deps -e ./packages/maverick-channels
+          pip install --no-deps -e ./packages/maverick-evolve
+          pip install --no-deps -e ./packages/maverick-dashboard
+          pip install --no-deps -e ./packages/maverick-mcp
+          pip install --no-deps -e ./packages/maverick-knowledge
+          pip install --no-deps -e ./apps/installer-cli
+          pip install 'questionary>=2.0' 'rich>=13.7'
+          pip install 'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' \
+                      'httpx>=0.27' 'python-multipart>=0.0.9'
+          pip install pytest pytest-asyncio 'pyjwt[crypto]'
+      - name: Test under the production security posture
+        env:
+          MAVERICK_TEST_SECURE_DEFAULT: "1"
+        # `|| true`: the run is EXPECTED to fail while the baseline is
+        # non-empty. The gate below is what decides pass/fail, and it fails
+        # closed on a report with no pytest summary, so a killed run cannot be
+        # mistaken for a clean one.
+        run: pytest -q -p no:randomly --tb=no > posture-report.txt || true
+      - name: Posture ratchet (the known-failure set may only shrink)
+        run: python -m maverick.posture_gate --ci --report posture-report.txt
+
   redteam:
     # Red-team CI (ROADMAP 2027-H1 safety): run the labelled adversarial
     # corpus through the shield's built-in detector and fail the build on any

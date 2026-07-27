@@ -1,7 +1,7 @@
 {
   "_comment": "Which modules production actually reaches. Regenerate with `python -m maverick.reachability --regen`. A module listed UNREACHED must not be cited as shipped capability in docs or strategy.",
   "counts": {
-    "CI_ONLY": 12,
+    "CI_ONLY": 13,
     "CLI_ONLY": 27,
     "PRODUCTION": 886,
     "TEST_ONLY": 85,
@@ -391,6 +391,7 @@
     "maverick.plugin_scaffold": "PRODUCTION",
     "maverick.plugin_telemetry": "PRODUCTION",
     "maverick.plugins": "PRODUCTION",
+    "maverick.posture_gate": "CI_ONLY",
     "maverick.predictive_approvals": "PRODUCTION",
     "maverick.preflight": "PRODUCTION",
     "maverick.privacy": "PRODUCTION",
