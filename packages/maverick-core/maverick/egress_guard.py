@@ -127,14 +127,48 @@ def _check(url: str) -> None:
 
 
 def _patch_httpx(mod: Any) -> None:
-    _originals["httpx.Client.send"] = mod.Client.send
+    """Wrap httpx at the per-hop seam, not at ``send``.
+
+    ``Client.send`` resolves the whole redirect chain internally, so a check
+    there sees only the FIRST url. That is a real bypass and it was measured:
+    an allow-listed host answering 302 to a denied host returned its body. The
+    other two libraries do not have this shape -- ``requests.Session.send``
+    re-enters itself via ``resolve_redirects`` and urllib's redirect handler
+    re-enters ``OpenerDirector.open`` -- so only httpx needs the lower seam.
+
+    ``_send_single_request`` issues exactly one request, so every hop is
+    checked. It is a private name; if a future httpx drops it we fall back to
+    ``send``, which is strictly weaker but still covers the common case, and
+    the redirect test pins the difference.
+    """
+    if hasattr(mod.Client, "_send_single_request"):
+        _originals["httpx.Client._send_single_request"] = (
+            mod.Client._send_single_request)
+        _originals["httpx.AsyncClient._send_single_request"] = (
+            mod.AsyncClient._send_single_request)
+
+        def _sync_one(self, request, *a, **kw):
+            _check(str(request.url))
+            return _originals["httpx.Client._send_single_request"](
+                self, request, *a, **kw)
+
+        async def _async_one(self, request, *a, **kw):
+            _check(str(request.url))
+            return await _originals["httpx.AsyncClient._send_single_request"](
+                self, request, *a, **kw)
+
+        mod.Client._send_single_request = _sync_one
+        mod.AsyncClient._send_single_request = _async_one
+        return
+
+    _originals["httpx.Client.send"] = mod.Client.send      # pragma: no cover
     _originals["httpx.AsyncClient.send"] = mod.AsyncClient.send
 
-    def _sync_send(self, request, **kwargs):
+    def _sync_send(self, request, **kwargs):  # pragma: no cover
         _check(str(request.url))
         return _originals["httpx.Client.send"](self, request, **kwargs)
 
-    async def _async_send(self, request, **kwargs):
+    async def _async_send(self, request, **kwargs):  # pragma: no cover
         _check(str(request.url))
         return await _originals["httpx.AsyncClient.send"](self, request, **kwargs)
 
@@ -175,9 +209,14 @@ def _patch_urllib(mod: Any) -> None:
 
 def _unpatch(name: str, mod: Any) -> None:
     if name == "httpx":
-        mod.Client.send = _originals.pop("httpx.Client.send", mod.Client.send)
-        mod.AsyncClient.send = _originals.pop(
-            "httpx.AsyncClient.send", mod.AsyncClient.send)
+        if "httpx.Client._send_single_request" in _originals:
+            mod.Client._send_single_request = _originals.pop(
+                "httpx.Client._send_single_request")
+            mod.AsyncClient._send_single_request = _originals.pop(
+                "httpx.AsyncClient._send_single_request")
+        if "httpx.Client.send" in _originals:  # pragma: no cover - fallback path
+            mod.Client.send = _originals.pop("httpx.Client.send")
+            mod.AsyncClient.send = _originals.pop("httpx.AsyncClient.send")
     elif name == "requests":
         mod.Session.send = _originals.pop(
             "requests.Session.send", mod.Session.send)

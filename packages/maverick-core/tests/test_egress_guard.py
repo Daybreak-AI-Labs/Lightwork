@@ -196,6 +196,66 @@ def test_a_non_allowlisted_host_is_still_blocked(guarded, monkeypatch) -> None:
         httpx.get("https://other.example.com/x", timeout=0.5)
 
 
+# -- redirects: the bypass this guard shipped with first --------------------
+
+def test_a_redirect_to_a_denied_host_is_blocked(guarded, monkeypatch) -> None:
+    """An allow-listed host must not be able to hand off to a denied one.
+
+    The first version of this guard wrapped ``httpx.Client.send``, which
+    resolves the WHOLE redirect chain internally -- so only the first URL was
+    ever checked. Measured before the fix: an allow-listed host answering 302
+    to a denied host returned its body. Exfiltration in two hops, past a lock
+    whose entire purpose is to prevent it.
+
+    The fix moves the httpx seam to ``_send_single_request``, which issues
+    exactly one request. This test is what distinguishes the two seams; without
+    it a future refactor back to ``send`` would look correct and silently
+    reopen the hole.
+    """
+    import http.server
+    import socketserver
+    import threading
+
+    ports: dict[str, int] = {}
+
+    class _Redirector(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://denied.test:{ports['b']}/x")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = socketserver.TCPServer(("127.0.0.1", 0), _Redirector)
+    ports["a"] = srv.server_address[1]
+    ports["b"] = 9
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        # Permit the first hop only.
+        monkeypatch.setattr("maverick.enterprise._is_local_endpoint",
+                            lambda url: f":{ports['a']}" in url)
+        _allowed(monkeypatch)
+        with pytest.raises(EgressBlocked):
+            httpx.get(f"http://127.0.0.1:{ports['a']}/start",
+                      follow_redirects=True, timeout=3.0)
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_the_first_hop_is_still_permitted(guarded, monkeypatch) -> None:
+    """Positive control for the test above.
+
+    If the guard simply blocked everything once redirects were involved, the
+    redirect test would pass while the feature was broken.
+    """
+    monkeypatch.setattr("maverick.enterprise._is_local_endpoint",
+                        lambda url: True)
+    with pytest.raises(httpx.HTTPError):
+        httpx.get(UNROUTABLE, timeout=0.5)
+
+
 # -- composition with SSRF pinning -----------------------------------------
 
 def test_the_guard_does_not_disable_ssrf_pinning(guarded, monkeypatch) -> None:
@@ -235,22 +295,38 @@ def test_a_block_is_audited(guarded, monkeypatch) -> None:
 
 # -- install/uninstall mechanics -------------------------------------------
 
-def test_install_is_idempotent(monkeypatch) -> None:
+#: The attribute the httpx wrapper actually replaces. Named here so these
+#: mechanics tests fail loudly if the seam moves again, rather than quietly
+#: asserting nothing about the method that carries the check.
+_SEAM = "_send_single_request"
+
+
+def test_the_seam_is_the_per_hop_one() -> None:
+    """Pins WHICH method carries the check, not merely that one does.
+
+    `send` resolves redirects internally; `_send_single_request` issues one
+    request. Wrapping the former is the bypass this guard shipped with.
+    """
+    assert hasattr(httpx.Client, _SEAM), "httpx moved its per-request seam"
+
+
+def test_install_is_idempotent() -> None:
     egress_guard.uninstall()
     assert egress_guard.install() is True
-    first = httpx.Client.send
+    first = getattr(httpx.Client, _SEAM)
     assert egress_guard.install() is True
-    assert httpx.Client.send is first, "double-wrapping would stack checks"
+    assert getattr(httpx.Client, _SEAM) is first, (
+        "double-wrapping would stack checks")
     egress_guard.uninstall()
 
 
-def test_uninstall_restores_the_original_send() -> None:
+def test_uninstall_restores_the_original_method() -> None:
     egress_guard.uninstall()
-    original = httpx.Client.send
+    original = getattr(httpx.Client, _SEAM)
     egress_guard.install()
-    assert httpx.Client.send is not original
+    assert getattr(httpx.Client, _SEAM) is not original
     egress_guard.uninstall()
-    assert httpx.Client.send is original
+    assert getattr(httpx.Client, _SEAM) is original
     assert egress_guard.active() is False
 
 
