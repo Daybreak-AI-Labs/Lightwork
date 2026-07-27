@@ -1,13 +1,13 @@
 # Coordinated security disclosures
 
 Resolved security issues, published after the embargo window in
-[`SECURITY.md`](../SECURITY.md) (90 days, or sooner once a fix ships and users
+[`SECURITY.md`](SECURITY.md) (90 days, or sooner once a fix ships and users
 have had a reasonable window to upgrade). This is the public record the roadmap's
 "coordinated-disclosure log" item calls for — a standing companion to
 `SECURITY.md` (which covers *how* to report) and `CHANGELOG.md` (which lists *what*
 changed).
 
-To report a vulnerability, see [`SECURITY.md`](../SECURITY.md). Do not open a
+To report a vulnerability, see [`SECURITY.md`](SECURITY.md). Do not open a
 public issue for an unpatched vulnerability.
 
 ## How to read this log

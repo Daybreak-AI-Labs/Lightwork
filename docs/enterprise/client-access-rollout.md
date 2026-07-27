@@ -37,7 +37,7 @@ downgrades are therefore the same gesture: flip boxes, save.
 
 Hosting the console on your own domain (sign in from anywhere, keep the
 signing key off the internet): **Cloudflare Tunnel + Access**, documented in
-[`deploy/cloudflare/`](../../deploy/cloudflare/README.md).
+[`deploy/cloudflare/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/cloudflare/README.md).
 
 ## 2. Near-instant propagation to client environments
 

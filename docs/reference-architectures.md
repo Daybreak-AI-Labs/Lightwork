@@ -14,10 +14,10 @@ store, never the image. Pick the one that matches where you already run things.
 
 | Platform | Manifest | State | Secrets |
 |---|---|---|---|
-| Kubernetes | [`kubernetes/maverick.yaml`](../deploy/reference-architectures/kubernetes/maverick.yaml) | PVC (`ReadWriteOnce`) | `Secret` → `envFrom` |
-| AWS ECS (Fargate) | [`ecs/task-definition.json`](../deploy/reference-architectures/ecs/task-definition.json) | EFS volume | Secrets Manager → `secrets` |
-| Fly.io | [`flyio/fly.toml`](../deploy/reference-architectures/flyio/fly.toml) | Fly volume at `/state` | `fly secrets set` |
-| Railway | [`railway/railway.json`](../deploy/reference-architectures/railway/railway.json) | Railway volume at `/state` | service variables |
+| Kubernetes | [`kubernetes/maverick.yaml`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/reference-architectures/kubernetes/maverick.yaml) | PVC (`ReadWriteOnce`) | `Secret` → `envFrom` |
+| AWS ECS (Fargate) | [`ecs/task-definition.json`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/reference-architectures/ecs/task-definition.json) | EFS volume | Secrets Manager → `secrets` |
+| Fly.io | [`flyio/fly.toml`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/reference-architectures/flyio/fly.toml) | Fly volume at `/state` | `fly secrets set` |
+| Railway | [`railway/railway.json`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/deploy/reference-architectures/railway/railway.json) | Railway volume at `/state` | service variables |
 
 ## Kubernetes
 

@@ -103,7 +103,7 @@ evidences a human/org process rather than performing it (flagged per entry).
 ## 2. How an IT/GRC agent maps onto Lightwork
 
 Identical to the finance suite: each agent is one
-[`DomainProfile`](../../packages/maverick-core/maverick/domain.py) pack
+[`DomainProfile`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/domain.py) pack
 (`compartment` seal + `persona` + attenuating `allow_tools`/`deny_tools` +
 `max_risk` + `allow_hosts` + `mcp_servers` + `knowledge_sources`), governed at
 runtime by Layer A (`governance.py` → allow/deny/require_human), consent/HITL, and

@@ -97,7 +97,7 @@ are relative to the repo root; `maverick/` means
 
 | # | Project | Repo area (verified) | Definition of done |
 |---|---|---|---|
-| 1 | New channel adapter (e.g. a campus chat system) | `packages/maverick-channels/maverick_channels/` — subclass `Channel` in `base.py`; wiring steps in [`CONTRIBUTING.md`](../../CONTRIBUTING.md) "Adding a channel" | Adapter + tests + wizard entry; messages round-trip in a live demo |
+| 1 | New channel adapter (e.g. a campus chat system) | `packages/maverick-channels/maverick_channels/` — subclass `Channel` in `base.py`; wiring steps in [`CONTRIBUTING.md`](../CONTRIBUTING.md) "Adding a channel" | Adapter + tests + wizard entry; messages round-trip in a live demo |
 | 2 | New sandbox backend via the entry-point SDK | `maverick/sandbox/sdk.py` (`SandboxV2` protocol, `conformance()`, `maverick.sandboxes` entry-point group) | Backend passes `conformance()`, ships as a separate package, runs a real goal |
 | 3 | New LLM provider adapter | `maverick/providers/` + registry in `providers/__init__.py`; steps in CONTRIBUTING "Adding a provider" | `complete()`/`complete_async()` + format-translation tests on the `FakeLLM` pattern |
 | 4 | Compaction strategy research | `maverick/compaction/plugins.py` (named-strategy registry; `learned`/`multimodal`/`streaming`/`graph` ship today), `tests/test_compaction_plugins.py` | A new registered strategy + a benchmark comparison against `"heuristic"` on a fixed corpus |
@@ -108,7 +108,7 @@ are relative to the repo root; `maverick/` means
 | 9 | TypeScript plugin development | `sdks/plugin-ts/` (`@maverick/plugin-sdk`, `defineTool`/`servePlugin`, NDJSON stdio protocol; host: `maverick/ts_plugin_host.py`) | A working TS tool plugin passing `python -m maverick.plugin_matrix --ci` and the moderation checks |
 | 10 | Dashboard i18n for a new language | `packages/maverick-dashboard/maverick_dashboard/i18n_portal.py` (`scaffold(lang)`, `validate_catalog`) | A validated community catalog for a language the team speaks natively (feeds the localized-docs roadmap rows) |
 | 11 | HCI study: approval friction | `maverick/ux_retrospective.py`, `maverick/consent_ergonomics.py`, `maverick/predictive_approvals.py` | An instrumented user study over the consent/approval UX with a written report; any code change is a bonus, the study is the deliverable |
-| 12 | Security analysis: capability model | `maverick/capability.py`, `maverick/capability_boot.py`, `maverick/capability_fuzzer.py` (CI gate: 0 leaks in ~2000 probes) | New fuzzer probe families or a written attack analysis; any found leak responsibly disclosed per [`SECURITY.md`](../../SECURITY.md) |
+| 12 | Security analysis: capability model | `maverick/capability.py`, `maverick/capability_boot.py`, `maverick/capability_fuzzer.py` (CI gate: 0 leaks in ~2000 probes) | New fuzzer probe families or a written attack analysis; any found leak responsibly disclosed per [`SECURITY.md`](../SECURITY.md) |
 
 ## Evaluation rubric (per project, end of semester)
 
@@ -149,9 +149,9 @@ therefore include, in writing:
    a handshake.
 2. **Contributions under the CLA.** Anything contributed upstream goes
    through the signed Contributor License Agreement
-   ([`CLA.md`](../../CLA.md)), which assigns the Licensor the rights needed
+   ([`CLA.md`](../CLA.md)), which assigns the Licensor the rights needed
    to relicense the contribution — exactly as
-   [`CONTRIBUTING.md`](../../CONTRIBUTING.md) states. Confirm the
+   [`CONTRIBUTING.md`](../CONTRIBUTING.md) states. Confirm the
    university's IP policy permits students to sign it *before* projects
    start; this is the most common deal-breaker, hence the rubric row.
 3. **Student-owned work.** Projects built against public extension surfaces
@@ -161,7 +161,7 @@ therefore include, in writing:
    explicit in the agreement so nobody is surprised.
 4. **Trademark.** Course materials may say "built on Lightwork" (nominative
    use); they may not name a course project "Lightwork-anything" or imply
-   official status ([`TRADEMARK.md`](../../TRADEMARK.md)).
+   official status ([`TRADEMARK.md`](../TRADEMARK.md)).
 5. **No open-source promise.** Do not promise a future open-source edition
    to close a deal — the "lite" edition is a stated possibility on the
    [roadmap](../ROADMAP.md), not a commitment, and partners must hear it

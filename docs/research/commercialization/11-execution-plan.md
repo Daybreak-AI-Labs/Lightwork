@@ -2,9 +2,9 @@
 
 > Operationalizes the teardown ([`00-synthesis.md`](./00-synthesis.md) + 01–10) into a
 > runnable program. Three lanes, hard gates, owners, costs. Companion artifacts:
-> the design-partner kit ([`12`](./12-gate0-design-partner-kit.md)), the Governed-Runtime
-> build spec ([`13`](./13-governed-runtime-build-spec.md)), and the licensing/positioning
-> execution checklist ([`14`](./14-licensing-and-positioning-execution.md)). Date: 2026-06-06.
+> the design-partner kit (`12` *(not yet written)*), the Governed-Runtime
+> build spec (`13` *(not yet written)*), and the licensing/positioning
+> execution checklist (`14` *(not yet written)*). Date: 2026-06-06.
 
 ## The one rule
 
@@ -17,7 +17,7 @@ around that gate.
 ## Lane 1 — Gate 0: falsify the thesis (weeks 1–8)
 
 Sell the *existing* product (signed-audit + capability + framework-tag projection) to
-regulated buyers and ask for money. Full playbook in [`12`](./12-gate0-design-partner-kit.md).
+regulated buyers and ask for money. Full playbook in `12` *(not yet written)*.
 
 | Wk | Action | Output |
 |---|---|---|
@@ -27,7 +27,7 @@ regulated buyers and ask for money. Full playbook in [`12`](./12-gate0-design-pa
 | 7–8 | Close. Count signed/verbal-committed LOIs | **Gate 0 decision** |
 
 **Gate 0 (end of week 8):**
-- **≥5 paid LOIs ⇒ GO.** Trigger Lane 3 build + the relicense/raise in [`14`](./14-licensing-and-positioning-execution.md).
+- **≥5 paid LOIs ⇒ GO.** Trigger Lane 3 build + the relicense/raise in `14` *(not yet written)*.
 - **<5 ⇒ STOP the pivot.** Ship the runtime hardening as OSS, keep the brand and the
   community, and re-test when the budget signal is stronger. You spent ~8 weeks and ~$0
   to avoid a company-scale mistake.
@@ -42,11 +42,11 @@ These pay off whether or not you pivot, so they don't wait on the gate:
 3. **Trust surface:** a public trust page, a DPA + SCC + sub-processor draft, and a
    pre-filled SIG-Lite/CAIQ. Lead the sale with self-host to shrink the questionnaire (07).
 4. **Trademark clearance** on "Lightwork" (the real enforcement lever; currently unguarded) —
-   *clearance now, public filing gated to Gate 0* (teardown 01, [`14`](./14-licensing-and-positioning-execution.md)).
+   *clearance now, public filing gated to Gate 0* (teardown 01, `14` *(not yet written)*).
 5. **Fix the cross-tenant leak as a security patch** — `server.py:81-88` writes the world
    model/audit outside `tenant_scope`. This is a correctness/safety fix independent of the
    full tenancy track; do it now, do **not** offer hosted multi-tenant until the full
-   `tenant_id` work in [`13`](./13-governed-runtime-build-spec.md) lands (teardown 04, 09).
+   `tenant_id` work in `13` *(not yet written)* lands (teardown 04, 09).
 6. **Content spine:** open conversations with **UCF** (OEM) and stand up **OSCAL** ingest;
    make **human attestation a hard product invariant** — it's the content-liability fix
    *and* the differentiator (teardown 08).
@@ -54,7 +54,7 @@ These pay off whether or not you pivot, so they don't wait on the gate:
 ## Lane 3 — Build the Governed Runtime (spec weeks 6–12; build only if Gate 0 = GO)
 
 The ~30–40 person-week track that turns ~15–20% readiness into a closeable regulated POC.
-Full spec, file-pointed, in [`13`](./13-governed-runtime-build-spec.md):
+Full spec, file-pointed, in `13` *(not yet written)*:
 
 - SSO/OIDC (+ SCIM) → federated principal onto `Capability.principal`.
 - Encryption-at-rest / KMS / per-tenant DEK for `world.db` + audit.

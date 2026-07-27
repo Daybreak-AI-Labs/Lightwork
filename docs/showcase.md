@@ -19,7 +19,7 @@ An entry qualifies when all of these hold:
   config (`config.toml` fragments, goal templates, skills) to reproduce the
   setup.
 - **It ships evidence of a real run** (see below).
-- **It respects the [trademark policy](../TRADEMARK.md)** — "built with
+- **It respects the [trademark policy](TRADEMARK.md)** — "built with
   Lightwork" is fine (nominative use); naming your product "Lightwork-anything"
   or implying it is the official Lightwork is not.
 
@@ -41,7 +41,7 @@ Two artifacts, both required:
 1. Fork the repo and add **one row** to the entries table below (keep the
    table sorted alphabetically by project name).
 2. Open a pull request titled `docs: add <project> to the showcase wall`.
-   The usual PR rules in [`CONTRIBUTING.md`](../CONTRIBUTING.md) apply.
+   The usual PR rules in [`CONTRIBUTING.md`](CONTRIBUTING.md) apply.
 3. In the PR description, link the evidence artifacts and note anything
    reviewers should know (e.g., which sandbox backend and providers the trace
    was captured with).

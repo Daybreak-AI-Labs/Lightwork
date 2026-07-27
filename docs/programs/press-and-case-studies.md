@@ -56,7 +56,7 @@ caps, a safety shield, and a signed, append-only audit log.
 | Everything else | — | v1 facts stand: proprietary license (lite edition a stated possibility, not a commitment); Python 3.10-3.12, 2000+ tests in CI; alpha, installable today; maker: Day AI Labs (Christopher Day) |
 
 Naming/trademark rules: unchanged — see press kit v1 and
-[`TRADEMARK.md`](../../TRADEMARK.md).
+[`TRADEMARK.md`](../TRADEMARK.md).
 
 ## Embargo / briefing checklist
 
@@ -82,7 +82,7 @@ For any pre-announcement briefing (release, partnership, case study):
       headlines; lite edition described only as a stated possibility.
 - [ ] **Spokesperson named**; everyone else (including
       [ambassadors](./ambassadors.md)) routes inquiries to the press
-      contact. Security topics: only what [`SECURITY.md`](../../SECURITY.md)
+      contact. Security topics: only what [`SECURITY.md`](../SECURITY.md)
       and published advisories already say.
 - [ ] **Day-of**: assets staged, links live at embargo lift, corrections
       contact monitored for 48h. Factual errors in coverage get one polite

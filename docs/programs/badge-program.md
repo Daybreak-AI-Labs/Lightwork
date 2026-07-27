@@ -71,7 +71,7 @@ itself.
 ## Usage terms
 
 The badge image is licensed for display **solely** to identify the verified
-project, subject to [`TRADEMARK.md`](../../TRADEMARK.md):
+project, subject to [`TRADEMARK.md`](../TRADEMARK.md):
 
 - Display on the verified project's README/site/materials: permitted.
 - Modifying the mark, recoloring beyond the two shipped variants, or

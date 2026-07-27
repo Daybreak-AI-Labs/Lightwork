@@ -3,7 +3,7 @@
 **Status:** design / roadmap. Companion to the finance, IT-GRC, sales-GTM, HR,
 product-engineering, and strategy/exec suites; indexed in
 [`agent-suites-overview.md`](agent-suites-overview.md). Extends the shipped
-[`legal.toml`](../../packages/maverick-core/maverick/domains/legal.toml) starter pack into
+[`legal.toml`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/domains/legal.toml) starter pack into
 a full suite. ~36 agents (31 base + 5 council-added) across eight towers.
 
 > **Legal is horizontal — it touches every other suite — and uniquely risky for AI.** A
@@ -80,7 +80,7 @@ is wired; "verify *every* cite or mark it unverified" is the enforcement to buil
 
 ## 2. How a legal agent maps onto Lightwork
 
-Each agent is a [`DomainProfile`](../../packages/maverick-core/maverick/domain.py) pack
+Each agent is a [`DomainProfile`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/domain.py) pack
 that **inherits the `legal.toml` spine** (cite precisely, not legal advice, human-confirm)
 and adds a practice-area persona + tools. Two specifics:
 

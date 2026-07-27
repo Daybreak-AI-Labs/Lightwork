@@ -88,7 +88,7 @@ churn/health models, partner/PRM, and win-loss. These are §9 connectors + new p
 ## 2. How a GTM agent maps onto Lightwork
 
 Same as the other suites: each agent is one
-[`DomainProfile`](../../packages/maverick-core/maverick/domain.py) pack (compartment
+[`DomainProfile`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/domain.py) pack (compartment
 + persona + attenuating capability + tools + knowledge), governed by Layer A
 (`governance.py`), the consent gate, and the signed audit chain. Two GTM specifics:
 

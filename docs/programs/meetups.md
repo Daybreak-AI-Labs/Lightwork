@@ -30,10 +30,10 @@ demo machine cover it), and remind people the runtime spends real API money —
 - [ ] Venue: free/cheap (office space, university room); seats, screen,
       power. No bar-only venues — laptops are the point.
 - [ ] Listing: any events platform or a repo discussion thread; the listing
-      states it's a community event, [CoC](../../CODE_OF_CONDUCT.md)
+      states it's a community event, [CoC](../CODE_OF_CONDUCT.md)
       linked and enforced (organizer is the contact).
 - [ ] Naming/trademark: "Lightwork Meetup <City>" is permitted nominative
-      use **with written permission per [`TRADEMARK.md`](../../TRADEMARK.md)**
+      use **with written permission per [`TRADEMARK.md`](../TRADEMARK.md)**
       — request it once when registering the meetup (below); no logo
       remixes, no implying official-company status.
 - [ ] Content: claims policy applies (capabilities per

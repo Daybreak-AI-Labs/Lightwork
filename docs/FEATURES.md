@@ -1411,7 +1411,7 @@ here.
   attack samples are allowed and disclosed); writes corpus + MANIFEST +
   README.
   **Security backports + LTS machinery**
-  ([`docs/security-backports.md`](../docs/security-backports.md) +
+  ([`docs/security-backports.md`](security-backports.md) +
   `backport_tool.py`, `python -m maverick.backport_tool scan|plan|check`):
   the policy (what qualifies, the `lts/<v>` 2-year safety-fix branch, 7-day
   SLA) made executable — `scan` finds security-marked commits, `plan` lists
@@ -1419,7 +1419,7 @@ here.
   twin isn't re-flagged), and `check` exits non-zero when an eligible fix is
   past the SLA — read-only; cherry-picks/pushes stay maintainer acts.
   **Formal verification of the sandbox interface (TLA+)**
-  ([`docs/specs/tla/`](../docs/specs/tla/README.md)): `SandboxInterface.tla`
+  ([`docs/specs/tla/`](specs/tla/README.md)): `SandboxInterface.tla`
   models the chokepoint as a state machine and TLC-verifies — for all
   interleavings — no silent downgrade to host exec under a container backend,
   scrubbed child env always, refused-never-ran, bounded execution budget, and

@@ -15,7 +15,7 @@ product enforces, with no parallel bureaucracy.
 A submission qualifies when all hold:
 
 - A `SKILL.md` per the schema in
-  [`benchmarks/example-skills/README.md`](../../benchmarks/example-skills/README.md),
+  [`benchmarks/example-skills/README.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/example-skills/README.md),
   publicly available (own repo or a catalog index entry), installable via
   `maverick skill install <source>`.
 - **Passes the validator**: `maverick skill validate <path>` clean (same
@@ -25,7 +25,7 @@ A submission qualifies when all hold:
   prohibited patterns, license declared. FLAG findings must be resolved
   with the judges; REJECT disqualifies.
 - Author signs off on entry (no drafting people in) and the skill respects
-  [`TRADEMARK.md`](../../TRADEMARK.md).
+  [`TRADEMARK.md`](../TRADEMARK.md).
 - Not authored by the maintainer or judges (their skills are showcased,
   not awarded).
 - Published or substantially updated within the award year.

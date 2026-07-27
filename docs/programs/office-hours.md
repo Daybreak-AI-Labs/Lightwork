@@ -25,7 +25,7 @@ none.
 | Minutes | Block |
 |---|---|
 | 0-5 | What shipped since last time — read straight from `CHANGELOG.md` / `FEATURES.md` diffs, no slides |
-| 5-45 | Open queue: attendee questions, first-come; live debugging welcome (`maverick doctor` output is the standard first ask, per the bug-report convention in [`CONTRIBUTING.md`](../../CONTRIBUTING.md)) |
+| 5-45 | Open queue: attendee questions, first-come; live debugging welcome (`maverick doctor` output is the standard first ask, per the bug-report convention in [`CONTRIBUTING.md`](../CONTRIBUTING.md)) |
 | 45-55 | One prepared 10-minute deep-dive on a real module or workflow (rotate: budget caps, audit verify, skills, plugins, sandboxes, channels) |
 | 55-60 | Parking lot → GitHub issues, filed live; next session's date confirmed |
 
@@ -37,8 +37,8 @@ Rules of the room:
 - **No commitments on air.** Feature requests become issues, not promises;
   the [roadmap](../ROADMAP.md) is the backlog of record.
 - **Security reports are redirected immediately** to
-  [`SECURITY.md`](../../SECURITY.md), never discussed live.
-- **Code of conduct applies** ([`CODE_OF_CONDUCT.md`](../../CODE_OF_CONDUCT.md));
+  [`SECURITY.md`](../SECURITY.md), never discussed live.
+- **Code of conduct applies** ([`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md));
   the host can remove anyone.
 - Recording: **off by default** (people debug their own configs on screen);
   the prepared deep-dive segment may be recorded separately and published

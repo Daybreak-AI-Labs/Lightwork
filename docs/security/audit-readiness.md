@@ -6,7 +6,7 @@ controls are and how to verify them, what we already test, and where the
 known residual risks are. It is the operational companion to two existing
 docs — read those first:
 
-- [`SECURITY.md`](../../SECURITY.md) — reporting, coordinated disclosure, and
+- [`SECURITY.md`](../SECURITY.md) — reporting, coordinated disclosure, and
   the execution-posture caveat (the single most important thing to understand).
 - [`threat-model.md`](./threat-model.md) — the STRIDE model, trust
   boundaries, and in-scope/out-of-scope assets.
@@ -165,7 +165,7 @@ hardened config; an auditor should still try to escalate each.
 
 ## 6. Reporting
 
-Use the process in [`SECURITY.md`](../../SECURITY.md): GitHub Security
+Use the process in [`SECURITY.md`](../SECURITY.md): GitHub Security
 Advisories (preferred) or the security email, **not** a public issue.
 Coordinated-disclosure window is 90 days. Please report against the config
 you tested (hardened vs. default) and include the `maverick version` output.

@@ -92,7 +92,7 @@ ML model registry / MLOps depth, and **DORA / engineering-metrics**.
 
 ## 2. How a P&E agent maps onto Lightwork
 
-Each agent is one [`DomainProfile`](../../packages/maverick-core/maverick/domain.py)
+Each agent is one [`DomainProfile`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/domain.py)
 pack — but here the pack is mostly **tool selection + persona over a shipped toolset**,
 not new infrastructure. The Software Engineering tower (T3) is essentially the existing
 coding agent with role-scoped capabilities; the other towers bind the already-shipped

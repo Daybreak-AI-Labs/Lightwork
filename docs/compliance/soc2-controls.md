@@ -4,7 +4,7 @@ This document maps the SOC 2 **Trust Services Criteria (TSC)** to the concrete
 Lightwork controls that satisfy each. It is the foundation of the SOC 2
 workstream: a controls inventory an auditor can read alongside the
 machine-readable evidence collector in
-[`packages/maverick-core/maverick/soc2.py`](../../packages/maverick-core/maverick/soc2.py)
+[`packages/maverick-core/maverick/soc2.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/soc2.py)
 (`collect_soc2_evidence()`).
 
 > **Honesty note.** SOC 2 is an *organizational* attestation, not a code audit.
@@ -26,7 +26,7 @@ machine-readable evidence collector in
 | **Process-only** | Satisfied (if at all) by an organizational process outside this repo, not by code. |
 
 The "Evidence" column points at a module/file, or — where the
-[`soc2.py`](../../packages/maverick-core/maverick/soc2.py) collector reports it
+[`soc2.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/soc2.py) collector reports it
 live — the **evidence key** (the dotted path into `collect_soc2_evidence()`'s
 output, e.g. `controls.capability_enforcement`).
 
@@ -189,7 +189,7 @@ processes (or built where marked Gap):
 
 ## The evidence collector
 
-[`maverick/soc2.py`](../../packages/maverick-core/maverick/soc2.py) exposes:
+[`maverick/soc2.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/soc2.py) exposes:
 
 ```python
 from maverick.soc2 import collect_soc2_evidence

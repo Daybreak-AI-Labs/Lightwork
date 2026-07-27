@@ -80,7 +80,7 @@ IoT/SCADA** — plus the **physical-action gate enforcement** and the **safety-r
 
 ## 2. How an operations agent maps onto Lightwork
 
-Each agent is a [`DomainProfile`](../../packages/maverick-core/maverick/domain.py) pack.
+Each agent is a [`DomainProfile`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/domain.py) pack.
 The defining specific: **the capability envelope separates *planning* (digital, freely
 automatable) from *acting* (physical, gated or refused).** A planning agent gets read +
 optimize tools; a shop-floor or dispatch agent's physical-effect tools are on `deny_tools`
