@@ -679,7 +679,7 @@ here.
   dashboard seed performs no network access, requires an empty/dedicated demo
   tenant, and forces a visible readiness gap. See
   [`AI_EVIDENCE_GATEWAY.md`](./AI_EVIDENCE_GATEWAY.md) and the
-  [governance benchmark report](../benchmarks/GOVERNANCE_FRONTIER_RESULTS.md).
+  [governance benchmark report](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md).
 - **Four reduced standalone security SKUs** (`demo/grc-concierge/`,
   `demo/platform-threat-hunter/`, `demo/environment-threat-hunter/`,
   `demo/model-risk-ai-assurance-officer/`) — each has
