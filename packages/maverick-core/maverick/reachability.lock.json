@@ -3,8 +3,8 @@
   "counts": {
     "CI_ONLY": 13,
     "CLI_ONLY": 27,
-    "PRODUCTION": 886,
-    "TEST_ONLY": 85,
+    "PRODUCTION": 887,
+    "TEST_ONLY": 87,
     "UNREACHED": 6
   },
   "modules": {
@@ -26,6 +26,7 @@
     "maverick.agent_trust": "PRODUCTION",
     "maverick.ai_act": "PRODUCTION",
     "maverick.ai_act_package": "CLI_ONLY",
+    "maverick.ai_evidence_gateway": "PRODUCTION",
     "maverick.air_gap": "PRODUCTION",
     "maverick.annotation_export": "CLI_ONLY",
     "maverick.anomaly_signal": "PRODUCTION",
@@ -179,6 +180,7 @@
     "maverick.dispatch_contract": "CI_ONLY",
     "maverick.doc_discovery": "PRODUCTION",
     "maverick.docs_i18n": "CLI_ONLY",
+    "maverick.docx_redline": "TEST_ONLY",
     "maverick.dom_diff": "PRODUCTION",
     "maverick.domain": "PRODUCTION",
     "maverick.domain_audit": "PRODUCTION",
@@ -367,6 +369,7 @@
     "maverick.orchestrator": "PRODUCTION",
     "maverick.outcomes": "PRODUCTION",
     "maverick.overrides_bundle": "PRODUCTION",
+    "maverick.paper_review": "TEST_ONLY",
     "maverick.parser_isolation": "PRODUCTION",
     "maverick.paths": "PRODUCTION",
     "maverick.perceptual_hash": "TEST_ONLY",
