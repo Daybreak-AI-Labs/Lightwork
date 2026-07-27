@@ -24,6 +24,16 @@ The installer wizard writes these conservative defaults:
 [security_ops]
 enable = true
 
+[evidence_graph]
+enable = false
+
+[model_risk_assurance]
+enable = false
+gate_promotions = false
+
+[evidence_gateway]
+enable = false
+
 [threat_hunt]
 enable = false
 
@@ -89,6 +99,7 @@ when the environment hunter, that connector's ``enable`` knob, and a trusted
 startup-injected read-only transport are all present. The dashboard surfaces are:
 
 - `/security` — Security & GRC control-program workspace
+- `/security/assurance` — AI evidence gateway and Model Risk assurance cockpit
 - `/security/report` — print-friendly readiness and board report
 - `/security/threats` — threats inside Lightwork and its agent activity
 - `/security/soc` — customer-environment findings, investigations, and response
@@ -99,6 +110,10 @@ workspace require `operate`; read summaries use `view`; configuration and other
 administrative mutations use `admin`. Mutations use revision compare-and-swap,
 so stale clients receive a conflict instead of silently overwriting a newer
 record.
+
+The evidence gateway's signed packet is issued by an admin-only, rate-limited
+`POST` because issuance appends an attestation; it is not a state-changing
+download `GET`.
 
 The configuration endpoint itself is revision-CAS guarded. Clients read the
 current ``revision`` from ``GET /api/v1/security/config`` and submit it as
