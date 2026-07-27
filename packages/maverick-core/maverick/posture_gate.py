@@ -30,6 +30,16 @@ Usage in CI::
 
 ``--regen`` rewrites the baseline from a report, for when the number moves
 deliberately.
+
+**The baseline is environment-sensitive, and the committed one was measured
+locally.** CI resolves starlette 1.3.x / fastapi 0.140.x where local pins are
+older, and on that runner 19 further tests fail -- none of which reproduce
+locally under the same flag. So the CI job runs this WITHOUT ``--ci`` for now:
+it reports the delta and uploads the report, rather than gating on a
+measurement taken somewhere else. Flipping it to blocking needs a baseline
+regenerated from that artifact, and those 19 explained rather than absorbed. A
+baseline nobody can account for is an exemption list wearing a ratchet's
+clothes, which is the failure this module was written to avoid.
 """
 
 from __future__ import annotations
