@@ -2023,11 +2023,13 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   kill -9 at any byte: one fsync'd `os.write` per record, seq resumes after
   reopen, replay tolerates (and counts) the torn tail vs mid-file corruption,
   gap detection; fsync policy knob for test/throughput mode.
-- **Right-to-rectification** (`rectification.py`) — GDPR Art. 16 counterpart
-  to DSAR/erasure: find a subject's occurrences across goals/turns/facts
-  (snippets), rectify with dry-run default inside one write transaction, and
-  a subject-digest audit trail (`rectifications.jsonl`) that never carries
-  the old or new value.
+- **Right-to-rectification** (`rectification.py`) — **built, not yet wired:
+  no production code path reaches this module** (see
+  `maverick.reachability`), so it is available to call but is not part of any
+  shipped flow. GDPR Art. 16 counterpart to DSAR/erasure: find a subject's
+  occurrences across goals/turns/facts (snippets), rectify with dry-run
+  default inside one write transaction, and a subject-digest audit trail
+  (`rectifications.jsonl`) that never carries the old or new value.
 - **Honeytoken planting** (`safety/honeytokens.py`) — mint decoy credentials
   (AWS-key-shaped, API-key, passphrase), plant a realistic 0600 secrets file,
   and alert (once per fingerprint) when a decoy value appears in text — alerts
@@ -2519,9 +2521,10 @@ tokenizer caveat always rendered); **cross-run learning cache**
 (`learning_cache.py`, opt-in `[memory] learning_cache`): memoize *verified*
 sub-results across runs (required `verified_by` provenance, TTL + LRU cap,
 refuses to store anything the secret detector flags); **energy/CO2
-accounting** (`energy_accounting.py`): clearly-labeled estimates from
-configurable Wh/1k-token + grid-CO2 coefficients (output tokens weighted 3x),
-disclaimer always rendered; **Redis tool cache** (`redis_tool_cache.py`,
+accounting** (`energy_accounting.py`, **built but unreached: nothing in
+production imports it**): clearly-labeled estimates from configurable
+Wh/1k-token + grid-CO2 coefficients (output tokens weighted 3x), disclaimer
+always rendered; **Redis tool cache** (`redis_tool_cache.py`,
 `[tools] output_cache_backend = "redis"`): cross-process/cross-host tier
 reusing the same key canonicalization, namespace-scoped purge, fail-open on
 any Redis error; **WAL contention audit** (`test_wal_contention.py`): pins the

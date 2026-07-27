@@ -117,6 +117,19 @@ jobs:
         # risk ceiling, a working persona, and its deny list -- the honest-
         # counting receipt behind the catalog claim. Errors fail the build.
         run: maverick domains-lint --ci
+      - name: Reachability ledger (nothing goes dark unnoticed)
+        # Two defect classes shared one root cause: nobody could answer "does
+        # production reach this?", so everyone guessed, and the guesses went
+        # both ways. A strategy review cited sigstore_signing.py as shipped
+        # capability (roadmap-tagged, no production importer) and in the same
+        # pass skipped erasure_verify.py as unbuilt (also roadmap-tagged, but
+        # it backs a shipping CLI command). The roadmap header was the only
+        # signal and it is wrong ~80% of the time in both directions.
+        #
+        # This walks the import graph from real entry points and fails when a
+        # module loses its last caller, or when a new one arrives that nothing
+        # reaches. Regenerate with `--regen` after reviewing the diff.
+        run: python -m maverick.reachability --ci
       - name: Tool dispatch contract (no ungated path to the registry)
         # Agent._run_tool runs eleven gates. It was not the only way into the
         # tool registry: a census found four dispatch sites and one gated. The
