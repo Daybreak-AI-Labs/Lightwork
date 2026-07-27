@@ -13,7 +13,8 @@ _STANDALONE_MODULES = ("app.py", "backend.py", "capabilities.py",
                        "pia_engine.py", "store.py", "mailsink.py",
                        "onetrust_client.py", "ot_mock.py", "notice_check.py",
                        "contract_guard.py", "value_ledger.py",
-                       "license_kit.py", "serve_standalone.py")
+                       "license_kit.py", "serve_standalone.py",
+                       "paper_desk.py")
 
 
 def _top_level_imports(path: Path) -> set[str]:
@@ -65,8 +66,14 @@ def test_dockerfile_copies_every_standalone_module():
 
 def test_launcher_bind_honors_deployment_env(monkeypatch):
     import importlib.util
+    import os
     import sys
     sys.path.insert(0, str(HERE))
+    # Importing the launcher runs `os.environ.setdefault("PIA_STANDALONE", 1)`
+    # at module scope, which would otherwise leak standalone mode into every
+    # later test that re-imports `capabilities` and silently disable the
+    # platform-only capabilities.
+    had_standalone = "PIA_STANDALONE" in os.environ
     try:
         spec = importlib.util.spec_from_file_location(
             "pia_serve_standalone_test", HERE / "serve_standalone.py")
@@ -74,6 +81,8 @@ def test_launcher_bind_honors_deployment_env(monkeypatch):
         spec.loader.exec_module(mod)
     finally:
         sys.path.remove(str(HERE))
+        if not had_standalone:
+            os.environ.pop("PIA_STANDALONE", None)
     monkeypatch.delenv("PIA_HOST", raising=False)
     monkeypatch.setenv("WORLD_PORT", "9001")
     assert mod.bind() == ("127.0.0.1", 9001)   # loopback by default

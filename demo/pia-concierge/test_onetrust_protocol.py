@@ -19,7 +19,7 @@ HERE = Path(__file__).resolve().parent
 _SHARED_MODULES = ("backend", "capabilities", "license_kit", "mailsink",
                    "value_ledger", "store", "pia_engine", "dsar_engine",
                    "ot_mock", "onetrust_client", "notice_check",
-                   "contract_guard", "serve_standalone")
+                   "contract_guard", "serve_standalone", "paper_desk")
 
 
 def _purge_shared_modules():
