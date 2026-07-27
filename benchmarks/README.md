@@ -129,7 +129,9 @@ proves self-signed run integrity when checked against the separately distributed
 public-key file, not off-host production key custody or publisher identity.
 The manifest-embedded key is never accepted as its own trust anchor. Publication
 validation also checks current source/config digests, a clean measured commit
-that is an ancestor of `HEAD`, and exact deterministic report regeneration.
+that is an ancestor of `HEAD` when history preserves it, or the exact signed
+source snapshot after a shallow checkout, squash, or rebase, plus exact
+deterministic report regeneration.
 
 ## Comparing across providers
 

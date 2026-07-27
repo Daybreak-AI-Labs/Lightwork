@@ -109,9 +109,11 @@ manifest, separate public-key file, and a short generated Markdown report:
 methodology, governed/baseline scorecard, false-positive honesty, overhead
 numbers, custody caveat, and reproduction commands. CI validates the tracked
 signature against that external key, current source/config digests, clean-source
-commit ancestry, and exact deterministic report rendering. A PDF/frontier chart becomes
-useful once a live-model arm adds multiple policy settings or model
-configurations rather than a single deterministic operating point.
+commit ancestry when history preserves it (or the exact signed source snapshot
+after a shallow checkout, squash, or rebase), and exact deterministic report
+rendering. A PDF/frontier chart becomes useful once a live-model arm adds
+multiple policy settings or model configurations rather than a single
+deterministic operating point.
 
 ## Honesty guardrails (so the number survives scrutiny)
 

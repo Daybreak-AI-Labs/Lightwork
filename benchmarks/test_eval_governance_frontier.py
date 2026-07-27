@@ -335,3 +335,67 @@ def test_tracked_validator_gates_report_source_and_clean_provenance(
     )
     assert not ok
     assert "one or more source-file SHA-256 values differ" in errors
+
+
+def test_tracked_validator_accepts_exact_snapshot_after_squash_or_shallow_clone(
+    manifest, trusted_pubkey, monkeypatch, tmp_path
+):
+    publishable = copy.deepcopy(manifest)
+    publishable["results"]["git"]["dirty"] = False
+    manifest_path = tmp_path / "manifest.json"
+    report_path = tmp_path / "report.md"
+    key_path = tmp_path / "publisher.pub"
+    manifest_path.write_text(json.dumps(publishable), encoding="utf-8")
+    report_path.write_bytes(frontier.render_report(publishable).encode("utf-8"))
+    key_path.write_text(trusted_pubkey + "\n", encoding="utf-8")
+    monkeypatch.setattr(
+        frontier,
+        "verify_manifest",
+        lambda _manifest, *, trusted_pubkey_hex: (True, "unit-test anchor"),
+    )
+    monkeypatch.setattr(frontier, "_git_commit_is_ancestor", lambda _commit: False)
+
+    ok, errors = frontier.validate_tracked_artifacts(
+        manifest_path=manifest_path,
+        report_path=report_path,
+        trusted_pubkey_path=key_path,
+    )
+    assert ok, errors
+
+    publishable["results"]["git"]["commit"] = "not-a-git-commit"
+    manifest_path.write_text(json.dumps(publishable), encoding="utf-8")
+    ok, errors = frontier.validate_tracked_artifacts(
+        manifest_path=manifest_path,
+        report_path=report_path,
+        trusted_pubkey_path=key_path,
+    )
+    assert not ok
+    assert "measured source commit is not a full Git SHA-1" in errors
+
+
+def test_tracked_validator_requires_snapshot_policy(
+    manifest, trusted_pubkey, monkeypatch, tmp_path
+):
+    publishable = copy.deepcopy(manifest)
+    publishable["results"]["git"]["dirty"] = False
+    publishable["results"].pop("source_snapshot_policy")
+    manifest_path = tmp_path / "manifest.json"
+    report_path = tmp_path / "report.md"
+    key_path = tmp_path / "publisher.pub"
+    manifest_path.write_text(json.dumps(publishable), encoding="utf-8")
+    report_path.write_bytes(frontier.render_report(publishable).encode("utf-8"))
+    key_path.write_text(trusted_pubkey + "\n", encoding="utf-8")
+    monkeypatch.setattr(
+        frontier,
+        "verify_manifest",
+        lambda _manifest, *, trusted_pubkey_hex: (True, "unit-test anchor"),
+    )
+    monkeypatch.setattr(frontier, "_git_commit_is_ancestor", lambda _commit: False)
+
+    ok, errors = frontier.validate_tracked_artifacts(
+        manifest_path=manifest_path,
+        report_path=report_path,
+        trusted_pubkey_path=key_path,
+    )
+    assert not ok
+    assert "unsupported or missing source-snapshot policy" in errors

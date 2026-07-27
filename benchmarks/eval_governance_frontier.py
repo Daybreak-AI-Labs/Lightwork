@@ -56,6 +56,7 @@ DEFAULT_PUBKEY = (
     / "trusted-publisher.pub"
 )
 PINNED_SEEDS = (17, 29, 43)
+SOURCE_SNAPSHOT_POLICY = "ancestor_or_exact_signed_source_files_v1"
 EXPECTED_FAMILIES = {
     "financial_actuation",
     "destructive_action",
@@ -143,6 +144,17 @@ def _isolated_benchmark_env(**values: str | None):
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _source_file_digests(catalog_path: Path) -> dict[str, str]:
+    """Return the signed, merge-method-independent benchmark source snapshot."""
+    return {
+        "runner": _sha256(Path(__file__)),
+        "catalog": _sha256(catalog_path),
+        "metrics": _sha256(
+            ROOT / "benchmarks" / "_common" / "governance_metrics.py"
+        ),
+    }
 
 
 def _git_metadata() -> dict[str, Any]:
@@ -856,13 +868,8 @@ def run_benchmark(
                 "governed_instances": sum(row["arm"] == "governed" for row in rows),
                 "baseline_instances": sum(row["arm"] == "baseline" for row in rows),
                 "git": _git_metadata(),
-                "source_files": {
-                    "runner": _sha256(Path(__file__)),
-                    "catalog": _sha256(catalog_path),
-                    "metrics": _sha256(
-                        ROOT / "benchmarks" / "_common" / "governance_metrics.py"
-                    ),
-                },
+                "source_snapshot_policy": SOURCE_SNAPSHOT_POLICY,
+                "source_files": _source_file_digests(catalog_path),
                 "audit": audit,
                 "key_custody": (
                     "ephemeral co-located benchmark key; self-signed run integrity "
@@ -986,20 +993,25 @@ def validate_tracked_artifacts(
         errors.append("benchmark configuration digest differs from the tracked manifest")
 
     results = manifest.get("results") or {}
-    expected_sources = {
-        "runner": _sha256(Path(__file__)),
-        "catalog": _sha256(catalog_path),
-        "metrics": _sha256(
-            ROOT / "benchmarks" / "_common" / "governance_metrics.py"
-        ),
-    }
-    if results.get("source_files") != expected_sources:
+    expected_sources = _source_file_digests(catalog_path)
+    source_files_match = results.get("source_files") == expected_sources
+    if not source_files_match:
         errors.append("one or more source-file SHA-256 values differ")
+    if results.get("source_snapshot_policy") != SOURCE_SNAPSHOT_POLICY:
+        errors.append("unsupported or missing source-snapshot policy")
     git_info = results.get("git") or {}
     if git_info.get("dirty") is not False:
         errors.append("published run was not measured from a clean source tree")
-    if not _git_commit_is_ancestor(str(git_info.get("commit") or "")):
-        errors.append("measured source commit is not an ancestor of current HEAD")
+    measured_commit = str(git_info.get("commit") or "").lower()
+    if len(measured_commit) != 40 or any(
+        char not in "0123456789abcdef" for char in measured_commit
+    ):
+        errors.append("measured source commit is not a full Git SHA-1")
+    elif not _git_commit_is_ancestor(measured_commit) and not source_files_match:
+        errors.append(
+            "measured source commit is outside current history and the exact "
+            "signed source snapshot does not match"
+        )
 
     try:
         tracked_report = report_path.read_text(encoding="utf-8")
@@ -1232,8 +1244,10 @@ def render_report(manifest: dict) -> str:
             "```",
             "",
             "Publication validation checks the external trusted-key file, current",
-            "source/config digests, clean-source commit ancestry, and exact",
-            "deterministic text rendering of the report.",
+            "signed source/config digests, a clean measured commit, commit ancestry",
+            "when history preserves it (or the exact signed source snapshot after",
+            "a shallow checkout, squash, or rebase), and deterministic report",
+            "rendering.",
             "",
         ]
     )
