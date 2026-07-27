@@ -2,22 +2,47 @@
 from __future__ import annotations
 
 import importlib
+import json
+import threading
+import time
+from collections import deque
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 from . import model_risk_schemas as schemas
 from .auth import require_global_permission, require_permission
 
 router = APIRouter(prefix="/assurance", tags=["model-risk-assurance"])
+_GATEWAY_ACTION_LIMITS = {"delivery": 120, "packet_issuance": 12}
+_gateway_action_times: dict[tuple[str, str], deque[float]] = {}
+_gateway_action_lock = threading.Lock()
 
 
 def _actor(request: Request) -> str:
     from .api import _request_actor
 
     return _request_actor(request)
+
+
+def _limit_gateway_action(request: Request, action: str) -> None:
+    actor = _actor(request)
+    now = time.monotonic()
+    limit = _GATEWAY_ACTION_LIMITS[action]
+    key = (actor, action)
+    with _gateway_action_lock:
+        window = _gateway_action_times.setdefault(key, deque())
+        while window and now - window[0] >= 60:
+            window.popleft()
+        if len(window) >= limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"AI evidence gateway {action} rate limit reached",
+                headers={"Retry-After": "60"},
+            )
+        window.append(now)
 
 
 def _module(name: str, knob: str):
@@ -354,3 +379,235 @@ async def model_risk_evidence_pack(
         actor=_actor(request),
         asset_id=asset_id or None,
     )
+
+
+# AI Evidence-Ready Gateway -------------------------------------------------
+
+
+@router.get("/gateway/summary")
+async def evidence_gateway_summary(request: Request) -> dict[str, Any]:
+    require_permission(request, "operate")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    return await _call(gateway.summary)
+
+
+@router.get("/gateway/policies")
+async def evidence_gateway_policies(request: Request) -> dict[str, Any]:
+    require_permission(request, "operate")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    return {"policies": await _call(gateway.list_policies)}
+
+
+@router.get("/gateway/policies/{policy_id}")
+async def evidence_gateway_policy(
+    request: Request,
+    policy_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    return await _record_call(gateway.get_policy, policy_id)
+
+
+@router.put("/gateway/policies/{policy_id}")
+async def upsert_evidence_gateway_policy(
+    request: Request,
+    policy_id: str,
+    body: schemas.EvidenceGatewayPolicyUpsertIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    current = await _call(gateway.get_policy, policy_id)
+    payload = body.model_dump(
+        exclude_unset=isinstance(current, dict),
+    )
+    if isinstance(current, dict):
+        settings = current.get("settings")
+        if not isinstance(settings, dict):
+            raise HTTPException(
+                status_code=503,
+                detail="current evidence policy is malformed",
+            )
+        for field in (
+            "disclosure_text",
+            "require_interaction_disclosure",
+            "require_machine_readable_marking",
+            "require_visible_marking",
+            "supported_modalities",
+            "machine_marker",
+            "visible_marker",
+        ):
+            payload.setdefault(field, settings[field])
+        for field in ("model_sha256", "context_sha256", "metadata"):
+            payload.setdefault(field, current[field])
+    return await _call(
+        gateway.upsert_policy,
+        policy_id,
+        **payload,
+        actor=_actor(request),
+    )
+
+
+@router.post("/gateway/deliver")
+async def deliver_evidence_ready_text(
+    request: Request,
+    body: schemas.EvidenceGatewayDeliveryIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    _limit_gateway_action(request, "delivery")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    payload = body.model_dump()
+    generated_text = payload.pop("generated_text")
+    return await _call(
+        gateway.deliver_text,
+        generated_text,
+        **payload,
+        actor=_actor(request),
+    )
+
+
+@router.get("/gateway/receipts")
+async def evidence_gateway_receipts(
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    return {
+        "receipts": await _call(
+            gateway.list_interaction_receipts,
+            limit=limit,
+        )
+    }
+
+
+@router.get("/gateway/receipts/{receipt_id}")
+async def evidence_gateway_receipt(
+    request: Request,
+    receipt_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    return await _record_call(gateway.get_interaction_receipt, receipt_id)
+
+
+@router.post("/gateway/receipts/{receipt_id}/verify")
+async def verify_evidence_gateway_receipt(
+    request: Request,
+    receipt_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    receipt = await _record_call(gateway.get_interaction_receipt, receipt_id)
+    valid = await _call(gateway.verify_interaction_receipt, receipt)
+    return {"receipt_id": receipt_id, "valid": bool(valid)}
+
+
+@router.get("/gateway/regulatory-impacts")
+async def evidence_gateway_regulatory_impacts(
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    return {
+        "regulatory_impacts": await _call(
+            gateway.list_regulatory_impacts,
+            limit=limit,
+        )
+    }
+
+
+@router.post("/gateway/regulatory-impacts")
+async def record_evidence_gateway_regulatory_impact(
+    request: Request,
+    body: schemas.EvidenceGatewayRegulatoryImpactIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    payload = body.model_dump()
+    alert_id = payload.pop("alert_id")
+    return await _call(
+        gateway.record_regulatory_impact,
+        alert_id,
+        **payload,
+        actor=_actor(request),
+    )
+
+
+@router.post("/gateway/regulatory-impacts/{impact_id}/review")
+async def review_evidence_gateway_regulatory_impact(
+    request: Request,
+    impact_id: str,
+    body: schemas.EvidenceGatewayImpactReviewIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    return await _record_call(
+        gateway.review_regulatory_impact,
+        impact_id,
+        decision=body.decision,
+        reviewer=_actor(request),
+        rationale=body.rationale,
+        expected_revision=body.expected_revision,
+    )
+
+
+@router.post("/gateway/assurance-packet")
+async def download_evidence_gateway_assurance_packet(
+    request: Request,
+    profile: str = Query(
+        "combined",
+        pattern="^(article50_gpai|nist_ai_rmf|federal_vendor|combined)$",
+    ),
+) -> Response:
+    # Rendering appends a signed attestation to the packet ledger, so this is
+    # an explicit privileged mutation rather than a cacheable/read-only GET.
+    require_global_permission(request, "admin")
+    _limit_gateway_action(request, "packet_issuance")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    packet = await _call(
+        gateway.render_assurance_packet,
+        profile=profile,
+        actor=_actor(request),
+    )
+    try:
+        payload = json.dumps(
+            packet,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="assurance packet was not valid JSON",
+        ) from exc
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": (
+                'attachment; filename="lightwork-ai-assurance-packet.json"'
+            ),
+        },
+    )
+
+
+@router.post("/gateway/assurance-packet/verify")
+async def verify_evidence_gateway_assurance_packet(
+    request: Request,
+    body: schemas.EvidenceGatewayPacketVerifyIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    valid = await _call(gateway.verify_assurance_packet, body.packet)
+    return {"valid": bool(valid)}
+
+
+@router.post("/gateway/demo-seed")
+async def seed_evidence_gateway_demo(request: Request) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    return await _call(gateway.seed_demo, actor=_actor(request))

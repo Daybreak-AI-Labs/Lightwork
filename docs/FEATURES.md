@@ -668,6 +668,18 @@ here.
   collection as proof. Framework and legal mappings are advisory; applicability
   and every consequential decision remain human-owned. See
   [`MODEL_RISK_ASSURANCE.md`](./MODEL_RISK_ASSURANCE.md).
+- **AI Evidence-Ready Gateway** (`ai_evidence_gateway.py`, the existing
+  `/security/assurance` cockpit, opt-in `[evidence_gateway] enable`) -
+  deterministic text-delivery disclosures, machine-readable markings,
+  idempotent hash-only interaction receipts, policy/model/context bindings,
+  cited regulatory-impact review, and exact signed JSON assurance packets.
+  It stores no raw prompt or generated response in its receipt ledger and makes
+  no certification claim. Packet issuance is a bounded, admin-only mutation
+  with a completeness manifest and source-snapshot recheck. The synthetic
+  dashboard seed performs no network access, requires an empty/dedicated demo
+  tenant, and forces a visible readiness gap. See
+  [`AI_EVIDENCE_GATEWAY.md`](./AI_EVIDENCE_GATEWAY.md) and the
+  [governance benchmark report](../benchmarks/GOVERNANCE_FRONTIER_RESULTS.md).
 - **Four reduced standalone security SKUs** (`demo/grc-concierge/`,
   `demo/platform-threat-hunter/`, `demo/environment-threat-hunter/`,
   `demo/model-risk-ai-assurance-officer/`) — each has

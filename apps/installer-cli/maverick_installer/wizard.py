@@ -1434,6 +1434,15 @@ def pick_security_suite() -> dict[str, Any]:
     )
     if model_risk_assurance:
         evidence_graph = True
+    evidence_gateway = _q_confirm(
+        "Enable the AI Evidence-Ready Gateway? It stores signed hash-only "
+        "interaction receipts and cited regulatory-impact records, never raw "
+        "prompts or generated text.",
+        default=False,
+    )
+    if evidence_gateway:
+        evidence_graph = True
+        model_risk_assurance = True
     model_improvement = _q_confirm(
         "Enable governed specialist-model improvement plumbing? Training and "
         "weight promotion remain separately approval-gated.",
@@ -1525,6 +1534,7 @@ def pick_security_suite() -> dict[str, Any]:
         "security_ops": security_ops,
         "evidence_graph": evidence_graph,
         "model_risk_assurance": model_risk_assurance,
+        "evidence_gateway": evidence_gateway,
         "model_improvement": model_improvement,
         "allow_hosted_training": allow_hosted_training,
         "threat_hunt": threat_hunt,
@@ -3494,6 +3504,10 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         f"{'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
         "gate_promotions = "
         f"{'true' if security_suite.get('model_risk_assurance', False) else 'false'}",
+        "",
+        "[evidence_gateway]",
+        "enable = "
+        f"{'true' if security_suite.get('evidence_gateway', False) else 'false'}",
         "",
         "[model_improvement]",
         "enable = "

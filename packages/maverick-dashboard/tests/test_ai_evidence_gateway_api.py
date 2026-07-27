@@ -1,0 +1,507 @@
+"""HTTP and cockpit contracts for the AI Evidence-Ready Gateway."""
+from __future__ import annotations
+
+import hashlib
+import sys
+import types
+
+import pytest
+from fastapi.testclient import TestClient
+from maverick_dashboard.app import app
+
+client = TestClient(app, headers={"Origin": "http://testserver"})
+
+
+@pytest.fixture(autouse=True)
+def _isolated_gateway(tmp_path, monkeypatch):
+    from maverick import audit, config, world_model
+    from maverick.audit import writer as audit_writer
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """[evidence_graph]
+enable = true
+
+[model_risk_assurance]
+enable = true
+gate_promotions = true
+
+[evidence_gateway]
+enable = true
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(config_path))
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    for name in (
+        "MAVERICK_DASHBOARD_TOKEN",
+        "MAVERICK_DASHBOARD_REQUIRE_AUTH",
+        "MAVERICK_OIDC_ENABLED",
+        "MAVERICK_PROXY_AUTH",
+        "MAVERICK_TENANT",
+        "MAVERICK_TENANT_BY_USER",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: True)
+    config.reset_config_cache()
+    audit_writer._default = None
+    audit_writer._defaults.clear()
+    yield
+    config.reset_config_cache()
+    audit_writer._default = None
+    audit_writer._defaults.clear()
+
+
+def _install_gateway(monkeypatch, **overrides):
+    import maverick
+
+    gateway = types.ModuleType("maverick.ai_evidence_gateway")
+    defaults = {
+        "enabled": lambda: True,
+        "summary": lambda: {
+            "enabled": True,
+            "certification_claim": False,
+            "current_policy_count": 0,
+            "interaction_receipt_count": 0,
+            "current_interaction_receipt_count": 0,
+            "stale_interaction_receipt_count": 0,
+            "pending_regulatory_impact_count": 0,
+            "accepted_regulatory_impact_count": 0,
+            "dismissed_regulatory_impact_count": 0,
+            "framework_sources": [],
+            "readiness": {},
+            "gaps": [],
+        },
+        "list_policies": list,
+        "get_policy": lambda _policy_id: None,
+        "upsert_policy": lambda _policy_id, **_kwargs: {},
+        "deliver_text": lambda _generated_text, **_kwargs: {},
+        "list_interaction_receipts": lambda *, limit=100: [],
+        "get_interaction_receipt": lambda _receipt_id: None,
+        "verify_interaction_receipt": lambda _receipt: False,
+        "record_regulatory_impact": lambda _alert_id, **_kwargs: {},
+        "list_regulatory_impacts": lambda *, limit=100: [],
+        "review_regulatory_impact": lambda _impact_id, **_kwargs: {},
+        "render_assurance_packet": lambda **_kwargs: {},
+        "verify_assurance_packet": lambda _packet: False,
+        "seed_demo": lambda **_kwargs: {},
+    }
+    for name, value in (defaults | overrides).items():
+        setattr(gateway, name, value)
+    monkeypatch.setitem(sys.modules, gateway.__name__, gateway)
+    monkeypatch.setattr(maverick, "ai_evidence_gateway", gateway, raising=False)
+    return gateway
+
+
+def test_gateway_policy_delivery_and_regulatory_api_contract(monkeypatch):
+    calls = {}
+
+    def _upsert(policy_id, **kwargs):
+        calls["policy"] = {"policy_id": policy_id, **kwargs}
+        return {"policy_id": policy_id, "revision": 1}
+
+    def _deliver(generated_text, **kwargs):
+        calls["delivery"] = {"generated_text": generated_text, **kwargs}
+        return {
+            "enabled": True,
+            "delivered_text": (
+                "This interaction includes AI-generated content.\n\n"
+                f"{generated_text}"
+            ),
+            "receipt": {"receipt_id": "AER-api-1"},
+            "idempotent_replay": False,
+        }
+
+    def _impact(alert_id, **kwargs):
+        calls["impact"] = {"alert_id": alert_id, **kwargs}
+        return {"impact_id": "ARI-api-1", "status": "pending_review"}
+
+    _install_gateway(
+        monkeypatch,
+        upsert_policy=_upsert,
+        deliver_text=_deliver,
+        record_regulatory_impact=_impact,
+    )
+    prefix = "/api/v1/security/assurance/gateway"
+    digest = hashlib.sha256(b"source").hexdigest()
+
+    invalid_policy = client.put(
+        f"{prefix}/policies/customer-facing",
+        json={"caller_trusted_keys": {"attacker": "key"}},
+    )
+    assert invalid_policy.status_code == 422
+
+    bypass_review = client.put(
+        f"{prefix}/policies/customer-facing",
+        json={
+            "regulatory_bindings": [{
+                "impact_id": "impact-binding-1",
+                "impact_sha256": digest,
+                "citations_sha256": digest,
+            }],
+        },
+    )
+    assert bypass_review.status_code == 422
+
+    policy = client.put(
+        f"{prefix}/policies/customer-facing",
+        json={
+            "disclosure_text": "AI-generated content.",
+            "require_visible_marking": True,
+            "model_sha256": digest,
+        },
+    )
+    assert policy.status_code == 200, policy.text
+    assert calls["policy"]["policy_id"] == "customer-facing"
+    assert calls["policy"]["actor"] == "local:dashboard"
+    assert "regulatory_bindings" not in calls["policy"]
+
+    rejected_trust_root = client.post(
+        f"{prefix}/deliver",
+        json={
+            "generated_text": "A generated answer.",
+            "conversation_id": "conversation-1",
+            "idempotency_key": "delivery-1",
+            "trusted_public_keys": {"attacker": "key"},
+        },
+    )
+    assert rejected_trust_root.status_code == 422
+
+    self_asserted_exception = client.post(
+        f"{prefix}/deliver",
+        json={
+            "generated_text": "A generated answer.",
+            "conversation_id": "conversation-1",
+            "idempotency_key": "delivery-with-exception",
+            "editorial_exception": {
+                "decision_id": "self-asserted",
+                "reviewer": "caller",
+                "approved_at": "2026-07-24T12:00:00Z",
+                "rationale": "Suppress the marker.",
+            },
+        },
+    )
+    assert self_asserted_exception.status_code == 422
+
+    caller_suppressed_marking = client.post(
+        f"{prefix}/deliver",
+        json={
+            "generated_text": "A generated answer.",
+            "conversation_id": "conversation-1",
+            "idempotency_key": "delivery-without-marking",
+            "synthetic_content": False,
+        },
+    )
+    assert caller_suppressed_marking.status_code == 422
+
+    delivered = client.post(
+        f"{prefix}/deliver",
+        json={
+            "generated_text": "A generated answer.",
+            "input_text": "A private prompt that must not enter the receipt.",
+            "conversation_id": "conversation-1",
+            "idempotency_key": "delivery-1",
+            "policy_id": "customer-facing",
+            "model_sha256": digest,
+        },
+    )
+    assert delivered.status_code == 200, delivered.text
+    assert "AI-generated content" in delivered.json()["delivered_text"]
+    assert calls["delivery"]["actor"] == "local:dashboard"
+
+    impact = client.post(
+        f"{prefix}/regulatory-impacts",
+        json={
+            "alert_id": "federal-register-1",
+            "alert_revision": 1,
+            "content_sha256": digest,
+            "citations": [{
+                "source_name": "Federal Register",
+                "retrieval_url": "https://www.federalregister.gov/api/v1/documents",
+                "record_url": "https://www.federalregister.gov/d/example",
+                "retrieved_at": "2026-07-20T12:00:00Z",
+                "content_sha256": digest,
+            }],
+            "affected_policy_ids": ["customer-facing"],
+            "control_ids": ["AI-DISCLOSURE-01"],
+            "match_reasons": ["explicit domain mapping"],
+        },
+    )
+    assert impact.status_code == 200, impact.text
+    assert calls["impact"]["alert_id"] == "federal-register-1"
+    assert calls["impact"]["citations"][0]["record_url"].startswith("https://")
+
+
+def test_gateway_receipt_verification_and_exact_packet_download(monkeypatch):
+    receipt = {
+        "id": "AER-api-1",
+        "receipt_id": "AER-api-1",
+        "assurance": {"status": "current", "reasons": []},
+    }
+    packet = {
+        "schema": "lightwork.ai-evidence-assurance-packet.v1",
+        "packet_id": "AEP-api-1",
+        "signature": {"key_id": "server-owned", "value": "ab"},
+    }
+    verification = {}
+
+    def _verify_receipt(candidate):
+        verification["receipt"] = candidate
+        return candidate == receipt
+
+    def _verify_packet(candidate):
+        verification["packet"] = candidate
+        return candidate == packet
+
+    _install_gateway(
+        monkeypatch,
+        list_interaction_receipts=lambda *, limit=100: [receipt],
+        get_interaction_receipt=(
+            lambda receipt_id: receipt if receipt_id == receipt["id"] else None
+        ),
+        verify_interaction_receipt=_verify_receipt,
+        render_assurance_packet=lambda **_kwargs: packet,
+        verify_assurance_packet=_verify_packet,
+    )
+    prefix = "/api/v1/security/assurance/gateway"
+
+    listed = client.get(f"{prefix}/receipts?limit=1")
+    assert listed.status_code == 200
+    assert listed.json() == {"receipts": [receipt]}
+
+    verified = client.post(f"{prefix}/receipts/AER-api-1/verify")
+    assert verified.status_code == 200
+    assert verified.json() == {"receipt_id": "AER-api-1", "valid": True}
+    assert verification["receipt"] == receipt
+
+    downloaded = client.post(f"{prefix}/assurance-packet")
+    assert downloaded.status_code == 200
+    assert downloaded.json() == packet
+    assert downloaded.headers["cache-control"] == "no-store"
+    assert downloaded.headers["content-disposition"] == (
+        'attachment; filename="lightwork-ai-assurance-packet.json"'
+    )
+    assert client.get(f"{prefix}/assurance-packet").status_code == 405
+
+    packet_check = client.post(
+        f"{prefix}/assurance-packet/verify",
+        json={"packet": packet},
+    )
+    assert packet_check.status_code == 200
+    assert packet_check.json() == {"valid": True}
+    assert verification["packet"] == packet
+
+    caller_key = client.post(
+        f"{prefix}/assurance-packet/verify",
+        json={"packet": packet, "trusted_public_keys": {"attacker": "key"}},
+    )
+    assert caller_key.status_code == 422
+
+
+def test_gateway_bounds_request_bodies_and_redacts_validation_inputs():
+    prefix = "/api/v1/security/assurance/gateway"
+    oversized = client.post(
+        f"{prefix}/assurance-packet/verify",
+        content=b"{}",
+        headers={"content-length": str((3 * 1024 * 1024) + 1)},
+    )
+    assert oversized.status_code == 413
+
+    raw_secret = "raw-prompt-that-must-not-be-echoed"
+    invalid = client.post(
+        f"{prefix}/deliver",
+        json={
+            "generated_text": {"invalid": raw_secret},
+            "conversation_id": "validation-redaction",
+            "idempotency_key": "turn-1",
+        },
+    )
+    assert invalid.status_code == 422
+    assert raw_secret not in invalid.text
+    assert "[redacted]" in invalid.text
+
+
+def test_partial_policy_update_preserves_governed_fields(monkeypatch):
+    digest = hashlib.sha256(b"reviewed-impact").hexdigest()
+    binding = {
+        "impact_id": "AII-" + ("a" * 32),
+        "impact_sha256": digest,
+        "citations_sha256": digest,
+    }
+    captured = {}
+
+    def _upsert(policy_id, **kwargs):
+        captured.update(kwargs)
+        return {"policy_id": policy_id, "revision": 5}
+
+    _install_gateway(
+        monkeypatch,
+        get_policy=lambda _policy_id: {
+            "policy_id": "customer-facing",
+            "revision": 4,
+            "regulatory_bindings": [binding],
+            "settings": {
+                "disclosure_text": "Prior disclosure.",
+                "require_interaction_disclosure": True,
+                "require_machine_readable_marking": True,
+                "require_visible_marking": True,
+                "supported_modalities": ["text"],
+                "machine_marker": "[ai; receipt={receipt_id}]",
+                "visible_marker": "AI generated.",
+            },
+            "model_sha256": digest,
+            "context_sha256": digest,
+            "metadata": {"owner_id": "model-risk"},
+        },
+        upsert_policy=_upsert,
+    )
+
+    response = client.put(
+        "/api/v1/security/assurance/gateway/policies/customer-facing",
+        json={
+            "expected_revision": 4,
+            "disclosure_text": "Updated AI disclosure.",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert "regulatory_bindings" not in captured
+    assert captured["disclosure_text"] == "Updated AI disclosure."
+    assert captured["require_visible_marking"] is True
+    assert captured["model_sha256"] == digest
+    assert captured["context_sha256"] == digest
+    assert captured["metadata"] == {"owner_id": "model-risk"}
+
+
+def test_gateway_admin_mutations_are_global_admin_only(monkeypatch):
+    from maverick_dashboard import auth
+
+    seeded = []
+    _install_gateway(
+        monkeypatch,
+        seed_demo=lambda **kwargs: seeded.append(kwargs) or {"demo": True},
+    )
+    role = {"value": "operator"}
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:analyst")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: role["value"])
+    monkeypatch.setattr(
+        auth,
+        "global_role_for_principal",
+        lambda principal: role["value"],
+    )
+    prefix = "/api/v1/security/assurance/gateway"
+
+    assert client.get(f"{prefix}/summary").status_code == 200
+    assert client.post(f"{prefix}/demo-seed").status_code == 403
+    assert client.put(
+        f"{prefix}/policies/default",
+        json={"disclosure_text": "AI-generated content."},
+    ).status_code == 403
+
+    role["value"] = "admin"
+    seeded_response = client.post(f"{prefix}/demo-seed")
+    assert seeded_response.status_code == 200
+    assert seeded_response.json() == {"demo": True}
+    assert seeded == [{"actor": "local:dashboard"}]
+
+
+def test_assurance_cockpit_renders_gateway_evidence_without_raw_content(
+    monkeypatch,
+):
+    digest = hashlib.sha256(b"bound-model").hexdigest()
+    raw_secret = "private-prompt-must-not-render"
+    _install_gateway(
+        monkeypatch,
+        summary=lambda: {
+            "enabled": True,
+            "certification_claim": False,
+            "current_policy_count": 1,
+            "interaction_receipt_count": 1,
+            "current_interaction_receipt_count": 1,
+            "stale_interaction_receipt_count": 0,
+            "pending_regulatory_impact_count": 1,
+            "accepted_regulatory_impact_count": 0,
+            "dismissed_regulatory_impact_count": 0,
+            "framework_sources": ["EU AI Act Article 50"],
+            "readiness": {"status": "review_required"},
+            "gaps": ["One regulatory impact awaits human review."],
+        },
+        list_policies=lambda: [{
+            "policy_id": "customer-facing",
+            "settings": {"disclosure_text": "AI-generated content."},
+            "model_sha256": digest,
+            "context_sha256": "",
+            "regulatory_bindings": [{
+                "impact_id": "AII-" + ("b" * 32),
+                "impact_sha256": digest,
+                "citations_sha256": digest,
+            }],
+            "revision": 1,
+        }],
+        list_interaction_receipts=lambda *, limit=100: [{
+            "receipt_id": "AER-page-1",
+            "assurance": {"status": "current", "reasons": []},
+            "policy_id": "customer-facing",
+            "model_sha256": digest,
+            "issued_at": "2026-07-24T12:00:00Z",
+        }],
+        list_regulatory_impacts=lambda *, limit=100: [{
+            "impact_id": "ARI-page-1",
+            "alert_id": "federal-register-1",
+            "status": "pending_review",
+            "affected_policy_ids": ["customer-facing"],
+            "affected_asset_ids": ["MAA-" + ("a" * 32)],
+            "control_ids": ["AI-DISCLOSURE-01"],
+            "citations": [{
+                "source_name": "Federal Register",
+                "record_url": "https://www.federalregister.gov/d/example",
+            }],
+            "raw_input": raw_secret,
+        }],
+    )
+
+    response = client.get("/security/assurance")
+
+    assert response.status_code == 200, response.text
+    assert "AI Evidence-Ready Gateway" in response.text
+    assert "Load synthetic no-network demo" in response.text
+    assert "DEMO DATA" in response.text
+    assert "Published benchmark report" in response.text
+    assert "AER-page-1" in response.text
+    assert "AI-DISCLOSURE-01" in response.text
+    assert "https://www.federalregister.gov/d/example" in response.text
+    assert raw_secret not in response.text
+
+
+def test_real_gateway_seed_receipt_and_packet_round_trip(monkeypatch):
+    from maverick import ai_evidence_gateway
+
+    monkeypatch.setenv("MAVERICK_TENANT", "gateway-api-integration")
+    assert ai_evidence_gateway.enabled() is True
+    prefix = "/api/v1/security/assurance/gateway"
+
+    seeded = client.post(f"{prefix}/demo-seed")
+    assert seeded.status_code == 200, seeded.text
+    seed = seeded.json()
+    assert seed["synthetic"] is True
+    assert seed["network_access"] is False
+
+    receipt_id = seed["receipt_id"]
+    verified_receipt = client.post(f"{prefix}/receipts/{receipt_id}/verify")
+    assert verified_receipt.status_code == 200, verified_receipt.text
+    assert verified_receipt.json()["valid"] is True
+
+    packet_response = client.post(f"{prefix}/assurance-packet")
+    assert packet_response.status_code == 200, packet_response.text
+    packet = packet_response.json()
+    assert packet["stores_raw_interaction_content"] is False
+    assert "Synthetic evidence-ready request." not in packet_response.text
+    assert "Synthetic evidence-ready response." not in packet_response.text
+
+    verified_packet = client.post(
+        f"{prefix}/assurance-packet/verify",
+        json={"packet": packet},
+    )
+    assert verified_packet.status_code == 200, verified_packet.text
+    assert verified_packet.json() == {"valid": True}
