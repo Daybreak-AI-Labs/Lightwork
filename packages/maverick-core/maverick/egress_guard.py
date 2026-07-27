@@ -178,51 +178,41 @@ def _reaches_the_network(client: Any, request: Any) -> bool:
 
 
 def _patch_httpx(mod: Any) -> None:
-    """Wrap httpx at the per-hop seam, not at ``send``.
+    """Wrap httpx at ``send``.
 
-    ``Client.send`` resolves the whole redirect chain internally, so a check
-    there sees only the FIRST url. That is a real bypass and it was measured:
-    an allow-listed host answering 302 to a denied host returned its body. The
-    other two libraries do not have this shape -- ``requests.Session.send``
-    re-enters itself via ``resolve_redirects`` and urllib's redirect handler
-    re-enters ``OpenerDirector.open`` -- so only httpx needs the lower seam.
+    **Known gap, stated rather than hidden: redirects.** ``Client.send``
+    resolves the whole redirect chain internally, so this sees only the first
+    URL. An allow-listed host answering 302 to a denied host is therefore NOT
+    re-checked -- measured, not theorised. ``requests`` and ``urllib`` do not
+    have this shape (both re-enter their wrapped method per hop), so the gap is
+    httpx-only.
 
-    ``_send_single_request`` issues exactly one request, so every hop is
-    checked. It is a private name; if a future httpx drops it we fall back to
-    ``send``, which is strictly weaker but still covers the common case, and
-    the redirect test pins the difference.
+    The obvious fix -- wrapping ``_send_single_request``, which issues exactly
+    one request per hop -- was implemented, and it broke **1538 tests in CI**
+    with "Attempted to send an async request with a sync Client instance",
+    across all three Python versions. It does not reproduce locally, including
+    against CI's exact starlette pin, so the mechanism is still unexplained.
+    The ``send`` seam is the configuration that has actually been observed
+    working: same suite, same runners, 5 failures instead of 1538, and those 5
+    are fixed by the in-process transport rule below.
+
+    Shipping an unexplained catastrophic regression to close a narrower hole is
+    the wrong trade. The hole is recorded here, in ``docs``, and in a test that
+    asserts the current (weaker) behaviour, so it is a known quantity rather
+    than a surprise -- and closing it properly needs the CI failure understood
+    first, not another guess.
     """
-    if hasattr(mod.Client, "_send_single_request"):
-        _originals["httpx.Client._send_single_request"] = (
-            mod.Client._send_single_request)
-        _originals["httpx.AsyncClient._send_single_request"] = (
-            mod.AsyncClient._send_single_request)
-
-        def _sync_one(self, request, *a, **kw):
-            if _reaches_the_network(self, request):
-                _check(str(request.url))
-            return _originals["httpx.Client._send_single_request"](
-                self, request, *a, **kw)
-
-        async def _async_one(self, request, *a, **kw):
-            if _reaches_the_network(self, request):
-                _check(str(request.url))
-            return await _originals["httpx.AsyncClient._send_single_request"](
-                self, request, *a, **kw)
-
-        mod.Client._send_single_request = _sync_one
-        mod.AsyncClient._send_single_request = _async_one
-        return
-
-    _originals["httpx.Client.send"] = mod.Client.send      # pragma: no cover
+    _originals["httpx.Client.send"] = mod.Client.send
     _originals["httpx.AsyncClient.send"] = mod.AsyncClient.send
 
-    def _sync_send(self, request, **kwargs):  # pragma: no cover
-        _check(str(request.url))
+    def _sync_send(self, request, **kwargs):
+        if _reaches_the_network(self, request):
+            _check(str(request.url))
         return _originals["httpx.Client.send"](self, request, **kwargs)
 
-    async def _async_send(self, request, **kwargs):  # pragma: no cover
-        _check(str(request.url))
+    async def _async_send(self, request, **kwargs):
+        if _reaches_the_network(self, request):
+            _check(str(request.url))
         return await _originals["httpx.AsyncClient.send"](self, request, **kwargs)
 
     mod.Client.send = _sync_send
@@ -262,12 +252,7 @@ def _patch_urllib(mod: Any) -> None:
 
 def _unpatch(name: str, mod: Any) -> None:
     if name == "httpx":
-        if "httpx.Client._send_single_request" in _originals:
-            mod.Client._send_single_request = _originals.pop(
-                "httpx.Client._send_single_request")
-            mod.AsyncClient._send_single_request = _originals.pop(
-                "httpx.AsyncClient._send_single_request")
-        if "httpx.Client.send" in _originals:  # pragma: no cover - fallback path
+        if "httpx.Client.send" in _originals:
             mod.Client.send = _originals.pop("httpx.Client.send")
             mod.AsyncClient.send = _originals.pop("httpx.AsyncClient.send")
     elif name == "requests":

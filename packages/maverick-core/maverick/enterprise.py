@@ -40,10 +40,18 @@ When on, it enforces:
   :mod:`maverick.egress_contract`, whose CI gate fails when a module reaches the
   network through a library the guard does not wrap.
 
-  What it still does not cover: a tool that shells out to ``curl`` or opens a raw
-  socket. There is no packet-level backend (see
-  :mod:`maverick.sandbox.network_policy`), so process-level egress is bounded by the
-  sandbox, not by this lock.
+  What it still does not cover, stated so the sentence above stays honest:
+
+  * A tool that shells out to ``curl`` or opens a raw socket. There is no
+    packet-level backend (see :mod:`maverick.sandbox.network_policy`), so
+    process-level egress is bounded by the sandbox, not by this lock.
+  * **httpx redirects.** ``httpx.Client.send`` resolves the redirect chain
+    internally, so the guard checks only the first URL: an allow-listed host
+    answering a 302 to a denied host is not re-checked. ``requests`` and
+    ``urllib`` re-enter their wrapped method per hop and are unaffected. The
+    per-hop httpx seam was implemented and reverted -- it broke 1538 tests in
+    CI and the cause is not yet understood. Tracked by an xfailed test in
+    ``tests/test_egress_guard.py``.
 - **Consent fail-closed.** Destructive-action consent defaults to ``ask`` (and therefore
   *deny* in non-interactive contexts) instead of ``auto-approve``.
   (Enforced in :mod:`maverick.safety.consent`.)
