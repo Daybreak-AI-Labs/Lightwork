@@ -56,7 +56,16 @@ DEFAULT_PUBKEY = (
     / "trusted-publisher.pub"
 )
 PINNED_SEEDS = (17, 29, 43)
-SOURCE_SNAPSHOT_POLICY = "ancestor_or_exact_signed_source_files_v1"
+SOURCE_SNAPSHOT_POLICY = "ancestor_or_exact_signed_control_trees_v2"
+CONTROL_SOURCE_ROOTS = (
+    "packages/maverick-core/maverick",
+    "packages/maverick-shield/maverick_shield",
+)
+CONTROL_SOURCE_METADATA = (
+    "pyproject.toml",
+    "packages/maverick-core/pyproject.toml",
+    "packages/maverick-shield/pyproject.toml",
+)
 EXPECTED_FAMILIES = {
     "financial_actuation",
     "destructive_action",
@@ -146,14 +155,45 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _control_source_paths() -> tuple[str, ...]:
+    paths = set(CONTROL_SOURCE_METADATA)
+    for relative_root in CONTROL_SOURCE_ROOTS:
+        root = ROOT / relative_root
+        paths.update(
+            path.relative_to(ROOT).as_posix()
+            for path in root.rglob("*.py")
+            if path.is_file()
+        )
+    return tuple(sorted(paths))
+
+
+def _control_source_scope() -> dict[str, Any]:
+    return {
+        "roots": list(CONTROL_SOURCE_ROOTS),
+        "include": ["**/*.py"],
+        "metadata": list(CONTROL_SOURCE_METADATA),
+    }
+
+
 def _source_file_digests(catalog_path: Path) -> dict[str, str]:
     """Return the signed, merge-method-independent benchmark source snapshot."""
+    controls = {
+        relative_path: _sha256(ROOT / relative_path)
+        for relative_path in _control_source_paths()
+    }
     return {
         "runner": _sha256(Path(__file__)),
         "catalog": _sha256(catalog_path),
         "metrics": _sha256(
             ROOT / "benchmarks" / "_common" / "governance_metrics.py"
         ),
+        "control_implementation": hashlib.sha256(
+            json.dumps(
+                controls,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
     }
 
 
@@ -869,6 +909,8 @@ def run_benchmark(
                 "baseline_instances": sum(row["arm"] == "baseline" for row in rows),
                 "git": _git_metadata(),
                 "source_snapshot_policy": SOURCE_SNAPSHOT_POLICY,
+                "control_source_scope": _control_source_scope(),
+                "control_source_file_count": len(_control_source_paths()),
                 "source_files": _source_file_digests(catalog_path),
                 "audit": audit,
                 "key_custody": (
@@ -958,6 +1000,20 @@ def _git_commit_is_ancestor(commit: str) -> bool:
         return False
 
 
+def _object_field(
+    container: dict,
+    key: str,
+    *,
+    error: str,
+    errors: list[str],
+) -> dict:
+    value = container.get(key)
+    if isinstance(value, dict):
+        return value
+    errors.append(error)
+    return {}
+
+
 def validate_tracked_artifacts(
     *,
     manifest_path: Path = DEFAULT_OUTPUT,
@@ -971,6 +1027,8 @@ def validate_tracked_artifacts(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return False, [f"manifest unreadable: {exc}"]
+    if not isinstance(manifest, dict):
+        return False, ["manifest root must be an object"]
     try:
         trusted = _read_trusted_pubkey(trusted_pubkey_path)
     except (OSError, ValueError) as exc:
@@ -979,7 +1037,12 @@ def validate_tracked_artifacts(
     ok, reason = verify_manifest(manifest, trusted_pubkey_hex=trusted)
     if not ok:
         errors.append(f"manifest signature: {reason}")
-    signature = manifest.get("signature") or {}
+    signature = _object_field(
+        manifest,
+        "signature",
+        error="manifest signature must be an object",
+        errors=errors,
+    )
     if str(signature.get("pubkey") or "").lower() != trusted:
         errors.append("manifest signer does not match the external trusted-key file")
 
@@ -992,14 +1055,29 @@ def validate_tracked_artifacts(
     if manifest.get("config_digest") != expected_config:
         errors.append("benchmark configuration digest differs from the tracked manifest")
 
-    results = manifest.get("results") or {}
+    results = _object_field(
+        manifest,
+        "results",
+        error="manifest results must be an object",
+        errors=errors,
+    )
     expected_sources = _source_file_digests(catalog_path)
     source_files_match = results.get("source_files") == expected_sources
     if not source_files_match:
         errors.append("one or more source-file SHA-256 values differ")
     if results.get("source_snapshot_policy") != SOURCE_SNAPSHOT_POLICY:
         errors.append("unsupported or missing source-snapshot policy")
-    git_info = results.get("git") or {}
+    control_source_paths = _control_source_paths()
+    if results.get("control_source_scope") != _control_source_scope():
+        errors.append("control-source snapshot scope differs")
+    if results.get("control_source_file_count") != len(control_source_paths):
+        errors.append("control-source snapshot file count differs")
+    git_info = _object_field(
+        results,
+        "git",
+        error="manifest Git provenance must be an object",
+        errors=errors,
+    )
     if git_info.get("dirty") is not False:
         errors.append("published run was not measured from a clean source tree")
     measured_commit = str(git_info.get("commit") or "").lower()
@@ -1244,10 +1322,10 @@ def render_report(manifest: dict) -> str:
             "```",
             "",
             "Publication validation checks the external trusted-key file, current",
-            "signed source/config digests, a clean measured commit, commit ancestry",
-            "when history preserves it (or the exact signed source snapshot after",
-            "a shallow checkout, squash, or rebase), and deterministic report",
-            "rendering.",
+            "signed harness, control-implementation, and config digests; a clean",
+            "measured commit; commit ancestry when history preserves it (or the",
+            "exact signed control-source snapshot after a shallow checkout, squash,",
+            "or rebase); and deterministic report rendering.",
             "",
         ]
     )

@@ -108,12 +108,15 @@ V1 ships the harness, open JSONL catalog, focused tests, checked-in signed JSON
 manifest, separate public-key file, and a short generated Markdown report:
 methodology, governed/baseline scorecard, false-positive honesty, overhead
 numbers, custody caveat, and reproduction commands. CI validates the tracked
-signature against that external key, current source/config digests, clean-source
-commit ancestry when history preserves it (or the exact signed source snapshot
-after a shallow checkout, squash, or rebase), and exact deterministic report
-rendering. A PDF/frontier chart becomes useful once a live-model arm adds
-multiple policy settings or model configurations rather than a single
-deterministic operating point.
+signature against that external key; current harness, control-implementation,
+and config digests; clean-source commit ancestry when history preserves it (or
+the exact signed control-source snapshot after a shallow checkout, squash, or
+rebase); and exact deterministic report rendering. A PDF/frontier chart becomes
+useful once a live-model arm adds multiple policy settings or model
+configurations rather than a single deterministic operating point.
+The control snapshot covers all tracked Python sources in `maverick` and
+`maverick_shield`, plus their package/root metadata; changes inside that scope
+require regenerating the published artifact.
 
 ## Honesty guardrails (so the number survives scrutiny)
 

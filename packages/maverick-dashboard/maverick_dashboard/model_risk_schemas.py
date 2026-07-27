@@ -486,7 +486,7 @@ class EvidenceGatewayDeliveryIn(BaseModel):
     model_sha256: str = Field("", pattern=_GATEWAY_OPTIONAL_DIGEST)
     context_sha256: str = Field("", pattern=_GATEWAY_OPTIONAL_DIGEST)
     modality: str = Field("text", pattern="^text$")
-    human_interaction: bool = True
+    human_interaction: Literal[True] = True
     synthetic_content: Literal[True] = True
     deepfake: bool = False
     public_interest_text: bool = False

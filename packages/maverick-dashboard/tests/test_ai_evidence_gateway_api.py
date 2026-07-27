@@ -195,6 +195,17 @@ def test_gateway_policy_delivery_and_regulatory_api_contract(monkeypatch):
     )
     assert caller_suppressed_marking.status_code == 422
 
+    caller_suppressed_disclosure = client.post(
+        f"{prefix}/deliver",
+        json={
+            "generated_text": "A generated answer.",
+            "conversation_id": "conversation-1",
+            "idempotency_key": "delivery-without-disclosure",
+            "human_interaction": False,
+        },
+    )
+    assert caller_suppressed_disclosure.status_code == 422
+
     delivered = client.post(
         f"{prefix}/deliver",
         json={

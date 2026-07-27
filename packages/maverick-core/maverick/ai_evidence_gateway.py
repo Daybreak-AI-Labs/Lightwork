@@ -866,6 +866,20 @@ def _snapshot_for_binding(
     return None
 
 
+def _reserved_issued_at(pending: Mapping[str, Any]) -> float:
+    value = pending.get("issued_at")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) <= 0
+    ):
+        raise EvidenceGatewayStateError(
+            "conversation reservation timestamp is invalid"
+        )
+    return float(value)
+
+
 def _conversation_reservation(
     conversation_sha256: str,
     receipt_id: str,
@@ -874,12 +888,13 @@ def _conversation_reservation(
     interaction_disclosure_required: bool,
     human_interaction: bool,
     actor: str,
-) -> tuple[int, str, bool]:
+) -> tuple[int, str, bool, float]:
     record_id = _stable_id("AIC", conversation_sha256)
     for _attempt in range(16):
         current = _CONVERSATIONS.get(record_id)
         if current is None:
             disclosure_due = interaction_disclosure_required
+            issued_at = time.time()
             try:
                 created = _CONVERSATIONS.create(
                     {
@@ -900,6 +915,7 @@ def _conversation_reservation(
                             ),
                             "interaction_disclosure_due": disclosure_due,
                             "human_interaction": human_interaction,
+                            "issued_at": issued_at,
                         },
                     },
                     action="delivery_reserved",
@@ -912,6 +928,7 @@ def _conversation_reservation(
                 int(pending["sequence"]),
                 str(pending["parent_receipt_hash"]),
                 bool(pending["interaction_disclosure_due"]),
+                _reserved_issued_at(pending),
             )
         completed = current.get("human_disclosure_completed", False)
         if not isinstance(completed, bool):
@@ -942,6 +959,7 @@ def _conversation_reservation(
                     int(pending["sequence"]),
                     str(pending.get("parent_receipt_hash") or ""),
                     bool(pending["interaction_disclosure_due"]),
+                    _reserved_issued_at(pending),
                 )
             raise ConversationOrderError(
                 "an earlier delivery in this conversation is not committed"
@@ -950,15 +968,19 @@ def _conversation_reservation(
         if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
             raise EvidenceGatewayStateError("conversation sequence is invalid")
         parent_hash = str(current.get("last_receipt_hash") or "")
-        disclosure_due = bool(
-            interaction_disclosure_required and not completed
-        )
+        # V1 has no independently attested presentation event. A caller could
+        # otherwise discard an earlier response while claiming it was the
+        # human-facing turn, consuming the disclosure before a user sees it.
+        # Apply the disclosure at every delivery boundary.
+        disclosure_due = interaction_disclosure_required
+        issued_at = time.time()
 
         def mutate(
             row: dict[str, Any],
             reserved_sequence: int = sequence,
             reserved_parent_hash: str = parent_hash,
             reserved_disclosure_due: bool = disclosure_due,
+            reserved_issued_at: float = issued_at,
         ) -> None:
             if row.get("pending") is not None:
                 raise RecordConflict("conversation delivery was reserved concurrently")
@@ -967,9 +989,7 @@ def _conversation_reservation(
                 raise EvidenceGatewayStateError(
                     "conversation disclosure state is invalid"
                 )
-            expected_due = bool(
-                interaction_disclosure_required and not row_completed
-            )
+            expected_due = interaction_disclosure_required
             if expected_due is not reserved_disclosure_due:
                 raise RecordConflict(
                     "conversation disclosure state changed concurrently"
@@ -984,6 +1004,7 @@ def _conversation_reservation(
                 ),
                 "interaction_disclosure_due": reserved_disclosure_due,
                 "human_interaction": human_interaction,
+                "issued_at": reserved_issued_at,
             }
             row["next_sequence"] = reserved_sequence + 1
 
@@ -997,7 +1018,7 @@ def _conversation_reservation(
             )
         except RecordConflict:
             continue
-        return sequence, parent_hash, disclosure_due
+        return sequence, parent_hash, disclosure_due, issued_at
     raise EvidenceGatewayStateError("conversation reservation contention exceeded")
 
 
@@ -1101,10 +1122,9 @@ def _render_text(
     public_interest_text: bool,
     editorial_exception: Mapping[str, Any] | None,
 ) -> tuple[str, dict[str, Any]]:
-    # The delivery caller may describe a turn as machine-only, but it is not a
-    # governed authority for suppressing the approved disclosure. Applying the
-    # disclosure to every not-yet-disclosed conversation fails safe; only a
-    # claimed human-facing turn consumes the once-per-conversation obligation.
+    # Delivery is the human-facing boundary in v1. The approved disclosure is
+    # applied on every delivery because the caller cannot independently attest
+    # that an earlier response was actually presented to the user.
     disclosure_required = bool(settings["require_interaction_disclosure"])
     if apply_interaction_disclosure and not disclosure_required:
         raise EvidenceGatewayStateError(
@@ -1165,7 +1185,7 @@ def _packet_path() -> Path:
     return data_dir("ai_evidence_gateway", "assurance_packets.ndjson")
 
 
-def _signed_rows(path: Path, identity_key: str, identity: str) -> list[dict[str, Any]]:
+def _signed_ledger_rows(path: Path) -> list[dict[str, Any]]:
     try:
         raw_lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
@@ -1180,9 +1200,45 @@ def _signed_rows(path: Path, identity_key: str, identity: str) -> list[dict[str,
             raise EvidenceGatewayStateError(
                 "signed evidence ledger contains malformed JSON"
             ) from exc
-        if isinstance(row, dict) and row.get(identity_key) == identity:
-            rows.append(row)
+        if not isinstance(row, dict):
+            raise EvidenceGatewayStateError(
+                "signed evidence ledger contains a non-object row"
+            )
+        rows.append(row)
     return rows
+
+
+def _signed_rows(path: Path, identity_key: str, identity: str) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in _signed_ledger_rows(path)
+        if row.get(identity_key) == identity
+    ]
+
+
+def _identity_transaction_target(path: Path) -> Path:
+    return path.with_name(f"{path.name}.identity-transaction")
+
+
+def _assert_receipt_admission_capacity(receipt_id: str) -> None:
+    """Reject a new identity before reserving conversation state at the v1 cap."""
+
+    from .file_lock import cross_process_lock
+
+    path = _receipt_path()
+    with cross_process_lock(_identity_transaction_target(path), strict=True):
+        rows = _signed_ledger_rows(path)
+        existing = [row for row in rows if row.get("receipt_id") == receipt_id]
+        if len(existing) > 1:
+            raise EvidenceGatewayStateError(
+                "signed evidence identity is duplicated"
+            )
+        if not existing and len(rows) >= _MAX_RECEIPTS:
+            raise EvidenceGatewayStateError(
+                "AI evidence receipt capacity has been reached; "
+                "v1 refuses further delivery until evidence is exported and "
+                "a new governed tenant evidence namespace is provisioned"
+            )
 
 
 def _sign_event(
@@ -1191,6 +1247,7 @@ def _sign_event(
     path: Path,
     identity_key: str,
     identity: str,
+    max_rows: int | None = None,
 ) -> tuple[dict[str, Any], str]:
     from .audit.signing import AuditSigner
     from .file_lock import cross_process_lock
@@ -1199,9 +1256,11 @@ def _sign_event(
     # a separate operation.  Hold a sibling transaction lock across the whole
     # check/write/recover sequence so two workers cannot append the same
     # receipt_id or packet_id as distinct, individually valid chain rows.
-    identity_target = path.with_name(f"{path.name}.identity-transaction")
-    with cross_process_lock(identity_target, strict=True):
-        existing = _signed_rows(path, identity_key, identity)
+    with cross_process_lock(_identity_transaction_target(path), strict=True):
+        rows = _signed_ledger_rows(path)
+        existing = [
+            row for row in rows if row.get(identity_key) == identity
+        ]
         if len(existing) > 1:
             raise EvidenceGatewayStateError("signed evidence identity is duplicated")
         if existing:
@@ -1219,6 +1278,18 @@ def _sign_event(
                     "signed evidence key is absent from the protected trust registry"
                 )
             return row, public_key
+        if max_rows is not None:
+            if (
+                isinstance(max_rows, bool)
+                or not isinstance(max_rows, int)
+                or max_rows < 1
+            ):
+                raise ValueError("signed evidence row limit must be positive")
+            if len(rows) >= max_rows:
+                raise EvidenceGatewayStateError(
+                    "AI evidence receipt capacity has been reached; "
+                    "delivery was withheld before signing"
+                )
         signer = AuditSigner(path)
         if not signer.write(dict(event)):
             raise EvidenceGatewayStateError("audit signer refused evidence")
@@ -1413,6 +1484,92 @@ def _validate_retry(
     return signed
 
 
+def _reproduce_delivery(
+    record: Mapping[str, Any],
+    generated_text: str,
+    *,
+    tenant_id: str,
+    input_sha256: str,
+    generated_sha256: str,
+    idempotency_sha256: str,
+    conversation_sha256: str,
+    policy_id: str,
+    model_sha256: str,
+    context_sha256: str,
+    modality: str,
+    actor_sha256: str,
+    human_interaction: bool,
+    synthetic_content: bool,
+    deepfake: bool,
+    public_interest_text: bool,
+    editorial_exception: Mapping[str, Any] | None,
+) -> tuple[Mapping[str, Any], str]:
+    signed = _validate_retry(
+        record,
+        input_sha256=input_sha256,
+        generated_sha256=generated_sha256,
+        idempotency_sha256=idempotency_sha256,
+        conversation_sha256=conversation_sha256,
+        policy_id=policy_id,
+        model_sha256=model_sha256,
+        context_sha256=context_sha256,
+        modality=modality,
+        actor_sha256=actor_sha256,
+        human_interaction=human_interaction,
+        synthetic_content=synthetic_content,
+        deepfake=deepfake,
+        public_interest_text=public_interest_text,
+        editorial_exception=editorial_exception,
+    )
+    if not verify_interaction_receipt(
+        signed,
+        trusted_public_keys=trusted_public_keys(),
+        expected_tenant_id=tenant_id,
+    ):
+        raise EvidenceGatewayStateError(
+            "stored interaction receipt failed signature verification"
+        )
+    binding = signed.get("policy_binding")
+    if not isinstance(binding, Mapping):
+        raise EvidenceGatewayStateError("receipt policy binding is invalid")
+    policy_record = _POLICIES.get(str(binding.get("record_id") or ""))
+    if policy_record is None:
+        raise EvidenceGatewayStateError(
+            "receipt policy snapshot is unavailable for retry"
+        )
+    snapshot = _snapshot_for_binding(
+        policy_record,
+        str(binding.get("policy_sha256") or ""),
+    )
+    if snapshot is None:
+        raise EvidenceGatewayStateError(
+            "receipt policy snapshot is unavailable for retry"
+        )
+    delivered, decision = _render_text(
+        generated_text,
+        receipt_id=str(signed.get("receipt_id") or ""),
+        settings=snapshot["settings"],
+        human_interaction=bool(signed["transparency"]["human_interaction"]),
+        apply_interaction_disclosure=bool(
+            signed["transparency"]["interaction_disclosure_applied"]
+        ),
+        synthetic_content=bool(signed["transparency"]["synthetic_content"]),
+        deepfake=bool(signed["transparency"]["deepfake"]),
+        public_interest_text=bool(
+            signed["transparency"]["public_interest_text"]
+        ),
+        editorial_exception=signed["transparency"].get("editorial_exception"),
+    )
+    if decision != signed["transparency"] or not hmac.compare_digest(
+        _sha256(delivered.encode("utf-8")),
+        str(signed.get("delivered_output_sha256") or ""),
+    ):
+        raise EvidenceGatewayStateError(
+            "idempotent retry cannot reproduce the delivered bytes"
+        )
+    return signed, delivered
+
+
 def deliver_text(  # noqa: C901 - one linear release transaction is auditable
     generated_text: str,
     *,
@@ -1458,6 +1615,11 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
             "deliver_text accepts AI-generated content only; "
             "synthetic_content cannot be disabled by the delivery caller"
         )
+    if human_interaction is not True:
+        raise EvidenceGatewayStateError(
+            "deliver_text is the human-facing delivery boundary; "
+            "human_interaction cannot be disabled by the delivery caller"
+        )
     exception = _editorial_exception(editorial_exception)
     input_sha = _sha256(input_text.encode("utf-8"))
     generated_sha = _sha256(generated_text.encode("utf-8"))
@@ -1468,77 +1630,32 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
     model_digest = _digest(model_sha256, "model_sha256", optional=True)
     context_digest = _digest(context_sha256, "context_sha256", optional=True)
     receipt_record_id = receipt_id
+    reproduction_context = {
+        "tenant_id": tenant_id,
+        "input_sha256": input_sha,
+        "generated_sha256": generated_sha,
+        "idempotency_sha256": idempotency_sha,
+        "conversation_sha256": conversation_sha,
+        "policy_id": policy_token,
+        "model_sha256": model_digest,
+        "context_sha256": context_digest,
+        "modality": modality_token,
+        "actor_sha256": actor_sha,
+        "human_interaction": human_interaction,
+        "synthetic_content": synthetic_content,
+        "deepfake": deepfake,
+        "public_interest_text": public_interest_text,
+        "editorial_exception": exception,
+    }
 
     with _DELIVERY_LOCK:
         existing = _RECEIPTS.get(receipt_record_id)
         if existing is not None and existing.get("status") == "issued":
-            signed = _validate_retry(
+            signed, delivered = _reproduce_delivery(
                 existing,
-                input_sha256=input_sha,
-                generated_sha256=generated_sha,
-                idempotency_sha256=idempotency_sha,
-                conversation_sha256=conversation_sha,
-                policy_id=policy_token,
-                model_sha256=model_digest,
-                context_sha256=context_digest,
-                modality=modality_token,
-                actor_sha256=actor_sha,
-                human_interaction=human_interaction,
-                synthetic_content=synthetic_content,
-                deepfake=deepfake,
-                public_interest_text=public_interest_text,
-                editorial_exception=exception,
-            )
-            if not verify_interaction_receipt(
-                signed,
-                trusted_public_keys=trusted_public_keys(),
-                expected_tenant_id=tenant_id,
-            ):
-                raise EvidenceGatewayStateError(
-                    "stored interaction receipt failed signature verification"
-                )
-            binding = signed.get("policy_binding")
-            if not isinstance(binding, Mapping):
-                raise EvidenceGatewayStateError("receipt policy binding is invalid")
-            policy_record = _POLICIES.get(str(binding.get("record_id") or ""))
-            if policy_record is None:
-                raise EvidenceGatewayStateError(
-                    "receipt policy snapshot is unavailable for retry"
-                )
-            snapshot = _snapshot_for_binding(
-                policy_record,
-                str(binding.get("policy_sha256") or ""),
-            )
-            if snapshot is None:
-                raise EvidenceGatewayStateError(
-                    "receipt policy snapshot is unavailable for retry"
-                )
-            delivered, decision = _render_text(
                 generated_text,
-                receipt_id=receipt_id,
-                settings=snapshot["settings"],
-                human_interaction=bool(signed["transparency"]["human_interaction"]),
-                apply_interaction_disclosure=bool(
-                    signed["transparency"][
-                        "interaction_disclosure_applied"
-                    ]
-                ),
-                synthetic_content=bool(signed["transparency"]["synthetic_content"]),
-                deepfake=bool(signed["transparency"]["deepfake"]),
-                public_interest_text=bool(
-                    signed["transparency"]["public_interest_text"]
-                ),
-                editorial_exception=signed["transparency"].get(
-                    "editorial_exception"
-                ),
+                **reproduction_context,
             )
-            if decision != signed["transparency"] or not hmac.compare_digest(
-                _sha256(delivered.encode("utf-8")),
-                str(signed.get("delivered_output_sha256") or ""),
-            ):
-                raise EvidenceGatewayStateError(
-                    "idempotent retry cannot reproduce the delivered bytes"
-                )
             _complete_conversation(
                 conversation_sha,
                 receipt_id,
@@ -1557,6 +1674,73 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
                 "idempotent_replay": True,
             }
 
+        if existing is None:
+            from .file_lock import cross_process_lock
+
+            receipt_path = _receipt_path()
+            identity_target = receipt_path.with_name(
+                f"{receipt_path.name}.identity-transaction"
+            )
+            with cross_process_lock(identity_target, strict=True):
+                recovered_rows = _signed_rows(
+                    receipt_path,
+                    "receipt_id",
+                    receipt_id,
+                )
+            if len(recovered_rows) > 1:
+                raise EvidenceGatewayStateError(
+                    "signed evidence identity is duplicated"
+                )
+            if recovered_rows:
+                recovered_record = {
+                    "id": receipt_record_id,
+                    "schema": RECEIPT_SCHEMA,
+                    "status": "issued",
+                    "receipt_id": receipt_id,
+                    "signed_receipt": recovered_rows[0],
+                }
+                signed, delivered = _reproduce_delivery(
+                    recovered_record,
+                    generated_text,
+                    **reproduction_context,
+                )
+                try:
+                    saved = _RECEIPTS.create(
+                        recovered_record,
+                        action="interaction_receipt_recovered",
+                        actor=operator,
+                    )
+                except RecordConflict:
+                    saved = _RECEIPTS.get(receipt_record_id)
+                    if saved is None or saved.get("status") != "issued":
+                        raise EvidenceGatewayStateError(
+                            "authoritative interaction receipt is unavailable "
+                            "after ledger recovery"
+                        ) from None
+                    signed, delivered = _reproduce_delivery(
+                        saved,
+                        generated_text,
+                        **reproduction_context,
+                    )
+                _complete_conversation(
+                    conversation_sha,
+                    receipt_id,
+                    str(signed["hash"]),
+                    interaction_disclosure_applied=bool(
+                        signed["transparency"][
+                            "interaction_disclosure_applied"
+                        ]
+                    ),
+                    actor=operator,
+                )
+                return {
+                    "enabled": True,
+                    "delivered_text": delivered,
+                    "receipt": _receipt_view(saved),
+                    "idempotent_replay": True,
+                }
+
+        _assert_receipt_admission_capacity(receipt_id)
         policy_record = _policy_record(policy_token)
         if policy_record is None:
             raise EvidenceGatewayStateError(
@@ -1597,15 +1781,17 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
         interaction_disclosure_required = bool(
             settings["require_interaction_disclosure"]
         )
-        sequence, parent_hash, disclosure_due = _conversation_reservation(
-            conversation_sha,
-            receipt_id,
-            idempotency_sha,
-            interaction_disclosure_required=(
-                interaction_disclosure_required
-            ),
-            human_interaction=human_interaction,
-            actor=operator,
+        sequence, parent_hash, disclosure_due, issued_at = (
+            _conversation_reservation(
+                conversation_sha,
+                receipt_id,
+                idempotency_sha,
+                interaction_disclosure_required=(
+                    interaction_disclosure_required
+                ),
+                human_interaction=human_interaction,
+                actor=operator,
+            )
         )
         delivered, decision = _render_text(
             generated_text,
@@ -1621,7 +1807,7 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
         event = _receipt_event(
             tenant_id=tenant_id,
             receipt_id=receipt_id,
-            issued_at=time.time(),
+            issued_at=issued_at,
             conversation_sha256=conversation_sha,
             sequence=sequence,
             idempotency_sha256=idempotency_sha,
@@ -1641,6 +1827,7 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
             path=_receipt_path(),
             identity_key="receipt_id",
             identity=receipt_id,
+            max_rows=_MAX_RECEIPTS,
         )
         if existing is None:
             try:
@@ -2677,11 +2864,55 @@ def _conversation_chains_valid(
 
 
 def _receipt_ledger_chain_valid(receipts: Sequence[Mapping[str, Any]]) -> bool:
-    if not receipts:
-        return True
     from .audit.signing import verify_chain
 
-    return not verify_chain(_receipt_path())
+    path = _receipt_path()
+    try:
+        ledger_rows = _signed_ledger_rows(path)
+    except EvidenceGatewayStateError:
+        return False
+    if not receipts and not ledger_rows:
+        return True
+    if verify_chain(path):
+        return False
+
+    def identity(row: Mapping[str, Any]) -> tuple[str, str] | None:
+        if (
+            row.get("schema") != RECEIPT_SCHEMA
+            or row.get("event") != INTERACTION_EVENT
+        ):
+            return None
+        receipt_id = row.get("receipt_id")
+        receipt_hash = row.get("hash")
+        if (
+            not isinstance(receipt_id, str)
+            or not receipt_id
+            or not isinstance(receipt_hash, str)
+            or not receipt_hash
+        ):
+            return None
+        return receipt_id, receipt_hash
+
+    stored_identities: list[tuple[str, str]] = []
+    for receipt in receipts:
+        signed = receipt.get("signed_receipt", receipt)
+        if not isinstance(signed, Mapping):
+            return False
+        value = identity(signed)
+        if value is None:
+            return False
+        stored_identities.append(value)
+    ledger_identities: list[tuple[str, str]] = []
+    for row in ledger_rows:
+        value = identity(row)
+        if value is None:
+            return False
+        ledger_identities.append(value)
+    return (
+        len(stored_identities) == len(set(stored_identities))
+        and len(ledger_identities) == len(set(ledger_identities))
+        and set(stored_identities) == set(ledger_identities)
+    )
 
 
 def _policy_readiness_gaps(
@@ -3031,36 +3262,57 @@ def render_assurance_packet(
         _size, largest_key = max(candidates)
         included[largest_key].pop()
         body = packet_body()
-    rechecked_collections = {
-        "policies": list_policies(),
-        "interaction_receipts": list_interaction_receipts(
-            limit=_MAX_RECEIPTS
-        ),
-        "regulatory_impacts": list_regulatory_impacts(
-            limit=_MAX_IMPACTS
-        ),
-    }
-    if any(
-        len(rechecked_collections[key]) != source_counts[key]
-        or not hmac.compare_digest(
-            _streaming_collection_digest(rechecked_collections[key]),
-            source_digests[key],
-        )
-        for key in source_counts
+    from .file_lock import cross_process_lock
+
+    receipt_path = _receipt_path()
+    with cross_process_lock(
+        _identity_transaction_target(receipt_path),
+        strict=True,
     ):
-        raise EvidenceGatewayStateError(
-            "evidence records changed during packet snapshot; retry export"
+        # The receipt ledger append precedes governed-store persistence. Hold
+        # the same transaction lock as delivery while reconciling the final
+        # snapshot and signing its attestation. A half-committed receipt then
+        # makes export retry instead of producing a ready-but-incomplete packet.
+        rechecked_collections = {
+            "policies": list_policies(),
+            "interaction_receipts": list_interaction_receipts(
+                limit=_MAX_RECEIPTS
+            ),
+            "regulatory_impacts": list_regulatory_impacts(
+                limit=_MAX_IMPACTS
+            ),
+        }
+        rechecked_ledger_chain_valid = _receipt_ledger_chain_valid(
+            rechecked_collections["interaction_receipts"]
         )
-    digest = _sha256(body)
-    return {
-        **body,
-        "packet_sha256": digest,
-        "attestation": _attestation(
+        changed = any(
+            len(rechecked_collections[key]) != source_counts[key]
+            or not hmac.compare_digest(
+                _streaming_collection_digest(rechecked_collections[key]),
+                source_digests[key],
+            )
+            for key in source_counts
+        )
+        if (
+            changed
+            or rechecked_ledger_chain_valid
+            is not receipt_ledger_chain_valid
+        ):
+            raise EvidenceGatewayStateError(
+                "evidence records or receipt ledger changed during packet "
+                "snapshot; retry export"
+            )
+        digest = _sha256(body)
+        attestation = _attestation(
             packet_id=signed_packet_id,
             packet_sha256=digest,
             actor=operator,
             generated_at=generated_at,
-        ),
+        )
+    return {
+        **body,
+        "packet_sha256": digest,
+        "attestation": attestation,
     }
 
 

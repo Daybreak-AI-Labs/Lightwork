@@ -42,8 +42,9 @@ For each delivered text interaction, the gateway:
 
 1. treats the payload as AI-generated content and refuses a caller attempt to
    disable that classification;
-2. applies the approved disclosure fail-safe until a human-facing turn has
-   consumed it, plus the configured machine-readable and visible markings;
+2. treats delivery as the human-facing boundary and applies the approved
+   disclosure on every v1 delivery, plus the configured machine-readable and
+   visible markings; callers cannot suppress or prematurely consume it;
 3. binds the event to policy revision, model digest, context digest, modality,
    conversation hash, and input/output hashes;
 4. emits an idempotent signed receipt; and
@@ -65,6 +66,23 @@ Hash-only receipts reduce retained content; they are not a confidentiality
 mechanism. Digests of low-entropy or repeated text can reveal equality and can
 be guessed by an actor who already has candidate text. Protect the receipt
 store and signing keys accordingly.
+
+Readiness reconciles the exact `(receipt_id, hash)` set in the signed receipt
+ledger against every issued governed receipt; missing, orphaned, or duplicated
+rows fail closed even when each remaining chain is internally valid. If the
+durable signer append succeeds but governed receipt persistence is interrupted,
+an identical retry verifies and recovers the signed row against its historical
+policy snapshot before completing the conversation reservation.
+
+V1 has a hard operational ceiling of 10,000 receipts per tenant evidence
+namespace. The gateway withholds the next new delivery before signing rather
+than letting the cockpit or packet exporter enter an unreadable overflow state.
+Receipt rows cannot be pruned in place because exact ledger/store
+reconciliation and the signature chain would fail. Operators must export and
+verify the evidence, then provision a new governed tenant evidence namespace
+before reaching the ceiling. Automated segmented-ledger rollover and anchored
+segment manifests are required before using v1 for sustained high-volume
+production traffic.
 
 ## Regulatory impact loop
 

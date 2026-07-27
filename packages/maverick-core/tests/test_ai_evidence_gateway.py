@@ -190,19 +190,21 @@ def test_conversation_order_idempotency_and_changed_risk_inputs_fail(monkeypatch
         idempotency_key="turn-2",
     )
     assert second["receipt"]["sequence"] == 2
-    assert not second["delivered_text"].startswith(
+    assert second["delivered_text"].startswith(
         gateway.DEFAULT_DISCLOSURE_TEXT
     )
     # A retry stays reproducible even after the conversation advances.
     assert _deliver()["idempotent_replay"] is True
 
 
-def test_first_human_turn_gets_disclosure_after_machine_only_turn(monkeypatch):
+def test_every_delivery_gets_disclosure_and_caller_cannot_consume_it_early(
+    monkeypatch,
+):
     _enable(monkeypatch)
     _policy()
-    machine_only = _deliver(human_interaction=False)
-    assert machine_only["receipt"]["sequence"] == 1
-    assert machine_only["delivered_text"].startswith(
+    hidden_preparatory = _deliver(human_interaction=True)
+    assert hidden_preparatory["receipt"]["sequence"] == 1
+    assert hidden_preparatory["delivered_text"].startswith(
         gateway.DEFAULT_DISCLOSURE_TEXT
     )
 
@@ -225,9 +227,19 @@ def test_first_human_turn_gets_disclosure_after_machine_only_turn(monkeypatch):
         human_interaction=True,
     )
     assert later_human["receipt"]["sequence"] == 3
-    assert not later_human["delivered_text"].startswith(
+    assert later_human["delivered_text"].startswith(
         gateway.DEFAULT_DISCLOSURE_TEXT
     )
+
+    with pytest.raises(
+        gateway.EvidenceGatewayStateError,
+        match="human_interaction cannot be disabled",
+    ):
+        _deliver(
+            generated_text="Machine-only internal output.",
+            idempotency_key="turn-4",
+            human_interaction=False,
+        )
 
 
 def test_delivery_caller_cannot_disable_ai_content_marking(monkeypatch):
@@ -311,6 +323,74 @@ def test_policy_model_and_context_changes_stale_old_receipts(monkeypatch):
     assert replay["delivered_text"] == delivery["delivered_text"]
 
 
+def test_retry_recovers_signed_receipt_after_governed_store_failure(monkeypatch):
+    _enable(monkeypatch)
+    first_policy = _policy()
+    real_create = gateway._RECEIPTS.create
+    failures = {"remaining": 1}
+
+    def fail_once(record, *, action, actor):
+        if failures["remaining"]:
+            failures["remaining"] -= 1
+            raise RuntimeError("simulated governed receipt persistence failure")
+        return real_create(record, action=action, actor=actor)
+
+    monkeypatch.setattr(gateway._RECEIPTS, "create", fail_once)
+    with pytest.raises(
+        RuntimeError,
+        match="simulated governed receipt persistence failure",
+    ):
+        _deliver()
+
+    ledger_rows = gateway._signed_rows(
+        gateway._receipt_path(),
+        "receipt_id",
+        _stable_receipt_id := gateway._stable_id(
+            "AIR",
+            "gateway-test-tenant",
+            _sha("conversation-1"),
+            _sha("turn-1"),
+        ),
+    )
+    assert len(ledger_rows) == 1
+    assert gateway.list_interaction_receipts() == []
+    assert not gateway._receipt_ledger_chain_valid([])
+
+    # Recovery must use the signed row and its immutable policy snapshot even
+    # if the current policy authority changes between the append and retry.
+    gateway.upsert_policy(
+        "default",
+        actor="policy-admin",
+        expected_revision=first_policy["revision"],
+        disclosure_text="Updated disclosure.",
+        model_sha256=_sha("model-v2"),
+        context_sha256=_sha("context-v2"),
+    )
+    recovered = _deliver()
+    assert recovered["idempotent_replay"] is True
+    assert recovered["receipt"]["receipt_id"] == _stable_receipt_id
+    assert recovered["receipt"]["signed_receipt"]["hash"] == ledger_rows[0]["hash"]
+    assert (
+        recovered["receipt"]["signed_receipt"]["issued_at"]
+        == ledger_rows[0]["issued_at"]
+    )
+    assert recovered["delivered_text"].startswith(
+        gateway.DEFAULT_DISCLOSURE_TEXT
+    )
+    assert gateway._receipt_ledger_chain_valid(
+        gateway.list_interaction_receipts()
+    )
+
+    next_turn = _deliver(
+        generated_text="Next answer.",
+        input_text="Next question.",
+        idempotency_key="turn-2",
+        model="model-v2",
+        context="context-v2",
+    )
+    assert next_turn["receipt"]["sequence"] == 2
+
+
 def test_signing_identity_transaction_prevents_duplicate_rows(monkeypatch):
     _enable(monkeypatch)
     _policy()
@@ -330,6 +410,38 @@ def test_signing_identity_transaction_prevents_duplicate_rows(monkeypatch):
     ]
     assert len(rows) == 1
     assert rows[0]["receipt_id"] == results[0]["receipt"]["receipt_id"]
+
+
+def test_delivery_fails_closed_before_receipt_capacity_is_crossed(monkeypatch):
+    _enable(monkeypatch)
+    _policy()
+    monkeypatch.setattr(gateway, "_MAX_RECEIPTS", 1)
+    first = _deliver()
+
+    with pytest.raises(
+        gateway.EvidenceGatewayStateError,
+        match="receipt capacity has been reached",
+    ):
+        _deliver(
+            generated_text="Second answer.",
+            input_text="Second question.",
+            idempotency_key="turn-2",
+        )
+
+    receipts = gateway.list_interaction_receipts(limit=1)
+    assert [row["receipt_id"] for row in receipts] == [
+        first["receipt"]["receipt_id"]
+    ]
+    assert len(gateway._signed_ledger_rows(gateway._receipt_path())) == 1
+    conversation = gateway._CONVERSATIONS.get(
+        gateway._stable_id("AIC", _sha("conversation-1"))
+    )
+    assert conversation is not None
+    assert conversation["pending"] is None
+    assert gateway.summary()["readiness"]["ready"] is True
+    packet = gateway.render_assurance_packet(actor="assurance-officer")
+    assert packet["verification"]["receipt_ledger_chain_valid"] is True
+    assert gateway.verify_assurance_packet(packet)
 
 
 def test_accepted_impact_refreshes_policy_and_stales_receipt(monkeypatch):
@@ -476,6 +588,50 @@ def test_summary_treats_tampered_receipt_as_not_ready(monkeypatch):
     assert "unverified_interaction_receipts" in cockpit["readiness"]["gaps"]
 
 
+def test_summary_and_packet_reject_missing_receipt_store_rows(monkeypatch):
+    _enable(monkeypatch)
+    _policy()
+    _deliver(
+        generated_text="First answer.",
+        conversation_id="ledger-completeness",
+        idempotency_key="turn-1",
+    )
+    _deliver(
+        generated_text="Second answer.",
+        conversation_id="ledger-completeness",
+        idempotency_key="turn-2",
+    )
+    all_receipts = gateway.list_interaction_receipts()
+    assert len(all_receipts) == 2
+    assert gateway._receipt_ledger_chain_valid(all_receipts)
+
+    # Simulate loss of the terminal governed-store row while the signed ledger
+    # remains intact. The remaining conversation prefix and ledger are each
+    # internally valid, but their exact identities no longer reconcile.
+    remaining_prefix = [
+        row for row in all_receipts if row["signed_receipt"]["sequence"] == 1
+    ]
+    assert gateway._conversation_chains_valid(remaining_prefix)
+    assert not gateway._receipt_ledger_chain_valid(remaining_prefix)
+    assert not gateway._receipt_ledger_chain_valid([])
+    monkeypatch.setattr(
+        gateway,
+        "list_interaction_receipts",
+        lambda *, limit=100: remaining_prefix,
+    )
+
+    cockpit = gateway.summary()
+    assert cockpit["interaction_receipts"]["conversation_chains_valid"] is True
+    assert cockpit["interaction_receipts"]["ledger_chain_valid"] is False
+    assert "invalid_receipt_ledger_chain" in cockpit["readiness"]["gaps"]
+    assert cockpit["readiness"]["ready"] is False
+
+    packet = gateway.render_assurance_packet(actor="assurance-officer")
+    assert packet["verification"]["receipt_ledger_chain_valid"] is False
+    assert "invalid_receipt_ledger_chain" in packet["readiness"]["gaps"]
+    assert packet["readiness"]["ready"] is False
+
+
 def test_composite_packet_has_official_sources_and_external_verification(monkeypatch):
     _enable(monkeypatch)
     _policy()
@@ -509,6 +665,62 @@ def test_composite_packet_has_official_sources_and_external_verification(monkeyp
     assert not gateway.verify_assurance_packet(
         tampered,
         trusted_public_keys=trust,
+    )
+
+
+def test_packet_rechecks_half_committed_receipt_before_attesting(monkeypatch):
+    _enable(monkeypatch)
+    _policy()
+    delivery = _deliver()
+    signed = delivery["receipt"]["signed_receipt"]
+    orphan_event = {
+        key: copy.deepcopy(value)
+        for key, value in signed.items()
+        if key not in {"prev_hash", "key_id", "hash", "sig"}
+    }
+    orphan_event.update(
+        {
+            "receipt_id": gateway._stable_id(
+                "AIR",
+                "gateway-test-tenant",
+                _sha("packet-race-conversation"),
+                _sha("packet-race-turn"),
+            ),
+            "issued_at": float(signed["issued_at"]) + 1.0,
+            "conversation_sha256": _sha("packet-race-conversation"),
+            "sequence": 1,
+            "idempotency_sha256": _sha("packet-race-turn"),
+            "parent_receipt_hash": "",
+        }
+    )
+    orphan_event.pop("receipt_payload_sha256")
+    orphan_event["receipt_payload_sha256"] = gateway._sha256(orphan_event)
+    real_packet_json_size = gateway._packet_json_size
+    injected = {"done": False}
+
+    def append_after_initial_snapshot(value):
+        if not injected["done"]:
+            injected["done"] = True
+            gateway._sign_event(
+                orphan_event,
+                path=gateway._receipt_path(),
+                identity_key="receipt_id",
+                identity=orphan_event["receipt_id"],
+            )
+        return real_packet_json_size(value)
+
+    monkeypatch.setattr(
+        gateway,
+        "_packet_json_size",
+        append_after_initial_snapshot,
+    )
+    with pytest.raises(
+        gateway.EvidenceGatewayStateError,
+        match="receipt ledger changed during packet snapshot",
+    ):
+        gateway.render_assurance_packet(actor="assurance-officer")
+    assert not gateway._receipt_ledger_chain_valid(
+        gateway.list_interaction_receipts()
     )
 
 

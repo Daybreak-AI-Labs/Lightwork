@@ -362,8 +362,27 @@ def test_tracked_validator_accepts_exact_snapshot_after_squash_or_shallow_clone(
     )
     assert ok, errors
 
+    publishable["results"]["source_files"]["control_implementation"] = "00" * 32
+    manifest_path.write_text(json.dumps(publishable), encoding="utf-8")
+    report_path.write_bytes(frontier.render_report(publishable).encode("utf-8"))
+    ok, errors = frontier.validate_tracked_artifacts(
+        manifest_path=manifest_path,
+        report_path=report_path,
+        trusted_pubkey_path=key_path,
+    )
+    assert not ok
+    assert "one or more source-file SHA-256 values differ" in errors
+    assert (
+        "measured source commit is outside current history and the exact "
+        "signed source snapshot does not match"
+    ) in errors
+
+    publishable["results"]["source_files"] = frontier._source_file_digests(
+        frontier.DEFAULT_CATALOG
+    )
     publishable["results"]["git"]["commit"] = "not-a-git-commit"
     manifest_path.write_text(json.dumps(publishable), encoding="utf-8")
+    report_path.write_bytes(frontier.render_report(publishable).encode("utf-8"))
     ok, errors = frontier.validate_tracked_artifacts(
         manifest_path=manifest_path,
         report_path=report_path,
@@ -399,3 +418,51 @@ def test_tracked_validator_requires_snapshot_policy(
     )
     assert not ok
     assert "unsupported or missing source-snapshot policy" in errors
+
+    publishable = copy.deepcopy(manifest)
+    publishable["results"]["git"]["dirty"] = False
+    publishable["results"]["control_source_scope"] = {}
+    manifest_path.write_text(json.dumps(publishable), encoding="utf-8")
+    report_path.write_bytes(frontier.render_report(publishable).encode("utf-8"))
+    ok, errors = frontier.validate_tracked_artifacts(
+        manifest_path=manifest_path,
+        report_path=report_path,
+        trusted_pubkey_path=key_path,
+    )
+    assert not ok
+    assert "control-source snapshot scope differs" in errors
+
+
+def test_tracked_validator_rejects_malformed_manifest_containers(
+    trusted_pubkey, monkeypatch, tmp_path
+):
+    manifest_path = tmp_path / "manifest.json"
+    report_path = tmp_path / "report.md"
+    key_path = tmp_path / "publisher.pub"
+    key_path.write_text(trusted_pubkey + "\n", encoding="utf-8")
+
+    manifest_path.write_text("[]", encoding="utf-8")
+    ok, errors = frontier.validate_tracked_artifacts(
+        manifest_path=manifest_path,
+        report_path=report_path,
+        trusted_pubkey_path=key_path,
+    )
+    assert not ok
+    assert errors == ["manifest root must be an object"]
+
+    malformed = {"signature": [], "results": []}
+    manifest_path.write_text(json.dumps(malformed), encoding="utf-8")
+    monkeypatch.setattr(
+        frontier,
+        "verify_manifest",
+        lambda _manifest, *, trusted_pubkey_hex: (True, "unit-test anchor"),
+    )
+    ok, errors = frontier.validate_tracked_artifacts(
+        manifest_path=manifest_path,
+        report_path=report_path,
+        trusted_pubkey_path=key_path,
+    )
+    assert not ok
+    assert "manifest signature must be an object" in errors
+    assert "manifest results must be an object" in errors
+    assert "manifest Git provenance must be an object" in errors

@@ -128,10 +128,13 @@ signing key and says so explicitly: its signature
 proves self-signed run integrity when checked against the separately distributed
 public-key file, not off-host production key custody or publisher identity.
 The manifest-embedded key is never accepted as its own trust anchor. Publication
-validation also checks current source/config digests, a clean measured commit
-that is an ancestor of `HEAD` when history preserves it, or the exact signed
-source snapshot after a shallow checkout, squash, or rebase, plus exact
-deterministic report regeneration.
+validation also checks current harness, control-implementation, and config
+digests; a clean measured commit that is an ancestor of `HEAD` when history
+preserves it, or the exact signed control-source snapshot after a shallow
+checkout, squash, or rebase; and exact deterministic report regeneration.
+The control snapshot covers every tracked Python file under `maverick` and
+`maverick_shield` plus their package/root metadata, so a change anywhere in that
+measured source scope requires regenerating the published artifact.
 
 ## Comparing across providers
 
