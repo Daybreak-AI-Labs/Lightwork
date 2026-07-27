@@ -1,9 +1,9 @@
 {
   "_comment": "Which modules production actually reaches. Regenerate with `python -m maverick.reachability --regen`. A module listed UNREACHED must not be cited as shipped capability in docs or strategy.",
   "counts": {
-    "CI_ONLY": 10,
-    "CLI_ONLY": 28,
-    "PRODUCTION": 885,
+    "CI_ONLY": 11,
+    "CLI_ONLY": 27,
+    "PRODUCTION": 886,
     "TEST_ONLY": 84,
     "UNREACHED": 6
   },
@@ -148,6 +148,7 @@
     "maverick.continuous_benchmark": "PRODUCTION",
     "maverick.control_data_plane_e2e": "CI_ONLY",
     "maverick.control_data_plane_soak": "CI_ONLY",
+    "maverick.control_plane_lease": "PRODUCTION",
     "maverick.controls": "PRODUCTION",
     "maverick.conversational_supervisor": "TEST_ONLY",
     "maverick.corrections": "PRODUCTION",
@@ -432,7 +433,7 @@
     "maverick.quorum": "TEST_ONLY",
     "maverick.quotas": "PRODUCTION",
     "maverick.rate_limit_predictor": "PRODUCTION",
-    "maverick.reachability": "CLI_ONLY",
+    "maverick.reachability": "CI_ONLY",
     "maverick.realtime_anomaly": "TEST_ONLY",
     "maverick.reasoning_reward": "PRODUCTION",
     "maverick.rectification": "UNREACHED",

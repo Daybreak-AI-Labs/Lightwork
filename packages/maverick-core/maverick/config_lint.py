@@ -38,7 +38,7 @@ from typing import Any
 # those are the ones where an unknown key is a useful signal.
 KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # --- fixed-key sections (unknown keys are flagged) ---
-    "deployment": {"type"},
+    "deployment": {"type", "allow_multiple_control_planes"},
     "budget": {
         "max_dollars",
         "max_wall_seconds",

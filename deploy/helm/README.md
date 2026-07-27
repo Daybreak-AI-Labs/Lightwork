@@ -35,6 +35,13 @@ root. Multiple dashboard/serve pods would split approval and idempotency
 authority. The chart fails closed on that topology; scale remote goal workers
 separately until every control-plane store has a shared transactional backend.
 
+The chart guard is build-time, so it only covers installs that go through Helm.
+The control plane also enforces this at runtime: it takes an exclusive lock on
+its data root at startup and a second process refuses to serve, naming the
+holder. That is what protects a hand-edited `kubectl apply`, a
+`docker compose up --scale`, or two processes on one host. `/readyz` reports the
+posture under `replica_safety`.
+
 See [`deploy/postgres/README.md`](../postgres/README.md) for provisioning the
 database, row-level-security, pooling, and backups.
 

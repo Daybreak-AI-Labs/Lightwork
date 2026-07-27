@@ -331,7 +331,7 @@ Honest, current state — what's now enforced in code vs. what genuinely remains
 ### Remaining (disclose to the customer / roadmap)
 | Area | Gap | Interim mitigation |
 |---|---|---|
-| Multi-replica control plane | Postgres centralizes the world model, but workflow releases/runs, A2A durable claims, audit/learning ledgers, and tenant-local policy files are not all transactionally shared yet. | Helm refuses `replicaCount > 1` and control-plane HPA. Run one dashboard/serve replica and scale remote workers separately. |
+| Multi-replica control plane | Postgres centralizes the world model, but workflow releases/runs, A2A durable claims, audit/learning ledgers, and tenant-local policy files are not all transactionally shared yet. | Enforced at runtime: the control plane takes an exclusive lock on its data root at startup, and a second process refuses to serve and names the holder. Helm additionally refuses `replicaCount > 1` and control-plane HPA. `/readyz` reports the replica-safety posture. Scale remote workers separately. |
 | MCP | Shared bearer grants full tool access; per-tenant gating only via Agent Trust Plane (opt-in). | `[agent_trust] enforce=true` with per-agent tokens. |
 | Plugins | Granted plugins run **in-process** — no runtime syscall/network sandbox (load-time grants only). | Vet + code-review allowlisted plugins. |
 | Firecracker | Silently falls back to Docker if the VM layer is unavailable. | Monitor logs; alert on fallback. |
