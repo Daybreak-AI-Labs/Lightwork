@@ -549,6 +549,26 @@ here.
     (`/privacy/dpa-documents` search + review-in-place via doc discovery),
     or from digital PDFs (stdlib extractor: FlateDecode, Tj/TJ/hex
     operators; scanned PDFs refuse honestly).
+  - *Vendor-paper review + tracked-changes redline*
+    (`paper_review.py`, `docx_redline.py`, the concierge's reviewer desk;
+    `[paper_review] use_model`, wizard step) — when a vendor insists on
+    THEIR paper: classify the instrument (GDPR DPA vs CCPA/CPRA privacy
+    addendum, scored from the document and filename, ties resolving to the
+    stronger instrument), compare it clause-by-clause against our standard
+    positions, and emit two deliverables — an analysis memo and the vendor's
+    own document marked up with real Word revisions (`w:ins`/`w:del`,
+    authored and dated), filed onto the vendor's OneTrust record under the
+    next sequential version for that vendor+instrument. The comparison goes
+    beyond presence detection: adverse language ("may engage sub-processors
+    at its sole discretion") is reported as *conflicting* and escalated to
+    high severity, because a paper that bargains for the opposite of our
+    position would otherwise score as satisfied. Gap findings are always
+    deterministic — a model can neither create nor clear one; it only
+    re-words OUR clause to match their drafting, and a draft that drops a
+    load-bearing term is discarded for the template text. Redlines edit an
+    uploaded `.docx` in place (every other package part preserved) or
+    reconstruct from a digital PDF, saying so explicitly. Stdlib OOXML — no
+    python-docx.
   - *AI systems registry* — EU AI Act tier screening
     (prohibited/high/limited/minimal) using the Act's own tests (Art. 5,
     Annex III, Art. 50) with matched signals + tier obligations; a
@@ -648,6 +668,18 @@ here.
   collection as proof. Framework and legal mappings are advisory; applicability
   and every consequential decision remain human-owned. See
   [`MODEL_RISK_ASSURANCE.md`](./MODEL_RISK_ASSURANCE.md).
+- **AI Evidence-Ready Gateway** (`ai_evidence_gateway.py`, the existing
+  `/security/assurance` cockpit, opt-in `[evidence_gateway] enable`) -
+  deterministic text-delivery disclosures, machine-readable markings,
+  idempotent hash-only interaction receipts, policy/model/context bindings,
+  cited regulatory-impact review, and exact signed JSON assurance packets.
+  It stores no raw prompt or generated response in its receipt ledger and makes
+  no certification claim. Packet issuance is a bounded, admin-only mutation
+  with a completeness manifest and source-snapshot recheck. The synthetic
+  dashboard seed performs no network access, requires an empty/dedicated demo
+  tenant, and forces a visible readiness gap. See
+  [`AI_EVIDENCE_GATEWAY.md`](./AI_EVIDENCE_GATEWAY.md) and the
+  [governance benchmark report](../benchmarks/GOVERNANCE_FRONTIER_RESULTS.md).
 - **Four reduced standalone security SKUs** (`demo/grc-concierge/`,
   `demo/platform-threat-hunter/`, `demo/environment-threat-hunter/`,
   `demo/model-risk-ai-assurance-officer/`) — each has

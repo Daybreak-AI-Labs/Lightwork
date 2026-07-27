@@ -10,7 +10,7 @@ except ModuleNotFoundError:  # Python 3.10
 def test_pick_security_suite_safe_defaults(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True, False, False, False, False, False])
+    answers = iter([True, False, False, False, False, False, False])
     monkeypatch.setattr(
         wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
     )
@@ -19,6 +19,7 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "security_ops": True,
         "evidence_graph": False,
         "model_risk_assurance": False,
+        "evidence_gateway": False,
         "model_improvement": False,
         "allow_hosted_training": False,
         "threat_hunt": False,
@@ -30,7 +31,7 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
 def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True, True, True, True, True, True, True, True])
+    answers = iter([True, True, True, True, True, True, True, True, True])
     monkeypatch.setattr(
         wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
     )
@@ -44,6 +45,7 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: next(text_answers))
 
     picked = wizard.pick_security_suite()
+    assert picked["evidence_gateway"] is True
     assert picked["model_improvement"] is True
     assert picked["allow_hosted_training"] is True
     assert picked["env_hunt"] is True
@@ -81,6 +83,7 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
             "security_ops": True,
             "evidence_graph": True,
             "model_risk_assurance": True,
+            "evidence_gateway": True,
             "model_improvement": True,
             "allow_hosted_training": False,
             "threat_hunt": True,
@@ -97,6 +100,7 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
         "enable": True,
         "gate_promotions": True,
     }
+    assert parsed["evidence_gateway"] == {"enable": True}
     assert parsed["model_improvement"] == {
         "enable": True,
         "allow_hosted": False,
@@ -123,6 +127,21 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
             "entra": {"enable": False, "push_enable": False, "pivot_enable": False},
         },
     }
+
+
+def test_evidence_gateway_enables_assurance_dependencies(monkeypatch):
+    from maverick_installer import wizard
+
+    answers = iter([True, False, False, True, False, False, False])
+    monkeypatch.setattr(
+        wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
+    )
+
+    picked = wizard.pick_security_suite()
+
+    assert picked["evidence_gateway"] is True
+    assert picked["evidence_graph"] is True
+    assert picked["model_risk_assurance"] is True
 
 
 def test_security_connector_knobs_are_explicit_and_independent():

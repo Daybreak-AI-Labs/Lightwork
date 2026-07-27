@@ -81,8 +81,63 @@ It reports a **prevention rate** (unsafe vectors contained) *and* a **utility
 rate** (legitimate paths preserved), so it can't be gamed by a control that
 blocks everything. This is the CI-runnable half of
 [`../docs/strategy/benchmark-plan.md`](../docs/strategy/benchmark-plan.md); the
-task-completion / false-positive frontier needs the paid live arm described
-there. Run it standalone: `python benchmarks/eval_governance.py`.
+broader governed-vs-baseline frontier is implemented by
+`eval_governance_frontier.py`. Run the fast wiring smoke standalone:
+`python benchmarks/eval_governance.py`.
+
+### Deterministic governance frontier
+
+`eval_governance_frontier.py` expands the smoke to **40 fixed definitions**
+(24 unsafe, 16 benign lookalikes) across financial/destructive actuation,
+enterprise egress, capability attenuation, agent trust, secret-output policy,
+budget controls, and signed-evidence integrity. Every definition runs through:
+
+- the real governed control path; and
+- an explicit controls-disabled baseline.
+
+Pinned seeds `17,29,43` change execution order to expose state/order leakage;
+they are not model-sampling seeds. The suite separately reports unsafe
+prevention, harness decision-ledger coverage, native product-event observation
+for supported controls, benign scripted-task completion, false positives,
+evidence integrity, and median/p95 measured overhead. Action controls exercise
+the production risk-aware secure default: high-risk mutations are denied in a
+non-interactive run while benign click/type/fill mutations remain admissible.
+It writes an Ed25519-signed reproducibility manifest, emits the run public key
+as a separate file, and generates
+[`GOVERNANCE_FRONTIER_RESULTS.md`](./GOVERNANCE_FRONTIER_RESULTS.md) from that
+verified manifest.
+
+```bash
+python benchmarks/eval_governance_frontier.py
+python benchmarks/eval_governance_frontier.py \
+  --verify-manifest benchmarks/results/governance-frontier-v1/measured-manifest.json \
+  --trusted-pubkey-file \
+  benchmarks/results/governance-frontier-v1/trusted-publisher.pub
+python benchmarks/eval_governance_frontier.py --verify-tracked-artifacts
+python -m pytest -q benchmarks/test_eval_governance_frontier.py \
+  benchmarks/test_governance_metrics.py
+```
+
+No model, provider key, or network is used. “Task completion” here means the
+benign scripted terminal action remained admissible; natural-language agent
+completion still belongs in a later paid live-model arm. Likewise, “prevented”
+means the called control returned a denial before the harness marked its
+simulated terminal effect admitted; the suite executes no live payment,
+deletion, or external side effect. The tracked run uses an ephemeral co-located
+signing key and says so explicitly: its signature
+proves self-signed run integrity when checked against the separately distributed
+public-key file, not off-host production key custody or publisher identity.
+The manifest-embedded key is never accepted as its own trust anchor. Publication
+validation also checks current harness, control-implementation, and config
+digests; a clean measured commit that is an ancestor of `HEAD` when history
+preserves it, or the exact signed control-source snapshot after a shallow
+checkout, squash, or rebase; and exact deterministic report regeneration.
+The control snapshot covers every tracked Python file under `maverick` and
+`maverick_shield` plus their package/root metadata, so a change anywhere in that
+measured source scope requires regenerating the published artifact. Source
+content is decoded as strict UTF-8 and line endings are normalized to LF before
+hashing, so Windows CRLF and Linux LF checkouts of identical Git text share the
+same signed snapshot; any other content change still invalidates it.
 
 ## Comparing across providers
 

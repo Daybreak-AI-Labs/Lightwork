@@ -696,6 +696,9 @@ _MAX_FINANCE_DEFAULT_BODY_BYTES = 256 * 1024
 _MAX_FINANCE_REGULATORY_BODY_BYTES = 7 * 1024 * 1024
 _MAX_FINANCE_AML_LIST_BODY_BYTES = 20 * 1024 * 1024
 _MAX_FINANCE_ANOMALY_BODY_BYTES = 32 * 1024 * 1024
+_MAX_EVIDENCE_GATEWAY_BODY_BYTES = 3 * 1024 * 1024
+_MAX_EVIDENCE_GATEWAY_DELIVERY_BODY_BYTES = 34 * 1024 * 1024
+_EVIDENCE_GATEWAY_PREFIX = "/api/v1/security/assurance/gateway/"
 _SECURITY_HUNTER_BODY_PATHS = {
     "/api/v1/security/threats/scan",
     "/api/v1/security/soc/ingest",
@@ -786,6 +789,44 @@ async def bound_finance_operations_body(request: Request, call_next):
             request,
             max_bytes=maximum,
             too_large_detail="finance operations request body too large",
+        )
+    except HTTPException as exc:
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+    delivered = False
+
+    async def replay_receive():
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        return {"type": "http.disconnect"}
+
+    request._body = body  # noqa: SLF001 - bounded ASGI body replay
+    request._receive = replay_receive  # noqa: SLF001 - bounded ASGI body replay
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def bound_evidence_gateway_body(request: Request, call_next):
+    """Bound gateway JSON before Starlette/Pydantic buffers evidence inputs."""
+
+    path = request.url.path
+    if (
+        request.method not in {"POST", "PUT"}
+        or not path.startswith(_EVIDENCE_GATEWAY_PREFIX)
+    ):
+        return await call_next(request)
+    maximum = (
+        _MAX_EVIDENCE_GATEWAY_DELIVERY_BODY_BYTES
+        if path == f"{_EVIDENCE_GATEWAY_PREFIX}deliver"
+        else _MAX_EVIDENCE_GATEWAY_BODY_BYTES
+    )
+    try:
+        body = await _read_limited_request_body(
+            request,
+            max_bytes=maximum,
+            too_large_detail="AI evidence gateway request body too large",
         )
     except HTTPException as exc:
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
@@ -1178,7 +1219,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     # client sent a wrong/garbage Content-Type; json.dumps can't serialize bytes,
     # so a 422 turned into an opaque 500. jsonable_encoder coerces bytes -> str.
     from fastapi.encoders import jsonable_encoder
-    return JSONResponse({"detail": jsonable_encoder(exc.errors())}, status_code=422)
+    errors = jsonable_encoder(exc.errors())
+    if request.url.path.startswith(_EVIDENCE_GATEWAY_PREFIX):
+        for error in errors:
+            if isinstance(error, dict) and "input" in error:
+                error["input"] = "[redacted]"
+    return JSONResponse({"detail": errors}, status_code=422)
 
 
 @app.exception_handler(OverflowError)
@@ -2236,12 +2282,14 @@ async def security_report_page(request: Request) -> HTMLResponse:
 
 @app.get("/security/assurance", response_class=HTMLResponse)
 async def model_risk_assurance_page(request: Request) -> HTMLResponse:
-    """Governed Model Risk & AI Assurance operator console."""
+    """Governed AI evidence gateway and model-risk operator cockpit."""
     require_permission(request, "operate")
-    from maverick import model_risk_assurance
+    from maverick import ai_evidence_gateway, model_risk_assurance
 
-    enabled = model_risk_assurance.enabled()
-    if enabled:
+    from .auth import has_global_permission
+
+    model_risk_enabled = model_risk_assurance.enabled()
+    if model_risk_enabled:
         assets, evidence, findings = await asyncio.gather(
             run_in_threadpool(model_risk_assurance.list_inventory),
             run_in_threadpool(model_risk_assurance.list_evidence),
@@ -2249,17 +2297,55 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
         )
     else:
         assets, evidence, findings = [], [], []
+
+    gateway_enabled = ai_evidence_gateway.enabled()
+    gateway_error = ""
+    gateway_summary: dict[str, Any] = {}
+    policies: list[dict[str, Any]] = []
+    receipts: list[dict[str, Any]] = []
+    regulatory_impacts: list[dict[str, Any]] = []
+    if gateway_enabled:
+        try:
+            (
+                gateway_summary,
+                policies,
+                receipts,
+                regulatory_impacts,
+            ) = await asyncio.gather(
+                run_in_threadpool(ai_evidence_gateway.summary),
+                run_in_threadpool(ai_evidence_gateway.list_policies),
+                run_in_threadpool(
+                    ai_evidence_gateway.list_interaction_receipts,
+                    limit=100,
+                ),
+                run_in_threadpool(
+                    ai_evidence_gateway.list_regulatory_impacts,
+                    limit=100,
+                ),
+            )
+        except Exception:
+            gateway_error = (
+                "Gateway records could not be loaded safely. "
+                "No readiness conclusion is available."
+            )
     return templates.TemplateResponse(
         request,
         "model_risk_assurance.html",
         {
-            "enabled": enabled,
-            "totals": {
+            "model_risk_enabled": model_risk_enabled,
+            "model_risk_totals": {
                 "assets": len(assets),
                 "evidence": len(evidence),
                 "findings": len(findings),
             },
             "findings": findings[:20],
+            "gateway_enabled": gateway_enabled,
+            "gateway_error": gateway_error,
+            "gateway_summary": gateway_summary,
+            "policies": policies[:100],
+            "receipts": receipts[:100],
+            "regulatory_impacts": regulatory_impacts[:100],
+            "gateway_admin": has_global_permission(request, "admin"),
         },
     )
 

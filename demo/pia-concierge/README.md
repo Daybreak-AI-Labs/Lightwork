@@ -149,6 +149,40 @@ flow — everything below runs on real records:
 `Govern → Finance` is the same chassis over SOX / fraud / ITGC / credit /
 close-readiness — the "one workspace per department" proof.
 
+## The reviewer desk (`/reviewer`) — when the vendor sends their own paper
+
+A privacy reviewer signs in and gets **their own queue, numbered**; picking a
+number (click, or type it) opens one case and asks the question that decides
+the next hour of work: *is this vendor on our paper, or theirs?*
+
+On our paper the round ends — our template already governs. On **their** paper,
+upload the document (`.docx` or a digital PDF) and the desk does the review by
+hand-equivalent steps:
+
+1. **Reads it** — stdlib extraction, and a scanned PDF is refused honestly
+   rather than reviewed as "10 clauses missing".
+2. **Decides the instrument** — GDPR Art. 28 DPA vs CCPA/CPRA privacy
+   addendum, scored from the text and filename; a tie resolves to the stronger
+   instrument and says so.
+3. **Compares it to our template** — clause by clause. A missing clause is a
+   gap; a *negated* one is unclear; and language that bargains for the opposite
+   of our position ("may engage sub-processors at its sole discretion") is
+   reported as **conflicting** and escalated to high severity. Presence
+   detection alone would score that last one as satisfied.
+4. **Writes two deliverables** — an analysis memo (concerns, their wording, the
+   required change, the basis in law) and **their own document marked up with
+   real Word tracked changes** you can Accept/Reject clause by clause.
+5. **Files both onto the vendor's OneTrust record** under the next sequential
+   version for that vendor + instrument, so the Documents tab reads as one
+   legible negotiation history (`v1`, `v2`, `v3`) instead of same-named files.
+
+The governance line is the point: **which clauses fall short is always decided
+deterministically** — a model can neither invent a finding nor clear one. A
+model is used only to re-word *our* required clause into the vendor's defined
+terms, and any draft that drops a load-bearing term is thrown away in favour of
+the template language. Set `[paper_review] use_model = false` (or answer no in
+the wizard) and no model sees the contract at all; the findings are identical.
+
 ## Demo script (~6 minutes) — Part 1: the agent alone, Part 2: the platform
 
 Two browser windows: **left** = external world (:8890) — this is ALL of

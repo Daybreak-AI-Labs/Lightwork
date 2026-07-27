@@ -132,6 +132,10 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "minimum_train_families",
         "minimum_holdout_families",
     },
+    # Evidence release is a high-trust, fail-closed boundary.  V1 deliberately
+    # exposes only the master opt-in; misspelled enforcement keys must not
+    # silently create an open-ended policy surface.
+    "evidence_gateway": {"enable"},
     # --- dynamic / open-ended sections (any subkey accepted) ---
     "providers": None,
     "models": None,

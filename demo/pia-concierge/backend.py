@@ -158,6 +158,62 @@ def dpa_clause_review(vendor: str, text: str, *, filename: str, mime: str,
             doc_id=filename, ref=None, extraction=extraction))
 
 
+# --------------------------------------------------------------------------- #
+# Vendor-paper redline — the reviewer desk's engine. Platform only: the
+# comparison checklists and the OOXML writer live in maverick-core.
+# --------------------------------------------------------------------------- #
+def document_text(data: bytes, mime: str) -> tuple[str, dict]:
+    """Extracted text plus extraction metadata (method / confidence /
+    review_required). Handles .docx and digital PDFs on the platform; returns
+    ("", {}) when the engine isn't present."""
+    if not CAPS["paper_redline"]:
+        return "", {}
+    from maverick import privacy_ops
+    meta: dict = {}
+    try:
+        return (privacy_ops._document_text(data, mime, _metadata=meta) or "",
+                meta)
+    except Exception:  # pragma: no cover -- a bad upload is not a crash
+        return "", meta
+
+
+def review_vendor_paper(text: str, *, vendor: str, document_name: str,
+                        instrument: str = "", use_model: bool = True):
+    """Classify the instrument and compare it against our standard positions.
+    Returns a ``maverick.paper_review.PaperReview`` or None off-platform."""
+    if not CAPS["paper_redline"]:
+        return None
+    from maverick import paper_review
+    return paper_review.review_paper(
+        text, vendor=vendor, instrument=instrument,
+        document_name=document_name, use_model=use_model)
+
+
+def build_redline(review, *, original: bytes | None, mime: str, date: str,
+                  title: str = ""):
+    """The tracked-changes .docx: edit their file in place when they sent a
+    .docx, otherwise rebuild the text we could read from their PDF. Returns a
+    ``RedlineResult`` or None off-platform."""
+    if not CAPS["paper_redline"]:
+        return None
+    from maverick import docx_redline
+    edits = review.edits()
+    if original and mime == docx_redline.DOCX_MIME:
+        try:
+            return docx_redline.redline_docx(original, edits, date=date)
+        except docx_redline.RedlineError:
+            pass   # fall through to a reconstruction rather than failing
+    paragraphs = [p for p in (review_text_paragraphs(review)) if p]
+    return docx_redline.build_redlined_docx(
+        paragraphs, edits, date=date, title=title)
+
+
+def review_text_paragraphs(review) -> list[str]:
+    """The vendor's paragraphs as we read them, for the reconstructed redline
+    path. Kept on the review so the redline and the report agree."""
+    return list(getattr(review, "source_paragraphs", []) or [])
+
+
 def previous_dpa_gaps(vendor: str) -> set[str]:
     if not CAPS["dpa_clause_review"]:
         return set()

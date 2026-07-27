@@ -168,6 +168,13 @@ enable = false
 enable = false
 gate_promotions = false
 
+[evidence_gateway]
+# AI delivery disclosures, hash-only interaction receipts, cited regulatory
+# impacts, and signed assurance packets. Enabling through the installer also
+# enables the companion evidence graph and Model Risk Officer controls. Runtime
+# use also requires an explicit authenticated tenant/client binding.
+enable = false
+
 [model_improvement]
 # Specialist-model tasksets, qualification, training receipts, and optional
 # external-backend exports. Inert until enabled. Hosted execution is a second

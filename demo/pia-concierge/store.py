@@ -93,6 +93,15 @@ class Case:
     approval_id: str = ""
     decided_by: str = ""
     onetrust_id: str = ""
+    # The privacy reviewer this case sits with. The reviewer desk lists a
+    # person's own queue off this field; empty means unassigned.
+    assigned_to: str = ""
+    # Whose contract is on the table: "" (not asked) | "ours" | "theirs".
+    paper_source: str = ""
+    # Filed vendor-paper redlines, newest last:
+    # [{version, instrument, filename, redline_filename, gaps, high, at,
+    #   recommendation, attachment_ids}].
+    paper_reviews: list[dict] = field(default_factory=list)
     # The counted value ledger for this case, set when the protocol run
     # files it (value_ledger.case_value output) — /value.json sums these.
     value: dict[str, Any] | None = None
@@ -110,6 +119,21 @@ class Store:
         self.cases: dict[str, Case] = {}
         self.onetrust: dict[str, OneTrustAssessment] = {}
         self._seq = {"ticket": 1000, "case": 1, "ot": 1}
+        # Sequential document versions per "<vendor>|<instrument>". A vendor's
+        # paper is renegotiated in rounds, so every filed redline gets the next
+        # version for that pairing and the history stays readable in OneTrust.
+        self._paper_seq: dict[str, int] = {}
+
+    def next_paper_version(self, vendor: str, instrument: str) -> int:
+        key = f"{(vendor or '').strip().lower()}|{instrument}"
+        with _LOCK:
+            n = self._paper_seq.get(key, 0) + 1
+            self._paper_seq[key] = n
+            return n
+
+    def paper_version_count(self, vendor: str, instrument: str) -> int:
+        return self._paper_seq.get(
+            f"{(vendor or '').strip().lower()}|{instrument}", 0)
 
     def next_ticket_number(self) -> str:
         with _LOCK:
