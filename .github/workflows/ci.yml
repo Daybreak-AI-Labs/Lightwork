@@ -117,6 +117,20 @@ jobs:
         # risk ceiling, a working persona, and its deny list -- the honest-
         # counting receipt behind the catalog claim. Errors fail the build.
         run: maverick domains-lint --ci
+      - name: Tool dispatch contract (no ungated path to the registry)
+        # Agent._run_tool runs eleven gates. It was not the only way into the
+        # tool registry: a census found four dispatch sites and one gated. The
+        # live ungated one (flow/execution.py, bound at automation_queue)
+        # reached every registered connector -- stripe, gmail, s3, salesforce,
+        # sap, workday -- with a partial check and NO audit row.
+        #
+        # The missing row is the structural problem. The attestation asserts
+        # "no RECORDED action violated the policy envelope", so an unrecorded
+        # dispatch satisfies it by construction: the claim was unfalsifiable,
+        # not merely incomplete. This fails the build on a new ungated site,
+        # and re-checks the premise of the one exempt-because-unreachable site
+        # rather than trusting a comment.
+        run: python -m maverick.dispatch_contract --ci
       - name: Audit refusal contract (an audit write may not be swallowed)
         # The audit subsystem raises AuditRefused when it DECLINES to write --
         # a compliance floor mandates a signed chain and the signer won't

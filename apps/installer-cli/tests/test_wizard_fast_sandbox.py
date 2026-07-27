@@ -23,7 +23,10 @@ def _stub_fast(monkeypatch, tmp_path: Path, *, docker: bool):
     monkeypatch.setattr(wizard, "ENV_FILE", tmp_path / ".maverick" / ".env")
     monkeypatch.setattr(wizard, "preflight", lambda: True)
     monkeypatch.setattr(wizard, "welcome", lambda: None)
-    monkeypatch.setattr(wizard, "smoke_test", lambda: None)
+    # Must return True, not None: run_fast now checks the result, so a falsy
+    # stub would fail the install these tests are not about. The smoke-test
+    # contract itself is covered in test_wizard_fast_smoke.py.
+    monkeypatch.setattr(wizard, "smoke_test", lambda: True)
     monkeypatch.setattr(wizard, "_docker_available", lambda: docker)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     return wizard

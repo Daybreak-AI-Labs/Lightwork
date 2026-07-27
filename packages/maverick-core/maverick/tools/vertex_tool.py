@@ -105,6 +105,24 @@ def _run(args: dict[str, Any]) -> str:
         import httpx  # noqa: F401
     except ImportError:
         return "ERROR: httpx not installed. Run: python -m pip install -e './packages/maverick-core[issue-trackers]'"
+    # Enterprise egress lock. enterprise.py's headline claim is that under
+    # MAVERICK_ENTERPRISE "sensitive data physically cannot reach a third-party
+    # API", enforced "via enterprise_egress_denial at each tool's request".
+    # This tool posts prompts and instances to *-aiplatform.googleapis.com and
+    # did not call it -- so a default-registered tool contradicted the single
+    # property enterprise mode is sold on. Checked before any request is built,
+    # so no prompt is assembled for a host we may not reach.
+    # Built from the location alone, not _base(): _base() requires credentials
+    # and raises without them, and an egress decision must not depend on
+    # whether the caller happens to be configured. The host is what the lock
+    # cares about, and it is fully determined by the location.
+    from ..enterprise import enterprise_egress_denial
+
+    _loc = os.environ.get("VERTEX_LOCATION", "").strip() or _DEFAULT_LOCATION
+    if denial := enterprise_egress_denial(
+            f"https://{_loc}-aiplatform.googleapis.com/", tool="vertex"):
+        return f"ERROR: {denial}"
+
     instances = args.get("instances") if isinstance(args.get("instances"), list) else []
     try:
         if op == "generate":

@@ -20,7 +20,7 @@ from typing import Any
 
 from ..tool_results import tool_result_failed
 from . import node_outcomes, store
-from .ir import Flow, FlowNode, action_tool_policy_error
+from .ir import Flow, FlowNode
 from .runner import (
     PAUSED_STATUSES,
     STATUS_CLAIMED,
@@ -634,8 +634,21 @@ def default_action_runner(
     quarantine rather than an automatic retry."""
     def run(tool: str, params: dict, data: dict) -> tuple[Any, float | None]:
         try:
-            if policy_error := action_tool_policy_error(tool):
-                return (f"ERROR: {policy_error}", 0.0)
+            # One authorization gate for every non-agent dispatch. This used to
+            # be action_tool_policy_error alone -- no shield scan, no governance
+            # policy, and no audit row -- on a path that is live (bound at
+            # automation_queue) and reaches every registered connector including
+            # stripe, gmail, s3, salesforce, sap and workday.
+            #
+            # The missing audit row was the worst of it: the attestation's
+            # policy_envelope claims "no RECORDED action violated the envelope",
+            # so an unrecorded dispatch satisfied it trivially and made the
+            # claim unfalsifiable rather than merely incomplete.
+            from ..tool_authz import authorize
+
+            if denial := authorize(tool, params, origin="flow",
+                                   principal=user_id):
+                return (denial, 0.0)
             from ..sandbox import LocalBackend
             from ..tools import base_registry
             reg = base_registry(

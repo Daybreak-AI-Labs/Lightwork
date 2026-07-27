@@ -196,7 +196,10 @@ def test_gate_inspects_a_real_and_substantial_tree() -> None:
     # The baseline is debt, not an exemption: every entry must still be a real
     # site, or the ratchet is hiding a fix nobody recorded.
     known = audit_contract.load_baseline()
-    live = {f"{v['file']}:{v['line']}" for v in violations}
+    # Same key the gate uses -- file::enclosing-function, not file:line, so an
+    # unrelated edit above a violation does not renumber it into a false
+    # "fixed + new" pair.
+    live = {audit_contract._key(v) for v in violations}
     stale = known - live
     assert not stale, (
         "baselined violations no longer present -- run "
@@ -212,12 +215,12 @@ def test_the_agent_and_orchestrator_paths_are_off_the_baseline() -> None:
     """
     known = audit_contract.load_baseline()
     kernel = [k for k in known
-              if k.startswith("packages/maverick-core/maverick/agent.py")
-              or k.startswith("packages/maverick-core/maverick/orchestrator.py")]
+              if k.startswith("packages/maverick-core/maverick/agent.py::")
+              or k.startswith("packages/maverick-core/maverick/orchestrator.py::")]
     assert not kernel, kernel
 
 
 def test_baseline_is_valid_json_with_the_expected_shape() -> None:
     data = json.loads(audit_contract.BASELINE.read_text(encoding="utf-8"))
     assert isinstance(data["known"], list)
-    assert all(":" in k for k in data["known"])
+    assert all("::" in k for k in data["known"])

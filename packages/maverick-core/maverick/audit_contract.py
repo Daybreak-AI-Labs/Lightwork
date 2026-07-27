@@ -127,6 +127,34 @@ def _span(nodes: list[ast.stmt]) -> tuple[int, int]:
     return (nodes[0].lineno, max((n.end_lineno or n.lineno) for n in nodes))
 
 
+def _enclosing_functions(tree: ast.AST) -> list[tuple[int, int, str]]:
+    """(start, end, qualified-name) for every function, innermost last."""
+    spans: list[tuple[int, int, str]] = []
+
+    def walk(node, prefix=""):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                name = f"{prefix}{child.name}"
+                spans.append((child.lineno, child.end_lineno or child.lineno, name))
+                walk(child, prefix=f"{name}.")
+            elif isinstance(child, ast.ClassDef):
+                walk(child, prefix=f"{prefix}{child.name}.")
+            else:
+                walk(child, prefix=prefix)
+
+    walk(tree)
+    return spans
+
+
+def _func_at(spans, line: int) -> str:
+    best = ""
+    best_span = None
+    for lo, hi, name in spans:
+        if lo <= line <= hi and (best_span is None or (hi - lo) <= best_span):
+            best, best_span = name, hi - lo
+    return best
+
+
 def scan_file(path: Path) -> list[dict]:
     """Violations in one file: audit writes under a refusal-swallowing handler."""
     try:
@@ -140,6 +168,7 @@ def scan_file(path: Path) -> list[dict]:
     if not calls:
         return []
 
+    spans = _enclosing_functions(tree)
     out: list[dict] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Try):
@@ -170,6 +199,7 @@ def scan_file(path: Path) -> list[dict]:
         for line in covered:
             out.append({
                 "file": _rel(path),
+                "func": _func_at(spans, line),
                 "line": line,
                 "catches": sorted(set(broad)),
                 "partial": sorted(set(partial)),
@@ -219,7 +249,16 @@ def scan(roots: tuple[str, ...] | None = None) -> tuple[list[dict], int]:
 
 
 def _key(v: dict) -> str:
-    return f"{v['file']}:{v['line']}"
+    """Stable identity for a baselined violation.
+
+    Deliberately NOT the line number. Keying on ``file:line`` meant any edit
+    above a violation renumbered it, so the gate reported the same site as both
+    "fixed" and "new" in one run -- which trains whoever sees it to run --regen
+    without reading, and a ratchet regenerated blindly is not a ratchet. The
+    enclosing function is stable across unrelated edits and still unique enough
+    to be worth reviewing when it changes.
+    """
+    return f"{v['file']}::{v.get('func') or '<module>'}"
 
 
 def load_baseline() -> set[str]:
