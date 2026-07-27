@@ -3351,6 +3351,48 @@ def answer_followup(
 DECISIONS = ("approved", "rejected")
 
 
+def assign_assessment(
+    assessment_id: str,
+    assignee: str,
+    *,
+    assigned_by: str = "",
+    expected_revision: int | None = None,
+) -> dict | None:
+    """Put a saved assessment on a named reviewer's desk (or clear it).
+
+    Everything else on an assessment record is *post-hoc* attribution -- who
+    decided, who answered, who accepted the risk. Nothing said whose job it is
+    NEXT, so a reviewer could not ask "what is mine?" and a queue could only be
+    eyeballed. ``assignee=""`` unassigns and returns the record to the pool.
+
+    Assignment is deliberately not a permission: it routes work, it does not
+    gate who may decide. The approval gate stays where it already is."""
+    who = (assignee or "").strip()[:200]
+
+    def _mutate(record: dict) -> None:
+        if who:
+            record["assignee"] = who
+            record["assigned_at"] = time.time()
+            record["assigned_by"] = str(assigned_by or "")[:256]
+        else:
+            record.pop("assignee", None)
+            record.pop("assigned_at", None)
+            record.pop("assigned_by", None)
+
+    receipt = _audit_receipt(
+        "ASSESSMENT_ASSIGNED",
+        assigned_by,
+        assessment=assessment_id,
+        assignee=who,
+    )
+    return _rewrite_saved(
+        assessment_id,
+        _mutate,
+        expected_revision=expected_revision,
+        audit_receipt=receipt,
+    )
+
+
 def decide_assessment(
     assessment_id: str,
     decision: str,
@@ -3571,6 +3613,8 @@ def list_saved() -> list[dict]:
                 "template_revision": data.get("template_revision"),
                 "template_digest": data.get("template_digest", ""),
                 "status": data.get("status", "pending_review"),
+                "assignee": data.get("assignee", ""),
+                "assigned_at": data.get("assigned_at"),
                 "open_followups": sum(1 for f in fups if not f.get("answer")),
                 "decided_at": data.get("decided_at"),
                 "next_review_at": data.get("next_review_at"),

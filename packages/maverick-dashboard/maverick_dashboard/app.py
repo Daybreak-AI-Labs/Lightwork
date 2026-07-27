@@ -1969,11 +1969,15 @@ SECURITY_ASSESSMENT_TYPES = frozenset({
 })
 
 
-def _workspace_ctx(department: str) -> dict:
+def _workspace_ctx(department: str, viewer: str = "") -> dict:
     """Chassis context for a department workspace: the worklist (risk pair,
     aging, follow-ups), hero stats, precedent memory, and catalog — filtered
     to the department's assessment types (built-ins plus any custom
-    templates authored for this department)."""
+    templates authored for this department).
+
+    ``viewer`` is the signed-in principal; rows they own are flagged ``mine``
+    so the worklist can answer "what is on my desk?" rather than only "what is
+    outstanding?"."""
     import time as _time
 
     from maverick.assessment import (
@@ -1994,6 +1998,7 @@ def _workspace_ctx(department: str) -> dict:
 
     sessions = [s for s in list_saved() if s.get("type") in types]
     now = _time.time()
+    me = (viewer or "").strip()
     for s in sessions:
         created = float(s.get("created_at") or 0)
         s["age_days"] = int((now - created) // 86400) if created else None
@@ -2001,6 +2006,10 @@ def _workspace_ctx(department: str) -> dict:
         # Days until the scheduled re-review (negative = overdue).
         s["review_in_days"] = (int((float(nra) - now) // 86400)
                                if nra else None)
+        # Only a real signed-in principal owns rows. In auth-off single-user
+        # mode `me` is empty, and an empty assignee must NOT then read as
+        # "mine" -- that would make every unassigned record look owned.
+        s["mine"] = bool(me) and s.get("assignee") == me
     open_rows = [s for s in sessions
                  if s.get("status") in ("pending_review", "needs_more")]
     stats = {
@@ -2012,6 +2021,8 @@ def _workspace_ctx(department: str) -> dict:
         "high_residual": sum(1 for s in sessions
                              if s.get("residual_risk") == "high"),
         "review_due": sum(1 for s in sessions if s.get("review_due")),
+        "mine": sum(1 for s in sessions if s.get("mine")),
+        "unassigned": sum(1 for s in sessions if not s.get("assignee")),
         "oldest_open_days": (max((s["age_days"] or 0) for s in open_rows)
                             if open_rows else None),
     }
@@ -2053,20 +2064,23 @@ async def privacy_page(request: Request) -> HTMLResponse:
     require_permission(request, "operate")
     import time as _time
 
-    ctx = _workspace_ctx("privacy")
+    ctx = _workspace_ctx("privacy", viewer=caller_principal(request) or "")
     # The record types — the data plane behind the [privacy_ops] knob. The
     # page still works without them.
     from maverick import privacy_ops
     records = {"enabled": privacy_ops.enabled(), "kind": "privacy",
-               "dpa": [], "ai": [], "ropa": [], "dsar": [], "incidents": []}
+               "dpa": [], "ai": [], "ropa": [], "dsar": [], "incidents": [],
+               "paper": []}
     if records["enabled"]:
         records["dpa"] = privacy_ops.list_dpa_reviews()
         records["ai"] = privacy_ops.list_ai_systems()
         records["ropa"] = privacy_ops.list_ropa()
         records["dsar"] = privacy_ops.list_dsars()
         records["incidents"] = privacy_ops.list_incidents()
+        records["paper"] = privacy_ops.list_paper_reviews()
         for rows in (records["dpa"], records["ai"], records["ropa"],
-                     records["dsar"], records["incidents"]):
+                     records["dsar"], records["incidents"],
+                     records["paper"]):
             for r in rows:
                 created = float(r.get("created_at") or 0)
                 r["created"] = (_time.strftime("%Y-%m-%d",
@@ -2122,7 +2136,7 @@ async def security_page(request: Request) -> HTMLResponse:
     require_permission(request, "operate")
     from maverick import security_ops
 
-    ctx = _workspace_ctx("security")
+    ctx = _workspace_ctx("security", viewer=caller_principal(request) or "")
     records = {
         "enabled": security_ops.enabled(),
         "kind": "security",
@@ -2383,7 +2397,7 @@ async def finance_page(request: Request) -> HTMLResponse:
         operations["degraded"] = True
         operations["error_type"] = type(exc).__name__
         log.warning("finance workspace operations summary degraded: %s", type(exc).__name__)
-    context = _workspace_ctx("finance")
+    context = _workspace_ctx("finance", viewer=caller_principal(request) or "")
     context["operations"] = operations
     return templates.TemplateResponse(
         request, "finance.html", context)

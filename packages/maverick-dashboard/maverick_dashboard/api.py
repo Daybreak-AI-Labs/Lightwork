@@ -31,7 +31,12 @@ from maverick.runner import (
     DEFAULT_MAX_WALL_SECONDS,
 )
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
 
 from ._shared import (
     _any_provider_key_set,
@@ -44,6 +49,7 @@ from .api_schemas import (
     AgentOverrideIn,
     AiSystemIn,
     AnswerIn,
+    AssessmentAssignIn,
     AssessmentDecideIn,
     AssessmentEvidenceIn,
     AssessmentRefreshIn,
@@ -53,6 +59,7 @@ from .api_schemas import (
     CachePurgeIn,
     CatalogInstallIn,
     ChildIn,
+    ClausePlaybookIn,
     ComposeIn,
     ConnectionIn,
     DeliverableEditIn,
@@ -1097,6 +1104,182 @@ async def get_dpa_review(request: Request, review_id: str) -> dict:
     if record is None:
         raise HTTPException(status_code=404, detail="no such review")
     return record
+
+
+_PAPER_DOCX_MIME = ("application/vnd.openxmlformats-officedocument"
+                    ".wordprocessingml.document")
+_PAPER_MAX_BYTES = 16 * 1024 * 1024
+
+
+def _safe_filename(name: str) -> str:
+    """A Content-Disposition-safe name: no quotes, no path separators, no
+    control characters that could forge a second header."""
+    cleaned = "".join(ch if (ch.isalnum() or ch in "-_. ") else "-"
+                      for ch in (name or ""))
+    return cleaned.strip(" .-")[:120] or "document"
+
+
+@router.get("/privacy/paper-reviews")
+async def list_paper_reviews(request: Request) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    return {"reviews": await run_in_threadpool(ops.list_paper_reviews)}
+
+
+@router.post("/privacy/paper-reviews", status_code=201)
+async def create_paper_review(
+    request: Request,
+    file: UploadFile = File(...),
+    vendor: str = Form(""),
+    instrument: str = Form(""),
+    assessment_id: str = Form(""),
+) -> dict:
+    """Review a vendor's OWN paper against our clause playbook.
+
+    Classifies the instrument (DPA vs privacy addendum), finds every departure
+    from our standard positions deterministically, and produces the vendor's
+    document marked up with real Word tracked changes. The upload itself is
+    never persisted -- only the review record and the redline we generated."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    from maverick import docx_redline, paper_review
+
+    filename = (file.filename or "vendor-paper")[:300]
+    mime = file.content_type or "application/octet-stream"
+    if not (mime in (_PAPER_DOCX_MIME, "application/pdf")
+            or filename.lower().endswith((".docx", ".pdf"))):
+        raise HTTPException(
+            status_code=400,
+            detail="only Word (.docx) and PDF documents can be reviewed")
+    data = await file.read(_PAPER_MAX_BYTES + 1)
+    if len(data) > _PAPER_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"document too large (limit {_PAPER_MAX_BYTES} bytes)")
+
+    extraction: dict = {}
+    text = await run_in_threadpool(
+        ops._document_text, data, mime, _metadata=extraction)
+    if not (text or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="no text could be read from that file — a scanned PDF "
+                   "needs OCR before it can be reviewed")
+
+    who = _request_actor(request)
+    review = await run_in_threadpool(
+        paper_review.review_paper, text, vendor=vendor.strip()[:200],
+        instrument=instrument.strip().lower(), document_name=filename)
+    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _redline():
+        edits = review.edits()
+        if mime == _PAPER_DOCX_MIME or filename.lower().endswith(".docx"):
+            try:
+                return docx_redline.redline_docx(data, edits, date=stamp)
+            except docx_redline.RedlineError:
+                pass   # fall back to a reconstruction rather than failing
+        return docx_redline.build_redlined_docx(
+            review.source_paragraphs, edits, date=stamp,
+            title=f"{review.vendor or 'Vendor'} — "
+                  f"{review.to_dict()['instrument_label']} (Lightwork redline)")
+
+    result = await run_in_threadpool(_redline)
+    stem = _safe_filename(review.vendor or "vendor")[:60] or "vendor"
+    record = await run_in_threadpool(
+        ops.save_paper_review, review, redline=result.content,
+        redline_result=result, reviewed_by=who,
+        assessment_id=assessment_id.strip()[:128],
+        redline_filename=f"{stem}-{review.instrument}-redline.docx")
+    return {**record, "extraction": extraction,
+            "redline": result.to_dict()}
+
+
+@router.get("/privacy/paper-reviews/{review_id}")
+async def get_paper_review(request: Request, review_id: str) -> dict:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(ops.get_paper_review, review_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such review")
+    return record
+
+
+@router.get("/privacy/paper-reviews/{review_id}/redline")
+async def download_paper_redline(request: Request, review_id: str) -> Response:
+    """The exact tracked-changes package that was reviewed and filed."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    rid = review_id[:64]
+    record = await run_in_threadpool(ops.get_paper_review, rid)
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such review")
+    body = await run_in_threadpool(ops.paper_redline_bytes, rid)
+    if not body:
+        raise HTTPException(status_code=404,
+                            detail="this review has no redline document")
+    name = record.get("redline_filename") or f"{rid}-redline.docx"
+    return Response(
+        content=body, media_type=_PAPER_DOCX_MIME,
+        headers={"Content-Disposition":
+                 f'attachment; filename="{_safe_filename(name)}"'})
+
+
+@router.get("/privacy/paper-reviews/{review_id}/memo")
+async def get_paper_memo(request: Request, review_id: str) -> Response:
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    record = await run_in_threadpool(ops.get_paper_review, review_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such review")
+    return PlainTextResponse(record.get("memo") or "")
+
+
+@router.get("/privacy/clause-playbook")
+async def get_clause_playbook(request: Request) -> dict:
+    """Our standard clause positions -- what a vendor's paper is redlined to.
+
+    ``customised`` names the clauses this deployment has overridden, so an
+    operator can see at a glance whether they are running our language or
+    their own."""
+    require_permission(request, "operate")
+    from maverick import paper_review
+    shipped = paper_review.default_playbook()
+    active = await run_in_threadpool(paper_review.load_playbook)
+    return {
+        "path": str(paper_review.playbook_path()),
+        "positions": active,
+        "shipped": shipped,
+        "customised": sorted(k for k, v in active.items()
+                             if shipped.get(k) != v),
+    }
+
+
+@router.post("/privacy/clause-playbook")
+async def set_clause_playbook(request: Request,
+                              body: ClausePlaybookIn) -> dict:
+    """Write this deployment's own clause positions.
+
+    A customer's standard positions are theirs, not ours -- this is the setup
+    step that makes the redline speak in their language. Omitted clauses keep
+    the shipped position."""
+    require_permission(request, "admin")
+    from maverick import paper_review
+    known = set(paper_review.default_playbook())
+    unknown = sorted(set(body.positions) - known)
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown clause id(s): {', '.join(unknown[:8])}")
+    merged = paper_review.default_playbook()
+    merged.update({k: v.strip() for k, v in body.positions.items()
+                   if v and v.strip()})
+    path = await run_in_threadpool(paper_review.write_playbook, merged)
+    active = await run_in_threadpool(paper_review.load_playbook)
+    shipped = paper_review.default_playbook()
+    return {"ok": True, "path": str(path),
+            "customised": sorted(k for k, v in active.items()
+                                 if shipped.get(k) != v)}
 
 
 @router.get("/privacy/dpa-documents")
@@ -2307,6 +2490,37 @@ async def decide_assessment_session(
             expected_revision=body.expected_revision,
         )
     except (AssessmentConflict, AssessmentTransitionError) as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except AssessmentStateError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    return record
+
+
+@router.post("/assess/sessions/{assessment_id}/assign")
+async def assign_assessment_session(
+    request: Request, assessment_id: str, body: AssessmentAssignIn,
+) -> dict:
+    """Put an assessment on a named reviewer's desk (empty name unassigns).
+
+    Everything else on the record is post-hoc attribution -- who decided, who
+    answered. This is the only field that says whose job it is NEXT, which is
+    what lets a reviewer ask "what is mine?". Routing only: it does not gate
+    who may decide. Audited."""
+    require_permission(request, "operate")
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        assign_assessment,
+    )
+    who = _request_actor(request)
+    try:
+        record = await run_in_threadpool(
+            assign_assessment, assessment_id[:64], body.assignee,
+            assigned_by=who, expected_revision=body.expected_revision,
+        )
+    except AssessmentConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except AssessmentStateError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
