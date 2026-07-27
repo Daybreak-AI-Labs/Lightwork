@@ -10,7 +10,13 @@ on:
       - 'CONTRIBUTING.md'
       - 'CODE_OF_CONDUCT.md'
       - 'SECURITY.md'
+      - 'TRADEMARK.md'
+      - 'CLA.md'
       - '.github/workflows/docs.yml'
+  # Also on PRs. This workflow ran only on pushes to main behind a paths
+  # filter, so a --strict failure was invisible until after merge -- and the
+  # site had failed every build for 30 consecutive runs without anyone seeing
+  # a red check. A docs build nobody watches is not a gate.
   pull_request:
     branches: [main]
     paths:
@@ -20,6 +26,8 @@ on:
       - 'CONTRIBUTING.md'
       - 'CODE_OF_CONDUCT.md'
       - 'SECURITY.md'
+      - 'TRADEMARK.md'
+      - 'CLA.md'
       - '.github/workflows/docs.yml'
   workflow_dispatch: {}
 
@@ -50,7 +58,8 @@ jobs:
         run: |
           set -e
           mkdir -p docs
-          for f in CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md ROADMAP.md; do
+          for f in CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md ROADMAP.md \
+                   TRADEMARK.md CLA.md; do
             if [ -f "$f" ] && [ ! -e "docs/$f" ]; then
               ln -s "../$f" "docs/$f"
             fi
@@ -75,8 +84,11 @@ jobs:
           path: _site
 
   deploy:
-    if: github.event_name != 'pull_request'
     needs: build
+    # Build on PRs, publish only from main: a PR must not be able to replace
+    # the live site, and Pages deployment needs write permissions a fork PR
+    # does not get. workflow_dispatch stays able to republish by hand.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

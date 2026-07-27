@@ -37,6 +37,7 @@ from pathlib import Path
 from ..file_lock import (
     atomic_read_bytes,
     atomic_write_bytes,
+    cross_process_lock,
     ensure_private_directory,
     ensure_private_file,
 )
@@ -163,6 +164,25 @@ def _process_file(
     """Walk a single audit-log file. Returns (matched, written)."""
     if not path.exists() or path.is_dir():
         return 0, 0
+    # An erase is a read-modify-write of the whole file. Held without a lock it
+    # races the live signer appending to today's day-file: rows committed
+    # between our read and our atomic replace are silently destroyed, and the
+    # re-anchor below then re-signs the truncated result so verify_chain
+    # reports CLEAN. Measured at 3-4 lost rows per run under a modest concurrent
+    # writer. This is the same sidecar-keyed lock AuditSigner.write takes, and
+    # it must cover the re-anchor too -- that is a second whole-file rewrite.
+    with cross_process_lock(path):
+        return _process_file_locked(path, channel, user_id, delete=delete)
+
+
+def _process_file_locked(
+    path: Path,
+    channel: str,
+    user_id: str,
+    *,
+    delete: bool,
+) -> tuple[int, int]:
+    """``_process_file`` body, with the file's rewrite lock already held."""
     try:
         ensure_private_directory(path.parent)
         ensure_private_file(path, 0o600)

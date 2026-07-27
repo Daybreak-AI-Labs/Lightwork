@@ -11,6 +11,7 @@ OpenAI translator without burning API credits in CI.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 import pytest
@@ -43,10 +44,23 @@ def _isolate_maverick_home(tmp_path, monkeypatch):
     # the suite sees only the (empty, isolated) user dir -- behaviour unchanged
     # from before the library shipped. Tests opt in with MAVERICK_BUILTIN_SKILLS=1.
     monkeypatch.setenv("MAVERICK_BUILTIN_SKILLS", "0")
-    # Pin the legacy (pre-secure-default) posture so the suite keeps asserting
-    # each control's explicit on/off mechanics; the secure DEFAULT is covered by
-    # test_secure_defaults.py (which overrides this). Production ships secure.
-    monkeypatch.setenv("MAVERICK_SECURE_DEFAULT", "0")
+    # Which security posture the suite runs under.
+    #
+    # The default here is the LEGACY posture, so the suite keeps asserting each
+    # control's explicit on/off mechanics. That is a real thing to test, but on
+    # its own it means ~19,000 passing tests describe a configuration no
+    # customer runs: production ships secure-by-default, which turns on audit
+    # signing, at-rest encryption, fail-closed consent for high-risk actions,
+    # and the tool-risk ceiling.
+    #
+    # MAVERICK_TEST_SECURE_DEFAULT=1 runs the whole suite under the production
+    # posture instead. Until that is green everywhere it is a separate CI job
+    # rather than the default, because a red posture job that blocks every PR
+    # gets switched off, and then nothing measures it at all.
+    monkeypatch.setenv(
+        "MAVERICK_SECURE_DEFAULT",
+        os.environ.get("MAVERICK_TEST_SECURE_DEFAULT", "0"),
+    )
     # The reflexion / dreaming-insight / learned-skill stores expose their
     # no-tenant path as an IMPORT-TIME module constant (the ``legacy`` fallback in
     # ``reflexion``/``dreaming`` ``_tenant_path``), computed once via ``data_dir()``

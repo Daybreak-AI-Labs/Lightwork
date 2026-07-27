@@ -4765,7 +4765,22 @@ def run_fast() -> int:
         sandbox, keys, capabilities,
         tool_acl={"denied_tools": denied_tools},
     )
-    smoke_test()
+    # smoke_test() returns a bool and it was discarded, so `maverick init
+    # --fast` printed "Fast setup finished" and exited 0 over a broken install
+    # -- the one command whose entire promise is that you can trust the result
+    # without answering questions. An installer that cannot fail is an
+    # installer whose success means nothing.
+    if not smoke_test():
+        console.print()
+        console.print(Panel.fit(
+            "[bold red]Fast setup failed its smoke test.[/bold red]\n\n"
+            "The config was written, but the checks above did not pass, so "
+            "this install is not ready to run.\n"
+            "Fix the failures listed above, then re-run "
+            "[bold]maverick init --fast[/bold] (or `maverick doctor`).",
+            border_style="red",
+        ))
+        return 1
     console.print()
     console.print(Panel.fit(
         "[bold green]Fast setup finished.[/bold green]\n\n"

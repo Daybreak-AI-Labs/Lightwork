@@ -85,7 +85,7 @@ pack** and the **bias-evaluation** engine (shared with AI-Gov).
 
 ## 2. How an HR agent maps onto Lightwork
 
-Each agent is one [`DomainProfile`](../../packages/maverick-core/maverick/domain.py)
+Each agent is one [`DomainProfile`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/domain.py)
 pack, governed by Layer A + consent + the signed audit chain. Three HR specifics:
 
 - **The employee/candidate is the data subject.** Reuse the privacy suite's PII,

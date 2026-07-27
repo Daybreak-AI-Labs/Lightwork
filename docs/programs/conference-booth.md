@@ -54,12 +54,12 @@ Station prep checklist (per laptop, before the show):
   staff can run every station and answer the hard questions: licensing
   (proprietary, per-engagement), "why not open source" (the honest README
   answer + the lite-edition status: a stated possibility, not a
-  commitment), security posture ([`SECURITY.md`](../../SECURITY.md),
+  commitment), security posture ([`SECURITY.md`](../SECURITY.md),
   signed audit, red-team CI), and "how is this different from Devin /
   Hermes / OpenClaw" (the comparison page — describe competitors coarsely
   and direct people to vendors' own docs, exactly as `comparison.md` does).
 - Shift in pairs; nobody works the floor solo longer than 2 hours.
-- Code of conduct: ours ([`CODE_OF_CONDUCT.md`](../../CODE_OF_CONDUCT.md))
+- Code of conduct: ours ([`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md))
   and the conference's both apply to staff conduct.
 
 ## Lead capture

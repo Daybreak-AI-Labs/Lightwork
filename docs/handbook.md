@@ -284,7 +284,7 @@ networked sandbox); `maverick confidential-compute` detects SEV-SNP/TDX;
 `maverick enterprise verify` checks the enterprise-mode floor. The
 red-team corpus gates CI on every commit, and the threat model is written
 down ([`security/threat-model.md`](./security/threat-model.md)).
-Vulnerabilities: [`SECURITY.md`](../SECURITY.md).
+Vulnerabilities: [`SECURITY.md`](SECURITY.md).
 
 ## 6. Extension points
 
@@ -294,7 +294,7 @@ screened by the same shield/budget/sandbox machinery:
 - **Skills** — markdown procedures (`SKILL.md`: name, triggers, steps)
   the agent applies when a goal matches. `maverick skill install / browse /
   validate`, schema in
-  [`benchmarks/example-skills/README.md`](../benchmarks/example-skills/README.md).
+  [`benchmarks/example-skills/README.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/example-skills/README.md).
   Lightwork can also *learn* skills from its own successful runs, opt-in
   (`[self_learning]`, [`self-learning.md`](./self-learning.md)).
 - **Plugins** — Python entry points under plugin API v2
@@ -320,7 +320,7 @@ screened by the same shield/budget/sandbox machinery:
   Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon,
   Voice, WhatsApp (Twilio + Cloud API), SMS, iMessage, IRC, Threads, RCS,
   and a glasses/wearable bridge. New ones subclass `Channel` in `base.py`
-  — four steps, documented in [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+  — four steps, documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - **MCP, both directions** — `maverick mcp` exposes the swarm to any MCP
   client (stdio + Streamable HTTP); `[mcp_servers]` makes Lightwork
   *consume* external MCP servers as tools, which still pass through the
@@ -338,7 +338,7 @@ screened by the same shield/budget/sandbox machinery:
 Providers get added in three files plus tests (CONTRIBUTING "Adding a
 provider"). Whatever you extend: shield wired or it doesn't count, budget
 respected, sandbox-mediated, config knob + wizard step — the house rules
-in [`CLAUDE.md`](../CLAUDE.md) and [`CONTRIBUTING.md`](../CONTRIBUTING.md)
+in [`CLAUDE.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CLAUDE.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md)
 are short and enforced.
 
 ## 7. Where everything lives
@@ -355,15 +355,15 @@ haven't installed yet.
 | Config schema | [`configuration.md`](./configuration.md), [`env-vars.md`](./env-vars.md) |
 | Deploy targets | [`deployment.md`](./deployment.md), [`reference-architectures.md`](./reference-architectures.md), [`github-action.md`](./github-action.md) |
 | Run it day-2 | [`operations.md`](./operations.md), [`perf-sla.md`](./perf-sla.md) |
-| Safety & security | [`safety.md`](./safety.md), [`security-hardening.md`](./security-hardening.md), [`security/`](./security/), [`SECURITY.md`](../SECURITY.md), [`threat-hunting.md`](./threat-hunting.md) |
+| Safety & security | [`safety.md`](./safety.md), [`security-hardening.md`](./security-hardening.md), [`security/`](./security/), [`SECURITY.md`](SECURITY.md), [`threat-hunting.md`](./threat-hunting.md) |
 | Enterprise & compliance | [`enterprise/`](./enterprise/) (editions, security overview, diligence), [`regulated-deployment.md`](./regulated-deployment.md), [`compliance/`](./compliance/), [`encryption.md`](./encryption.md) |
 | Extend it | [`plugins.md`](./plugins.md), [`plugin-api-v2.md`](./plugin-api-v2.md), [`self-learning.md`](./self-learning.md), [`embedding.md`](./embedding.md), [`connectors.md`](./connectors.md) |
 | Drive it from outside | [`api.md`](./api.md), [`grpc.md`](./grpc.md), [`a2a.md`](./a2a.md), [`clients/`](./clients/), [`integrations/`](./integrations/) |
 | Task recipes | [`cookbook/`](./cookbook/) (30 recipes), [`starter-goals.md`](./starter-goals.md) |
-| How it compares | [`comparison.md`](./comparison.md), [`benchmarks/`](../benchmarks/) (`EVAL.md`, `RESULTS.md`) |
+| How it compares | [`comparison.md`](./comparison.md), [`benchmarks/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/) (`EVAL.md`, `RESULTS.md`) |
 | Community & programs | [`showcase.md`](./showcase.md), [`programs/`](./programs/) (summit, office hours, grants, awards, partnerships…) |
-| Press & naming | [`press-kit.md`](./press-kit.md), [`TRADEMARK.md`](../TRADEMARK.md) |
-| Contribute | [`CONTRIBUTING.md`](../CONTRIBUTING.md), [`CLA.md`](../CLA.md), [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md), [`MAINTAINERS.md`](../MAINTAINERS.md) |
+| Press & naming | [`press-kit.md`](./press-kit.md), [`TRADEMARK.md`](TRADEMARK.md) |
+| Contribute | [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CLA.md`](CLA.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md), [`MAINTAINERS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/MAINTAINERS.md) |
 | Licensing | [`LICENSE`](../LICENSE), [`enterprise/editions.md`](./enterprise/editions.md) |
 
 ### The honest closing note

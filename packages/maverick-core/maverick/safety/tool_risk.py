@@ -60,6 +60,10 @@ _DEFAULT_RISK: dict[str, str] = {
     "wasm_run": "high",
     "ros": "high",
     "serial": "high",
+    # Bidirectional P2P data channel to an arbitrary peer: an exfil path with
+    # no allow-list concept. Had no entry at all, so it fell to "medium".
+    "webrtc": "high",
+    "websocket": "high",
     # high: mutate external state / money / send messages / drive infra or a
     # device / recursively spawn. These used to fall through to the "medium"
     # default, so a max_risk="medium" channel ceiling failed to drop them.

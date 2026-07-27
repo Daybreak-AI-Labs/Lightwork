@@ -56,6 +56,7 @@ import json
 import logging
 import math
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -625,9 +626,33 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
             print(f"  - {prob}")
     else:
         anchors = discover_anchors()
-        print("evaluator-anchor governance: OK")
-        print(f"  {len(anchors)} anchor(s): "
-              + ", ".join(f"{r}({len(a)})" for r, a in sorted(anchors.items())))
+        lock = load_lock()
+        locked = len(lock.get("checksums") or {})
+        # Anti-vacuity. With no anchors committed and an empty lock this printed
+        # "OK / 0 anchor(s)" and exited 0 -- a governance gate reporting success
+        # over nothing, next to migration_governance whose lock carries real
+        # checksums. "Nothing to govern" is a legitimate state, but it must not
+        # be spelled the same way as "everything checks out": an operator
+        # skimming a green column cannot tell them apart, and that is exactly
+        # how a ratchet protecting nothing survives review.
+        if not anchors and not locked:
+            print("evaluator-anchor governance: NO ANCHORS COMMITTED")
+            print("  0 anchors on disk and 0 in the lock, so this gate is "
+                  "currently governing nothing. That is a valid state for a "
+                  "deployment that has not released an evaluator anchor -- but "
+                  "it is not evidence that anchor immutability is enforced.")
+        else:
+            print("evaluator-anchor governance: OK")
+            print(f"  {len(anchors)} anchor(s) on disk, {locked} locked: "
+                  + ", ".join(f"{r}({len(a)})" for r, a in sorted(anchors.items())))
+        # A lock with entries but nothing on disk means the released anchors
+        # were deleted -- the exact laundering the ratchet exists to catch, and
+        # `validate()` cannot see it if it only walks what is present.
+        if locked and not anchors:
+            print(f"evaluator-anchor governance: PROBLEM -- {locked} anchor(s) "
+                  "are locked but none are on disk; released anchors were "
+                  "removed.", file=sys.stderr)
+            return 1 if args.ci else 0
     if args.ci and problems:
         return 1
     return 0

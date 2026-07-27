@@ -115,7 +115,7 @@ async def settings_set_model(request: Request, model: str = Form("")) -> Redirec
     An empty value clears the pin, reverting to config.toml / built-in
     defaults. config.toml is never written."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick.runtime_overrides import (
         allowed_models,
         clear_default_model,
@@ -141,7 +141,7 @@ async def settings_set_budget(request: Request, max_dollars: str = Form("")) -> 
     overlay. An empty value clears it, reverting to config.toml / defaults.
     config.toml is never written."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick.runtime_overrides import clear_budget, set_budget
     val = (max_dollars or "").strip()
     try:
@@ -161,7 +161,7 @@ async def settings_set_role_models(request: Request) -> RedirectResponse:
     """Set/clear per-role model pins from the settings page in one write. Each
     form field is named for a role; an empty value clears that role's pin."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick.runtime_overrides import allowed_models, set_role_models
     roles = ("orchestrator", "coder", "researcher", "writer",
              "analyst", "verifier", "summarizer")
@@ -186,7 +186,7 @@ async def settings_set_allowed_models(request: Request) -> RedirectResponse:
     (every model allowed again). Saved to the dashboard overlay, never
     config.toml; ``llm.model_for_role`` then caps every role to this set."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick.runtime_overrides import set_allowed_models
     form = await request.form()
     try:
@@ -234,7 +234,7 @@ async def settings_set_provider(
     (0600). Empty fields are left unchanged (so re-saving a base URL never wipes
     a key you can't see); resolved before env vars; config.toml is never written."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     try:
         settings_store.set_provider(provider.strip(), api_key=api_key, base_url=base_url)
@@ -247,7 +247,7 @@ async def settings_set_provider(
 async def settings_clear_provider(request: Request, provider: str = Form(...)) -> RedirectResponse:
     """Remove a provider's dashboard-set key (config.toml / env unaffected)."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     try:
         settings_store.clear_provider(provider.strip())
@@ -260,7 +260,7 @@ async def settings_clear_provider(request: Request, provider: str = Form(...)) -
 async def settings_set_capabilities(request: Request) -> RedirectResponse:
     """Activate/deactivate capabilities via the dashboard config overlay."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     form = await request.form()
     for name in settings_store.CAPABILITY_DEFAULTS:
@@ -272,7 +272,7 @@ async def settings_set_capabilities(request: Request) -> RedirectResponse:
 async def settings_set_features(request: Request) -> RedirectResponse:
     """Activate/deactivate features via the dashboard config overlay."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     form = await request.form()
     for name in settings_store.FEATURE_DEFAULTS:
@@ -367,7 +367,7 @@ async def users_set_role(
     request: Request, principal: str = Form(...), role: str = Form(...),
 ) -> RedirectResponse:
     """Assign a dashboard role to a user principal (admin only)."""
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import rbac
     try:
@@ -382,7 +382,7 @@ async def users_set_role(
 async def users_remove(request: Request, principal: str = Form(...)) -> RedirectResponse:
     """Remove a user's explicit role assignment (admin only). A bootstrap admin
     pinned in config is unaffected — it can't be removed here."""
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import rbac
     rbac.remove_user(principal.strip(),
@@ -399,7 +399,7 @@ async def users_invite(request: Request, email: str = Form(...),
     place the link exists — the admin copies it into an email/chat to the
     invitee. Renders the users page directly instead of redirecting, because a
     redirect would drop the one-time link."""
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import invites
     if not invites.invites_enabled():
@@ -423,7 +423,7 @@ async def users_invite(request: Request, email: str = Form(...),
 async def users_invite_revoke(request: Request,
                               invite_id: str = Form(...)) -> RedirectResponse:
     """Revoke a pending invite link (admin only)."""
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import invites
     invites.revoke_invite(invite_id.strip())

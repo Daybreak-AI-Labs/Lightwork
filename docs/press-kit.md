@@ -72,7 +72,7 @@ append-only audit log.
 "Lightwork", the Lightwork name, and the Lightwork logo are trademarks of
 Christopher Day / Day AI Labs and are **not** licensed under the software
 [`LICENSE`](../LICENSE). The full policy is
-[`TRADEMARK.md`](../TRADEMARK.md); the short version for writers:
+[`TRADEMARK.md`](TRADEMARK.md); the short version for writers:
 
 - **Product name**: "Lightwork", capital M. The CLI command is lowercase
   `maverick`; the PyPI distribution is `maverick-agent`.

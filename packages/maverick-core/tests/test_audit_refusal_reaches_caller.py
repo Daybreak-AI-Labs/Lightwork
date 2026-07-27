@@ -75,11 +75,15 @@ def test_ordinary_audit_failures_are_still_swallowed_but_logged(monkeypatch, cap
         raise OSError("disk full")
 
     monkeypatch.setattr(audit_mod, "record", _boom)
-    with caplog.at_level(logging.WARNING, logger="maverick.agent"):
+    # The warning now comes from audit_event in maverick.audit.writer rather
+    # than from the agent: the contract moved into one helper so it stops
+    # depending on ~93 call sites each remembering to apply it.
+    with caplog.at_level(logging.WARNING, logger="maverick.audit.writer"):
         _FakeAgent()._audit_tool_event("tool_start", tool="wire_transfer")
 
     messages = [r.getMessage() for r in caplog.records]
-    assert any("tool-event write failed" in m for m in messages), messages
+    assert any("write failed" in m for m in messages), messages
+    assert any("tool_start" in m for m in messages), messages
     # exc_info is what makes it diagnosable rather than merely noisy.
     assert any(r.exc_info for r in caplog.records)
 

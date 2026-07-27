@@ -60,6 +60,7 @@ from ..file_lock import (
     ensure_private_file,
 )
 from ..paths import data_dir
+from .errors import AuditRefused
 
 log = logging.getLogger(__name__)
 
@@ -74,8 +75,14 @@ _LEGACY_KEY_DIR = data_dir("audit", "keys")
 KEY_DIR = _LEGACY_KEY_DIR
 
 
-class OffHostSigningRequiredError(RuntimeError):
-    """Raised when audit signing must use off-host key material."""
+class OffHostSigningRequiredError(AuditRefused):
+    """Raised when audit signing must use off-host key material.
+
+    An :class:`~maverick.audit.errors.AuditRefused`, not a bare RuntimeError:
+    this is the refusal that fires under the strictest posture the product
+    sells, so a caller hardened against the compliance-floor refusal was
+    missing exactly the case that matters most.
+    """
 
 
 def _key_dir() -> Path:
@@ -102,6 +109,7 @@ _SIG_RE = re.compile(r"^[0-9a-f]{128}$")
 ANCHOR_FILENAME = "anchors.ndjson"
 ANCHOR_MARKER_FILENAME = ".anchors.required"
 _DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
 def _is_valid_key_id(key_id: str) -> bool:
@@ -799,14 +807,24 @@ class AuditSigner:
                 # recreate it at genesis; require an existing private regular
                 # file on every append.
                 ensure_private_directory(self._path.parent)
-                ensure_private_file(self._path, 0o600)
-                with open(self._path, "a+b") as f:
-                    # Cross-process advisory lock covers tail read, hash/sign,
-                    # and append as one transaction. Merely locking f.write()
-                    # is insufficient: independent signers may have cached the
-                    # same old tip and would append a cryptographically valid but
-                    # structurally forked pair of rows.
-                    with _file_append_lock(f):
+                # Whole-file rewriters (GDPR erase, reanchor_file) replace this
+                # path via os.replace, which swaps the inode out from under any
+                # handle already opened on it. The append lock below is held on
+                # that handle, so it cannot serialize against them: a signer
+                # that opened the old inode appends into an orphaned file and
+                # the row is lost while write() still reports True. This
+                # sidecar-keyed lock is the one both sides can share -- take it
+                # BEFORE opening, so the handle we get is the surviving inode.
+                # Ordering is always sidecar -> append lock; rewriters take only
+                # the sidecar, so the two cannot deadlock.
+                with cross_process_lock(self._path):
+                    ensure_private_file(self._path, 0o600)
+                    with open(self._path, "a+b") as f, _file_append_lock(f):
+                        # The append lock still covers tail read, hash/sign, and
+                        # append as one transaction for independent signers that
+                        # may have cached the same old tip and would otherwise
+                        # append a cryptographically valid but structurally
+                        # forked pair of rows.
                         actual_tail = self._locked_tail_hash(f)
                         payload = dict(event)
                         payload["prev_hash"] = actual_tail
@@ -1167,6 +1185,99 @@ def _today_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+#: Exact key set of a ``retention_purge`` row in the anchor ledger, excluding
+#: the chain fields every signed row carries.
+_PURGE_BODY_KEYS = {"kind", "days", "cutoff_day", "ts"}
+
+
+def record_retention_purge(audit_dir: Path, purged: list[dict]) -> bool:
+    """Record in the ANCHOR LEDGER that policy retention removed day-files.
+
+    Without this, a legitimate ``[retention] audit_days`` purge is
+    indistinguishable from an attacker deleting a day-file: ``verify_anchors``
+    reports ``anchored_file_deleted`` for every purged day, forever, because the
+    anchor for that day stays in the append-only ledger while the file it
+    describes is gone. That trains operators to ignore the one check that would
+    show real tampering.
+
+    The marker lands in ``anchors.ndjson`` rather than in a day-file for one
+    reason that matters: retention itself never deletes the ledger (it prunes
+    only ``YYYY-MM-DD.ndjson``), so the record outlives the next purge. A marker
+    written into a live day-file is itself purged ~30 days later and the
+    excusal evaporates -- the break comes back with no surviving explanation.
+
+    Each entry commits to the exact ``tip_hash``/``row_count`` destroyed, so the
+    row is not a blanket permission slip: :func:`verify_anchors` honours it only
+    when it matches that day's latest anchor. A file mutated after its last
+    anchor and *then* purged still fails, and an archived copy can be
+    reconciled byte-for-byte against what the purge claims it removed.
+    """
+    if not _have_crypto() or not purged:
+        return False
+    anchor_path = audit_dir / ANCHOR_FILENAME
+    if not anchor_path.exists():
+        # No ledger means no anchors, so no day can be reported as deleted.
+        return False
+    signer = AuditSigner(anchor_path)
+    ok = bool(signer.write({
+        "kind": "retention_purge",
+        "days": purged,
+        "cutoff_day": max((str(p.get("day", "")) for p in purged), default=""),
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }))
+    if ok:
+        _mark_anchor_ledger_required(audit_dir)
+    return ok
+
+
+def retention_purged_days(audit_dir: Path) -> list[dict]:
+    """Days that a signed ``retention_purge`` row accounts for, oldest first.
+
+    :func:`verify_anchors` stops reporting these as deletions, so something has
+    to say they happened -- otherwise "0 breaks" reads as "nothing was removed"
+    when the truth is "two days were removed and here is the signed record of
+    it". Silence would make the check less informative than the bug it fixed.
+    """
+    anchor_path = audit_dir / ANCHOR_FILENAME
+    if not anchor_path.exists():
+        return []
+    out: dict[str, dict] = {}
+    try:
+        with open(anchor_path, encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    d = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(d, dict) or d.get("kind") != "retention_purge":
+                    continue
+                for entry in d.get("days") or []:
+                    if isinstance(entry, dict) and isinstance(entry.get("day"), str):
+                        out[entry["day"]] = entry
+    except OSError:  # pragma: no cover - reported by verify_anchors instead
+        return []
+    return [out[k] for k in sorted(out)]
+
+
+def _purge_authorizes(entry: object, anchor: dict) -> bool:
+    """Whether a purge entry accounts for exactly the anchored content.
+
+    Fail closed on anything partial: an entry that cannot name the tip it
+    destroyed is not evidence that the deletion was the policy-driven one.
+    """
+    if not isinstance(entry, dict):
+        return False
+    tip = entry.get("tip_hash")
+    count = entry.get("row_count")
+    if not isinstance(tip, str) or not _SHA256_RE.fullmatch(tip):
+        return False
+    if not isinstance(count, int) or isinstance(count, bool):
+        return False
+    return tip == anchor.get("tip_hash") and count == anchor.get("row_count")
+
+
 def ensure_anchors(audit_dir: Path) -> int:
     """Record a tip-ledger anchor for every COMPLETED day-file lacking one.
 
@@ -1234,10 +1345,17 @@ def verify_anchors(audit_dir: Path, pubkey_hex: str | None = None) -> list[Chain
             ]
         return []
     breaks = list(verify_chain(anchor_path, pubkey_hex))
+    # A purge row only excuses a deletion when the ledger's own signed chain is
+    # intact. Otherwise an attacker who can append unsigned lines could write
+    # their own permission slip for the day-file they just deleted.
+    ledger_intact = not breaks
     # The ledger is append-only; the last anchor for a day wins (supersession).
     latest: dict[str, dict] = {}
+    anchored_at: dict[str, int] = {}
+    purged: dict[str, dict] = {}
+    purged_at: dict[str, int] = {}
     with open(anchor_path, encoding="utf-8") as f:
-        for line in f:
+        for idx, line in enumerate(f):
             if not line.strip():
                 continue
             try:
@@ -1248,9 +1366,27 @@ def verify_anchors(audit_dir: Path, pubkey_hex: str | None = None) -> list[Chain
                 continue
             if d.get("kind") == "anchor" and d.get("day"):
                 latest[str(d["day"])] = d
+                anchored_at[str(d["day"])] = idx
+            elif d.get("kind") == "retention_purge":
+                for entry in d.get("days") or []:
+                    if isinstance(entry, dict) and isinstance(entry.get("day"), str):
+                        purged[entry["day"]] = entry
+                        purged_at[entry["day"]] = idx
     for day, anc in sorted(latest.items()):
         day_file = audit_dir / f"{day}.ndjson"
         if not day_file.exists():
+            # Retention legitimately deletes day-files older than [retention]
+            # audit_days. That is policy, not tampering -- but only when it is
+            # recorded in this signed ledger, commits to the exact tip that was
+            # destroyed, and was recorded AFTER the anchor it retires (an
+            # append-only ledger cannot pre-authorize a future deletion).
+            if (
+                ledger_intact
+                and day in purged
+                and purged_at[day] > anchored_at.get(day, -1)
+                and _purge_authorizes(purged[day], anc)
+            ):
+                continue
             breaks.append(ChainBreak(
                 0, "anchored_file_deleted", f"{day}.ndjson is anchored but missing"))
             continue
@@ -1305,6 +1441,18 @@ def reanchor_file(path: Path, *, force: bool = False, preverified: bool = False)
         return -1
     if not path.exists() or path.is_dir():
         return -1
+    # Re-chaining is a whole-file read-modify-write. Take the same lock
+    # AuditSigner.write holds, or a concurrent append lands on the pre-rewrite
+    # inode and is discarded by the atomic replace below. Reentrant, so the
+    # erase path (which already holds it across read+write+reanchor) nests.
+    with cross_process_lock(path):
+        return _reanchor_file_locked(path, force=force, preverified=preverified)
+
+
+def _reanchor_file_locked(
+    path: Path, *, force: bool = False, preverified: bool = False
+) -> int:
+    """``reanchor_file`` body, with the file's rewrite lock already held."""
     from cryptography.hazmat.primitives.asymmetric import ed25519
 
     try:
@@ -1402,5 +1550,6 @@ __all__ = [
     "KEY_DIR",
     "active_key_is_offhost",
     "reanchor_file",
+    "record_retention_purge",
     "rotate_audit_keypair",
 ]

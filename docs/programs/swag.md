@@ -9,7 +9,7 @@ One constraint shapes everything: **the official logo/wordmark assets are
 not yet published** (the [press kit](../press-kit.md) marks them as
 placeholders to be added by maintainers). Producing branded goods is blocked
 on those assets landing; text-only designs below can proceed without them.
-The marks are trademarks of the Licensor ([`TRADEMARK.md`](../../TRADEMARK.md))
+The marks are trademarks of the Licensor ([`TRADEMARK.md`](../TRADEMARK.md))
 — swag is produced only by/for the project, never licensed to third parties
 to print.
 

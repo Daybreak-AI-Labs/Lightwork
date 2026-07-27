@@ -76,7 +76,7 @@ walls, the decision gate, the audit trail) are shipped.
 
 ## 2. How a strategy/exec agent maps onto Lightwork
 
-Each agent is a [`DomainProfile`](../../packages/maverick-core/maverick/domain.py) pack —
+Each agent is a [`DomainProfile`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/domain.py) pack —
 but here the **compartment seal is the point**, not an afterthought. A deal or board agent
 is spawned into an **isolated compartment** (`quarantine`-sealable, capability-scoped) so
 its MNPI never reaches the rest of the fleet, and it cannot reach back out. The research

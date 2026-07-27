@@ -24,7 +24,7 @@ audit every touch" is a selling point.
 
 ## 1. Entitlements — control features per customer, flip tiers remotely
 
-**Built:** [`maverick/entitlements.py`](../../packages/maverick-core/maverick/entitlements.py)
+**Built:** [`maverick/entitlements.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/entitlements.py)
 (+ `tests/test_entitlements.py`, 10 tests).
 
 A **license** is an Ed25519-signed JSON doc declaring `customer`, `tier`
@@ -88,7 +88,7 @@ Daybreak's publisher pubkey in the build (`_EMBEDDED_PUBKEYS`).
 
 ## 2. Updates — every size, every regulatory posture
 
-**Built:** [`maverick/release_update.py`](../../packages/maverick-core/maverick/release_update.py)
+**Built:** [`maverick/release_update.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/release_update.py)
 (+ `tests/test_release_update.py`, 10 tests).
 
 A **release manifest** is an Ed25519-signed doc (same trust anchor) listing the
@@ -138,7 +138,7 @@ channel config.
 
 ## 3. Support — see what broke, fix it, push the fix
 
-**Built:** [`maverick/support_bundle.py`](../../packages/maverick-core/maverick/support_bundle.py)
+**Built:** [`maverick/support_bundle.py`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/support_bundle.py)
 extended with a `correlation_id` (keys a ticket) and the deployment's
 `entitlement` (so a ticket is tied to the exact SKU) — on top of the existing
 **redacted** bundle (versions, runtime, readiness, providers, recent failures,

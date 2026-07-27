@@ -26,7 +26,7 @@ employment-shaped program.
 Not fundable in v1: core-feature development (that's the roadmap and the
 CLA path), marketing content, anything whose acceptance can't be checked by
 an existing gate. **IP note:** upstream contributions ride the
-[CLA](../../CLA.md) like any PR; standalone works (a plugin package, a
+[CLA](../CLA.md) like any PR; standalone works (a plugin package, a
 study) stay the grantee's, per the same split as
 [university-outreach](./university-outreach.md) — and running Lightwork to
 build them requires a written evaluation license, included with the grant

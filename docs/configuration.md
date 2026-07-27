@@ -7,6 +7,14 @@ Lightwork reads `~/.maverick/config.toml`. The installer wizard writes it; you c
 ```toml
 [deployment]
 type = "desktop"       # desktop | docker | vps | phone
+# Break-glass only. Exactly one control plane may write a data root: flows,
+# A2A claims, and the audit, budget-receipt, fleet-memory and learning ledgers
+# are hash-chained and assume a single author. Two writers do not tear a
+# record -- they interleave valid ones, so the result verifies clean and is
+# unreconstructable. Startup takes an exclusive lock on the data root and a
+# second process refuses to serve. Set this only if you have guaranteed
+# exclusivity another way; /readyz then reports `replica_safety: unenforced`.
+# allow_multiple_control_planes = false   # env: MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES
 
 [governance]
 # The business-shaped governance level picked at onboarding. Every level gets

@@ -117,6 +117,60 @@ jobs:
         # risk ceiling, a working persona, and its deny list -- the honest-
         # counting receipt behind the catalog claim. Errors fail the build.
         run: maverick domains-lint --ci
+      - name: Reachability ledger (nothing goes dark unnoticed)
+        # Two defect classes shared one root cause: nobody could answer "does
+        # production reach this?", so everyone guessed, and the guesses went
+        # both ways. A strategy review cited sigstore_signing.py as shipped
+        # capability (roadmap-tagged, no production importer) and in the same
+        # pass skipped erasure_verify.py as unbuilt (also roadmap-tagged, but
+        # it backs a shipping CLI command). The roadmap header was the only
+        # signal and it is wrong ~80% of the time in both directions.
+        #
+        # This walks the import graph from real entry points and fails when a
+        # module loses its last caller, or when a new one arrives that nothing
+        # reaches. Regenerate with `--regen` after reviewing the diff.
+        run: python -m maverick.reachability --ci
+      - name: Tool dispatch contract (no ungated path to the registry)
+        # Agent._run_tool runs eleven gates. It was not the only way into the
+        # tool registry: a census found four dispatch sites and one gated. The
+        # live ungated one (flow/execution.py, bound at automation_queue)
+        # reached every registered connector -- stripe, gmail, s3, salesforce,
+        # sap, workday -- with a partial check and NO audit row.
+        #
+        # The missing row is the structural problem. The attestation asserts
+        # "no RECORDED action violated the policy envelope", so an unrecorded
+        # dispatch satisfies it by construction: the claim was unfalsifiable,
+        # not merely incomplete. This fails the build on a new ungated site,
+        # and re-checks the premise of the one exempt-because-unreachable site
+        # rather than trusting a comment.
+        run: python -m maverick.dispatch_contract --ci
+      - name: Egress contract (no outbound path outside the guarded libraries)
+        # enterprise.py sells one property -- "sensitive data physically cannot
+        # reach a third-party API" -- and documented it as enforced "at each
+        # tool's request". The check existed at 11 call sites; 87 of the 94
+        # modules that make outbound HTTP had none, including gmail,
+        # salesforce, slack_bot and the knowledge-store embedder.
+        #
+        # egress_guard moved enforcement to the send path of httpx, requests
+        # and urllib, which covers every connector including ones not yet
+        # written. This gate keeps that true: it fails when a module reaches
+        # the network through a library the guard does not wrap, and when a
+        # recorded hole is left in the register after being migrated.
+        run: python -m maverick.egress_contract --ci
+      - name: Audit refusal contract (an audit write may not be swallowed)
+        # The audit subsystem raises AuditRefused when it DECLINES to write --
+        # a compliance floor mandates a signed chain and the signer won't
+        # start, or custody policy forbids a co-located key. A caller that
+        # catches it and continues turns "we could not record this action"
+        # into "we recorded nothing and did it anyway", which is the exact
+        # failure the guarantee exists to prevent.
+        #
+        # This lived in a docstring and was honoured at 1 of ~93 call sites.
+        # The gate ratchets the pre-existing 50 in audit_contract.baseline.json
+        # (a debt register to shrink, not an exemption list) and fails the
+        # build on any NEW one. It also exits non-zero if it inspects zero
+        # files, so a bad path can never be mistaken for a pass.
+        run: python -m maverick.audit_contract --ci
       - name: Sunset gate (past-due deprecations must be removed)
         # The deprecation registry (maverick/deprecations.py) records every
         # deprecated path with its removal version. Once the package version
@@ -326,6 +380,80 @@ jobs:
         run: pip list
       - name: Test
         run: pytest -vvs --tb=long
+
+  posture:
+    # The suite runs with MAVERICK_SECURE_DEFAULT=0, which keeps each control's
+    # explicit on/off mechanics under test but means ~19,000 passing tests
+    # describe a configuration no customer runs. Production ships
+    # secure-by-default: audit signing, at-rest encryption, fail-closed consent
+    # for high-risk actions, and the tool-risk ceiling.
+    #
+    # This job runs the suite under the REAL posture. It does not block: 91 of
+    # 15,869 fail today, and none is a product bug -- they are tests asserting
+    # a legacy default, or fixtures that never granted consent because consent
+    # used to auto-approve. A job that is red on every PR gets switched off,
+    # and then nothing measures the posture at all. So the failing set is
+    # committed and ratcheted instead: a NEW failure fails this job, and a
+    # fixed one must be removed from the baseline. The list only shrinks.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install packages
+        run: |
+          set -x
+          pip install -e ./packages/maverick-core
+          pip install --no-deps -e ./packages/maverick-shield
+          pip install --no-deps -e ./packages/maverick-channels
+          pip install --no-deps -e ./packages/maverick-evolve
+          pip install --no-deps -e ./packages/maverick-dashboard
+          pip install --no-deps -e ./packages/maverick-mcp
+          pip install --no-deps -e ./packages/maverick-knowledge
+          pip install --no-deps -e ./apps/installer-cli
+          pip install 'questionary>=2.0' 'rich>=13.7'
+          pip install 'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' \
+                      'httpx>=0.27' 'python-multipart>=0.0.9'
+          pip install pytest pytest-asyncio 'pyjwt[crypto]'
+      - name: Test under the production security posture
+        env:
+          MAVERICK_TEST_SECURE_DEFAULT: "1"
+        # Scoped to maverick-core because that is where the baseline was
+        # measured and where every control the posture flips lives (audit
+        # signing, at-rest encryption, consent, the tool-risk ceiling).
+        # Widening it to the whole workspace needs a measurement first --
+        # asserting a baseline that was never taken is the defect class this
+        # PR exists to close.
+        #
+        # `|| true`: the run is EXPECTED to fail while the baseline is
+        # non-empty. The gate below decides pass/fail, and it fails closed on
+        # a report with no pytest summary, so a killed run cannot be mistaken
+        # for a clean one.
+        run: |
+          pytest packages/maverick-core/tests -q -p no:randomly --tb=no \
+            > posture-report.txt || true
+      - name: Posture ratchet (report-only until the baseline is CI-measured)
+        # NOT `--ci` yet, deliberately. The committed baseline was measured
+        # locally, and this runner disagrees with it by 19 tests -- CI resolves
+        # starlette 1.3.x / fastapi 0.140.x where local has older pins, and
+        # those 19 do not reproduce locally under the same flag. A baseline
+        # taken in one environment cannot gate a run in another; making it
+        # blocking would assert a measurement that was never made here, which
+        # is the exact defect this PR exists to close.
+        #
+        # So the job reports the delta and uploads the raw report. Flipping to
+        # `--ci` needs one CI-measured baseline committed from that artifact,
+        # and the 19 understood rather than absorbed -- a baseline you cannot
+        # explain is an exemption list, not a debt register.
+        run: python -m maverick.posture_gate --report posture-report.txt
+      - name: Upload the posture report (the input a CI baseline is built from)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: posture-report
+          path: posture-report.txt
+          if-no-files-found: warn
 
   redteam:
     # Red-team CI (ROADMAP 2027-H1 safety): run the labelled adversarial

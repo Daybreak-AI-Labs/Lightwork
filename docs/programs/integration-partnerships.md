@@ -28,7 +28,7 @@ Two principles, non-negotiable:
 | Agreement | None | Lightweight letter (validation + listing terms) | Signed partnership agreement |
 | Technical bar | Works for their users | Passes the validation checklist below, re-run per Lightwork minor release | Tier 1 + signed artifacts + a named technical contact + the reliability drill |
 | Listing | None implied | Row in the relevant integrations doc, "validated against vX.Y" | Row marked certified + entry in release-notes compatibility table |
-| Co-marketing | Nominative use only ([`TRADEMARK.md`](../../TRADEMARK.md)) | Joint blog post permitted (boundaries below) | Tier 1 + joint webinar/booth presence permitted |
+| Co-marketing | Nominative use only ([`TRADEMARK.md`](../TRADEMARK.md)) | Joint blog post permitted (boundaries below) | Tier 1 + joint webinar/booth presence permitted |
 | Support | Community channels | Shared issue-triage expectations (below) | Cross-escalation path with response-time commitments |
 | Fee | Free | _Founder decision (recommendation: free — the validation work is the cost)_ | _Founder decision_ |
 
@@ -103,7 +103,7 @@ maverick.deprecations`) tells partners what's sunsetting and when.
 ## Co-marketing boundaries
 
 What a partner may and may not do, by tier. The trademark policy
-([`TRADEMARK.md`](../../TRADEMARK.md)) governs everything; this is the
+([`TRADEMARK.md`](../TRADEMARK.md)) governs everything; this is the
 application of it.
 
 **Any tier (including non-partners):**
@@ -137,7 +137,7 @@ Numbers marked _founder-set_ go in the signed agreement, not this doc.
 |---|---|---|
 | Named technical contact each side | Recommended | Required |
 | Cross-filed bug triage (acknowledge + route) | Best effort | _Founder-set response time (recommendation: 2 business days)_ |
-| Security issues affecting the integration | Per [`SECURITY.md`](../../SECURITY.md), both directions | Same, plus direct contact exchange |
+| Security issues affecting the integration | Per [`SECURITY.md`](../SECURITY.md), both directions | Same, plus direct contact exchange |
 | Breaking-change notice from us | Public deprecation registry + release notes | Same + direct heads-up at deprecation time, before removal |
 | Breaking-change notice from partner | Listing-staleness process above | _Founder-set advance notice (recommendation: 30 days)_ |
 | End-customer support | Each party supports its own product; no joint support desk | Same — joint support is explicitly out of scope for v1 |

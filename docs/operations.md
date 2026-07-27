@@ -165,6 +165,19 @@ Notes:
   other durable stores remain file-backed; replace that replica against the
   same persistent data root instead of running active-active control-plane pods.
   The single-node `maverick backup` cold-standby model is for the SQLite default.
+- **Single-writer enforcement:** this is no longer a convention. On startup the
+  control plane takes an exclusive advisory lock on `control-plane.lock` in its
+  data root and holds it for the process lifetime; a second process refuses to
+  start and reports the pid, host and uptime of the holder. The lock is released
+  by the kernel when the holder exits, so a `Recreate` rollout hands over
+  cleanly and there is no stale lock to clear. `/readyz` reports the posture
+  under `replica_safety`. If the data root sits on a filesystem whose advisory
+  locks are a no-op (some NFS and overlay mounts), startup **fails closed**
+  rather than assume exclusivity — move the volume, or set
+  `MAVERICK_ALLOW_MULTIPLE_CONTROL_PLANES=1` (equivalently
+  `[deployment] allow_multiple_control_planes = true`) if you have guaranteed
+  single-writer access another way. The override is reported on `/readyz` as
+  `unenforced`, never silently honoured.
 
 ## Learning-state operations
 

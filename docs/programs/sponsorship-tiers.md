@@ -23,7 +23,7 @@ Hard boundaries, stated up front in the sponsor agreement:
   [integration-partnership validation](./integration-partnerships.md);
   "sponsor" and "validated/certified" are independent statuses.
 - **No endorsement.** We don't endorse sponsor products; logo placement is
-  acknowledgment of support, nothing more. [`TRADEMARK.md`](../../TRADEMARK.md)
+  acknowledgment of support, nothing more. [`TRADEMARK.md`](../TRADEMARK.md)
   applies in both directions.
 - **Refusal rights.** We decline sponsors whose business conflicts with the
   product's positioning (e.g. vendors of the dark-pattern tactics the

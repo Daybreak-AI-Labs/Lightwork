@@ -65,7 +65,7 @@ evaluation rubric.
   "empty sections say so" — is taught explicitly in weeks 9 and 12; it's
   the part students won't get elsewhere.
 - **Contribution path:** lab work that clears the bar can be PR'd upstream
-  under the [CLA](../../CLA.md) — optional, never required for grade
+  under the [CLA](../CLA.md) — optional, never required for grade
   (universities differ on whether required assignments may be assigned;
   the outreach kit's IP note covers this).
 - **Materials status:** slide decks are an instructor deliverable; this

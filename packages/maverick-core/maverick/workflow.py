@@ -162,6 +162,15 @@ class Workflow:
             args = self._interpolate(step.args, outputs)
             t0 = time.monotonic()
             try:
+                # NOT routed through tool_authz, deliberately. This is a library
+                # API: the caller supplies the registry, so its tools need not
+                # appear in the deployment's risk classifier, and applying the
+                # flow gate here would reject every in-process registry rather
+                # than protect anything. It is safe to leave ungated only
+                # because nothing in production calls Workflow.run -- and that
+                # is not left to a comment: maverick.dispatch_contract asserts
+                # the absence of a production caller and fails the build the
+                # moment one appears, at which point this must be gated.
                 raw = _drive(registry.run(step.tool, args))
                 from .tool_results import tool_result_failed
 

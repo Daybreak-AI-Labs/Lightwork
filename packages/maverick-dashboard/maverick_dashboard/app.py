@@ -366,6 +366,15 @@ async def _lifespan(app: FastAPI):
     require_enterprise_or_die()
     from maverick.residency import require_residency_or_die
     require_residency_or_die()  # strict region pin (#41); no-op unless opted in
+    # Exactly one control plane may write a data root. Until now that was
+    # enforced only by a `helm template` guard, which a raw kubectl apply,
+    # `compose up --scale`, or a second local `maverick dashboard` walks past
+    # -- and the failure is silent: two writers interleave valid records into
+    # hash-chained ledgers that assume one author. This raises, deliberately:
+    # a replica that refuses to start is a visible outage, while a corrupted
+    # audit chain is discovered months later by whoever needs it most.
+    from maverick.control_plane_lease import acquire as _acquire_control_plane
+    _acquire_control_plane(role="dashboard")
     _assert_dashboard_auth_configured()
     # Loud warning if reverse-proxy SSO is on but no upstream is trusted
     # (neither trusted_proxies pinned nor trust_loopback explicitly set) --
@@ -6292,6 +6301,21 @@ def _readiness_deep_checks() -> tuple[bool, dict[str, str]]:
             checks["agent_trust"] = "ok"
     except Exception as e:  # pragma: no cover
         checks["agent_trust"] = f"unknown: {type(e).__name__}"
+    # Replica safety. Reported rather than merely enforced at startup, so an
+    # operator who set the override can see that this deployment is running
+    # without single-writer protection instead of inferring it from silence.
+    # Not ready-blocking: this process either owns the root or was told not to
+    # care, and in neither case is refusing traffic the right response.
+    try:
+        from maverick.control_plane_lease import posture
+        state = posture()
+        checks["replica_safety"] = (
+            f"ok: single writer (token {state['fencing_token']})"
+            if state["state"] == "owned"
+            else f"{state['state']}: {state.get('detail', '')}".strip()
+        )
+    except Exception as e:  # pragma: no cover
+        checks["replica_safety"] = f"unknown: {type(e).__name__}"
     return ok, checks
 
 

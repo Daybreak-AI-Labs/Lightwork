@@ -4,13 +4,20 @@ The writer is fail-safe by default: ordinary write errors are logged to the
 regular Python logger and swallowed, because the agent kernel must never crash
 because of an audit-path bug.
 
-The one deliberate exception is :class:`AuditWriteRefused`. When an active
-compliance profile mandates signed, tamper-evident logs and the signer will not
-start, the writer refuses rather than silently downgrading to plaintext -- and
-that refusal is meant to reach the caller. A caller that swallows it converts
-"we could not record this action" into "we recorded nothing and did it anyway",
-which is the failure the profile exists to prevent. Catch ``Exception`` on the
-audit path if you must, but re-raise ``AuditWriteRefused``.
+The one deliberate exception is :class:`~maverick.audit.errors.AuditRefused` and
+its two subclasses: :class:`AuditWriteRefused` (an active compliance profile
+mandates signed, tamper-evident logs and the signer will not start) and
+:class:`~maverick.audit.signing.OffHostSigningRequiredError` (custody policy
+forbids signing with a co-located key). In both the writer refuses rather than
+silently downgrading, and that refusal is meant to reach the caller: swallowing
+it converts "we could not record this action" into "we recorded nothing and did
+it anyway", which is the failure the profile exists to prevent.
+
+**Prefer :func:`audit_event` over calling :func:`record` inside your own try.**
+It applies the contract for you. Catching ``Exception`` around a raw ``record()``
+is the documented mistake -- and note you must catch the BASE class, because a
+handler written against ``AuditWriteRefused`` alone misses the off-host refusal,
+which is the one that fires under the strictest posture the product sells.
 """
 
 from __future__ import annotations
@@ -34,6 +41,7 @@ from ..file_lock import (
     ensure_private_file,
 )
 from ..paths import data_dir
+from .errors import AuditRefused
 from .events import AuditEvent, EventKind, is_valid_day
 
 log = logging.getLogger(__name__)
@@ -94,7 +102,7 @@ _live_logs_lock = threading.Lock()
 _APPEND_LOCK_STRIPES = tuple(threading.Lock() for _ in range(64))
 
 
-class AuditWriteRefused(RuntimeError):
+class AuditWriteRefused(AuditRefused):
     """A compliance floor mandates signed logs and the signer would not start.
 
     Distinct from an incidental audit failure, and callers must treat it
@@ -104,9 +112,11 @@ class AuditWriteRefused(RuntimeError):
     action while the record cannot be written breaks the control the profile
     exists to provide. The unrecorded action is the failure, not the log.
 
-    Subclasses RuntimeError because that is what this path raised before it had
-    a name, so existing handlers keep working; the point of the name is to let a
-    caller re-raise *this* while still swallowing ordinary write errors.
+    Subclasses :class:`~maverick.audit.errors.AuditRefused` (itself a
+    RuntimeError, which is what this path raised before it had a name, so
+    existing handlers keep working). Catch the BASE, not this class: the sibling
+    refusal ``OffHostSigningRequiredError`` fires under the strictest posture we
+    sell, and a handler written against this name alone missed exactly that one.
     """
 
 
@@ -358,9 +368,23 @@ class AuditLog:
                     # enter the signed bytes either.
                     return bool(signer.write(payload))
                 line = json.dumps(payload, default=str) + "\n"
-                with open(path, "a", encoding="utf-8") as f:
-                    # Cross-process advisory lock so two processes appending the
-                    # same day-file can't interleave torn records above PIPE_BUF.
+                # Sidecar lock FIRST, exactly as AuditSigner.write does, and for
+                # the same reason: whole-file rewriters (GDPR erase,
+                # reanchor_file) publish a new inode via os.replace, so an
+                # flock on this handle cannot exclude them -- it guards an inode
+                # that is about to be orphaned.
+                #
+                # This path was missed when the signed one was fixed. With
+                # signing off, an erase running concurrently still destroyed
+                # committed rows while record() returned True: measured at 41
+                # lost out of 197 in a natural reproduction, and 4/4 in a
+                # targeted one. Ordering is sidecar -> append lock everywhere,
+                # so the two cannot deadlock.
+                with cross_process_lock(path), \
+                        open(path, "a", encoding="utf-8") as f:
+                    # The append lock still covers the torn-record case: two
+                    # processes appending the same day-file must not interleave
+                    # above PIPE_BUF.
                     with _file_append_lock(f):
                         f.write(line)
                         # fsync so a crash / power loss can't lose a committed
@@ -698,6 +722,52 @@ def record_global(
     return global_audit_log().record(event)
 
 
+def audit_event(kind: str, *, agent: str = "system", goal_id: int | None = None,
+                _global: bool = False, **payload: Any) -> bool:
+    """Record an event with the refusal contract applied for you.
+
+    Prefer this over calling :func:`record` inside your own ``try``. A census of
+    this repo found ~93 non-test ``record()`` call sites, 42 of them wrapped in
+    a bare ``except Exception: pass``, and exactly ONE that re-raised a refusal.
+    A contract honoured at one site in ninety-three is not a contract, it is a
+    coincidence -- so the safe behaviour belongs in one function rather than in
+    ninety-three reviewers' memories.
+
+    Semantics:
+
+    * :class:`~maverick.audit.errors.AuditRefused` propagates. The audit
+      subsystem declined to write because writing would have broken a guarantee
+      the deployment asserts; the caller must not proceed with the action.
+    * Any other failure is swallowed and logged **with a traceback**, because a
+      broken log must not crash a running agent -- but a permanently broken
+      audit path must not look identical to a healthy one either. That is what
+      a bare ``pass`` did, and it is why nobody noticed.
+
+    Returns True when the row was written, False when the write failed and was
+    swallowed. A caller that wants the old fire-and-forget behaviour should say
+    so explicitly rather than by omission.
+    """
+    # Resolve through the package namespace at call time, not this module's
+    # globals. `maverick.audit.record` is the documented entry point and is what
+    # the repo's tests monkeypatch; binding writer.record here would silently
+    # bypass every one of those patches while still looking correct.
+    from . import record as _record
+    from . import record_global as _record_global
+
+    fn = _record_global if _global else _record
+    try:
+        return bool(fn(kind, agent=agent, goal_id=goal_id, **payload))
+    except AuditRefused:
+        raise
+    # A broken audit path must not crash a run, but it must not be invisible
+    # either; the refusal above is the case that stops the caller.
+    # failure-policy: fail_soft_with_audit
+    except Exception:
+        log.warning("audit: write failed for kind=%r (agent=%r)", kind, agent,
+                    exc_info=True)
+        return False
+
+
 def reanchor_after_erase() -> int:
     """Re-anchor the default audit log's signed chain after a GDPR erase.
 
@@ -724,7 +794,9 @@ def reset_signer_after_erase(audit_dir: Path) -> None:
 
 __all__ = [
     "AuditLog",
+    "AuditRefused",
     "AuditWriteRefused",
+    "audit_event",
     "DEFAULT_AUDIT_DIR",
     "default_audit_log",
     "record",

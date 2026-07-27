@@ -712,7 +712,26 @@ def _verified_source_snapshot(audit_dir: Path, closed: list[Path]) -> dict[str, 
             "kind", "day", "tip_hash", "row_count", "ts",
             "prev_hash", "key_id", "hash", "sig",
         }
+        purge_keys = {
+            "kind", "days", "cutoff_day", "ts",
+            "prev_hash", "key_id", "hash", "sig",
+        }
+        purged: set[str] = set()
         for record in anchor_records:
+            # The ledger carries policy-retention records alongside anchors.
+            # Validate them under their own strict schema rather than rejecting
+            # the whole ledger -- an exact-key-set test against the anchor shape
+            # made a legitimate `retention enforce` permanently break WORM push.
+            if record.get("kind") == "retention_purge":
+                if set(record) != purge_keys or not isinstance(record["days"], list):
+                    raise WormUnavailable("signed anchor ledger schema is invalid")
+                for entry in record["days"]:
+                    if not isinstance(entry, dict) or not isinstance(
+                        entry.get("day"), str
+                    ):
+                        raise WormUnavailable("signed anchor ledger schema is invalid")
+                    purged.add(entry["day"])
+                continue
             day = record.get("day")
             row_count = record.get("row_count")
             if (
@@ -729,6 +748,12 @@ def _verified_source_snapshot(audit_dir: Path, closed: list[Path]) -> dict[str, 
             ):
                 raise WormUnavailable("signed anchor ledger schema is invalid")
             latest[day] = record
+
+        # A day retired by policy retention has no file left to read. Its anchor
+        # stays in the append-only ledger by design; consuming it here would
+        # fail every subsequent push on a missing file.
+        for day in purged:
+            latest.pop(day, None)
 
         requested = {path.stem: path for path in closed}
         if not set(requested).issubset(latest):

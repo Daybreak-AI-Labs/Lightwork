@@ -104,7 +104,7 @@ from nothing:
 - **Audit + evidence** — append-only Ed25519 Merkle-chained audit log
   (`maverick/audit/`), `maverick/soc2.py` evidence collector,
   `maverick/safety_report.py` annual.
-- **Disclosure + backports** — [`SECURITY.md`](../../SECURITY.md) (the vuln
+- **Disclosure + backports** — [`SECURITY.md`](../SECURITY.md) (the vuln
   reward program), [`docs/security-backports.md`](../security-backports.md)
   (the LTS safety-branch SLA tooling).
 - **Threat model + audit readiness** —

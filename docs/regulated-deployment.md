@@ -50,6 +50,22 @@ audit segments, but the current day-file stays plaintext until it is sealed, so 
 anonymous mode actually redacts PII from the live log. Without it the
 `PII redaction in logs` compliance control reports `action_needed`.
 
+Retention and tamper-evidence are designed to coexist. `maverick retention enforce`
+deletes expired day-files, but their entries stay in the append-only anchor ledger --
+so the purge is recorded there as a signed `retention_purge` row naming each removed
+day and the exact tip hash and row count it destroyed. `maverick audit verify` reads
+that row and reports the deletion as policy rather than tampering, which is why a
+retention-enabled deployment still verifies green.
+
+The record is deliberately narrow, so it excuses a deletion without excusing an
+attack. It is honoured only when the ledger's own signed chain is intact, only for
+the days it names, and only when the tip and row count match that day's last anchor
+-- so a file altered before deletion, or truncated before deletion, still fails
+verification. Because the row commits to the tip, an archived copy of a purged day
+(see [WORM audit export](security-hardening.md#worm-audit-export-immutable-retention))
+can be reconciled byte-for-byte against what
+the purge claims it removed.
+
 The env equivalents (for containers / CI, where a secrets manager injects the key):
 
 ```bash

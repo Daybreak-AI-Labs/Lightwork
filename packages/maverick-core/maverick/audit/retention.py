@@ -70,6 +70,7 @@ def purge_audit_files(
     cutoff_ts = _cutoff_for_days(days, now=now)
     cutoff_day = datetime.fromtimestamp(cutoff_ts, tz=timezone.utc).date()
     removed: list[str] = []
+    purged: list[dict] = []
     kept = 0
     for path in sorted(audit_dir.glob("*.ndjson")):
         try:
@@ -80,20 +81,74 @@ def purge_audit_files(
         # <= : the day-file dated exactly `days` ago is expired and must be
         # purged. Strict < kept it, making the window days+1.
         if day <= cutoff_day:
+            # Capture what is about to be destroyed BEFORE unlinking, so the
+            # signed purge record commits to the exact tip and row count. After
+            # the unlink this is unrecoverable, and a purge row that cannot name
+            # the tip is refused by verify_anchors (see _purge_authorizes).
+            tip, count = _tip_and_count(path)
             removed.append(path.name)
             if not dry_run:
                 try:
                     path.unlink()
                 except OSError as e:
                     log.warning("retention: cannot unlink %s: %s", path, e)
+                    removed.pop()
                     continue
+                # The rewrite/append lock sidecar guards a file that no longer
+                # exists. Left behind it is one empty inode per purged day,
+                # forever -- unbounded growth inside the routine whose whole
+                # job is to bound it.
+                sidecar = path.parent / (path.name + ".lock")
+                try:
+                    sidecar.unlink()
+                except OSError:
+                    pass
+            purged.append({
+                "day": path.stem, "tip_hash": tip, "row_count": count,
+            })
         else:
             kept += 1
+    if purged and not dry_run:
+        # Record the deletion in the append-only anchor ledger, which retention
+        # never prunes. Without it every purged day is reported forever as
+        # `anchored_file_deleted` -- policy retention forging a permanent
+        # tamper alert.
+        try:
+            from .signing import record_retention_purge
+            record_retention_purge(audit_dir, purged)
+        # failure-policy: fail_soft_with_audit
+        except Exception as e:  # pragma: no cover - must not undo the purge
+            log.warning("retention: could not record anchor purge marker: %s", e)
     log.info(
         "retention: audit purge cutoff=%s removed=%d kept=%d dry_run=%s",
         cutoff_day, len(removed), kept, dry_run,
     )
     return {"removed": removed, "kept": kept, "cutoff_day": str(cutoff_day)}
+
+
+def _tip_and_count(path: Path) -> tuple[str, int]:
+    """Signed tip hash and row count of a day-file, or ``("", 0)``.
+
+    Storage limitation is a legal obligation, so an unreadable file is still
+    deleted -- but the deletion then cannot be attested, and ``audit verify``
+    will report it as ``anchored_file_deleted`` because a purge record with no
+    tip is (correctly) refused. Say so at the point of loss rather than leaving
+    an operator to discover an unexplained permanent break later.
+    """
+    try:
+        from .signing import _file_tip_and_count
+        tip, count = _file_tip_and_count(path)
+        return str(tip or ""), int(count or 0)
+    # failure-policy: best_effort
+    except Exception as e:
+        log.warning(
+            "retention: cannot read the signed tip of %s (%s); deleting it "
+            "anyway to honour storage limitation, but the purge cannot be "
+            "attested and `audit verify` will report this day as deleted. "
+            "A sealed segment needs its at-rest key available during retention.",
+            path, e,
+        )
+        return "", 0
 
 
 def _purge_table_by_time(

@@ -78,7 +78,7 @@ operating evidence.
 
 ### Standing posture gate (CI)
 
-The [`Compliance Posture`](../../../.github/workflows/compliance-posture.yml)
+The [`Compliance Posture`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/.github/workflows/compliance-posture.yml)
 GitHub Actions workflow runs the gate automatically: it applies
 [`compliant-config.toml`](../deployment/compliant-config.toml) and fails unless
 `maverick soc2` is compliant-ready. It runs weekly, on demand

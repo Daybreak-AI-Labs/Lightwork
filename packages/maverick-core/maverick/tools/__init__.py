@@ -1304,13 +1304,18 @@ def base_registry(
     from .latex_tool import latex_tool
     from .notebook_exec import notebook_exec
     from .teams_tool import teams_tool
-    from .webrtc_tool import webrtc_tool
     from .websocket_tool import websocket_tool
     reg.register(notebook_exec(sandbox))
     reg.register(latex_tool(sandbox))
     reg.register(diagram_tool(sandbox))
     reg.register(websocket_tool())
-    reg.register(webrtc_tool())
+    # webrtc is NOT registered by default. Its own module docstring has always
+    # said "Factory exported, NOT registered in the default tool set: callers
+    # opt in" -- the registration contradicted it. It holds a bidirectional P2P
+    # data channel to an arbitrary remote peer, and unlike `websocket` it had
+    # no SSRF pin, no risk tier, and no containment denial, so it was the one
+    # default-on transport that no control covered. Both are fixed below; the
+    # registration now matches the documented contract.
     reg.register(teams_tool())
     # self_edit intentionally is not registered in the default tool set.
     # It can edit Lightwork source/config and cannot rely on a model-supplied

@@ -13,7 +13,7 @@ sales channel: they are never asked to pitch licenses.
 ## Criteria (all required)
 
 1. **Demonstrated contribution over ≥3 months** — any mix of: merged PRs
-   (under the [CLA](../../CLA.md)), high-quality issue triage, published
+   (under the [CLA](../CLA.md)), high-quality issue triage, published
    skills/plugins that pass the validator and
    [moderation checks](./skill-of-the-year.md), a verified
    [showcase-wall](../showcase.md) entry, meetup organizing
@@ -22,7 +22,7 @@ sales channel: they are never asked to pitch licenses.
 2. **Technical fluency** — can install, configure, and demo the runtime
    unassisted (the [booth kit](./conference-booth.md) station list is the
    practical bar).
-3. **Conduct record** — no unresolved [code-of-conduct](../../CODE_OF_CONDUCT.md)
+3. **Conduct record** — no unresolved [code-of-conduct](../CODE_OF_CONDUCT.md)
    issues. Ambassadors are held to the CoC's *community leader* standard:
    they model it, and a violation removes the title (see below).
 4. **Honesty fit** — their public material doesn't over-claim. One review
@@ -51,22 +51,22 @@ months, renewable on the same criteria.
 - Follow the claims policy (capabilities from `FEATURES.md`, forward-looking
   statements labeled as roadmap, no open-source promises — the lite edition
   is a stated possibility, not a commitment) and
-  [`TRADEMARK.md`](../../TRADEMARK.md) (nominative use; never "official").
+  [`TRADEMARK.md`](../TRADEMARK.md) (nominative use; never "official").
 - Route press to the [press kit](./press-and-case-studies.md) contact;
   route license questions to the licensor contact; route security reports
-  to [`SECURITY.md`](../../SECURITY.md). Ambassadors never speak *for* the
+  to [`SECURITY.md`](../SECURITY.md). Ambassadors never speak *for* the
   project on those three.
 
 ## Code-of-conduct tie-in
 
 The ambassador title makes someone a *community leader* under
-[`CODE_OF_CONDUCT.md`](../../CODE_OF_CONDUCT.md), with the enforcement
+[`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md), with the enforcement
 responsibilities that section assigns. Consequences for violations follow
 the CoC's enforcement guidelines, with one addition: any enforcement action
 at the *warning* level or above suspends the title pending review; a
 *temporary ban* or above removes it. Conduct reports follow the existing
 channel (private security advisory with `[CONDUCT]` in the title, per
-[`MAINTAINERS.md`](../../MAINTAINERS.md)).
+[`MAINTAINERS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/MAINTAINERS.md)).
 
 ## Lifecycle + measurement
 

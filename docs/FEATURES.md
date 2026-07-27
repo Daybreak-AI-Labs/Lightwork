@@ -1460,7 +1460,7 @@ here.
   attack samples are allowed and disclosed); writes corpus + MANIFEST +
   README.
   **Security backports + LTS machinery**
-  ([`docs/security-backports.md`](../docs/security-backports.md) +
+  ([`docs/security-backports.md`](security-backports.md) +
   `backport_tool.py`, `python -m maverick.backport_tool scan|plan|check`):
   the policy (what qualifies, the `lts/<v>` 2-year safety-fix branch, 7-day
   SLA) made executable — `scan` finds security-marked commits, `plan` lists
@@ -1468,7 +1468,7 @@ here.
   twin isn't re-flagged), and `check` exits non-zero when an eligible fix is
   past the SLA — read-only; cherry-picks/pushes stay maintainer acts.
   **Formal verification of the sandbox interface (TLA+)**
-  ([`docs/specs/tla/`](../docs/specs/tla/README.md)): `SandboxInterface.tla`
+  ([`docs/specs/tla/`](specs/tla/README.md)): `SandboxInterface.tla`
   models the chokepoint as a state machine and TLC-verifies — for all
   interleavings — no silent downgrade to host exec under a container backend,
   scrubbed child env always, refused-never-ran, bounded execution budget, and
@@ -2072,11 +2072,13 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   kill -9 at any byte: one fsync'd `os.write` per record, seq resumes after
   reopen, replay tolerates (and counts) the torn tail vs mid-file corruption,
   gap detection; fsync policy knob for test/throughput mode.
-- **Right-to-rectification** (`rectification.py`) — GDPR Art. 16 counterpart
-  to DSAR/erasure: find a subject's occurrences across goals/turns/facts
-  (snippets), rectify with dry-run default inside one write transaction, and
-  a subject-digest audit trail (`rectifications.jsonl`) that never carries
-  the old or new value.
+- **Right-to-rectification** (`rectification.py`) — **built, not yet wired:
+  no production code path reaches this module** (see
+  `maverick.reachability`), so it is available to call but is not part of any
+  shipped flow. GDPR Art. 16 counterpart to DSAR/erasure: find a subject's
+  occurrences across goals/turns/facts (snippets), rectify with dry-run
+  default inside one write transaction, and a subject-digest audit trail
+  (`rectifications.jsonl`) that never carries the old or new value.
 - **Honeytoken planting** (`safety/honeytokens.py`) — mint decoy credentials
   (AWS-key-shaped, API-key, passphrase), plant a realistic 0600 secrets file,
   and alert (once per fingerprint) when a decoy value appears in text — alerts
@@ -2568,9 +2570,10 @@ tokenizer caveat always rendered); **cross-run learning cache**
 (`learning_cache.py`, opt-in `[memory] learning_cache`): memoize *verified*
 sub-results across runs (required `verified_by` provenance, TTL + LRU cap,
 refuses to store anything the secret detector flags); **energy/CO2
-accounting** (`energy_accounting.py`): clearly-labeled estimates from
-configurable Wh/1k-token + grid-CO2 coefficients (output tokens weighted 3x),
-disclaimer always rendered; **Redis tool cache** (`redis_tool_cache.py`,
+accounting** (`energy_accounting.py`, **built but unreached: nothing in
+production imports it**): clearly-labeled estimates from configurable
+Wh/1k-token + grid-CO2 coefficients (output tokens weighted 3x), disclaimer
+always rendered; **Redis tool cache** (`redis_tool_cache.py`,
 `[tools] output_cache_backend = "redis"`): cross-process/cross-host tier
 reusing the same key canonicalization, namespace-scoped purge, fail-open on
 any Redis error; **WAL contention audit** (`test_wal_contention.py`): pins the
@@ -2901,7 +2904,11 @@ tested without spawning py-spy.
   the live counterpart to the static `a11y_tree` extractor.
 - **WebRTC tool** (`tools/webrtc_tool.py`, `[webrtc]` extra): data-channel
   offer/answer/send/close over lazily-imported aiortc (signalling is the
-  caller's; media tracks out of scope, stated honestly).
+  caller's; media tracks out of scope, stated honestly). **Built but not
+  registered by default** — nothing in production imports it; a caller opts in
+  by registering the factory. It holds a bidirectional channel to an arbitrary
+  peer, so it is tiered `high` risk and containment-denied alongside
+  `websocket`.
 - **Audio understanding** (`tools/audio_understanding.py`, `[clap]` extra):
   zero-shot NON-SPEECH classification — a CLAP model embeds the clip and
   free-text labels ("glass breaking", "dog barking", "fire alarm") into one

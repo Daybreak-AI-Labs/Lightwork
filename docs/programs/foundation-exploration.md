@@ -6,7 +6,7 @@ governance v2 launch (elected TSC)" rows are *contingent* on this memo's
 outcome — exploration may legitimately conclude "no").
 **Status:** the exploration framework, complete. **The decision is the
 founder's** — Lightwork is solo-maintained under BDFL governance
-([`MAINTAINERS.md`](../../MAINTAINERS.md)), the copyright is held by the
+([`MAINTAINERS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/MAINTAINERS.md)), the copyright is held by the
 Licensor, and no committee output of this memo binds him.
 
 ## The honest starting point
@@ -15,7 +15,7 @@ Foundations (Linux Foundation, Apache, Eclipse model) exist primarily to
 hold **open-source** assets neutrally: trademark, copyright/license
 stewardship, and vendor-neutral governance. Lightwork is **proprietary,
 commercially licensed** software ([`LICENSE`](../../LICENSE)) whose
-copyright concentration — via the [CLA](../../CLA.md) — is a deliberate
+copyright concentration — via the [CLA](../CLA.md) — is a deliberate
 commercial asset, and whose roadmap explicitly keeps the
 governance/compliance platform proprietary even if a "lite" edition ever
 ships. A conventional foundation hand-off is therefore mostly *not
@@ -49,7 +49,7 @@ What it would **not** change:
   the dishonesty this repo's docs exist to avoid.
 - **The CLA / copyright position**, unless deliberately given up — which is
   a one-way door and a commercial decision, not a governance one.
-- **The trademark**, unless transferred — [`TRADEMARK.md`](../../TRADEMARK.md)
+- **The trademark**, unless transferred — [`TRADEMARK.md`](../TRADEMARK.md)
   is owned by the Licensor; transferring the mark of a proprietary product
   to a neutral body while selling the product under it is incoherent.
 - **Engineering capacity.** Paperwork creates obligations, not maintainers.

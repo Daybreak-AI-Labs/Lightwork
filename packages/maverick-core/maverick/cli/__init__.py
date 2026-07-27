@@ -5689,6 +5689,20 @@ def audit_verify(
     else:
         click.echo(f"OK: tip-ledger intact ({anchor_dir})")
 
+    # State the deletions the tip-ledger stopped reporting as breaks. Without
+    # this line "OK" would read as "nothing was removed" when the truth is
+    # "these days were removed by policy and here is the signed record".
+    from ..audit.signing import retention_purged_days
+    retired = retention_purged_days(anchor_dir)
+    if retired:
+        click.echo(
+            f"note: {len(retired)} day-file(s) retired by [retention] policy "
+            "and recorded in the signed tip-ledger:")
+        for entry in retired:
+            click.echo(
+                f"  {entry.get('day')}: {entry.get('row_count')} row(s), "
+                f"tip {str(entry.get('tip_hash'))[:12]}...")
+
     if any_break:
         raise SystemExit(1)
 

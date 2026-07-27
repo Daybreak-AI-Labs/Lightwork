@@ -146,10 +146,25 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     args = p.parse_args(argv)
     rows = build_matrix()
     print(render(rows))
+    # Anti-vacuity. With no plugins installed this printed one line and exited
+    # 0, which reads in a CI column as "plugin compatibility verified" when
+    # nothing was compared. Zero plugins IS the expected state in this repo's
+    # own CI, so it must not fail -- but it must be spelled differently from a
+    # real pass, because those two mean opposite things to whoever reads the
+    # green check. The gate's ability to reject an incompatible plugin is
+    # asserted by a committed negative control in test_plugin_matrix.py rather
+    # than implied by this run.
+    if not rows:
+        print("plugin matrix: 0 plugins installed -- nothing was compared. "
+              "This is the expected state for a plugin-free install and is NOT "
+              "evidence that plugin compatibility is enforced; the enforcement "
+              "itself is covered by the negative control in the test suite.")
+        return 0
     if args.ci:
         probs = problems(rows)
         for prob in probs:
             print(f"PROBLEM: {prob}")
+        print(f"plugin matrix: {len(rows)} plugin(s) checked, {len(probs)} problem(s)")
         return 1 if probs else 0
     return 0
 
