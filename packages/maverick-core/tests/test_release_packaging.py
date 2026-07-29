@@ -1012,6 +1012,37 @@ def test_ci_posture_tools_are_exactly_pinned_and_secret_scan_uses_module():
     assert "python -m detect_secrets scan --baseline" in workflow
 
 
+def test_secret_scan_excludes_only_the_rotating_signed_manifest():
+    baseline = json.loads(
+        (REPO_ROOT / ".secrets.baseline").read_text(encoding="utf-8")
+    )
+    regex_filters = [
+        item
+        for item in baseline["filters_used"]
+        if item["path"] == "detect_secrets.filters.regex.should_exclude_file"
+    ]
+    assert len(regex_filters) == 1
+    patterns = regex_filters[0]["pattern"]
+    assert len(patterns) == 1
+    exclusion = re.compile(patterns[0])
+
+    manifest = (
+        "benchmarks/results/governance-frontier-v1/measured-manifest.json"
+    )
+    assert exclusion.search(manifest)
+    assert exclusion.search(manifest.replace("/", "\\"))
+    assert not exclusion.search(
+        "benchmarks/results/governance-frontier-v1/trusted-publisher.pub"
+    )
+    assert not exclusion.search(
+        "benchmarks\\results\\governance-frontier-v1\\trusted-publisher.pub"
+    )
+    assert not exclusion.search(f"{manifest}.bak")
+    assert not exclusion.search(
+        "benchmarks/results/another-run/measured-manifest.json"
+    )
+
+
 def test_ci_constraints_satisfy_shipped_network_security_floors():
     constraints = (
         REPO_ROOT / "requirements" / "ci.txt"

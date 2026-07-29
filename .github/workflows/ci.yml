@@ -82,8 +82,10 @@ jobs:
         # current finding was hand-audited and is a placeholder, a public
         # constant (e.g. X's web-client bearer), AWS's docs example key, or a
         # deliberately-fake redaction-test fixture; all are recorded by hash in
-        # .secrets.baseline. Lockfiles are excluded (dependency-hash churn) via
-        # the baseline's recorded filter.
+        # .secrets.baseline. Lockfiles (dependency-hash churn) and the exact
+        # signed governance manifest (rotating public digests/signatures) are
+        # excluded via the baseline's recorded filter. Its neighboring key and
+        # verifier files remain scanned.
         #
         # We re-scan into a throwaway copy of the baseline and fail only when a
         # NEW (file, secret-hash) pair appears. Comparing by HASH -- not via the
