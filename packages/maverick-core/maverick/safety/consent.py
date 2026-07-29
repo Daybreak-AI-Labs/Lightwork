@@ -439,22 +439,56 @@ def grant_persistent(
 
 
 def revoke(
-    action: str, scope: str | None = None, *, path: Path | None = None,
+    action: str,
+    scope: str | None = None,
+    *,
+    path: Path | None = None,
+    strict: bool = False,
+    write_tombstone: bool = False,
 ) -> bool:
-    """Remove all matching grants. Returns True if anything was removed."""
+    """Remove all matching grants. Returns True if anything was removed.
+
+    The default preserves the consent primitive's historical fail-soft
+    administrative behavior. Security lifecycle transitions that must prove
+    authority was revoked before proceeding (for example generated-tool
+    deletion) pass ``strict=True`` so an unreadable or unwritable ledger aborts
+    the mutation instead of looking identical to "there was no grant".
+    ``write_tombstone=True`` appends a signed revocation even when no active
+    grant exists, preserving durable evidence that the exact authority was
+    invalidated. Repeating an already-current tombstone is idempotent.
+    """
     action, normalized_scope = _validated_key(action, scope)
     try:
         with _locked_ledger(path) as resolved:
-            key = _ledger_key(resolved, create=False)
+            key = _ledger_key(resolved, create=write_tombstone)
             records = _load_records_unlocked(resolved, key)
-            if key is None or (action, normalized_scope) not in _active_grants(records):
+            was_active = (action, normalized_scope) in _active_grants(records)
+            if key is None or (not was_active and not write_tombstone):
                 return False
+            if write_tombstone and not was_active:
+                tenant, principal, policy = _authority_binding()
+                last_matching = next(
+                    (
+                        record
+                        for record in reversed(records)
+                        if record["tenant"] == tenant
+                        and record["principal"] == principal
+                        and record["policy"] == policy
+                        and record["action"] == action
+                        and record["scope"] == normalized_scope
+                    ),
+                    None,
+                )
+                if last_matching is not None and last_matching["op"] == "revoke":
+                    return False
             _append_record_unlocked(
                 resolved, key, records, op="revoke",
                 action=action, scope=normalized_scope,
             )
-            return True
+            return was_active
     except (ConsentLedgerError, OSError, PermissionError) as exc:
+        if strict:
+            raise
         log.warning("consent: cannot revoke standing grant: %s", exc)
         return False
 

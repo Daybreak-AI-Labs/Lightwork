@@ -22,6 +22,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from .budget import Budget, _cache_write_mult_from_ttl
+from .pricing import (
+    ModelPrice,
+    PriceUse,
+    UnverifiedRateError,
+    VersionedPricingProvider,
+    load_pricing_evidence_pack,
+)
 
 # Latest Claude family as of 2026-05.
 MODEL_OPUS = "claude-opus-4-8"
@@ -59,71 +66,250 @@ ROLE_MODELS: dict[str, str] = {
 }
 
 
-# Per-million-token list prices (May 2026, no cache discount, USD).
-# Used by Budget.record_tokens to compute spend accurately per model.
-#
-# Wave 12 hotfix: an earlier Wave 12 commit raised Opus to ($15, $75)
-# based on a confused reading of Anthropic's docs (those are the
-# legacy Opus 4.0/4.1 rates; Opus 4.5/4.6/4.7 are all priced at
-# $5/$25). Verified May 2026 against
-# https://platform.claude.com/docs/en/about-claude/pricing and against
-# vals.ai's measured Opus 4.7 cost-per-test of $2.42 (which only
-# reconciles with $5/$25). Reverting to the correct ($5.0, $25.0).
+# Immutable rate-card snapshot. A price is not merely two floats: the billing
+# boundary needs the source, applicability/fetch dates, currency, confidence,
+# and verification status that justify those floats. Every row must exactly
+# match the tracked evidence pack. Rows whose current official source could not
+# be captured remain available for planning, but cannot cross the billing gate.
+MODEL_RATE_CARD_VERSION = "2026-07-29.2"
+_PRICING_EVIDENCE = load_pricing_evidence_pack()
+
+
+def _model_price(
+    model_id: str,
+    rates: tuple[float, float],
+    *,
+    evidence_id: str,
+) -> ModelPrice:
+    evidence = _PRICING_EVIDENCE.entries[evidence_id]
+    return ModelPrice(
+        model_id=model_id,
+        input_per_mtok=rates[0],
+        output_per_mtok=rates[1],
+        source=evidence.source_url,
+        as_of=evidence.as_of,
+        fetched_at=evidence.retrieved_at,
+        currency=evidence.currency,
+        confidence=evidence.confidence,
+        verified=evidence.verified,
+        rate_card_version=MODEL_RATE_CARD_VERSION,
+        evidence_id=evidence_id,
+        pricing_basis=evidence.pricing_basis,
+        applicability=evidence.applicability,
+    )
+
+
+MODEL_PRICING_PROVIDER = VersionedPricingProvider(
+    MODEL_RATE_CARD_VERSION,
+    [
+        # Anthropic official list pricing.
+        _model_price(
+            MODEL_OPUS,
+            (5.0, 25.0),
+            evidence_id="anthropic-direct-2026-07-29",
+        ),
+        _model_price(
+            MODEL_OPUS_FAST,
+            (10.0, 50.0),
+            evidence_id="anthropic-direct-2026-07-29",
+        ),
+        _model_price(
+            "claude-opus-4-7",
+            (5.0, 25.0),
+            evidence_id="anthropic-direct-2026-07-29",
+        ),
+        _model_price(
+            "claude-opus-4-6",
+            (5.0, 25.0),
+            evidence_id="anthropic-direct-2026-07-29",
+        ),
+        _model_price(
+            "claude-opus-4-5",
+            (5.0, 25.0),
+            evidence_id="anthropic-direct-2026-07-29",
+        ),
+        _model_price(
+            MODEL_SONNET,
+            (3.0, 15.0),
+            evidence_id="anthropic-direct-2026-07-29",
+        ),
+        _model_price(
+            MODEL_HAIKU,
+            (1.0, 5.0),
+            evidence_id="anthropic-direct-2026-07-29",
+        ),
+        _model_price(
+            "claude-haiku-4-5-20251001",
+            (1.0, 5.0),
+            evidence_id="anthropic-direct-2026-07-29",
+        ),
+        # OpenAI billing stores a conservative flat ceiling because the
+        # published price varies by context length and processing region.
+        # The evidence pack records both the direct list prices and the exact
+        # ceiling policy, so a flat ModelPrice cannot undercount either tier.
+        _model_price(
+            "gpt-5.5",
+            (11.0, 49.5),
+            evidence_id="openai-direct-ceiling-2026-07-29",
+        ),
+        _model_price(
+            "gpt-5.4",
+            (5.5, 24.75),
+            evidence_id="openai-direct-ceiling-2026-07-29",
+        ),
+        _model_price(
+            "gpt-5.4-pro",
+            (66.0, 297.0),
+            evidence_id="openai-direct-ceiling-2026-07-29",
+        ),
+        _model_price(
+            "gpt-5.4-mini",
+            (0.825, 4.95),
+            evidence_id="openai-direct-ceiling-2026-07-29",
+        ),
+        _model_price(
+            "gpt-5.4-nano",
+            (0.22, 1.375),
+            evidence_id="openai-direct-ceiling-2026-07-29",
+        ),
+        _model_price(
+            "deepseek-v4-flash",
+            (0.14, 0.28),
+            evidence_id="deepseek-current-2026-07-29",
+        ),
+        _model_price(
+            "deepseek-v4-pro",
+            (0.435, 0.87),
+            evidence_id="deepseek-current-2026-07-29",
+        ),
+        _model_price(
+            "deepseek-chat",
+            (0.27, 1.10),
+            evidence_id="deepseek-deprecated-alias-estimates-2026-07-29",
+        ),
+        _model_price(
+            "deepseek-reasoner",
+            (0.55, 2.19),
+            evidence_id="deepseek-deprecated-alias-estimates-2026-07-29",
+        ),
+        _model_price(
+            "grok-4.5",
+            (4.0, 12.0),
+            evidence_id="xai-current-2026-07-29",
+        ),
+        _model_price(
+            "grok-4.3",
+            (2.5, 5.0),
+            evidence_id="xai-current-2026-07-29",
+        ),
+        _model_price(
+            "grok-build-0.1",
+            (2.0, 4.0),
+            evidence_id="xai-current-2026-07-29",
+        ),
+        _model_price(
+            "grok-code-fast",
+            (1.0, 2.0),
+            evidence_id="xai-ambiguous-estimates-2026-07-29",
+        ),
+        _model_price(
+            "grok-4-latest",
+            (3.0, 15.0),
+            evidence_id="xai-ambiguous-estimates-2026-07-29",
+        ),
+        _model_price(
+            "grok-4-mini",
+            (0.30, 0.50),
+            evidence_id="xai-ambiguous-estimates-2026-07-29",
+        ),
+        _model_price(
+            "grok-3",
+            (3.0, 15.0),
+            evidence_id="xai-ambiguous-estimates-2026-07-29",
+        ),
+        _model_price(
+            "gemini-3.5-flash",
+            (1.5, 9.0),
+            evidence_id="google-gemini-flash-2026-07-29",
+        ),
+        _model_price(
+            "gemini-3.5-pro",
+            (2.50, 10.0),
+            evidence_id="google-unsupported-estimates-2026-07-29",
+        ),
+        _model_price(
+            "gemini-3-pro",
+            (2.50, 10.0),
+            evidence_id="google-unsupported-estimates-2026-07-29",
+        ),
+        _model_price(
+            "gemini-3-flash",
+            (0.15, 0.60),
+            evidence_id="google-unsupported-estimates-2026-07-29",
+        ),
+        *[
+            _model_price(
+                model_id,
+                rates,
+                evidence_id="moonshot-uncaptured-estimates-2026-07-29",
+            )
+            for model_id, rates in (
+                ("kimi-k2", (0.60, 2.50)),
+                ("kimi-k1.5", (0.20, 2.00)),
+                ("moonshot-v1-8k", (0.30, 0.30)),
+                ("moonshot-v1-32k", (0.60, 0.60)),
+                ("moonshot-v1-128k", (1.20, 1.20)),
+            )
+        ],
+        *[
+            _model_price(
+                model_id,
+                rates,
+                evidence_id="openrouter-uncaptured-estimates-2026-07-29",
+            )
+            for model_id, rates in (
+                ("minimax/minimax-m2.5", (0.30, 1.20)),
+                ("deepseek/deepseek-v4-pro", (0.14, 0.55)),
+                ("qwen/qwen3-coder-next", (0.20, 0.80)),
+            )
+        ],
+        # Zero means no metered external API-token charge, not zero
+        # infrastructure cost. The evidence explicitly encodes this scope.
+        *[
+            _model_price(
+                model_id,
+                (0.0, 0.0),
+                evidence_id="local-api-metering-policy-2026-07-29",
+            )
+            for model_id in (
+                "qwen3-coder-next",
+                "qwen3-32b",
+                "llama-4-maverick",
+            )
+        ],
+    ],
+    evidence_pack=_PRICING_EVIDENCE,
+)
+
+
+def model_price_quote(
+    model_id: str,
+    *,
+    estimate_only: bool = False,
+) -> ModelPrice | None:
+    """Resolve one canonical quote; billing-grade is the safe default."""
+
+    use = PriceUse.ESTIMATE if estimate_only else PriceUse.BILLING
+    return MODEL_PRICING_PROVIDER.quote(model_id, use=use)
+
+
+# Compatibility view for integrations that only display or compare rates.
+# It intentionally includes provisional estimate-only rows. Billing and
+# routing decisions must use ``model_price_quote`` / MODEL_PRICING_PROVIDER so
+# verification metadata is enforced rather than lost in tuple unpacking.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
-    # Anthropic (verified May 2026 against platform.claude.com/docs/.../pricing)
-    MODEL_OPUS:                  (5.0, 25.0),    # opus 4.8 (also 4.5/4.6/4.7 — same $5/$25)
-    MODEL_OPUS_FAST:             (10.0, 50.0),   # opus 4.8 fast mode: 2.5x faster, 2x price
-    "claude-opus-4-7":           (5.0, 25.0),    # prior Opus, still selectable in config
-    # Older Opus tiers share the $5/$25 rate (comment above). They were absent
-    # from this table, so calls fell through to the Sonnet fallback ($3/$15) --
-    # a ~40% output-cost undercount, so an Opus budget overshot (user-testing
-    # finding). effort.py/anthropic_provider.py still reference these ids.
-    "claude-opus-4-6":           (5.0, 25.0),
-    "claude-opus-4-5":           (5.0, 25.0),
-    MODEL_SONNET:                (3.0, 15.0),    # sonnet 4.6
-    MODEL_HAIKU:                 (1.0, 5.0),     # haiku 4.5
-    # OpenAI (only enable after verifying against platform.openai.com/docs/pricing
-    # for your specific model ids; the prior values were speculative SKUs).
-    "gpt-5.5":                   (5.0, 20.0),
-    "gpt-5.4":                   (3.0, 12.0),
-    "gpt-5.4-pro":               (10.0, 40.0),
-    "gpt-5.4-mini":              (0.50, 2.0),
-    "gpt-5.4-nano":              (0.10, 0.40),
-    # OpenRouter / DeepSeek (May 26 update: actual DeepSeek API pricing,
-    # not OpenRouter aliases. https://platform.deepseek.com/api-docs/pricing)
-    "deepseek-chat":             (0.27, 1.10),    # V3.2 — cache off
-    "deepseek-reasoner":         (0.55, 2.19),    # R1-line
-    "deepseek-v4-pro":           (0.14, 0.55),
-    "deepseek-v4-flash":         (0.07, 0.28),
-    # xAI Grok (May 26: https://docs.x.ai/docs/models#models-and-pricing)
-    "grok-4-latest":             (3.00, 15.00),
-    "grok-4-mini":               (0.30, 0.50),
-    "grok-code-fast":            (0.20, 1.50),
-    "grok-3":                    (3.00, 15.00),
-    "grok-4.3":                  (1.25, 2.50),
-    # Moonshot / Kimi (May 26: https://platform.moonshot.ai/pricing)
-    "kimi-k2":                   (0.60, 2.50),
-    "kimi-k1.5":                 (0.20, 2.00),
-    "moonshot-v1-8k":            (0.30, 0.30),
-    "moonshot-v1-32k":           (0.60, 0.60),
-    "moonshot-v1-128k":          (1.20, 1.20),
-    # Google (Gemini 3.5 Flash GA at I/O 2026-05-19; 3.5 Pro followed in June)
-    "gemini-3.5-pro":            (2.50, 10.0),
-    "gemini-3.5-flash":          (0.15, 0.60),
-    "gemini-3-pro":              (2.50, 10.0),
-    "gemini-3-flash":            (0.15, 0.60),
-    # OpenRouter vendor/model ids (cheap, near-frontier-on-coding open models).
-    # Keyed by the OpenRouter `vendor/model` id because that is the bare
-    # model_id _lookup_price sees after stripping the `openrouter:` prefix.
-    # TODO: verify each rate against https://openrouter.ai pricing before relying
-    # on these for billing — placeholders below are best-effort May/June 2026.
-    "minimax/minimax-m2.5":      (0.30, 1.20),    # MiniMax M2.5 — verify on openrouter.ai
-    "deepseek/deepseek-v4-pro":  (0.14, 0.55),    # DeepSeek V4 Pro via OpenRouter — verify
-    "qwen/qwen3-coder-next":     (0.20, 0.80),    # Qwen3 Coder Next via OpenRouter — verify
-    # Open-weight defaults via Ollama: priced at zero (compute cost).
-    "qwen3-coder-next":          (0.0, 0.0),
-    "qwen3-32b":                 (0.0, 0.0),
-    "llama-4-maverick":          (0.0, 0.0),
+    model_id: quote.rates
+    for model_id, quote in MODEL_PRICING_PROVIDER.rates.items()
 }
 
 
@@ -131,14 +317,14 @@ MODEL_PRICES: dict[str, tuple[float, float]] = {
 # ids. The dashboard renders these as ``provider:<id>`` specs (bare for
 # anthropic, the default provider) and also lets the operator type any other
 # id. Admins extend the list via ``[models] catalog`` in config.toml. Prices
-# live in MODEL_PRICES; a model here without a price bills at the Sonnet
-# fallback until added there.
+# live in MODEL_PRICING_PROVIDER; a model without a verified quote may be shown
+# in a picker but cannot be billed.
 MODEL_CATALOG: dict[str, list[str]] = {
     "anthropic":  [MODEL_OPUS, MODEL_OPUS_FAST, MODEL_SONNET, MODEL_HAIKU],
     "openai":     ["gpt-5.5", "gpt-5.4", "gpt-5.4-pro", "gpt-5.4-mini", "gpt-5.4-nano"],
     "gemini":     ["gemini-3.5-pro", "gemini-3.5-flash", "gemini-3-pro", "gemini-3-flash"],
-    "xai":        ["grok-4-latest", "grok-4.3", "grok-4-mini", "grok-code-fast", "grok-3"],
-    "deepseek":   ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro", "deepseek-v4-flash"],
+    "xai":        ["grok-4.5", "grok-build-0.1", "grok-4.3", "grok-code-fast", "grok-4-latest", "grok-4-mini", "grok-3"],
+    "deepseek":   ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
     "moonshot":   ["kimi-k2", "kimi-k1.5", "moonshot-v1-128k"],
     "openrouter": ["minimax/minimax-m2.5", "qwen/qwen3-coder-next"],
     "ollama":     ["qwen3-coder-next", "qwen3-32b", "llama-4-maverick"],
@@ -365,15 +551,13 @@ def _allowlist_rank_price(spec: str) -> tuple[float, float] | None:
     provider, model_id = _parse_spec(spec)
     if provider == "codex_cli":
         return 0.0, 0.0
-    if spec in MODEL_PRICES:
-        return MODEL_PRICES[spec]
-    if model_id in MODEL_PRICES:
-        return MODEL_PRICES[model_id]
-    from .cost.router import price_for_model
-
-    priced = price_for_model(spec) or price_for_model(model_id)
-    if priced is not None:
-        return priced
+    for key in (spec, model_id):
+        try:
+            quote = model_price_quote(key)
+        except UnverifiedRateError:
+            return None
+        if quote is not None:
+            return quote.rates
     if provider in ("ollama", "vllm", "tgi"):
         return 0.0, 0.0
     return None

@@ -10,8 +10,10 @@ event -- correlated to the run via the goal-id context -- so ``/replay`` and the
 exported evidence packet carry verifiable visual provenance for the
 consequential actions.
 
-Best-effort throughout: no key -> no capture; any capture/seal failure is
-swallowed, because evidence must never break the action the model is waiting on.
+Best-effort for capture and sealing failures: no key -> no capture. An explicit
+audit policy/custody refusal still propagates, because reporting a governed
+action as fully evidenced when the audit subsystem declined its row is a false
+success.
 """
 from __future__ import annotations
 
@@ -20,6 +22,8 @@ import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import TypeVar
+
+from ..audit import AuditRefused
 
 log = logging.getLogger(__name__)
 
@@ -42,8 +46,8 @@ def sealing_enabled() -> bool:
 def seal_evidence(png_b64: str, *, action: str, phase: str) -> None:
     """Persist + seal a base64 PNG and log an ``EVIDENCE_CAPTURE`` audit event.
 
-    ``phase`` is ``"before"`` or ``"after"``. No-op (logged at debug) on any
-    failure, so a capture problem never propagates into the action.
+    ``phase`` is ``"before"`` or ``"after"``. Capture/seal failures are logged
+    and swallowed; an explicit :class:`AuditRefused` propagates.
     """
     try:
         from ..paths import data_dir
@@ -54,11 +58,13 @@ def seal_evidence(png_b64: str, *, action: str, phase: str) -> None:
         path = captures / f"{stamp}-{phase}.png"
         path.write_bytes(base64.b64decode(png_b64))
         entry = seal(path)
-        from ..audit import EventKind, record
-        record(
+        from ..audit import EventKind, audit_event
+        audit_event(
             EventKind.EVIDENCE_CAPTURE,
             action=action, phase=phase, file=path.name, sha256=entry.sha256,
         )
+    except AuditRefused:
+        raise
     except Exception:  # pragma: no cover -- evidence is best-effort
         log.debug("action evidence seal failed", exc_info=True)
 

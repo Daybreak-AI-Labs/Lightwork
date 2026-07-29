@@ -1,13 +1,8 @@
-"""MiniMax M2.5 (and peer cheap open models) are priced and routable via the
-existing OpenRouter provider.
+"""MiniMax M2.5 provisional OpenRouter pricing is planning-only.
 
-Operationalizes the cost lever from the competitive analysis: a cheap open
-model that's near-frontier on coding. These tests pin that:
-  - MiniMax M2.5 is priced under the key form the runtime lookup actually
-    hits (the OpenRouter `vendor/model` id, after the `openrouter:` prefix is
-    stripped) -- so spend bills accurately instead of at the Sonnet fallback;
-  - the cost router CONSIDERS MiniMax at the cheap tier when OpenRouter is
-    configured and routing is opted in;
+These tests pin that:
+  - the provisional value remains available for explicit estimates;
+  - live billing and routing refuse it until its source is verified;
   - none of this changes default model selection (additive / opt-in).
 
 Hermetic: no network, no real config. Env is scrubbed so only the keys a test
@@ -47,17 +42,16 @@ def test_minimax_is_priced_in_model_prices():
     assert 0 < in_rate < out_rate < 5.0
 
 
-def test_lookup_price_resolves_openrouter_spec():
-    # The router emits "openrouter:vendor/model"; budget billing must resolve
-    # it (splitting on the FIRST colon) to the MODEL_PRICES rate, not the
-    # Sonnet fallback.
-    from maverick.budget import _FALLBACK_PRICE_IN, _lookup_price
+def test_lookup_price_resolves_openrouter_spec_for_estimate_only():
+    # The provider-qualified id resolves without losing the vendor/model suffix,
+    # but only after the caller explicitly selects planning mode.
+    from maverick.budget import UnpricedModelError, _lookup_price
     from maverick.llm import MODEL_PRICES
 
-    priced = _lookup_price(MINIMAX_SPEC)
-    assert priced is not None
+    with pytest.raises(UnpricedModelError, match="unverified"):
+        _lookup_price(MINIMAX_SPEC)
+    priced = _lookup_price(MINIMAX_SPEC, estimate_only=True)
     assert priced == MODEL_PRICES[MINIMAX_ID]
-    assert priced[0] != _FALLBACK_PRICE_IN  # not silently the fallback
 
 
 def test_minimax_in_router_cheap_tier():
@@ -70,15 +64,19 @@ def test_minimax_in_router_cheap_tier():
     assert rows[0][2] == cost_router.TIER_CHEAP
 
 
-def test_router_considers_minimax_when_openrouter_configured(_clean, monkeypatch):
-    # Opt in to cost routing with ONLY OpenRouter keyed. summarizer is the
-    # cheap-tier role, so the router must pick an OpenRouter model.
+def test_router_requires_estimate_only_to_consider_minimax(_clean, monkeypatch):
+    # With only provisional OpenRouter prices available, live role resolution
+    # falls back rather than selecting an unbillable model. A planning caller
+    # can still ask the router for the estimate-only candidate.
     monkeypatch.setenv("MAVERICK_COST_ROUTING", "1")
     monkeypatch.setenv("OPENROUTER_API_KEY", "x")
-    from maverick.llm import model_for_role
+    from maverick.cost import router
+    from maverick.llm import ROLE_MODELS, model_for_role
 
     got = model_for_role("summarizer")
-    assert got.startswith("openrouter:"), got
+    assert got == ROLE_MODELS["summarizer"]
+    estimate = router.pick(router.signal_for_role("summarizer"), estimate_only=True)
+    assert estimate.startswith("openrouter:"), estimate
 
 
 def test_off_by_default_does_not_select_openrouter(_clean, monkeypatch):

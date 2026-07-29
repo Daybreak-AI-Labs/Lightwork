@@ -44,6 +44,10 @@ _init_lock = threading.Lock()
 _tracer: Any = None
 _sentry: Any = None
 _metrics: dict[str, Any] = {}
+_metric_series_lock = threading.Lock()
+_metric_label_series: dict[str, set[tuple[tuple[str, str], ...]]] = {}
+_MAX_LABEL_SERIES_PER_METRIC = 128
+_OVERFLOW_LABEL = "__other__"
 
 _SAFE_TELEMETRY_LABEL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,63}$")
 
@@ -59,6 +63,44 @@ def safe_agent_telemetry_label(value: object, *, fallback: str = "redacted-agent
         return value
     digest = hashlib.sha256(str(value).encode("utf-8", "replace")).hexdigest()[:12]
     return f"{fallback}-{digest}"
+
+
+def _safe_metric_label(value: object) -> str:
+    """Bound hostile/dynamic metric label text without exposing raw payloads."""
+    text = str(value)
+    if (
+        len(text) <= 128
+        and all(char >= " " and char not in {"\x7f", "\r", "\n"} for char in text)
+    ):
+        return text
+    digest = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+    return f"redacted-{digest}"
+
+
+def _bounded_metric_labels(
+    metric_name: str,
+    labels: dict[str, str],
+) -> dict[str, str]:
+    """Return safe labels under a fixed per-metric series-cardinality budget.
+
+    ``prometheus_client`` retains every distinct label tuple for the process
+    lifetime. Model IDs and generated tool names are configurable, so passing
+    them through without a budget turns telemetry into an unbounded-memory
+    input surface. Reserve one series for overflow and aggregate every later
+    unseen tuple there.
+    """
+    safe = {str(key): _safe_metric_label(value) for key, value in labels.items()}
+    signature = tuple(sorted(safe.items()))
+    with _metric_series_lock:
+        seen = _metric_label_series.setdefault(metric_name, set())
+        if signature in seen:
+            return safe
+        if len(seen) < max(0, _MAX_LABEL_SERIES_PER_METRIC - 1):
+            seen.add(signature)
+            return safe
+        overflow = dict.fromkeys(safe, _OVERFLOW_LABEL)
+        seen.add(tuple(sorted(overflow.items())))
+        return overflow
 
 
 def _otel_enabled() -> bool:
@@ -196,6 +238,8 @@ def _initialize() -> None:
             except (OSError, ValueError) as e:
                 log.warning("observability: Prometheus exporter failed: %s", e)
                 return
+            with _metric_series_lock:
+                _metric_label_series.clear()
             _metrics["llm_calls"] = Counter(
                 "maverick_llm_calls_total",
                 "Total LLM API calls", ["provider", "model"],
@@ -278,7 +322,7 @@ def _register_computed_collector() -> None:
                 from . import tool_latency
 
                 for row in tool_latency.report():
-                    tool = str(row.get("tool", "?"))
+                    tool = _safe_metric_label(row.get("tool", "?"))
                     for q, key in (("0.5", "p50_ms"), ("0.95", "p95_ms"),
                                    ("0.99", "p99_ms"), ("max", "max_ms")):
                         lat.add_metric([tool, q], float(row.get(key) or 0.0))
@@ -300,10 +344,10 @@ def _register_computed_collector() -> None:
                 from . import provider_health
 
                 for row in provider_health.get().snapshot():
-                    p = str(row.get("provider", "?"))
-                    m = str(row.get("model", "?"))
+                    p = _safe_metric_label(row.get("provider", "?"))
+                    m = _safe_metric_label(row.get("model", "?"))
                     err.add_metric([p, m], float(row.get("error_rate") or 0.0))
-                    for q, key in (("0.5", "p50"), ("0.95", "p95")):
+                    for q, key in (("0.5", "p50_ms"), ("0.95", "p95_ms")):
                         v = row.get(key)
                         if v is not None:
                             plat.add_metric([p, m, q], float(v))
@@ -395,6 +439,8 @@ def record_metric(
         return
     labels = labels or {}
     try:
+        if labels:
+            labels = _bounded_metric_labels(name, labels)
         # Resolve the label child once. Calling metric.labels() with the
         # wrong (or empty) label set raises in prometheus_client, so only
         # scope when labels are actually provided.

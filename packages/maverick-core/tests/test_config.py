@@ -186,6 +186,21 @@ def test_get_governed_connectors_parses_list_and_csv(monkeypatch):
     assert cfg_mod.get_governed_connectors()["connectors"] == ["salesforce", "servicenow"]
 
 
+def test_automation_import_rejects_string_truthiness(monkeypatch):
+    import maverick.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "load_config", lambda: {
+        "automation_import": {
+            "enable": "false",
+            "create_schedules": "true",
+        }
+    })
+    assert cfg_mod.get_automation_import() == {
+        "enable": False,
+        "create_schedules": False,
+    }
+
+
 def test_nested_dict_interpolation(monkeypatch):
     monkeypatch.setenv("X", "42")
     data = {"a": "${X}", "b": ["${X}", "plain"], "c": {"inner": "${X}"}}

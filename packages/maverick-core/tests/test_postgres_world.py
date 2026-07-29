@@ -520,27 +520,97 @@ def test_prune_processed_messages(world):
         assert world.is_processed_message("sms", "to-prune") is False
 
 
-def test_erase_conversations_deletes_pg_rows(world):
+def test_erase_conversations_deletes_pg_rows(world, monkeypatch):
+    from maverick.erasure_receipts import (
+        RECEIPT_STORES,
+        build_manifest,
+        persist_erasure_closure,
+        persist_receipt,
+    )
+    from maverick.erasure_verify import verify_erasure
+    from maverick.paths import current_tenant_id
+
     conv = world.get_or_create_conversation("gdpr-pg", "erase-me")
     parent = world.create_goal("parent-delete")
     child = world.create_goal("child-delete", parent_id=parent)
+    grandchild = world.create_goal("grandchild-delete", parent_id=child)
     world.append_turn(conv.id, "user", "private text", goal_id=parent)
     world.append_turn(conv.id, "assistant", "private reply", goal_id=child)
     world.append_message(parent, "user", "private message")
     world.append_event(parent, "agent", "note", "private event")
     world.add_attachment(parent, "secret.txt", "text/plain", 6, "abc", "/tmp/secret.txt")
     world.mark_message_processed("gdpr-pg", "external-1", goal_id=parent)
+    monkeypatch.setenv("MAVERICK_TEMPORAL_MEMORY", "1")
+    episode = world.start_episode(grandchild)
+    world.upsert_fact(
+        f"derived-private-{episode}",
+        "private episode-derived fact",
+        episode_id=episode,
+    )
+    world.add_artifact(grandchild, "text", "report", "private artifact")
+    world.ask("private question", goal_id=grandchild)
+    world.create_share_link(grandchild, created_by="reviewer")
+    world.record_goal_origin(grandchild, "webhook", "private-origin")
+    world.set_goal_status(grandchild, "done", result="private result")
+    world.record_signoff(grandchild, "approved", decided_by="reviewer")
 
-    goal_ids, attachment_paths, removed_turns = world.erase_conversations([conv.id])
+    plan = world.plan_conversation_erasure([conv.id])
+    assert plan["goal_ids"] == [parent, child, grandchild]
+    manifest = build_manifest(
+        tenant_id=current_tenant_id() or "shared",
+        conversation_ids=plan["conversation_ids"],
+        goal_ids=plan["goal_ids"],
+        episode_ids=plan["episode_ids"],
+    )
+    receipt = persist_receipt(world, manifest)
+    assert all(
+        world.count_erasure_receipt_store(
+            store,
+            manifest["conversation_ids"],
+            manifest["goal_ids"],
+            manifest["episode_ids"],
+        ) > 0
+        for store in RECEIPT_STORES
+    )
 
-    assert goal_ids == {parent, child}
+    goal_ids, attachment_paths, removed_turns = world.erase_conversations(
+        [conv.id],
+        expected_conversation_ids=plan["conversation_ids"],
+        expected_goal_ids=plan["goal_ids"],
+        expected_episode_ids=plan["episode_ids"],
+    )
+
+    assert goal_ids == {parent, child, grandchild}
     assert attachment_paths == ["/tmp/secret.txt"]
     assert removed_turns == 2
     assert world.recent_turns(conv.id) == []
     assert all(c.id != conv.id for c in world.list_conversations("gdpr-pg"))
     assert world.get_goal(parent) is None
     assert world.get_goal(child) is None
+    assert world.get_goal(grandchild) is None
     assert world.is_processed_message("gdpr-pg", "external-1") is False
+    assert all(
+        world.count_erasure_receipt_store(
+            store,
+            manifest["conversation_ids"],
+            manifest["goal_ids"],
+            manifest["episode_ids"],
+        ) == 0
+        for store in RECEIPT_STORES
+    )
+    persist_erasure_closure(
+        world,
+        receipt,
+        expected_tenant=current_tenant_id() or "shared",
+    )
+    proof = verify_erasure(
+        "erase-me",
+        channel="gdpr-pg",
+        receipt=receipt,
+        world=world,
+    )
+    assert proof["clean"] is True
+    assert proof["durable_proof"] is True
 
 
 def test_erase_conversations_fact_scrub_is_tenant_scoped(world):

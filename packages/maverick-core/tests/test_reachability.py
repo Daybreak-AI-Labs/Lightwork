@@ -23,6 +23,26 @@ from maverick import reachability
 CLASSES = {"PRODUCTION", "CI_ONLY", "CLI_ONLY", "TEST_ONLY", "UNREACHED"}
 
 
+def test_module_inventory_ignores_generated_package_copies(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Build trees and unpacked sdists are artifacts, not source modules."""
+    dist = tmp_path / "packages" / "maverick-core"
+    source = dist / "maverick"
+    generated = dist / "build" / "lib" / "maverick"
+    unpacked = dist / "maverick_agent-0.1.7" / "maverick"
+    for root in (source, generated, unpacked):
+        root.mkdir(parents=True)
+        (root / "__init__.py").write_text("", encoding="utf-8")
+        (root / "agent.py").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(reachability, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(reachability, "PACKAGES", ("maverick-core",))
+
+    assert set(reachability.all_modules()) == {"maverick", "maverick.agent"}
+
+
 @pytest.fixture(scope="module")
 def table() -> dict[str, str]:
     return reachability.classify()
@@ -38,6 +58,18 @@ def test_the_kernel_is_production_reachable(table) -> None:
     """Control: if these are not PRODUCTION the graph walk is broken."""
     for mod in ("maverick.agent", "maverick.orchestrator", "maverick.audit.writer",
                 "maverick.capability", "maverick.budget"):
+        assert table.get(mod) == "PRODUCTION", (mod, table.get(mod))
+
+
+def test_lazy_runtime_imports_are_declared_reachable(table) -> None:
+    """A lazy import is still a production edge, without eager side effects."""
+    for mod in (
+        "maverick.audit.erase",
+        "maverick.automation_import.manual",
+        "maverick.automation_import.notion",
+        "maverick.automation_import.uipath",
+        "maverick.automation_import.zapier",
+    ):
         assert table.get(mod) == "PRODUCTION", (mod, table.get(mod))
 
 

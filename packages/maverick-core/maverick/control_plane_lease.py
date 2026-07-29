@@ -32,12 +32,16 @@ holder after it wins, and a second process reads it only to name the winner in
 its refusal message. Saying "lease" and shipping a lock would be exactly the
 claim-vs-code gap this work exists to close, so: it is a lock.
 
-**The fencing token** is a counter incremented under the lock on each
-successful acquisition, so it is monotonic across restarts. It answers "is the
-component about to write still the one that holds the root?" for anything that
-caches an ownership decision -- a stale holder's token is lower than the
-current one and its write can be rejected. Nothing consumes it for admission
-yet; it is recorded, exposed on ``/readyz``, and honest about that.
+**The holder record and fencing token.** The OS-lock file contains no mutable
+state. A separate atomically replaced ``control-plane-holder.json`` records the
+diagnostic holder and the counter incremented under the authority lock on each
+successful acquisition. The separation matters on Windows, where a mandatory
+byte-range lock prevents another process from reading the locked byte. The
+token answers "is the component about to write still the one that holds the
+root?" for anything that caches an ownership decision -- a stale holder's token
+is lower than the current one and its write can be rejected. Nothing consumes
+it for admission yet; it is recorded, exposed on ``/readyz``, and honest about
+that.
 
 **Where exclusion does not reach.** Advisory locks bind a kernel, so this
 covers processes sharing a host and a data root -- which is the deployment
@@ -65,6 +69,12 @@ log = logging.getLogger(__name__)
 
 #: Sentinel filename in the data root. Named for what holding it means.
 LOCK_FILENAME = "control-plane.lock"
+
+#: Readable diagnostic/fencing record. Windows byte-range locks are mandatory:
+#: another process cannot read the byte range that carries the lock. Keeping
+#: observability in a separate atomically replaced file lets every platform
+#: name the current holder without weakening the authority lock.
+HOLDER_FILENAME = "control-plane-holder.json"
 
 #: Opt out of single-writer enforcement. Set only when you have independently
 #: guaranteed that no other process writes this data root -- the override is
@@ -98,11 +108,19 @@ class Holder:
 
 
 def lock_path(root: Path | None = None) -> Path:
-    """The sentinel path for a data root."""
+    """The authoritative advisory-lock path for a data root."""
     if root is None:
         from .paths import maverick_home
         root = maverick_home()
     return Path(root) / LOCK_FILENAME
+
+
+def holder_path(root: Path | None = None) -> Path:
+    """The readable diagnostic/fencing record for a data root."""
+    if root is None:
+        from .paths import maverick_home
+        root = maverick_home()
+    return Path(root) / HOLDER_FILENAME
 
 
 def override_enabled() -> bool:
@@ -122,12 +140,32 @@ def override_enabled() -> bool:
         return False
 
 
-def _read_holder(path: Path) -> Holder | None:
+def _holder_record_unavailable(path: Path, detail: str) -> LeaseUnavailable:
+    return LeaseUnavailable(
+        f"control-plane holder record {path} is {detail}; the prior fencing "
+        "token cannot be proven, so single-writer startup is refusing to "
+        "reset it. Restore the record from a trusted backup before retrying."
+    )
+
+
+def _read_holder(path: Path, *, strict: bool = False) -> Holder | None:
     try:
-        data = json.loads(path.read_text(encoding="utf-8") or "{}")
-    except (OSError, ValueError):
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        if strict:
+            raise _holder_record_unavailable(path, "unreadable") from exc
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        if strict:
+            raise _holder_record_unavailable(path, "malformed") from exc
         return None
     if not isinstance(data, dict) or "pid" not in data:
+        if strict:
+            raise _holder_record_unavailable(path, "malformed")
         return None
     try:
         return Holder(
@@ -137,7 +175,9 @@ def _read_holder(path: Path) -> Holder | None:
             fencing_token=int(data.get("fencing_token", 0)),
             role=str(data.get("role", "control-plane")),
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        if strict:
+            raise _holder_record_unavailable(path, "malformed") from exc
         return None
 
 
@@ -166,7 +206,12 @@ def _try_lock(fd: int) -> bool:
             if e.errno in (errno.EACCES, errno.EDEADLOCK):
                 return False
             raise LeaseUnavailable(
-                f"advisory locking failed on the data root: {e}") from e
+                f"the data root's filesystem cannot provide advisory locking "
+                f"({e}); single-writer safety cannot be established, so the "
+                f"control plane will not start. Move the state volume to a "
+                f"filesystem with working locks, or set {OVERRIDE_ENV}=1 if "
+                f"you have guaranteed exclusivity another way"
+            ) from e
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return True
@@ -251,7 +296,7 @@ def acquire(
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         if not _try_lock(fd):
-            other = _read_holder(path)
+            other = _read_holder(holder_path(path.parent))
             who = other.describe() if other else "an unidentified process"
             raise ControlPlaneBusy(
                 f"another Lightwork control plane already owns {path.parent}: "
@@ -264,7 +309,8 @@ def acquire(
             )
         # Won the lock. Bump the fencing token under it, so the value is
         # monotonic across restarts and a stale holder is detectable.
-        previous = _read_holder(path)
+        record_path = holder_path(path.parent)
+        previous = _read_holder(record_path, strict=True)
         holder = Holder(
             pid=os.getpid(),
             hostname=socket.gethostname(),
@@ -272,10 +318,13 @@ def acquire(
             fencing_token=(previous.fencing_token + 1) if previous else 1,
             role=role,
         )
-        os.lseek(fd, 0, os.SEEK_SET)
-        os.ftruncate(fd, 0)
-        os.write(fd, (json.dumps(asdict(holder), sort_keys=True) + "\n").encode())
-        os.fsync(fd)
+        from .file_lock import atomic_write_text
+
+        atomic_write_text(
+            record_path,
+            json.dumps(asdict(holder), sort_keys=True) + "\n",
+            mode=0o600,
+        )
     except BaseException:
         os.close(fd)
         raise
@@ -320,7 +369,7 @@ def posture(root: Path | None = None) -> dict:
             "detail": (f"{OVERRIDE_ENV} is set; concurrent writers to this "
                        "data root are not prevented"),
         }
-    other = _read_holder(lock_path(root))
+    other = _read_holder(holder_path(root))
     return {
         "state": "unknown",
         "single_writer_enforced": False,
@@ -332,12 +381,14 @@ def posture(root: Path | None = None) -> dict:
 
 __all__ = [
     "ControlPlaneBusy",
+    "HOLDER_FILENAME",
     "Holder",
     "Lease",
     "LeaseUnavailable",
     "OVERRIDE_ENV",
     "acquire",
     "current",
+    "holder_path",
     "lock_path",
     "override_enabled",
     "posture",

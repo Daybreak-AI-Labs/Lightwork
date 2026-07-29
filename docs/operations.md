@@ -9,13 +9,19 @@ checked playbook.
 |---|---|---|
 | `GET /livez` | none | Process is alive (TCP accepts). |
 | `GET /healthz` | none | Deep checks: DB writable, LLM key present, runner alive. Returns 503 if degraded. |
-| `GET /readyz` | none | Alias for `/healthz` today. |
+| `GET /readyz` | none | Traffic admission: all `/healthz` checks plus client binding, required Shield, and agent-trust registry checks. Returns 503 when the process is healthy but not safe to receive work. |
 | `GET /metrics` | bearer (when set) | Prometheus text format: goals by status, $ spent, tokens, concurrent goals. |
 | `GET /api/v1/spend` | bearer | Total spend + recent episode list. |
 
-`MAVERICK_DASHBOARD_TOKEN` gates `/api/v1/*` and `/metrics`. The four
-probe endpoints (`livez`, `healthz`, `readyz`, `openapi.json`, `docs`)
-are always public so monitoring works on a locked-down VPS.
+`MAVERICK_DASHBOARD_TOKEN` gates `/api/v1/*` and `/metrics`. The three
+health endpoints (`livez`, `healthz`, `readyz`) and API-documentation
+routes (`openapi.json`, `docs`, `redoc`, `docs/oauth2-redirect`) are
+always public so monitoring and API discovery work on a locked-down VPS.
+
+Treat `/healthz` and `/readyz` as different signals. A green `/healthz`
+with a 503 `/readyz` means the process and its dependencies are alive,
+but a deployment safety precondition is missing; keep the instance out of
+service and act on the failed readiness check instead of restarting it.
 
 ## "The service is hung"
 
@@ -168,9 +174,13 @@ Notes:
 - **Single-writer enforcement:** this is no longer a convention. On startup the
   control plane takes an exclusive advisory lock on `control-plane.lock` in its
   data root and holds it for the process lifetime; a second process refuses to
-  start and reports the pid, host and uptime of the holder. The lock is released
-  by the kernel when the holder exits, so a `Recreate` rollout hands over
-  cleanly and there is no stale lock to clear. `/readyz` reports the posture
+  start and reports the pid, host and uptime from the atomically published
+  `control-plane-holder.json` diagnostic record. This record is observability;
+  the OS lock remains the authority. Separating them also keeps diagnostics
+  readable on Windows, where byte-range locks deny reads of the locked byte.
+  The lock is released by the kernel when the holder exits, so a `Recreate`
+  rollout hands over cleanly and there is no stale lock to clear. `/readyz`
+  reports the posture
   under `replica_safety`. If the data root sits on a filesystem whose advisory
   locks are a no-op (some NFS and overlay mounts), startup **fails closed**
   rather than assume exclusivity — move the volume, or set

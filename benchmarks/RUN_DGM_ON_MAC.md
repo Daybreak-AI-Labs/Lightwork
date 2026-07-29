@@ -16,7 +16,7 @@ locally. No GPU, nothing heavy runs on the Mac itself.
 ## 0. One-time setup (already have the repo? skip to step 1)
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork.git
+git clone https://github.com/Daybreak-AI-Labs/Lightwork.git
 cd Lightwork
 chmod +x benchmarks/setup_mac.sh
 ./benchmarks/setup_mac.sh          # brew python@3.11, .venv, all packages, keys

@@ -1,3 +1,3 @@
-module github.com/Day-AI-Labs/maverick/go/model-proxy
+module github.com/Daybreak-AI-Labs/Lightwork/go/model-proxy
 
 go 1.24

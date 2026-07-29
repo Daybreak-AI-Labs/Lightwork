@@ -105,7 +105,7 @@ On a GPU pod (RunPod / Lambda / Vast / any GPU VM):
 
 ```bash
 # cheap proof run (default base model, full-param, any GPU):
-curl -fsSL https://raw.githubusercontent.com/Day-AI-Labs/Lightwork/main/scripts/train_runpod.sh -o train.sh \
+curl -fsSL https://raw.githubusercontent.com/Daybreak-AI-Labs/Lightwork/main/scripts/train_runpod.sh -o train.sh \
   && bash train.sh
 
 # …or graduate to the strongest ownable model on one 80GB GPU (QLoRA):

@@ -34,6 +34,12 @@ def test_pending_approval_shows_on_page(monkeypatch, tmp_path):
     assert "/tmp/build" in text
     assert f'data-id="{aid}"' in text
     assert 'href="/approvals"' in text  # nav link present
+    # A durable vote can be accepted while signed audit delivery is pending,
+    # and an N-of-M vote can be delivered while the action still lacks quorum.
+    # The browser must not remove either row and imply the action is effective.
+    assert "r.status === 202" in text
+    assert "X-Lightwork-Approval-State" in text
+    assert "decision accepted but not effective" in text
 
 
 def test_approve_transitions_state(monkeypatch, tmp_path):

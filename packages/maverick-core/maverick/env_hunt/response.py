@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import asdict, replace
 from typing import Any, Protocol, runtime_checkable
 
+from ..audit.errors import AuditRefused
 from .models import (
     GovernedApproval,
     ResponseProposal,
@@ -154,12 +155,16 @@ def _audit(
     if recorder is not None:
         try:
             return bool(recorder(kind, payload))
+        except AuditRefused:
+            raise
         except Exception:  # failure-policy: fail_closed
             return False
     try:
         from ..audit import record
 
         return bool(record(kind, **payload))
+    except AuditRefused:
+        raise
     except Exception:  # failure-policy: visible_degradation
         return False
 

@@ -5,7 +5,7 @@ Production-oriented chart for the Lightwork dashboard (web UI + API + webhooks).
 ```bash
 # Minimal install (SQLite, single replica). Provide a provider key + token.
 helm install maverick ./deploy/helm/maverick \
-  --set image.tag=0.1.6 \
+  --set image.tag=0.1.7 \
   --set-string secret.data.ANTHROPIC_API_KEY=sk-ant-... \
   --set-string secret.data.MAVERICK_DASHBOARD_TOKEN=$(openssl rand -hex 32)
 ```

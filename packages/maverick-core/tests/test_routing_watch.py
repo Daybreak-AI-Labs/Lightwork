@@ -6,7 +6,7 @@ from pathlib import Path
 
 from maverick.cli import _watch_goal_allowed
 from maverick.llm import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
-from maverick.routing import RouteSignal, pick
+from maverick.routing import RouteSignal, cascade_enabled, pick
 from maverick.watch_mode import scan_dir, scan_file, scan_text
 
 
@@ -60,6 +60,49 @@ class TestCascadedRouting:
         _patch_user_config(monkeypatch, {"coder": "openrouter:deepseek-v4-pro"})
         sig = RouteSignal(role="coder")
         assert pick(sig) == "openrouter:deepseek-v4-pro"
+
+    def test_explicit_env_false_overrides_enabled_config(self, monkeypatch):
+        from maverick import config as config_mod
+
+        monkeypatch.setenv("MAVERICK_CASCADE_ROUTING", "0")
+        monkeypatch.setattr(
+            config_mod,
+            "load_config",
+            lambda: {"models": {"cascade": True}},
+        )
+        assert cascade_enabled() is False
+
+    def test_canonical_env_parser_accepts_on(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_CASCADE_ROUTING", "on")
+        assert cascade_enabled() is True
+
+    def test_invalid_config_type_disables_with_actionable_warning(
+        self, monkeypatch, caplog,
+    ):
+        from maverick import config as config_mod
+
+        monkeypatch.delenv("MAVERICK_CASCADE_ROUTING", raising=False)
+        monkeypatch.setattr(
+            config_mod,
+            "load_config",
+            lambda: {"models": {"cascade": "false"}},
+        )
+        assert cascade_enabled() is False
+        assert "models.cascade must be true or false" in caplog.text
+
+    def test_invalid_env_value_is_visible_and_fails_closed(
+        self, monkeypatch, caplog,
+    ):
+        from maverick import config as config_mod
+
+        monkeypatch.setenv("MAVERICK_CASCADE_ROUTING", "treu")
+        monkeypatch.setattr(
+            config_mod,
+            "load_config",
+            lambda: {"models": {"cascade": True}},
+        )
+        assert cascade_enabled() is False
+        assert "MAVERICK_CASCADE_ROUTING must be one of" in caplog.text
 
 
 class TestWatchMode:

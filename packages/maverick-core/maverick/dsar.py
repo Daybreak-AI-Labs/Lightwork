@@ -67,7 +67,7 @@ def _iso(ts: Any) -> Any:
         return str(ts)
 
 
-def _resolve_world(tenant: str | None) -> Any:
+def _resolve_world(tenant: str | None, *, strict: bool = False) -> Any:
     """Open the selected tenant's ``WorldModel``.
 
     ``world_for_tenant(None)`` deliberately forces the legacy shared
@@ -84,6 +84,8 @@ def _resolve_world(tenant: str | None) -> Any:
         world_tenant = tenant or "__active__"
         return world_for_tenant(world_tenant)
     except Exception as e:  # pragma: no cover - defensive (corrupt/locked DB)
+        if strict:
+            raise RuntimeError("could not open world model") from e
         log.warning("dsar: could not open world model: %s", e)
         return None
 
@@ -100,7 +102,13 @@ def _matches_user(conv_user_id: str, user_id: str) -> bool:
     return conv_user_id == user_id
 
 
-def _export_facts(world: Any, user_id: str, channel: str) -> dict[str, Any]:
+def _export_facts(
+    world: Any,
+    user_id: str,
+    channel: str,
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
     """Export the subject's explicitly user-scoped global facts + history.
 
     Facts are global key/value memory with no per-user column, so -- exactly as
@@ -112,15 +120,21 @@ def _export_facts(world: Any, user_id: str, channel: str) -> dict[str, Any]:
     """
     out: dict[str, Any] = {"facts": {}, "fact_history": {}}
     if world is None or not hasattr(world, "facts_matching"):
+        if strict:
+            raise RuntimeError("subject fact store is unavailable")
         return out
     token = _fact_subject_token(channel, user_id)
     try:
         out["facts"] = dict(world.facts_matching(token))
     except Exception as e:  # pragma: no cover - defensive
+        if strict:
+            raise RuntimeError("could not count subject facts") from e
         log.warning("dsar: facts_matching failed: %s", e)
     try:
         history = world.fact_history_matching(token)
     except Exception as e:  # pragma: no cover - defensive
+        if strict:
+            raise RuntimeError("could not count subject fact history") from e
         log.warning("dsar: fact_history_matching failed: %s", e)
         history = {}
     out["fact_history"] = {
@@ -138,7 +152,13 @@ def _export_facts(world: Any, user_id: str, channel: str) -> dict[str, Any]:
     return out
 
 
-def _export_world(world: Any, user_id: str, channel: str | None) -> dict[str, Any]:
+def _export_world(
+    world: Any,
+    user_id: str,
+    channel: str | None,
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
     """Collect the subject's conversations + turns and the goals they touch.
 
     Uses only existing read APIs: ``list_conversations`` to find the subject's
@@ -152,6 +172,8 @@ def _export_world(world: Any, user_id: str, channel: str | None) -> dict[str, An
     """
     empty = {"conversations": [], "goals": [], "facts": {}, "fact_history": {}}
     if world is None:
+        if strict:
+            raise RuntimeError("world model is unavailable")
         return empty
 
     # --- conversations + turns -------------------------------------------
@@ -164,6 +186,8 @@ def _export_world(world: Any, user_id: str, channel: str | None) -> dict[str, An
     try:
         all_convs = world.list_conversations(channel)
     except Exception as e:  # pragma: no cover - defensive
+        if strict:
+            raise RuntimeError("could not read subject conversations") from e
         log.warning("dsar: list_conversations failed: %s", e)
         return empty
 
@@ -177,6 +201,10 @@ def _export_world(world: Any, user_id: str, channel: str | None) -> dict[str, An
             # limit high enough to capture full history; export must be complete.
             turns = world.recent_turns(c.id, limit=1_000_000)
         except Exception as e:  # pragma: no cover - defensive
+            if strict:
+                raise RuntimeError(
+                    f"could not read turns for conversation {c.id}"
+                ) from e
             log.warning("dsar: recent_turns failed for conv %s: %s", c.id, e)
             turns = []
         turn_dicts: list[dict[str, Any]] = []
@@ -210,6 +238,8 @@ def _export_world(world: Any, user_id: str, channel: str | None) -> dict[str, An
         try:
             goal = world.get_goal(gid)
         except Exception as e:  # pragma: no cover - defensive
+            if strict:
+                raise RuntimeError(f"could not read goal {gid}") from e
             log.warning("dsar: get_goal failed for %s: %s", gid, e)
             continue
         if goal is None:
@@ -217,6 +247,8 @@ def _export_world(world: Any, user_id: str, channel: str | None) -> dict[str, An
         try:
             episodes = world.list_episodes(limit=1_000_000, goal_id=gid)
         except Exception as e:  # pragma: no cover - defensive
+            if strict:
+                raise RuntimeError(f"could not read episodes for goal {gid}") from e
             log.warning("dsar: list_episodes failed for goal %s: %s", gid, e)
             episodes = []
         goals.append(
@@ -246,7 +278,7 @@ def _export_world(world: Any, user_id: str, channel: str | None) -> dict[str, An
             }
         )
 
-    facts_section = _export_facts(world, user_id, channel)
+    facts_section = _export_facts(world, user_id, channel, strict=strict)
     return {
         "conversations": conversations,
         "goals": goals,
@@ -255,7 +287,11 @@ def _export_world(world: Any, user_id: str, channel: str | None) -> dict[str, An
     }
 
 
-def _iter_audit_events(tenant: str | None) -> list[dict[str, Any]]:
+def _iter_audit_events(
+    tenant: str | None,
+    *,
+    strict: bool = False,
+) -> list[dict[str, Any]]:
     """Read audit NDJSON rows as dicts, skipping malformed/unreadable input.
 
     Delegates to the shared :func:`maverick.audit.reader.iter_events` (the
@@ -268,23 +304,41 @@ def _iter_audit_events(tenant: str | None) -> list[dict[str, Any]]:
     from .audit import reader
 
     try:
-        return list(reader.iter_events(tenant=tenant, all_days=True))
+        return list(
+            reader.iter_events(
+                tenant=tenant,
+                all_days=True,
+                strict=strict,
+            )
+        )
     except Exception as e:  # pragma: no cover - defensive
+        if strict:
+            raise RuntimeError("could not read subject audit events") from e
         log.warning("dsar: could not read audit events: %s", e)
         return []
 
 
-def _audit_channels_for_user(user_id: str, tenant: str | None) -> set[str]:
+def _audit_channels_for_user(
+    user_id: str,
+    tenant: str | None,
+    *,
+    strict: bool = False,
+) -> set[str]:
     """Return structured audit channels observed for ``user_id``."""
     return {
         event["channel"]
-        for event in _iter_audit_events(tenant)
+        for event in _iter_audit_events(tenant, strict=strict)
         if event.get("user_id") == user_id and isinstance(event.get("channel"), str)
     }
 
 
 def _resolve_subject_channel(
-    world: Any, user_id: str, channel: str | None, tenant: str | None
+    world: Any,
+    user_id: str,
+    channel: str | None,
+    tenant: str | None,
+    *,
+    strict: bool = False,
 ) -> str | None:
     """Return the concrete channel for a DSAR, or ``None`` if ambiguous.
 
@@ -312,9 +366,15 @@ def _resolve_subject_channel(
                 if _matches_user(c.user_id, user_id) and isinstance(c.channel, str)
             )
         except Exception as e:  # pragma: no cover - defensive
+            if strict:
+                raise RuntimeError(
+                    "could not resolve subject channel from conversations"
+                ) from e
             log.warning("dsar: list_conversations failed while resolving channel: %s", e)
 
-    channels.update(_audit_channels_for_user(user_id, tenant))
+    channels.update(
+        _audit_channels_for_user(user_id, tenant, strict=strict)
+    )
     if len(channels) == 1:
         return next(iter(channels))
     if len(channels) > 1:
@@ -326,7 +386,13 @@ def _resolve_subject_channel(
     return None
 
 
-def _export_audit(user_id: str, channel: str | None, tenant: str | None) -> list[dict[str, Any]]:
+def _export_audit(
+    user_id: str,
+    channel: str | None,
+    tenant: str | None,
+    *,
+    strict: bool = False,
+) -> list[dict[str, Any]]:
     """Collect audit rows for the subject.
 
     Audit events are plain dicts (``AuditEvent.to_dict`` spreads the payload),
@@ -343,7 +409,7 @@ def _export_audit(user_id: str, channel: str | None, tenant: str | None) -> list
         return []
 
     out: list[dict[str, Any]] = []
-    for event in _iter_audit_events(tenant):
+    for event in _iter_audit_events(tenant, strict=strict):
         if event.get("user_id") != user_id:
             continue
         if event.get("channel") != channel:
@@ -360,13 +426,21 @@ def _export_audit(user_id: str, channel: str | None, tenant: str | None) -> list
 
 
 def export_subject_data(
-    user_id: str, *, channel: str | None = None, tenant: str | None = None
+    user_id: str,
+    *,
+    channel: str | None = None,
+    tenant: str | None = None,
+    strict: bool = False,
+    world: Any = None,
 ) -> dict[str, Any]:
     """Gather everything Lightwork holds for ``user_id`` into one JSON bundle.
 
     GDPR Art. 15 (right of access) / Art. 20 (portability), and a SOC 2 Privacy
-    expectation. Read-only and fail-soft: a missing world DB or audit dir
-    produces an empty section rather than an error.
+    expectation. Read-only and fail-soft by default: a missing world DB or
+    audit dir produces an empty section rather than an error. ``strict=True``
+    is reserved for proof-producing callers such as erasure verification; it
+    propagates an internal store-read failure so an unreadable store cannot be
+    represented as a verified zero.
 
     ``user_id`` plus ``channel`` identify the subject (the same pair the world
     model stores on ``conversations`` and that audit events carry as structured
@@ -393,10 +467,29 @@ def export_subject_data(
                            "episodes", "facts", "audit_events"},
         }
     """
-    world = _resolve_world(tenant)
-    channel = _resolve_subject_channel(world, user_id, channel, tenant)
-    world_section = _export_world(world, user_id, channel)
-    audit_section = _export_audit(user_id, channel, tenant)
+    world = world if world is not None else _resolve_world(
+        tenant,
+        strict=strict,
+    )
+    channel = _resolve_subject_channel(
+        world,
+        user_id,
+        channel,
+        tenant,
+        strict=strict,
+    )
+    world_section = _export_world(
+        world,
+        user_id,
+        channel,
+        strict=strict,
+    )
+    audit_section = _export_audit(
+        user_id,
+        channel,
+        tenant,
+        strict=strict,
+    )
 
     turn_count = sum(len(c["turns"]) for c in world_section["conversations"])
     episode_count = sum(len(g["episodes"]) for g in world_section["goals"])
@@ -413,6 +506,10 @@ def export_subject_data(
             "goals": len(world_section["goals"]),
             "episodes": episode_count,
             "facts": len(world_section["facts"]),
+            "fact_history": sum(
+                len(versions)
+                for versions in world_section["fact_history"].values()
+            ),
             "audit_events": len(audit_section),
         },
     }

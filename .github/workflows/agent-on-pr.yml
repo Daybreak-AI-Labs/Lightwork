@@ -7,7 +7,7 @@ name: Lightwork agent on PR (reusable)
 #
 #     jobs:
 #       review:
-#         uses: Day-AI-Labs/Lightwork/.github/workflows/agent-on-pr.yml@<full-40-character-commit-sha>
+#         uses: Daybreak-AI-Labs/Lightwork/.github/workflows/agent-on-pr.yml@<full-40-character-commit-sha>
 #         with:
 #           goal: "Review this PR for logic bugs and missing edge cases."
 #           # Must match the immutable SHA in `uses:` above.
@@ -102,7 +102,7 @@ jobs:
       - name: Checkout pinned Lightwork runtime source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: Day-AI-Labs/Lightwork
+          repository: Daybreak-AI-Labs/Lightwork
           ref: ${{ inputs.lightwork_ref }}
           path: .lightwork-runtime
           fetch-depth: 1
@@ -125,13 +125,16 @@ jobs:
           # Supply all first-party distributions as local direct requirements
           # in one resolver transaction. Never resolve an unclaimed
           # maverick-* project name from the public package index.
-          python -m pip install \
+          python -m pip install --constraint "$source_root/requirements/ci.txt" \
             "$source_root/packages/maverick-core[all]" \
             "$source_root/packages/maverick-shield" \
             "$source_root/packages/maverick-channels" \
+            "$source_root/packages/maverick-evolve" \
             "$source_root/packages/maverick-dashboard" \
             "$source_root/packages/maverick-mcp" \
+            "$source_root/packages/maverick-knowledge" \
             "$source_root/apps/installer-cli"
+          python -m pip check
 
           # Keep the reviewed calling-repository checkout as the agent's only
           # source tree. Installed wheels do not need this temporary checkout.

@@ -19,6 +19,13 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from .pricing import (
+    ModelPrice,
+    UnverifiedRateError,
+    assert_price_evidenced,
+    load_pricing_evidence_pack,
+)
+
 log = logging.getLogger(__name__)
 
 
@@ -27,38 +34,82 @@ class BudgetExceeded(Exception):
 
 
 class UnpricedModelError(BudgetExceeded):
-    """Raised when an unpriced model is billed under strict (billing-grade)
-    pricing. Subclasses ``BudgetExceeded`` so existing ``except BudgetExceeded``
-    handlers still stop the run, while callers that care can catch it by type."""
+    """Raised when billing lacks a verified, provenance-carrying model rate.
+
+    Subclassing ``BudgetExceeded`` preserves the existing hard-stop behavior at
+    every spend boundary. Planning code can explicitly request estimate-only
+    pricing from :func:`_lookup_price`; live accounting cannot silently do so.
+    """
 
 
 # Fallback price (Sonnet 4.6 list, no cache discount) in $/Mtok.
-# Used only when the model id isn't in maverick.llm.MODEL_PRICES.
+# Used only by the explicit estimate-only fallback for an unknown model.
 _FALLBACK_PRICE_IN = 3.0
 _FALLBACK_PRICE_OUT = 15.0
 
 # Model ids already warned about (estimate-priced); warn once each, not per call.
 _UNPRICED_WARNED: set[str] = set()
+_ESTIMATE_MODE_WARNED = False
 _TRUTHY = {"1", "true", "yes", "on"}
+_FALSY = {"0", "false", "no", "off"}
 
 
 def _billing_strict() -> bool:
-    """Whether an unverified model price should fail closed (billing-grade).
+    """Whether live accounting requires a verified rate.
 
-    Off by default: an unknown model bills at the documented fallback estimate
-    and warns once. Enabled via ``MAVERICK_BILLING_STRICT`` (truthy) or
-    ``[budget] strict_pricing = true``, an unpriced model raises
-    :class:`UnpricedModelError` instead of silently accruing estimated (and
-    possibly wrong) spend — the right default when the meter feeds a customer
-    invoice or chargeback rather than a soft internal cap.
+    Billing is fail-closed by default. The environment override has precedence,
+    followed by an explicitly configured ``[budget] strict_pricing`` boolean.
+    ``false`` is retained as a legacy opt-in to estimate-only accounting for
+    custom gateways; malformed values fail closed.
     """
-    if os.environ.get("MAVERICK_BILLING_STRICT", "").strip().lower() in _TRUTHY:
+
+    raw = os.environ.get("MAVERICK_BILLING_STRICT")
+    if raw is not None and raw.strip():
+        norm = raw.strip().lower()
+        if norm in _TRUTHY:
+            return True
+        if norm in _FALSY:
+            return False
+        log.warning(
+            "MAVERICK_BILLING_STRICT must be true/false; failing closed "
+            "with strict pricing"
+        )
         return True
     try:
         from .config import get_budget_overrides
-        return bool((get_budget_overrides() or {}).get("strict_pricing", False))
-    except Exception:  # pragma: no cover -- config never blocks accounting
-        return False
+
+        budget = get_budget_overrides() or {}
+    except Exception as exc:  # fail closed: config outage cannot weaken billing
+        log.warning("pricing config unavailable; failing closed: %s", exc)
+        return True
+    if "strict_pricing" not in budget:
+        return True
+    value = budget.get("strict_pricing")
+    if isinstance(value, bool):
+        return value
+    log.warning(
+        "budget.strict_pricing must be true or false; failing closed with "
+        "strict pricing"
+    )
+    return True
+
+
+def _resolve_estimate_only(value: bool | None) -> bool:
+    """Resolve an explicit lookup mode or the deployment billing policy."""
+
+    global _ESTIMATE_MODE_WARNED
+    if value is not None:
+        return bool(value)
+    estimate_only = not _billing_strict()
+    if estimate_only and not _ESTIMATE_MODE_WARNED:
+        _ESTIMATE_MODE_WARNED = True
+        log.warning(
+            "budget.strict_pricing=false enables legacy estimate-only "
+            "accounting: provisional rates may affect dollar totals; every "
+            "such rate is labeled unverified in Budget.pricing_evidence and "
+            "must not be used for invoices or chargebacks"
+        )
+    return estimate_only
 
 
 def _coerce_count(v: object) -> int:
@@ -125,84 +176,214 @@ def _cache_write_mult_from_ttl(ttl: str | None) -> float:
     return _CACHE_WRITE_MULT_5M
 
 
-def _lookup_price(model: str | None) -> tuple[float, float]:
-    """Return (in_per_mtok, out_per_mtok) for a model id. Falls back to Sonnet."""
-    if not model:
-        return _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT
-    # codex_cli is SUBSCRIPTION-metered (ChatGPT/Codex plan, no per-token
-    # invoice), so it always prices $0 -- BEFORE any table lookup. This must
-    # come first because Codex model ids (gpt-5.5, gpt-5) collide with priced
-    # OpenAI-API entries in MODEL_PRICES; the bare-id lookup below would
-    # otherwise bill a free subscription run at OpenAI API rates and could trip
-    # a --max-dollars cap. Token / wall-clock / tool-call caps still enforce.
-    if model.startswith("codex_cli:"):
-        return 0.0, 0.0
-    try:
-        from .llm import MODEL_PRICES
-    except ImportError:
-        return _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT
-    if model in MODEL_PRICES:
-        return MODEL_PRICES[model]
-    # Strip a "provider:" prefix (e.g. "anthropic:claude-opus-4-7").
-    bare = model.split(":", 1)[1] if ":" in model else model
-    if bare in MODEL_PRICES:
-        return MODEL_PRICES[bare]
-    # Models the cost-router can SELECT but that aren't in MODEL_PRICES
-    # (gpt-5-nano, gpt-5, gpt-5-pro, grok-4, gemini-2.5-*, the dated Haiku
-    # id) used to silently bill at the Sonnet fallback rate. Consult the
-    # router's own pricing table before giving up.
-    try:
-        from .cost.router import price_for_model
-        priced = price_for_model(model) or price_for_model(bare)
-        if priced is not None:
-            return priced
-    except ImportError:
-        pass
-    # Self-hosted providers have no per-token API bill: an UNKNOWN model id
-    # behind a local prefix is the operator's own server, so price it $0
-    # instead of the Sonnet fallback (which accrued phantom spend for free
-    # local models -- platform-test finding). A known table id behind the
-    # same prefix was matched above and keeps its real rate. The generic
-    # openai_compatible provider is intentionally excluded because it can
-    # point at paid public gateways. (codex_cli is handled up top -- its ids
-    # collide with priced OpenAI entries, so it must short-circuit before the
-    # table lookups above, not here.)
-    if ":" in model and model.split(":", 1)[0] in (
-        "ollama", "vllm", "tgi",
-    ):
-        return 0.0, 0.0
-    # Azure OpenAI and AWS Bedrock are paid hosted providers whose installer
-    # entries necessarily use dynamic placeholders/deployment names. Billing
-    # them at the generic Sonnet fallback can undercount real provider spend, so
-    # fail closed even when global strict pricing is disabled.
-    provider = model.split(":", 1)[0] if ":" in model else model
-    if provider in ("azure", "bedrock"):
-        raise UnpricedModelError(
-            f"no verified price for hosted provider model {model!r}; refusing "
-            "to bill at an estimate. Configure a concrete model id that exists "
-            "in maverick.llm.MODEL_PRICES, or add verified pricing before using "
-            "this paid provider with dollar caps."
+def _tracked_policy_price(
+    model_id: str,
+    rates: tuple[float, float],
+    *,
+    evidence_id: str,
+) -> ModelPrice:
+    """Build and verify a quote from a tracked non-vendor metering policy."""
+
+    evidence_pack = load_pricing_evidence_pack()
+    evidence = evidence_pack.entries[evidence_id]
+    quote = ModelPrice(
+        model_id=model_id,
+        input_per_mtok=rates[0],
+        output_per_mtok=rates[1],
+        source=evidence.source_url,
+        as_of=evidence.as_of,
+        fetched_at=evidence.retrieved_at,
+        currency=evidence.currency,
+        confidence=evidence.confidence,
+        verified=evidence.verified,
+        rate_card_version=evidence_pack.rate_card_version,
+        evidence_id=evidence_id,
+        pricing_basis=evidence.pricing_basis,
+        applicability=evidence.applicability,
+    )
+    assert_price_evidenced(quote, evidence_pack)
+    return quote
+
+
+def _estimate_policy_price(
+    model_id: str,
+    rates: tuple[float, float],
+    *,
+    source: str,
+    confidence: float,
+    version: str,
+    evidence_id: str,
+    pricing_basis: str,
+    applicability: str,
+) -> ModelPrice:
+    """Build a clearly provisional quote for a compatibility estimate."""
+
+    return ModelPrice(
+        model_id=model_id,
+        input_per_mtok=rates[0],
+        output_per_mtok=rates[1],
+        source=source,
+        as_of="2026-07-29",
+        fetched_at="2026-07-29T16:00:00Z",
+        currency="USD",
+        confidence=confidence,
+        verified=False,
+        rate_card_version=version,
+        evidence_id=evidence_id,
+        pricing_basis=pricing_basis,
+        applicability=applicability,
+    )
+
+
+def _lookup_price_quote(
+    model: str | None,
+    *,
+    estimate_only: bool | None = None,
+) -> ModelPrice:
+    """Resolve a model rate with its provenance and verification evidence.
+
+    Billing-grade lookup is the default and fails closed for a missing or
+    provisional rate. ``estimate_only=True`` opts one planning call into
+    estimates; an explicitly configured legacy ``strict_pricing=false`` opts
+    live accounting into the same warning-labelled compatibility path.
+    """
+
+    from .llm import MODEL_PRICES, MODEL_SONNET, model_price_quote
+
+    estimate_only = _resolve_estimate_only(estimate_only)
+    requested = model or MODEL_SONNET
+
+    # Codex CLI is subscription-metered rather than API-token-metered. This is
+    # an explicit, verified accounting policy and must win before a bare model
+    # id (such as gpt-5.5) resolves to the paid OpenAI API rate.
+    if requested.startswith("codex_cli:"):
+        return _tracked_policy_price(
+            requested,
+            (0.0, 0.0),
+            evidence_id="codex-cli-subscription-policy-2026-07-29",
         )
-    # Genuinely unknown model: no verified rate exists. Default behaviour bills
-    # at the documented Sonnet fallback estimate, but that was silent — phantom
-    # mispricing with no signal. Make it observable (warn once per id), and let
-    # billing-grade deployments refuse the estimate outright (strict pricing).
-    if _billing_strict():
-        raise UnpricedModelError(
-            f"no verified price for model {model!r}; refusing to bill at an "
-            f"estimate under strict pricing. Add it to maverick.llm.MODEL_PRICES, "
-            f"or unset [budget] strict_pricing / MAVERICK_BILLING_STRICT to bill "
-            f"at the fallback estimate."
+
+    keys = [requested]
+    bare = requested.split(":", 1)[1] if ":" in requested else requested
+    if bare != requested:
+        keys.append(bare)
+
+    for key in keys:
+        try:
+            quote = model_price_quote(key, estimate_only=estimate_only)
+        except UnverifiedRateError as exc:
+            raise UnpricedModelError(
+                f"{exc}. A legacy/custom gateway may explicitly set "
+                "[budget] strict_pricing=false for warning-labelled "
+                "estimate-only accounting."
+            ) from exc
+        legacy = MODEL_PRICES.get(key)
+        if quote is not None and (legacy is None or legacy == quote.rates):
+            if quote.currency != "USD":
+                raise UnpricedModelError(
+                    f"price for {requested!r} is in {quote.currency}; "
+                    "Budget dollars requires a verified USD rate"
+                )
+            if not quote.verified and requested not in _UNPRICED_WARNED:
+                _UNPRICED_WARNED.add(requested)
+                log.warning(
+                    "estimate-only accounting is using unverified rate for "
+                    "%r (source=%s, as_of=%s, confidence=%.2f); not suitable "
+                    "for invoices or chargebacks",
+                    requested,
+                    quote.source,
+                    quote.as_of,
+                    quote.confidence,
+                )
+            return quote
+        if legacy is not None:
+            # A runtime override of the compatibility tuple map carries no
+            # source or verification evidence. Preserve it for planning, but
+            # never let it become a bill merely because two floats exist.
+            if not estimate_only:
+                raise UnpricedModelError(
+                    f"price for {requested!r} exists only in the metadata-free "
+                    "MODEL_PRICES compatibility view; billing requires a "
+                    "verified ModelPrice"
+                )
+            estimate_quote = _estimate_policy_price(
+                requested,
+                (float(legacy[0]), float(legacy[1])),
+                source="maverick://pricing-policy/legacy-tuple-estimate",
+                confidence=0.25,
+                version="legacy-tuple-estimate-v1",
+                evidence_id="legacy-tuple-estimate-v1",
+                pricing_basis="Unverified integration-supplied USD per 1M token estimate",
+                applicability=(
+                    "Estimate-only compatibility override; no tracked "
+                    "source evidence"
+                ),
+            )
+            if requested not in _UNPRICED_WARNED:
+                _UNPRICED_WARNED.add(requested)
+                log.warning(
+                    "estimate-only accounting is using metadata-free rate "
+                    "for %r (source=%s, confidence=%.2f); not suitable for "
+                    "invoices or chargebacks",
+                    requested,
+                    estimate_quote.source,
+                    estimate_quote.confidence,
+                )
+            return estimate_quote
+
+    # Unknown self-hosted ids incur no metered API-token charge. This does not
+    # claim infrastructure is free; the source makes the accounting scope
+    # explicit and auditable.
+    provider = requested.split(":", 1)[0] if ":" in requested else requested
+    if ":" in requested and provider in ("ollama", "vllm", "tgi"):
+        return _tracked_policy_price(
+            requested,
+            (0.0, 0.0),
+            evidence_id="self-hosted-api-metering-policy-2026-07-29",
         )
-    if model not in _UNPRICED_WARNED:
-        _UNPRICED_WARNED.add(model)
+
+    if not estimate_only:
+        raise UnpricedModelError(
+            f"no verified USD price for model {requested!r}; refusing to bill "
+            "at an estimate. Add a sourced ModelPrice to the versioned rate "
+            "card. Planning code may explicitly request estimate_only=True; "
+            "a legacy/custom gateway may explicitly set "
+            "[budget] strict_pricing=false for warning-labelled estimates."
+        )
+
+    if requested not in _UNPRICED_WARNED:
+        _UNPRICED_WARNED.add(requested)
         log.warning(
-            "no verified price for model %r; billing at the Sonnet fallback "
-            "estimate ($%.2f/$%.2f per Mtok). Add it to MODEL_PRICES for accurate "
-            "accounting, or set [budget] strict_pricing to fail closed instead.",
-            model, _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT,
+            "no verified price for model %r; estimate-only calculation is "
+            "using the Sonnet fallback ($%.2f/$%.2f per Mtok); this rate must "
+            "not be used for billing",
+            requested,
+            _FALLBACK_PRICE_IN,
+            _FALLBACK_PRICE_OUT,
         )
-    return _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT
+    return _estimate_policy_price(
+        requested,
+        (_FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT),
+        source="maverick://pricing-policy/unknown-model-estimate",
+        confidence=0.1,
+        version="unknown-model-estimate-v1",
+        evidence_id="unknown-model-estimate-v1",
+        pricing_basis="Unverified Sonnet-rate planning fallback",
+        applicability=(
+            "Estimate-only unknown-model fallback; no vendor-specific "
+            "pricing evidence"
+        ),
+    )
+
+
+def _lookup_price(
+    model: str | None,
+    *,
+    estimate_only: bool | None = None,
+) -> tuple[float, float]:
+    """Return ``(input, output)`` rates while enforcing the requested use."""
+
+    return _lookup_price_quote(model, estimate_only=estimate_only).rates
 
 
 @dataclass
@@ -220,6 +401,14 @@ class Budget:
     dollars: float = 0.0
     tool_calls: int = 0
     started_at: float = field(default_factory=time.time)
+    # Model -> immutable rate-card evidence used by this budget. Kept out of
+    # ``__init__`` because callers must not inject provenance independently of
+    # the pricing provider.
+    pricing_evidence: dict[str, dict[str, object]] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
 
     # Legacy defaults; only used when ``model`` isn't passed.
     price_in_per_mtok: float = _FALLBACK_PRICE_IN
@@ -260,6 +449,10 @@ class Budget:
         out_tok = _coerce_count(out_tok)
         cache_read_tok = _coerce_count(cache_read_tok)
         cache_write_tok = _coerce_count(cache_write_tok)
+        # Resolve before mutating counters. A missing/unverified billing rate
+        # must leave the Budget untouched, not record tokens and then raise.
+        quote = _lookup_price_quote(model)
+        in_rate, out_rate = quote.rates
         # Wave 12 (council F12b): make the accumulator atomic so a
         # future parallel best-of-N (or multi-agent swarm where two
         # agents share a Budget) can't lose updates. `+=` on float is
@@ -275,7 +468,7 @@ class Budget:
             self.cache_write_tokens += cache_write_tok
             self.output_tokens += out_tok
 
-            in_rate, out_rate = _lookup_price(model)
+            self.pricing_evidence[quote.model_id] = quote.metadata()
             write_mult = _cache_write_mult_from_ttl(cache_write_ttl)
             # Provider-aware cache-read discount: Anthropic 0.1x (default),
             # OpenAI/o-series/gpt-5 auto-cache ~0.5x (caller passes it).
@@ -308,6 +501,7 @@ class Budget:
             self.cache_write_tokens += other.cache_write_tokens
             self.dollars += other.dollars
             self.tool_calls += other.tool_calls
+            self.pricing_evidence.update(other.pricing_evidence)
             self.check()
 
     def elapsed(self) -> float:
@@ -458,6 +652,15 @@ class Budget:
             "billable_input_tokens": self.input_tokens,
             "hit_rate": self.cache_hit_rate(),
         }
+
+    def pricing_snapshot(self) -> dict[str, dict[str, object]]:
+        """Copy of the rate provenance supporting this Budget's dollar total."""
+
+        with self._lock:
+            return {
+                model_id: dict(evidence)
+                for model_id, evidence in self.pricing_evidence.items()
+            }
 
     def summary(self) -> str:
         return (

@@ -4,11 +4,11 @@ very_high.
 The router already reasons in capability tiers (cheap/base/premium) and dollar
 ceilings; this is the *human* framing on top: which models cost a little vs a
 lot, so an operator can look at a specialist and say "this doesn't need a Very
-High model." The band is DERIVED from the real per-token price
-(:data:`maverick.llm.MODEL_PRICES`) so it never drifts from what a call
-actually costs, and it is OVERRIDABLE per model via ``[model_cost_tiers]`` in
-config for a deployment that prices its own endpoints (a local model is
-"low" no matter what the base weights would cost hosted).
+High model." The band is DERIVED from an explicit estimate-only lookup on the
+versioned pricing provider, and it is OVERRIDABLE per model via
+``[model_cost_tiers]`` in config for a deployment that prices its own
+endpoints (a local model is "low" no matter what the base weights would cost
+hosted).
 
 Pure + read-only here; the dashboard's settings store persists an override.
 """
@@ -31,14 +31,12 @@ _THRESHOLDS = ((18.0, "very_high"), (8.0, "high"), (2.5, "medium"))
 def blended_rate(model: str) -> float | None:
     """The output-weighted $/Mtok for a model, or None if its price is
     unknown (an unpriced local/custom endpoint)."""
-    from .llm import MODEL_PRICES
-    price = MODEL_PRICES.get(model)
-    if price is None:
-        # Tolerate a provider-prefixed id ("anthropic:claude-opus-4-8").
-        price = MODEL_PRICES.get(model.split(":", 1)[-1])
-    if price is None:
+    from .budget import _lookup_price_quote
+
+    quote = _lookup_price_quote(model, estimate_only=True)
+    if quote.source.endswith("unknown-model-estimate"):
         return None
-    inp, out = price
+    inp, out = quote.rates
     return _INPUT_WEIGHT * float(inp) + _OUTPUT_WEIGHT * float(out)
 
 
@@ -87,9 +85,10 @@ def band_detail(model: str) -> dict:
 
 def catalog() -> list[dict]:
     """Every priced model with its band -- the settable cost-tier table."""
-    from .llm import MODEL_PRICES
+    from .llm import MODEL_PRICING_PROVIDER
+
     # Most expensive band first (Very High → Low), then priciest within a band.
-    return sorted((band_detail(m) for m in MODEL_PRICES),
+    return sorted((band_detail(m) for m in MODEL_PRICING_PROVIDER.rates),
                   key=lambda d: (-BANDS.index(d["band"]), -(d["blended_rate"] or 0)))
 
 

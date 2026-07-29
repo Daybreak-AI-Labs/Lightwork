@@ -47,6 +47,12 @@ def _leave_the_guard_installed():
     """
     yield
     egress_guard.uninstall()
+    # Direct compatibility probes patch synthetic client classes while the
+    # process guard is intentionally uninstalled.  They do not participate in
+    # the runtime ``_patched`` registry, so discard their synthetic restore
+    # entries before reinstalling the real libraries.
+    egress_guard._originals.clear()
+    egress_guard._compatibility.clear()
     egress_guard.install()
 
 
@@ -196,24 +202,13 @@ def test_a_non_allowlisted_host_is_still_blocked(guarded, monkeypatch) -> None:
         httpx.get("https://other.example.com/x", timeout=0.5)
 
 
-# -- redirects: the bypass this guard shipped with first --------------------
+# -- redirects: every network hop gets a fresh policy decision --------------
 
-@pytest.mark.xfail(reason=(
-    "KNOWN GAP, recorded deliberately. httpx resolves redirects inside "
-    "Client.send, so the guard sees only the first URL and an allow-listed "
-    "host can hand off to a denied one. The fix (wrapping "
-    "_send_single_request, one request per hop) broke 1538 tests in CI with "
-    "'Attempted to send an async request with a sync Client instance' on all "
-    "three Python versions, and does not reproduce locally even against CI's "
-    "starlette pin. Shipping an unexplained catastrophic regression to close a "
-    "narrower hole is the wrong trade. This test stays, xfailed, so the gap is "
-    "a tracked number rather than a forgotten one -- and it flips to xpass the "
-    "moment the seam is fixed properly."), strict=True)
 def test_a_redirect_to_a_denied_host_is_blocked(guarded, monkeypatch) -> None:
     """An allow-listed host must not be able to hand off to a denied one.
 
-    Currently it can. See the xfail above: this is the honest record of a
-    measured hole, not an aspiration.
+    The first endpoint is genuinely reached and returns a 302. The second URL
+    is then checked as a new request and refused before DNS/connect.
     """
     import http.server
     import socketserver
@@ -235,13 +230,24 @@ def test_a_redirect_to_a_denied_host_is_blocked(guarded, monkeypatch) -> None:
     ports["b"] = 9
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        # Permit the first hop only.
-        monkeypatch.setattr("maverick.enterprise._is_local_endpoint",
-                            lambda url: f":{ports['a']}" in url)
+        # Permit the first hop only, and prove policy is invoked again with the
+        # rebuilt redirect URL rather than reusing the first-hop decision.
+        checked_urls = []
+
+        def local_only_for_first_hop(url):
+            checked_urls.append(url)
+            return f":{ports['a']}" in url
+
+        monkeypatch.setattr(
+            "maverick.enterprise._is_local_endpoint",
+            local_only_for_first_hop,
+        )
         _allowed(monkeypatch)
         with pytest.raises(EgressBlocked):
             httpx.get(f"http://127.0.0.1:{ports['a']}/start",
                       follow_redirects=True, timeout=3.0)
+        assert any(f":{ports['a']}/start" in url for url in checked_urls)
+        assert any("denied.test" in url for url in checked_urls)
     finally:
         srv.shutdown()
         srv.server_close()
@@ -257,6 +263,17 @@ def test_the_first_hop_is_still_permitted(guarded, monkeypatch) -> None:
                         lambda url: True)
     with pytest.raises(httpx.HTTPError):
         httpx.get(UNROUTABLE, timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_async_permitted_hop_preserves_async_stream_contract(
+    guarded,
+) -> None:
+    """The async wrapper must delegate to AsyncClient's own one-hop method."""
+    async with httpx.AsyncClient(timeout=0.5) as client:
+        with pytest.raises(httpx.HTTPError) as caught:
+            await client.get(UNROUTABLE)
+    assert "sync Client instance" not in str(caught.value)
 
 
 # -- in-process transports are not egress ----------------------------------
@@ -278,8 +295,7 @@ def test_an_in_process_asgi_request_is_not_blocked(guarded) -> None:
         await send({"type": "http.response.body", "body": b"ok"})
 
     # Starlette's TestClient, which is the exact shape that broke: it ships its
-    # own `_TestClientTransport`, not httpx's ASGITransport, which is why the
-    # rule follows delegation rather than a class-name allowlist.
+    # own `_TestClientTransport`, not httpx's ASGITransport.
     # No `with`: entering the client runs the ASGI lifespan, which this bare
     # app does not implement. The request path is what is under test.
     assert starlette.TestClient(app).get("/x").status_code == 200
@@ -293,13 +309,95 @@ def test_a_mock_transport_is_not_blocked(guarded) -> None:
         assert c.get("https://denied.example.com/x").status_code == 200
 
 
+def test_an_unknown_sync_transport_is_checked_before_it_can_run(guarded) -> None:
+    """A custom BaseTransport is network-capable unless explicitly proven not."""
+
+    class SocketLikeTransport(httpx.BaseTransport):
+        reached = False
+
+        def handle_request(self, request):
+            self.reached = True
+            return httpx.Response(200, text="escaped", request=request)
+
+    transport = SocketLikeTransport()
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(EgressBlocked):
+            client.get("https://denied.example.com/x")
+    assert transport.reached is False
+
+
+def test_an_unknown_transport_redirect_is_checked_before_second_hop(
+    guarded,
+    monkeypatch,
+) -> None:
+    """Custom transports cannot use an allowed first hop to bypass policy."""
+    calls = []
+
+    class RedirectingTransport(httpx.BaseTransport):
+        def handle_request(self, request):
+            calls.append(str(request.url))
+            return httpx.Response(
+                302,
+                headers={"location": "https://denied.example.com/steal"},
+                request=request,
+            )
+
+    _allowed(monkeypatch, "allowed.example.com")
+    with httpx.Client(transport=RedirectingTransport()) as client:
+        with pytest.raises(EgressBlocked):
+            client.get(
+                "https://allowed.example.com/start",
+                follow_redirects=True,
+            )
+    assert calls == ["https://allowed.example.com/start"]
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_async_transport_is_checked_before_it_can_run(
+    guarded,
+) -> None:
+    """The same fail-closed classification applies to AsyncBaseTransport."""
+
+    class AsyncSocketLikeTransport(httpx.AsyncBaseTransport):
+        reached = False
+
+        async def handle_async_request(self, request):
+            self.reached = True
+            return httpx.Response(200, text="escaped", request=request)
+
+    transport = AsyncSocketLikeTransport()
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(EgressBlocked):
+            await client.get("https://denied.example.com/x")
+    assert transport.reached is False
+
+
+def test_a_custom_mock_subclass_is_not_allowed_to_claim_in_process(
+    guarded,
+) -> None:
+    """Only the exact known mock type is exempt; overrides can perform I/O."""
+
+    class SocketLikeMock(httpx.MockTransport):
+        reached = False
+
+        def handle_request(self, request):
+            self.reached = True
+            return httpx.Response(200, text="escaped", request=request)
+
+    transport = SocketLikeMock(lambda request: httpx.Response(200))
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(EgressBlocked):
+            client.get("https://denied.example.com/x")
+    assert transport.reached is False
+
+
 def test_a_wrapped_network_transport_is_still_checked(guarded, monkeypatch) -> None:
     """The negative control that makes the rule above safe.
 
     `tools/_ssrf._PinnedTransport` WRAPS an httpx network transport rather than
     being one, so a rule of "only HTTPTransport counts as network" would skip
-    the check for exactly the requests most worth checking. Detection follows
-    delegation instead, and this pins it.
+    the check for exactly the requests most worth checking. Unknown transports
+    fail closed, and this pins that behavior.
     """
     from maverick.tools import _ssrf
 
@@ -325,10 +423,10 @@ def test_an_unresolvable_transport_fails_closed() -> None:
 # -- composition with SSRF pinning -----------------------------------------
 
 def test_the_guard_does_not_disable_ssrf_pinning(guarded, monkeypatch) -> None:
-    """The pinned transport sits below send; both must still apply.
+    """The pinned transport sits below the one-hop seam; both must still apply.
 
-    If the guard had replaced the transport rather than wrapping send, this
-    would silently drop SSRF protection while looking like an improvement.
+    If the guard had replaced the transport rather than wrapping the client
+    method, this would silently drop SSRF protection.
     """
     from maverick.tools import _ssrf
 
@@ -364,17 +462,162 @@ def test_a_block_is_audited(guarded, monkeypatch) -> None:
 #: The attribute the httpx wrapper actually replaces. Named here so these
 #: mechanics tests fail loudly if the seam moves again, rather than quietly
 #: asserting nothing about the method that carries the check.
-_SEAM = "send"
+_SEAM = "_send_single_request"
 
 
 def test_the_seam_is_recorded() -> None:
     """Pins WHICH method carries the check, not merely that one does.
 
-    `send` is the seam because it is the one observed working in CI; the
-    per-hop `_send_single_request` seam broke 1538 tests there. If that is ever
-    fixed, this constant and the xfailed redirect test move together.
+    ``_send_single_request`` is entered once per actual redirect hop; wrapping
+    ``send`` would inspect only the first URL in the chain.
     """
     assert hasattr(httpx.Client, _SEAM)
+    status = egress_guard.compatibility_status()
+    assert status["active"] is True
+    assert status["clients"]["httpx"] == {
+        "compatible": True,
+        "reason": "",
+        "seam": _SEAM,
+    }
+
+
+@pytest.mark.asyncio
+async def test_one_hop_wrappers_forward_signature_extensions(
+    monkeypatch,
+) -> None:
+    """Future optional seam parameters must reach the matching client method."""
+    egress_guard.uninstall()
+    calls = []
+    checked = []
+
+    class SyncClient:
+        def _send_single_request(self, request, *args, **kwargs):
+            calls.append(("sync", request, args, kwargs))
+            return "sync-result"
+
+    class AsyncClient:
+        async def _send_single_request(self, request, *args, **kwargs):
+            calls.append(("async", request, args, kwargs))
+            return "async-result"
+
+    FakeHttpx = type(
+        "FakeHttpx",
+        (),
+        {"Client": SyncClient, "AsyncClient": AsyncClient},
+    )
+
+    request = type("Request", (), {"url": "https://allowed.example/x"})()
+    monkeypatch.setattr(egress_guard, "_reaches_the_network", lambda *a: True)
+    monkeypatch.setattr(egress_guard, "_check", lambda url: checked.append(url))
+
+    egress_guard._patch_httpx(FakeHttpx)
+
+    assert (
+        SyncClient()._send_single_request(request, "future", option=1)
+        == "sync-result"
+    )
+    assert (
+        await AsyncClient()._send_single_request(request, "future", option=2)
+        == "async-result"
+    )
+    assert calls == [
+        ("sync", request, ("future",), {"option": 1}),
+        ("async", request, ("future",), {"option": 2}),
+    ]
+    assert checked == [
+        "https://allowed.example/x",
+        "https://allowed.example/x",
+    ]
+
+
+def test_incompatible_httpx_seam_is_visible_in_readiness(monkeypatch) -> None:
+    egress_guard.uninstall()
+
+    class MissingSeam:
+        pass
+
+    class IncompatibleHttpx:
+        Client = MissingSeam
+        AsyncClient = MissingSeam
+
+    with pytest.raises(RuntimeError, match="_send_single_request"):
+        egress_guard._patch_httpx(IncompatibleHttpx)
+
+    status = egress_guard.compatibility_status()
+    assert status["active"] is False
+    assert status["clients"]["httpx"]["compatible"] is False
+    assert status["clients"]["httpx"]["fail_closed_fallback"] is False
+    assert "_send_single_request" in status["clients"]["httpx"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_incompatible_httpx_fails_closed_without_delegating(
+    monkeypatch,
+) -> None:
+    """A future HTTPX cannot silently open the enterprise data boundary."""
+    egress_guard.uninstall()
+    calls = []
+
+    class SyncClient:
+        def send(self, request, *args, **kwargs):
+            calls.append(("sync", request, args, kwargs))
+            return "network"
+
+    class AsyncClient:
+        async def send(self, request, *args, **kwargs):
+            calls.append(("async", request, args, kwargs))
+            return "network"
+
+    FakeHttpx = type(
+        "FakeHttpx",
+        (),
+        {"Client": SyncClient, "AsyncClient": AsyncClient},
+    )
+    request = type("Request", (), {"url": "https://api.example.com/x"})()
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
+    monkeypatch.setattr("maverick.audit.writer.audit_event", lambda *a, **k: True)
+
+    egress_guard._patch_httpx(FakeHttpx)
+
+    status = egress_guard.compatibility_status()
+    assert status["active"] is False
+    assert status["clients"]["httpx"]["compatible"] is False
+    assert status["clients"]["httpx"]["fail_closed_fallback"] is True
+    assert status["clients"]["httpx"]["fallback_seam"] == "send"
+    with pytest.raises(EgressBlocked, match="every redirect hop"):
+        SyncClient().send(request, "future", option=1)
+    with pytest.raises(EgressBlocked, match="every redirect hop"):
+        await AsyncClient().send(request, "future", option=2)
+    assert calls == []
+
+
+def test_incompatible_httpx_fallback_preserves_default_mode(
+    monkeypatch,
+) -> None:
+    """The degraded guard is fail-closed only where the boundary is asserted."""
+    egress_guard.uninstall()
+    calls = []
+
+    class SyncClient:
+        def send(self, request, *args, **kwargs):
+            calls.append((request, args, kwargs))
+            return "delegated"
+
+    class AsyncClient:
+        async def send(self, request, *args, **kwargs):
+            return "delegated"
+
+    FakeHttpx = type(
+        "FakeHttpx",
+        (),
+        {"Client": SyncClient, "AsyncClient": AsyncClient},
+    )
+    request = type("Request", (), {"url": "https://api.example.com/x"})()
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    egress_guard._patch_httpx(FakeHttpx)
+
+    assert SyncClient().send(request, "future", option=1) == "delegated"
+    assert calls == [(request, ("future",), {"option": 1})]
 
 
 def test_install_is_idempotent() -> None:
@@ -415,7 +658,7 @@ def test_importing_maverick_does_not_import_httpx() -> None:
     assert out.stdout.strip() == "False", "importing maverick pulled in httpx"
 
 
-def test_a_library_imported_after_the_guard_is_still_wrapped(monkeypatch) -> None:
+def test_a_library_imported_after_the_guard_is_still_wrapped() -> None:
     """The other half: lazy must not mean unguarded.
 
     Most connectors do ``import httpx`` inside the function body, so the module
@@ -423,26 +666,71 @@ def test_a_library_imported_after_the_guard_is_still_wrapped(monkeypatch) -> Non
     already-loaded libraries, exactly those connectors would stay unprotected
     -- which is the population the whole change exists to cover.
 
-    Done in-process by evicting httpx and re-importing, rather than in a
-    subprocess: conftest points HOME at a tmp dir, and certifi (which httpx
-    needs) lives in the user site-packages, so a subprocess cannot import httpx
-    at all here.
+    Exercise this in a subprocess. Evicting and re-importing HTTPX in the
+    pytest process creates two incompatible ``Request``/``SyncByteStream``
+    class families and can corrupt already-collected Starlette TestClient
+    classes even when the guard restores every method correctly.
     """
+    import subprocess
     import sys
 
-    monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
-    egress_guard.uninstall()
-    for name in [m for m in list(sys.modules) if m == "httpx"
-                 or m.startswith("httpx.")]:
-        monkeypatch.delitem(sys.modules, name)
+    script = (
+        "import os, sys; "
+        "os.environ['MAVERICK_ENTERPRISE']='1'; "
+        "import maverick; "
+        "assert 'httpx' not in sys.modules; "
+        "import httpx; "
+        "from maverick.enterprise import EgressBlocked; "
+        "\ntry:\n"
+        " httpx.get('https://api.example.com/x', timeout=1.0)\n"
+        "except EgressBlocked:\n"
+        " print('blocked')\n"
+        "else:\n"
+        " raise SystemExit('late HTTPX import was not guarded')\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "blocked"
 
-    egress_guard.install()
-    assert "httpx" not in sys.modules, "arming the guard must not force the import"
 
-    import httpx as freshly_imported
+def test_late_client_import_is_refused_when_no_guard_seam_exists() -> None:
+    """A future client shape cannot remain imported and silently unguarded."""
+    import subprocess
+    import sys
 
-    with pytest.raises(EgressBlocked):
-        freshly_imported.get("https://api.example.com/x", timeout=1.0)
+    script = """
+import pathlib
+import sys
+import tempfile
+
+root = pathlib.Path(tempfile.mkdtemp())
+(root / "httpx.py").write_text(
+    "class Client:\\n    pass\\nclass AsyncClient:\\n    pass\\n",
+    encoding="utf-8",
+)
+sys.path.insert(0, str(root))
+import maverick
+try:
+    import httpx
+except RuntimeError as exc:
+    assert "egress boundary could not be installed" in str(exc)
+    print("refused")
+else:
+    raise SystemExit("incompatible HTTPX remained importable without a guard")
+"""
+    out = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "refused"
 
 
 def test_importing_maverick_installs_the_guard() -> None:

@@ -30,15 +30,10 @@ def test_composite_action_installs_first_party_packages_from_its_checkout():
     text = _read("deploy/github-action/action.yml")
 
     assert "GITHUB_ACTION_PATH" in text
-    for local_project in (
-        "packages/maverick-core[all]",
-        "packages/maverick-shield",
-        "packages/maverick-channels",
-        "packages/maverick-dashboard",
-        "packages/maverick-mcp",
-        "apps/installer-cli",
-    ):
-        assert local_project in text
+    assert "scripts/install_release_cohort.py" in text
+    assert "--source-root" in text
+    assert "--core-extra release-runtime" in text
+    assert "release-cohort.toml" in text
 
     assert not re.search(
         r"python\s+-m\s+pip\s+install\s+['\"]?maverick-agent",
@@ -51,7 +46,7 @@ def test_reusable_pr_workflow_requires_immutable_runtime_source():
 
     assert "lightwork_ref:" in text
     assert "Full 40-character commit SHA" in text
-    assert "repository: Day-AI-Labs/Lightwork" in text
+    assert "repository: Daybreak-AI-Labs/Lightwork" in text
     assert "persist-credentials: false" in text
     assert '"$source_root/packages/maverick-core[all]"' in text
     assert "pip install 'maverick-agent[all]'" not in text
@@ -122,6 +117,35 @@ def test_public_pypi_consumer_is_disabled_until_namespace_is_reserved():
 
     assert "MAVERICK_PUBLIC_PYPI_ENABLED == 'true'" in text
     assert "disabled by default" in text
+    top_level = text.split("jobs:", 1)[0]
+    resolver = text.split("\n  resolve:", 1)[1].split(
+        "\n  open-pr:", 1
+    )[0]
+    publisher = text.split("\n  open-pr:", 1)[1]
+    assert "contents: read" in top_level
+    assert "contents: write" not in resolver
+    assert "pull-requests: write" not in resolver
+    assert "pip-tools==7.6.0" in resolver
+    assert "resolved-homebrew-formula" in resolver
+    assert "contents: write" in publisher
+    assert "pull-requests: write" in publisher
+    assert "actions/download-artifact@" in publisher
+    assert "token: ${{ github.token }}" in publisher
+
+
+def test_ci_integration_docs_do_not_call_workdir_a_security_boundary():
+    action = _read("deploy/github-action/action.yml")
+    action_docs = _read("deploy/github-action/README.md")
+    gitlab = _read("deploy/gitlab-ci/maverick.gitlab-ci.yml")
+    gitlab_docs = _read("deploy/gitlab-ci/README.md")
+
+    for text in (action, action_docs, gitlab, gitlab_docs):
+        assert "trusted disposable" in text
+        assert "CI runner is already an ephemeral VM" not in text
+    assert "working directory is not a filesystem or network" in (
+        gitlab_docs
+    )
+    assert "confines the starting directory, not the" in action_docs
 
 
 def test_external_github_actions_are_pinned_to_full_commits():
@@ -147,7 +171,12 @@ def test_external_github_actions_are_pinned_to_full_commits():
 
 def test_markdown_workflow_examples_do_not_recommend_mutable_action_refs():
     mutable: list[str] = []
-    for path in sorted(REPO_ROOT.rglob("*.md")):
+    paths = (
+        path
+        for path in REPO_ROOT.rglob("*.md")
+        if "node_modules" not in path.parts
+    )
+    for path in sorted(paths):
         for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             match = re.search(r"\buses:\s*([^\s#]+)", line)
             if match is None:
@@ -164,8 +193,10 @@ def test_markdown_workflow_examples_do_not_recommend_mutable_action_refs():
 
 def test_public_publish_workflow_uses_an_explicit_package_allowlist():
     text = _read(".github/workflows/publish.yml")
+    cohort = tomllib.loads(_read("release-cohort.toml"))
 
-    for public_project in (
+    assert "release-cohort.toml" in text
+    assert {item["path"] for item in cohort["packages"]} == {
         "packages/maverick-core",
         "packages/maverick-shield",
         "packages/maverick-channels",
@@ -174,8 +205,7 @@ def test_public_publish_workflow_uses_an_explicit_package_allowlist():
         "packages/maverick-evolve",
         "packages/maverick-knowledge",
         "apps/installer-cli",
-    ):
-        assert public_project in text
+    }
     assert "apps/vendor-console" not in text
     assert "for d in packages/* apps/*" not in text
     # OIDC is granted only on the publish/sign jobs, never the dependency-
@@ -222,7 +252,15 @@ def _assert_floor(requirements: list[str], package: str, floor: str) -> None:
         for spec in requirement.specifier
         if spec.operator == ">="
     ]
-    assert lower_bounds and max(lower_bounds) >= Version(floor), (
+    exact_versions = [
+        Version(spec.version)
+        for requirement in matches
+        for spec in requirement.specifier
+        if spec.operator in {"==", "==="} and "*" not in spec.version
+    ]
+    has_safe_floor = bool(lower_bounds) and max(lower_bounds) >= Version(floor)
+    has_safe_exact_pin = bool(exact_versions) and min(exact_versions) >= Version(floor)
+    assert has_safe_floor or has_safe_exact_pin, (
         f"{package} must be constrained to >= {floor}: {matches}"
     )
 

@@ -6,7 +6,7 @@ cost from its own shape, before a single token is spent. Each step's text is
 sized with the same chars/4 heuristic the live billing path uses
 (``llm._estimate_call_cost`` and the token preflight), and priced at the
 canonical rate of the model the step's role would actually run on
-(``llm.model_for_role`` -> ``llm.MODEL_PRICES``). The point is a
+(``llm.model_for_role`` -> versioned pricing provider). The point is a
 pre-execution gut check — "this 12-step plan with 3 reflect iterations is
 ~$4.10 against a $5 cap" — so an over-budget plan gets reshaped *before*
 execution instead of dying on ``BudgetExceeded`` halfway through.
@@ -20,10 +20,10 @@ These are estimates, not bills. Two documented knobs keep them honest:
   caller doesn't know better (writer/coder/revisor produce long completions;
   a summarizer doesn't). Override per step via ``expected_output_tokens``.
 
-Pricing is never invented here: rates resolve through
-``budget._lookup_price`` — ``llm.MODEL_PRICES`` first (bare or
-``provider:``-prefixed id), then the cost router's table, then the documented
-last-resort fallback (Sonnet list rate) for ids nobody can price.
+Pricing resolves through ``budget._lookup_price`` in explicit
+``estimate_only`` mode. That permits clearly marked provisional provider
+quotes and the documented last-resort Sonnet fallback; the same values cannot
+cross the default billing-grade verification gate.
 
 Pure library, default inert: nothing here runs unless called and nothing
 dispatches an LLM call, so there is no config knob to flip.
@@ -98,14 +98,15 @@ class BudgetVerdict:
 
 
 def _price_for(model: str) -> tuple[float, float]:
-    """($/Mtok in, $/Mtok out) for a model spec, exactly as billing prices it.
+    """Planning-only ``($/Mtok in, $/Mtok out)`` for a model spec.
 
-    Delegates to ``budget._lookup_price``: ``llm.MODEL_PRICES`` first, then
-    the cost router's table, then the documented Sonnet-list-rate fallback.
-    One pricing source of truth — no rates are invented here.
+    A plan projection is explicitly not a bill, so it opts into provisional
+    rates and the documented unknown-model fallback. Live accounting calls the
+    same resolver without ``estimate_only`` and fails closed unless the rate is
+    verified and provenance-carrying.
     """
     from ..budget import _lookup_price
-    return _lookup_price(model)
+    return _lookup_price(model, estimate_only=True)
 
 
 def estimate_step(

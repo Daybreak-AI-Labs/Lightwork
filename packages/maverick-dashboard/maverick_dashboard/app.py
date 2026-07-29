@@ -49,6 +49,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth_metrics as _auth_metrics
+from . import health_routes as _health_routes
 from ._shared import (
     _any_provider_key_set,
     _get_sse_semaphore,
@@ -78,7 +79,19 @@ from .auth import (
     stored_automation_identity,
     websocket_caller_principal,
 )
+from .health_routes import (
+    health_response as _health_response,
+)
+from .health_routes import (
+    metrics_response as _metrics_response,
+)
+from .health_routes import (
+    readiness_response as _readiness_response,
+)
 from .oidc_login import router as oidc_login_router
+
+_MAX_USER_SPEND_METRIC_SERIES = _health_routes.MAX_USER_SPEND_METRIC_SERIES
+_USER_SPEND_OVERFLOW_LABEL = _health_routes.USER_SPEND_OVERFLOW_LABEL
 
 log = logging.getLogger(__name__)
 
@@ -2303,45 +2316,122 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
     from .auth import has_global_permission
 
     model_risk_enabled = model_risk_assurance.enabled()
+    model_risk_errors: dict[str, str] = {}
     if model_risk_enabled:
-        assets, evidence, findings = await asyncio.gather(
+        model_results = await asyncio.gather(
             run_in_threadpool(model_risk_assurance.list_inventory),
             run_in_threadpool(model_risk_assurance.list_evidence),
             run_in_threadpool(model_risk_assurance.findings),
+            return_exceptions=True,
         )
+        assets, evidence, findings = [], [], []
+        for label, result in zip(
+            ("assets", "evidence", "findings"),
+            model_results,
+            strict=True,
+        ):
+            if isinstance(result, Exception):
+                model_risk_errors[label] = (
+                    f"Model-risk {label} are temporarily unavailable."
+                )
+            elif label == "assets":
+                assets = result
+            elif label == "evidence":
+                evidence = result
+            else:
+                findings = result
     else:
         assets, evidence, findings = [], [], []
 
     gateway_enabled = ai_evidence_gateway.enabled()
     gateway_error = ""
+    gateway_error_action = ""
+    gateway_panel_errors: dict[str, str] = {}
     gateway_summary: dict[str, Any] = {}
     policies: list[dict[str, Any]] = []
     receipts: list[dict[str, Any]] = []
     regulatory_impacts: list[dict[str, Any]] = []
+    impact_page: dict[str, Any] = {
+        "next_cursor": None,
+        "snapshot_total": 0,
+        "count": 0,
+        "status": None,
+        "pending_first": True,
+    }
     if gateway_enabled:
-        try:
-            (
-                gateway_summary,
-                policies,
-                receipts,
-                regulatory_impacts,
-            ) = await asyncio.gather(
-                run_in_threadpool(ai_evidence_gateway.summary),
-                run_in_threadpool(ai_evidence_gateway.list_policies),
-                run_in_threadpool(
-                    ai_evidence_gateway.list_interaction_receipts,
-                    limit=100,
-                ),
-                run_in_threadpool(
-                    ai_evidence_gateway.list_regulatory_impacts,
-                    limit=100,
-                ),
+        gateway_results = await asyncio.gather(
+            run_in_threadpool(ai_evidence_gateway.summary),
+            run_in_threadpool(ai_evidence_gateway.list_policies),
+            run_in_threadpool(
+                ai_evidence_gateway.list_interaction_receipts,
+                limit=100,
+            ),
+            run_in_threadpool(
+                ai_evidence_gateway.list_regulatory_impacts_page,
+                limit=100,
+                pending_first=True,
+            ),
+            return_exceptions=True,
+        )
+        summary_result, policy_result, receipt_result, impact_result = (
+            gateway_results
+        )
+        if isinstance(summary_result, Exception):
+            exc = summary_result
+            if (
+                type(exc).__name__ == "EvidenceGatewayStateError"
+                and str(exc)
+                == "AI evidence gateway records require an explicit tenant scope"
+            ):
+                gateway_error = (
+                    "Select a company or tenant before loading evidence. "
+                    "No records were read."
+                )
+                gateway_error_action = (
+                    "Set [client] id in the Lightwork configuration or set "
+                    "MAVERICK_TENANT, then restart the dashboard."
+                )
+            else:
+                gateway_error = (
+                    "Gateway records could not be loaded safely. "
+                    "No readiness conclusion is available."
+                )
+                gateway_error_action = (
+                    "Run maverick preflight --profile cockpit, then "
+                    "maverick doctor."
+                )
+            gateway_panel_errors["summary"] = gateway_error
+        else:
+            gateway_summary = summary_result
+        if isinstance(policy_result, Exception):
+            gateway_panel_errors["policies"] = (
+                "Policy and model bindings are temporarily unavailable."
             )
-        except Exception:
-            gateway_error = (
-                "Gateway records could not be loaded safely. "
-                "No readiness conclusion is available."
+        else:
+            policies = policy_result
+        if isinstance(receipt_result, Exception):
+            gateway_panel_errors["receipts"] = (
+                "Interaction receipts are temporarily unavailable."
             )
+        else:
+            receipts = receipt_result
+        if isinstance(impact_result, Exception):
+            gateway_panel_errors["impacts"] = (
+                "Regulatory impacts are temporarily unavailable."
+            )
+        else:
+            impact_page = impact_result
+            regulatory_impacts = list(impact_page["items"])
+    from .operator_cockpit import display_timestamp, gateway_view
+
+    receipt_rows = []
+    for receipt in receipts[:100]:
+        row = dict(receipt)
+        row["issued_display"] = display_timestamp(
+            row.get("issued_at") or row.get("created_at")
+        )
+        receipt_rows.append(row)
+
     return templates.TemplateResponse(
         request,
         "model_risk_assurance.html",
@@ -2353,12 +2443,22 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
                 "findings": len(findings),
             },
             "findings": findings[:20],
+            "model_risk_errors": model_risk_errors,
             "gateway_enabled": gateway_enabled,
             "gateway_error": gateway_error,
+            "gateway_error_action": gateway_error_action,
+            "gateway_panel_errors": gateway_panel_errors,
             "gateway_summary": gateway_summary,
             "policies": policies[:100],
-            "receipts": receipts[:100],
+            "receipts": receipt_rows,
             "regulatory_impacts": regulatory_impacts[:100],
+            "impact_page": impact_page,
+            "gateway_view": gateway_view(
+                gateway_summary,
+                policies,
+                receipts,
+                regulatory_impacts,
+            ),
             "gateway_admin": has_global_permission(request, "admin"),
         },
     )
@@ -5961,49 +6061,12 @@ async def get_started_page(request: Request) -> HTMLResponse:
     """First-run guide: a live checklist from zero to a running AI workforce.
     Each step reflects real workspace state (provider configured? a workflow or
     agent built? anything run or automated?) so it self-completes as you go."""
-    from maverick.config import any_provider_configured
-    from maverick.templates import user_templates_dir
-    provider_ok = bool(any_provider_configured())
-    try:
-        has_templates = any(user_templates_dir().glob("*.md"))
-    except OSError:
-        has_templates = False
-    try:
-        from maverick.domain_edit import list_agents
-        has_agents = any(a.get("is_override") for a in list_agents())
-    except Exception:
-        has_agents = False
-    try:
-        ran = bool(_world().list_goals(limit=1))
-    except Exception:
-        ran = False
-    automated = False
-    try:
-        from maverick.job_queue import JobQueue
-        automated = any((j.payload or {}).get("__cron__")
-                        for j in JobQueue().list(status="pending"))
-    except Exception:
-        automated = False
-    if not automated:
-        try:
-            from maverick_dashboard import triggers_store
-            automated = bool(triggers_store.list_triggers())
-        except Exception:
-            automated = False
-    steps = [
-        {"title": "Connect a model provider", "done": provider_ok,
-         "body": "Add an API key (or a self-hosted endpoint) so your agents can think.",
-         "cta": "/settings", "cta_label": "Open Settings"},
-        {"title": "Build a workflow or agent", "done": has_templates or has_agents,
-         "body": "Draft a reusable workflow, or a governed specialist agent, in the builder.",
-         "cta": "/workflow-builder", "cta_label": "Open the builder"},
-        {"title": "Run it — or put it on autopilot", "done": ran or automated,
-         "body": "Start a goal from chat, or arm a schedule / webhook trigger to run it for you.",
-         "cta": "/chat", "cta_label": "Start a goal"},
-    ]
+    from .onboarding_state import build
+
+    state = build(_world())
     return templates.TemplateResponse(
         request, "get_started.html",
-        {"steps": steps, "done_count": sum(1 for s in steps if s["done"]), "total": len(steps)},
+        state,
     )
 
 
@@ -6266,145 +6329,22 @@ async def livez() -> dict:
 
 
 def _readiness_deep_checks() -> tuple[bool, dict[str, str]]:
-    """The deep readiness checks ``maverick doctor`` runs but a shallow health
-    probe misses — the silent footguns where a pod accepts traffic yet refuses
-    all work: client binding enforced-but-unset, the shield required-but-absent,
-    and the Agent Trust Plane engaged with an empty registry (denies every
-    external agent). Returns ``(ok, checks)``; never raises."""
-    checks: dict[str, str] = {}
-    ok = True
-    try:
-        from maverick.client import client_binding_enforced, client_id
-        if client_binding_enforced() and not client_id():
-            checks["client_binding"] = "fail: enforced but no valid client id"
-            ok = False
-        else:
-            checks["client_binding"] = "ok"
-    except Exception as e:  # pragma: no cover - never break the probe
-        checks["client_binding"] = f"unknown: {type(e).__name__}"
-    try:
-        from maverick.shield_policy import shield_available, shield_required
-        if shield_required() and not shield_available():
-            checks["shield"] = "fail: required but not installed/available"
-            ok = False
-        else:
-            checks["shield"] = "ok"
-    except Exception as e:  # pragma: no cover
-        checks["shield"] = f"unknown: {type(e).__name__}"
-    try:
-        from maverick.agent_trust import load_trust_state
-        enforced, registry = load_trust_state()
-        if enforced and not registry:
-            checks["agent_trust"] = "fail: engaged but registry empty (denies all)"
-            ok = False
-        else:
-            checks["agent_trust"] = "ok"
-    except Exception as e:  # pragma: no cover
-        checks["agent_trust"] = f"unknown: {type(e).__name__}"
-    # Replica safety. Reported rather than merely enforced at startup, so an
-    # operator who set the override can see that this deployment is running
-    # without single-writer protection instead of inferring it from silence.
-    # Not ready-blocking: this process either owns the root or was told not to
-    # care, and in neither case is refusing traffic the right response.
-    try:
-        from maverick.control_plane_lease import posture
-        state = posture()
-        checks["replica_safety"] = (
-            f"ok: single writer (token {state['fencing_token']})"
-            if state["state"] == "owned"
-            else f"{state['state']}: {state.get('detail', '')}".strip()
-        )
-    except Exception as e:  # pragma: no cover
-        checks["replica_safety"] = f"unknown: {type(e).__name__}"
-    return ok, checks
+    """Compatibility export for the extracted operational probe service."""
+    return _health_routes.readiness_deep_checks()
 
 
 def _health_should_redact() -> bool:
-    """Redact the auth-exempt health payloads (``/healthz``, ``/readyz``)
-    whenever ANY auth mechanism is configured -- a static token, OIDC, or
-    reverse-proxy SSO -- not only when ``MAVERICK_DASHBOARD_TOKEN`` is set.
-
-    The platform treats token, OIDC, and proxy SSO as three independent auth
-    mechanisms, so an OIDC-only or proxy-SSO deployment runs with the token
-    UNSET. Gating on the token alone left the exempt (unauthenticated) probe
-    payload leaking operational signal to anyone on the network: the llm_key
-    status, a live in-flight goal gauge, the shield/agent-trust/client-binding
-    posture, and -- on a DB failure -- the absolute world.db path/DSN. Redact
-    whenever the deployment is authenticated at all; local-dev (no auth) keeps
-    the full checks for debuggability. One helper so the sites can't drift.
-    """
-    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
-        return True
-    try:
-        from maverick.oidc import oidc_enabled
-        if oidc_enabled():
-            return True
-    except Exception:  # pragma: no cover -- never weaken redaction on a lookup error
-        pass
-    try:
-        from maverick.proxy_auth import proxy_auth_enabled
-        if proxy_auth_enabled():
-            return True
-    except Exception:  # pragma: no cover -- never weaken redaction on a lookup error
-        pass
-    return False
+    """Compatibility export for the extracted probe disclosure policy."""
+    return _health_routes.health_should_redact()
 
 
 @app.get("/healthz")
 async def healthz() -> JSONResponse:
     """Deep health: DB writable, LLM provider key present, runner alive."""
-    from maverick.runner import MAX_CONCURRENT_GOALS, _run_semaphore
-    checks: dict[str, str] = {}
-    overall_ok = True
-
-    try:
-        # Probe the CONFIGURED backend (SQLite or Postgres), not a hard-coded
-        # local world.db -- a Postgres-backed deployment used to report a stale
-        # local file healthy/unhealthy instead of the DB it actually uses.
-        _world().ping()
-        checks["db"] = "ok"
-    except Exception as e:
-        # Council security finding: /healthz is auth-exempt so an
-        # unauthenticated caller probing it during a DB failure used to
-        # learn the absolute world.db path (and therefore the OS
-        # username). Surface only the exception type when the deployment is
-        # authenticated at all (token, OIDC, or reverse-proxy SSO -- see
-        # _health_should_redact; an OIDC-/proxy-only deploy runs with the
-        # token UNSET). Local-dev (no auth) keeps the full detail for
-        # debuggability.
-        if _health_should_redact():
-            checks["db"] = f"fail: {type(e).__name__}"
-        else:
-            checks["db"] = f"fail: {type(e).__name__}: {e}"
-        overall_ok = False
-
-    # Use the same gate the goal-creation routes use (`_any_provider_key_set`):
-    # the dashboard accepts goals on any of the supported providers, so a
-    # Gemini-only / OpenRouter-only deploy is healthy. Checking only ANTHROPIC/
-    # OPENAI made /healthz + /readyz report 503 and got such a deploy pulled
-    # from rotation by k8s/LB probes.
-    if _any_provider_key_set():
-        checks["llm_key"] = "ok"
-    else:
-        checks["llm_key"] = "missing"
-        overall_ok = False
-
-    in_flight = MAX_CONCURRENT_GOALS - _run_semaphore._value  # type: ignore[attr-defined]
-    checks["runner"] = f"in_flight={in_flight}/{MAX_CONCURRENT_GOALS}"
-
-    status = "ok" if overall_ok else "degraded"
-    # /healthz + /readyz are auth-exempt (LB/k8s probes can't carry a bearer).
-    # On an authenticated (i.e. potentially exposed) deployment, the detailed
-    # `checks` block leaks operational signal to anyone on the network:
-    # whether an LLM key is configured (llm_key: ok/missing) and a live
-    # in-flight goal gauge. Mirror the DB-path redaction already done above and
-    # collapse the exempt payload to just the status (LB probes only need the
-    # 200/503). Local-dev (no auth) keeps the full checks for debuggability.
-    if _health_should_redact():
-        payload: dict[str, Any] = {"status": status}
-    else:
-        payload = {"status": status, "checks": checks}
-    return JSONResponse(payload, status_code=200 if overall_ok else 503)
+    return await _health_response(
+        world_provider=_world,
+        provider_key_set=_any_provider_key_set,
+    )
 
 
 @app.get("/readyz")
@@ -6413,136 +6353,27 @@ async def readyz() -> JSONResponse:
     checks (client binding, shield-required, agent-trust registry) so a
     k8s/LB never routes to a pod that is up but configured to refuse all work.
     """
-    health = await healthz()
-    health_ok = health.status_code == 200
-    deep_ok, deep_checks = await run_in_threadpool(_readiness_deep_checks)
-    overall_ok = health_ok and deep_ok
-    if _health_should_redact():
-        payload: dict[str, Any] = {"status": "ok" if overall_ok else "not_ready"}
-    else:
-        import json as _json
-        health_body = _json.loads(bytes(health.body).decode("utf-8"))
-        checks = dict(health_body.get("checks", {}))
-        checks.update(deep_checks)
-        payload = {"status": "ok" if overall_ok else "not_ready", "checks": checks}
-    return JSONResponse(payload, status_code=200 if overall_ok else 503)
+    return await _readiness_response(
+        world_provider=_world,
+        provider_key_set=_any_provider_key_set,
+    )
+
+
+def _bounded_user_spend_series(
+    spend_by_principal: dict[str, float],
+) -> list[tuple[str, float]]:
+    """Compatibility export for the extracted metric-cardinality helper."""
+    return _health_routes.bounded_user_spend_series(spend_by_principal)
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
 async def metrics(request: Request) -> PlainTextResponse:
     """Prometheus text format. Gated by the same bearer as /api/v1."""
-    from maverick.runner import MAX_CONCURRENT_GOALS, _run_semaphore
-    try:
-        # Honor the configured backend (SQLite or Postgres): the inlined
-        # WorldModel(DEFAULT_DB) reported a stale local file on a Postgres deploy.
-        wm = _world()
-        status_counts = wm.goal_status_counts()
-        spend = wm.total_spend()
-    except Exception:
-        status_counts = {}
-        spend = {"dollars": 0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
-
-    lines = [
-        "# HELP maverick_goals_total Total goals by status",
-        "# TYPE maverick_goals_total counter",
-    ]
-    for status, count in status_counts.items():
-        lines.append(f'maverick_goals_total{{status="{status}"}} {count}')
-    lines += [
-        "# HELP maverick_cost_dollars_total Total LLM spend",
-        "# TYPE maverick_cost_dollars_total counter",
-        f"maverick_cost_dollars_total {spend['dollars']:.4f}",
-        "# HELP maverick_tokens_total Total input/output tokens",
-        "# TYPE maverick_tokens_total counter",
-        f'maverick_tokens_total{{direction="input"}} {spend["input_tokens"]}',
-        f'maverick_tokens_total{{direction="output"}} {spend["output_tokens"]}',
-        "# HELP maverick_concurrent_goals Goals running right now",
-        "# TYPE maverick_concurrent_goals gauge",
-        f"maverick_concurrent_goals {MAX_CONCURRENT_GOALS - _run_semaphore._value}",
-        "# HELP maverick_max_concurrent_goals Concurrency cap",
-        "# TYPE maverick_max_concurrent_goals gauge",
-        f"maverick_max_concurrent_goals {MAX_CONCURRENT_GOALS}",
-    ]
-
-    # Auth failures by reason — a bad-token / credential-stuffing flood is
-    # otherwise invisible (each attempt only returned a 401). Always emit the
-    # counter (even at 0) so an alert rule has a series to watch from boot.
-    lines += [
-        "# HELP maverick_auth_failures_total Rejected dashboard/SCIM auth attempts by reason",
-        "# TYPE maverick_auth_failures_total counter",
-    ]
-    auth_failures = _auth_metrics.auth_failure_counts()
-    if not auth_failures:
-        lines.append('maverick_auth_failures_total{reason="none"} 0')
-    for reason, n in sorted(auth_failures.items()):
-        safe = reason.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
-        lines.append(f'maverick_auth_failures_total{{reason="{safe}"}} {n}')
-
-    # Job-queue depth + dead-letter — a growing pending backlog or rising failed
-    # (dead-letter) count is the leading ops signal the goal counts can't show
-    # (queued jobs never hit the world-DB goals table until claimed).
-    try:
-        from maverick.job_queue import JobQueue
-        qcounts = JobQueue().counts()
-    except Exception:
-        qcounts = {}
-    lines += [
-        "# HELP maverick_queue_jobs Job-queue jobs by status (incl. pending backlog and failed dead-letter)",
-        "# TYPE maverick_queue_jobs gauge",
-    ]
-    for qstatus, qn in sorted(qcounts.items()):
-        lines.append(f'maverick_queue_jobs{{status="{qstatus}"}} {qn}')
-
-    # Per-principal spend today is cross-user control-plane data. Keep it
-    # visible to the local single-user/no-auth operator and dashboard admins,
-    # but do not leak raw principal identifiers or spend to ordinary callers.
-    user_spend: dict[str, float] = {}
-    if goal_owner_filter(request) is None:
-        try:
-            from maverick.quotas import UsageLedger
-            user_spend = UsageLedger().spend_by_principal()
-        except Exception:
-            user_spend = {}
-    if user_spend:
-        lines += [
-            "# HELP maverick_user_spend_dollars_today Per-principal spend for the current UTC day",
-            "# TYPE maverick_user_spend_dollars_today gauge",
-        ]
-        for principal, dollars in sorted(user_spend.items()):
-            label = principal.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
-            lines.append(
-                f'maverick_user_spend_dollars_today{{principal="{label}"}} {dollars:.4f}')
-
-    # Storage leading indicators: world-DB growth + free disk on the data
-    # volume, so an SRE can alert BEFORE SQLite slows or the disk fills (the
-    # episodes/goal_events tables grow without bound until archival runs).
-    try:
-        import shutil
-
-        from maverick.world_model import default_db_path
-        from maverick.world_model_backends import is_postgres_configured
-        db_path = default_db_path()
-        probe = db_path.parent if db_path.parent.exists() else None
-        usage = shutil.disk_usage(str(probe) if probe else ".")
-        # The world-DB-bytes gauge is a SQLite-file metric; on Postgres the size
-        # lives in the DB server, not a local file, so emit it only for SQLite
-        # rather than report a misleading 0. Disk-free stays useful on both.
-        if not is_postgres_configured():
-            db_bytes = db_path.stat().st_size if db_path.exists() else 0
-            lines += [
-                "# HELP maverick_world_db_bytes Size of the world.db file on disk",
-                "# TYPE maverick_world_db_bytes gauge",
-                f"maverick_world_db_bytes {db_bytes}",
-            ]
-        lines += [
-            "# HELP maverick_data_disk_free_bytes Free space on the data volume",
-            "# TYPE maverick_data_disk_free_bytes gauge",
-            f"maverick_data_disk_free_bytes {usage.free}",
-        ]
-    except Exception:
-        pass
-
-    return PlainTextResponse("\n".join(lines) + "\n")
+    return await _metrics_response(
+        request,
+        world_provider=_world,
+        owner_filter=goal_owner_filter,
+    )
 
 
 def _is_loopback_host(host: str) -> bool:

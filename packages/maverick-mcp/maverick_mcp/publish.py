@@ -20,7 +20,8 @@ import json
 # newer registry schema revision.
 SCHEMA_URL = ("https://static.modelcontextprotocol.io/schemas/"
               "2025-09-29/server.schema.json")
-DEFAULT_REPO_URL = "https://github.com/Day-AI-Labs/maverick"
+DEFAULT_REPO_URL = "https://github.com/Daybreak-AI-Labs/Lightwork"
+DEFAULT_MANIFEST_OWNER = "daybreak-ai-labs"
 PACKAGE_NAME = "maverick-mcp-server"
 
 
@@ -36,14 +37,22 @@ _FALLBACK_DESC = ("Model Context Protocol server for Lightwork "
                   "(exposes the swarm to MCP clients)")
 
 
-def manifest_name(server: str, *, owner: str = "day-ai-labs") -> str:
-    """Reverse-DNS namespaced registry name, e.g. ``io.github.day-ai-labs/maverick``."""
+def manifest_name(
+    server: str,
+    *,
+    owner: str = DEFAULT_MANIFEST_OWNER,
+) -> str:
+    """Build ``io.github.<owner>/<server>`` without changing the server slug."""
     return f"io.github.{owner.strip().lower()}/{server.strip().lower()}"
 
 
-def build_manifest(*, version: str | None = None, owner: str = "day-ai-labs",
-                   repo_url: str = DEFAULT_REPO_URL,
-                   description: str | None = None) -> dict:
+def build_manifest(
+    *,
+    version: str | None = None,
+    owner: str = DEFAULT_MANIFEST_OWNER,
+    repo_url: str = DEFAULT_REPO_URL,
+    description: str | None = None,
+) -> dict:
     """Build the registry ``server.json`` for this MCP server."""
     from .server import SERVER_NAME, SERVER_VERSION
     ver = (version or SERVER_VERSION).strip()
@@ -106,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
         description="Emit (or validate) the MCP registry server.json manifest.")
     p.add_argument("--validate", action="store_true",
                    help="validate the manifest and exit non-zero on problems")
-    p.add_argument("--owner", default="day-ai-labs",
+    p.add_argument("--owner", default=DEFAULT_MANIFEST_OWNER,
                    help="GitHub owner for the reverse-DNS name")
     args = p.parse_args(argv)
     manifest = build_manifest(owner=args.owner)
@@ -122,8 +131,15 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     return 0
 
 
-__all__ = ["build_manifest", "validate", "manifest_name", "tools_summary",
-           "SCHEMA_URL", "PACKAGE_NAME"]
+__all__ = [
+    "build_manifest",
+    "validate",
+    "manifest_name",
+    "tools_summary",
+    "SCHEMA_URL",
+    "DEFAULT_MANIFEST_OWNER",
+    "PACKAGE_NAME",
+]
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -140,10 +140,12 @@ def _plain_message_block(agent: Any, sender: str, text: str) -> str | None:
         )
         severity = getattr(verdict, "severity", "high")
         score = getattr(verdict, "score", None)
-    try:
-        from ..audit import EventKind, record
+    from ..audit import EventKind, audit_event
 
-        record(
+    # Preserve quarantine triage even when the audit subsystem refuses its row;
+    # the untrusted payload remains blocked and the refusal then propagates.
+    try:
+        audit_event(
             EventKind.SHIELD_BLOCK,
             agent=sender,
             goal_id=getattr(ctx, "goal_id", None),
@@ -151,21 +153,20 @@ def _plain_message_block(agent: Any, sender: str, text: str) -> str | None:
             reason=reasons[:1000],
             score=score,
         )
-    except Exception:
-        pass
-    quarantine = getattr(ctx, "quarantine", None)
-    if quarantine is not None:
-        try:
-            from ..quarantine import triage_block
+    finally:
+        quarantine = getattr(ctx, "quarantine", None)
+        if quarantine is not None:
+            try:
+                from ..quarantine import triage_block
 
-            triage_block(
-                quarantine,
-                sender,
-                severity,
-                "untrusted agent-bus payload blocked by shield",
-            )
-        except Exception:
-            pass
+                triage_block(
+                    quarantine,
+                    sender,
+                    severity,
+                    "untrusted agent-bus payload blocked by shield",
+                )
+            except Exception:
+                pass
     return "blocked"
 
 

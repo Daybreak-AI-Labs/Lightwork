@@ -5,13 +5,13 @@
   "version": "0.1.0",
   "publisher": "cdayAI",
   "license": "MIT",
-  "homepage": "https://github.com/Day-AI-Labs/Lightwork",
+  "homepage": "https://github.com/Daybreak-AI-Labs/Lightwork",
   "bugs": {
-    "url": "https://github.com/Day-AI-Labs/Lightwork/issues"
+    "url": "https://github.com/Daybreak-AI-Labs/Lightwork/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Day-AI-Labs/Lightwork.git",
+    "url": "https://github.com/Daybreak-AI-Labs/Lightwork.git",
     "directory": "apps/vscode-extension"
   },
   "categories": [

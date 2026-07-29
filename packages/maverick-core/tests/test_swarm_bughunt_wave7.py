@@ -28,6 +28,6 @@ class TestCostRouterReconciled:
         from maverick.cost.router import _PRICING
         from maverick.llm import MODEL_PRICES
         rates = {mid: (cin, cout) for _p, mid, _t, cin, cout in _PRICING}
-        for mid in ("deepseek-chat", "moonshot-v1-128k"):
+        for mid in ("deepseek-v4-flash", "moonshot-v1-128k"):
             assert mid in MODEL_PRICES
             assert rates[mid] == MODEL_PRICES[mid], mid

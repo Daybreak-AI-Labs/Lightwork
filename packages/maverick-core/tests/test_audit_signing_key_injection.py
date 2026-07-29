@@ -9,6 +9,8 @@ persisted, so local ``verify_chain`` still trusts the chain.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 
 import pytest
 from maverick.audit import signing
@@ -37,6 +39,39 @@ def _fresh_key_hex() -> tuple[str, bytes]:
         encryption_algorithm=serialization.NoEncryption(),
     )
     return raw.hex(), raw
+
+
+def test_offline_signature_verification_does_not_resolve_active_config(
+    tmp_path,
+) -> None:
+    invalid_config = tmp_path / "invalid.toml"
+    invalid_config.write_text("[broken", encoding="utf-8")
+    env = os.environ.copy()
+    env["MAVERICK_CONFIG"] = str(invalid_config)
+    script = """
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from maverick.audit.signing import verify_ed25519
+
+private = ed25519.Ed25519PrivateKey.generate()
+public = private.public_key().public_bytes(
+    encoding=serialization.Encoding.Raw,
+    format=serialization.PublicFormat.Raw,
+)
+message = b"offline-proof"
+signature = private.sign(message)
+assert verify_ed25519(public.hex(), signature.hex(), message)
+print("verified")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "verified"
 
 
 def test_injected_key_signs_without_writing_private_to_disk(monkeypatch):

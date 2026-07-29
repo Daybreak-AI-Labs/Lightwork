@@ -113,6 +113,10 @@ def test_hipaa_required_floors_are_runtime_enforced(monkeypatch):
         "MAVERICK_ANON",
     ):
         monkeypatch.setenv(env, "0")
+    # HIPAA also requires off-host audit-key custody. Supply a deterministic
+    # injected Ed25519 seed so this test exercises the provider-denial floor,
+    # rather than correctly stopping one step earlier on a missing audit key.
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", "00" * 32)
 
     assert enterprise_enabled() is True
     assert at_rest_enabled() is True

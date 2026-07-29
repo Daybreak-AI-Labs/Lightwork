@@ -29,11 +29,13 @@ block_threshold = "high"
 
 The **built-in ~20-pattern** layer is what runs in every environment we ship: the
 full Agent Shield SDK (~115 patterns) is **not published on PyPI and not vendored
-here**, so `pip install agent-shield` will not resolve and the fallback is not a
-fallback in practice — it is the product. Measured accuracy for the layer that
-actually runs is in [`benchmarks/security/RESULTS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/security/RESULTS.md):
-**F1 0.821–0.900, TPR 74.2% [57–86]**. The categories below describe the full SDK
-ruleset; treat them as the coverage target, not as shipped coverage:
+here**, so the public package name is not an installation path and the fallback
+is not a fallback in practice — it is the product. The current internal, reproducible
+diagnostic is reported with its corpus size and confidence intervals on the
+[Shield benchmark page](./security/shield-benchmark.md). Those small,
+repository-authored held-out results are regression evidence, not a generalized
+public efficacy or marketing claim. The categories below describe the full SDK
+ruleset; treat them as a coverage target, not as shipped coverage:
 
 - **Prompt injection** — system prompt overrides, ChatML/LLaMA delimiters, instruction hijacking
 - **Role hijacking** — DAN mode, developer mode, persona attacks, jailbreaks
@@ -69,31 +71,37 @@ interactively.
 
 Two layers can be missing, and they degrade differently:
 
-- **Full `agent-shield` SDK absent** (but the `maverick-shield` wrapper present): detection uses the **built-in** layer — ~20 high-impact rules, the decode/defang pre-pass, and a cheap-probe (regex + Unicode heuristics, optionally ensembled with a trained linear model via `[shield] probe_model`). The F1 0.988 SDK ruleset is forgone, but scans — including obfuscation-decoding — still run.
+- **Full `agent-shield` SDK absent** (but the `maverick-shield` wrapper present): detection uses the **built-in** layer — ~20 high-impact rules, the decode/defang pre-pass, and a cheap-probe (regex + Unicode heuristics, optionally ensembled with a trained linear model via `[shield] probe_model`). No SDK efficacy number is attributed to this built-in backend; scans — including obfuscation-decoding — still run.
 - **Shield wrapper absent entirely**: scans are **skipped (fail-open)** with a startup warning, per the kernel's "runs without the shield" rule.
 
-The installer does **not** pull in `agent-shield` automatically — install it with `pip install agent-shield` for the full ruleset.
+The complete Lightwork release cohort includes the `maverick-shield` wrapper.
+Core-only source installs must add `packages/maverick-shield` explicitly. The
+separate full `agent-shield` SDK is not available from public PyPI; do not use a
+public namesake package.
 
 To verify the shield is loaded:
 
 ```python
 from maverick_shield import Shield
-print(Shield().enabled)   # True if agent-shield is installed
+shield = Shield()
+print(shield.enabled, shield.backend)  # e.g. True, "builtin"
 ```
 
 ## Privacy posture
 
 - All Agent Shield detection runs **locally**. Nothing is sent to any external service.
-- Your prompts go only to the LLM provider you chose during `maverick init`. If you pick Ollama, nothing leaves your machine.
+- Your model prompts go only to the LLM provider you chose during
+  `maverick init`. If you pick Ollama, model inference is local; tools and other
+  process code still need deployment egress controls.
 - The world model (SQLite) lives in `~/.maverick/world.db`. Inspect, back up, or wipe it freely.
 
 ## Enterprise mode (private / sensitive data)
 
 The kernel ships fail-open and cloud-capable by design — right for a personal agent,
 wrong the moment it handles PHI / PII / financial / regulated data. **Enterprise mode**
-is one switch that flips those defaults to *fail-closed* and guarantees the property an
-enterprise needs before it lets an agent touch sensitive data: **the data never leaves
-your boundary.**
+is one switch that flips those application defaults to *fail-closed*. It blocks
+non-local governed model dispatch and supported Python HTTP paths; it is not a
+packet-level firewall.
 
 ```toml
 [enterprise]
@@ -121,9 +129,16 @@ posture is on:
 | **Sandbox** | `local` host shell (warned) | **container-default** — a `local`/unset backend is upgraded to an available container runtime (docker → podman); if none is installed it fails closed rather than running `shell=True` on the host (`[sandbox] backend` / `require_container`) |
 | **Plugins** | in-process, lockfile off | plugin **tool calls** are proxied through the configured isolation backend, and lock enforcement refuses version/content drift once a lockfile exists; plugin import/discovery, factories, channel plugins, skill plugins, and persona plugins still run in-process, so install only trusted plugins (`[plugins] isolation` / `lock_policy`) |
 
-The egress lock is enforced at the single LLM dispatch chokepoint (`maverick.llm.LLM.complete`),
-so it covers every agent, role, and tool-driven model call. An explicit env/config setting
-still wins per control, but the egress lock can never be satisfied by a cloud provider.
+The model egress lock is enforced at the single LLM dispatch chokepoint
+(`maverick.llm.LLM.complete`), so it covers every agent, role, and tool-driven
+model call that uses that path. Supported `httpx`, `requests`, and `urllib`
+calls are checked separately. An explicit env/config setting still wins per
+control, but the model egress lock can never be satisfied by a cloud provider.
+
+For a hard no-egress boundary, also use sandbox network isolation and
+host/OS/VPC default-deny egress policy. Application interception cannot contain
+raw sockets, subprocess network clients, unwrapped libraries, or untrusted code
+running in the Lightwork process.
 
 ## Compliance posture (`maverick compliance`)
 

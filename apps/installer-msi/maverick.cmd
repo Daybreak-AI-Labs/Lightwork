@@ -1,20 +1,12 @@
 @echo off
-rem Lightwork CLI launcher, installed by the Lightwork MSI (apps/installer-msi).
+rem Lightwork CLI launcher, installed by the engineering bootstrap MSI.
 rem
 rem Why this exists: the MSI cannot pip-install at install time without
 rem custom actions, so it ships the wheel next to this script and bootstraps
 rem lazily on first run. There is no maverick/__main__.py, so `py -m maverick`
 rem does not work; the real entry point is the console script maverick.cli:main
 rem (see packages/maverick-core/pyproject.toml [project.scripts]).
-rem Delayed expansion so !ERRORLEVEL! inside the parenthesized fast-path block
-rem below reads maverick.exe's ACTUAL exit code. With plain %ERRORLEVEL% the
-rem whole `( ... )` block is expanded at parse time, capturing the value from
-rem BEFORE maverick.exe ran -- so every failure was reported as success.
-setlocal enabledelayedexpansion
-
-rem Fast path: pip already put the console script on PATH (e.g. pipx or a
-rem previous bootstrap whose Scripts dir is on PATH).
-where maverick.exe >nul 2>nul && ( maverick.exe %* & exit /b !ERRORLEVEL! )
+setlocal
 
 rem Resolve a Python 3 interpreter: the py launcher first, plain python second.
 set "PYCMD=py -3"
@@ -25,13 +17,21 @@ set "PYCMD=py -3"
   exit /b 1
 )
 
-rem First run: install the wheel bundled by the MSI into the per-user site.
-%PYCMD% -c "import maverick" >nul 2>nul || (
-  echo maverick: first run - installing the bundled wheel into the user site...
-  %PYCMD% -m pip install --user --quiet "%~dp0..\wheels\maverick_agent.whl" || (
-    echo maverick: pip install of the bundled wheel failed.
-    exit /b 1
-  )
+rem Read the exact MSI ProductVersion. Import success alone is not enough:
+rem after an MSI upgrade an older maverick-agent can still import cleanly.
+set "PRODUCT_VERSION="
+for /f "tokens=2,*" %%A in ('reg query "HKCU\Software\Maverick\CLI" /v wheel 2^>nul') do if /I "%%A"=="REG_SZ" set "PRODUCT_VERSION=%%B"
+if not defined PRODUCT_VERSION (
+  echo maverick: the MSI product version is missing; repair the engineering bootstrap.
+  exit /b 1
+)
+
+rem The stdlib-only bootstrap finds the staged PEP 427 wheel, skips pip only
+rem when importlib.metadata reports this exact ProductVersion, and installs or
+rem upgrades otherwise.
+%PYCMD% "%~dp0maverick_bootstrap.py" --product-version "%PRODUCT_VERSION%" --wheel-dir "%~dp0..\wheels" || (
+  echo maverick: bootstrap of the bundled wheel failed.
+  exit /b 1
 )
 
 rem Invoke the click entry point directly; argv[1:] is forwarded unchanged.

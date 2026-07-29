@@ -474,6 +474,24 @@
       }
       body.nav-open .nav-backdrop { display: block; }
     }
+    @media (max-width: 560px) {
+      /* The desktop chrome's minimum content width (menu + full wordmark +
+         kill switch + two icon buttons) used to widen the entire document on
+         phones. That clipped every page, not just the header. Keep all safety
+         controls reachable while collapsing only the redundant wordmark. */
+      .topbar {
+        gap: var(--space-2);
+        padding-inline: var(--space-3);
+      }
+      .brand { gap: var(--space-1); }
+      .brand__name { display: none; }
+      .topbar__controls {
+        min-width: 0;
+        gap: var(--space-1);
+        flex-wrap: nowrap;
+      }
+      .halt-pill { padding-inline: 0.55rem; white-space: nowrap; }
+    }
     /* Desktop: the hamburger collapses the persistent sidebar for more room. */
     @media (min-width: 881px) {
       body.nav-collapsed { grid-template-columns: 1fr; }

@@ -3,10 +3,10 @@
 Answers the procurement question every multi-provider shop eventually asks:
 "what would last month have cost on model X?". Given observed usage rows
 (token volumes, optionally what they actually cost), :func:`reprice` replays
-the *same token volumes* at a target model's list rate from the canonical
-``llm.MODEL_PRICES`` catalog — the single pricing source of truth — and
-reports the delta. :func:`compare_matrix` does it across several candidate
-targets at once, cheapest first.
+the *same token volumes* at a target model's list rate from the versioned
+pricing provider and reports the delta. This module is planning-only and
+explicitly requests estimate rates; no result is suitable for billing.
+:func:`compare_matrix` does it across several targets at once, cheapest first.
 
 Honesty matters more than precision here, in three documented ways:
 
@@ -16,7 +16,7 @@ Honesty matters more than precision here, in three documented ways:
   in every output.
 * **The current side prefers what was actually billed.** A row's
   ``cost_dollars`` (the recorded spend) wins over re-deriving it; only rows
-  without one are priced from their ``model`` via ``MODEL_PRICES``.
+  without one are priced from their ``model`` via the pricing provider.
 * **Unpriceable rows are counted, never guessed.** A row with no recorded
   cost and no priceable model is excluded from BOTH sides (so the delta stays
   apples-to-apples) and surfaced in ``unpriceable_rows`` instead of being
@@ -55,14 +55,25 @@ class MigrationEstimate:
 
 
 def _prices() -> dict[str, tuple[float, float]]:
-    """The canonical model_id -> ($/Mtok in, $/Mtok out) catalog, read at call
-    time so tests can pin it."""
-    from .llm import MODEL_PRICES
-    return MODEL_PRICES
+    """Planning catalog from explicit estimate-only provider lookups.
+
+    The legacy tuple view is included solely so integrations/tests that replace
+    it wholesale remain compatible; every value still passes through the
+    provenance resolver and cannot reach live billing.
+    """
+    from .budget import _lookup_price_quote
+    from .llm import MODEL_PRICES, MODEL_PRICING_PROVIDER
+
+    out: dict[str, tuple[float, float]] = {}
+    for model_id in set(MODEL_PRICING_PROVIDER.rates) | set(MODEL_PRICES):
+        quote = _lookup_price_quote(model_id, estimate_only=True)
+        if not quote.source.endswith("unknown-model-estimate"):
+            out[model_id] = quote.rates
+    return out
 
 
 def _bare(model: str) -> str:
-    """Strip a ``provider:`` prefix — MODEL_PRICES keys bare ids."""
+    """Strip a ``provider:`` prefix from a model spec."""
     return model.split(":", 1)[1] if ":" in model else model
 
 
@@ -86,11 +97,11 @@ def _field(row, *names: str, default=None):
 def reprice(rows: list, target_model: str) -> MigrationEstimate:
     """Re-price ``rows``' token volumes on ``target_model``.
 
-    The target must resolve in ``llm.MODEL_PRICES`` (a ``provider:`` prefix is
+    The target must resolve in the estimate catalog (a ``provider:`` prefix is
     stripped); an unknown id raises ``ValueError`` listing the known ids so a
     typo is caught instead of silently priced wrong. Per row: the current side
-    is ``cost_dollars`` when present, else the row's ``model`` priced via
-    ``MODEL_PRICES``; rows priceable on neither side are counted in
+    is ``cost_dollars`` when present, else the row's ``model`` priced via the
+    provider; rows priceable on neither side are counted in
     ``unpriceable_rows`` and excluded from both totals.
     """
     prices = _prices()

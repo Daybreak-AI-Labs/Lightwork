@@ -108,4 +108,9 @@ def test_erase_verify_includes_knowledge_residual(tmp_path, monkeypatch):
     knowledge_admin.erase_subject("slack", "UERIN")
     report2 = verify_erasure("UERIN", channel="slack")
     assert report2["counts"].get("knowledge_chunks") == 0
-    assert report2["clean"]
+    # The knowledge store is now clean, but a bare post-hoc subject scan cannot
+    # reconstruct the deleted goal closure. Only a durable pre-delete receipt
+    # can turn the complete erasure report into a clean certificate.
+    assert not report2["clean"]
+    assert report2["indeterminate"]
+    assert "erasure_receipt" in report2["errors"]

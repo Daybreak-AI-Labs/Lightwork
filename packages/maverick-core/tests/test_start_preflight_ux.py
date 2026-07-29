@@ -11,12 +11,14 @@ Platform-test findings, round 2 fixes:
   - Unknown model ids on self-hosted providers (ollama:/vllm:/tgi:)
     billed at the Sonnet fallback rate, accruing phantom spend for free
     local models. Now priced at $0. The generic openai_compatible provider
-    is not blanket-zeroed because it can target paid public gateways.
+    is not blanket-zeroed because it can target paid public gateways; an
+    unknown hosted rate now fails closed instead of becoming a bill.
 """
 from __future__ import annotations
 
+import pytest
 from click.testing import CliRunner
-from maverick.budget import Budget
+from maverick.budget import Budget, UnpricedModelError
 
 
 def _goal_count(home) -> int:
@@ -101,23 +103,27 @@ def test_unknown_local_models_priced_zero():
         assert b.dollars == 0.0, (spec, b.dollars)
 
 
-def test_unknown_openai_compatible_model_keeps_sonnet_fallback():
+def test_unknown_openai_compatible_model_fails_closed():
     b = Budget(max_dollars=10.0)
-    b.record_tokens(1_000_000, 0, model="openai_compatible:proxy-model")
-    assert b.dollars > 0
+    with pytest.raises(UnpricedModelError):
+        b.record_tokens(1_000_000, 0, model="openai_compatible:proxy-model")
+    assert b.dollars == 0
+    assert b.input_tokens == 0
 
 
-def test_unknown_hosted_model_keeps_sonnet_fallback():
+def test_unknown_hosted_model_fails_closed():
     b = Budget(max_dollars=10.0)
-    b.record_tokens(1_000_000, 0, model="mystery-model")
-    assert b.dollars > 0
+    with pytest.raises(UnpricedModelError):
+        b.record_tokens(1_000_000, 0, model="mystery-model")
+    assert b.dollars == 0
+    assert b.input_tokens == 0
 
 
 def test_known_model_via_local_prefix_still_priced():
     # A REAL priced id behind a local prefix keeps its table rate
     # (prefix-stripping match has priority over the local-zero rule).
     b = Budget(max_dollars=10.0)
-    b.record_tokens(1_000_000, 0, model="ollama:deepseek-chat")
+    b.record_tokens(1_000_000, 0, model="ollama:deepseek-v4-flash")
     assert b.dollars > 0
 
 

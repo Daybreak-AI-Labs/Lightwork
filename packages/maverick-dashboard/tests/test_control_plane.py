@@ -166,6 +166,26 @@ def test_trust_overview_shapes_registry(monkeypatch):
     assert a["active"] is True
 
 
+def test_trust_overview_lifecycle_failure_is_not_rendered_active(monkeypatch):
+    import maverick.agent_trust as at
+
+    class BrokenLifecycleAgent:
+        id = "broken"
+        allow_tools = frozenset()
+
+        def is_active(self):
+            raise RuntimeError("registry unavailable")
+
+    agent = BrokenLifecycleAgent()
+    monkeypatch.setattr(at, "load_trust_state", lambda: (True, {"broken": agent}))
+
+    ov = trust_overview()
+    row = ov["agents"][0]
+    assert row["active"] is False
+    assert row["status"] == "unknown (lifecycle check failed)"
+    assert ov["graph"]["nodes"][0]["color"] == "#dc2626"
+
+
 def test_trust_api_and_page(monkeypatch):
     _fake_trust(monkeypatch)
     r = client.get("/api/v1/trust/agents")

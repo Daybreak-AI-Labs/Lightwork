@@ -7,9 +7,11 @@ default for a personal agent. It is the *wrong* default the moment the agent is 
 at PHI / PII / financial / regulated data, where the data leaving the boundary or an
 unsupervised destructive action is exactly the exposure an enterprise cannot accept.
 
-**Enterprise mode is one opt-in switch that makes those defaults fail-closed** and
-guarantees the property an enterprise needs before it lets an agent touch sensitive
-data: *the data never leaves your boundary.*
+**Enterprise mode is one opt-in switch that makes those application defaults
+fail-closed.** It blocks known LLM dispatch and supported Python HTTP client
+paths; it is defense in depth, not a packet-level firewall. A deployment that
+requires a hard no-egress boundary must also enforce sandbox network isolation
+and host/OS/VPC egress policy.
 
 Turn it on with ``MAVERICK_ENTERPRISE=1``, ``[enterprise] mode = true`` in
 ``~/.maverick/config.toml``, or the installer wizard. **Off by default** — behaviour is
@@ -17,19 +19,19 @@ exactly as before.
 
 When on, it enforces:
 
-- **Egress lock.** Every LLM call is pinned to a local / self-hosted provider
+- **Egress lock.** Every governed LLM call is pinned to a local / self-hosted provider
   (``ollama`` / ``vllm`` / ``tgi``, or an endpoint you allow-list under
   ``[enterprise] local_providers``). A call routed to a cloud provider
   (``anthropic`` / ``openai`` / ...) raises :class:`EgressBlocked` **before any prompt
-  is sent**, and the denial is audited. Sensitive data physically cannot reach a
-  third-party API. (Enforced in :func:`maverick.llm.LLM.complete`.)
+  is sent**, and the denial is audited. This protects the governed LLM dispatch
+  path. (Enforced in :func:`maverick.llm.LLM.complete`.)
 - **Tool egress lock.** Outbound HTTP is held to local/private endpoints or hosts
-  allow-listed under ``[enterprise] allowed_hosts`` (default-deny), so a tool can't
-  carry data off-box either. (Enforced in :mod:`maverick.egress_guard`, which wraps
-  the ``send`` path of every HTTP client library the codebase uses -- ``httpx``,
-  ``requests`` and ``urllib`` -- so a connector is covered whether or not its author
-  called anything. Tools that surface a denial as an error string still call
-  :func:`enterprise_egress_denial` directly for the better message.)
+  allow-listed under ``[enterprise] allowed_hosts`` (default-deny) on the
+  supported HTTP paths. (Enforced in :mod:`maverick.egress_guard`, which wraps
+  the request path of every HTTP client library the codebase uses -- ``httpx``,
+  ``requests`` and ``urllib`` -- so a connector is covered whether or not its
+  author called anything. Tools that surface a denial as an error string still
+  call :func:`enterprise_egress_denial` directly for the better message.)
 
   This clause used to read "enforced at each tool's request", which was false: the
   check existed at 11 call sites while 87 of the 94 modules that make outbound HTTP
@@ -44,14 +46,15 @@ When on, it enforces:
 
   * A tool that shells out to ``curl`` or opens a raw socket. There is no
     packet-level backend (see :mod:`maverick.sandbox.network_policy`), so
-    process-level egress is bounded by the sandbox, not by this lock.
-  * **httpx redirects.** ``httpx.Client.send`` resolves the redirect chain
-    internally, so the guard checks only the first URL: an allow-listed host
-    answering a 302 to a denied host is not re-checked. ``requests`` and
-    ``urllib`` re-enter their wrapped method per hop and are unaffected. The
-    per-hop httpx seam was implemented and reverted -- it broke 1538 tests in
-    CI and the cause is not yet understood. Tracked by an xfailed test in
-    ``tests/test_egress_guard.py``.
+    hard process-level egress is bounded by the sandbox and deployment network
+    policy, not by this lock.
+  * An HTTP library outside the wrapped set. The static egress-contract CI gate
+    catches known production imports, but it cannot substitute for an OS/VPC
+    deny rule at runtime.
+
+  HTTPX is checked at its one-request seam, including each followed redirect
+  hop. Known in-process test/mock transports are exempted by exact type; every
+  unknown or custom transport is treated as network-capable and checked.
 - **Consent fail-closed.** Destructive-action consent defaults to ``ask`` (and therefore
   *deny* in non-interactive contexts) instead of ``auto-approve``.
   (Enforced in :mod:`maverick.safety.consent`.)
@@ -492,10 +495,11 @@ def is_local_provider(provider: str) -> bool:
 def assert_provider_allowed(provider: str) -> None:
     """Egress guard. No-op unless enterprise mode is on.
 
-    When on, raises :class:`EgressBlocked` for a non-local provider so sensitive data
-    never leaves the boundary, and records an ``egress_blocked`` audit event. Called at
-    the single LLM dispatch chokepoint (:func:`maverick.llm.LLM.complete`) so it covers
-    every agent, role, and tool-driven model call.
+    When on, raises :class:`EgressBlocked` before the governed dispatch path can
+    call a non-local provider, and records an ``egress_blocked`` audit event.
+    Called at the single LLM dispatch chokepoint
+    (:func:`maverick.llm.LLM.complete`) so it covers every agent, role, and
+    tool-driven model call that uses that chokepoint.
     """
     if not enterprise_enabled():
         return
@@ -506,11 +510,11 @@ def assert_provider_allowed(provider: str) -> None:
         canon = _canonical(provider)
     except Exception:
         canon = (provider or "").strip().lower()
-    try:  # fail-safe: a blocked-egress denial must never crash on the audit path
-        from .audit import EventKind, record
-        record(EventKind.EGRESS_BLOCKED, provider=canon)
-    except Exception:
-        pass
+    from .audit import EventKind, audit_event
+
+    # A refusal still denies egress (the caller cannot reach dispatch), while
+    # making it impossible to claim the denial was recorded when it was not.
+    audit_event(EventKind.EGRESS_BLOCKED, provider=canon)
     raise EgressBlocked(canon)
 
 
@@ -536,9 +540,8 @@ def egress_permitted(url: str) -> bool:
     """In enterprise mode, is outbound *tool* egress to ``url`` permitted?
 
     True when enterprise mode is off, the endpoint is local/private, or its host is
-    on the ``[enterprise] allowed_hosts`` allow-list. Default-deny otherwise -- so a
-    tool (http_fetch, web_search, a connector) can't carry data off-box, the same
-    boundary the LLM egress lock already enforces for model calls.
+    on the ``[enterprise] allowed_hosts`` allow-list. Default-deny otherwise for
+    guarded HTTP paths such as http_fetch, web_search, and connectors.
     """
     if not enterprise_enabled():
         return True
@@ -556,15 +559,17 @@ def enterprise_egress_denial(url: str, *, tool: str = "") -> str | None:
     if egress_permitted(url):
         return None
     host = _host_of(url) or (url or "?")
-    try:
-        from .audit import EventKind, record
-        record(EventKind.EGRESS_BLOCKED,
-               provider=f"tool:{tool}" if tool else "tool", host=host)
-    except Exception:
-        pass
+    from .audit import EventKind, audit_event
+
+    audit_event(
+        EventKind.EGRESS_BLOCKED,
+        provider=f"tool:{tool}" if tool else "tool",
+        host=host,
+    )
     return (
         f"enterprise mode: refusing tool egress to {host!r} -- not a local endpoint "
-        "and not in [enterprise] allowed_hosts. The data boundary stays closed."
+        "and not in [enterprise] allowed_hosts. The application egress boundary "
+        "blocks this request."
     )
 
 

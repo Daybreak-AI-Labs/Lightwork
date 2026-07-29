@@ -246,6 +246,12 @@ class N8nImporter:
                 cursor = body.get("nextCursor")
                 if not cursor:
                     break
+            else:
+                raise ImporterError(
+                    "n8n import exceeded the 100-page (10,000 workflow) "
+                    "safety limit; narrow the source account or use an export "
+                    "instead of accepting a silently truncated import"
+                )
         return out
 
     def translate(self, raw: dict[str, Any]) -> ImportedAutomation:

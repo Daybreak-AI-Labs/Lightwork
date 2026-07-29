@@ -83,18 +83,25 @@ def halt(reason: str, source: str = "manual") -> None:
     except Exception:
         log.exception("killswitch: Ekko commit barrier unavailable during halt")
     log.warning("killswitch: halt set (%s, source=%s)", reason, source)
+    from .audit import EventKind, audit_event
+
+    # Page the operator even when the configured audit guarantee refuses its
+    # row. The halt remains armed either way, then the refusal propagates so the
+    # caller cannot mistake an unrecorded stop for a fully recorded one.
     try:
-        from .audit import EventKind, record
-        record(EventKind.HALT, source=source, detail=reason)
-    except Exception:  # pragma: no cover -- never crash on audit
-        pass
-    # Page the operator: a halt stops all work, so it's the canonical event an
-    # SRE must hear about. No-op unless [alerts] enabled (never blocks the halt).
-    try:
-        from .ops_alert import alert
-        alert("killswitch_tripped", f"{reason} (source={source})", severity="critical")
-    except Exception:  # pragma: no cover -- alerting never blocks the halt
-        pass
+        audit_event(EventKind.HALT, source=source, detail=reason)
+    finally:
+        # A halt stops all work, so this is the canonical event an SRE must hear
+        # about. No-op unless [alerts] is enabled; paging never blocks the halt.
+        try:
+            from .ops_alert import alert
+            alert(
+                "killswitch_tripped",
+                f"{reason} (source={source})",
+                severity="critical",
+            )
+        except Exception:  # pragma: no cover -- alerting never blocks the halt
+            pass
 
 
 def clear() -> None:

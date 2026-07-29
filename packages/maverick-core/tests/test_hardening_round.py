@@ -246,7 +246,9 @@ def test_cost_router_tolerates_snapshot_without_error_rate(monkeypatch):
     monkeypatch.setattr(
         ph, "get",
         lambda: type("H", (), {"snapshot": staticmethod(
-            lambda: [{"provider": "deepseek", "model": "deepseek-chat"}])})(),
+            lambda: [
+                {"provider": "deepseek", "model": "deepseek-v4-flash"}
+            ])})(),
     )
     from maverick.cost.router import CostSignal, pick
     spec = pick(CostSignal())
@@ -296,6 +298,123 @@ def test_record_metric_labeled_counter(monkeypatch):
                       labels={"provider": "anthropic", "model": "m"})
     assert seen["labels"] == {"provider": "anthropic", "model": "m"}
     assert seen["inc"] == 1.0
+
+
+def test_record_metric_bounds_dynamic_label_series(monkeypatch):
+    import maverick.observability as obs
+
+    seen = []
+
+    class _Child:
+        @staticmethod
+        def inc(_value):
+            return None
+
+    class _Counter:
+        @staticmethod
+        def labels(**labels):
+            seen.append(labels)
+            return _Child()
+
+    monkeypatch.setattr(obs, "_metrics", {"llm_calls": _Counter()})
+    monkeypatch.setattr(obs, "_initialize", lambda: None)
+    monkeypatch.setattr(obs, "_MAX_LABEL_SERIES_PER_METRIC", 3)
+    obs._metric_label_series.clear()
+    try:
+        for model in ("one", "two", "three", "four"):
+            obs.record_metric(
+                "llm_calls",
+                labels={"provider": "custom", "model": model},
+            )
+    finally:
+        obs._metric_label_series.clear()
+
+    assert seen[:2] == [
+        {"provider": "custom", "model": "one"},
+        {"provider": "custom", "model": "two"},
+    ]
+    assert seen[2:] == [
+        {"provider": obs._OVERFLOW_LABEL, "model": obs._OVERFLOW_LABEL},
+        {"provider": obs._OVERFLOW_LABEL, "model": obs._OVERFLOW_LABEL},
+    ]
+
+
+def test_record_metric_hashes_control_character_labels(monkeypatch):
+    import maverick.observability as obs
+
+    captured = {}
+
+    class _Child:
+        @staticmethod
+        def inc(_value):
+            return None
+
+    class _Counter:
+        @staticmethod
+        def labels(**labels):
+            captured.update(labels)
+            return _Child()
+
+    monkeypatch.setattr(obs, "_metrics", {"tool_calls": _Counter()})
+    monkeypatch.setattr(obs, "_initialize", lambda: None)
+    obs._metric_label_series.clear()
+    try:
+        obs.record_metric(
+            "tool_calls",
+            labels={"tool": "unsafe\nlabel", "status": "ok"},
+        )
+    finally:
+        obs._metric_label_series.clear()
+
+    assert captured["tool"].startswith("redacted-")
+    assert "\n" not in captured["tool"]
+    assert captured["status"] == "ok"
+
+
+def test_provider_latency_collector_reads_ms_snapshot_fields(monkeypatch):
+    import maverick.observability as obs
+    from maverick import provider_health
+
+    captured = []
+
+    class _Family:
+        def __init__(self, name, _help, labels=None):
+            self.name = name
+            self.labels = labels or []
+            self.metrics = []
+
+        def add_metric(self, labels, value):
+            self.metrics.append((labels, value))
+
+    fake_client = types.ModuleType("prometheus_client")
+    fake_client.REGISTRY = types.SimpleNamespace(
+        register=lambda collector: captured.append(collector)
+    )
+    fake_core = types.ModuleType("prometheus_client.core")
+    fake_core.GaugeMetricFamily = _Family
+    monkeypatch.setitem(sys.modules, "prometheus_client", fake_client)
+    monkeypatch.setitem(sys.modules, "prometheus_client.core", fake_core)
+    monkeypatch.setattr(
+        provider_health,
+        "get",
+        lambda: types.SimpleNamespace(
+            snapshot=lambda: [{
+                "provider": "anthropic",
+                "model": "model",
+                "error_rate": 0.25,
+                "p50_ms": 75.0,
+                "p95_ms": 100.0,
+            }]
+        ),
+    )
+
+    obs._register_computed_collector()
+    families = {family.name: family for family in captured[0].collect()}
+
+    assert families["maverick_provider_latency_ms"].metrics == [
+        (["anthropic", "model", "0.5"], 75.0),
+        (["anthropic", "model", "0.95"], 100.0),
+    ]
 
 
 def test_prometheus_exporter_defaults_to_loopback_bind(monkeypatch):

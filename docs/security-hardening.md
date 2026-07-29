@@ -155,11 +155,11 @@ fail closed by design.
 
 ## Enterprise mode (the umbrella switch)
 
-The fastest way to a hardened posture. Enterprise mode pins every LLM call to a
-local/self-hosted provider (an **egress lock**: sensitive data physically
-cannot reach a cloud API) and, as a side effect, **implies two of the controls
-below**: it forces [capability enforcement](#capability-enforcement) on and
-turns on [encryption at rest](#encryption-at-rest).
+The fastest way to a hardened application posture. Enterprise mode pins every
+governed LLM call to a local/self-hosted provider and checks supported Python
+HTTP clients per request. It also **implies two of the controls below**: it
+forces [capability enforcement](#capability-enforcement) on and turns on
+[encryption at rest](#encryption-at-rest).
 
 **config.toml**
 
@@ -183,6 +183,10 @@ export MAVERICK_ENTERPRISE=1          # set to a falsey value to force-disable
   cloud provider raises `EgressBlocked` *before any prompt is sent*, and the
   denial is audited. Make sure you actually have a local provider configured,
   or runs will fail closed.
+- This is an application-layer control, not a packet firewall. A hard
+  no-egress boundary also requires sandbox network isolation and host/OS/VPC
+  default-deny egress policy; raw sockets, subprocess clients, and unwrapped
+  libraries are outside the application guard.
 - `MAVERICK_ENTERPRISE` (when set to a non-empty value) wins over
   `[enterprise] mode`.
 - Enterprise mode is documented in depth in

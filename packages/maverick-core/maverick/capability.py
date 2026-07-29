@@ -17,12 +17,15 @@ enforcement is a no-op and behaviour is unchanged. Turn it on with
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
 from fnmatch import fnmatch
 
 from .safety.tool_risk import RISK_LEVELS, risk_rank, tool_risk
+
+log = logging.getLogger(__name__)
 
 # The coordination control-plane: the tools that let a specialist participate in
 # the workforce -- discover peers, spawn specialists, fan out a swarm, and
@@ -93,13 +96,15 @@ class Capability:
             return False
         if tool_name in self.deny_tools:
             return False
+        # A policy-resolution failure is stronger than the normal coordination
+        # floor below: deny-all must not retain spawn or peer-messaging authority.
+        if self.allow_tools == frozenset({_DENY_ALL}):
+            return False
         # Coordination floor: the workforce control-plane is permitted unless the
         # operator explicitly denied it above -- a narrow allowlist or a low risk
         # ceiling must not isolate an agent from spawning/messaging its peers.
         if tool_name in COORDINATION_TOOLS:
             return True
-        if self.allow_tools == frozenset({_DENY_ALL}):
-            return False
         if self.allow_tools and tool_name not in self.allow_tools:
             return False
         if (
@@ -228,6 +233,8 @@ def deny_all_capability(principal: str) -> Capability:
         principal=principal,
         allow_tools=frozenset({_DENY_ALL}),
         max_risk="low",
+        allow_paths=frozenset({_DENY_ALL}),
+        allow_hosts=frozenset({_DENY_ALL}),
     )
 
 
@@ -343,11 +350,25 @@ def verify_capability(cap: Capability, sig_hex: str, public_key_hex: str) -> boo
 def capability_enforced() -> bool:
     """Opt-in, off by default. ``MAVERICK_ENFORCE_CAPABILITIES=1`` or
     ``[capabilities] enforce = true`` turns on per-agent capability
-    enforcement + attenuating propagation to children."""
-    if os.environ.get("MAVERICK_ENFORCE_CAPABILITIES", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }:
-        return True
+    enforcement + attenuating propagation to children.
+
+    A readable, valid policy with no opt-in remains disabled. Once policy
+    intent is uncertain, however, this returns ``True`` so the root grant is
+    resolved through the fail-closed path rather than silently becoming
+    unrestricted.
+    """
+    env = os.environ.get("MAVERICK_ENFORCE_CAPABILITIES")
+    if env is not None and env.strip():
+        value = env.strip().lower()
+        if value in {"1", "true", "yes", "on"}:
+            return True
+        if value not in {"0", "false", "no", "off"}:
+            log.error(
+                "MAVERICK_ENFORCE_CAPABILITIES=%r is not a recognized boolean; "
+                "failing closed to enforcement-on",
+                env,
+            )
+            return True
     # Enterprise mode forces capability enforcement on (least privilege is
     # mandatory when an agent handles sensitive data).
     try:
@@ -355,13 +376,34 @@ def capability_enforced() -> bool:
         if enterprise_enabled():
             return True
     except Exception:
-        pass
+        log.exception("enterprise capability policy is unavailable; failing closed")
+        return True
     try:
-        from .config import load_config
-        cfg = (load_config() or {}).get("capabilities") or {}
-        return bool(cfg.get("enforce"))
+        from .config import config_source_errors, load_config
+
+        root = load_config() or {}
+        if config_source_errors():
+            log.error("capability config source is unreadable; failing closed")
+            return True
     except Exception:
+        log.exception("capability policy is unavailable; failing closed")
+        return True
+    if not isinstance(root, dict):
+        log.error("capability config root is malformed; failing closed")
+        return True
+    cfg = root.get("capabilities")
+    if cfg is None:
         return False
+    if not isinstance(cfg, dict):
+        log.error("[capabilities] policy is malformed; failing closed")
+        return True
+    enforce = cfg.get("enforce")
+    if enforce is None:
+        return False
+    if not isinstance(enforce, bool):
+        log.error("[capabilities] enforce must be a boolean; failing closed")
+        return True
+    return enforce
 
 
 def capability_from_config(
@@ -379,18 +421,22 @@ def capability_from_config(
     (still gives identity + least-privilege-on-spawn).
     """
     try:
+        from .config import config_source_errors, load_config
+
+        load_config()
+        if config_source_errors():
+            log.error("capability grant policy source is unreadable; denying all")
+            return deny_all_capability(principal)
+    except Exception:
+        log.exception("capability grant policy is unavailable; denying all")
+        return deny_all_capability(principal)
+    try:
         from .safety.tool_acl import resolve_lists, resolve_max_risk
         allowed, denied = resolve_lists(channel=channel, user_id=user_id)
         max_risk = resolve_max_risk(channel=channel, user_id=user_id)
     except Exception:
-        # Fail CLOSED, not open. An EMPTY allow_tools means "all tools", so the
-        # old fallback (set(), set(), None) was an all-permissive root grant on a
-        # resolver error -- the inverse of tool_acl's _FAIL_CLOSED posture.
-        # _DENY_ALL makes permits() refuse every tool; "low" is the tightest
-        # risk ceiling. Dead-defensive today (resolve_lists/resolve_max_risk
-        # swallow their own config errors and already return fail-closed), but a
-        # latent trap for any future refactor that lets those resolvers raise.
-        allowed, denied, max_risk = {_DENY_ALL}, set(), "low"
+        log.exception("capability ACL resolution failed; denying all")
+        return deny_all_capability(principal)
     base = Capability(
         principal=principal,
         allow_tools=frozenset(allowed),
@@ -408,7 +454,7 @@ def capability_from_config(
 
 
 class UnknownRoleError(ValueError):
-    """Raised when an explicitly requested RBAC role is not configured."""
+    """Raised when a requested or assigned RBAC role is not configured."""
 
 
 def capability_for_role(role: str, *, principal: str = "agent") -> Capability:
@@ -431,11 +477,17 @@ def capability_for_role(role: str, *, principal: str = "agent") -> Capability:
 
 def _roles_config() -> dict:
     """The ``[roles]`` table (role name -> scope dict), or empty."""
-    try:
-        from .config import load_config
-        return (load_config() or {}).get("roles") or {}
-    except Exception:
+    from .config import load_config
+
+    cfg = load_config() or {}
+    if not isinstance(cfg, dict):
+        raise ValueError("capability config root must be a table")
+    roles = cfg.get("roles")
+    if roles is None:
         return {}
+    if not isinstance(roles, dict):
+        raise ValueError("[roles] must be a table")
+    return roles
 
 
 def configured_roles() -> frozenset[str]:
@@ -462,13 +514,24 @@ def role_for_principal(principal: str) -> str | None:
     ``[role_assignments]`` config this returns ``None`` and the grant is
     unchanged.
     """
-    try:
-        from .config import load_config
-        assigns = (load_config() or {}).get("role_assignments") or {}
-    except Exception:
+    from .config import load_config
+
+    cfg = load_config() or {}
+    if not isinstance(cfg, dict):
+        raise ValueError("capability config root must be a table")
+    assigns = cfg.get("role_assignments")
+    if assigns is None:
         return None
-    role = assigns.get(principal) or assigns.get("default")
-    return role if isinstance(role, str) and role else None
+    if not isinstance(assigns, dict):
+        raise ValueError("[role_assignments] must be a table")
+    role = assigns[principal] if principal in assigns else assigns.get("default")
+    if role is None:
+        return None
+    if not isinstance(role, str) or not role.strip():
+        raise UnknownRoleError(
+            f"invalid RBAC role assignment for principal {principal!r}: {role!r}"
+        )
+    return role.strip()
 
 
 def _apply_role(base: Capability, role_name: str) -> Capability:
@@ -477,14 +540,15 @@ def _apply_role(base: Capability, role_name: str) -> Capability:
     Routes through :meth:`Capability.attenuate`, so a role can only ever
     *restrict* the deployment ACL ceiling -- a misconfigured role that lists
     broader tools/paths/hosts than ``[security]`` still cannot escalate a
-    principal past it. An unknown/empty role leaves ``base`` unchanged.
+    principal past it. An unknown/empty assigned role is rejected rather than
+    silently restoring the deployment-wide base grant.
 
     Scope keys mirror the :class:`Capability` fields: ``allow_tools``,
     ``deny_tools``, ``max_risk``, ``allow_paths``, ``allow_hosts``.
     """
     scope = _roles_config().get(role_name)
     if not isinstance(scope, dict):
-        return base
+        raise UnknownRoleError(f"undefined RBAC role: {role_name!r}")
 
     def _set(key: str) -> set[str] | None:
         v = scope.get(key)

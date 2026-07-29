@@ -32,15 +32,13 @@ python benchmarks/security/latency_bench.py       # latency distribution
 - **`train` TPR is a regression check, not skill.** The built-in rules were
   hand-tuned on that corpus (e.g. `persona_takeover` was widened *because* a
   corpus case slipped past it). A high train TPR only means "no regression."
-- **`heldout` TPR / F1 is the real capability signal** — and it is currently
-  low for the offline fallback (it generalizes poorly to novel phrasings; see
-  `RESULTS.md`). That's a true finding, consistent with the `docs/safety.md`
-  caveat that the SDK's F1 does not apply to the fallback. The benchmark
-  reports it; it does not paper over it.
-- **This dashboard number must NOT be quoted as the public `docs/safety.md`
-  figure.** A corpus-tuned TPR is not a marketing number. The credible,
-  publishable number comes from the held-out + end-to-end methodology in
-  `RUNBOOK_SECURITY.md` (v2).
+- **`heldout` TPR / F1 is the v1 capability signal**, with the important limit
+  that this is a small, repository-authored split. `RESULTS.md` is the
+  authoritative current artifact; docs may reproduce it only with its corpus,
+  confidence intervals, and internal-diagnostic caveat.
+- **This dashboard is not a generalized marketing efficacy figure.** A
+  credible headline number requires pinned external held-out data and the
+  end-to-end methodology in `RUNBOOK_SECURITY.md` (v2).
 - Backends needing the SDK or an LLM are listed as **UNAVAILABLE**, never
   silently dropped.
 

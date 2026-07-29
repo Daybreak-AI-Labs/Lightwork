@@ -54,39 +54,50 @@ class _Resp:
 
 
 def test_openai_cache_hit_is_discounted_not_full_rate():
-    # gpt-5.4 = (3.0 in, 12.0 out) per Mtok. 100k prompt of which 80k cached.
+    # gpt-5.4 conservative ceiling = (5.5 in, 24.75 out) per Mtok.
     resp = _Resp(_UsageOpenAI(prompt=100_000, completion=1_000, cached=80_000))
     cost = _response_call_cost("gpt-5.4", resp)
-    # billable 20k @ $3 + cached 80k @ $3*0.5 + 1k out @ $12.
-    expected = (20_000 / 1e6) * 3.0 + (80_000 / 1e6) * 3.0 * 0.5 + (1_000 / 1e6) * 12.0
+    expected = (
+        (20_000 / 1e6) * 5.5
+        + (80_000 / 1e6) * 5.5 * 0.5
+        + (1_000 / 1e6) * 24.75
+    )
     assert cost == pytest.approx(expected, rel=1e-9)
     # And strictly cheaper than the old no-discount pricing of the full prompt.
-    no_discount = (100_000 / 1e6) * 3.0 + (1_000 / 1e6) * 12.0
+    no_discount = (100_000 / 1e6) * 5.5 + (1_000 / 1e6) * 24.75
     assert cost < no_discount
 
 
 def test_deepseek_prompt_cache_hit_tokens_discounted():
-    # deepseek-chat = (0.27, 1.10). prompt_cache_hit_tokens path (no details obj).
+    # Current v4 Flash = (0.14, 0.28); cache-hit path has no details object.
     # DeepSeek bills cache hits at 0.1x (see DeepSeekClient.CACHE_READ_MULT, the
     # multiplier the authoritative record_tokens path uses); hard-coding
     # OpenAI's 0.5x here overcounted DeepSeek cached input 5x in the
     # provider-cap ledger and budget_dollars metric.
     from maverick.providers.deepseek_provider import DeepSeekClient
     resp = _Resp(_UsageDeepSeek(prompt=50_000, completion=500, cache_hit=40_000))
-    cost = _response_call_cost("deepseek-chat", resp, DeepSeekClient.CACHE_READ_MULT)
-    expected = (10_000 / 1e6) * 0.27 + (40_000 / 1e6) * 0.27 * 0.1 + (500 / 1e6) * 1.10
+    cost = _response_call_cost(
+        "deepseek-v4-flash",
+        resp,
+        DeepSeekClient.CACHE_READ_MULT,
+    )
+    expected = (
+        (10_000 / 1e6) * 0.14
+        + (40_000 / 1e6) * 0.14 * 0.1
+        + (500 / 1e6) * 0.28
+    )
     assert cost == pytest.approx(expected, rel=1e-9)
 
 
 def test_gemini_cached_tokens_billed_at_provider_mult():
-    # gemini-3.5-flash = (0.15, 0.60); Gemini implicit cache reads bill 0.25x.
+    # Gemini 3.5 Flash = (1.50, 9.00); implicit cache reads bill 0.25x.
     from maverick.providers.gemini_provider import GeminiClient
     resp = _Resp(_UsageOpenAI(prompt=100_000, completion=1_000, cached=80_000))
     cost = _response_call_cost("gemini-3.5-flash", resp, GeminiClient.CACHE_READ_MULT)
     expected = (
-        (20_000 / 1e6) * 0.15
-        + (80_000 / 1e6) * 0.15 * 0.25
-        + (1_000 / 1e6) * 0.60
+        (20_000 / 1e6) * 1.5
+        + (80_000 / 1e6) * 1.5 * 0.25
+        + (1_000 / 1e6) * 9.0
     )
     assert cost == pytest.approx(expected, rel=1e-9)
 
@@ -107,18 +118,22 @@ def test_complete_threads_client_cache_mult_into_ledger_spend(monkeypatch):
     recorded = {}
     monkeypatch.setattr(llm_mod, "_record_provider_spend",
                         lambda provider, dollars: recorded.update({provider: dollars}))
-    llm = llm_mod.LLM(model="deepseek:deepseek-chat")
+    llm = llm_mod.LLM(model="deepseek:deepseek-v4-flash")
     monkeypatch.setattr(llm, "_get_client", lambda provider: _DeepSeekish())
     llm.complete(system="s", messages=[{"role": "user", "content": "hi"}],
                  budget=Budget())
-    expected = (10_000 / 1e6) * 0.27 + (40_000 / 1e6) * 0.27 * 0.1 + (500 / 1e6) * 1.10
+    expected = (
+        (10_000 / 1e6) * 0.14
+        + (40_000 / 1e6) * 0.14 * 0.1
+        + (500 / 1e6) * 0.28
+    )
     assert recorded["deepseek"] == pytest.approx(expected, rel=1e-9)
 
 
 def test_no_cache_is_plain_full_rate():
     resp = _Resp(_UsageOpenAI(prompt=10_000, completion=2_000, cached=0))
     cost = _response_call_cost("gpt-5.4", resp)
-    expected = (10_000 / 1e6) * 3.0 + (2_000 / 1e6) * 12.0
+    expected = (10_000 / 1e6) * 5.5 + (2_000 / 1e6) * 24.75
     assert cost == pytest.approx(expected, rel=1e-9)
 
 

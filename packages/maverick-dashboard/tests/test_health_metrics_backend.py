@@ -10,6 +10,19 @@ from maverick_dashboard.app import app
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
+def test_unreadable_auth_posture_keeps_probe_details_redacted(monkeypatch):
+    from maverick import oidc
+    from maverick_dashboard.health_routes import health_should_redact
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+
+    def unavailable():
+        raise RuntimeError("auth config unavailable")
+
+    monkeypatch.setattr(oidc, "oidc_enabled", unavailable)
+    assert health_should_redact() is True
+
+
 def _use_sqlite(monkeypatch, tmp_path):
     """Point the dashboard's _world() at an isolated SQLite world."""
     from maverick import world_model
@@ -27,8 +40,28 @@ def test_metrics_goal_counts_from_configured_backend(monkeypatch, tmp_path):
     wm.create_goal("b")  # stays pending
 
     text = client.get("/metrics").text
+    assert "# TYPE maverick_goals_total gauge" in text
     assert 'maverick_goals_total{status="done"} 1' in text
     assert 'maverick_goals_total{status="pending"} 1' in text
+
+
+def test_health_and_metrics_use_public_inflight_snapshot(monkeypatch, tmp_path):
+    _use_sqlite(monkeypatch, tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    from maverick import runner
+
+    monkeypatch.setattr(runner, "inflight_goals", lambda: 3)
+    # A regression to the semaphore's private ``_value`` would fail loudly.
+    monkeypatch.setattr(runner, "_run_semaphore", object())
+
+    health = client.get("/healthz")
+    assert health.status_code == 200
+    assert health.json()["checks"]["runner"] == (
+        f"in_flight=3/{runner.MAX_CONCURRENT_GOALS}"
+    )
+    text = client.get("/metrics").text
+    assert "maverick_concurrent_goals 3" in text
 
 
 def test_healthz_db_ok_via_ping(monkeypatch, tmp_path):

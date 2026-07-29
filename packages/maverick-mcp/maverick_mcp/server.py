@@ -9,12 +9,14 @@ import json
 import logging
 import math
 import os
+import re
 import secrets
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict
 
+from . import __version__ as _PACKAGE_VERSION
 from .tasks import TaskError
 
 log = logging.getLogger(__name__)
@@ -118,15 +120,10 @@ SERVER_NAME = "maverick"
 # Sentinel distinguishing a MISSING JSON-RPC "id" (a notification, owed no
 # response) from an explicit `"id": null` (a request that still wants a reply).
 _NO_ID = object()
-try:
-    from importlib.metadata import version as _pkg_version
 
-    # Keep serverInfo.version in lockstep with the published package version
-    # rather than a hand-bumped constant that drifts (was "0.2.0" while the
-    # package shipped 0.1.6).
-    SERVER_VERSION = _pkg_version("maverick-mcp-server")
-except Exception:  # pragma: no cover -- metadata is present once installed
-    SERVER_VERSION = "0.1.6"
+# Keep serverInfo.version in lockstep with the distribution metadata (and its
+# source-tree fallback) instead of maintaining another release constant.
+SERVER_VERSION = _PACKAGE_VERSION
 
 
 def _bounded_float(value: Any, *, default: float, ceiling: float) -> float:
@@ -166,7 +163,17 @@ class _ProtocolError(Exception):
         self.message = message
 
 
-TOOLS: list[dict[str, Any]] = [
+class ToolSpec(TypedDict, total=False):
+    """Typed MCP tool declaration; runtime validation enforces required keys."""
+
+    name: str
+    description: str
+    inputSchema: dict[str, Any]
+    outputSchema: dict[str, Any]
+    execution: dict[str, str]
+
+
+TOOLS: list[ToolSpec] = [
     {
         "name": "maverick_start",
         "description": (
@@ -381,7 +388,74 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
-_TOOL_NAMES = {t["name"] for t in TOOLS}
+_TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
+_TOOL_SPEC_KEYS = frozenset(
+    {"name", "description", "inputSchema", "outputSchema", "execution"}
+)
+
+
+def _validate_tool_specs(specs: list[ToolSpec]) -> dict[str, ToolSpec]:
+    """Validate the catalog once and return its immutable-name lookup."""
+    by_name: dict[str, ToolSpec] = {}
+    for index, spec in enumerate(specs):
+        if not isinstance(spec, dict):
+            raise RuntimeError(f"MCP tool declaration {index} must be an object")
+        unknown = set(spec) - _TOOL_SPEC_KEYS
+        if unknown:
+            raise RuntimeError(
+                f"MCP tool declaration {index} has unknown fields: "
+                f"{sorted(unknown)}"
+            )
+        name = spec.get("name")
+        description = spec.get("description")
+        input_schema = spec.get("inputSchema")
+        output_schema = spec.get("outputSchema")
+        if not isinstance(name, str) or not _TOOL_NAME_RE.fullmatch(name):
+            raise RuntimeError(f"MCP tool declaration {index} has an invalid name")
+        if name in by_name:
+            raise RuntimeError(f"duplicate MCP tool declaration: {name}")
+        if not isinstance(description, str) or not description.strip():
+            raise RuntimeError(f"MCP tool {name} has no description")
+        for label, schema in (
+            ("inputSchema", input_schema),
+            ("outputSchema", output_schema),
+        ):
+            if (
+                not isinstance(schema, dict)
+                or schema.get("type") != "object"
+                or not isinstance(schema.get("properties"), dict)
+            ):
+                raise RuntimeError(
+                    f"MCP tool {name} has an invalid {label} object schema"
+                )
+            required = schema.get("required", [])
+            if (
+                not isinstance(required, list)
+                or any(not isinstance(field, str) for field in required)
+                or not set(required).issubset(schema["properties"])
+            ):
+                raise RuntimeError(
+                    f"MCP tool {name} has invalid {label}.required fields"
+                )
+        execution = spec.get("execution")
+        if execution is not None and (
+            not isinstance(execution, dict)
+            or set(execution) != {"taskSupport"}
+            or execution.get("taskSupport") not in {"optional", "required"}
+        ):
+            raise RuntimeError(f"MCP tool {name} has invalid execution metadata")
+        try:
+            json.dumps(spec, sort_keys=True, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"MCP tool {name} is not canonical JSON") from exc
+        by_name[name] = spec
+    if not by_name:
+        raise RuntimeError("MCP tool catalog must not be empty")
+    return by_name
+
+
+_TOOL_BY_NAME = _validate_tool_specs(TOOLS)
+_TOOL_NAMES = frozenset(_TOOL_BY_NAME)
 
 # Form a parked free-text ask_user question is surfaced as, when the client
 # supports elicitation. A single required string keeps the round trip simple.
@@ -436,7 +510,7 @@ def _elicit_host_allowed(url: str, allowed: frozenset[str]) -> bool:
     return bool(host) and any(host == a or host.endswith("." + a) for a in allowed)
 
 
-def _tool_supports_tasks(tool_spec: dict) -> bool:
+def _tool_supports_tasks(tool_spec: ToolSpec) -> bool:
     """Whether a tool opted into task augmentation via execution.taskSupport."""
     return tool_spec.get("execution", {}).get("taskSupport") in ("optional", "required")
 
@@ -1215,7 +1289,7 @@ class MCPServer:
         # coercion in _handle_stdio_line.
         if not isinstance(arguments, dict):
             raise _ProtocolError(-32602, f"arguments for {name} must be an object")
-        tool_spec = next(t for t in TOOLS if t["name"] == name)
+        tool_spec = _TOOL_BY_NAME[name]
         required = tool_spec.get("inputSchema", {}).get("required", []) or []
         missing = [r for r in required if r not in arguments]
         if missing:

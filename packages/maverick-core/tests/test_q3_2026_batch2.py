@@ -422,7 +422,7 @@ def test_cost_router_avoids_high_error_provider(monkeypatch):
     ph = _h()
     ph.reset()
     for _ in range(10):
-        ph.record("deepseek", "deepseek-chat",
+        ph.record("deepseek", "deepseek-v4-flash",
                   latency_ms=100, error=True)
     try:
         from maverick.cost.router import TIER_CHEAP, CostSignal, pick
@@ -430,7 +430,7 @@ def test_cost_router_avoids_high_error_provider(monkeypatch):
         assert spec is not None
         # Errored model itself should not be the pick (within-brand
         # swap to a non-errored model is acceptable).
-        assert spec != "deepseek:deepseek-chat"
+        assert spec != "deepseek:deepseek-v4-flash"
     finally:
         ph.reset()
 

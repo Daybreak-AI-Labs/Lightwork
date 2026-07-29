@@ -21,7 +21,13 @@ email_v2 (IMAP IDLE + threading), discord_stages (Stage voice), streaming_voice
 when ``[channels] rich_render`` is on). signal needs signal-cli on PATH; matrix
 needs matrix-nio.
 """
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _distribution_version
+
 from .base import Channel, Handler, IncomingMessage, Reply, as_reply
 
-__version__ = "0.1.6"
+try:
+    __version__ = _distribution_version("maverick-channels")
+except PackageNotFoundError:  # source tree without installed metadata
+    __version__ = "0.1.7"
 __all__ = ["Channel", "IncomingMessage", "Handler", "Reply", "as_reply"]

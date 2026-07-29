@@ -17,7 +17,7 @@ class Maverick < Formula
   include Language::Python::Virtualenv
 
   desc "AI agent swarm that runs locally, works for hours, under a budget cap"
-  homepage "https://github.com/Day-AI-Labs/Lightwork"
+  homepage "https://github.com/Daybreak-AI-Labs/Lightwork"
   url "https://files.pythonhosted.org/packages/source/m/maverick-agent/maverick_agent-0.1.6.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000" # set by homebrew-bump.yml
   license :cannot_represent

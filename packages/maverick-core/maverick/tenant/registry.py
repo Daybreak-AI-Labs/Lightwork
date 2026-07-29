@@ -162,6 +162,23 @@ def _lookup_id(tenant_id: str | None) -> str:
     return canonical_tenant_id(tid) if tid else ""
 
 
+def _quota_value(value: object) -> float:
+    """Return a finite, non-negative daily cap.
+
+    ``inf`` previously persisted successfully and made the next registry read
+    fail as corrupt because :meth:`TenantRecord.from_dict` correctly rejects
+    it. Validate at the write boundary so an operator input cannot poison the
+    control-plane roster.
+    """
+    try:
+        cap = float(value or 0.0)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError("tenant quota must be a finite number") from exc
+    if not math.isfinite(cap):
+        raise ValueError("tenant quota must be a finite number")
+    return max(0.0, cap)
+
+
 def _load() -> dict[str, TenantRecord]:
     from ..file_lock import ensure_private_file
 
@@ -265,6 +282,7 @@ def create_tenant(
 ) -> TenantRecord:
     """Provision a tenant + its workspace dir. Raises ValueError if it exists."""
     tid = _validate_id(tenant_id)
+    quota = _quota_value(max_daily_dollars)
     # Provisioning a named tenant IS multi-tenant mode — a paid (Platinum)
     # capability. Fail-open: a no-op unless license enforcement is on and the
     # deployment isn't entitled (a genuine single-tenant box never calls this —
@@ -299,7 +317,7 @@ def create_tenant(
         now = time.time()
         rec = TenantRecord(
             id=tid, status=ACTIVE, plan=plan, display_name=display_name,
-            max_daily_dollars=max(0.0, float(max_daily_dollars or 0.0)),
+            max_daily_dollars=quota,
             created_at=now, updated_at=now,
         )
         records[tid] = rec
@@ -331,30 +349,65 @@ def resume_tenant(tenant_id: str) -> TenantRecord:
 def _audit_billing_change(field: str, tenant_id: str, *, old, new) -> None:
     """Record a tamper-evident audit row for a change to a tenant's billing
     terms (plan / daily cap), so an upgrade or cap change is provable rather than
-    a silent edit. Fail-soft: an audit error never blocks the mutation."""
-    try:
-        from ..audit import EventKind, record
-        kind = (EventKind.TENANT_PLAN_CHANGED if field == "plan"
-                else EventKind.TENANT_QUOTA_CHANGED)
-        record(kind, agent="operator", tenant=tenant_id, field=field,
-               old=old, new=new)
-    except Exception:  # pragma: no cover -- audit must never break provisioning
-        pass
+    a silent edit. Ordinary writer outages remain fail-soft; an explicit
+    policy/custody refusal propagates."""
+    from ..audit import EventKind, audit_event
+
+    kind = (EventKind.TENANT_PLAN_CHANGED if field == "plan"
+            else EventKind.TENANT_QUOTA_CHANGED)
+    audit_event(
+        kind, agent="operator", tenant=tenant_id, field=field,
+        old=old, new=new,
+    )
+
+
+def _mutate_billing(tenant_id: str, field: str, value: object) -> TenantRecord:
+    """Commit a billing mutation and its audit result as one locked operation.
+
+    On a strict audit refusal the roster is restored before the exception
+    propagates. Keeping the original read, write, audit, and possible rollback
+    under one registry lock also prevents the old/new evidence from racing a
+    concurrent operator update.
+    """
+    tid = _lookup_id(tenant_id)
+    attr = "plan" if field == "plan" else "max_daily_dollars"
+    with _locked():
+        records = _load()
+        old_rec = records.get(tid)
+        if old_rec is None:
+            raise UnknownTenant(tid)
+        prior = dict(records)
+        old = getattr(old_rec, attr)
+        rec = replace(old_rec, updated_at=time.time(), **{attr: value})
+        records[tid] = rec
+        _save(records)
+        from ..audit import AuditRefused
+
+        try:
+            _audit_billing_change(field, rec.id, old=old, new=getattr(rec, attr))
+        except AuditRefused:
+            try:
+                _save(prior)
+            except Exception as rollback_exc:
+                raise TenantRegistryError(
+                    "audit refused tenant billing change and rollback failed"
+                ) from rollback_exc
+            raise
+    return rec
 
 
 def set_quota(tenant_id: str, max_daily_dollars: float) -> TenantRecord:
-    old = get_tenant(tenant_id)
-    rec = _mutate(tenant_id, max_daily_dollars=max(0.0, float(max_daily_dollars or 0.0)))
-    _audit_billing_change("quota", rec.id, old=(old.max_daily_dollars if old else None),
-                          new=rec.max_daily_dollars)
+    rec = _mutate_billing(
+        tenant_id,
+        "quota",
+        _quota_value(max_daily_dollars),
+    )
     return rec
 
 
 def set_plan(tenant_id: str, plan: str) -> TenantRecord:
     _warn_if_unknown_plan(plan)
-    old = get_tenant(tenant_id)
-    rec = _mutate(tenant_id, plan=str(plan or "free"))
-    _audit_billing_change("plan", rec.id, old=(old.plan if old else None), new=rec.plan)
+    rec = _mutate_billing(tenant_id, "plan", str(plan or "free"))
     return rec
 
 

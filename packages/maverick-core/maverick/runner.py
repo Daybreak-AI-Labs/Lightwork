@@ -44,6 +44,8 @@ MAX_CONCURRENT_GOALS = max(1, env_int("MAVERICK_MAX_CONCURRENT_GOALS", 16))
 MAX_CONCURRENT_GOALS_PER_PRINCIPAL = max(
     1, env_int("MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL", 3))
 _run_semaphore = threading.BoundedSemaphore(MAX_CONCURRENT_GOALS)
+_inflight_lock = threading.Lock()
+_inflight_count = 0
 
 # Per-principal lanes, created on first use. Guarded by _principal_sems_lock.
 # The dict grows with the number of distinct principals seen this process — a
@@ -73,9 +75,31 @@ _ACQUIRE_TIMEOUT = env_float("MAVERICK_GOAL_ACQUIRE_TIMEOUT", 300.0)
 def inflight_goals() -> int:
     """How many goals currently hold a concurrency slot (are running).
 
-    Derived from the bounded semaphore's free permits; the same expression the
-    dashboard's /healthz + /metrics gauges use."""
-    return MAX_CONCURRENT_GOALS - _run_semaphore._value  # type: ignore[attr-defined]
+    This is tracked explicitly rather than inferred from CPython's private
+    ``Semaphore._value`` attribute.  Besides being an implementation detail,
+    ``_value`` reports permits rather than accepted runs and is not a portable
+    readiness/metrics contract across Python implementations.
+    """
+    with _inflight_lock:
+        return _inflight_count
+
+
+def _mark_inflight_started() -> None:
+    global _inflight_count
+    with _inflight_lock:
+        _inflight_count += 1
+
+
+def _mark_inflight_finished() -> None:
+    global _inflight_count
+    with _inflight_lock:
+        if _inflight_count <= 0:
+            # Never publish a negative readiness gauge if an internal caller
+            # violates the acquire/release contract.
+            log.error("runner in-flight accounting underflow")
+            _inflight_count = 0
+            return
+        _inflight_count -= 1
 
 
 def drain_inflight(timeout: float = 25.0, poll: float = 0.5) -> int:
@@ -152,6 +176,7 @@ def run_goal_in_thread(
             "(goal_id=%s); refusing run", _ACQUIRE_TIMEOUT, goal_id,
         )
         return None
+    _mark_inflight_started()
     world = None
     sandbox = None
     try:
@@ -223,9 +248,15 @@ def run_goal_in_thread(
                 close_world_if_owned(world)
             except Exception:  # pragma: no cover
                 log.debug("run_goal_in_thread: world close failed", exc_info=True)
+        # The run is no longer doing work once cleanup completes. Publish that
+        # truth before returning the permit so a newly-admitted run cannot
+        # briefly double-count with this finished one.
+        _mark_inflight_finished()
         # Release in reverse acquire order: global ceiling, then the user lane.
-        _run_semaphore.release()
-        principal_sem.release()
+        try:
+            _run_semaphore.release()
+        finally:
+            principal_sem.release()
 
 
 class Dispatcher(Protocol):

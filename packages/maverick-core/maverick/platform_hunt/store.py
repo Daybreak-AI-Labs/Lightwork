@@ -713,15 +713,21 @@ class HuntStore:
             return updated.rowcount == 1
 
     def _record_audit(self, kind: str, payload: dict[str, Any]) -> bool:
+        from ..audit import AuditRefused
+
         if self._audit_recorder is not None:
             try:
                 return bool(self._audit_recorder(kind, payload))
+            except AuditRefused:
+                raise
             except Exception:  # failure-policy: durable_retry
                 return False
         try:
             from ..audit import record
 
             return bool(record(kind, **payload))
+        except AuditRefused:
+            raise
         except Exception:  # failure-policy: durable_retry
             return False
 

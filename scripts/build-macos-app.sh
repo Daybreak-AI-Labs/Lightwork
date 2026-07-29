@@ -27,27 +27,31 @@ cd "$ROOT"
 PY="${PYTHON:-python3.12}"
 command -v "$PY" >/dev/null 2>&1 || { echo "need $PY (brew install python@3.12) or set PYTHON=..."; exit 1; }
 [ "$(uname)" = "Darwin" ] || { echo "run this on macOS"; exit 1; }
+VERSION="$("$PY" - <<'PY'
+import tomllib
+from pathlib import Path
+
+cohort = tomllib.loads(Path("release-cohort.toml").read_text(encoding="utf-8"))
+print(cohort["version"])
+PY
+)"
+[ -n "$VERSION" ] || { echo "release-cohort.toml does not declare a version"; exit 1; }
 
 echo ">> [1/6] clean venv"
 rm -rf .buildvenv dist build/dist build/build
 "$PY" -m venv .buildvenv
 # shellcheck disable=SC1091
 source .buildvenv/bin/activate
-python -m pip install --upgrade pip wheel >/dev/null
+python -m pip install --upgrade 'pip==26.1.2' >/dev/null
 
 echo ">> [2/6] install packages NON-editable (so PyInstaller can bundle them)"
-pip install ./packages/maverick-core
-pip install --no-deps ./packages/maverick-shield
-pip install --no-deps ./packages/maverick-channels
-pip install --no-deps ./packages/maverick-dashboard
-pip install --no-deps ./packages/maverick-mcp
-pip install --no-deps ./apps/installer-cli
-# bundled deps the --no-deps installs skipped:
-pip install 'questionary>=2.0' 'rich>=13.7' \
-            'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' 'python-multipart>=0.0.9'
-# a provider client so ollama:/azure/openai-compatible runs work in the binary:
-pip install 'openai>=1.30'
-pip install 'pyinstaller>=6.0,<7.0'
+python scripts/install_release_cohort.py \
+  --target-python python \
+  --core-extra release-runtime
+python -m pip install --constraint requirements/ci.txt 'pyinstaller==6.21.0'
+python -m pip check
+python -c "from maverick.providers import verify_release_runtime; verify_release_runtime()"
+python -c "from importlib.metadata import version; assert version('pywhispercpp') == '1.5.0'; print('pywhispercpp:', version('pywhispercpp'))"
 
 echo ">> [3/6] sanity: sqlite3 present in this interpreter"
 python -c "import sqlite3, _sqlite3; print('sqlite3', sqlite3.sqlite_version)"
@@ -55,7 +59,12 @@ python -c "import sqlite3, _sqlite3; print('sqlite3', sqlite3.sqlite_version)"
 echo ">> [4/6] compile the binary (PyInstaller, from build/)"
 ( cd build && pyinstaller --clean --noconfirm --distpath ../dist maverick.spec )
 ./dist/maverick version
-./dist/maverick dashboard --help >/dev/null && echo "   dashboard subcommand ok"
+./dist/maverick dashboard --help
+./dist/maverick mcp --help
+./dist/maverick release-runtime-check
+voice_status="$(./dist/maverick voice status)"
+printf '%s\n' "$voice_status"
+grep -F "pywhispercpp engine (installed)" <<<"$voice_status"
 
 echo ">> [5/6] wrap the compiled binary into Lightwork.app"
 APP="dist/Lightwork.app"
@@ -66,15 +75,15 @@ cp dist/maverick "$APP/Contents/MacOS/maverick"
 if [ -f apps/installer-desktop/src-tauri/icons/icon.icns ]; then
   cp apps/installer-desktop/src-tauri/icons/icon.icns "$APP/Contents/Resources/Lightwork.icns"
 fi
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>Lightwork</string>
   <key>CFBundleDisplayName</key><string>Lightwork</string>
   <key>CFBundleIdentifier</key><string>com.daybreaklabs.lightwork</string>
-  <key>CFBundleVersion</key><string>0.1.7</string>
-  <key>CFBundleShortVersionString</key><string>0.1.7</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Lightwork</string>
   <key>CFBundleIconFile</key><string>Lightwork</string>
@@ -92,13 +101,13 @@ LOG="${TMPDIR:-/tmp}/lightwork-dashboard.log"
 if [ ! -f "$HOME/.maverick/config.toml" ]; then
   osascript -e 'display dialog "First run: open Terminal and run the maverick binary once to set up (maverick init). Then reopen Lightwork." buttons {"OK"} default button 1' >/dev/null 2>&1 || true
 fi
-"$DIR/maverick" dashboard >"$LOG" 2>&1 &
+"$DIR/maverick" dashboard --host 127.0.0.1 --port 8765 >"$LOG" 2>&1 &
 SRV=$!
 for _ in $(seq 1 40); do
   URL="$(grep -oE 'http://127\.0\.0\.1:[0-9]+' "$LOG" | head -1 || true)"
   [ -n "$URL" ] && break; sleep 0.5
 done
-open "${URL:-http://127.0.0.1:8000}"
+open "${URL:-http://127.0.0.1:8765}"
 wait "$SRV"
 LAUNCH
 chmod +x "$APP/Contents/MacOS/Lightwork" "$APP/Contents/MacOS/maverick"

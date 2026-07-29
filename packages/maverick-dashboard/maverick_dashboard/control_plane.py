@@ -321,7 +321,11 @@ def trust_overview() -> dict[str, Any]:
         try:
             active, reason = a.is_active()
         except Exception:
-            active, reason = True, "active"
+            # A broken lifecycle check is not evidence that an external agent
+            # remains authorized.  Keep the overview available, but represent
+            # the indeterminate state conservatively instead of rendering the
+            # agent as healthy.
+            active, reason = False, "unknown (lifecycle check failed)"
         agents.append({
             "id": getattr(a, "id", _id),
             "direction": getattr(a, "direction", "both"),

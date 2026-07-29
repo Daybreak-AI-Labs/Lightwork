@@ -39,6 +39,7 @@ for false unless noted otherwise.
 | Env var | Default | Description |
 | --- | --- | --- |
 | `MAVERICK_BUDGET_DOLLARS` | config `[budget]` | Override the dollar budget cap for a run. |
+| `MAVERICK_BILLING_STRICT` | `true` | Require verified pricing for live accounting. `false` explicitly enables warning-labelled estimate-only accounting for legacy/custom gateways. |
 | `MAVERICK_DEFAULT_MAX_DOLLARS` | `2.0` | Default per-goal dollar ceiling when none is supplied. |
 | `MAVERICK_DEFAULT_MAX_WALL_SECONDS` | `1800` | Default per-goal wall-clock ceiling (seconds). |
 | `MAVERICK_DEFAULT_MAX_DEPTH` | `3` | Default max recursion depth for spawned sub-goals. |
@@ -235,6 +236,10 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_CLIPBOARD_DISABLE` | unset | `1` disables the clipboard tool. |
 | `MAVERICK_EMAIL_DISABLE` | unset | `1` blocks the email tool from sending. |
 | `MAVERICK_WHISPER_MODEL` | `small` | Whisper model size for the voice tool. |
+| `MAVERICK_WHISPER_OPENAI_MODEL` | `whisper-1` | OpenAI speech-to-text model used by the voice tool. |
+| `MAVERICK_WHISPER_GROQ_MODEL` | `whisper-large-v3-turbo` | Groq speech-to-text model used by the voice tool. |
+| `MAVERICK_TTS_OPENAI_MODEL` | `tts-1` | OpenAI text-to-speech model used by the voice tool. |
+| `MAVERICK_TTS_ELEVENLABS_MODEL` | `eleven_turbo_v2_5` | ElevenLabs text-to-speech model used by the voice tool. |
 | `MAVERICK_SEARCH_BACKEND` | auto (preference order) | Force a web-search backend: `tavily`, `brave`, `serpapi`, or `ddg`. |
 | `MAVERICK_FETCH_ALLOW_PRIVATE` | unset | `1` allows fetching URLs resolving to private/loopback/reserved IPs (SSRF escape hatch). |
 | `MAVERICK_FETCH_RESPECT_ROBOTS` | unset | `1` makes the fetch tool honor `robots.txt`. |

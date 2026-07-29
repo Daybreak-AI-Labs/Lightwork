@@ -22,7 +22,7 @@ Schema overview::
 
     [budget]
     max_dollars = 5.0
-    strict_pricing = false  # true => refuse to bill an unpriced model (billing-grade)
+    strict_pricing = true  # false => explicit legacy estimate-only accounting
 
     [safety]
     profile = "balanced"
@@ -723,8 +723,8 @@ def get_automation_import() -> dict:
     """
     cfg = load_config().get("automation_import", {})
     return {
-        "enable": bool(cfg.get("enable", False)),
-        "create_schedules": bool(cfg.get("create_schedules", False)),
+        "enable": _strict_config_bool(cfg, "enable", False),
+        "create_schedules": _strict_config_bool(cfg, "create_schedules", False),
     }
 
 

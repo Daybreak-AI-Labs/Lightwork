@@ -19,4 +19,4 @@ Nominative/referential use (e.g., a factual "compatible with Lightwork" or a
 reference in an article) is permitted where it does not imply endorsement.
 
 For permission to use the Marks, contact the Licensor:
-https://github.com/Day-AI-Labs/Lightwork
+https://github.com/Daybreak-AI-Labs/Lightwork

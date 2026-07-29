@@ -15,6 +15,7 @@ blueprint the user pastes in), plus a "connect" path documented on the importer.
 """
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
@@ -43,6 +44,7 @@ class Importer(Protocol):
 
 
 _REGISTRY: dict[str, Callable[[], Importer]] = {}
+_LAZY_MODULES: dict[str, str] = {}
 
 
 def register(source: str, factory: Callable[[], Importer]) -> None:
@@ -50,12 +52,32 @@ def register(source: str, factory: Callable[[], Importer]) -> None:
     _REGISTRY[source] = factory
 
 
+def register_lazy(source: str, module: str) -> None:
+    """Declare the module that registers ``source`` when first requested."""
+    _LAZY_MODULES[source] = module
+
+
 def available_sources() -> list[str]:
-    return sorted(_REGISTRY)
+    return sorted(_REGISTRY.keys() | _LAZY_MODULES.keys())
 
 
 def get_importer(source: str) -> Importer:
     factory = _REGISTRY.get(source)
+    if factory is None and source in _LAZY_MODULES:
+        module = _LAZY_MODULES[source]
+        try:
+            importlib.import_module(module)
+        except Exception as exc:
+            raise ImporterError(
+                f"automation source {source!r} could not be loaded from "
+                f"{module!r}: {type(exc).__name__}: {exc}"
+            ) from exc
+        factory = _REGISTRY.get(source)
+        if factory is None:
+            raise ImporterError(
+                f"automation source {source!r} did not register an importer "
+                f"after loading {module!r}"
+            )
     if factory is None:
         raise ImporterError(
             f"unknown automation source {source!r}; "

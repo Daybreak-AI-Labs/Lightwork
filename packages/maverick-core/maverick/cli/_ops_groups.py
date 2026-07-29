@@ -10,6 +10,35 @@ import click
 from . import main
 
 
+@main.command("preflight")
+@click.option(
+    "--profile",
+    type=click.Choice(["run", "cockpit"]),
+    default="run",
+    show_default=True,
+    help="Readiness contract to evaluate.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit stable machine-readable JSON.",
+)
+def operator_preflight_cmd(profile: str, as_json: bool) -> None:
+    """Run a deterministic, offline install-readiness check.
+
+    Unlike ``doctor``, preflight makes no network calls and creates no state.
+    It exits non-zero when the selected profile has a blocker.
+    """
+
+    from ..operator_preflight import collect, render, render_json
+
+    report = collect(profile=profile)
+    click.echo(render_json(report) if as_json else render(report))
+    if not report.ready:
+        raise click.exceptions.Exit(1)
+
+
 @main.group("cache")
 def cache_group() -> None:
     """Inspect and clear in-process caches (file reads, repo map, embeddings)."""

@@ -181,6 +181,39 @@ def test_gate_ignores_an_audit_write_with_no_handler(tmp_path) -> None:
     """) == []
 
 
+def test_baseline_paths_are_host_independent(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(audit_contract, "REPO_ROOT", tmp_path)
+    nested = tmp_path / "packages" / "maverick-core" / "maverick" / "module.py"
+    assert audit_contract._rel(nested) == (
+        "packages/maverick-core/maverick/module.py"
+    )
+
+
+def test_gate_does_not_scan_generated_build_copies(tmp_path, monkeypatch) -> None:
+    """A local package build must not duplicate every source finding."""
+    monkeypatch.setattr(audit_contract, "REPO_ROOT", tmp_path)
+    source = tmp_path / "packages" / "example.py"
+    generated = tmp_path / "packages" / "example" / "build" / "lib" / "example.py"
+    source.parent.mkdir(parents=True)
+    generated.parent.mkdir(parents=True)
+    body = textwrap.dedent("""
+        from maverick.audit import record
+
+        def go():
+            try:
+                record("event")
+            except Exception:
+                pass
+    """)
+    source.write_text(body, encoding="utf-8")
+    generated.write_text(body, encoding="utf-8")
+
+    violations, inspected = audit_contract.scan(("packages",))
+
+    assert inspected == 1
+    assert [hit["file"] for hit in violations] == ["packages/example.py"]
+
+
 # -- the gate cannot pass vacuously ----------------------------------------
 
 def test_gate_exits_non_zero_when_it_inspects_nothing(monkeypatch, capsys) -> None:

@@ -7,7 +7,7 @@
 टर्मिनल से इंस्टॉल करने का सबसे सुरक्षित तरीका है कि रिमोट बूटस्ट्रैप स्क्रिप्ट चलाने के बजाय pipx से प्रकाशित पैकेज इंस्टॉल किया जाए:
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
 python -m pip install -e ./packages/maverick-core
@@ -22,7 +22,7 @@ PyPI पैकेज `maverick-agent` है (`maverick` नाम पहले 
 डेवलपमेंट के दौरान सोर्स से:
 
 ```bash
-git clone https://github.com/Day-AI-Labs/maverick
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd maverick
 pip install -e ./packages/maverick-core
 pip install -e ./apps/installer-cli

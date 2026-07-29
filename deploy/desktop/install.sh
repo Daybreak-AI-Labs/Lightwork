@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-REPO="${MAVERICK_REPO:-Day-AI-Labs/Lightwork}"
+REPO="${MAVERICK_REPO:-Daybreak-AI-Labs/Lightwork}"
 REF="${MAVERICK_REF:-}"
 SRC_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/maverick/src"
 STAGED_SRC=""
@@ -118,11 +118,22 @@ fetch_source() {
 }
 
 install_maverick() {
-  log "Installing the agent + setup wizard (this can take a minute) ..."
+  log "Installing the complete Lightwork package cohort (this can take a minute) ..."
   fetch_source
-  pipx_cmd install --force "$SRC_DIR/packages/maverick-core"
-  # The wizard ships in apps/installer-cli; install it into the same venv.
-  pipx_cmd inject --force maverick-agent "$SRC_DIR/apps/installer-cli"
+  # Let pipx create and expose the managed environment without resolving a
+  # partial dependency graph. The cohort helper immediately performs the one
+  # constrained eight-package resolver transaction and verifies imports.
+  pipx_cmd install --force --pip-args=--no-deps \
+    "$SRC_DIR/packages/maverick-core"
+  local venvs target_python
+  venvs="$(pipx_cmd environment --value PIPX_LOCAL_VENVS)"
+  target_python="$venvs/maverick-agent/bin/python"
+  [ -x "$target_python" ] \
+    || die "pipx created no maverick-agent environment at $target_python"
+  python3 "$SRC_DIR/scripts/install_release_cohort.py" \
+    --source-root "$SRC_DIR" \
+    --target-python "$target_python" \
+    --core-extra release-runtime
 }
 
 run_wizard() {

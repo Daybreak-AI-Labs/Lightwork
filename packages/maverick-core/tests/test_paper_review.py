@@ -2,6 +2,8 @@
 and model-drafted clause language that can never weaken our position."""
 from __future__ import annotations
 
+import json
+
 from maverick import paper_review as pr
 
 DPA_TEXT = """DATA PROCESSING AGREEMENT
@@ -299,8 +301,13 @@ def test_a_broken_playbook_degrades_to_the_shipped_positions(
 def test_playbook_path_is_configurable(tmp_path, monkeypatch):
     cfg = tmp_path / "config.toml"
     custom = tmp_path / "legal" / "our-clauses.json"
-    cfg.write_text(f'[paper_review]\nplaybook_path = "{custom}"\n',
-                   encoding="utf-8")
+    # JSON string escaping is compatible with a TOML basic string. In
+    # particular, it doubles Windows path separators instead of emitting
+    # invalid TOML escapes such as ``\U`` from ``C:\Users``.
+    cfg.write_text(
+        f"[paper_review]\nplaybook_path = {json.dumps(str(custom))}\n",
+        encoding="utf-8",
+    )
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     from maverick import config
     config.reset_config_cache()

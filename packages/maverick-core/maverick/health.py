@@ -402,7 +402,7 @@ def _check_shield() -> None:
         _row(GREEN, "shield", backend_label)
     elif s.backend == "builtin":
         _row(YELLOW, "shield", backend_label,
-             fix="pip install agent-shield  (when published) for full coverage")
+             fix="Use the built-in layer; the full SDK is not on public PyPI")
     else:
         _row(RED, "shield", backend_label,
              fix="set [safety] profile = \"balanced\" in ~/.maverick/config.toml to re-enable")

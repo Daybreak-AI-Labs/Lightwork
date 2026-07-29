@@ -36,7 +36,10 @@ inputs:
     required: false
     default: ""
   sandbox:
-    description: "Sandbox backend for model-generated shell. A CI runner is already an ephemeral VM, so `local` is the default."
+    description: >-
+      Sandbox backend for model-generated shell. `local` executes on the runner
+      host and is appropriate only on a trusted disposable hosted/isolated
+      runner; select docker or podman where available.
     required: false
     default: "local"
   anthropic-api-key:
@@ -44,7 +47,7 @@ inputs:
     required: false
     default: ""
   version:
-    description: "Optional expected version of the Lightwork source bundled with this action (e.g. 0.1.6). The action fails if it does not match."
+    description: "Optional expected version of the Lightwork source bundled with this action (e.g. 0.1.7). The action fails if it does not match."
     required: false
     default: ""
   python-version:
@@ -112,17 +115,14 @@ runs:
           fi
         fi
 
-        # All first-party distributions are supplied as local direct
-        # requirements in one resolver transaction. This prevents pip from
-        # satisfying maverick-* dependencies with an untrusted public-index
-        # package if a project name is unreserved or later compromised.
-        python -m pip install \
-          "$action_root/packages/maverick-core[all]" \
-          "$action_root/packages/maverick-shield" \
-          "$action_root/packages/maverick-channels" \
-          "$action_root/packages/maverick-dashboard" \
-          "$action_root/packages/maverick-mcp" \
-          "$action_root/apps/installer-cli"
+        # The shared helper reads all eight local direct requirements from
+        # release-cohort.toml, resolves them together under requirements/ci.txt,
+        # runs pip check, and imports every declared runtime module. This keeps
+        # an unreserved sibling name from falling back to the public index.
+        python "$action_root/scripts/install_release_cohort.py" \
+          --source-root "$action_root" \
+          --target-python python \
+          --core-extra release-runtime
         maverick version || maverick --help
 
     - name: Run the swarm

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import maverick.env_hunt as env_hunt
 import pytest
+from maverick.audit.errors import AuditRefused
 from maverick.env_hunt import (
     CloudTrailConnector,
     ConnectorRegistry,
@@ -120,6 +121,61 @@ def test_connector_registry_is_read_only_ephemeral_and_audits_metadata_only():
         QueryRequest(start=1, end=2, filters={"api_token": "do-not-log"})
     with pytest.raises(ValueError, match="credentials"):
         QueryRequest(start=1, end=2, query="Authorization: Bearer abcdefghijkl")
+
+
+def test_environment_hunt_never_downgrades_an_explicit_audit_refusal(
+    synthetic_attack_chain,
+):
+    """Ordinary recorder failures degrade; a custody refusal must stay fatal."""
+
+    def refuse(*_args, **_kwargs):
+        raise AuditRefused("signed audit custody is unavailable")
+
+    registry = ConnectorRegistry(audit_recorder=refuse)
+    registry.register(CloudTrailConnector(lambda _request: ()))
+    with pytest.raises(AuditRefused, match="custody"):
+        registry.ingest("cloudtrail", QueryRequest(start=1, end=2))
+
+    with pytest.raises(AuditRefused, match="custody"):
+        env_hunt.scan(synthetic_attack_chain, audit_recorder=refuse)
+
+    ip_event = _event("ip", 400, "connection", target="203.0.113.7")
+    ip_finding = env_hunt.detect(
+        [ip_event],
+        [env_hunt.SigmaRule({
+            "id": "ip-rule",
+            "title": "IP event",
+            "detection": {
+                "selection": {"action": "connection"},
+                "condition": "selection",
+            },
+        })],
+    )[0]
+    investigation = env_hunt.build_investigation([ip_finding], [ip_event])
+
+    @dataclass
+    class Provider:
+        name: str = "approved-intel"
+
+        def lookup(self, _indicator):
+            return {"reputation": "known"}
+
+    with pytest.raises(AuditRefused, match="custody"):
+        env_hunt.enrich(
+            investigation,
+            [Provider()],
+            allowed_sources=["approved-intel"],
+            audit_recorder=refuse,
+        )
+
+    with pytest.raises(AuditRefused, match="custody"):
+        env_hunt.propose_response(
+            "isolate_host",
+            "host-1",
+            "contain the cited event",
+            (synthetic_attack_chain[-1].evidence(),),
+            audit_recorder=refuse,
+        )
 
 
 def test_vendor_parsers_cover_cloud_host_edr_siem_kubernetes_and_identity():

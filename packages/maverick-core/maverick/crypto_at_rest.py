@@ -22,7 +22,7 @@ Key resolution (first match wins):
   2. ``~/.maverick/keys/at_rest.key`` — generated on first use, ``chmod 600``.
 
 Every Postgres governed authority additionally requires the injected key plus
-``MAVERICK_ENCRYPTION_KEY_DIGEST=sha256:<full digest>``â€”including an explicitly
+``MAVERICK_ENCRYPTION_KEY_DIGEST=sha256:<full digest>``—including an explicitly
 selected single-replica deployment. The digest is verified from decoded key
 bytes before shared I/O; node-local rotation-keyring files are refused.
 

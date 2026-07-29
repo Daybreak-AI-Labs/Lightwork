@@ -7,7 +7,7 @@
 터미널에서 가장 안전한 설치 방법은 원격 부트스트랩 스크립트를 실행하는 대신 pipx로 게시된 패키지를 설치하는 것입니다.
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
 python -m pip install -e ./packages/maverick-core
@@ -22,7 +22,7 @@ PyPI 패키지 이름은 `maverick-agent`입니다(`maverick`이라는 이름은
 개발 중에 소스에서 설치하려면:
 
 ```bash
-git clone https://github.com/Day-AI-Labs/maverick
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd maverick
 pip install -e ./packages/maverick-core
 pip install -e ./apps/installer-cli

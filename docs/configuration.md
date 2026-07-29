@@ -46,12 +46,12 @@ base_url = "http://localhost:11434"
 [models]
 # Per-role model picks. Format: "provider:model-id".
 # Any role omitted falls back to maverick.llm.ROLE_MODELS defaults.
-orchestrator    = "anthropic:claude-opus-4-7"
+orchestrator    = "anthropic:claude-opus-4-8"
 researcher      = "anthropic:claude-sonnet-4-6"
 coder           = "anthropic:claude-sonnet-4-6"
 writer          = "anthropic:claude-sonnet-4-6"
 analyst         = "anthropic:claude-sonnet-4-6"
-revisor         = "anthropic:claude-opus-4-7"
+revisor         = "anthropic:claude-opus-4-8"
 verifier        = "anthropic:claude-sonnet-4-6"
 summarizer      = "anthropic:claude-haiku-4-5"
 skill_distiller = "anthropic:claude-sonnet-4-6"
@@ -62,6 +62,7 @@ max_wall_seconds    = 3600
 max_tool_calls      = 500
 max_input_tokens    = 1000000
 max_output_tokens   = 200000
+strict_pricing      = true
 
 [safety]
 profile         = "balanced"   # strict | balanced | permissive | off
@@ -241,6 +242,15 @@ args    = ["-y", "@modelcontextprotocol/server-github"]
 env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_TOKEN}" }
 ```
 
+`strict_pricing = true` is the default: a missing or unverified model rate
+stops the call before dispatch rather than turning an estimate into billable
+accounting. Set it to `false` only for a legacy or custom OpenAI-compatible
+gateway whose exact rate is unavailable. That explicit opt-out emits warnings
+and records the unverified source, date, confidence, pricing basis, and
+applicability in `Budget.pricing_evidence`; those totals are not suitable for
+invoices or chargebacks. `MAVERICK_BILLING_STRICT=true|false` overrides the
+file setting.
+
 `backend = "local"` runs tools in the same runtime environment as
 Lightwork. For untrusted skills, avoid mounting secret-bearing paths into
 that runtime and prefer sandbox isolation that does not expose host
@@ -269,10 +279,12 @@ anthropic-region = "eu"
 x-no-retention = "1"
 ```
 
-For a hard guarantee that *no* prompt leaves your boundary, prefer the
-enterprise egress lock (`[enterprise] mode = true`), which pins every role to a
-self-hosted provider — see `docs/security-hardening.md`. Outbound PII can also be
-stripped before any cloud call with `[privacy] redact_egress = true`.
+For application-layer default-deny model egress, use the enterprise egress lock
+(`[enterprise] mode = true`), which pins every governed role to a self-hosted
+provider — see `docs/security-hardening.md`. A hard no-egress boundary also
+requires sandbox network isolation and host/OS/VPC egress policy. Outbound PII
+can also be stripped before any cloud call with
+`[privacy] redact_egress = true`.
 
 ## Learning & workforce sections
 

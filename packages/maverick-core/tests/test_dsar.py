@@ -86,7 +86,8 @@ def test_export_contains_subject_world_and_audit():
     assert bundle["tenant"] is None
     assert isinstance(bundle["generated_at"], str)
     assert set(bundle["counts"]) == {
-        "conversations", "turns", "goals", "episodes", "facts", "audit_events",
+        "conversations", "turns", "goals", "episodes", "facts",
+        "fact_history", "audit_events",
     }
 
     # World: the conversation + both turns + the goal + its episode.
@@ -238,7 +239,7 @@ def test_unknown_user_returns_empty_structured_bundle():
     assert bundle["audit"] == []
     assert bundle["counts"] == {
         "conversations": 0, "turns": 0, "goals": 0,
-        "episodes": 0, "facts": 0, "audit_events": 0,
+        "episodes": 0, "facts": 0, "fact_history": 0, "audit_events": 0,
     }
     # Still serializable.
     json.dumps(bundle)

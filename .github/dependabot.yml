@@ -17,6 +17,7 @@ updates:
   # floors are surfaced; grouped so a sweep lands as a single PR per package.
   - package-ecosystem: pip
     directories:
+      - "/"
       - "/packages/maverick-core"
       - "/packages/maverick-shield"
       - "/packages/maverick-channels"

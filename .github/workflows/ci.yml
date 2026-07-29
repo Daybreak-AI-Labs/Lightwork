@@ -5,16 +5,27 @@ on:
     branches: [main]
   pull_request:
 
+# Resolve the test environment from one reviewed set. Consumer package
+# manifests keep compatible ranges; CI must not silently change behavior when
+# an upstream dependency publishes a new release.
+env:
+  PIP_CONSTRAINT: ${{ github.workspace }}/requirements/ci.txt
+
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - name: Install ruff
-        run: python -m pip install 'ruff>=0.5'
+        run: python -m pip install 'ruff==0.15.15'
       - name: Lint
         # Also enforces the C901 cyclomatic-complexity ceiling (max 20, see
         # pyproject [tool.ruff.lint.mccabe]). Functions already over it carry
@@ -28,7 +39,7 @@ jobs:
         # fails the gate. Add a real false positive to [tool.vulture]
         # ignore_names rather than lowering the floor.
         run: |
-          python -m pip install 'vulture>=2.11'
+          python -m pip install 'vulture==2.16'
           python -m vulture
       - name: Reject bare `import tomllib` (3.11+ stdlib without 3.10 fallback)
         # Three PRs in a row broke CI on Python 3.10 by importing tomllib
@@ -84,9 +95,9 @@ jobs:
         # secret` comment at the line (preferred), or re-audit the baseline with
         # `detect-secrets scan --baseline .secrets.baseline` and commit it.
         run: |
-          python -m pip install 'detect-secrets>=1.5'
+          python -m pip install 'detect-secrets==1.5.0'
           cp .secrets.baseline /tmp/scan.baseline
-          detect-secrets scan --baseline /tmp/scan.baseline
+          python -m detect_secrets scan --baseline /tmp/scan.baseline
           python3 - <<'PY'
           import json, sys
           old = json.load(open(".secrets.baseline"))["results"]
@@ -242,32 +253,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - name: Install packages (so pip-audit sees the real dependency tree)
         run: |
           set -x
-          # Mirror the test job's install (minus pytest) so pip-audit audits
-          # the actual resolved/installed dependencies, not an empty env.
-          pip install -e ./packages/maverick-core
-          pip install --no-deps -e ./packages/maverick-shield
-          pip install --no-deps -e ./packages/maverick-channels
-          pip install --no-deps -e ./packages/maverick-evolve
-          pip install --no-deps -e ./packages/maverick-dashboard
-          pip install --no-deps -e ./packages/maverick-mcp
-          pip install --no-deps -e ./packages/maverick-knowledge
-          pip install --no-deps -e ./apps/installer-cli
-          pip install 'questionary>=2.0' 'rich>=13.7'
+          # Resolve all first-party base dependencies together so pip-audit
+          # sees the complete cohort rather than a hand-reconstructed subset.
+          python -m pip install \
+            -e ./packages/maverick-core \
+            -e ./packages/maverick-shield \
+            -e ./packages/maverick-channels \
+            -e ./packages/maverick-evolve \
+            -e ./packages/maverick-dashboard \
+            -e ./packages/maverick-mcp \
+            -e ./packages/maverick-knowledge \
+            -e ./apps/installer-cli
+          python -m pip check
           # Install the network-facing deps at the patched floors declared in
           # the package extras, plus twilio (which pulls requests/urllib3), so
           # pip-audit sees the real surface we ship -- not a stale bare env.
-          pip install 'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' \
-                      'httpx>=0.27' 'python-multipart>=0.0.31' \
-                      'starlette>=1.3.1' 'requests>=2.33.0' 'urllib3>=2.7.0' \
-                      'pillow>=12.3.0' 'pypdf>=6.13.3' 'aiohttp>=3.14.1' \
-                      'click>=8.3.3' 'cryptography>=48.0.1' 'twilio>=9.0' \
-                      'pywhispercpp>=1.5'
+          python -m pip install \
+            'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' \
+            'httpx>=0.27' 'python-multipart>=0.0.31' \
+            'starlette>=1.3.1' 'requests>=2.33.0' 'urllib3>=2.7.0' \
+            'pillow>=12.3.0' 'pypdf>=6.13.3' 'aiohttp>=3.14.1' \
+            'click>=8.3.3' 'cryptography>=48.0.1' 'twilio>=9.0'
+          python -m pip check
       - name: pip-audit (known CVEs in dependencies)
         # BLOCKING: the dependency floors are now bumped past every CVE this
         # surfaced (including aiohttp/cryptography/pillow/python-multipart/
@@ -280,8 +295,8 @@ jobs:
           # PYSEC-2026-196; 26.1.2 patches it. Bump pip to the fixed floor
           # before auditing so the gate reflects our shipped dependency tree,
           # not a stale CVE in the runner's own tooling.
-          python -m pip install --upgrade 'pip>=26.1.2' 'setuptools>=83.0.0'
-          python -m pip install pip-audit
+          python -m pip install --upgrade 'pip==26.1.2' 'setuptools==83.0.0'
+          python -m pip install 'pip-audit==2.10.0'
           pip-audit
       - name: SAST (bandit, high-severity)
         # BLOCKING static-analysis gate over shipped source (tests excluded:
@@ -295,7 +310,7 @@ jobs:
         # severity once the B608 false-positive parameterized-IN sites are
         # annotated.
         run: |
-          python -m pip install 'bandit>=1.7'
+          python -m pip install 'bandit==1.9.4'
           python -m bandit -q -r packages apps -lll -ii \
             -x '*/tests/*,*/test_*.py'
       - name: License policy (no strong-copyleft — GPL / AGPL / SSPL)
@@ -324,62 +339,124 @@ jobs:
           print(f"license policy OK: 0 strong-copyleft across {len(scanned)} packages")
           PY
       - name: SBOM (CycloneDX, supply-chain transparency)
-        # NON-BLOCKING (continue-on-error): emit a CycloneDX SBOM of the
-        # resolved dependency tree as a build artifact for supply-chain review
-        # by regulated buyers. Generation must never gate the build, so a
-        # cyclonedx-py hiccup is tolerated; the artifact is best-effort.
-        continue-on-error: true
+        # Emit a CycloneDX SBOM of the exact resolved dependency tree as a
+        # required build artifact. A green supply-chain job must never silently
+        # omit the artifact regulated buyers rely on.
         run: |
-          python -m pip install 'cyclonedx-bom>=4'
+          python -m pip install 'cyclonedx-bom==7.3.1'
           # Generate from the installed environment (the same tree pip-audit saw).
-          cyclonedx-py environment -o sbom.cyclonedx.json || \
-            cyclonedx-py environment > sbom.cyclonedx.json
+          cyclonedx-py environment -o sbom.cyclonedx.json
+          test -s sbom.cyclonedx.json
       - name: Upload SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        continue-on-error: true
         with:
           name: sbom-cyclonedx
           path: sbom.cyclonedx.json
-          if-no-files-found: ignore
+          if-no-files-found: error
+
+  release-cohort:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install release verification tools
+        run: python -m pip install build pytest
+      - name: Verify the release cohort manifest and package metadata
+        env:
+          PYTHONPATH: ${{ github.workspace }}/packages/maverick-core
+        run: >-
+          python -m pytest -q
+          packages/maverick-core/tests/test_release_packaging.py
+      - name: Build every public wheel from the reviewed cohort
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t package_dirs < <(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          cohort = tomllib.loads(Path("release-cohort.toml").read_text(encoding="utf-8"))
+          for package in cohort["packages"]:
+              print(package["path"])
+          PY
+          )
+          mkdir -p "$GITHUB_WORKSPACE/dist-cohort"
+          for package_dir in "${package_dirs[@]}"; do
+            echo "==> building $package_dir"
+            (
+              cd "$package_dir"
+              python -m build --wheel \
+                --outdir "$GITHUB_WORKSPACE/dist-cohort" .
+            )
+          done
+          test "$(find dist-cohort -maxdepth 1 -name '*.whl' | wc -l)" -eq 8
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install packages
         run: |
           set -x
-          # Install maverick-core first; downstream packages use --no-deps to
-          # avoid pip trying to resolve 'maverick>=0.1' from PyPI.
-          pip install -e ./packages/maverick-core
-          pip install --no-deps -e ./packages/maverick-shield
-          pip install --no-deps -e ./packages/maverick-channels
-          pip install --no-deps -e ./packages/maverick-evolve
-          pip install --no-deps -e ./packages/maverick-dashboard
-          pip install --no-deps -e ./packages/maverick-mcp
-          pip install --no-deps -e ./packages/maverick-knowledge
-          pip install --no-deps -e ./apps/installer-cli
-          # Runtime deps the --no-deps installs dropped. python-multipart is
-          # required by FastAPI for Form() params (used in /chat/send) and
-          # must be present at app construction, not just at request time.
-          pip install 'questionary>=2.0' 'rich>=13.7'
-          pip install 'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' \
-                      'httpx>=0.27' 'python-multipart>=0.0.9'
+          # All local distributions are direct requirements in one resolver
+          # transaction, so no sibling can fall back to a public lookalike and
+          # every declared base dependency is present.
           # OIDC (P4) verifier ships as the optional [oidc] extra (PyJWT);
           # install it here so the adversarial security matrix in test_oidc.py
           # actually RUNS in CI instead of self-skipping when PyJWT is absent.
-          pip install pytest pytest-asyncio 'pyjwt[crypto]'
+          python -m pip install \
+            -e ./packages/maverick-core \
+            -e ./packages/maverick-shield \
+            -e ./packages/maverick-channels \
+            -e ./packages/maverick-evolve \
+            -e ./packages/maverick-dashboard \
+            -e ./packages/maverick-mcp \
+            -e ./packages/maverick-knowledge \
+            -e ./apps/installer-cli \
+            pytest pytest-asyncio pytest-timeout 'pyjwt[crypto]'
+          python -m pip check
       - name: Show installed packages
-        run: pip list
-      - name: Test
-        run: pytest -vvs --tb=long
+        run: python -m pip list
+      - name: Test (bounded, with diagnostics)
+        env:
+          PYTHONFAULTHANDLER: "1"
+        shell: bash
+        run: |
+          set -o pipefail
+          # Two exact-main jobs previously survived until GitHub's six-hour
+          # ceiling. pytest-timeout catches a stuck test; GNU timeout also
+          # bounds interpreter shutdown/non-daemon-thread leaks after the last
+          # test and SIGABRT gives faulthandler a chance to print stacks.
+          timeout --verbose --signal=ABRT --kill-after=30s 35m \
+            python -m pytest -q --tb=short --durations=50 \
+              --timeout=180 --timeout-method=signal \
+              --junitxml="test-results-${{ matrix.python-version }}.xml" \
+            2>&1 | tee "pytest-${{ matrix.python-version }}.log"
+      - name: Upload test diagnostics
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: pytest-${{ matrix.python-version }}
+          path: |
+            test-results-${{ matrix.python-version }}.xml
+            pytest-${{ matrix.python-version }}.log
+          if-no-files-found: warn
+          retention-days: 14
 
   posture:
     # The suite runs with MAVERICK_SECURE_DEFAULT=0, which keeps each control's
@@ -388,37 +465,37 @@ jobs:
     # secure-by-default: audit signing, at-rest encryption, fail-closed consent
     # for high-risk actions, and the tool-risk ceiling.
     #
-    # This job runs the suite under the REAL posture. It does not block: 91 of
-    # 15,869 fail today, and none is a product bug -- they are tests asserting
-    # a legacy default, or fixtures that never granted consent because consent
-    # used to auto-approve. A job that is red on every PR gets switched off,
-    # and then nothing measures the posture at all. So the failing set is
-    # committed and ratcheted instead: a NEW failure fails this job, and a
-    # fixed one must be removed from the baseline. The list only shrinks.
+    # The reviewed 91-test debt register is checked in and ratcheted: a new
+    # failure fails this job, and a fixed failure also fails until the baseline
+    # is deliberately reduced. requirements/ci.txt keeps this measurement
+    # reproducible instead of absorbing dependency drift into the baseline.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install packages
         run: |
           set -x
-          pip install -e ./packages/maverick-core
-          pip install --no-deps -e ./packages/maverick-shield
-          pip install --no-deps -e ./packages/maverick-channels
-          pip install --no-deps -e ./packages/maverick-evolve
-          pip install --no-deps -e ./packages/maverick-dashboard
-          pip install --no-deps -e ./packages/maverick-mcp
-          pip install --no-deps -e ./packages/maverick-knowledge
-          pip install --no-deps -e ./apps/installer-cli
-          pip install 'questionary>=2.0' 'rich>=13.7'
-          pip install 'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' \
-                      'httpx>=0.27' 'python-multipart>=0.0.9'
-          pip install pytest pytest-asyncio 'pyjwt[crypto]'
-      - name: Test under the production security posture
+          python -m pip install \
+            -e ./packages/maverick-core \
+            -e ./packages/maverick-shield \
+            -e ./packages/maverick-channels \
+            -e ./packages/maverick-evolve \
+            -e ./packages/maverick-dashboard \
+            -e ./packages/maverick-mcp \
+            -e ./packages/maverick-knowledge \
+            -e ./apps/installer-cli \
+            pytest pytest-asyncio pytest-timeout 'pyjwt[crypto]'
+          python -m pip check
+      - name: Test and gate the production security posture
         env:
           MAVERICK_TEST_SECURE_DEFAULT: "1"
+          PYTHONFAULTHANDLER: "1"
         # Scoped to maverick-core because that is where the baseline was
         # measured and where every control the posture flips lives (audit
         # signing, at-rest encryption, consent, the tool-risk ceiling).
@@ -426,34 +503,32 @@ jobs:
         # asserting a baseline that was never taken is the defect class this
         # PR exists to close.
         #
-        # `|| true`: the run is EXPECTED to fail while the baseline is
-        # non-empty. The gate below decides pass/fail, and it fails closed on
-        # a report with no pytest summary, so a killed run cannot be mistaken
-        # for a clean one.
+        # Exit code 1 is expected while the debt register is non-empty. Other
+        # pytest exit codes (collection/internal/timeout errors) fail directly;
+        # then --ci compares the completed report with the exact baseline.
+        shell: bash
         run: |
-          pytest packages/maverick-core/tests -q -p no:randomly --tb=no \
-            > posture-report.txt || true
-      - name: Posture ratchet (report-only until the baseline is CI-measured)
-        # NOT `--ci` yet, deliberately. The committed baseline was measured
-        # locally, and this runner disagrees with it by 19 tests -- CI resolves
-        # starlette 1.3.x / fastapi 0.140.x where local has older pins, and
-        # those 19 do not reproduce locally under the same flag. A baseline
-        # taken in one environment cannot gate a run in another; making it
-        # blocking would assert a measurement that was never made here, which
-        # is the exact defect this PR exists to close.
-        #
-        # So the job reports the delta and uploads the raw report. Flipping to
-        # `--ci` needs one CI-measured baseline committed from that artifact,
-        # and the 19 understood rather than absorbed -- a baseline you cannot
-        # explain is an exemption list, not a debt register.
-        run: python -m maverick.posture_gate --report posture-report.txt
-      - name: Upload the posture report (the input a CI baseline is built from)
+          set +e
+          set -o pipefail
+          timeout --verbose --signal=ABRT --kill-after=30s 25m \
+            python -m pytest packages/maverick-core/tests -q -p no:randomly \
+              --tb=no --timeout=180 --timeout-method=signal \
+            2>&1 | tee posture-report.txt
+          pytest_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$pytest_status" -ne 0 ] && [ "$pytest_status" -ne 1 ]; then
+            echo "posture pytest did not complete normally (exit $pytest_status)" >&2
+            exit "$pytest_status"
+          fi
+          python -m maverick.posture_gate --ci --report posture-report.txt
+      - name: Upload the posture report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: posture-report
           path: posture-report.txt
           if-no-files-found: warn
+          retention-days: 14
 
   redteam:
     # Red-team CI (ROADMAP 2027-H1 safety): run the labelled adversarial
@@ -464,6 +539,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -484,6 +561,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -495,7 +574,7 @@ jobs:
           pip install -e ./packages/maverick-core
           pip install pytest pytest-asyncio
       - name: Eval-harness smoke (offline regression gate)
-        run: pytest -vvs --tb=long benchmarks/test_eval_smoke.py
+        run: python -m pytest -vvs --tb=long benchmarks/test_eval_smoke.py
 
   governance-frontier-offline:
     # Forty deterministic control-path definitions, each in governed and
@@ -506,6 +585,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
@@ -559,6 +640,8 @@ jobs:
           --health-retries 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -567,21 +650,26 @@ jobs:
           set -x
           pip install -e ./packages/maverick-core
           pip install -e ./packages/maverick-knowledge
-          pip install 'psycopg[binary]>=3.1'
+          pip install 'psycopg==3.3.4' 'psycopg-binary==3.3.4'
           pip install pytest pytest-asyncio
       - name: Test PostgresWorldModel
         env:
           MAVERICK_PG_DSN: postgres://maverick:maverick@localhost:5432/maverick_test
-        run: pytest -vvs packages/maverick-core/tests/test_postgres_world.py
+        run: python -m pytest -vvs packages/maverick-core/tests/test_postgres_world.py
       - name: Test pgvector knowledge store
         env:
           MAVERICK_PG_DSN: postgres://maverick:maverick@localhost:5432/maverick_test
-        run: pytest -vvs packages/maverick-knowledge/tests/test_knowledge.py -k PgVectorLive
+        run: >-
+          python -m pytest -vvs
+          packages/maverick-knowledge/tests/test_knowledge.py
+          -k PgVectorLive
 
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Build image
         # Docker Hub base-image pulls intermittently time out on CI runners
         # (registry-1.docker.io i/o timeout). Retry with backoff so a transient
@@ -605,3 +693,5 @@ jobs:
           docker run --rm maverick:ci --help
           docker run --rm maverick:ci dashboard --help
           docker run --rm maverick:ci mcp --help
+          docker run --rm --entrypoint python maverick:ci -c \
+            "import maverick_evolve, maverick_knowledge"

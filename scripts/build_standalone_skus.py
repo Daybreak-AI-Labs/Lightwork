@@ -164,7 +164,7 @@ def _build_sku(
         "pypi_distribution": False,
         "requirements": [item["requirement"] for item in requirements],
         "schema_version": 1,
-        "source_repository": "https://github.com/Day-AI-Labs/Lightwork",
+        "source_repository": "https://github.com/Daybreak-AI-Labs/Lightwork",
         "source_revision": source_revision,
         "version": version,
     }

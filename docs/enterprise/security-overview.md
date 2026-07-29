@@ -1,12 +1,11 @@
 # Lightwork — Security & Compliance Overview
 
-Lightwork is a **governed, self-hostable AI agent runtime** built to run on
-private and regulated data (PHI / PCI / PII / EU / classified) without that data
-leaving your boundary. This page summarizes the security architecture for
-technical and security reviewers. It describes the product as built; capabilities
-are cited to the modules that enforce them.
+Lightwork is a **governed, self-hostable AI agent runtime** built for private
+and regulated data (PHI / PCI / PII / EU / classified). This page summarizes
+the security architecture for technical and security reviewers. It describes
+the product as built; capabilities are cited to the modules that enforce them.
 
-## The data-boundary guarantee (Enterprise mode)
+## Application egress controls (Enterprise mode)
 
 The kernel ships fail-open and cloud-capable by design — the right default for a
 personal agent, the wrong one for sensitive data. **Enterprise mode is one opt-in
@@ -16,10 +15,11 @@ or, simplest, the named **deployment profile** `MAVERICK_PROFILE=enterprise`
 deployment-specific secure defaults below in one knob — that flips the defaults
 fail-closed (`maverick/enterprise.py`):
 
-- **Egress lock.** Every LLM call is pinned to a local / self-hosted provider
+- **Egress lock.** Every governed LLM call is pinned to a local / self-hosted provider
   (Ollama / vLLM / TGI, or an allow-listed endpoint). A call routed to a cloud
   provider raises `EgressBlocked` **before any prompt is sent**, and the denial is
-  audited. Sensitive data physically cannot reach a third-party API.
+  audited. Supported `httpx`, `requests`, and `urllib` paths are also checked
+  per request, including each HTTPX redirect hop.
 - **Consent fail-closed.** Destructive-action consent defaults to *ask* (and
   therefore *deny* in non-interactive contexts) instead of auto-approve.
 - **Capabilities enforced.** Per-agent capability scoping with attenuating
@@ -39,14 +39,22 @@ fail-closed (`maverick/enterprise.py`):
   lockfile before relying on drift enforcement (`plugins.py`,
   `plugin_isolation.py`, `plugin_lock.py`).
 
+> **Application control, not a packet firewall.** Enterprise mode protects the
+> governed model-dispatch path and supported Python HTTP clients. It cannot
+> prevent a raw socket, a subprocess such as `curl`, or an unwrapped network
+> library from sending traffic. A deployment that requires a hard no-egress
+> boundary must additionally enforce sandbox network isolation and
+> host/OS/VPC default-deny egress policy. Treat untrusted in-process plugins as
+> able to bypass application-layer controls.
+
 **Prove it, don't trust the flag.** `maverick enterprise verify`
 
 **Governance invariants proven across the whole roster.** Beyond per-deployment checks, a roster-wide invariant test suite verifies six safety invariants across **all 2,020 specialist packs**, each fault-injected with a non-vacuous control (property-fuzzed up to 5,000 iterations): (1) **tool-reachability** — no drafting/non-builder agent can reach a state-mutating tool; (2) **autonomy dial** — an onboarding agent is never autonomous and a high-risk action is never autonomous even when graduated; (3) **capability attenuation** — a spawned child can never exceed its parent's grant; (4) **compartment isolation** — a quarantine seal never bleeds across compartments/suites; (5) **hard refusals** — the universal refusal floor is unstrippable; (6) **budget caps** — no cap is ever silently exceeded. Hostile-argument fuzzing covers all connectors and tools.
 
-(`deployment.py`) *actively exercises* the load-bearing guarantees — it confirms
-the egress lock refuses a cloud provider and that at-rest sealing round-trips on
-the host — so a pass means the boundary holds, not merely that a config flag reads
-`on`.
+(`deployment.py`) *actively exercises* the application controls — it confirms
+the governed LLM path refuses a cloud provider and that at-rest sealing
+round-trips on the host. It does not test host firewall, VPC, or packet-level
+sandbox policy.
 
 ## Identity & access
 
@@ -102,11 +110,12 @@ the host — so a pass means the boundary holds, not merely that a config flag r
         │   self-hosted LLM ←──────┘   signed audit ──┴─→ SIEM export  │
         │   (Ollama/vLLM/TGI)          (encrypted at rest)             │
         └──────────────────────────────────────────────────────────────┘
-   Egress lock: no prompt or data leaves the boundary. No telemetry.
+   App egress lock + deployment network policy. No product telemetry.
 ```
 
 Deployable on a laptop, a VPC, Kubernetes, or a disconnected/air-gapped network.
-No hyperscaler dependency; Lightwork emits no telemetry of its own.
+No hyperscaler dependency; Lightwork emits no telemetry of its own. Use an
+air gap or OS/VPC deny policy when network-level non-egress is required.
 
 ## Roadmap (not yet built)
 
@@ -121,4 +130,5 @@ provisioning + deprovisioning all ship today; SCIM deprovision force-revokes liv
 sessions, including pairwise-`sub` IdPs (Entra) via a login-time subject directory.
 
 > Licensing: Lightwork is proprietary, commercially licensed software
-> ([`../../LICENSE`](../../LICENSE)). Contact us for evaluation or enterprise access.
+> ([`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)).
+> Contact us for evaluation or enterprise access.

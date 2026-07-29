@@ -9,8 +9,9 @@ Backends (chosen automatically in order):
   1. ``agent_shield`` SDK if installed -- note it is not published on PyPI and is
      not vendored here, so in every environment we ship, this backend is
      unavailable and (2) is what actually runs. No detection score is quoted for
-     it: the only measured backend is the builtin one, benchmarked in
-     ``benchmarks/security/RESULTS.md`` (F1 0.821-0.900, TPR 74.2% [57-86]).
+     it: the only measured backends are the in-repository layers benchmarked in
+     ``benchmarks/security/RESULTS.md``. That generated artifact is authoritative;
+     do not copy a score into this module docstring where it can drift.
   2. ``builtin_rules`` (~20 high-impact rules bundled with maverick-shield)
   3. No-op (only if the user explicitly disabled safety via [safety] profile=off)
 
@@ -176,7 +177,7 @@ class Shield:
             log.warning(
                 "Shield: agent-shield SDK not installed; using built-in rules "
                 "(~20 high-impact patterns vs. ~115 in the full SDK). "
-                "For full protection: pip install agent-shield"
+                "The full SDK is not available from public PyPI"
             )
 
     @property

@@ -85,13 +85,12 @@ def test_agent_bus_correlation_filter_no_drop_when_inbox_full():
     # The core #480 bug: re-queueing via put_nowait into a full inbox silently
     # dropped messages. Fill the inbox to capacity with non-matching messages
     # plus one match; the held-buffer restore must not lose any.
-    import queue
-
     from maverick import agent_bus
     agent_bus.clear()
     cap = 4
-    agent_bus._inboxes["bob"] = queue.Queue(maxsize=cap)
-    ib = agent_bus._inboxes["bob"]
+    ib = agent_bus._Inbox()
+    ib.maxsize = cap
+    agent_bus._inboxes["bob"] = ib
     ib.put_nowait(agent_bus.Message(sender="a", recipient="bob", payload="n1", correlation_id="o"))
     ib.put_nowait(agent_bus.Message(sender="a", recipient="bob", payload="n2", correlation_id="o"))
     ib.put_nowait(agent_bus.Message(sender="a", recipient="bob", payload="hit", correlation_id="w"))
@@ -109,7 +108,6 @@ def test_agent_bus_correlation_timeout_not_extended_by_nonmatching_flood():
     # A correlated recv must honor its overall timeout even when producers keep
     # sending non-matching messages. It also must not use an out-of-queue held
     # buffer that lets more successful sends accumulate than the inbox can hold.
-    import queue
     import threading
     import time
 
@@ -117,7 +115,9 @@ def test_agent_bus_correlation_timeout_not_extended_by_nonmatching_flood():
 
     agent_bus.clear()
     cap = 16
-    agent_bus._inboxes["bob"] = queue.Queue(maxsize=cap)
+    ib = agent_bus._Inbox()
+    ib.maxsize = cap
+    agent_bus._inboxes["bob"] = ib
     sent_ok = 0
     end = time.monotonic() + 0.25
 

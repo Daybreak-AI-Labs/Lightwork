@@ -1,28 +1,17 @@
 # syntax=docker/dockerfile:1
-# Lightwork multi-architecture image: linux/amd64, linux/arm64, and (gated)
-# linux/riscv64. Build with deploy/multiarch/build.sh (docker buildx) from
-# the REPO ROOT.
+# Lightwork reduced multi-architecture image: linux/amd64 and linux/arm64.
+# Build with deploy/multiarch/build.sh (docker buildx) from the repo root.
 #
-# Default base: python:3.12-slim — published for amd64 and arm64. riscv64:
-# whether the official python image's current -slim tag includes riscv64
-# depends on its Debian base (riscv64 became an official Debian arch with
-# trixie); it could NOT be verified from the authoring environment (no
-# Docker daemon). Check before building:
+# The official python:3.12-slim base publishes both supported architectures.
+# riscv64 is intentionally unsupported here: mandatory cryptography/cffi and
+# dashboard native dependencies need a tested Rust/C/OpenSSL build toolchain.
 #
-#   docker manifest inspect python:3.12-slim | grep riscv64
-#
-# If absent, use the gated fallback: a Debian base that DOES ship riscv64
-# (sid/trixie) plus python3 from apt — the conditional bootstrap below
-# activates automatically:
-#
-#   --build-arg BASE_IMAGE=debian:sid-slim
-#
-# Scope: maverick-core (+ shield wrapper) only. The core's dependency tree
-# (anthropic, click, httpx, tomli) is pure Python = architecture-independent.
-# The dashboard is opt-in (INSTALL_DASHBOARD=1) because fastapi -> pydantic-core
-# is a compiled Rust wheel: fine on amd64/arm64, a from-source Rust build on
-# riscv64. Heavier native extras (grpc, torch, ...) are deliberately NOT
-# installed here — see README.md for the per-extra wheel-availability table.
+# Scope: an explicitly reduced core + shield runtime. It does not install the
+# channels, evolve, MCP, knowledge, or installer distributions, so no setup
+# wizard or those capabilities are claimed. Dashboard is opt-in
+# (INSTALL_DASHBOARD=1) because fastapi -> pydantic-core is a compiled Rust
+# wheel on both supported architectures. pywhispercpp 1.5.0 also publishes a
+# CPython 3.10-3.14 Linux aarch64 wheel.
 
 ARG BASE_IMAGE=python:3.12-slim
 FROM ${BASE_IMAGE}
@@ -31,15 +20,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# riscv64 fallback gate: on a bare Debian base (no python:* image for the
-# arch) install CPython from apt. No-op on python:*-slim bases.
-RUN set -eux; \
-    if ! command -v python3 >/dev/null 2>&1; then \
-        apt-get update; \
-        apt-get install -y --no-install-recommends python3 python3-pip python3-venv; \
-        rm -rf /var/lib/apt/lists/*; \
-    fi
 
 # System deps for sqlite + git (skills, world model) — same as deploy/docker.
 RUN apt-get update \
@@ -50,19 +30,27 @@ RUN apt-get update \
 # apt python is PEP 668 externally-managed; python:slim's is not).
 RUN python3 -m venv /opt/maverick
 ENV PATH="/opt/maverick/bin:${PATH}"
+RUN python -m pip install --upgrade 'pip==26.1.2'
 
 WORKDIR /app
+COPY release-cohort.toml ./release-cohort.toml
+COPY requirements/ci.txt ./requirements/ci.txt
+COPY scripts/install_release_cohort.py ./scripts/install_release_cohort.py
 COPY packages/maverick-core ./packages/maverick-core
 COPY packages/maverick-shield ./packages/maverick-shield
 COPY packages/maverick-dashboard ./packages/maverick-dashboard
 
-RUN pip install ./packages/maverick-core ./packages/maverick-shield
-
-# Opt-in: pulls fastapi/pydantic-core (compiled). amd64/arm64 have wheels;
-# riscv64 builds pydantic-core from source and needs a Rust toolchain.
+# Opt-in: pulls fastapi/pydantic-core and pywhispercpp; both supported
+# architectures have compatible wheels for the pinned dependency set.
 ARG INSTALL_DASHBOARD=0
 RUN if [ "${INSTALL_DASHBOARD}" = "1" ]; then \
-        pip install ./packages/maverick-dashboard; \
+        python scripts/install_release_cohort.py \
+          --target-python python \
+          --only maverick-agent maverick-shield maverick-dashboard; \
+    else \
+        python scripts/install_release_cohort.py \
+          --target-python python \
+          --only maverick-agent maverick-shield; \
     fi
 
 WORKDIR /workspace

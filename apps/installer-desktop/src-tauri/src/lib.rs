@@ -1,11 +1,14 @@
-//! Tauri shell for the Lightwork graphical installer.
+//! Tauri shell for Lightwork's authenticated source bootstrap.
 //!
-//! The window hosts a one-button Svelte UI. Pressing "Install" runs the
+//! The window hosts a one-button Svelte UI. Pressing "Install from authorized
+//! source" runs the
 //! same bootstrap the CLI one-liners use
 //! (`deploy/desktop/install.{ps1,sh}`) with `MAVERICK_NO_WIZARD=1`, and
 //! streams each output line to the UI as a Tauri event. No Python is
 //! required on the machine first -- the bootstrap installs it. When it
-//! finishes, the UI tells the user to run `maverick init`.
+//! finishes, the UI tells the user to run `maverick init`. The bundle is not
+//! self-contained: cloning the private pinned commit requires valid GitHub
+//! authorization, and the resulting Python source remains readable.
 //!
 //! Why shell out to the existing scripts instead of reimplementing the
 //! install in Rust: those scripts are already tested and handle the
@@ -20,9 +23,9 @@ use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-// Source the installer pulls from. The desktop installer always pins
-// the checkout to the commit captured when the signed app was built.
-const REPO: &str = "Day-AI-Labs/Lightwork";
+// Private source the bootstrap pulls from. The bundle pins the checkout to the
+// commit captured at build time but still requires GitHub authorization.
+const REPO: &str = "Daybreak-AI-Labs/Lightwork";
 const GIT_REF: &str = env!("MAVERICK_INSTALL_REF");
 
 #[cfg(windows)]

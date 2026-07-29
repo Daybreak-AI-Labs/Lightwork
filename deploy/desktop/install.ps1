@@ -15,7 +15,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$Repo   = if ($env:MAVERICK_REPO) { $env:MAVERICK_REPO } else { 'Day-AI-Labs/Lightwork' }
+$Repo   = if ($env:MAVERICK_REPO) { $env:MAVERICK_REPO } else { 'Daybreak-AI-Labs/Lightwork' }
 $Ref    = if ($env:MAVERICK_REF)  { $env:MAVERICK_REF }  else { '' }
 $SrcDir = Join-Path $env:LOCALAPPDATA 'Lightwork\src'
 
@@ -231,13 +231,21 @@ function Fetch-Source {
   }
 }
 
-# 3. Install agent + wizard into one pipx venv.
-Write-Step "Installing the agent + setup wizard (this can take a minute) ..."
+# 3. Install the complete release cohort into one pipx venv.
+Write-Step "Installing the complete Lightwork package cohort (this can take a minute) ..."
 Fetch-Source
-Py -m pipx install --force (Join-Path $SrcDir 'packages\maverick-core')
+Py -m pipx install --force --pip-args=--no-deps (Join-Path $SrcDir 'packages\maverick-core')
 if ($LASTEXITCODE -ne 0) { Die "pipx could not install the pinned Lightwork core source." }
-Py -m pipx inject --force maverick-agent (Join-Path $SrcDir 'apps\installer-cli')
-if ($LASTEXITCODE -ne 0) { Die "pipx could not install the pinned Lightwork wizard source." }
+$venvsDir = (Py -m pipx environment --value PIPX_LOCAL_VENVS).Trim()
+$venvPython = Join-Path $venvsDir 'maverick-agent\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+  Die "pipx created no maverick-agent environment at '$venvPython'."
+}
+Py (Join-Path $SrcDir 'scripts\install_release_cohort.py') `
+  --source-root $SrcDir `
+  --target-python $venvPython `
+  --core-extra release-runtime
+if ($LASTEXITCODE -ne 0) { Die "The constrained Lightwork cohort install failed." }
 
 # 4. Locate the maverick shim and launch the wizard.
 $binDir = $null

@@ -8,6 +8,7 @@ tests pin the corrected math.
 """
 from __future__ import annotations
 
+import pytest
 from maverick.budget import Budget
 from maverick.llm import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
 
@@ -40,11 +41,14 @@ def test_haiku_priced_at_haiku_rate():
     assert abs(b.dollars - 6.0) < 0.001
 
 
-def test_unknown_model_falls_back_to_sonnet_rate():
+def test_unknown_model_cannot_be_billed_at_sonnet_fallback():
+    from maverick.budget import UnpricedModelError
+
     b = Budget(max_dollars=100.0, max_input_tokens=10_000_000, max_output_tokens=10_000_000)
-    b.record_tokens(1_000_000, 0, model="provider:unknown-future-model")
-    # Sonnet input rate = $3
-    assert abs(b.dollars - 3.0) < 0.001
+    with pytest.raises(UnpricedModelError):
+        b.record_tokens(1_000_000, 0, model="provider:unknown-future-model")
+    assert b.dollars == 0.0
+    assert b.input_tokens == 0
 
 
 def test_router_selectable_models_bill_at_real_rate_not_fallback():
@@ -57,8 +61,9 @@ def test_router_selectable_models_bill_at_real_rate_not_fallback():
     Budget bills each id at the MODEL_PRICES rate -- catching any future id
     that drifts out of the canonical catalog and silently bills at fallback.
     """
+    from maverick.budget import UnpricedModelError
     from maverick.cost.router import _PRICING
-    from maverick.llm import MODEL_PRICES
+    from maverick.llm import MODEL_PRICES, MODEL_PRICING_PROVIDER
 
     saw_non_fallback = False
     for _provider, model, _tier, _in, _out in _PRICING:
@@ -66,6 +71,11 @@ def test_router_selectable_models_bill_at_real_rate_not_fallback():
         pin, pout = MODEL_PRICES[model]
         b = Budget(max_dollars=1e9, max_input_tokens=10_000_000,
                    max_output_tokens=10_000_000)
+        if not MODEL_PRICING_PROVIDER.rates[model].verified:
+            with pytest.raises(UnpricedModelError):
+                b.record_tokens(1_000_000, 1_000_000, model=model)
+            assert b.dollars == 0.0
+            continue
         b.record_tokens(1_000_000, 1_000_000, model=model)
         assert abs(b.dollars - (pin + pout)) < 0.001, (
             f"{model}: billed ${b.dollars:.2f}, expected ${pin + pout:.2f}"

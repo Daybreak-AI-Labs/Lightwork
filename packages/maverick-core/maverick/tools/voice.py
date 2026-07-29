@@ -87,6 +87,15 @@ _TTS_SCHEMA: dict[str, Any] = {
 
 # ---------- STT ----------
 
+def _hosted_model(environment: str, default: str) -> str:
+    """Resolve an operator-selectable hosted voice model without blank IDs."""
+    value = (os.environ.get(environment) or default).strip()
+    if not value or len(value) > 256 or any(ord(char) < 32 for char in value):
+        log.warning("%s is invalid; using the documented default", environment)
+        return default
+    return value
+
+
 def _whisper_openai(audio_path: Path, language: str | None) -> str | None:
     key = os.environ.get("OPENAI_API_KEY")
     if not key:
@@ -98,7 +107,13 @@ def _whisper_openai(audio_path: Path, language: str | None) -> str | None:
     try:
         client = OpenAI(api_key=key)
         with open(audio_path, "rb") as f:
-            kwargs: dict[str, Any] = {"model": "whisper-1", "file": f}
+            kwargs: dict[str, Any] = {
+                "model": _hosted_model(
+                    "MAVERICK_WHISPER_OPENAI_MODEL",
+                    "whisper-1",
+                ),
+                "file": f,
+            }
             if language:
                 kwargs["language"] = language
             resp = client.audio.transcriptions.create(**kwargs)
@@ -120,7 +135,11 @@ def _whisper_groq(audio_path: Path, language: str | None) -> str | None:
         client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
         with open(audio_path, "rb") as f:
             kwargs: dict[str, Any] = {
-                "model": "whisper-large-v3-turbo", "file": f,
+                "model": _hosted_model(
+                    "MAVERICK_WHISPER_GROQ_MODEL",
+                    "whisper-large-v3-turbo",
+                ),
+                "file": f,
             }
             if language:
                 kwargs["language"] = language
@@ -446,7 +465,7 @@ def _tts_openai(text: str, voice: str | None, output: Path) -> bool:
     try:
         client = OpenAI(api_key=key)
         resp = client.audio.speech.create(
-            model="tts-1",
+            model=_hosted_model("MAVERICK_TTS_OPENAI_MODEL", "tts-1"),
             voice=voice or "alloy",
             input=text,
         )
@@ -479,7 +498,13 @@ def _tts_elevenlabs(text: str, voice: str | None, output: Path) -> bool:
                 "Content-Type": "application/json",
                 "Accept": "audio/mpeg",
             },
-            json={"text": text, "model_id": "eleven_turbo_v2_5"},
+            json={
+                "text": text,
+                "model_id": _hosted_model(
+                    "MAVERICK_TTS_ELEVENLABS_MODEL",
+                    "eleven_turbo_v2_5",
+                ),
+            },
             timeout=60.0,
         )
         resp.raise_for_status()

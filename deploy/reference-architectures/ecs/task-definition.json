@@ -9,7 +9,7 @@
   "containerDefinitions": [
     {
       "name": "maverick",
-      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/maverick:0.1.6",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/maverick:0.1.7",
       "essential": true,
       "command": ["dashboard", "--host", "0.0.0.0", "--port", "8765"],
       "user": "1000:1000",

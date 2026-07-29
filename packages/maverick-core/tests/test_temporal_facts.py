@@ -8,15 +8,15 @@ from __future__ import annotations
 
 import time
 
-from maverick.world_model import WorldModel
+from maverick.world_model import SCHEMA_VERSION, WorldModel
 
 
 def _wm(tmp_path) -> WorldModel:
     return WorldModel(tmp_path / "world.db")
 
 
-def test_schema_is_v28(tmp_path):
-    assert _wm(tmp_path).schema_version == 28
+def test_schema_is_current(tmp_path):
+    assert _wm(tmp_path).schema_version == SCHEMA_VERSION
 
 
 def test_overwrite_when_temporal_disabled(tmp_path, monkeypatch):

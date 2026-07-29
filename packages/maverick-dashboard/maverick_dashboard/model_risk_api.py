@@ -9,7 +9,7 @@ from collections import deque
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 from . import model_risk_schemas as schemas
@@ -17,7 +17,8 @@ from .auth import require_global_permission, require_permission
 
 router = APIRouter(prefix="/assurance", tags=["model-risk-assurance"])
 _GATEWAY_ACTION_LIMITS = {"delivery": 120, "packet_issuance": 12}
-_gateway_action_times: dict[tuple[str, str], deque[float]] = {}
+_GATEWAY_ACTION_BUCKET_CAP = 10_000
+_gateway_action_times: dict[tuple[str, str, str], deque[float]] = {}
 _gateway_action_lock = threading.Lock()
 
 
@@ -28,11 +29,34 @@ def _actor(request: Request) -> str:
 
 
 def _limit_gateway_action(request: Request, action: str) -> None:
+    from maverick.paths import current_tenant_id_strict
+
     actor = _actor(request)
+    # The gateway operation itself enforces an explicit tenant.  Keep the
+    # limiter safe for disabled/fake modules and return the domain's actionable
+    # tenant error instead of pre-empting it here.
+    tenant = current_tenant_id_strict() or "<unbound>"
     now = time.monotonic()
     limit = _GATEWAY_ACTION_LIMITS[action]
-    key = (actor, action)
+    key = (tenant, actor, action)
     with _gateway_action_lock:
+        if (
+            key not in _gateway_action_times
+            and len(_gateway_action_times) >= _GATEWAY_ACTION_BUCKET_CAP
+        ):
+            for candidate, candidate_window in tuple(
+                _gateway_action_times.items()
+            ):
+                while candidate_window and now - candidate_window[0] >= 60:
+                    candidate_window.popleft()
+                if not candidate_window:
+                    _gateway_action_times.pop(candidate, None)
+            if len(_gateway_action_times) >= _GATEWAY_ACTION_BUCKET_CAP:
+                raise HTTPException(
+                    status_code=429,
+                    detail="AI evidence gateway rate-limit capacity reached",
+                    headers={"Retry-After": "60"},
+                )
         window = _gateway_action_times.setdefault(key, deque())
         while window and now - window[0] >= 60:
             window.popleft()
@@ -469,14 +493,21 @@ async def deliver_evidence_ready_text(
 async def evidence_gateway_receipts(
     request: Request,
     limit: int = Query(100, ge=1, le=500),
+    cursor: str | None = Query(None, min_length=16, max_length=2048),
 ) -> dict[str, Any]:
     require_permission(request, "operate")
     gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    page = await _call(
+        gateway.list_interaction_receipts_page,
+        limit=limit,
+        cursor=cursor,
+    )
     return {
-        "receipts": await _call(
-            gateway.list_interaction_receipts,
-            limit=limit,
-        )
+        "receipts": page["items"],
+        "next_cursor": page["next_cursor"],
+        "snapshot_total": page["snapshot_total"],
+        "count": page["count"],
+        "missing_governed_count": page["missing_governed_count"],
     }
 
 
@@ -506,15 +537,40 @@ async def verify_evidence_gateway_receipt(
 async def evidence_gateway_regulatory_impacts(
     request: Request,
     limit: int = Query(100, ge=1, le=500),
+    cursor: str | None = Query(None, max_length=2_048),
+    status: str | None = Query(
+        None,
+        pattern="^(pending_review|accepted_refreshing|accepted|dismissed)$",
+    ),
+    pending_first: bool = Query(True),
 ) -> dict[str, Any]:
     require_permission(request, "operate")
     gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    page = await _call(
+        gateway.list_regulatory_impacts_page,
+        limit=limit,
+        cursor=cursor,
+        status=status,
+        pending_first=pending_first,
+    )
     return {
-        "regulatory_impacts": await _call(
-            gateway.list_regulatory_impacts,
-            limit=limit,
-        )
+        "regulatory_impacts": page["items"],
+        "next_cursor": page["next_cursor"],
+        "snapshot_total": page["snapshot_total"],
+        "count": page["count"],
+        "status": page["status"],
+        "pending_first": page["pending_first"],
     }
+
+
+@router.get("/gateway/regulatory-impacts/{impact_id}")
+async def evidence_gateway_regulatory_impact(
+    request: Request,
+    impact_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    gateway = _module("ai_evidence_gateway", "evidence_gateway")
+    return await _record_call(gateway.get_regulatory_impact, impact_id)
 
 
 @router.post("/gateway/regulatory-impacts")
@@ -559,17 +615,25 @@ async def download_evidence_gateway_assurance_packet(
         "combined",
         pattern="^(article50_gpai|nist_ai_rmf|federal_vendor|combined)$",
     ),
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=1,
+        max_length=1_024,
+    ),
 ) -> Response:
     # Rendering appends a signed attestation to the packet ledger, so this is
     # an explicit privileged mutation rather than a cacheable/read-only GET.
     require_global_permission(request, "admin")
     _limit_gateway_action(request, "packet_issuance")
     gateway = _module("ai_evidence_gateway", "evidence_gateway")
-    packet = await _call(
-        gateway.render_assurance_packet,
+    issued = await _call(
+        gateway.issue_assurance_packet,
         profile=profile,
         actor=_actor(request),
+        idempotency_key=idempotency_key,
     )
+    packet = issued["packet"]
     try:
         payload = json.dumps(
             packet,
@@ -588,6 +652,9 @@ async def download_evidence_gateway_assurance_packet(
         media_type="application/json",
         headers={
             "Cache-Control": "no-store",
+            "Idempotent-Replay": (
+                "true" if issued["idempotent_replay"] else "false"
+            ),
             "Content-Disposition": (
                 'attachment; filename="lightwork-ai-assurance-packet.json"'
             ),

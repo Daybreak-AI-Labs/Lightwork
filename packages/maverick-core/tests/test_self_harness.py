@@ -369,7 +369,11 @@ def test_prompt_artifact_commits_only_after_atomic_apply(monkeypatch, store, tmp
     assert rep.promoted == 1
     events = [json.loads(line) for line in Path(
         f"{ledger_path}.journal").read_text(encoding="utf-8").splitlines()]
-    assert [event["event"] for event in events] == ["prepare", "commit"]
+    assert [event["event"] for event in events] == [
+        "prepare", "commit", "audit_ack",
+    ]
+    assert events[1]["audit"]["event_id"] == events[2]["audit_event_id"]
+    assert events[2]["prev_sha256"] == events[1]["sha256"]
     assert ctrl.ledger.all()[0].id == events[0]["transaction"]["record"]["id"]
 
 

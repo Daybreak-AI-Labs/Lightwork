@@ -15,68 +15,296 @@ on:
 permissions:
   contents: read
 
+env:
+  PIP_CONSTRAINT: ${{ github.workspace }}/requirements/ci.txt
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       names: ${{ steps.names.outputs.names }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install build tools
-        run: python -m pip install --upgrade build
+      - name: Install pinned build tools
+        run: |
+          python -m pip install --upgrade 'pip==26.1.2'
+          python -m pip install 'build==1.5.0'
 
-      - name: Build all packages
+      - name: Validate the tag and build the complete release cohort
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
           set -euo pipefail
-          # Public-package allowlist. Never auto-discover apps/*: that once
-          # pulled the private vendor console into an OIDC-enabled publish run.
-          dirs=(
-            packages/maverick-core
-            packages/maverick-shield
-            packages/maverick-channels
-            packages/maverick-dashboard
-            packages/maverick-mcp
-            packages/maverick-evolve
-            packages/maverick-knowledge
-            apps/installer-cli
+          # release-cohort.toml is the reviewed public allowlist. Never
+          # auto-discover apps/*: that once pulled the private vendor console
+          # into an OIDC-enabled publish run.
+          mapfile -t dirs < <(python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          cohort = tomllib.loads(Path("release-cohort.toml").read_text(encoding="utf-8"))
+          release_tag = os.environ.get("RELEASE_TAG", "")
+          if release_tag and cohort["version"] != release_tag.removeprefix("v"):
+              raise SystemExit(
+                  f"tag {release_tag!r} does not match cohort {cohort['version']!r}"
+              )
+          if len(cohort["packages"]) != 8:
+              raise SystemExit("release cohort must contain exactly eight public packages")
+          for package in cohort["packages"]:
+              metadata = tomllib.loads(
+                  (Path(package["path"]) / "pyproject.toml").read_text(encoding="utf-8")
+              )["project"]
+              if metadata["name"] != package["distribution"]:
+                  raise SystemExit(f"{package['path']}: distribution-name mismatch")
+              if metadata["version"] != cohort["version"]:
+                  raise SystemExit(f"{package['path']}: cohort-version mismatch")
+              print(package["path"])
+          PY
           )
-          mkdir -p dist-all
+
+          # PEP 427 wheels and PEP 517 sdists otherwise inherit wall-clock
+          # timestamps. Anchor both independent builds to the immutable source
+          # commit and require byte-for-byte equality before any OIDC publish
+          # job can run. This makes a partial tag-run safely resumable without
+          # weakening the existing PyPI digest comparison.
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]]
+          export PYTHONHASHSEED=0
+          source_a="$RUNNER_TEMP/lightwork-publish-source-a"
+          source_b="$RUNNER_TEMP/lightwork-publish-source-b"
+          mkdir -p "$source_a" "$source_b" dist-first dist-second dist-all
+          git archive HEAD | tar -x -C "$source_a"
+          git archive HEAD | tar -x -C "$source_b"
           for d in "${dirs[@]}"; do
             test -f "$d/pyproject.toml"
-            echo "==> Building $d"
-            (cd "$d" && python -m build --outdir ../../dist-all .)
+            echo "==> Reproducibility-building $d"
+            (cd "$source_a/$d" && python -m build --outdir "$GITHUB_WORKSPACE/dist-first" .)
+            (cd "$source_b/$d" && python -m build --outdir "$GITHUB_WORKSPACE/dist-second" .)
           done
+          python scripts/normalize_python_artifacts.py \
+            --source-date-epoch "$SOURCE_DATE_EPOCH" \
+            dist-first/*.whl dist-first/*.tar.gz
+          python scripts/normalize_python_artifacts.py \
+            --source-date-epoch "$SOURCE_DATE_EPOCH" \
+            dist-second/*.whl dist-second/*.tar.gz
+          python - <<'PY'
+          import hashlib
+          import shutil
+          from pathlib import Path
+
+          def inventory(root: Path) -> dict[str, str]:
+              return {
+                  path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                  for path in sorted(root.iterdir())
+                  if path.is_file()
+              }
+
+          first_root = Path("dist-first")
+          second_root = Path("dist-second")
+          first = inventory(first_root)
+          second = inventory(second_root)
+          if first != second:
+              names = sorted(first.keys() | second.keys())
+              differences = {
+                  name: {"first": first.get(name), "second": second.get(name)}
+                  for name in names
+                  if first.get(name) != second.get(name)
+              }
+              raise SystemExit(
+                  f"release artifacts are not reproducible from this commit: {differences}"
+              )
+          for artifact in first_root.iterdir():
+              if artifact.is_file():
+                  shutil.copy2(artifact, Path("dist-all") / artifact.name)
+          print(f"reproducibility OK: {len(first)} byte-identical artifacts")
+          PY
           ls -la dist-all
+
+      - name: Preflight every distribution and existing PyPI release
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          SOURCE_REVISION: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import tomllib
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
+
+          from packaging.utils import (
+              canonicalize_name,
+              parse_sdist_filename,
+              parse_wheel_filename,
+          )
+
+          root = Path("dist-all")
+          cohort = tomllib.loads(Path("release-cohort.toml").read_text(encoding="utf-8"))
+          version = cohort["version"]
+          expected_names = {
+              canonicalize_name(package["distribution"]): package["distribution"]
+              for package in cohort["packages"]
+          }
+          artifacts = sorted(
+              path
+              for path in root.iterdir()
+              if path.suffix == ".whl" or path.name.endswith(".tar.gz")
+          )
+          if len(artifacts) != 2 * len(expected_names):
+              raise SystemExit(
+                  f"expected {2 * len(expected_names)} artifacts, found {len(artifacts)}"
+              )
+
+          records = []
+          counts = {
+              name: {"wheel": 0, "sdist": 0}
+              for name in expected_names
+          }
+          for path in artifacts:
+              if path.suffix == ".whl":
+                  parsed_name, parsed_version, _build, _tags = parse_wheel_filename(path.name)
+                  kind = "wheel"
+              else:
+                  parsed_name, parsed_version = parse_sdist_filename(path.name)
+                  kind = "sdist"
+              name = canonicalize_name(parsed_name)
+              if name not in expected_names:
+                  raise SystemExit(f"unexpected distribution artifact: {path.name}")
+              if str(parsed_version) != version:
+                  raise SystemExit(
+                      f"{path.name}: artifact version {parsed_version} != cohort {version}"
+                  )
+              counts[name][kind] += 1
+              prefix, separator, _rest = path.name.partition(f"-{version}")
+              if not separator:
+                  raise SystemExit(f"{path.name}: cannot derive safe publish prefix")
+              records.append(
+                  {
+                      "distribution": expected_names[name],
+                      "filename": path.name,
+                      "kind": kind,
+                      "publish_prefix": prefix,
+                      "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                      "version": version,
+                  }
+              )
+
+          invalid = {
+              expected_names[name]: kinds
+              for name, kinds in counts.items()
+              if kinds != {"wheel": 1, "sdist": 1}
+          }
+          if invalid:
+              raise SystemExit(f"release cohort must have one wheel and one sdist each: {invalid}")
+
+          # Safe resume: skip-existing may only mask files whose bytes match
+          # this exact build. A claimed namespace/version with any different
+          # filename or digest fails before any matrix publish job receives OIDC.
+          if os.environ.get("RELEASE_TAG"):
+              by_name = {
+                  name: {
+                      record["filename"]: record["sha256"]
+                      for record in records
+                      if canonicalize_name(record["distribution"]) == name
+                  }
+                  for name in expected_names
+              }
+              for name, expected in by_name.items():
+                  url = f"https://pypi.org/pypi/{quote(name)}/{quote(version)}/json"
+                  request = Request(url, headers={"User-Agent": "Lightwork-release-preflight/1"})
+                  try:
+                      with urlopen(request, timeout=20) as response:  # noqa: S310
+                          payload = json.load(response)
+                  except HTTPError as exc:
+                      if exc.code == 404:
+                          continue
+                      raise
+                  existing = {
+                      item["filename"]: item["digests"]["sha256"]
+                      for item in payload.get("urls", [])
+                  }
+                  if existing != expected:
+                      raise SystemExit(
+                          f"PyPI {name}=={version} differs from this build: "
+                          f"existing={sorted(existing)}, expected={sorted(expected)}"
+                      )
+
+          manifest = {
+              "schema_version": 1,
+              "source_revision": os.environ["SOURCE_REVISION"],
+              "version": version,
+              "artifacts": records,
+          }
+          (root / "release-manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          (root / "SHA256SUMS").write_text(
+              "".join(
+                  f"{record['sha256']}  {record['filename']}\n"
+                  for record in sorted(records, key=lambda item: item["filename"])
+              ),
+              encoding="ascii",
+          )
+          print(f"preflight OK: {len(records)} artifacts for {len(expected_names)} packages")
+          PY
+          (cd dist-all && sha256sum --check SHA256SUMS)
 
       - id: names
         name: List distribution names for the publish matrix
         run: |
-          # Distinct dist-name prefixes from the built wheels (underscores,
-          # e.g. maverick_agent). Drives one publish job per package so a
-          # package without a trusted publisher yet can't abort the rest.
-          names=$(ls dist-all/*.whl | sed 's#.*/##; s/-[0-9].*//' | sort -u)
-          echo "names=$(printf '%s\n' $names | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          names=$(python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("dist-all/release-manifest.json").read_text(encoding="utf-8")
+          )
+          print(json.dumps(sorted({
+              artifact["publish_prefix"]
+              for artifact in manifest["artifacts"]
+          })))
+          PY
+          )
+          echo "names=$names" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dist
           path: dist-all/
+          if-no-files-found: error
+          retention-days: 14
 
   publish:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The first-party public names are not all reserved yet. An environment
     # owner must explicitly enable publishing after every allowlisted namespace
     # and trusted-publisher binding has been verified out of band.
-    if: vars.MAVERICK_PUBLIC_PYPI_ENABLED == 'true'
+    # workflow_dispatch is build-only. Publishing requires an immutable tag;
+    # this prevents an operator from sending arbitrary default-branch bytes to
+    # PyPI through a manual run.
+    if: >-
+      vars.MAVERICK_PUBLIC_PYPI_ENABLED == 'true' &&
+      startsWith(github.ref, 'refs/tags/v')
     # One job per package. fail-fast: false means a package that has no
     # trusted publisher yet (or otherwise 4xx's) fails only its own job --
     # it can't abort the others the way a single `twine upload dist/*` did.
-    # Re-running after you register more publishers picks up the rest;
-    # skip-existing makes already-published packages a no-op.
+    # Re-running after you register more publishers picks up the rest.
+    # skip-existing supports resume, but is not the integrity authority: the
+    # verify-published job re-reads PyPI after every matrix upload and requires
+    # exact filename + digest equality with the signed release manifest.
     strategy:
       fail-fast: false
       matrix:
@@ -92,42 +320,158 @@ jobs:
           name: dist
           path: dist-all/
       - name: Stage only ${{ matrix.package }}
+        shell: bash
         run: |
+          set -euo pipefail
+          (cd dist-all && sha256sum --check SHA256SUMS)
           mkdir -p dist
-          cp dist-all/${{ matrix.package }}-* dist/
+          shopt -s nullglob
+          artifacts=(
+            dist-all/${{ matrix.package }}-*.whl
+            dist-all/${{ matrix.package }}-*.tar.gz
+          )
+          if [ "${#artifacts[@]}" -ne 2 ]; then
+            echo "Expected one wheel and one sdist for ${{ matrix.package }}" >&2
+            exit 1
+          fi
+          cp "${artifacts[@]}" dist/
           ls -la dist/
       - name: Publish ${{ matrix.package }} to PyPI
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # release/v1
         with:
           packages-dir: dist/
           skip-existing: true
+          attestations: true
+
+  verify-published:
+    name: Verify final PyPI cohort bytes
+    needs: [build, publish]
+    runs-on: ubuntu-24.04
+    if: >-
+      vars.MAVERICK_PUBLIC_PYPI_ENABLED == 'true' &&
+      startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: dist
+          path: dist/
+      - name: Require exact final filenames and SHA-256 digests on PyPI
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum --check SHA256SUMS)
+          python - <<'PY'
+          import json
+          import time
+          from pathlib import Path
+          from urllib.error import HTTPError
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
+
+          manifest = json.loads(
+              Path("dist/release-manifest.json").read_text(encoding="utf-8")
+          )
+          version = manifest["version"]
+          expected: dict[str, dict[str, str]] = {}
+          for record in manifest["artifacts"]:
+              expected.setdefault(record["distribution"], {})[
+                  record["filename"]
+              ] = record["sha256"]
+
+          for attempt in range(1, 31):
+              incomplete: dict[str, list[str]] = {}
+              for distribution, wanted in expected.items():
+                  url = (
+                      f"https://pypi.org/pypi/{quote(distribution)}/"
+                      f"{quote(version)}/json"
+                  )
+                  request = Request(
+                      url,
+                      headers={"User-Agent": "Lightwork-post-publish-verify/1"},
+                  )
+                  try:
+                      with urlopen(request, timeout=20) as response:  # noqa: S310
+                          payload = json.load(response)
+                  except HTTPError as exc:
+                      if exc.code == 404:
+                          incomplete[distribution] = sorted(wanted)
+                          continue
+                      raise
+                  actual = {
+                      item["filename"]: item["digests"]["sha256"]
+                      for item in payload.get("urls", [])
+                  }
+                  conflicting = {
+                      filename: digest
+                      for filename, digest in actual.items()
+                      if filename not in wanted
+                      or wanted[filename] != digest
+                  }
+                  if conflicting:
+                      raise SystemExit(
+                          f"PyPI {distribution}=={version} contains bytes "
+                          f"outside the release manifest: {conflicting}"
+                      )
+                  missing = sorted(set(wanted) - set(actual))
+                  if missing:
+                      incomplete[distribution] = missing
+              if not incomplete:
+                  print(
+                      f"final PyPI verification OK: {len(expected)} "
+                      f"distributions at {version}"
+                  )
+                  break
+              if attempt == 30:
+                  raise SystemExit(
+                      f"PyPI cohort incomplete after final retry: {incomplete}"
+                  )
+              print(
+                  f"PyPI propagation incomplete (attempt {attempt}/30): "
+                  f"{incomplete}"
+              )
+              time.sleep(10)
+          PY
 
   sign:
     # Sign every built artifact with cosign (keyless via Sigstore OIDC).
     # Signatures + provenance bundles get attached to the GitHub Release.
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write     # release attach
       id-token: write     # Sigstore OIDC
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: dist
           path: dist/
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign artifacts (keyless)
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
+          (cd dist && sha256sum --check SHA256SUMS)
           mkdir -p signatures
-          for f in dist/*.tar.gz dist/*.whl; do
-            [ -f "$f" ] || continue
+          shopt -s nullglob
+          artifacts=(
+            dist/*.tar.gz
+            dist/*.whl
+            dist/SHA256SUMS
+            dist/release-manifest.json
+          )
+          if [ "${#artifacts[@]}" -ne 18 ]; then
+            echo "Expected 16 distributions plus two manifests, found ${#artifacts[@]}" >&2
+            exit 1
+          fi
+          for f in "${artifacts[@]}"; do
             base=$(basename "$f")
             cosign sign-blob --yes \
               --bundle "signatures/${base}.cosign.bundle" \
               "$f"
+            test -s "signatures/${base}.cosign.bundle"
           done
           ls -la signatures/
       - name: Attach signatures to the existing release
@@ -139,27 +483,45 @@ jobs:
         # to create the release, then upload the signatures as assets.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           set -e
-          for i in $(seq 1 30); do
+          # release.yml must finish Docker + three native binaries before it
+          # creates the release; five minutes was routinely too short. Keep
+          # polling for up to 45 minutes, still bounded by the job timeout.
+          for i in $(seq 1 180); do
             if gh release view "$TAG" >/dev/null 2>&1; then
-              gh release upload "$TAG" signatures/*.cosign.bundle --clobber
-              echo "Uploaded signatures to release $TAG"
+              gh release upload "$TAG" \
+                dist/SHA256SUMS \
+                dist/release-manifest.json \
+                signatures/*.cosign.bundle \
+                --clobber
+              echo "Uploaded signed payload manifests and signatures to release $TAG"
               echo "uploaded=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "Release $TAG not found yet (attempt $i/30); sleeping 10s..."
-            sleep 10
+            echo "Release $TAG not found yet (attempt $i/180); sleeping 15s..."
+            sleep 15
           done
-          echo "::warning::Release $TAG never appeared after ~5min; uploading signatures as a workflow artifact instead."
+          echo "::warning::Release $TAG never appeared after ~45min; uploading signatures as a workflow artifact instead."
           echo "uploaded=false" >> "$GITHUB_OUTPUT"
       - name: Fallback - upload signatures as workflow artifact
         # Runs only when the release never appeared, so the signatures are
-        # still retrievable. Never fails the job.
+        # still retrievable before the job reports that the release is not
+        # evidence-complete.
         if: steps.attach.outputs.uploaded == 'false'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: signatures
-          path: signatures/*.cosign.bundle
-          if-no-files-found: warn
+          path: |
+            dist/SHA256SUMS
+            dist/release-manifest.json
+            signatures/*.cosign.bundle
+          if-no-files-found: error
+          retention-days: 14
+      - name: Fail if signatures were not attached to the release
+        if: steps.attach.outputs.uploaded == 'false'
+        run: |
+          echo "Release exists without attached Python artifact signatures" >&2
+          exit 1

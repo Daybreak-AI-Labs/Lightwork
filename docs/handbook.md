@@ -109,7 +109,7 @@ vLLM), configured in `~/.maverick/config.toml`, never hard-coded — and the
 The 90-second path:
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork && cd Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork && cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
 pip install -e ./packages/maverick-core -e ./apps/installer-cli
 maverick init          # wizard: four questions, safe defaults (--fast skips)
@@ -149,7 +149,7 @@ maverick mcp                   # MCP server: drive Lightwork from Claude Code,
 Extend it:
 
 ```bash
-maverick skill install gh:Day-AI-Labs/maverick:benchmarks/example-skills/web-research.md
+maverick skill install gh:Daybreak-AI-Labs/Lightwork:benchmarks/example-skills/web-research.md
 maverick skills                # list installed + distilled skills
 maverick template browse       # community goal templates
 maverick plugin list           # installed plugins + permissions

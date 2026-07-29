@@ -215,7 +215,7 @@ canonical payload digest. The gate uses a family-wise-corrected, one-sided
 paired empirical-Bernstein lower confidence bound rather than raw mean lift.
 Version 1 evidence can still be inspected, but cannot alter the live correction
 artifact. Accepted changes use the shared configured improvement margin and a
-durable PREPARE â†’ exact-digest CAS apply â†’ COMMIT transaction; evidence lineage
+durable PREPARE → exact-digest CAS apply → COMMIT transaction; evidence lineage
 is embedded in the hash-chained promotion receipt.
 
 ## Evaluator co-evolution

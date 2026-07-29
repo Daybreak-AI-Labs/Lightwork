@@ -495,7 +495,7 @@ def test_train_and_propose_end_to_end(tmp_path, monkeypatch):
     record = controller.ledger.get(verdict.candidate_id)
     assert record is not None
     assert deployment.plan.artifact.version in record.summary
-    assert _journal_events(tmp_path) == ["prepare", "commit"]
+    assert _journal_events(tmp_path) == ["prepare", "commit", "audit_ack"]
     receipts = list((tmp_path / "artifacts" / "evaluations").glob("*.json"))
     assert len(receipts) == 1
     # The governance rollback invokes the concrete deployment undo and records it.
@@ -849,7 +849,7 @@ def test_restart_recovery_commits_prepare_when_crash_follows_activation(
     restarted = _ctrl(tmp_path, ledger=restarted_ledger)
     model = build_from_env(recovery_controller=restarted)
     assert isinstance(model, LinearPRM)
-    assert _journal_events(tmp_path) == ["prepare", "commit"]
+    assert _journal_events(tmp_path) == ["prepare", "commit", "audit_ack"]
     record = PromotionLedger(path=tmp_path / "led.json").get(
         in_doubt[0].record.id,
     )

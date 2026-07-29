@@ -17,6 +17,7 @@ from maverick_mcp.server import (
     TOOLS,
     MCPServer,
     _ProtocolError,
+    _validate_tool_specs,
 )
 
 
@@ -56,6 +57,31 @@ class TestTools:
             "maverick_fact_set",
         ):
             assert expected in names
+
+    def test_catalog_validator_rejects_duplicates_and_schema_drift(self):
+        valid = {
+            "name": "safe_tool",
+            "description": "A valid tool.",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {
+                "type": "object",
+                "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"],
+            },
+        }
+        assert set(_validate_tool_specs([valid])) == {"safe_tool"}
+        with pytest.raises(RuntimeError, match="duplicate MCP tool"):
+            _validate_tool_specs([valid, dict(valid)])
+        malformed = {
+            **valid,
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": ["missing"],
+            },
+        }
+        with pytest.raises(RuntimeError, match="required fields"):
+            _validate_tool_specs([malformed])
 
 
 class TestProtocol:

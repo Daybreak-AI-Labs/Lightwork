@@ -63,12 +63,12 @@ def test_known_model_priced_from_table():
     assert (in_rate, out_rate) == (3.0, 15.0)
 
 
-def test_unknown_model_warns_once_then_falls_back(monkeypatch, caplog):
+def test_unknown_model_estimate_warns_once_then_falls_back(monkeypatch, caplog):
     monkeypatch.delenv("MAVERICK_BILLING_STRICT", raising=False)
     monkeypatch.setattr("maverick.config.get_budget_overrides", dict)
     with caplog.at_level(logging.WARNING, logger="maverick.budget"):
-        first = _lookup_price("totally-made-up-model")
-        second = _lookup_price("totally-made-up-model")
+        first = _lookup_price("totally-made-up-model", estimate_only=True)
+        second = _lookup_price("totally-made-up-model", estimate_only=True)
     assert first == second == (3.0, 15.0)  # documented Sonnet fallback estimate
     unpriced = [r for r in caplog.records if "no verified price" in r.getMessage()]
     assert len(unpriced) == 1  # warned once, not per call
@@ -83,7 +83,7 @@ def test_none_model_does_not_warn(monkeypatch, caplog):
 
 def test_strict_pricing_raises_on_unknown_model(monkeypatch):
     monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
-    with pytest.raises(UnpricedModelError, match="no verified price"):
+    with pytest.raises(UnpricedModelError, match="no verified"):
         _lookup_price("totally-made-up-model")
 
 

@@ -226,7 +226,13 @@ _TENANT_TABLES = ("goals", "facts", "conversations", "approvals", "processed_mes
 # -- otherwise a PG deployment relying on "the database enforces the boundary"
 # leaves those two tables app-layer-only. Child tables (episodes/turns/...) carry
 # no tenant_id and remain FK-scoped through their parent goal.
-_RLS_TABLES = (*_TENANT_TABLES, "projects", "fact_history")
+_RLS_TABLES = (
+    *_TENANT_TABLES,
+    "projects",
+    "fact_history",
+    "erasure_receipts",
+    "approval_audit_outbox",
+)
 _TENANT_MIGRATION: list[str] = [
     f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS tenant_id TEXT;" for t in _TENANT_TABLES
 ] + [
@@ -512,6 +518,94 @@ _GOAL_OWNER_MIGRATION = [
     "ALTER TABLE goals ADD COLUMN IF NOT EXISTS owner TEXT NOT NULL DEFAULT '';",
 ]
 
+# v29: tenant-scoped, insert-only erasure scope receipts. The signed manifest
+# contains exact pre-delete row IDs but no raw subject or subject-derived hash.
+# UPDATE is forbidden at the database layer; DELETE remains available only to
+# the explicit retention/retirement path after ``retained_until``.
+_ERASURE_RECEIPTS_MIGRATION = [
+    """
+    CREATE TABLE IF NOT EXISTS erasure_receipts (
+      receipt_id     TEXT NOT NULL,
+      tenant_id      TEXT NOT NULL,
+      manifest       TEXT NOT NULL,
+      created_at     DOUBLE PRECISION NOT NULL,
+      retained_until DOUBLE PRECISION NOT NULL,
+      PRIMARY KEY (tenant_id, receipt_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_pg_erasure_receipts_retention "
+    "ON erasure_receipts(tenant_id, retained_until);",
+    """
+    CREATE OR REPLACE FUNCTION mvk_erasure_receipts_no_update()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      RAISE EXCEPTION 'erasure receipts are immutable';
+    END;
+    $$;
+    """,
+    """
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'erasure_receipts_no_update'
+          AND tgrelid = 'erasure_receipts'::regclass
+      ) THEN
+        CREATE TRIGGER erasure_receipts_no_update
+        BEFORE UPDATE ON erasure_receipts
+        FOR EACH ROW EXECUTE FUNCTION mvk_erasure_receipts_no_update();
+      END IF;
+    END;
+    $$;
+    """,
+    """
+    CREATE OR REPLACE FUNCTION mvk_erasure_receipts_no_early_delete()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF OLD.retained_until > EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) THEN
+        RAISE EXCEPTION 'erasure receipt retention is active';
+      END IF;
+      RETURN OLD;
+    END;
+    $$;
+    """,
+    """
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'erasure_receipts_no_early_delete'
+          AND tgrelid = 'erasure_receipts'::regclass
+      ) THEN
+        CREATE TRIGGER erasure_receipts_no_early_delete
+        BEFORE DELETE ON erasure_receipts
+        FOR EACH ROW EXECUTE FUNCTION mvk_erasure_receipts_no_early_delete();
+      END IF;
+    END;
+    $$;
+    """,
+]
+
+# v30 approval/audit atomicity: a vote and its audit-delivery intent commit
+# together. The final outcome remains pending until all queued vote events are
+# durably appended to the signed audit chain.
+_APPROVAL_AUDIT_OUTBOX_MIGRATION = [
+    """
+    CREATE TABLE IF NOT EXISTS approval_audit_outbox (
+      event_id     TEXT PRIMARY KEY,
+      approval_id  INTEGER NOT NULL REFERENCES approvals(id),
+      status       TEXT NOT NULL,
+      decided_by   TEXT NOT NULL,
+      final_status TEXT,
+      created_at   DOUBLE PRECISION NOT NULL,
+      delivered_at DOUBLE PRECISION,
+      tenant_id    TEXT
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_pg_approval_audit_outbox_pending "
+    "ON approval_audit_outbox(tenant_id, delivered_at, approval_id);",
+]
+
 MIGRATIONS: list[tuple[int, list[str]]] = [
     (1, SCHEMA),
     (10, _TENANT_MIGRATION),
@@ -531,6 +625,8 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     (26, _HARNESS_CORPUS_MIGRATION),
     (27, _EPISODE_CACHE_TOKENS_MIGRATION),
     (28, _GOAL_OWNER_MIGRATION),
+    (29, _ERASURE_RECEIPTS_MIGRATION),
+    (30, _APPROVAL_AUDIT_OUTBOX_MIGRATION),
 ]
 
 # Highest migration version = the reported schema version.
@@ -688,6 +784,36 @@ def _tenant_scope(column: str = "tenant_id") -> tuple[str, list]:
     return f"({column} = %s OR {column} IS NULL)", [t]
 
 
+def _approval_outbox_scope(column: str = "tenant_id") -> tuple[str, list]:
+    """Exact tenant predicate for newly stamped approval-audit rows.
+
+    Unlike compatibility reads of legacy root tables, an active tenant must
+    never inherit a legacy/null outbox event. Every v30 write has an explicit
+    tenant value (or deliberately unbound ``NULL`` in legacy single-tenant
+    mode), so exact matching is both safe and lossless.
+    """
+    tenant = _active_tenant()
+    if tenant is None:
+        return f"{column} IS NULL", []
+    return f"{column} = %s", [tenant]
+
+
+def _erasure_tenant_scope(column: str = "tenant_id") -> tuple[str, list]:
+    """Tenant boundary for destructive erasure and its receipt proof.
+
+    An unbound Postgres connection is an administrator read view, not authority
+    to erase every named tenant. It may erase only legacy single-tenant NULL
+    rows. A bound tenant follows the normal compatibility policy (its own rows
+    plus legacy NULL rows until strict isolation/backfill is enabled).
+    """
+    tenant = _active_tenant()
+    if tenant is None:
+        return f"{column} IS NULL", []
+    if _strict_tenant_isolation():
+        return f"{column} = %s", [tenant]
+    return f"({column} = %s OR {column} IS NULL)", [tenant]
+
+
 def _required_retention_tenant(operation: str) -> str:
     """Concrete tenant for a destructive retention operation.
 
@@ -755,6 +881,20 @@ def _dec_approval_row(r):
                     r[5], r[6], r[7], r[8], r[9], r[10], r[11],
                     int(r[12]) if len(r) > 12 and r[12] is not None else 1,
                     r[13] if len(r) > 13 else None)
+
+
+def _dec_approval_audit_row(r):
+    from ..world_model import ApprovalAuditEvent
+
+    return ApprovalAuditEvent(
+        event_id=str(r[0]),
+        approval_id=int(r[1]),
+        status=str(r[2]),
+        decided_by=str(r[3]),
+        final_status=str(r[4]) if r[4] is not None else None,
+        created_at=float(r[5]),
+        delivered_at=float(r[6]) if r[6] is not None else None,
+    )
 
 
 def _dec_question_row(r):
@@ -2747,6 +2887,315 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         return [_dec_approval_row(r) for r in rows]
 
+    def approval_audit_event_id(
+        self,
+        approval_id: int,
+        status: str,
+        decided_by: str,
+    ) -> str:
+        from ..world_model import _approval_audit_event_id
+
+        return _approval_audit_event_id(
+            _active_tenant(),
+            approval_id,
+            status,
+            (decided_by or "").strip(),
+        )
+
+    def get_approval_audit_event(self, event_id: str):
+        scope, params = _approval_outbox_scope()
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at FROM approval_audit_outbox "
+                f"WHERE event_id = %s AND {scope}",
+                tuple([str(event_id), *params]),
+            )
+            row = cur.fetchone()
+        return _dec_approval_audit_row(row) if row else None
+
+    def pending_approval_audit_events(
+        self,
+        *,
+        approval_id: int | None = None,
+        limit: int = 100,
+    ) -> list:
+        scope, params = _approval_outbox_scope()
+        sql = (
+            "SELECT event_id, approval_id, status, decided_by, final_status, "
+            "created_at, delivered_at FROM approval_audit_outbox "
+            f"WHERE delivered_at IS NULL AND {scope}"
+        )
+        values: list = list(params)
+        if approval_id is not None:
+            sql += " AND approval_id = %s"
+            values.append(int(approval_id))
+        sql += " ORDER BY created_at, event_id LIMIT %s"
+        values.append(max(1, min(int(limit), 1000)))
+        with self._tx() as cur:
+            cur.execute(sql, tuple(values))
+            rows = cur.fetchall()
+        return [_dec_approval_audit_row(row) for row in rows]
+
+    def approval_has_pending_finalization(self, approval_id: int) -> bool:
+        scope, params = _approval_outbox_scope()
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT 1 FROM approval_audit_outbox "
+                "WHERE approval_id = %s AND final_status IS NOT NULL "
+                f"AND delivered_at IS NULL AND {scope} LIMIT 1",
+                tuple([int(approval_id), *params]),
+            )
+            row = cur.fetchone()
+        return row is not None
+
+    def decide_approval_audited(
+        self,
+        approval_id: int,
+        status: str,
+        *,
+        decided_by: str,
+    ):
+        """Atomically accept a vote and queue its signed-audit delivery."""
+        if status not in ("approved", "denied"):
+            raise ValueError("status must be 'approved' or 'denied'")
+        approver = (decided_by or "").strip()
+        if not approver:
+            return None
+
+        from ..world_model import ApprovalAuditEvent
+
+        event_id = self.approval_audit_event_id(
+            approval_id,
+            status,
+            approver,
+        )
+        tenant = _active_tenant()
+        approval_scope, approval_params = _tenant_scope()
+        outbox_scope, outbox_params = _approval_outbox_scope()
+        approval_sql = (
+            "SELECT status, approvals_required, requested_by "
+            "FROM approvals WHERE id = %s"
+        )
+        approval_values: list = [int(approval_id)]
+        if approval_scope:
+            approval_sql += " AND " + approval_scope
+            approval_values += approval_params
+        approval_sql += " FOR UPDATE"
+
+        with self._tx() as cur:
+            # Row lock serializes duplicate and competing votes across replicas.
+            cur.execute(approval_sql, tuple(approval_values))
+            approval = cur.fetchone()
+
+            cur.execute(
+                "SELECT event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at FROM approval_audit_outbox "
+                f"WHERE event_id = %s AND {outbox_scope}",
+                tuple([event_id, *outbox_params]),
+            )
+            prior = cur.fetchone()
+            if prior is not None:
+                prior_event = _dec_approval_audit_row(prior)
+                if not prior_event.matches(approval_id, status, approver):
+                    raise RuntimeError(
+                        "approval audit outbox event identity is corrupt"
+                    )
+                return prior_event
+            if approval is None or approval[0] != "pending":
+                return None
+
+            cur.execute(
+                "SELECT 1 FROM approval_audit_outbox "
+                "WHERE approval_id = %s AND final_status IS NOT NULL "
+                f"AND delivered_at IS NULL AND {outbox_scope} LIMIT 1",
+                tuple([int(approval_id), *outbox_params]),
+            )
+            if cur.fetchone() is not None:
+                return None
+
+            required = max(1, int(approval[1] or 1))
+            requested_by = approval[2]
+            if (
+                required > 1
+                and status == "approved"
+                and requested_by
+                and approver == requested_by
+            ):
+                from ..safety.dual_control import allow_self_approval
+
+                if not allow_self_approval():
+                    return None
+
+            now = time.time()
+            final_status = None
+            if required <= 1:
+                final_status = status
+            else:
+                # Backfill pending pre-v30 signoffs into the new outbox before
+                # a later vote can reach quorum. This keeps upgraded databases
+                # from signing only the final vote in an N-of-M decision.
+                cur.execute(
+                    "SELECT approver, decision, decided_at "
+                    "FROM approval_signoffs WHERE approval_id = %s "
+                    "ORDER BY decided_at, approver",
+                    (int(approval_id),),
+                )
+                for legacy in cur.fetchall():
+                    legacy_event_id = self.approval_audit_event_id(
+                        approval_id,
+                        legacy[1],
+                        legacy[0],
+                    )
+                    cur.execute(
+                        "INSERT INTO approval_audit_outbox("
+                        "event_id, approval_id, status, decided_by, final_status, "
+                        "created_at, delivered_at, tenant_id) "
+                        "VALUES(%s, %s, %s, %s, NULL, %s, NULL, %s) "
+                        "ON CONFLICT (event_id) DO NOTHING",
+                        (
+                            legacy_event_id,
+                            int(approval_id),
+                            legacy[1],
+                            legacy[0],
+                            float(legacy[2]),
+                            tenant,
+                        ),
+                    )
+                cur.execute(
+                    "SELECT event_id, approval_id, status, decided_by, final_status, "
+                    "created_at, delivered_at FROM approval_audit_outbox "
+                    f"WHERE event_id = %s AND {outbox_scope}",
+                    tuple([event_id, *outbox_params]),
+                )
+                prior = cur.fetchone()
+                if prior is not None:
+                    prior_event = _dec_approval_audit_row(prior)
+                    if not prior_event.matches(approval_id, status, approver):
+                        raise RuntimeError(
+                            "approval audit outbox event identity is corrupt"
+                        )
+                    return prior_event
+
+                cur.execute(
+                    "SELECT decision FROM approval_signoffs "
+                    "WHERE approval_id = %s AND approver = %s",
+                    (int(approval_id), approver),
+                )
+                existing_signoff = cur.fetchone()
+                if (
+                    existing_signoff is not None
+                    and existing_signoff[0] != status
+                ):
+                    return None
+                cur.execute(
+                    "INSERT INTO approval_signoffs(approval_id, approver, decision, "
+                    "decided_at) VALUES(%s, %s, %s, %s) "
+                    "ON CONFLICT (approval_id, approver) DO NOTHING",
+                    (int(approval_id), approver, status, now),
+                )
+                if status == "denied":
+                    final_status = "denied"
+                else:
+                    cur.execute(
+                        "SELECT COUNT(*) FROM approval_signoffs "
+                        "WHERE approval_id = %s AND decision = 'approved'",
+                        (int(approval_id),),
+                    )
+                    if int(cur.fetchone()[0]) >= required:
+                        final_status = "approved"
+
+            cur.execute(
+                "INSERT INTO approval_audit_outbox("
+                "event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at, tenant_id) "
+                "VALUES(%s, %s, %s, %s, %s, %s, NULL, %s)",
+                (
+                    event_id,
+                    int(approval_id),
+                    status,
+                    approver,
+                    final_status,
+                    now,
+                    tenant,
+                ),
+            )
+            return ApprovalAuditEvent(
+                event_id=event_id,
+                approval_id=int(approval_id),
+                status=status,
+                decided_by=approver,
+                final_status=final_status,
+                created_at=now,
+                delivered_at=None,
+            )
+
+    def mark_approval_audit_delivered(
+        self,
+        event_id: str,
+        *,
+        delivered_at: float | None = None,
+    ) -> bool:
+        """Acknowledge signed delivery and apply any now-safe final outcome."""
+        outbox_scope, outbox_params = _approval_outbox_scope()
+        approval_scope, approval_params = _tenant_scope()
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at FROM approval_audit_outbox "
+                f"WHERE event_id = %s AND {outbox_scope} FOR UPDATE",
+                tuple([str(event_id), *outbox_params]),
+            )
+            event = cur.fetchone()
+            if event is None:
+                return False
+            if event[6] is None:
+                cur.execute(
+                    "UPDATE approval_audit_outbox SET delivered_at = %s "
+                    f"WHERE event_id = %s AND delivered_at IS NULL AND {outbox_scope}",
+                    tuple([
+                        float(delivered_at)
+                        if delivered_at is not None
+                        else time.time(),
+                        str(event_id),
+                        *outbox_params,
+                    ]),
+                )
+
+            approval_id = int(event[1])
+            cur.execute(
+                "SELECT 1 FROM approval_audit_outbox "
+                f"WHERE approval_id = %s AND delivered_at IS NULL AND {outbox_scope} "
+                "LIMIT 1",
+                tuple([approval_id, *outbox_params]),
+            )
+            if cur.fetchone() is None:
+                cur.execute(
+                    "SELECT final_status, decided_by, created_at "
+                    "FROM approval_audit_outbox "
+                    f"WHERE approval_id = %s AND final_status IS NOT NULL "
+                    f"AND {outbox_scope} "
+                    "ORDER BY created_at DESC, event_id DESC LIMIT 1",
+                    tuple([approval_id, *outbox_params]),
+                )
+                final = cur.fetchone()
+                if final is not None:
+                    sql = (
+                        "UPDATE approvals SET status = %s, decided_at = %s, "
+                        "decided_by = %s WHERE id = %s AND status = 'pending'"
+                    )
+                    values: list = [
+                        final[0],
+                        float(final[2]),
+                        final[1],
+                        approval_id,
+                    ]
+                    if approval_scope:
+                        sql += " AND " + approval_scope
+                        values += approval_params
+                    cur.execute(sql, tuple(values))
+            return True
+
     def decide_approval(self, approval_id: int, status: str,
                         decided_by: str | None = None) -> bool:
         """Record one approver's decision (N-of-M dual control; mirrors SQLite).
@@ -2756,7 +3205,10 @@ class PostgresWorldModel:
         requester from self-approving (unless allowed), and flips to 'approved'
         only at quorum. Tenant-scoped like get_approval. Returns True when the
         vote was accepted, False on unknown/decided id, a barred self-approval,
-        or a multi-party vote with no approver identity."""
+        or a multi-party vote with no approver identity. Once the audited path
+        has created an outbox row, this legacy immediate path refuses every
+        later vote so callers cannot bypass signed delivery between quorum
+        votes."""
         if status not in ("approved", "denied"):
             raise ValueError("status must be 'approved' or 'denied'")
         appr = self.get_approval(approval_id)   # already tenant-scoped
@@ -2768,8 +3220,11 @@ class PostgresWorldModel:
         frag, params = _tenant_scope()
         if required <= 1:
             sql = ("UPDATE approvals SET status = %s, decided_at = %s, "
-                   "decided_by = %s WHERE id = %s AND status = 'pending'")
+                   "decided_by = %s WHERE id = %s AND status = 'pending' "
+                   "AND NOT EXISTS (SELECT 1 FROM approval_audit_outbox "
+                   "WHERE approval_id = %s)")
             p: list = [status, time.time(), decided_by, approval_id]
+            p.append(approval_id)
             if frag:
                 sql += " AND " + frag
                 p += params
@@ -2792,6 +3247,25 @@ class PostgresWorldModel:
         if frag:
             upd += " AND " + frag
         with self._tx() as cur:
+            lock_sql = (
+                "SELECT id FROM approvals "
+                "WHERE id = %s AND status = 'pending'"
+            )
+            lock_params: list = [approval_id]
+            if frag:
+                lock_sql += " AND " + frag
+                lock_params += params
+            lock_sql += " FOR UPDATE"
+            cur.execute(lock_sql, tuple(lock_params))
+            if cur.fetchone() is None:
+                return False
+            cur.execute(
+                "SELECT 1 FROM approval_audit_outbox "
+                "WHERE approval_id = %s LIMIT 1",
+                (approval_id,),
+            )
+            if cur.fetchone() is not None:
+                return False
             cur.execute(
                 "INSERT INTO approval_signoffs(approval_id, approver, decision, "
                 "decided_at) VALUES(%s, %s, %s, %s) "
@@ -2827,12 +3301,22 @@ class PostgresWorldModel:
             )
             rows = cur.fetchall()
         approvers = [r[0] for r in rows if r[1] == "approved"]
+        scope, params = _approval_outbox_scope()
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM approval_audit_outbox "
+                f"WHERE approval_id = %s AND delivered_at IS NULL AND {scope}",
+                tuple([approval_id, *params]),
+            )
+            audit_pending = int(cur.fetchone()[0])
         return {
             "status": appr.status,
             "approvals_required": max(1, int(appr.approvals_required or 1)),
             "approved_count": len(approvers),
             "approvers": approvers,
             "requested_by": appr.requested_by,
+            "audit_pending_count": audit_pending,
+            "effective": appr.status != "pending",
         }
 
     def claim_approval(self, approval_id: int, principal: str) -> bool:
@@ -2998,7 +3482,299 @@ class PostgresWorldModel:
             )
             return cur.rowcount
 
-    def erase_conversations(self, conversation_ids: list[int]) -> tuple[set[int], list[str], int]:
+    @staticmethod
+    def _erasure_ids(values) -> list[int]:
+        ids = sorted(set(values))
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value <= 0
+            for value in ids
+        ):
+            raise ValueError("erasure IDs must be positive integers")
+        return ids
+
+    def _conversation_erasure_plan_cursor(
+        self,
+        cur,
+        conversation_ids: list[int],
+    ) -> dict:
+        cfrag, cfparams = _erasure_tenant_scope()
+        csql = (
+            "SELECT id, channel, user_id FROM conversations "
+            "WHERE id = ANY(%s)"
+        )
+        if cfrag:
+            csql += " AND " + cfrag
+        cur.execute(csql, tuple([conversation_ids, *cfparams]))
+        owned = cur.fetchall()
+        conv_ids = sorted(int(row[0]) for row in owned)
+        subjects = [(str(row[1]), str(row[2])) for row in owned]
+        if not conv_ids:
+            return {
+                "conversation_ids": [],
+                "goal_ids": [],
+                "episode_ids": [],
+                "attachment_paths": [],
+                "subjects": [],
+            }
+
+        gfrag, gfparams = _erasure_tenant_scope("g.tenant_id")
+        root_sql = (
+            "SELECT DISTINCT t.goal_id FROM turns t "
+            "JOIN goals g ON g.id = t.goal_id "
+            "WHERE t.conversation_id = ANY(%s) AND t.goal_id IS NOT NULL"
+        )
+        root_params: list = [conv_ids]
+        if gfrag:
+            root_sql += " AND " + gfrag
+            root_params += gfparams
+        cur.execute(root_sql, tuple(root_params))
+        root_goal_ids = [int(row[0]) for row in cur.fetchall()]
+        goal_ids: list[int] = []
+        if root_goal_ids:
+            base_scope = f" AND {gfrag}" if gfrag else ""
+            child_scope = f" WHERE {gfrag}" if gfrag else ""
+            recursive_sql = (
+                "WITH RECURSIVE goal_tree(id) AS ("
+                " SELECT g.id FROM goals g WHERE g.id = ANY(%s)"
+                f"{base_scope}"
+                " UNION"
+                " SELECT g.id FROM goals g"
+                " JOIN goal_tree gt ON g.parent_id = gt.id"
+                f"{child_scope}"
+                ") SELECT id FROM goal_tree ORDER BY id"
+            )
+            recursive_params: list = [root_goal_ids]
+            if gfrag:
+                recursive_params += gfparams
+                recursive_params += gfparams
+            cur.execute(recursive_sql, tuple(recursive_params))
+            goal_ids = [int(row[0]) for row in cur.fetchall()]
+
+        attachment_paths: list[str] = []
+        episode_ids: list[int] = []
+        if goal_ids:
+            cur.execute(
+                "SELECT id FROM episodes "
+                "WHERE goal_id = ANY(%s) ORDER BY id",
+                (goal_ids,),
+            )
+            episode_ids = [int(row[0]) for row in cur.fetchall()]
+            cur.execute(
+                "SELECT path FROM attachments "
+                "WHERE goal_id = ANY(%s) ORDER BY id",
+                (goal_ids,),
+            )
+            attachment_paths = [str(row[0]) for row in cur.fetchall()]
+        return {
+            "conversation_ids": conv_ids,
+            "goal_ids": goal_ids,
+            "episode_ids": episode_ids,
+            "attachment_paths": attachment_paths,
+            "subjects": subjects,
+        }
+
+    def plan_conversation_erasure(self, conversation_ids: list[int]) -> dict:
+        """Return the tenant-owned conversation + descendant-goal closure."""
+        requested = self._erasure_ids(conversation_ids)
+        if not requested:
+            return {
+                "conversation_ids": [],
+                "goal_ids": [],
+                "episode_ids": [],
+                "attachment_paths": [],
+            }
+        with self._tx() as cur:
+            plan = self._conversation_erasure_plan_cursor(cur, requested)
+        return {
+            key: plan[key]
+            for key in (
+                "conversation_ids",
+                "goal_ids",
+                "episode_ids",
+                "attachment_paths",
+            )
+        }
+
+    @staticmethod
+    def _receipt_tenant(tenant_id: str) -> str:
+        active = _active_tenant() or "shared"
+        if tenant_id != active:
+            raise ValueError("erasure receipt belongs to another tenant")
+        return active
+
+    def store_erasure_receipt(
+        self,
+        receipt_id: str,
+        manifest: str,
+        *,
+        tenant_id: str,
+        created_at: float,
+        retained_until: float,
+    ) -> None:
+        tenant = self._receipt_tenant(tenant_id)
+        with self._tx() as cur:
+            cur.execute(
+                "INSERT INTO erasure_receipts("
+                "receipt_id, tenant_id, manifest, created_at, retained_until"
+                ") VALUES(%s, %s, %s, %s, %s)",
+                (
+                    receipt_id,
+                    tenant,
+                    manifest,
+                    float(created_at),
+                    float(retained_until),
+                ),
+            )
+
+    def get_erasure_receipt(
+        self,
+        receipt_id: str,
+        *,
+        tenant_id: str,
+    ) -> str | None:
+        tenant = self._receipt_tenant(tenant_id)
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT manifest FROM erasure_receipts "
+                "WHERE tenant_id = %s AND receipt_id = %s",
+                (tenant, receipt_id),
+            )
+            row = cur.fetchone()
+        return str(row[0]) if row is not None else None
+
+    def retire_erasure_receipts(
+        self,
+        cutoff: float,
+        *,
+        tenant_id: str,
+    ) -> int:
+        tenant = self._receipt_tenant(tenant_id)
+        with self._tx() as cur:
+            cur.execute(
+                "DELETE FROM erasure_receipts "
+                "WHERE tenant_id = %s AND retained_until <= %s",
+                (tenant, float(cutoff)),
+            )
+            return int(cur.rowcount)
+
+    def count_erasure_receipt_store(
+        self,
+        store: str,
+        conversation_ids: list[int],
+        goal_ids: list[int],
+        episode_ids: list[int] | None = None,
+    ) -> int:
+        """Count one exact receipt store, preserving per-store failures."""
+        from ..erasure_receipts import RECEIPT_STORES
+
+        if store not in RECEIPT_STORES:
+            raise ValueError(f"unsupported erasure receipt store {store!r}")
+        conversations = self._erasure_ids(conversation_ids)
+        goals = self._erasure_ids(goal_ids)
+        episodes = self._erasure_ids(episode_ids or [])
+        with self._tx() as cur:
+            if episode_ids is None and goals:
+                cur.execute(
+                    "SELECT id FROM episodes WHERE goal_id = ANY(%s)",
+                    (goals,),
+                )
+                episodes = sorted(int(row[0]) for row in cur.fetchall())
+            if store == "conversations":
+                if not conversations:
+                    return 0
+                cfrag, cfparams = _erasure_tenant_scope()
+                sql = "SELECT COUNT(*) FROM conversations WHERE id = ANY(%s)"
+                params: list = [conversations]
+                if cfrag:
+                    sql += " AND " + cfrag
+                    params += cfparams
+                cur.execute(sql, tuple(params))
+                return int(cur.fetchone()[0])
+            if store == "turns":
+                if not conversations and not goals:
+                    return 0
+                clauses = []
+                params = []
+                if conversations:
+                    clauses.append("conversation_id = ANY(%s)")
+                    params.append(conversations)
+                if goals:
+                    clauses.append("goal_id = ANY(%s)")
+                    params.append(goals)
+                cur.execute(
+                    "SELECT COUNT(*) FROM turns WHERE " + " OR ".join(clauses),
+                    tuple(params),
+                )
+                return int(cur.fetchone()[0])
+            if not goals:
+                return 0
+            if store == "goals":
+                gfrag, gfparams = _erasure_tenant_scope()
+                sql = "SELECT COUNT(*) FROM goals WHERE id = ANY(%s)"
+                params = [goals]
+                if gfrag:
+                    sql += " AND " + gfrag
+                    params += gfparams
+                cur.execute(sql, tuple(params))
+                return int(cur.fetchone()[0])
+            if store in (
+                "episodes",
+                "episode_facts",
+                "episode_fact_history",
+            ):
+                if not episodes:
+                    return 0
+                table, field = {
+                    "episodes": ("episodes", "id"),
+                    "episode_facts": ("facts", "source_episode_id"),
+                    "episode_fact_history": (
+                        "fact_history",
+                        "source_episode_id",
+                    ),
+                }[store]
+                tfrag, tfparams = _erasure_tenant_scope()
+                sql = f"SELECT COUNT(*) FROM {table} WHERE {field} = ANY(%s)"
+                params = [episodes]
+                if tfrag:
+                    sql += " AND " + tfrag
+                    params += tfparams
+                cur.execute(sql, tuple(params))
+                return int(cur.fetchone()[0])
+            cur.execute(
+                f"SELECT COUNT(*) FROM {store} WHERE goal_id = ANY(%s)",
+                (goals,),
+            )
+            return int(cur.fetchone()[0])
+
+    def count_erasure_receipt_residuals(
+        self,
+        conversation_ids: list[int],
+        goal_ids: list[int],
+        episode_ids: list[int] | None = None,
+    ) -> dict[str, int]:
+        """Count exact receipt IDs across every covered Postgres table."""
+        from ..erasure_receipts import RECEIPT_STORES
+
+        return {
+            store: self.count_erasure_receipt_store(
+                store,
+                conversation_ids,
+                goal_ids,
+                episode_ids,
+            )
+            for store in RECEIPT_STORES
+        }
+
+    def erase_conversations(
+        self,
+        conversation_ids: list[int],
+        *,
+        expected_conversation_ids: list[int] | None = None,
+        expected_goal_ids: list[int] | None = None,
+        expected_episode_ids: list[int] | None = None,
+    ) -> tuple[set[int], list[str], int]:
         """Erase conversations and goal-scoped rows for GDPR deletion.
 
         This is the Postgres equivalent of the CLI's SQLite cascade: gather all
@@ -3010,77 +3786,116 @@ class PostgresWorldModel:
         if not conversation_ids:
             return set(), [], 0
 
-        conv_ids = [int(cid) for cid in conversation_ids]
+        requested = self._erasure_ids(conversation_ids)
+        expected_conversations = (
+            self._erasure_ids(expected_conversation_ids)
+            if expected_conversation_ids is not None
+            else None
+        )
+        expected_goals = (
+            self._erasure_ids(expected_goal_ids)
+            if expected_goal_ids is not None
+            else None
+        )
+        expected_episodes = (
+            self._erasure_ids(expected_episode_ids)
+            if expected_episode_ids is not None
+            else None
+        )
+        from ..erasure_receipts import ErasurePlanChanged
+
         with self._tx() as cur:
-            # Restrict to conversations the ACTIVE TENANT owns before deleting
-            # anything: erase operates on caller-supplied ids, so without this a
-            # tenant could erase another tenant's conversations/goals/facts by
-            # passing foreign ids. No-op when no tenant is active (single-tenant).
-            # Same pass returns the (channel, user_id) subjects used to scrub the
-            # subject's user-scoped facts by key prefix below.
-            cfrag, cfparams = _tenant_scope()
-            csql = "SELECT id, channel, user_id FROM conversations WHERE id = ANY(%s)"
-            if cfrag:
-                csql += " AND " + cfrag
-            cur.execute(csql, tuple([conv_ids, *cfparams]))
-            owned = cur.fetchall()
-            conv_ids = [int(row[0]) for row in owned]
-            subjects = [(str(row[1]), str(row[2])) for row in owned]
+            # Erasure is rare and correctness-sensitive. Block concurrent
+            # inserts into every participating table while the durable plan is
+            # re-read, compared, and deleted; otherwise a child could appear
+            # after receipt issuance but before its table's DELETE.
+            cur.execute(
+                "LOCK TABLE conversations, turns, goals, episodes, artifacts, "
+                "attachments, goal_events, goal_origins, messages, "
+                "processed_messages, questions, share_links, signoffs, facts, "
+                "fact_history IN SHARE ROW EXCLUSIVE MODE"
+            )
+            plan = self._conversation_erasure_plan_cursor(cur, requested)
+            if (
+                expected_conversations is not None
+                and plan["conversation_ids"] != expected_conversations
+            ) or (
+                expected_goals is not None
+                and plan["goal_ids"] != expected_goals
+            ) or (
+                expected_episodes is not None
+                and plan["episode_ids"] != expected_episodes
+            ):
+                raise ErasurePlanChanged(
+                    "conversation/goal closure changed after receipt issuance"
+                )
+
+            conv_ids = plan["conversation_ids"]
             if not conv_ids:
                 return set(), [], 0
-
-            cur.execute(
-                "SELECT DISTINCT goal_id FROM turns "
-                "WHERE conversation_id = ANY(%s) AND goal_id IS NOT NULL",
-                (conv_ids,),
-            )
-            root_goal_ids = [int(row[0]) for row in cur.fetchall()]
-
-            goal_ids: set[int] = set()
-            if root_goal_ids:
-                cur.execute(
-                    """
-                    WITH RECURSIVE goal_tree(id) AS (
-                        SELECT id FROM goals WHERE id = ANY(%s)
-                        UNION
-                        SELECT g.id FROM goals g
-                        JOIN goal_tree gt ON g.parent_id = gt.id
-                    )
-                    SELECT id FROM goal_tree
-                    """,
-                    (root_goal_ids,),
-                )
-                goal_ids = {int(row[0]) for row in cur.fetchall()}
-
-            attachment_paths: list[str] = []
-            gids = sorted(goal_ids)
+            gids = plan["goal_ids"]
+            subjects = plan["subjects"]
             if gids:
-                cur.execute("SELECT path FROM attachments WHERE goal_id = ANY(%s)", (gids,))
-                attachment_paths = [str(row[0]) for row in cur.fetchall()]
-
-            cur.execute("DELETE FROM turns WHERE conversation_id = ANY(%s)", (conv_ids,))
+                cur.execute(
+                    "DELETE FROM turns WHERE conversation_id = ANY(%s) "
+                    "OR goal_id = ANY(%s)",
+                    (conv_ids, gids),
+                )
+            else:
+                cur.execute(
+                    "DELETE FROM turns WHERE conversation_id = ANY(%s)",
+                    (conv_ids,),
+                )
             removed_turns = cur.rowcount
 
             if gids:
-                cur.execute("DELETE FROM goal_events WHERE goal_id = ANY(%s)", (gids,))
-                cur.execute("DELETE FROM messages WHERE goal_id = ANY(%s)", (gids,))
-                cur.execute("DELETE FROM questions WHERE goal_id = ANY(%s)", (gids,))
-                cur.execute("DELETE FROM attachments WHERE goal_id = ANY(%s)", (gids,))
-                cur.execute("DELETE FROM episodes WHERE goal_id = ANY(%s)", (gids,))
-                cur.execute("DELETE FROM processed_messages WHERE goal_id = ANY(%s)", (gids,))
-                # share_links/signoffs/goal_origins also REFERENCE goals(id) with
-                # no ON DELETE CASCADE; Postgres checks FKs per statement, so the
-                # DELETE FROM goals below raises a ForeignKeyViolation and rolls
-                # the whole GDPR erase back unless these children go first too.
-                cur.execute("DELETE FROM artifacts WHERE goal_id = ANY(%s)", (gids,))
-                cur.execute("DELETE FROM share_links WHERE goal_id = ANY(%s)", (gids,))
-                cur.execute("DELETE FROM signoffs WHERE goal_id = ANY(%s)", (gids,))
-                cur.execute("DELETE FROM goal_origins WHERE goal_id = ANY(%s)", (gids,))
+                for table in (
+                    "artifacts",
+                    "attachments",
+                    "goal_events",
+                    "goal_origins",
+                    "messages",
+                    "processed_messages",
+                    "questions",
+                    "share_links",
+                    "signoffs",
+                ):
+                    cur.execute(
+                        f"DELETE FROM {table} WHERE goal_id = ANY(%s)",
+                        (gids,),
+                    )
+                # Source-linked live and historical facts can retain output
+                # derived from the subject's episodes. IDs are globally unique,
+                # and the active tenant predicate prevents cross-tenant prefix
+                # cleanup below.
+                cur.execute(
+                    "DELETE FROM fact_history WHERE source_episode_id IN "
+                    "(SELECT id FROM episodes WHERE goal_id = ANY(%s))",
+                    (gids,),
+                )
+                cur.execute(
+                    "DELETE FROM facts WHERE source_episode_id IN "
+                    "(SELECT id FROM episodes WHERE goal_id = ANY(%s))",
+                    (gids,),
+                )
+                cur.execute(
+                    "DELETE FROM episodes WHERE goal_id = ANY(%s)",
+                    (gids,),
+                )
                 # Postgres self-referential FKs are checked per statement by
                 # default, unlike the SQLite path that defers FK checks for the
                 # transaction. Break edges inside the soon-to-be-deleted tree so
                 # a single goal DELETE cannot fail on parent_id references.
-                cur.execute("UPDATE goals SET parent_id = NULL WHERE parent_id = ANY(%s)", (gids,))
+                gfrag, gfparams = _erasure_tenant_scope("tenant_id")
+                edge_sql = (
+                    "UPDATE goals SET parent_id = NULL "
+                    "WHERE parent_id = ANY(%s)"
+                )
+                edge_params: list = [gids]
+                if gfrag:
+                    edge_sql += " AND " + gfrag
+                    edge_params += gfparams
+                cur.execute(edge_sql, tuple(edge_params))
                 cur.execute("DELETE FROM goals WHERE id = ANY(%s)", (gids,))
 
             # Scrub the subject's explicitly user-scoped facts. Facts are global
@@ -3096,7 +3911,7 @@ class PostgresWorldModel:
             # too -- the same cross-tenant GDPR over-deletion delete_facts_matching
             # guards against. The conv/goal rows above are already tenant-isolated
             # by id; this LIKE-by-prefix path is the one that needs the predicate.
-            frag, fparams = _tenant_scope()
+            frag, fparams = _erasure_tenant_scope()
             for channel, user_id in subjects:
                 token = f"{quote(channel, safe='')}:{quote(user_id, safe='')}"
                 like = self._like_escape(f"user:{token}:") + "%"
@@ -3106,10 +3921,19 @@ class PostgresWorldModel:
                     sql += " AND " + frag
                     params += fparams
                 cur.execute(sql, tuple(params))
+                history_sql = (
+                    "DELETE FROM fact_history "
+                    "WHERE key LIKE %s ESCAPE '\\'"
+                )
+                history_params = [like]
+                if frag:
+                    history_sql += " AND " + frag
+                    history_params += fparams
+                cur.execute(history_sql, tuple(history_params))
 
             cur.execute("DELETE FROM conversations WHERE id = ANY(%s)", (conv_ids,))
 
-        return goal_ids, attachment_paths, removed_turns
+        return set(gids), list(plan["attachment_paths"]), removed_turns
 
     # ----- messages (goal-scoped log + full-text search) -----
 

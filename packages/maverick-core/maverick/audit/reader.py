@@ -90,29 +90,45 @@ def event_paths(
 
 
 def iter_events(
-    *, day: str | None = None, all_days: bool = False,
-    since: str | None = None, until: str | None = None,
+    *,
+    day: str | None = None,
+    all_days: bool = False,
+    since: str | None = None,
+    until: str | None = None,
     tenant: str | None = None,
+    strict: bool = False,
 ) -> Iterator[dict[str, Any]]:
     """Yield audit event dicts from the tenant-aware audit dir.
 
     Sealing-aware (transparently decrypts an at-rest-sealed segment) and
-    fail-soft: malformed/unreadable lines and a missing dir are skipped
-    silently, and the anchor ledger is excluded. See :func:`event_paths` for the
-    selection precedence.
+    fail-soft by default: malformed/unreadable lines and a missing dir are
+    skipped silently, and the anchor ledger is excluded. ``strict=True`` makes
+    an unreadable/decryption failure, malformed JSON line, or non-object row
+    raise so a proof-producing caller cannot mistake unreadable evidence for an
+    empty log. See :func:`event_paths` for the selection precedence.
     """
     for path in event_paths(
         day=day, all_days=all_days, since=since, until=until, tenant=tenant,
     ):
-        # segment_text transparently decrypts a sealed (at-rest) segment and is
-        # fail-soft (returns "" on a read/decrypt error).
-        for line in segment_text(path).splitlines():
+        # segment_text transparently decrypts a sealed (at-rest) segment.
+        # Export/UI readers keep its fail-soft default; verification callers
+        # explicitly propagate read/decrypt failures.
+        text = segment_text(path, fail_soft=not strict)
+        for line_number, line in enumerate(text.splitlines(), start=1):
             line = line.strip()
             if not line:
                 continue
             try:
                 event = json.loads(line)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as error:
+                if strict:
+                    raise ValueError(
+                        f"invalid audit JSON in {path} at line {line_number}"
+                    ) from error
                 continue
             if isinstance(event, dict):
                 yield event
+            elif strict:
+                raise ValueError(
+                    f"non-object audit row in {path} at line {line_number}"
+                )

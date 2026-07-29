@@ -7,7 +7,7 @@ not install those names from the public index. Install a reviewed source
 commit instead:
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
 pip install -e ./packages/maverick-core
@@ -24,7 +24,7 @@ Every `MAVERICK_*` variable can also be spelled `LIGHTWORK_*`.
 From source while iterating:
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 pip install -e ./packages/maverick-core
 pip install -e ./apps/installer-cli
@@ -35,6 +35,8 @@ maverick init
 
 ```bash
 maverick init
+maverick preflight
+maverick doctor
 ```
 
 The wizard takes ~2 minutes. It writes `~/.maverick/config.toml` and `~/.maverick/.env`.

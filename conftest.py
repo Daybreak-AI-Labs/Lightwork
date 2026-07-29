@@ -77,3 +77,31 @@ def _reset_governed_process_authority_pin():
         yield
     finally:
         governed_records._reset_process_authority_pin_for_testing()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_default_audit_writers():
+    """Do not let a cached deployment-global writer cross test data roots.
+
+    ``default_audit_log`` intentionally caches one writer for a production
+    process. Tests change ``MAVERICK_HOME`` for every case, though, and the
+    process-level singleton would otherwise keep writing to the first case's
+    audit chain. Besides leaking state, stable outbox identities from two
+    independent test worlds can then collide and correctly fail closed.
+    """
+    try:
+        from maverick.audit import writer
+    except ImportError:
+        yield
+        return
+
+    def _reset() -> None:
+        with writer._default_lock:
+            writer._default = None
+            writer._defaults.clear()
+
+    _reset()
+    try:
+        yield
+    finally:
+        _reset()

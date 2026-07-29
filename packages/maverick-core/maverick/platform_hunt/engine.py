@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict
 from typing import Any
 
+from ..audit.errors import AuditRefused
 from .models import (
     BaselineProfile,
     ChainIntegrityStatus,
@@ -468,12 +469,16 @@ def _audit_finding(recorder: AuditRecorder | None, finding: Finding) -> bool:
     if recorder is not None:
         try:
             return bool(recorder("platform_hunt_detection", payload))
+        except AuditRefused:
+            raise
         except Exception:  # failure-policy: visible_degradation
             return False
     try:
         from ..audit import record
 
         return bool(record("platform_hunt_detection", **payload))
+    except AuditRefused:
+        raise
     except Exception:  # failure-policy: visible_degradation
         return False
 

@@ -16,11 +16,10 @@ on:
         type: string
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
-  bump:
+  resolve:
     # Undefined repository variables compare as an empty string, so the job is
     # disabled by default. Enable it only after the maverick-agent namespace is
     # reserved under the organization, protected with MFA, and the trusted
@@ -30,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -81,7 +82,9 @@ jobs:
                       "-m",
                       "pip",
                       "install",
-                      "pip-tools>=7.4",
+                      "--constraint",
+                      "requirements/ci.txt",
+                      "pip-tools==7.6.0",
                   ],
                   check=True,
               )
@@ -139,8 +142,32 @@ jobs:
           )
           PY
 
+      - name: Stage the resolved formula without repository credentials
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: resolved-homebrew-formula
+          path: deploy/homebrew/maverick.rb
+          if-no-files-found: error
+          retention-days: 1
+
+  open-pr:
+    needs: resolve
+    if: ${{ vars.MAVERICK_PUBLIC_PYPI_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: resolved-homebrew-formula
+          path: deploy/homebrew
       - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
+          token: ${{ github.token }}
           branch: chore/homebrew-bump
           title: "chore: bump the Homebrew formula to the latest release"
           commit-message: "chore: bump Homebrew formula to the published sdist"

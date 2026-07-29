@@ -35,6 +35,10 @@ _ONLINE_PATTERNS = (
     re.compile(r"^\s*CREATE\s+(UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\b", re.IGNORECASE),
     re.compile(r"^\s*CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\b", re.IGNORECASE),
     re.compile(r"^\s*CREATE\s+VIRTUAL\s+TABLE\s+IF\s+NOT\s+EXISTS\b", re.IGNORECASE),
+    # Installing an idempotent trigger changes schema metadata only; it does
+    # not scan or rewrite existing rows. The trigger body governs future
+    # statements after the brief schema lock is released.
+    re.compile(r"^\s*CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\b", re.IGNORECASE),
     # FTS maintenance ('rebuild'/'optimize') touches its own shadow tables only.
     re.compile(r"^\s*INSERT\s+INTO\s+\w+_fts\s*\(\s*\w+_fts\s*\)", re.IGNORECASE),
 )
@@ -44,8 +48,9 @@ _OFFLINE_PATTERNS = (
     re.compile(r"^\s*ALTER\s+TABLE\s+\S+\s+RENAME\b", re.IGNORECASE),
     re.compile(r"^\s*CREATE\s+INDEX\s+(?!IF\s+NOT\s+EXISTS)", re.IGNORECASE),
     re.compile(r"^\s*CREATE\s+TABLE\s+(?!IF\s+NOT\s+EXISTS|VIRTUAL)", re.IGNORECASE),
+    re.compile(r"^\s*CREATE\s+TRIGGER\s+(?!IF\s+NOT\s+EXISTS)", re.IGNORECASE),
     re.compile(r"^\s*(UPDATE|DELETE\s+FROM)\b", re.IGNORECASE),
-    re.compile(r"^\s*DROP\s+(TABLE|INDEX)\b", re.IGNORECASE),
+    re.compile(r"^\s*DROP\s+(TABLE|INDEX|TRIGGER)\b", re.IGNORECASE),
 )
 
 

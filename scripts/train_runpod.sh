@@ -9,7 +9,7 @@
 # Quick start on a fresh GPU pod (paste once):
 #
 #   LIGHTWORK_REF=<full-40-character-commit-sha>
-#   git clone https://github.com/Day-AI-Labs/Lightwork lightwork
+#   git clone https://github.com/Daybreak-AI-Labs/Lightwork lightwork
 #   git -C lightwork checkout --detach "$LIGHTWORK_REF"
 #   # upload your two inputs to the pod first (see below), then:
 #   MAVERICK_SOURCE_DIR="$PWD/lightwork" MAVERICK_SOURCE_REF="$LIGHTWORK_REF" \

@@ -7,7 +7,8 @@ so a run on the newest model silently billed at the Sonnet fallback rate
 """
 from __future__ import annotations
 
-from maverick.budget import Budget
+import pytest
+from maverick.budget import Budget, UnpricedModelError
 from maverick.llm import MODEL_OPUS, MODEL_OPUS_FAST, MODEL_PRICES
 
 
@@ -40,15 +41,16 @@ def test_prior_opus_47_still_priced():
     assert abs(b.dollars - 5.0) < 0.001
 
 
-def test_gemini_35_priced_not_fallback():
+def test_gemini_35_flash_priced_and_uncaptured_pro_is_estimate_only():
     # gemini-3.5-flash present so it bills at its own rate, not Sonnet's.
     assert "gemini-3.5-flash" in MODEL_PRICES
     assert "gemini-3.5-pro" in MODEL_PRICES
     b = Budget(max_dollars=100.0, max_input_tokens=10_000_000,
                max_output_tokens=10_000_000)
     b.record_tokens(1_000_000, 1_000_000, model="gemini-3.5-flash")
-    # 0.15 + 0.60 = $0.75 (Sonnet fallback would be $18).
-    assert abs(b.dollars - 0.75) < 0.001
+    assert abs(b.dollars - 10.5) < 0.001
+    with pytest.raises(UnpricedModelError, match="unverified"):
+        Budget().record_tokens(100, 10, model="gemini-3.5-pro")
 
 
 # --- provider request shaping: Opus 4.8 was missing from every version

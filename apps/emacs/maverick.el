@@ -6,7 +6,7 @@
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; Keywords: tools, processes
-;; URL: https://github.com/Day-AI-Labs/maverick
+;; URL: https://github.com/Daybreak-AI-Labs/Lightwork
 
 ;;; Commentary:
 

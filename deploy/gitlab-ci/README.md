@@ -10,7 +10,7 @@ PyPI fallback while the Lightwork project names remain unreserved.
 
 It is the GitLab counterpart to the [`deploy/github-action`](../github-action)
 wrapper and mirrors the same safety inputs: consent mode, budget cap, and
-sandbox scope.
+sandbox backend selection.
 
 ## Usage
 
@@ -27,7 +27,7 @@ maverick:
     MAVERICK_GOAL: "Review the changes on this branch and flag any risks."
     MAVERICK_MAX_DOLLARS: "0.50"
     MAVERICK_PACKAGE_INDEX_URL: "https://packages.example.com/simple"
-    MAVERICK_VERSION: "0.1.6"
+    MAVERICK_VERSION: "0.1.7"
 ```
 
 > Host the reviewed template where the runner can read it and replace the
@@ -48,6 +48,7 @@ Set these under **Settings → CI/CD → Variables** (mark the API key as
 | `MAVERICK_MAX_DOLLARS` | no (default `1.0`) | Hard USD spend cap, wired into `[budget] max_dollars`. The kernel refuses to exceed it. |
 | `MAVERICK_MODEL` | no | Model override, e.g. `anthropic:claude-sonnet-4-6` (passed as `maverick --model`). |
 | `MAVERICK_PYTHON_VERSION` | no (default `3.12`) | Python image tag used for the job. |
+| `MAVERICK_SANDBOX` | no (default `local`) | Model-generated shell backend. `local` is suitable only on a trusted disposable/isolated runner; use `docker` or `podman` when the runner exposes a securely configured container runtime. |
 
 ## Safety defaults
 
@@ -59,9 +60,11 @@ These are baked into the template so a pipeline run is safe by default:
 - **Hard budget cap** — `MAVERICK_MAX_DOLLARS` is written to
   `[budget] max_dollars` and passed as `--max-dollars`. A runaway goal stops
   instead of running up a bill. Start small.
-- **Sandbox scoped to the checkout** — the `local` sandbox's `workdir` is
-  set to `$CI_PROJECT_DIR`, so model-generated shell operates on the cloned
-  project, not the whole runner.
+- **Explicit shell authority** — the default `local` backend starts in
+  `$CI_PROJECT_DIR`, but a working directory is not a filesystem or network
+  sandbox. Use it only on a trusted disposable/isolated runner. Persistent or
+  shared runners require a real container backend plus runner-level
+  filesystem/network controls.
 
 ## Notes
 

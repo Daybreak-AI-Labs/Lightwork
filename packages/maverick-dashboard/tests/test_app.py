@@ -5,6 +5,7 @@ registered, and templates render with empty data.
 """
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
 
@@ -65,6 +66,41 @@ def test_readyz_ok_when_bound(tmp_path, monkeypatch):
 
 def client_get_readyz():
     return client.get("/readyz")
+
+
+@pytest.mark.parametrize(
+    ("module_name", "attribute", "check_name"),
+    [
+        ("client", "client_binding_enforced", "client_binding"),
+        ("shield_policy", "shield_required", "shield"),
+        ("agent_trust", "load_trust_state", "agent_trust"),
+    ],
+)
+def test_readiness_deep_check_errors_fail_closed(
+    monkeypatch, module_name, attribute, check_name
+):
+    """An unreadable trust posture is not evidence that a pod is ready."""
+    from maverick import agent_trust, shield_policy
+    from maverick import client as client_module
+    from maverick_dashboard import app as dash_app
+
+    modules = {
+        "client": client_module,
+        "shield_policy": shield_policy,
+        "agent_trust": agent_trust,
+    }
+    monkeypatch.setattr(client_module, "client_binding_enforced", lambda: False)
+    monkeypatch.setattr(shield_policy, "shield_required", lambda: False)
+    monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {}))
+
+    def _raise_probe_error():
+        raise RuntimeError("probe unavailable")
+
+    monkeypatch.setattr(modules[module_name], attribute, _raise_probe_error)
+    ok, checks = dash_app._readiness_deep_checks()
+
+    assert ok is False
+    assert checks[check_name] == "unknown: RuntimeError"
 
 
 def test_index_renders(tmp_path, monkeypatch):

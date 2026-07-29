@@ -12,6 +12,8 @@ import threading
 from collections import defaultdict, deque
 
 _MAX_SAMPLES = 1024
+_MAX_TOOLS = 128
+_OVERFLOW_TOOL = "__other__"
 _lock = threading.Lock()
 _samples: dict[str, deque] = defaultdict(lambda: deque(maxlen=_MAX_SAMPLES))
 
@@ -21,7 +23,10 @@ def record(tool: str, ms: float) -> None:
     if ms is None or ms < 0:
         return
     with _lock:
-        _samples[tool].append(float(ms))
+        key = str(tool or "?")
+        if key not in _samples and len(_samples) >= max(1, _MAX_TOOLS - 1):
+            key = _OVERFLOW_TOOL
+        _samples[key].append(float(ms))
 
 
 def _percentile(sorted_vals: list[float], q: float) -> float:

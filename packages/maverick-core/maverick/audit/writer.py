@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import io
 import json
 import logging
 import os
@@ -202,6 +203,92 @@ class _file_append_lock:
             self._thread_lock.release()
 
 
+def _audit_idempotency_identity(
+    payload: dict[str, Any],
+) -> tuple[str, str] | None:
+    """Return the governed sink identity for events that require append-once."""
+    field_by_kind = {
+        EventKind.APPROVAL_DECISION: "approval_event_id",
+        EventKind.ACCESS_GRANT_CHANGED: "scim_group_event_id",
+        EventKind.LEARNING_UPDATE: "event_id",
+        EventKind.PRIVACY_RECORD_CHANGED: "event_id",
+        EventKind.SECURITY_RECORD_CHANGED: "event_id",
+        EventKind.PLATFORM_HUNT_CUSTODY_INITIALIZED: "event_id",
+        EventKind.THREAT_HUNT_RECORD_CHANGED: "event_id",
+        EventKind.ENV_HUNT_RECORD_CHANGED: "event_id",
+    }
+    field = field_by_kind.get(payload.get("kind"))
+    if field is None:
+        return None
+    value = payload.get(field)
+    if not isinstance(value, str) or not value or len(value) > 256:
+        return None
+    return field, value
+
+
+def _locked_event_identity_exists(
+    fileobj: Any,
+    payload: dict[str, Any],
+    identity: tuple[str, str],
+) -> bool:
+    """Check one locked NDJSON stream and reject identity/content collisions."""
+    field, value = identity
+    kind = payload.get("kind")
+    fileobj.seek(0)
+    for line_number, raw in enumerate(fileobj, start=1):
+        if not raw.strip():
+            continue
+        try:
+            existing = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise ValueError(
+                "audit idempotency scan found malformed NDJSON at "
+                f"line {line_number}"
+            ) from error
+        if (
+            not isinstance(existing, dict)
+            or existing.get("kind") != kind
+            or existing.get(field) != value
+        ):
+            continue
+        # Retries get a fresh transport timestamp, while ``occurred_at`` is the
+        # transactional business time. Every other logical field must match;
+        # accepting the same identity for different content would hide a
+        # conflicting decision instead of deduplicating a retry.
+        for key, expected in payload.items():
+            if key == "ts":
+                continue
+            if existing.get(key) != expected:
+                raise ValueError(
+                    "audit idempotency identity is bound to conflicting content"
+                )
+        return True
+    return False
+
+
+def _prior_day_identity_exists(
+    audit_dir: Path,
+    current_path: Path,
+    payload: dict[str, Any],
+    identity: tuple[str, str],
+) -> bool:
+    """Search closed segments while the deployment-wide identity lock is held."""
+    from .sealing import segment_text
+
+    for path in sorted(audit_dir.glob("*.ndjson")):
+        if path == current_path:
+            continue
+        # A retention/erase rewriter uses this same sidecar lock. Take a stable
+        # snapshot before parsing so a replace cannot turn a duplicate into a
+        # missed identity at the rollover boundary.
+        with cross_process_lock(path):
+            text = segment_text(path, fail_soft=False)
+        with io.StringIO(text) as stream:
+            if _locked_event_identity_exists(stream, payload, identity):
+                return True
+    return False
+
+
 def _resolve_signing(explicit: bool | None) -> bool:
     """Whether to sign + hash-chain audit rows.
 
@@ -362,40 +449,62 @@ class AuditLog:
                 return False
             try:
                 payload = _redact_event(event.to_dict())
-                signer = self._signer_for(path)
-                if signer is not None:
-                    # Sign the already-redacted payload so secrets never
-                    # enter the signed bytes either.
-                    return bool(signer.write(payload))
-                line = json.dumps(payload, default=str) + "\n"
-                # Sidecar lock FIRST, exactly as AuditSigner.write does, and for
-                # the same reason: whole-file rewriters (GDPR erase,
-                # reanchor_file) publish a new inode via os.replace, so an
-                # flock on this handle cannot exclude them -- it guards an inode
-                # that is about to be orphaned.
-                #
-                # This path was missed when the signed one was fixed. With
-                # signing off, an erase running concurrently still destroyed
-                # committed rows while record() returned True: measured at 41
-                # lost out of 197 in a natural reproduction, and 4/4 in a
-                # targeted one. Ordering is sidecar -> append lock everywhere,
-                # so the two cannot deadlock.
-                with cross_process_lock(path), \
-                        open(path, "a", encoding="utf-8") as f:
-                    # The append lock still covers the torn-record case: two
-                    # processes appending the same day-file must not interleave
-                    # above PIPE_BUF.
-                    with _file_append_lock(f):
-                        f.write(line)
-                        # fsync so a crash / power loss can't lose a committed
-                        # audit row (the signed path in signing.py already does
-                        # this; match it so the unsigned log is just as durable).
-                        f.flush()
-                        os.fsync(f.fileno())
-                return True
+                identity = _audit_idempotency_identity(payload)
+                guard = (
+                    cross_process_lock(
+                        self.audit_dir / ".governed-audit-idempotency"
+                    )
+                    if identity is not None
+                    else contextlib.nullcontext()
+                )
+                with guard:
+                    if identity is not None and _prior_day_identity_exists(
+                        self.audit_dir,
+                        path,
+                        payload,
+                        identity,
+                    ):
+                        return True
+                    return self._append_payload(path, payload, identity)
             except (OSError, TypeError, ValueError) as e:
                 log.warning("audit: write failed: %s", e)
                 return False
+
+    def _append_payload(
+        self,
+        path: Path,
+        payload: dict[str, Any],
+        identity: tuple[str, str] | None,
+    ) -> bool:
+        """Append under the optional cross-day identity guard held by caller."""
+        signer = self._signer_for(path)
+        if signer is not None:
+            # Sign the already-redacted payload so secrets never enter the
+            # signed bytes either.
+            return bool(
+                signer.write(payload, idempotency_identity=identity)
+            )
+        line = json.dumps(payload, default=str) + "\n"
+        # Sidecar lock FIRST, exactly as AuditSigner.write does. Whole-file
+        # rewriters publish a new inode via os.replace, so an advisory lock on
+        # an already-open handle alone cannot serialize against them.
+        with cross_process_lock(path), open(
+            path,
+            "a+",
+            encoding="utf-8",
+        ) as fileobj:
+            with _file_append_lock(fileobj):
+                if identity is not None and _locked_event_identity_exists(
+                    fileobj,
+                    payload,
+                    identity,
+                ):
+                    return True
+                fileobj.seek(0, os.SEEK_END)
+                fileobj.write(line)
+                fileobj.flush()
+                os.fsync(fileobj.fileno())
+        return True
 
     def _signer_for(self, path: Path) -> Any:
         """Lazily build (and rotate with the day file) the AuditSigner.

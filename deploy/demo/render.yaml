@@ -17,7 +17,7 @@ services:
   - type: web
     name: maverick-demo
     runtime: docker
-    repo: https://github.com/Day-AI-Labs/Lightwork
+    repo: https://github.com/Daybreak-AI-Labs/Lightwork
     dockerfilePath: ./deploy/docker/Dockerfile
     dockerContext: .
     # The image ENTRYPOINT is `maverick`; this is the CMD appended to it, so the

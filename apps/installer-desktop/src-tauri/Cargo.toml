@@ -1,11 +1,11 @@
 [package]
 name = "maverick-installer-desktop"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "Tauri GUI installer for Lightwork"
 authors = ["cdayAI"]
 license = "LicenseRef-Proprietary"
-repository = "https://github.com/Day-AI-Labs/maverick"
+repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
 
 [lib]
 name = "maverick_installer_desktop_lib"

@@ -70,6 +70,21 @@ def _is_test_path(p: Path) -> bool:
     return "tests" in parts or p.name.startswith("test_") or p.name == "conftest.py"
 
 
+def _is_generated_path(p: Path) -> bool:
+    """Return whether *p* is packaging output rather than maintained source.
+
+    ``python -m build`` leaves importable copies below ``build/lib``. Scanning
+    them double-counts every finding and, because the directory is gitignored,
+    can make CI results depend on which packaging command happened to run
+    first. The maintained module remains in the scan; only its generated copy
+    is excluded.
+    """
+    return any(
+        part == "build" and index + 1 < len(p.parts) and p.parts[index + 1] == "lib"
+        for index, part in enumerate(p.parts)
+    )
+
+
 def _handler_names(handler: ast.ExceptHandler) -> set[str]:
     t = handler.type
     if t is None:
@@ -208,11 +223,17 @@ def scan_file(path: Path) -> list[dict]:
 
 
 def _rel(path: Path) -> str:
-    """Repo-relative where possible; absolute otherwise (tests scan tmp files)."""
+    """Stable POSIX-style path, repo-relative where possible.
+
+    Baseline keys are committed once and consumed on Windows and POSIX runners.
+    ``str(Path)`` made every slash differ on Windows, so all known debt appeared
+    simultaneously fixed and newly introduced.  Serialize paths independently
+    of the host filesystem convention.
+    """
     try:
-        return str(path.relative_to(REPO_ROOT))
+        return path.relative_to(REPO_ROOT).as_posix()
     except ValueError:
-        return str(path)
+        return path.as_posix()
 
 
 def scan(roots: tuple[str, ...] | None = None) -> tuple[list[dict], int]:
@@ -231,7 +252,7 @@ def scan(roots: tuple[str, ...] | None = None) -> tuple[list[dict], int]:
         if not base.is_dir():
             continue
         for p in sorted(base.rglob("*.py")):
-            if _is_test_path(p):
+            if _is_test_path(p) or _is_generated_path(p):
                 continue
             inspected += 1
             violations.extend(scan_file(p))

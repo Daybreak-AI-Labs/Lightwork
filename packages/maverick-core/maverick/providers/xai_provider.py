@@ -2,8 +2,9 @@
 
 xAI's API is OpenAI-compatible at https://api.x.ai/v1.
 
-Default model is `grok-4-latest`. Other models: `grok-4-mini`,
-`grok-code-fast`, `grok-3` (legacy).
+Default model is `grok-4.5`. Other directly priced models include
+`grok-build-0.1` and `grok-4.3`; `grok-code-fast` and other aliases without a
+current exact pricing row remain estimate-only.
 
 API key env var: XAI_API_KEY (or GROK_API_KEY as a common alias).
 """
@@ -15,7 +16,7 @@ from .openai_provider import OpenAIClient
 
 
 class XaiClient(OpenAIClient):
-    DEFAULT_MODEL = "grok-4-latest"
+    DEFAULT_MODEL = "grok-4.5"
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None):
         key = (

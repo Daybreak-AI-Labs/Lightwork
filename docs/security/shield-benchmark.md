@@ -22,8 +22,8 @@ caught at the next:
    misses.
 3. **Optional LLM cascade** (`MAVERICK_CASCADE_SHIELD=1`) — a model judge for
    ambiguous cases. Higher recall, costs a call; off by default.
-4. **Full agent-shield SDK** (`pip install agent-shield`) — the ~115-pattern
-   production ruleset. Referenced here, not measured (not installed in CI).
+4. **Full agent-shield SDK** — the separate private/unpublished ~115-pattern
+   ruleset. Referenced here, not measured, and not available from public PyPI.
 5. **Action-layer containment** — the part most "AI safety" layers lack. Even
    when text detection misses, the *action* is bounded:
    - writes through connectors and the `database` tool are **confirm-gated**
@@ -58,34 +58,35 @@ Methodology (baked into the harness so it can't drift):
 - **Leakage guard** (`detector_score.train_overlap`): any external prompt that
   normalizes to a trained-on phrase is dropped before scoring.
 
-Measured on the current corpus (53 train / 31 held-out / 32 benign):
+The table below is the 2026-07-29 snapshot generated into the authoritative
+[`benchmarks/security/RESULTS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/security/RESULTS.md)
+artifact from the current corpus (53 train / 31 held-out / 32 benign):
 
 | backend | TPR train¹ | TPR held-out (95% CI) | FPR benign (95% CI) | F1 held-out |
 |---|---|---|---|---|
-| `builtin@high` | 18.9% | 48.4% [32–65] | 6.2% [2–20] | 0.625 |
-| `builtin@medium` | 20.8% | 54.8% [38–71] | 6.2% [2–20] | 0.680 |
-| `defense_in_depth`² | 75.5% | 58.1% [41–74] | 9.4% [3–24] | 0.692 |
+| `builtin@high` | 18.9% | 71.0% [53–84] | 6.2% [2–20] | 0.800 |
+| `builtin@medium` | 20.8% | 83.9% [67–93] | 6.2% [2–20] | 0.881 |
+| `defense_in_depth`² | 75.5% | 83.9% [67–93] | 9.4% [3–24] | 0.867 |
 
 ¹ Regression check only. ² Regex `OR` weighted heuristics — the realistic
 posture when the SDK is absent.
 
-Evasion (held-out TPR, `defense_in_depth`): zero-width 48.4%, full-width 48.4%,
-homoglyph 48.4%, base64 100% (the base64 path de-obfuscates and re-scans).
+Evasion (held-out TPR, `defense_in_depth`): zero-width 71.0%, full-width 71.0%,
+homoglyph 71.0%, base64 100% (the base64 path de-obfuscates and re-scans).
 
 ### Read this honestly
 
-The offline fallback is a **tripwire, not the primary defense**. It reliably
-catches blatant, known-shape attacks and de-obfuscated variants, but it
-generalizes poorly to novel phrasings (≈58% held-out) and, on its own, misses
-whole families — paraphrased system-prompt-leak, indirect injection, and
-action-abuse. That is the *designed* posture: the fallback exists so the kernel
-is never unguarded, while real recall comes from the heuristics + cascade + SDK
-layers, and real *safety* comes from the action-layer containment above. We
-publish the weak number rather than hide it because diligence will measure it
-anyway, and an honest floor is more credible than a marketing ceiling.
+The offline fallback is a **tripwire, not the primary defense**. This small,
+repository-authored held-out set currently measures 71.0% for `builtin@high`
+and 83.9% for the combined posture, but five held-out cases still miss and the
+confidence intervals are wide. These values are an internal reproducible
+diagnostic, not a generalized public recall claim. Real deployment safety also
+depends on confirmation gates, capabilities, sandbox isolation, budget limits,
+and egress controls. A credible headline efficacy number requires pinned
+external held-out sets plus end-to-end attack-success-rate measurement.
 
 Current held-out misses and false positives are listed in
-[`benchmarks/security/RESULTS.md`](https://github.com/Day-AI-Labs/Lightwork/blob/main/benchmarks/security/RESULTS.md)
+[`benchmarks/security/RESULTS.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/security/RESULTS.md)
 (regenerated with each run) so the gaps are tracked, not forgotten.
 
 ## Latency & ReDoS are a hard CI gate
@@ -108,7 +109,7 @@ carries no encoded blobs — obfuscated variants are built at runtime.
 ## Roadmap to a published recall number
 
 The credible public recall figure comes from scale + end-to-end measurement,
-documented in [`RUNBOOK_SECURITY.md`](https://github.com/Day-AI-Labs/Lightwork/blob/main/benchmarks/security/RUNBOOK_SECURITY.md):
+documented in [`RUNBOOK_SECURITY.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/security/RUNBOOK_SECURITY.md):
 external held-out sets (AgentDojo, JailbreakBench) run through the leakage
 guard, and an end-to-end AgentDojo run measuring attack-success-rate reduction
 with the shield **on vs. off** (the number that actually matters: not "did we

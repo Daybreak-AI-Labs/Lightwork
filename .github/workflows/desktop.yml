@@ -1,14 +1,12 @@
 name: Desktop bundle
 
-# Builds the native Lightwork installer (Tauri) for macOS, Windows, and
-# Linux. For a product release, release.yml owns the `v*` tag and
-# dispatches this workflow for it; the installers are then attached to
-# that GitHub Release, so end users can download and double-click them
-# without a GitHub login.
+# Builds the authenticated source-bootstrap shell (Tauri) for macOS, Windows,
+# and Linux as an engineering workflow artifact. It is not a self-contained
+# product installer and is not attached to product releases.
 #
-# The app needs no prerequisites: pressing "Install Lightwork" runs the
-# same bootstrap as the one-line installers (it installs Python +
-# Lightwork for the user).
+# Pressing "Install from authorized source" clones the pinned private
+# repository commit. The operator therefore needs network access and valid
+# GitHub authorization; the installed Python source remains readable.
 #
 # Status: UNSIGNED. First launch trips SmartScreen (Windows) / Gatekeeper
 # (macOS) with an "unknown developer" prompt. Code signing + notarization
@@ -19,15 +17,8 @@ on:
   workflow_dispatch: {}
   push:
     tags:
-      # desktop-v* builds bundles standalone (no Release attach). Product
-      # `v*` tags intentionally do NOT trigger here: release.yml dispatches
-      # this workflow with `gh workflow run desktop.yml --ref <tag>` after
-      # it creates the Release. That path is reliable even when the release
-      # is cut via workflow_dispatch -- the tag is then created with
-      # GITHUB_TOKEN, and a GITHUB_TOKEN-created tag does NOT emit a push
-      # event that could trigger this workflow (exactly why v0.1.5 shipped
-      # with no installers). workflow_dispatch IS an allowed GITHUB_TOKEN
-      # trigger, so the dispatch from release.yml always fires.
+      # Engineering-only version markers. Product `v*` releases deliberately
+      # do not publish these source-bootstrap bundles as customer installers.
       - 'desktop-v*'
 
 jobs:
@@ -67,8 +58,9 @@ jobs:
       - name: Enable pnpm
         run: corepack enable && corepack prepare pnpm@10.11.1 --activate
 
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
         with:
+          toolchain: "1.97.1"
           targets: ${{ matrix.target }}
 
       - name: Cache cargo
@@ -78,7 +70,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/installer-desktop/src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/installer-desktop/src-tauri/Cargo.toml') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('apps/installer-desktop/src-tauri/Cargo.toml', 'apps/installer-desktop/src-tauri/Cargo.lock') }}
 
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
@@ -109,7 +101,7 @@ jobs:
           esac
 
       - name: Build bundle (unsigned)
-        run: pnpm tauri build
+        run: pnpm tauri build -- --locked
 
       - name: Upload bundle artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -122,58 +114,4 @@ jobs:
             apps/installer-desktop/src-tauri/target/release/bundle/**/*.exe
             apps/installer-desktop/src-tauri/target/release/bundle/**/*.AppImage
             apps/installer-desktop/src-tauri/target/release/bundle/**/*.deb
-          if-no-files-found: warn
-
-
-  attach-release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: bundle
-    runs-on: ubuntu-22.04
-    permissions:
-      actions: read
-      contents: write   # only this minimal job attaches bundles to the GitHub Release
-    steps:
-      - name: Download bundle artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          path: downloaded-bundles
-
-      - name: Attach bundles to the existing GitHub Release
-        # On v* product tags, release.yml is the SOLE creator of the GitHub
-        # Release (it has generate_release_notes:true). Do NOT use
-        # action-gh-release here -- this job could win the create race and the
-        # release would end up with no notes. Instead, wait for release.yml to
-        # create the release, then upload the bundles as assets. Same pattern
-        # as publish.yml's signature-attach step.
-        #
-        # NOTE: these desktop bundles are UNSIGNED (no Apple / Azure Trusted
-        # Signing certs yet). Signing + notarization is the human's later step.
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # This job does no checkout (unlike publish.yml's sign job), so gh
-          # has no git remote to infer the repo from. Without GH_REPO every
-          # `gh release view` below fails to resolve the repository, the poll
-          # loop times out, and the installers silently fall back to workflow
-          # artifacts instead of attaching to the Release.
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -e
-          bundles=$(find downloaded-bundles \
-            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
-               -o -name '*.AppImage' -o -name '*.deb' \) -type f)
-          if [ -z "$bundles" ]; then
-            echo "::warning::No desktop bundles found to attach for $TAG."
-            exit 0
-          fi
-          for i in $(seq 1 30); do
-            if gh release view "$TAG" >/dev/null 2>&1; then
-              gh release upload "$TAG" $bundles --clobber
-              echo "Uploaded desktop bundles to release $TAG"
-              exit 0
-            fi
-            echo "Release $TAG not found yet (attempt $i/30); sleeping 10s..."
-            sleep 10
-          done
-          echo "::warning::Release $TAG never appeared after ~5min; desktop bundles remain available as workflow artifacts."
+          if-no-files-found: error

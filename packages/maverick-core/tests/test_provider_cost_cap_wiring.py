@@ -3,7 +3,7 @@ ENFORCED on the LLM dispatch path -- it was a configured-but-inert control."""
 from __future__ import annotations
 
 import pytest
-from maverick.llm import LLM, LLMResponse
+from maverick.llm import LLM, MODEL_SONNET, LLMResponse
 
 
 def _resp(text: str) -> LLMResponse:
@@ -31,7 +31,7 @@ def test_call_blocked_when_provider_over_cap(monkeypatch):
 
     monkeypatch.setattr(LLM, "_get_client", lambda self, p: FakeClient())
     with pytest.raises(ProviderCapExceeded):
-        LLM(model="anthropic:claude-3-5-sonnet").complete(
+        LLM(model=f"anthropic:{MODEL_SONNET}").complete(
             "sys", [{"role": "user", "content": "hi"}])
     assert dispatched == []  # blocked BEFORE the provider was called
 
@@ -49,7 +49,7 @@ def test_spend_recorded_to_the_cap_ledger_after_a_call(monkeypatch):
             return _resp("ok")
 
     monkeypatch.setattr(LLM, "_get_client", lambda self, p: FakeClient())
-    LLM(model="anthropic:claude-3-5-sonnet").complete(
+    LLM(model=f"anthropic:{MODEL_SONNET}").complete(
         "sys", [{"role": "user", "content": "hi"}])
     assert recorded and recorded[0][0] == "anthropic"  # spend fed to the cap ledger
 
@@ -64,6 +64,6 @@ def test_no_cap_configured_is_a_noop(monkeypatch):
             return _resp("through")
 
     monkeypatch.setattr(LLM, "_get_client", lambda self, p: FakeClient())
-    out = LLM(model="anthropic:claude-3-5-sonnet").complete(
+    out = LLM(model=f"anthropic:{MODEL_SONNET}").complete(
         "sys", [{"role": "user", "content": "hi"}])
     assert out.text == "through"

@@ -30,13 +30,13 @@ def test_openai_cache_read_mult_is_0_5x():
     from maverick.budget import CACHE_READ_MULT_OPENAI, Budget
     assert CACHE_READ_MULT_OPENAI == 0.5
     b = Budget(max_dollars=1000.0)
-    # gpt-5.4 input rate is $3/Mtok. 1M cached read tokens at OpenAI 0.5x
-    # => $1.50, i.e. 5x the Anthropic-rate bill that was happening before.
+    # The flat billing card uses the conservative $5.50/Mtok context/region
+    # ceiling. One million cached-read tokens at OpenAI 0.5x => $2.75.
     b.record_tokens(
         0, 0, model="gpt-5.4", cache_read_tok=1_000_000,
         cache_read_mult=CACHE_READ_MULT_OPENAI,
     )
-    assert b.dollars == pytest.approx(3.0 * 0.5)
+    assert b.dollars == pytest.approx(5.5 * 0.5)
 
 
 def test_record_tokens_backward_compatible():
@@ -73,8 +73,8 @@ def test_openai_provider_passes_openai_cache_mult():
     b = Budget(max_dollars=1000.0)
     OpenAIClient._from_response(resp, b, model="gpt-5.4")
     # All 1M prompt tokens are cached -> billable_in=0, cached at 0.5x of the
-    # gpt-5.4 $3 input rate => $1.50. (At the old 0.1x default it'd be $0.30.)
-    assert b.dollars == pytest.approx(3.0 * 0.5)
+    # gpt-5.4 conservative $5.50 input ceiling => $2.75.
+    assert b.dollars == pytest.approx(5.5 * 0.5)
 
 
 # --- Task 2: cost_router ids all resolve in MODEL_PRICES -------------------
@@ -90,9 +90,14 @@ def test_router_pricing_ids_resolve_in_model_prices():
 
 def test_price_for_model_matches_canonical_catalog():
     from maverick.cost.router import _PRICING, price_for_model
-    from maverick.llm import MODEL_PRICES
+    from maverick.llm import MODEL_PRICES, MODEL_PRICING_PROVIDER
     for _provider, mid, *_ in _PRICING:
-        assert price_for_model(mid) == MODEL_PRICES[mid]
+        quote = MODEL_PRICING_PROVIDER.rates[mid]
+        if quote.verified:
+            assert price_for_model(mid) == MODEL_PRICES[mid]
+        else:
+            assert price_for_model(mid) is None
+            assert price_for_model(mid, estimate_only=True) == MODEL_PRICES[mid]
 
 
 # --- Task 3: lifetime budget_dollars metric isn't stomped across goals -----
@@ -186,7 +191,7 @@ def test_healthy_cheap_provider_still_wins(_route_env, monkeypatch):
     # deepseek healthy (errors below threshold) -> still the cheapest pick.
     h = get()
     for _ in range(10):
-        h.record("deepseek", "deepseek-chat", latency_ms=10, error=False)
+        h.record("deepseek", "deepseek-v4-flash", latency_ms=10, error=False)
 
     got = pick(CostSignal(role="coder", tier=TIER_BASE))
     assert got.startswith("deepseek:"), got
@@ -200,7 +205,7 @@ def test_single_early_error_does_not_exclude(_route_env, monkeypatch):
     from maverick.provider_health import get
 
     # 1/1 = 100% error rate, but below the min sample count -> not excluded.
-    get().record("deepseek", "deepseek-chat", latency_ms=10, error=True)
+    get().record("deepseek", "deepseek-v4-flash", latency_ms=10, error=True)
     got = pick(CostSignal(role="coder", tier=TIER_BASE))
     assert got.startswith("deepseek:"), got
 
@@ -217,7 +222,7 @@ def test_error_rate_threshold_config_knob(_route_env, monkeypatch):
     h = get()
     # Both deepseek base-tier models at 40% error -> both excluded under the
     # 20% ceiling, so routing falls back to the cheapest healthy openai model.
-    for mid in ("deepseek-chat", "deepseek-reasoner"):
+    for mid in ("deepseek-v4-flash", "deepseek-v4-pro"):
         for i in range(10):
             h.record("deepseek", mid, latency_ms=10, error=(i < 4))
 

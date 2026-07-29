@@ -56,7 +56,7 @@ service Maverick {
   remains supported over gRPC.
 
 The full message definitions are in
-[`maverick.proto`](https://github.com/Day-AI-Labs/maverick/blob/main/packages/maverick-core/maverick/grpc_api/maverick.proto).
+[`maverick.proto`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/packages/maverick-core/maverick/grpc_api/maverick.proto).
 
 ## Authentication
 

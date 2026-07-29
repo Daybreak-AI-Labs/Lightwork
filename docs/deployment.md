@@ -7,7 +7,7 @@ Four deployment targets, all driven by the same `maverick init` wizard.
 For most users.
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
 pip install -e ./packages/maverick-core
@@ -23,11 +23,13 @@ Runs as your user. Stores everything under `~/.maverick/`. The sandbox
 `workdir` defaults to `~/maverick-workspace/`. Nothing listens on a
 network port unless you enable a channel that needs one (WhatsApp/SMS).
 
-**Available now:** native single-file builds (PyInstaller) and a
-Tauri-based GUI installer for users who don't open terminals — see the
-[latest release](https://github.com/Day-AI-Labs/Lightwork/releases/latest).
-Both are currently **unsigned** (first launch shows an "unknown
-developer" prompt); code signing + notarization are still coming.
+**Artifact status:** reviewed source is the dependable installation route
+today. A successful tagged release is configured to publish three single-file
+PyInstaller binaries, checksums, SBOMs, and Sigstore material; check the
+[release assets](https://github.com/Daybreak-AI-Labs/Lightwork/releases) for
+the exact operating-system file before relying on one. The Tauri and MSI
+projects are authenticated source-bootstrap/build engineering artifacts, not
+self-contained product installers, and are not attached to product releases.
 
 ## Docker
 
@@ -38,7 +40,7 @@ docker run -it --rm \
   -v ~/maverick-workspace:/workspace \
   -v ~/.maverick/config.toml:/home/maverick/.maverick/config.toml:ro \
   -e ANTHROPIC_API_KEY=... \
-  ghcr.io/day-ai-labs/maverick:latest \
+  ghcr.io/daybreak-ai-labs/lightwork:latest \
   start "..."
 ```
 
@@ -61,7 +63,7 @@ The `vps` deployment target generates:
 ```bash
 LIGHTWORK_REF=<lowercase-full-40-character-commit-sha>
 curl -fsSLo /tmp/lightwork-install.sh \
-  "https://raw.githubusercontent.com/Day-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
+  "https://raw.githubusercontent.com/Daybreak-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
 sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
 sudo systemctl enable --now maverick
 ```

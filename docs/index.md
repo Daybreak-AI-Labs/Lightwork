@@ -8,7 +8,7 @@ with use — deployed in your own environment. It drives any
 LLM (Claude, GPT, Kimi, Grok, Gemini, DeepSeek, Ollama, OpenRouter), and
 ships a governed, auditable safety surface built for regulated teams.
 Lightwork is proprietary, commercially licensed software (see
-[`LICENSE`](LICENSE)).
+[`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)).
 
 ## What you can do with it
 
@@ -52,7 +52,7 @@ Lightwork is proprietary, commercially licensed software (see
 ## Quick start
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork && cd Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork && cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
 pip install -e ./packages/maverick-core
 pip install -e ./apps/installer-cli
@@ -77,9 +77,9 @@ maverick cost                # spend summary
 ## Licensing & access
 
 Lightwork is **proprietary, commercially licensed** software (see
-[`LICENSE`](LICENSE)). It is self-hostable — the runtime executes entirely
+[`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)). It is self-hostable — the runtime executes entirely
 in your own environment — and use requires a license. Pricing is handled
-per engagement; [contact us](https://github.com/Day-AI-Labs/Lightwork) for
+per engagement; [contact us](https://github.com/Daybreak-AI-Labs/Lightwork) for
 evaluation or enterprise access.
 
 A deliberately stripped-down **open-source "lite" edition** may be released
@@ -89,17 +89,16 @@ platform remain proprietary.
 ## Where to go next
 
 - [Getting started](getting-started.md) — install + first goal
-- [Architecture](architecture.md) — the governed agent runtime (OS-style primitives)
+- [Architecture](enterprise/architecture.md) — the governed agent runtime (OS-style primitives)
 - [Configuration](configuration.md) — providers, channels, budgets
 - [Deployment](deployment.md) — desktop / docker / VPS / phone modes
 - [Safety](safety.md) — shield, audit log, kill switches, consent
-- [Security hardening](security-hardening.md) — enterprise opt-in controls (capabilities, tenancy, quotas, OIDC, encryption-at-rest, audit signing) + compliance commands
-- [Security & compliance overview](enterprise/security-overview.md) — the data-boundary guarantee, identity, audit/evidence, reference architecture
+- [Threat model](security/threat-model.md) — trust boundaries, capabilities, tenancy, and security controls
+- [Security & compliance overview](enterprise/security-overview.md) — application egress controls, deployment boundaries, identity, audit/evidence
 - [Editions](enterprise/editions.md) — Community vs Enterprise
 - [Plugins](plugins.md) — extending the tool / channel / skill surface
-- [Self-learning](self-learning.md) — acquire skills, tools, MCP servers, and APIs on demand
-- [Ekko work discovery](ekko-work-discovery.md) — local, opt-in process observation that drafts automation opportunities for human review
-- [Features → Dreaming / Hindsight / Fleet memory](FEATURES.md) — the full learning lifecycle: consolidation, regression detection, value proof, and the cross-vendor memory plane
-- [Features](FEATURES.md) — everything Lightwork does today (shipped capabilities + tools)
-- [Roadmap](ROADMAP.md) — the forward backlog (what isn't built yet)
+- [Governed model improvement](MODEL_IMPROVEMENT_PLATFORM.md) — the learning lifecycle, regression detection, and promotion controls
+- [Starter goals](starter-goals.md) — ready-to-run examples for common workflows
+- [How Lightwork compares](comparison.md) — shipped capabilities and platform positioning
+- Roadmap details are available during enterprise evaluation.
 - [Contributing](CONTRIBUTING.md) — how to send PRs

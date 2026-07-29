@@ -22,6 +22,18 @@ def _isolated_world(tmp_path, monkeypatch):
 
 
 class TestGoals:
+    def test_openapi_documents_idempotency_and_pagination_headers(self):
+        operations = app.openapi()["paths"]["/api/v1/goals"]
+        create_headers = operations["post"]["responses"]["201"]["headers"]
+        assert set(create_headers) == {"Location", "Idempotency-Replayed"}
+        list_headers = operations["get"]["responses"]["200"]["headers"]
+        assert set(list_headers) == {
+            "Pagination-Limit",
+            "Pagination-Offset",
+            "Pagination-Has-More",
+            "Pagination-Next-Offset",
+        }
+
     def test_create_requires_api_key(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         resp = client.post("/api/v1/goals", json={"title": "hi"})
@@ -51,6 +63,8 @@ class TestGoals:
         data = resp.json()
         assert data["status"] == "pending"
         assert data["title"] == "test goal"
+        assert resp.headers["location"] == f"/api/v1/goals/{data['id']}"
+        assert resp.headers["idempotency-replayed"] == "false"
         assert len(called) == 1
         assert called[0][0] == data["id"]
         # Verify payload's max_dollars propagated (the fix from the council
@@ -134,6 +148,9 @@ class TestGoals:
         assert r1.status_code == 201 and r2.status_code == 201
         assert r1.json()["id"] == r2.json()["id"]   # same goal returned
         assert len(called) == 1                      # only one run dispatched
+        assert r1.headers["idempotency-replayed"] == "false"
+        assert r2.headers["idempotency-replayed"] == "true"
+        assert r2.headers["location"] == f"/api/v1/goals/{r1.json()['id']}"
 
     def test_distinct_idempotency_keys_create_distinct_goals(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
@@ -142,6 +159,37 @@ class TestGoals:
         r1 = client.post("/api/v1/goals", json={"title": "g"}, headers={"Idempotency-Key": "k1"})
         r2 = client.post("/api/v1/goals", json={"title": "g"}, headers={"Idempotency-Key": "k2"})
         assert r1.json()["id"] != r2.json()["id"]
+
+    def test_idempotency_race_loser_is_terminal_not_pending(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        from maverick_dashboard import api as api_mod
+
+        world = api_mod._world()
+        winner_id = world.create_goal("winner", "")
+        lookups = iter((None, winner_id))
+        monkeypatch.setattr(
+            world,
+            "lookup_processed_message",
+            lambda *_args, **_kwargs: next(lookups),
+        )
+        monkeypatch.setattr(
+            world,
+            "mark_message_processed",
+            lambda *_args, **_kwargs: False,
+        )
+        monkeypatch.setattr(api_mod, "_world", lambda: world)
+
+        response = client.post(
+            "/api/v1/goals",
+            json={"title": "racing request"},
+            headers={"Idempotency-Key": "same-key"},
+        )
+
+        assert response.status_code == 201
+        assert response.json()["id"] == winner_id
+        assert response.headers["idempotency-replayed"] == "true"
+        loser = next(g for g in world.list_goals() if g.id != winner_id)
+        assert loser.status == "cancelled"
 
     def test_create_rejects_invalid_template_name(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
@@ -187,6 +235,27 @@ class TestGoals:
         resp = client.get("/api/v1/goals")
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
+
+    def test_list_pagination_metadata_is_backward_compatible(self):
+        from maverick_dashboard.app import _world
+
+        world = _world()
+        for index in range(3):
+            world.create_goal(f"goal-{index}", "")
+
+        first = client.get("/api/v1/goals?limit=2&offset=0")
+        assert first.status_code == 200
+        assert len(first.json()) == 2
+        assert first.headers["pagination-limit"] == "2"
+        assert first.headers["pagination-offset"] == "0"
+        assert first.headers["pagination-has-more"] == "true"
+        assert first.headers["pagination-next-offset"] == "2"
+
+        last = client.get("/api/v1/goals?limit=2&offset=2")
+        assert last.status_code == 200
+        assert len(last.json()) == 1
+        assert last.headers["pagination-has-more"] == "false"
+        assert "pagination-next-offset" not in last.headers
 
     def test_get_unknown_404(self):
         resp = client.get("/api/v1/goals/999999")
@@ -557,7 +626,7 @@ class TestMetrics:
         text = resp.text
         # Prometheus text format requires HELP + TYPE lines.
         assert "# HELP maverick_goals_total" in text
-        assert "# TYPE maverick_goals_total counter" in text
+        assert "# TYPE maverick_goals_total gauge" in text
         assert "# HELP maverick_cost_dollars_total" in text
         assert "# TYPE maverick_concurrent_goals gauge" in text
         assert "maverick_concurrent_goals" in text
@@ -565,3 +634,26 @@ class TestMetrics:
         # Job-queue backlog + dead-letter visibility.
         assert "# HELP maverick_queue_jobs" in text
         assert "# TYPE maverick_queue_jobs gauge" in text
+
+    def test_metrics_bounds_principal_cardinality(self, monkeypatch):
+        from maverick import quotas
+        from maverick_dashboard import app as dash_app
+
+        class _Usage:
+            @staticmethod
+            def spend_by_principal():
+                return {f"user:{i}": float(i) for i in range(150)}
+
+        monkeypatch.setattr(quotas, "UsageLedger", _Usage)
+        monkeypatch.setattr(dash_app, "goal_owner_filter", lambda _request: None)
+
+        text = client.get("/metrics").text
+        series = [
+            line for line in text.splitlines()
+            if line.startswith("maverick_user_spend_dollars_today{")
+        ]
+        assert len(series) == dash_app._MAX_USER_SPEND_METRIC_SERIES
+        assert any(
+            f'principal="{dash_app._USER_SPEND_OVERFLOW_LABEL}"' in line
+            for line in series
+        )

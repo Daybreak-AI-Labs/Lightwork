@@ -972,26 +972,25 @@ def record_denied(
     rule: str | None = None,
     reason: str | None = None,
 ) -> None:
-    """Record a trust-plane denial to the audit chain (fail-safe).
+    """Record a trust-plane denial to the audit chain.
 
     Pass a :class:`TrustDecision` (the usual case) or ``rule=``/``reason=``
     directly — the latter lets a caller log a denial without fabricating a
     throwaway decision object. A denial is a security-relevant event, so it
     lands in the Operating Record alongside capability/governance denials.
-    Never raises — an audit-path failure must not change the deny outcome.
+    Ordinary audit outages remain fail-soft. A policy/custody refusal
+    propagates so a denied trust decision cannot be reported as fully recorded
+    when the configured audit guarantee explicitly declined the write.
     """
     if decision is not None:
         rule, reason = decision.rule, decision.reason
-    try:
-        from .audit import record
-        from .audit.events import EventKind
-        record(
-            EventKind.AGENT_TRUST_DENIED, agent="agent_trust",
-            peer=agent_id, direction=direction, rule=rule or "denied",
-            reason=reason or "", correlation_id=correlation_id,
-        )
-    except Exception as e:  # pragma: no cover - audit is best-effort here
-        log.warning("agent_trust: audit record failed: %s", e)
+    from .audit import EventKind, audit_event
+
+    audit_event(
+        EventKind.AGENT_TRUST_DENIED, agent="agent_trust",
+        peer=agent_id, direction=direction, rule=rule or "denied",
+        reason=reason or "", correlation_id=correlation_id,
+    )
 
 
 def status() -> dict[str, Any]:

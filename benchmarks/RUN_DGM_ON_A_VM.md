@@ -20,7 +20,7 @@ equivalent.) SSH in as a sudo user.
 
 ```bash
 sudo apt-get update && sudo apt-get install -y python3 python3-pip python3-venv git tmux
-git clone https://github.com/Day-AI-Labs/Lightwork.git
+git clone https://github.com/Daybreak-AI-Labs/Lightwork.git
 cd Lightwork
 bash .devcontainer/post-create.sh          # editable-installs all packages + deps
 pip install modal                           # grading backend client

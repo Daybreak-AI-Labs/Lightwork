@@ -54,22 +54,15 @@ rm -rf .nuitkavenv dist/nuitka-build
 "$PY" -m venv .nuitkavenv
 # shellcheck disable=SC1091
 source .nuitkavenv/bin/activate
-python -m pip install --upgrade pip wheel >/dev/null
+python -m pip install --upgrade 'pip==26.1.2' >/dev/null
 
 echo ">> [2/6] install packages NON-editable (so Nuitka can follow them)"
-# core WITH deps; the rest --no-deps (the workspace pins are already resolved by
-# core) — mirrors release.yml + build-macos-app.sh so the two binaries agree.
-pip install ./packages/maverick-core
-pip install --no-deps ./packages/maverick-shield
-pip install --no-deps ./packages/maverick-channels
-pip install --no-deps ./packages/maverick-dashboard
-pip install --no-deps ./packages/maverick-mcp
-pip install --no-deps ./apps/installer-cli
-# bundled runtime deps the --no-deps installs skipped:
-pip install 'questionary>=2.0' 'rich>=13.7' \
-            'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' 'python-multipart>=0.0.9'
-pip install 'openai>=1.30'          # provider client so ollama/openai-compatible works
-pip install 'nuitka>=2.4'
+python scripts/install_release_cohort.py \
+  --target-python python \
+  --core-extra release-runtime
+python -m pip install --constraint requirements/ci.txt 'nuitka==4.1.3'
+python -m pip check
+python -c "from maverick.providers import verify_release_runtime; verify_release_runtime()"
 
 echo ">> [3/6] sanity: interpreter has sqlite3 + a C compiler"
 python -c "import sqlite3, _sqlite3; print('sqlite3', sqlite3.sqlite_version)"
@@ -100,10 +93,18 @@ python -m nuitka \
   --include-package=maverick \
   --include-package=maverick_shield \
   --include-package=maverick_channels \
+  --include-package=maverick_evolve \
   --include-package=maverick_dashboard \
   --include-package=maverick_mcp \
+  --include-package=maverick_knowledge \
+  --include-package=maverick_installer \
+  --include-package=pywhispercpp \
+  --include-package=openai \
   --include-package-data=maverick \
+  --include-package-data=maverick_shield \
+  --include-package-data=maverick_evolve \
   --include-package-data=maverick_dashboard \
+  --include-package-data=maverick_knowledge \
   --nofollow-import-to='*.tests' \
   --nofollow-import-to='*.test_*' \
   --assume-yes-for-downloads \
@@ -116,7 +117,14 @@ mkdir -p dist
 mv "dist/nuitka-build/$OUT" "dist/$OUT"
 
 echo ">> [6/6] smoke test the compiled binary"
-"./dist/$OUT" version || "./dist/$OUT" --version
+"./dist/$OUT" --help
+"./dist/$OUT" version
+"./dist/$OUT" dashboard --help
+"./dist/$OUT" mcp --help
+"./dist/$OUT" release-runtime-check
+voice_status="$("./dist/$OUT" voice status)"
+printf '%s\n' "$voice_status"
+grep -F "pywhispercpp engine (installed)" <<<"$voice_status"
 "./dist/$OUT" doctor >/dev/null 2>&1 || true   # doctor exits non-zero without a provider key; that's fine
 
 deactivate || true

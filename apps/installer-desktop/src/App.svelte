@@ -54,16 +54,17 @@
 <main>
   <header>
     <h1>Lightwork</h1>
-    <p class="sub">Install the Lightwork agent on this machine.</p>
+    <p class="sub">Authenticated source bootstrap for authorized operators.</p>
   </header>
 
   {#if status === 'idle'}
     <section>
       <p>
-        This installs Python (if it isn't already) and Lightwork, then you'll run a
-        quick one-time setup. It takes a couple of minutes.
+        This clones a pinned commit from the private Lightwork repository and
+        installs its readable Python source. Network access and GitHub authorization
+        are required. Python is installed first if needed.
       </p>
-      <button on:click={startInstall}>Install Lightwork</button>
+      <button on:click={startInstall}>Install from authorized source</button>
     </section>
   {:else if status === 'installing'}
     <section>

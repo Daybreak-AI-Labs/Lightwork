@@ -187,11 +187,16 @@ def notes_for(
 def erase_notes(
     channel: str | None, user_ids: str | list[str] | tuple[str, ...] | set[str],
     path: Path | str | None = None,
+    *,
+    strict: bool = False,
 ) -> int:
     """Remove persisted notes for ``channel`` and the given user id(s).
 
     Returns the number of scoped note records removed. Malformed lines and
-    unrelated scopes are preserved so erasure is narrow and best-effort.
+    unrelated scopes are preserved so erasure is narrow. The normal dreaming
+    cleanup remains best-effort; the legal-erasure command passes
+    ``strict=True`` so an unreadable or unwritable note store cannot be
+    mistaken for a verified zero.
     """
     if not channel:
         return 0
@@ -228,6 +233,8 @@ def erase_notes(
                 atomic_write_text(p, "".join(kept))
     except OSError as e:
         log.warning("user_notes: erase failed: %s", e)
+        if strict:
+            raise
         return 0
     return removed
 

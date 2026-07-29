@@ -8,10 +8,10 @@ type: application
 # Chart version is independent of the app; bump on template changes.
 version: 0.1.0
 # Tracks the maverick package cohort.
-appVersion: "0.1.6"
-home: https://github.com/Day-AI-Labs/Lightwork
+appVersion: "0.1.7"
+home: https://github.com/Daybreak-AI-Labs/Lightwork
 sources:
-  - https://github.com/Day-AI-Labs/Lightwork
+  - https://github.com/Daybreak-AI-Labs/Lightwork
 maintainers:
   - name: Day AI Labs
 keywords:

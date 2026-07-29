@@ -348,14 +348,45 @@ def _trust_capability(context, agent):
         # so deny instead of silently collapsing to bearer-only access.
         log.error("gRPC trust plane: could not load trust state; refusing RPC: %s", e)
         _abort(context, _grpc_code().UNAVAILABLE, "agent trust policy unavailable")
-    if not enforced:
+    # Treat only the literal boolean False as a disengaged plane. A malformed
+    # or future loader result such as ``None`` must not become a remote-control
+    # bypass through ordinary falsey coercion.
+    if type(enforced) is not bool or not isinstance(registry, dict):
+        log.error(
+            "gRPC trust plane: invalid trust-state result; refusing RPC "
+            "(enforced_type=%s, registry_type=%s)",
+            type(enforced).__name__,
+            type(registry).__name__,
+        )
+        _abort(context, _grpc_code().UNAVAILABLE, "agent trust policy unavailable")
+    if enforced is False:
         return None
     agent_id = agent.id if agent is not None else "grpc"
-    decision = agent_trust.decide_inbound(agent_id, registry=registry, enforced=True)
-    if decision.denied:
-        agent_trust.record_denied(agent_id, decision, direction="inbound")
-        _abort(context, _grpc_code().PERMISSION_DENIED, decision.reason)
-    return decision.capability
+    try:
+        decision = agent_trust.decide_inbound(
+            agent_id, registry=registry, enforced=True,
+        )
+        if not isinstance(decision, agent_trust.TrustDecision):
+            raise TypeError("agent trust decision has an invalid type")
+        denied = decision.denied
+        reason = decision.reason
+        capability = decision.capability
+    except Exception as e:  # pragma: no cover - exercised via monkeypatched seam
+        log.error(
+            "gRPC trust plane: admission decision failed; refusing RPC: %s", e,
+        )
+        _abort(context, _grpc_code().UNAVAILABLE, "agent trust policy unavailable")
+    if denied:
+        try:
+            agent_trust.record_denied(agent_id, decision, direction="inbound")
+        except Exception as e:  # denial must survive an unavailable audit sink
+            log.error(
+                "gRPC trust plane: could not record denied admission for %r: %s",
+                agent_id,
+                e,
+            )
+        _abort(context, _grpc_code().PERMISSION_DENIED, reason)
+    return capability
 
 
 def _capability_from_json(raw: str):

@@ -8,7 +8,7 @@ summary and exposes it as a step output. It never falls back to an
 unqualified public-index install of a Lightwork distribution.
 
 ```yaml
-- uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+- uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
   with:
     goal: "Summarize the changes in this PR and flag anything risky."
     max-dollars: "0.50"
@@ -17,6 +17,12 @@ unqualified public-index install of a Lightwork distribution.
 
 > Replace the placeholder with a reviewed 40-character commit SHA. Do not use
 > a mutable branch or tag for a workflow that receives provider secrets.
+>
+> The default `local` shell backend confines the starting directory, not the
+> host filesystem or network. Use it only on a trusted disposable GitHub-hosted
+> or equivalently isolated runner. On persistent/self-hosted runners, select a
+> real isolation backend such as `docker` or `podman` and apply runner-level
+> network/filesystem controls.
 
 ## Inputs
 
@@ -29,7 +35,7 @@ unqualified public-index install of a Lightwork distribution.
 | `max-dollars` | `1.0` | Hard USD spend cap. The swarm refuses to exceed it. |
 | `max-wall-seconds` | — | Optional wall-clock cap. |
 | `model` | — | Override the model (e.g. `claude-sonnet-4-6`). |
-| `sandbox` | `local` | Shell sandbox backend. A CI runner is already an ephemeral VM, so `local` is the default. |
+| `sandbox` | `local` | Shell backend. `local` executes on the runner host and only sets the working directory; use it solely on a trusted disposable/isolated runner. Prefer `docker` or `podman` where available. |
 | `anthropic-api-key` | `""` | Exported as `ANTHROPIC_API_KEY`. For other providers, leave blank and set that provider's env var on the job. |
 | `version` | `""` | Optional expected version of the source bundled with the pinned action. A mismatch fails closed. |
 | `python-version` | `3.12` | Python to set up. |
@@ -57,7 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+      - uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
         with:
           template: code-review
           params: |
@@ -72,7 +78,7 @@ jobs:
 
 ```yaml
       - id: maverick
-        uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+        uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
         with:
           goal: "Review the diff on this PR and list concrete risks."
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -100,7 +106,7 @@ composite-action steps inherit it:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-      - uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+      - uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
         with:
           goal: "..."
           model: gpt-4.1

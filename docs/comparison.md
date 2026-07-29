@@ -2,7 +2,7 @@
 
 Where Lightwork sits among agent frameworks and coding agents. This page
 describes **Lightwork's** capabilities precisely (each row links to the shipped
-implementation in [`FEATURES.md`](./FEATURES.md)); for other tools it states
+implementation or its [platform overview](./index.md)); for other tools it states
 only their well-known positioning. Vendors move fast — **verify any competitor
 specifics against their own current docs** before relying on them.
 

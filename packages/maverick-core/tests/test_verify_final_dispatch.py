@@ -174,4 +174,4 @@ def test_ensemble_uses_selected_provider_outside_curated_panel(_clean, monkeypat
     ))
 
     assert v.accepts is True
-    assert calls == ["deepseek:deepseek-reasoner"]
+    assert calls == ["deepseek:deepseek-v4-pro"]

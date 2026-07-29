@@ -1,6 +1,7 @@
 """Learned-capability ledger panel + generated-tool removal (#427)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 
@@ -15,11 +16,18 @@ def _client():
 def _isolate(monkeypatch, tmp_path):
     """Point the self-learning ledger + generated-tools dir at tmp_path."""
     from maverick import self_learning
+    from maverick.safety import consent
+
     ledger = tmp_path / "learned.ndjson"
     gen = tmp_path / "generated_tools"
     gen.mkdir()
     monkeypatch.setattr(self_learning, "LEARNED_PATH", ledger)
     monkeypatch.setattr(self_learning, "GENERATED_TOOLS_DIR", gen)
+    monkeypatch.setattr(
+        consent,
+        "CONSENT_LEDGER_PATH",
+        tmp_path / "consent.ledger",
+    )
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     return ledger, gen
 
@@ -303,6 +311,76 @@ def test_delete_removes_only_named_file(monkeypatch, tmp_path):
     assert r.status_code == 204
     assert not (gen / "bad.py").exists()
     assert (gen / "good.py").exists()
+
+
+def test_delete_revokes_digest_and_records_tombstone(monkeypatch, tmp_path):
+    _ledger, gen = _isolate(monkeypatch, tmp_path)
+    from maverick import self_learning
+    from maverick.safety import consent
+
+    source = "# generated tool\n"
+    target = gen / "bad.py"
+    target.write_text(source, encoding="utf-8")
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    scope = f"shared:bad:{digest}"
+    consent.grant_persistent("register-generated-tool", scope=scope)
+    assert consent._check_ledger("register-generated-tool", scope)
+
+    events = []
+    monkeypatch.setattr(
+        "maverick.audit.audit_event",
+        lambda kind, **payload: events.append((kind, payload)) or True,
+    )
+    response = _client().request(
+        "DELETE",
+        "/api/v1/generated-tools/bad.py",
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 204
+    assert not target.exists()
+    assert not consent._check_ledger("register-generated-tool", scope)
+    records = [
+        json.loads(line)
+        for line in consent.consent_ledger_path().read_text(
+            encoding="utf-8",
+        ).splitlines()
+    ]
+    assert records[-1]["op"] == "revoke"
+    assert records[-1]["scope"] == scope
+    assert events[-1][1]["operation"] == "generated_tool_authority_revoked"
+    assert events[-1][1]["source_sha256"] == digest
+
+    # Identical bytes appearing later are inert until a fresh consent decision
+    # creates a new post-tombstone grant.
+    target.write_text(source, encoding="utf-8")
+    assert "bad" not in self_learning.generated_tool_names()
+
+
+def test_delete_audit_failure_keeps_source_but_revokes_authority(
+    monkeypatch,
+    tmp_path,
+):
+    _ledger, gen = _isolate(monkeypatch, tmp_path)
+    from maverick.safety import consent
+
+    source = "# generated tool\n"
+    target = gen / "bad.py"
+    target.write_text(source, encoding="utf-8")
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    scope = f"shared:bad:{digest}"
+    consent.grant_persistent("register-generated-tool", scope=scope)
+    monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: False)
+
+    response = _client().request(
+        "DELETE",
+        "/api/v1/generated-tools/bad.py",
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 503
+    assert target.exists()
+    assert not consent._check_ledger("register-generated-tool", scope)
 
 
 def test_delete_missing_file_404(monkeypatch, tmp_path):

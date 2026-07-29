@@ -173,15 +173,44 @@ def get_stored_role(principal: str) -> str | None:
 def _audit_role_change(actor: str, principal: str, field: str, tenant: str,
                        old, new) -> None:
     """One tamper-evident audit row per role change, so who-granted-whom-what
-    is provable rather than a silent JSON edit. Fail-soft: an audit error never
-    blocks the mutation (mirrors the tenant registry's billing audit)."""
+    is provable rather than a silent JSON edit. Ordinary writer outages remain
+    fail-soft; a configured policy/custody refusal propagates."""
+    from maverick.audit import EventKind, audit_event
+
+    audit_event(
+        EventKind.ACCESS_GRANT_CHANGED,
+        agent=actor or "local",
+        actor=actor or "local",
+        principal=principal,
+        field=field,
+        tenant=tenant,
+        old=old,
+        new=new,
+    )
+
+
+def _audit_role_change_with_rollback(
+    actor: str,
+    principal: str,
+    field: str,
+    tenant: str,
+    old,
+    new,
+    rollback,
+) -> None:
+    """Restore the prior roster before propagating an explicit refusal."""
+    from maverick.audit import AuditRefused
+
     try:
-        from maverick.audit import EventKind, record
-        record(EventKind.ACCESS_GRANT_CHANGED, agent=actor or "local",
-               actor=actor or "local", principal=principal, field=field,
-               tenant=tenant, old=old, new=new)
-    except Exception:  # pragma: no cover -- audit must never break the store
-        pass
+        _audit_role_change(actor, principal, field, tenant, old, new)
+    except AuditRefused:
+        try:
+            rollback()
+        except Exception as rollback_exc:
+            raise RbacStoreError(
+                "audit refused RBAC mutation and roster rollback failed"
+            ) from rollback_exc
+        raise
 
 
 def set_role(principal: str, role: str, *, actor: str = "") -> None:
@@ -193,21 +222,39 @@ def set_role(principal: str, role: str, *, actor: str = "") -> None:
     with _locked(store_path()):
         data = _load()
         old = data.get(principal)
+        if old == role:
+            return
+        prior = dict(data)
         data[principal] = role
         _write(data)
-    if old != role:
-        _audit_role_change(actor, principal, "role", "", old, role)
+        _audit_role_change_with_rollback(
+            actor,
+            principal,
+            "role",
+            "",
+            old,
+            role,
+            lambda: _write(prior),
+        )
 
 
 def remove_user(principal: str, *, actor: str = "") -> None:
     principal = (principal or "").strip()
     with _locked(store_path()):
         data = _load()
+        prior = dict(data)
         removed = data.pop(principal, None)
         if removed is not None:
             _write(data)
-    if removed is not None:
-        _audit_role_change(actor, principal, "role", "", removed, None)
+            _audit_role_change_with_rollback(
+                actor,
+                principal,
+                "role",
+                "",
+                removed,
+                None,
+                lambda: _write(prior),
+            )
 
 
 # --- Per-tenant role memberships ---------------------------------------------
@@ -290,10 +337,20 @@ def set_tenant_role(tenant: str, principal: str, role: str, *,
     with _locked(tenant_store_path()):
         data = _load_tenant()
         old = data.get(tenant, {}).get(principal)
+        if old == role:
+            return
+        prior = json.loads(json.dumps(data))
         data.setdefault(tenant, {})[principal] = role
         _write_tenant(data)
-    if old != role:
-        _audit_role_change(actor, principal, "tenant_role", tenant, old, role)
+        _audit_role_change_with_rollback(
+            actor,
+            principal,
+            "tenant_role",
+            tenant,
+            old,
+            role,
+            lambda: _write_tenant(prior),
+        )
 
 
 def remove_tenant_role(tenant: str, principal: str, *, actor: str = "") -> None:
@@ -302,6 +359,7 @@ def remove_tenant_role(tenant: str, principal: str, *, actor: str = "") -> None:
     removed = None
     with _locked(tenant_store_path()):
         data = _load_tenant()
+        prior = json.loads(json.dumps(data))
         members = data.get(tenant)
         if members:
             removed = members.pop(principal, None)
@@ -309,8 +367,15 @@ def remove_tenant_role(tenant: str, principal: str, *, actor: str = "") -> None:
                 if not members:
                     data.pop(tenant, None)
                 _write_tenant(data)
-    if removed is not None:
-        _audit_role_change(actor, principal, "tenant_role", tenant, removed, None)
+                _audit_role_change_with_rollback(
+                    actor,
+                    principal,
+                    "tenant_role",
+                    tenant,
+                    removed,
+                    None,
+                    lambda: _write_tenant(prior),
+                )
 
 
 def list_tenant_roles(tenant: str) -> dict[str, str]:

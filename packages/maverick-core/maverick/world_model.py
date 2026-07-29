@@ -45,7 +45,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 30
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -560,6 +560,42 @@ MIGRATIONS: dict[int, list[str]] = {
     # v28 Postgres adds goals.owner for SQLite owner-scoped episode parity.
     # SQLite has carried this column since v11, so its matching head is a no-op.
     28: [],
+    # v29 immutable, privacy-minimized erasure receipts. The signed manifest
+    # contains random receipt identity plus exact pre-delete row IDs, but no
+    # channel/user value or subject-derived hash. A trigger prevents updates;
+    # rows may only be inserted or retired after their signed retention date.
+    29: [
+        "CREATE TABLE IF NOT EXISTS erasure_receipts ("
+        " receipt_id TEXT PRIMARY KEY,"
+        " tenant_id TEXT NOT NULL,"
+        " manifest TEXT NOT NULL,"
+        " created_at REAL NOT NULL,"
+        " retained_until REAL NOT NULL)",
+        "CREATE INDEX IF NOT EXISTS idx_erasure_receipts_retention "
+        "ON erasure_receipts(retained_until)",
+        "CREATE TRIGGER IF NOT EXISTS erasure_receipts_no_update "
+        "BEFORE UPDATE ON erasure_receipts BEGIN "
+        "SELECT RAISE(ABORT, 'erasure receipts are immutable'); END",
+        "CREATE TRIGGER IF NOT EXISTS erasure_receipts_no_early_delete "
+        "BEFORE DELETE ON erasure_receipts "
+        "WHEN OLD.retained_until > CAST(strftime('%s', 'now') AS REAL) BEGIN "
+        "SELECT RAISE(ABORT, 'erasure receipt retention is active'); END",
+    ],
+    # v30 approval/audit atomicity: a dashboard vote and its stable audit
+    # delivery intent commit together.  The approval remains pending until
+    # every queued vote is durably appended to the signed audit chain.
+    30: [
+        "CREATE TABLE IF NOT EXISTS approval_audit_outbox ("
+        " event_id TEXT PRIMARY KEY,"
+        " approval_id INTEGER NOT NULL,"
+        " status TEXT NOT NULL,"
+        " decided_by TEXT NOT NULL,"
+        " final_status TEXT,"
+        " created_at REAL NOT NULL,"
+        " delivered_at REAL)",
+        "CREATE INDEX IF NOT EXISTS idx_approval_audit_outbox_pending "
+        "ON approval_audit_outbox(delivered_at, approval_id)",
+    ],
 }
 
 
@@ -605,6 +641,49 @@ class Approval:
     decided_by: str | None = None
     approvals_required: int = 1
     requested_by: str | None = None
+
+
+@dataclass(frozen=True)
+class ApprovalAuditEvent:
+    """One transactionally queued human-approval audit event.
+
+    ``final_status`` is populated by the vote that reaches quorum (or by a
+    denial).  It is deliberately not applied to ``approvals.status`` until all
+    queued events for that approval have a non-null ``delivered_at``.
+    """
+
+    event_id: str
+    approval_id: int
+    status: str
+    decided_by: str
+    final_status: str | None
+    created_at: float
+    delivered_at: float | None
+
+    def matches(self, approval_id: int, status: str, decided_by: str) -> bool:
+        """Whether this row is the exact vote represented by its stable id."""
+        return (
+            self.approval_id == int(approval_id)
+            and self.status == status
+            and self.decided_by == (decided_by or "").strip()
+        )
+
+
+def _approval_audit_event_id(
+    tenant_id: str | None,
+    approval_id: int,
+    status: str,
+    decided_by: str,
+) -> str:
+    """Stable, unambiguous id for retrying one supervisor's exact vote."""
+    parts = (
+        (tenant_id or "").encode("utf-8"),
+        str(int(approval_id)).encode("ascii"),
+        status.encode("ascii"),
+        decided_by.encode("utf-8"),
+    )
+    framed = b"".join(len(part).to_bytes(4, "big") + part for part in parts)
+    return "approval-v1-" + hashlib.sha256(framed).hexdigest()
 
 
 @dataclass
@@ -851,6 +930,10 @@ def _approval_from_row(row) -> Approval:
     d["scope"] = _dec_field(d.get("scope"))
     d["detail"] = _dec_field(d.get("detail"))
     return Approval(**_row_for(Approval, d))
+
+
+def _approval_audit_event_from_row(row) -> ApprovalAuditEvent:
+    return ApprovalAuditEvent(**_row_for(ApprovalAuditEvent, dict(row)))
 
 
 def default_db_path() -> Path:
@@ -2539,6 +2622,315 @@ class WorldModel:
         )
         return [_approval_from_row(r) for r in rows]
 
+    def approval_audit_event_id(
+        self,
+        approval_id: int,
+        status: str,
+        decided_by: str,
+    ) -> str:
+        """Deterministic idempotency id for an exact approval vote."""
+        return _approval_audit_event_id(
+            current_tenant_id(),
+            approval_id,
+            status,
+            (decided_by or "").strip(),
+        )
+
+    def get_approval_audit_event(
+        self,
+        event_id: str,
+    ) -> ApprovalAuditEvent | None:
+        row = self._read_one(
+            "SELECT event_id, approval_id, status, decided_by, final_status, "
+            "created_at, delivered_at FROM approval_audit_outbox "
+            "WHERE event_id = ?",
+            (str(event_id),),
+        )
+        return _approval_audit_event_from_row(row) if row else None
+
+    def pending_approval_audit_events(
+        self,
+        *,
+        approval_id: int | None = None,
+        limit: int = 100,
+    ) -> list[ApprovalAuditEvent]:
+        """Undelivered approval audit events, oldest first."""
+        sql = (
+            "SELECT event_id, approval_id, status, decided_by, final_status, "
+            "created_at, delivered_at FROM approval_audit_outbox "
+            "WHERE delivered_at IS NULL"
+        )
+        params: tuple[Any, ...] = ()
+        if approval_id is not None:
+            sql += " AND approval_id = ?"
+            params = (int(approval_id),)
+        sql += " ORDER BY created_at, event_id LIMIT ?"
+        params += (max(1, min(int(limit), 1000)),)
+        return [
+            _approval_audit_event_from_row(row)
+            for row in self._read_all(sql, params)
+        ]
+
+    def approval_has_pending_finalization(self, approval_id: int) -> bool:
+        """Whether an accepted final vote is waiting on signed audit delivery."""
+        row = self._read_one(
+            "SELECT 1 FROM approval_audit_outbox "
+            "WHERE approval_id = ? AND final_status IS NOT NULL "
+            "AND delivered_at IS NULL LIMIT 1",
+            (int(approval_id),),
+        )
+        return row is not None
+
+    def decide_approval_audited(
+        self,
+        approval_id: int,
+        status: str,
+        *,
+        decided_by: str,
+    ) -> ApprovalAuditEvent | None:
+        """Atomically accept a vote and queue its signed-audit delivery.
+
+        Unlike :meth:`decide_approval`, this does not make a final approval
+        effective in the same transaction.  It records the sign-off plus a
+        deterministic outbox event together, and
+        :meth:`mark_approval_audit_delivered` applies the final status only once
+        every event for this approval has reached the audit chain.
+
+        A retry of the same ``(approval, status, supervisor)`` returns the
+        original event even if the approval is now final.  That makes a retry
+        safe after a database commit acknowledgement is lost.
+        """
+        if status not in ("approved", "denied"):
+            raise ValueError("status must be 'approved' or 'denied'")
+        approver = (decided_by or "").strip()
+        if not approver:
+            return None
+        event_id = self.approval_audit_event_id(
+            approval_id,
+            status,
+            approver,
+        )
+        with self._writing() as conn:
+            # The no-op write acquires SQLite's cross-process write reservation
+            # before any decision read.  A SELECT-first deferred transaction can
+            # otherwise race another process and fail with BUSY_SNAPSHOT.
+            pending = conn.execute(
+                "UPDATE approvals SET status = status "
+                "WHERE id = ? AND status = 'pending'",
+                (int(approval_id),),
+            ).rowcount > 0
+
+            prior = conn.execute(
+                "SELECT event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at FROM approval_audit_outbox "
+                "WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if prior is not None:
+                prior_event = _approval_audit_event_from_row(prior)
+                if not prior_event.matches(approval_id, status, approver):
+                    raise RuntimeError(
+                        "approval audit outbox event identity is corrupt"
+                    )
+                return prior_event
+            if not pending:
+                return None
+
+            row = conn.execute(
+                "SELECT approvals_required, requested_by "
+                "FROM approvals WHERE id = ? AND status = 'pending'",
+                (int(approval_id),),
+            ).fetchone()
+            if row is None:
+                return None
+
+            # Once a vote has selected a final outcome, freeze the approval
+            # while its audit row is pending.  A competing approve/deny must not
+            # race the signed authority boundary.
+            if conn.execute(
+                "SELECT 1 FROM approval_audit_outbox "
+                "WHERE approval_id = ? AND final_status IS NOT NULL "
+                "AND delivered_at IS NULL LIMIT 1",
+                (int(approval_id),),
+            ).fetchone() is not None:
+                return None
+
+            required = max(1, int(row["approvals_required"] or 1))
+            requested_by = row["requested_by"]
+            if (
+                required > 1
+                and status == "approved"
+                and requested_by
+                and approver == requested_by
+            ):
+                from .safety.dual_control import allow_self_approval
+
+                if not allow_self_approval():
+                    return None
+
+            now = time.time()
+            final_status: str | None = None
+            if required <= 1:
+                final_status = status
+            else:
+                # Upgrade seam: v21-v29 could leave a pending N-of-M approval
+                # with one or more signoffs but no transactional outbox rows.
+                # Queue those historical votes before accepting a new one, so
+                # a quorum can never become effective with only its last vote
+                # represented in the signed chain.
+                for legacy in conn.execute(
+                    "SELECT approver, decision, decided_at "
+                    "FROM approval_signoffs WHERE approval_id = ? "
+                    "ORDER BY decided_at, approver",
+                    (int(approval_id),),
+                ).fetchall():
+                    legacy_event_id = self.approval_audit_event_id(
+                        approval_id,
+                        legacy["decision"],
+                        legacy["approver"],
+                    )
+                    conn.execute(
+                        "INSERT OR IGNORE INTO approval_audit_outbox("
+                        "event_id, approval_id, status, decided_by, final_status, "
+                        "created_at, delivered_at) "
+                        "VALUES(?, ?, ?, ?, NULL, ?, NULL)",
+                        (
+                            legacy_event_id,
+                            int(approval_id),
+                            legacy["decision"],
+                            legacy["approver"],
+                            float(legacy["decided_at"]),
+                        ),
+                    )
+                prior = conn.execute(
+                    "SELECT event_id, approval_id, status, decided_by, final_status, "
+                    "created_at, delivered_at FROM approval_audit_outbox "
+                    "WHERE event_id = ?",
+                    (event_id,),
+                ).fetchone()
+                if prior is not None:
+                    prior_event = _approval_audit_event_from_row(prior)
+                    if not prior_event.matches(approval_id, status, approver):
+                        raise RuntimeError(
+                            "approval audit outbox event identity is corrupt"
+                        )
+                    return prior_event
+
+                existing_signoff = conn.execute(
+                    "SELECT decision FROM approval_signoffs "
+                    "WHERE approval_id = ? AND approver = ?",
+                    (int(approval_id), approver),
+                ).fetchone()
+                # A signed human vote is immutable.  The old immediate method
+                # retains its compatibility semantics, but the governed
+                # dashboard path never silently rewrites one decision into the
+                # opposite decision.
+                if (
+                    existing_signoff is not None
+                    and existing_signoff["decision"] != status
+                ):
+                    return None
+                conn.execute(
+                    "INSERT INTO approval_signoffs(approval_id, approver, decision, "
+                    "decided_at) VALUES(?, ?, ?, ?) "
+                    "ON CONFLICT(approval_id, approver) DO NOTHING",
+                    (int(approval_id), approver, status, now),
+                )
+                if status == "denied":
+                    final_status = "denied"
+                else:
+                    approved = conn.execute(
+                        "SELECT COUNT(*) FROM approval_signoffs "
+                        "WHERE approval_id = ? AND decision = 'approved'",
+                        (int(approval_id),),
+                    ).fetchone()[0]
+                    if approved >= required:
+                        final_status = "approved"
+
+            conn.execute(
+                "INSERT INTO approval_audit_outbox("
+                "event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at) VALUES(?, ?, ?, ?, ?, ?, NULL)",
+                (
+                    event_id,
+                    int(approval_id),
+                    status,
+                    approver,
+                    final_status,
+                    now,
+                ),
+            )
+            return ApprovalAuditEvent(
+                event_id=event_id,
+                approval_id=int(approval_id),
+                status=status,
+                decided_by=approver,
+                final_status=final_status,
+                created_at=now,
+                delivered_at=None,
+            )
+
+    def mark_approval_audit_delivered(
+        self,
+        event_id: str,
+        *,
+        delivered_at: float | None = None,
+    ) -> bool:
+        """Acknowledge signed delivery and apply any now-safe final outcome.
+
+        The delivery marker and final approval update share one transaction.
+        Repeating the call is idempotent.  If an audit append succeeded but the
+        commit acknowledgement is lost, the caller can safely append the same
+        stable ``event_id`` again and retry this method.
+        """
+        with self._writing() as conn:
+            event = conn.execute(
+                "SELECT event_id, approval_id, status, decided_by, final_status, "
+                "created_at, delivered_at FROM approval_audit_outbox "
+                "WHERE event_id = ?",
+                (str(event_id),),
+            ).fetchone()
+            if event is None:
+                return False
+            if event["delivered_at"] is None:
+                conn.execute(
+                    "UPDATE approval_audit_outbox SET delivered_at = ? "
+                    "WHERE event_id = ? AND delivered_at IS NULL",
+                    (
+                        float(delivered_at)
+                        if delivered_at is not None
+                        else time.time(),
+                        str(event_id),
+                    ),
+                )
+
+            approval_id = int(event["approval_id"])
+            still_pending = conn.execute(
+                "SELECT 1 FROM approval_audit_outbox "
+                "WHERE approval_id = ? AND delivered_at IS NULL LIMIT 1",
+                (approval_id,),
+            ).fetchone()
+            if still_pending is None:
+                final = conn.execute(
+                    "SELECT final_status, decided_by, created_at "
+                    "FROM approval_audit_outbox "
+                    "WHERE approval_id = ? AND final_status IS NOT NULL "
+                    "ORDER BY created_at DESC, event_id DESC LIMIT 1",
+                    (approval_id,),
+                ).fetchone()
+                if final is not None:
+                    conn.execute(
+                        "UPDATE approvals SET status = ?, decided_at = ?, "
+                        "decided_by = ? WHERE id = ? AND status = 'pending'",
+                        (
+                            final["final_status"],
+                            float(final["created_at"]),
+                            final["decided_by"],
+                            approval_id,
+                        ),
+                    )
+            return True
+
     def decide_approval(self, approval_id: int, status: str,
                         decided_by: str | None = None) -> bool:
         """Record one approver's decision on a pending approval.
@@ -2555,7 +2947,10 @@ class WorldModel:
         Returns True when the vote was accepted (recorded and/or final), False on
         an unknown/already-decided id, a self-approval that is barred, or a
         multi-party vote with no ``decided_by`` (an approver identity is required
-        to enforce distinctness).
+        to enforce distinctness). Once :meth:`decide_approval_audited` has
+        created an outbox row for an approval, this legacy immediate path also
+        returns False; every later vote must remain behind the same signed-audit
+        authority boundary.
         """
         if status not in ("approved", "denied"):
             raise ValueError("status must be 'approved' or 'denied'")
@@ -2567,8 +2962,16 @@ class WorldModel:
             with self._writing() as conn:
                 cur = conn.execute(
                     "UPDATE approvals SET status = ?, decided_at = ?, decided_by = ? "
-                    "WHERE id = ? AND status = 'pending'",
-                    (status, time.time(), decided_by, approval_id),
+                    "WHERE id = ? AND status = 'pending' "
+                    "AND NOT EXISTS (SELECT 1 FROM approval_audit_outbox "
+                    "WHERE approval_id = ?)",
+                    (
+                        status,
+                        time.time(),
+                        decided_by,
+                        approval_id,
+                        approval_id,
+                    ),
                 )
                 return cur.rowcount > 0
 
@@ -2582,6 +2985,22 @@ class WorldModel:
                 return False   # segregation of duties: no self-approval
         now = time.time()
         with self._writing() as conn:
+            # Once the governed dashboard path has queued any audit event, all
+            # later votes must stay on that path. This prevents a legacy caller
+            # from bypassing the signed-delivery gate between quorum votes.
+            locked = conn.execute(
+                "UPDATE approvals SET status = status "
+                "WHERE id = ? AND status = 'pending'",
+                (approval_id,),
+            ).rowcount > 0
+            if not locked:
+                return False
+            if conn.execute(
+                "SELECT 1 FROM approval_audit_outbox "
+                "WHERE approval_id = ? LIMIT 1",
+                (approval_id,),
+            ).fetchone() is not None:
+                return False
             # PK (approval_id, approver) makes a given approver count once; a
             # repeat vote from the same approver updates their recorded decision.
             conn.execute(
@@ -2623,12 +3042,21 @@ class WorldModel:
             "WHERE approval_id = ? ORDER BY decided_at", (approval_id,),
         )
         approvers = [r["approver"] for r in rows if r["decision"] == "approved"]
+        audit_pending = int(
+            self._read_one(
+                "SELECT COUNT(*) FROM approval_audit_outbox "
+                "WHERE approval_id = ? AND delivered_at IS NULL",
+                (approval_id,),
+            )[0]
+        )
         return {
             "status": appr.status,
             "approvals_required": max(1, int(appr.approvals_required or 1)),
             "approved_count": len(approvers),
             "approvers": approvers,
             "requested_by": appr.requested_by,
+            "audit_pending_count": audit_pending,
+            "effective": appr.status != "pending",
         }
 
     def claim_approval(self, approval_id: int, principal: str) -> bool:
@@ -2760,6 +3188,429 @@ class WorldModel:
                 "SELECT * FROM conversations ORDER BY last_seen DESC"
             )
         return [Conversation(**_row_for(Conversation, dict(r))) for r in rows]
+
+    @staticmethod
+    def _erasure_ids(values: list[int] | tuple[int, ...] | set[int]) -> list[int]:
+        ids = sorted(set(values))
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value <= 0
+            for value in ids
+        ):
+            raise ValueError("erasure IDs must be positive integers")
+        return ids
+
+    def _conversation_erasure_plan(
+        self,
+        conn: sqlite3.Connection,
+        conversation_ids: list[int],
+    ) -> dict[str, Any]:
+        if not conversation_ids:
+            return {
+                "conversation_ids": [],
+                "goal_ids": [],
+                "episode_ids": [],
+                "attachment_paths": [],
+            }
+        owned: list[int] = []
+        for chunk in self._chunks(conversation_ids):
+            placeholders = ",".join("?" * len(chunk))
+            owned.extend(
+                int(row[0])
+                for row in conn.execute(
+                    "SELECT id FROM conversations "
+                    f"WHERE id IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+            )
+        owned.sort()
+        if not owned:
+            return {
+                "conversation_ids": [],
+                "goal_ids": [],
+                "episode_ids": [],
+                "attachment_paths": [],
+            }
+        roots: set[int] = set()
+        for chunk in self._chunks(owned):
+            placeholders = ",".join("?" * len(chunk))
+            roots.update(
+                int(row[0])
+                for row in conn.execute(
+                    "SELECT DISTINCT goal_id FROM turns "
+                    f"WHERE conversation_id IN ({placeholders}) "
+                    "AND goal_id IS NOT NULL",
+                    chunk,
+                ).fetchall()
+            )
+        # Walk descendants in bounded batches. A recursive CTE seeded with the
+        # full subject scope can exceed SQLite's compile-time variable ceiling
+        # (commonly 32,766) even though receipts allow 100,000 IDs.
+        goals = set(roots)
+        frontier = set(roots)
+        while frontier:
+            descendants: set[int] = set()
+            for chunk in self._chunks(sorted(frontier)):
+                placeholders = ",".join("?" * len(chunk))
+                descendants.update(
+                    int(row[0])
+                    for row in conn.execute(
+                        "SELECT id FROM goals "
+                        f"WHERE parent_id IN ({placeholders})",
+                        chunk,
+                    ).fetchall()
+                )
+            frontier = descendants - goals
+            goals.update(frontier)
+        goal_ids = sorted(goals)
+        episode_ids: list[int] = []
+        attachment_paths: list[str] = []
+        for chunk in self._chunks(goal_ids):
+            placeholders = ",".join("?" * len(chunk))
+            episode_ids.extend(
+                int(row[0])
+                for row in conn.execute(
+                    "SELECT id FROM episodes "
+                    f"WHERE goal_id IN ({placeholders}) ORDER BY id",
+                    chunk,
+                ).fetchall()
+            )
+            attachment_paths.extend(
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT path FROM attachments "
+                    f"WHERE goal_id IN ({placeholders}) ORDER BY id",
+                    chunk,
+                ).fetchall()
+            )
+        return {
+            "conversation_ids": sorted(owned),
+            "goal_ids": goal_ids,
+            "episode_ids": sorted(episode_ids),
+            "attachment_paths": attachment_paths,
+        }
+
+    def plan_conversation_erasure(
+        self,
+        conversation_ids: list[int],
+    ) -> dict[str, Any]:
+        """Return the exact conversation + descendant-goal closure, read-only."""
+        requested = self._erasure_ids(conversation_ids)
+        with self._write_lock:
+            return self._conversation_erasure_plan(self.conn, requested)
+
+    def store_erasure_receipt(
+        self,
+        receipt_id: str,
+        manifest: str,
+        *,
+        tenant_id: str,
+        created_at: float,
+        retained_until: float,
+    ) -> None:
+        """Insert one immutable signed erasure receipt."""
+        with self._writing() as conn:
+            conn.execute(
+                "INSERT INTO erasure_receipts("
+                "receipt_id, tenant_id, manifest, created_at, retained_until"
+                ") VALUES(?, ?, ?, ?, ?)",
+                (
+                    receipt_id,
+                    tenant_id,
+                    manifest,
+                    float(created_at),
+                    float(retained_until),
+                ),
+            )
+
+    def get_erasure_receipt(
+        self,
+        receipt_id: str,
+        *,
+        tenant_id: str,
+    ) -> str | None:
+        row = self._read_one(
+            "SELECT manifest FROM erasure_receipts "
+            "WHERE receipt_id = ? AND tenant_id = ?",
+            (receipt_id, tenant_id),
+        )
+        return str(row[0]) if row is not None else None
+
+    def retire_erasure_receipts(
+        self,
+        cutoff: float,
+        *,
+        tenant_id: str,
+    ) -> int:
+        """Delete tenant receipts whose signed retention period has elapsed."""
+        with self._writing() as conn:
+            cursor = conn.execute(
+                "DELETE FROM erasure_receipts "
+                "WHERE tenant_id = ? AND retained_until <= ?",
+                (tenant_id, float(cutoff)),
+            )
+            return int(cursor.rowcount)
+
+    @staticmethod
+    def _chunks(values: list[int], size: int = 500) -> Iterator[list[int]]:
+        for index in range(0, len(values), size):
+            yield values[index:index + size]
+
+    def count_erasure_receipt_store(
+        self,
+        store: str,
+        conversation_ids: list[int],
+        goal_ids: list[int],
+        episode_ids: list[int] | None = None,
+    ) -> int:
+        """Count one exact receipt store, so failures remain per-store."""
+        from .erasure_receipts import RECEIPT_STORES
+
+        if store not in RECEIPT_STORES:
+            raise ValueError(f"unsupported erasure receipt store {store!r}")
+        conversations = self._erasure_ids(conversation_ids)
+        goals = self._erasure_ids(goal_ids)
+        episodes = self._erasure_ids(episode_ids or [])
+        conn = self._reader()
+        lock = contextlib.nullcontext() if conn is not None else self._write_lock
+        conn = conn or self.conn
+        with lock:
+            if episode_ids is None:
+                discovered: set[int] = set()
+                for chunk in self._chunks(goals):
+                    placeholders = ",".join("?" * len(chunk))
+                    discovered.update(
+                        int(row[0])
+                        for row in conn.execute(
+                            "SELECT id FROM episodes "
+                            f"WHERE goal_id IN ({placeholders})",
+                            chunk,
+                        ).fetchall()
+                    )
+                episodes = sorted(discovered)
+            if store == "conversations":
+                count = 0
+                for chunk in self._chunks(conversations):
+                    placeholders = ",".join("?" * len(chunk))
+                    count += int(
+                        conn.execute(
+                            "SELECT COUNT(*) FROM conversations "
+                            f"WHERE id IN ({placeholders})",
+                            chunk,
+                        ).fetchone()[0]
+                    )
+                return count
+            if store == "turns":
+                turn_ids: set[int] = set()
+                for field, values in (
+                    ("conversation_id", conversations),
+                    ("goal_id", goals),
+                ):
+                    for chunk in self._chunks(values):
+                        placeholders = ",".join("?" * len(chunk))
+                        turn_ids.update(
+                            int(row[0])
+                            for row in conn.execute(
+                                f"SELECT id FROM turns WHERE {field} "
+                                f"IN ({placeholders})",
+                                chunk,
+                            ).fetchall()
+                        )
+                return len(turn_ids)
+            if store == "goals":
+                count = 0
+                for chunk in self._chunks(goals):
+                    placeholders = ",".join("?" * len(chunk))
+                    count += int(
+                        conn.execute(
+                            f"SELECT COUNT(*) FROM goals "
+                            f"WHERE id IN ({placeholders})",
+                            chunk,
+                        ).fetchone()[0]
+                    )
+                return count
+            if store in (
+                "episodes",
+                "episode_facts",
+                "episode_fact_history",
+            ):
+                table, field = {
+                    "episodes": ("episodes", "id"),
+                    "episode_facts": ("facts", "source_episode_id"),
+                    "episode_fact_history": (
+                        "fact_history",
+                        "source_episode_id",
+                    ),
+                }[store]
+                count = 0
+                for chunk in self._chunks(episodes):
+                    placeholders = ",".join("?" * len(chunk))
+                    count += int(
+                        conn.execute(
+                            f"SELECT COUNT(*) FROM {table} "
+                            f"WHERE {field} IN ({placeholders})",
+                            chunk,
+                        ).fetchone()[0]
+                    )
+                return count
+            count = 0
+            for chunk in self._chunks(goals):
+                placeholders = ",".join("?" * len(chunk))
+                count += int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM {store} "
+                        f"WHERE goal_id IN ({placeholders})",
+                        chunk,
+                    ).fetchone()[0]
+                )
+            return count
+
+    def count_erasure_receipt_residuals(
+        self,
+        conversation_ids: list[int],
+        goal_ids: list[int],
+        episode_ids: list[int] | None = None,
+    ) -> dict[str, int]:
+        """Count exact receipt IDs in every covered store."""
+        from .erasure_receipts import RECEIPT_STORES
+
+        return {
+            store: self.count_erasure_receipt_store(
+                store,
+                conversation_ids,
+                goal_ids,
+                episode_ids,
+            )
+            for store in RECEIPT_STORES
+        }
+
+    def erase_conversations(
+        self,
+        conversation_ids: list[int],
+        *,
+        expected_conversation_ids: list[int] | None = None,
+        expected_goal_ids: list[int] | None = None,
+        expected_episode_ids: list[int] | None = None,
+    ) -> tuple[set[int], list[str], int]:
+        """Delete a receipt-race-checked subject closure in one transaction."""
+        requested = self._erasure_ids(conversation_ids)
+        if not requested:
+            return set(), [], 0
+        expected_conversations = (
+            self._erasure_ids(expected_conversation_ids)
+            if expected_conversation_ids is not None
+            else None
+        )
+        expected_goals = (
+            self._erasure_ids(expected_goal_ids)
+            if expected_goal_ids is not None
+            else None
+        )
+        expected_episodes = (
+            self._erasure_ids(expected_episode_ids)
+            if expected_episode_ids is not None
+            else None
+        )
+        from .erasure_receipts import ErasurePlanChanged
+
+        with self._writing() as conn:
+            # Block every concurrent writer before re-reading the closure. The
+            # durable receipt was inserted in an earlier transaction; a new
+            # turn/subgoal in between must abort before any deletion.
+            conn.execute("BEGIN IMMEDIATE")
+            plan = self._conversation_erasure_plan(conn, requested)
+            if (
+                expected_conversations is not None
+                and plan["conversation_ids"] != expected_conversations
+            ) or (
+                expected_goals is not None
+                and plan["goal_ids"] != expected_goals
+            ) or (
+                expected_episodes is not None
+                and plan["episode_ids"] != expected_episodes
+            ):
+                raise ErasurePlanChanged(
+                    "conversation/goal closure changed after receipt issuance"
+                )
+
+            conv_ids = plan["conversation_ids"]
+            goal_ids = plan["goal_ids"]
+            if not conv_ids:
+                return set(), [], 0
+            conn.execute("PRAGMA defer_foreign_keys = ON")
+            removed_turns = 0
+            for chunk in self._chunks(conv_ids):
+                placeholders = ",".join("?" * len(chunk))
+                cursor = conn.execute(
+                    "DELETE FROM turns "
+                    f"WHERE conversation_id IN ({placeholders})",
+                    chunk,
+                )
+                removed_turns += int(cursor.rowcount)
+
+            if goal_ids:
+                for chunk in self._chunks(goal_ids):
+                    goal_placeholders = ",".join("?" * len(chunk))
+                    conn.execute(
+                        "DELETE FROM turns "
+                        f"WHERE goal_id IN ({goal_placeholders})",
+                        chunk,
+                    )
+                    for table in (
+                        "artifacts",
+                        "attachments",
+                        "goal_events",
+                        "goal_origins",
+                        "messages",
+                        "processed_messages",
+                        "questions",
+                        "share_links",
+                        "signoffs",
+                    ):
+                        conn.execute(
+                            f"DELETE FROM {table} "
+                            f"WHERE goal_id IN ({goal_placeholders})",
+                            chunk,
+                        )
+                    episode_query = (
+                        "SELECT id FROM episodes "
+                        f"WHERE goal_id IN ({goal_placeholders})"
+                    )
+                    # Historical fact values can retain the same personal data
+                    # and carry the same episode FK, so purge both first.
+                    conn.execute(
+                        "DELETE FROM fact_history WHERE source_episode_id IN "
+                        f"({episode_query})",
+                        chunk,
+                    )
+                    conn.execute(
+                        "DELETE FROM facts WHERE source_episode_id IN "
+                        f"({episode_query})",
+                        chunk,
+                    )
+                    conn.execute(
+                        "DELETE FROM episodes "
+                        f"WHERE goal_id IN ({goal_placeholders})",
+                        chunk,
+                    )
+                # With deferred self-referential FKs, goals can be removed in
+                # bounded chunks and checked as one transaction at commit.
+                for chunk in self._chunks(goal_ids):
+                    goal_placeholders = ",".join("?" * len(chunk))
+                    conn.execute(
+                        f"DELETE FROM goals WHERE id IN ({goal_placeholders})",
+                        chunk,
+                    )
+
+            for chunk in self._chunks(conv_ids):
+                conv_placeholders = ",".join("?" * len(chunk))
+                conn.execute(
+                    "DELETE FROM conversations "
+                    f"WHERE id IN ({conv_placeholders})",
+                    chunk,
+                )
+        return set(goal_ids), list(plan["attachment_paths"]), removed_turns
 
     # ----- channel dedup -----
     def mark_message_processed(

@@ -59,7 +59,6 @@ from ..file_lock import (
     ensure_private_directory,
     ensure_private_file,
 )
-from ..paths import data_dir
 from .errors import AuditRefused
 
 log = logging.getLogger(__name__)
@@ -71,7 +70,11 @@ log = logging.getLogger(__name__)
 # override. With no override, ``_key_dir()`` resolves the *tenant-scoped* dir
 # via ``data_dir`` so each tenant gets an independent signing key, while the
 # no-tenant default stays exactly ``~/.maverick/audit/keys``.
-_LEGACY_KEY_DIR = data_dir("audit", "keys")
+# A non-I/O sentinel preserves the historical public ``KEY_DIR`` test hook
+# without resolving config, client binding, tenant state, or storage at import
+# time. Pure consumers such as ``verify_ed25519`` must remain usable against an
+# offline artifact even when the deployment's active config is unreadable.
+_LEGACY_KEY_DIR = Path.home() / ".maverick" / "audit" / "keys"
 KEY_DIR = _LEGACY_KEY_DIR
 
 
@@ -797,11 +800,19 @@ class AuditSigner:
             ) from e
         return _validated_tail_hash(data, operation=operation, path=self._path)
 
-    def write(self, event: dict) -> bool:
-        """Append a signed + chained event row. Returns True on success."""
+    def write(
+        self,
+        event: dict,
+        *,
+        idempotency_identity: tuple[str, str] | None = None,
+    ) -> bool:
+        """Append one signed row, or acknowledge an identical prior identity."""
         with self._lock:
             try:
-                from .writer import _file_append_lock
+                from .writer import (
+                    _file_append_lock,
+                    _locked_event_identity_exists,
+                )
 
                 # A deleted/replaced live file is integrity state loss. Do not
                 # recreate it at genesis; require an existing private regular
@@ -826,6 +837,16 @@ class AuditSigner:
                         # append a cryptographically valid but structurally
                         # forked pair of rows.
                         actual_tail = self._locked_tail_hash(f)
+                        if (
+                            idempotency_identity is not None
+                            and _locked_event_identity_exists(
+                                f,
+                                event,
+                                idempotency_identity,
+                            )
+                        ):
+                            self._last_hash = actual_tail
+                            return True
                         payload = dict(event)
                         payload["prev_hash"] = actual_tail
                         payload["key_id"] = self._key_id

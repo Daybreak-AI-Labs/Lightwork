@@ -27,57 +27,64 @@ def test_pending_skips_already_applied():
     # N-of-M dual control (v21), cluster-wide halt (v22), provider spend (v23),
     # facts provenance columns (v24), fleet learning store (v25),
     # corpus family (v26), episode cache-token spend columns (v27), and
-    # per-principal goal ownership (v28).
+    # per-principal goal ownership (v28), erasure receipts (v29), and the
+    # approval-audit transactional outbox (v30).
     pending = pg.pending_migrations(1)
     assert [v for v, _ in pending] == [
-        10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+        10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
     ]
     # A DB at v10 still needs the remaining upgrades.
     assert [v for v, _ in pg.pending_migrations(10)] == [
-        11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+        11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
     ]
     # A DB at v11 still needs the rest of the ladder.
     assert [v for v, _ in pg.pending_migrations(11)] == [
-        13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+        13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
     ]
     # A DB at v13 still needs goal-domain + projects + artifacts + share/etc.
     assert [v for v, _ in pg.pending_migrations(13)] == [
-        14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+        14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
     ]
     # A DB at v14 still needs projects + artifacts + share/signoff/origin.
     assert [v for v, _ in pg.pending_migrations(14)] == [
-        15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+        15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
     ]
     # A DB at v15 still needs artifacts + share/signoff/origin + fact_history.
     assert [v for v, _ in pg.pending_migrations(15)] == [
-        16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+        16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
     ]
     # A DB at v16 still needs the share/signoff/origin + fact_history migrations.
     assert [v for v, _ in pg.pending_migrations(16)] == [
-        17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+        17, 18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
     ]
     # A DB at v17 still needs fact_history + rate_events.
     assert [v for v, _ in pg.pending_migrations(17)] == [
-        18, 19, 21, 22, 23, 24, 25, 26, 27, 28,
+        18, 19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
     ]
     # A DB at v18 still needs the rate_events migration.
     assert [v for v, _ in pg.pending_migrations(18)] == [
-        19, 21, 22, 23, 24, 25, 26, 27, 28,
+        19, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
     ]
     # A DB at v19 still needs dual-control + halt + provider-spend + facts trust.
     assert [v for v, _ in pg.pending_migrations(19)] == [
-        21, 22, 23, 24, 25, 26, 27, 28,
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
     ]
     # A DB at v21 still needs halt + provider-spend + facts trust.
-    assert [v for v, _ in pg.pending_migrations(21)] == [22, 23, 24, 25, 26, 27, 28]
+    assert [v for v, _ in pg.pending_migrations(21)] == [
+        22, 23, 24, 25, 26, 27, 28, 29, 30,
+    ]
     # A DB at v22 still needs provider-spend + facts trust.
-    assert [v for v, _ in pg.pending_migrations(22)] == [23, 24, 25, 26, 27, 28]
+    assert [v for v, _ in pg.pending_migrations(22)] == [
+        23, 24, 25, 26, 27, 28, 29, 30,
+    ]
     # A DB at v23 still needs the facts provenance migration + the store.
-    assert [v for v, _ in pg.pending_migrations(23)] == [24, 25, 26, 27, 28]
+    assert [v for v, _ in pg.pending_migrations(23)] == [
+        24, 25, 26, 27, 28, 29, 30,
+    ]
     # A DB at v24 still needs the fleet learning store + corpus family.
-    assert [v for v, _ in pg.pending_migrations(24)] == [25, 26, 27, 28]
+    assert [v for v, _ in pg.pending_migrations(24)] == [25, 26, 27, 28, 29, 30]
     # A DB at v25 still needs the corpus family.
-    assert [v for v, _ in pg.pending_migrations(25)] == [26, 27, 28]
+    assert [v for v, _ in pg.pending_migrations(25)] == [26, 27, 28, 29, 30]
 
 
 def test_pending_is_ordered_with_custom_ladder():
@@ -115,7 +122,7 @@ def test_approval_claims_migration_adds_collaboration_columns():
 
 
 def test_schema_version_is_latest_migration():
-    assert pg._PG_SCHEMA_VERSION == 28
+    assert pg._PG_SCHEMA_VERSION == 30
     assert max(v for v, _ in pg.MIGRATIONS) == pg._PG_SCHEMA_VERSION
 
 
@@ -124,7 +131,16 @@ def test_goal_owner_migration_is_additive_and_backfills_legacy_rows():
         "ALTER TABLE goals ADD COLUMN IF NOT EXISTS owner "
         "TEXT NOT NULL DEFAULT '';",
     ]
-    assert [v for v, _ in pg.pending_migrations(27)] == [28]
+    assert [v for v, _ in pg.pending_migrations(27)] == [28, 29, 30]
+
+
+def test_erasure_receipt_migration_is_tenant_scoped_and_immutable():
+    joined = "\n".join(dict(pg.MIGRATIONS)[29])
+    assert "CREATE TABLE IF NOT EXISTS erasure_receipts" in joined
+    assert "PRIMARY KEY (tenant_id, receipt_id)" in joined
+    assert "erasure_receipts_no_update" in joined
+    assert "erasure_receipts_no_early_delete" in joined
+    assert [v for v, _ in pg.pending_migrations(28)] == [29, 30]
 
 
 def test_rate_events_migration_adds_table():
@@ -159,6 +175,15 @@ def test_tenant_scope_noop_without_active_tenant(monkeypatch):
     monkeypatch.setattr(pg, "_active_tenant", lambda: None)
     frag, params = pg._tenant_scope()
     assert frag == ""
+    assert params == []
+
+
+def test_erasure_scope_never_turns_unbound_admin_view_into_global_delete(
+    monkeypatch,
+):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: None)
+    frag, params = pg._erasure_tenant_scope("g.tenant_id")
+    assert frag == "g.tenant_id IS NULL"
     assert params == []
 
 

@@ -1,8 +1,8 @@
 # Press kit
 
 Boilerplate, key facts, and naming rules for writing about Lightwork. Counts
-and capability claims on this page are grounded in
-[`FEATURES.md`](./FEATURES.md), the catalogue of shipped features.
+and capability claims on this page are grounded in the
+[platform overview](./index.md) and linked product documentation.
 
 ## Boilerplate
 
@@ -39,9 +39,10 @@ append-only audit log.
 ## Key facts
 
 - **License model**: proprietary, commercially licensed. Use, redistribution,
-  and derivative works require a license (see [`LICENSE`](../LICENSE)). A
-  stripped-down open-source "lite" edition is a stated possibility on the
-  [roadmap](./ROADMAP.md), not a commitment.
+  and derivative works require a license (see
+  [`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)). A
+  stripped-down open-source "lite" edition is a stated possibility in product
+  planning, not a commitment.
 - **Deployment**: self-hosted — laptop, Docker, VPS, Kubernetes, or a
   disconnected/air-gapped network with no required data egress.
 - **Implementation**: Python (3.10–3.12), 2000+ tests in CI; other languages
@@ -61,18 +62,25 @@ append-only audit log.
   channels; 9 sandbox backends; 12 LLM providers, routable per role.
 - **Auditability**: signed, append-only audit log (`maverick audit verify`),
   SIEM export, encryption-at-rest, DSAR, data-retention enforcement.
-- **Distribution**: native double-click installers for Windows/macOS/Linux, a
-  GHCR Docker image, PyInstaller binaries, and source installs; PyPI publishing
-  for the 8 packages is wired (OIDC) and ships on the first tagged release.
-- **Status**: alpha, installable today (native installers / source).
+- **Distribution**: installable from reviewed source today. A successful tagged
+  release is configured to publish Sigstore-verifiable PyInstaller binaries, a
+  GHCR image, reduced licensed source archives, checksums, and SBOMs. The Tauri
+  and MSI trees are engineering source-bootstrap/build artifacts; a
+  self-contained, platform-signed native installer is not currently shipped.
+  Public PyPI consumption remains disabled until every first-party project name
+  is reserved and protected.
+- **Status**: alpha; verify the exact assets present on a release rather than
+  treating a tag or build recipe as a downloadable product.
 - **Maker**: Day AI Labs (Christopher Day).
 
 ## Naming and trademark usage
 
 "Lightwork", the Lightwork name, and the Lightwork logo are trademarks of
 Christopher Day / Day AI Labs and are **not** licensed under the software
-[`LICENSE`](../LICENSE). The full policy is
-[`TRADEMARK.md`](TRADEMARK.md); the short version for writers:
+[`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE).
+The full
+[`TRADEMARK.md`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md)
+policy applies; the short version for writers:
 
 - **Product name**: "Lightwork", capital M. The CLI command is lowercase
   `maverick`; the PyPI distribution is `maverick-agent`.
@@ -85,7 +93,7 @@ Christopher Day / Day AI Labs and are **not** licensed under the software
   or describing any build as the "official" Lightwork.
 
 For permission requests, contact the licensor via
-[github.com/Day-AI-Labs/Lightwork](https://github.com/Day-AI-Labs/Lightwork).
+[github.com/Daybreak-AI-Labs/Lightwork](https://github.com/Daybreak-AI-Labs/Lightwork).
 
 ## Logos and assets
 
@@ -104,4 +112,4 @@ For permission requests, contact the licensor via
 
 > **Placeholder — maintainers: add a press email/contact here.** Until a
 > dedicated press contact is published, reach the project via
-> [github.com/Day-AI-Labs/Lightwork](https://github.com/Day-AI-Labs/Lightwork).
+> [github.com/Daybreak-AI-Labs/Lightwork](https://github.com/Daybreak-AI-Labs/Lightwork).

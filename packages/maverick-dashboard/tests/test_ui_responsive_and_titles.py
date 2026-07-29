@@ -39,6 +39,22 @@ def test_panel_has_horizontal_overflow(monkeypatch, tmp_path):
     assert ".panel" in css and "overflow-x: auto" in css
 
 
+def test_mobile_topbar_cannot_widen_the_document(monkeypatch, tmp_path):
+    """Phone chrome keeps every control reachable without clipping the page."""
+    from maverick import world_model
+
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    from maverick_dashboard import app as dash_app
+
+    dash_app._world_cache.clear()
+    css = _client().get("/static/lightwork.css").text
+    assert "@media (max-width: 560px)" in css
+    assert ".brand__name { display: none; }" in css
+    assert "flex-wrap: nowrap;" in css
+    assert ".halt-pill { padding-inline: 0.55rem; white-space: nowrap; }" in css
+
+
 # ---------- page titles ----------
 
 @pytest.mark.parametrize("path,fragment", [

@@ -186,10 +186,12 @@ def _record_remediation(item: RemediationItem, block: str) -> bool:
     be written -- the caller then refuses to leave config mutated unlogged (audit
     is load-bearing for a self-modifying-config change)."""
     try:
-        from .audit import EventKind, record
+        from .audit import AuditRefused, EventKind, record
         return bool(record(
             EventKind.CONFIG_REMEDIATED, agent="security_assessor",
             section=item.section, control=item.control, applied=block.strip()))
+    except AuditRefused:
+        raise
     except Exception:
         return False
 
@@ -284,7 +286,22 @@ def apply_remediation(item: RemediationItem, *, dry_run: bool = True) -> ApplyRe
         # and roll the commit back if the audit writer reports failure. This avoids
         # both unlogged config mutation and false-positive remediation audit rows.
         # Kept inside the lock so the rollback write can't race another writer.
-        if not _record_remediation(item, block):
+        from .audit import AuditRefused
+
+        try:
+            recorded = _record_remediation(item, block)
+        except AuditRefused:
+            try:
+                if existed_before:
+                    _write_config_atomic(path, existing, prior=new_text)
+                else:
+                    path.unlink(missing_ok=True)
+            except OSError as rollback_exc:
+                raise RuntimeError(
+                    "audit refused the remediation record and rollback failed"
+                ) from rollback_exc
+            raise
+        if not recorded:
             try:
                 if existed_before:
                     _write_config_atomic(path, existing, prior=new_text)

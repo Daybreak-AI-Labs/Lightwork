@@ -2006,10 +2006,12 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   closed file is durably shipped, encryption-at-rest (`crypto_at_rest.py`,
   `maverick encryption migrate`), SOC2 readiness (`soc2.py`), DSAR (`dsar.py`),
   **differential erasure verification** (`erasure_verify.py`, `maverick
-  erase-verify`) — a right-to-erasure *proof*: reuses the DSAR export (whose
-  subject-matching is guaranteed to agree with the erase path) to assert zero
-  residual records across every store after `maverick erase`, with a
-  before/after `differential` that confirms the erase actually removed data,
+  erase-verify`) — a right-to-erasure *proof*: combines exact post-delete
+  counts with an immutable signed pre-delete scope receipt and a bound signed
+  completion record for attachment files, user notes, the disposable LLM
+  cache, and audit-chain maintenance. Any missing, failed, or tampered proof
+  surface yields `INDETERMINATE`, never a false clean certificate. The
+  before/after `differential` also confirms the erase actually removed data,
   **data-retention enforcement** (`audit/retention.py`, opt-in `[retention]`
   config, `maverick retention enforce [--dry-run]`) — prunes audit files,
   `episodes`/`goal_events` rows, **and the usage-ledger cost buckets**
@@ -3153,9 +3155,11 @@ tested without spawning py-spy.
 
 ## Distribution & install
 
-- **Packaging** — 8 packages (PyPI publish wired via OIDC, pending first tagged
-  release), GHCR Docker image, PyInstaller binaries, native double-click
-  installers (Tauri; `.exe` / `.dmg` / `.AppImage`).
+- **Packaging** — 8-package lockstep cohort (public PyPI consumption remains
+  disabled until every name is reserved), a GHCR image, PyInstaller binaries,
+  reduced licensed source archives, checksums, SBOMs, and Sigstore material.
+  Tauri/MSI outputs remain authenticated source-bootstrap/build engineering
+  artifacts rather than customer product installers.
 - **Backwards-compat tooling** — `maverick migrate` (`migrate.py`): walks an
   existing config forward — real migration advisories (Twilio WhatsApp → the
   first-party Cloud API adapter), unknown-section lint with did-you-mean
@@ -3180,22 +3184,23 @@ tested without spawning py-spy.
   WASI sandbox and cannot exec, so CLI verbs ship as Zed tasks; compiling
   needs the Zed SDK, stated in its README), GitHub Action wrapper
   (`maverick-action`) — all contract-tested against the real CLI verb set.
-- **Native desktop app** (`apps/desktop/`): a Tauri v2 shell for the local
+- **Native desktop engineering scaffold** (`apps/desktop/`): a Tauri v2 shell for the local
   dashboard — splash polls `127.0.0.1:8765/healthz` and redirects, spawning
   `maverick dashboard` as its own child when the port is closed (kills only
   that child on exit); macOS/Windows/Linux bundle targets, ships unsigned
-  (installer-desktop posture), building needs Rust + Tauri CLI.
-- **Windows MSI** (`apps/installer-msi/`): WiX v4 authoring set — per-user
+  (installer-desktop posture), building needs Rust + Tauri CLI. It is not
+  attached to product releases or claimed as a signed customer installer.
+- **Windows MSI engineering build** (`apps/installer-msi/`): WiX v4 authoring set — per-user
   scope, stable UpgradeCode + MajorUpgrade, user-PATH component, a launcher
   that bootstraps the bundled wheel into the console-script target —
   plus `build.ps1` and a dispatch-only `build-msi.yml` workflow; building
-  and signing happen on a Windows host (maintainer act), output ships
-  unsigned like the Tauri installer.
-- **Multi-arch builds** (`deploy/multiarch/`): buildx Dockerfile + script
-  for linux/amd64 + arm64 + riscv64 (ARG-gated base with a debian-sid
-  CPython fallback for riscv64) — core+shield are pure Python; the README
-  carries the honest per-extra wheel-availability table (grpcio/torch/
-  pyarrow et al. lack riscv64 wheels) and the QEMU/binfmt CI commands.
+  and signing happen on a Windows host (maintainer act); the output is not a
+  current product-release artifact.
+- **Reduced multi-arch builds** (`deploy/multiarch/`): buildx Dockerfile +
+  script for exactly linux/amd64 and linux/arm64, installing the constrained
+  core + shield cohort with an optional dashboard. The runtime includes native
+  dependencies; RISC-V is rejected because there is no tested wheel/toolchain
+  path. Use the standard image for the complete eight-package platform.
 - **Hosted demo cluster blueprint**
   (`deploy/reference-architectures/demo-cluster/`): compose + k8s manifests
   for a public read-only demo — the dashboard has no global read-only flag,

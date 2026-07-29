@@ -181,6 +181,23 @@ class MakeImporter:
                 if len(scenarios) < page_size:
                     break
                 offset += page_size
+            else:
+                # Make exposes offset pagination without a continuation token.
+                # Probe one item past the supported window so an account with
+                # more than 10k scenarios fails explicitly instead of looking
+                # like a complete import.
+                r = self._get(
+                    client,
+                    "/api/v2/scenarios",
+                    params={"pg[limit]": 1, "pg[offset]": offset},
+                )
+                r.raise_for_status()
+                if (r.json() or {}).get("scenarios"):
+                    raise ImporterError(
+                        "Make import exceeded the 100-page (10,000 scenario) "
+                        "safety limit; narrow the source account or use an "
+                        "export instead of accepting a silently truncated import"
+                    )
         return out
 
     def translate(self, raw: dict[str, Any]) -> ImportedAutomation:

@@ -32,6 +32,56 @@ def test_empty_policy_when_table_absent(monkeypatch):
     assert cr.role_policy("coder").is_empty()
 
 
+def test_explicit_env_false_overrides_enabled_config(monkeypatch):
+    import maverick.config as config_mod
+
+    monkeypatch.setenv("MAVERICK_COST_ROUTING", "0")
+    monkeypatch.setattr(
+        config_mod,
+        "load_config",
+        lambda: {"routing": {"cost_aware": True}},
+    )
+    assert cr._enabled() is False
+
+
+def test_invalid_config_type_disables_with_actionable_warning(monkeypatch, caplog):
+    import maverick.config as config_mod
+
+    monkeypatch.delenv("MAVERICK_COST_ROUTING", raising=False)
+    monkeypatch.setattr(
+        config_mod,
+        "load_config",
+        lambda: {"routing": {"cost_aware": "false"}},
+    )
+    assert cr._enabled() is False
+    assert "routing.cost_aware must be true or false" in caplog.text
+
+
+def test_invalid_env_value_is_visible_and_fails_closed(monkeypatch, caplog):
+    import maverick.config as config_mod
+
+    monkeypatch.setenv("MAVERICK_COST_ROUTING", "ture")
+    monkeypatch.setattr(
+        config_mod,
+        "load_config",
+        lambda: {"routing": {"cost_aware": True}},
+    )
+    assert cr._enabled() is False
+    assert "MAVERICK_COST_ROUTING must be one of" in caplog.text
+
+
+def test_policy_load_failure_is_visible(monkeypatch, caplog):
+    import maverick.config as config_mod
+
+    monkeypatch.setattr(
+        config_mod,
+        "load_config",
+        lambda: (_ for _ in ()).throw(RuntimeError("broken config source")),
+    )
+    assert cr.role_policy("coder").is_empty()
+    assert "could not read policy" in caplog.text
+
+
 def test_role_policy_parses_config(monkeypatch):
     import maverick.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", lambda: {

@@ -1,6 +1,6 @@
 # maverick.el
 
-Drive the [Lightwork](https://github.com/Day-AI-Labs/maverick) agent runtime
+Drive the [Lightwork](https://github.com/Daybreak-AI-Labs/Lightwork) agent runtime
 from Emacs — a dependency-free front end over the locally installed
 `maverick` CLI (Emacs 27.1+).
 

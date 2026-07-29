@@ -844,9 +844,13 @@ class Agent:
         self._tool_fail_streak: dict[str, int] = {}
 
     def _resolve_capability(self, explicit):
-        """Pick this agent's capability grant. Fail-open: any error or the
-        disabled default yields ``None`` (unrestricted), so a misconfigured
-        policy can never wedge a run."""
+        """Pick this agent's capability grant.
+
+        A readable policy that leaves enforcement disabled intentionally yields
+        ``None`` (legacy unrestricted behavior). Once enforcement is enabled or
+        policy intent is uncertain, root-grant failures yield an explicit
+        deny-all grant instead of silently restoring unrestricted authority.
+        """
         if explicit is not None:
             return explicit
         inherited = getattr(self.ctx, "capability", None)
@@ -854,15 +858,22 @@ class Agent:
             return inherited
         if self.depth != 0:
             return None
+        principal = f"user:{getattr(self.ctx, 'user_id', None) or 'local'}"
         try:
-            from .capability import capability_enforced, capability_from_config
+            from .capability import (
+                Capability,
+                capability_enforced,
+                capability_from_config,
+            )
             if not capability_enforced():
                 return None
             root = capability_from_config(
-                principal=f"user:{getattr(self.ctx, 'user_id', None) or 'local'}",
+                principal=principal,
                 channel=getattr(self.ctx, "channel", None),
                 user_id=getattr(self.ctx, "user_id", None),
             )
+            if not isinstance(root, Capability):
+                raise TypeError("capability root mint returned an invalid grant")
             # Stash on the shared context so spawned children inherit + attenuate.
             try:
                 self.ctx.capability = root
@@ -870,7 +881,21 @@ class Agent:
                 pass
             return root
         except Exception:
-            return None
+            log.exception(
+                "capability root-grant resolution failed for %s; denying all",
+                principal,
+            )
+            # A failure importing the capability module itself should stop agent
+            # construction rather than fabricate authority. Normal mint/config
+            # failures reach this import successfully and receive deny-all.
+            from .capability import deny_all_capability
+
+            root = deny_all_capability(principal)
+            try:
+                self.ctx.capability = root
+            except Exception:
+                pass
+            return root
 
     @property
     def checkpoint_id(self) -> str:

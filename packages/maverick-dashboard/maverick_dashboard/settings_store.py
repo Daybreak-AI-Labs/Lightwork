@@ -596,22 +596,21 @@ def set_learning(enabled: bool, *, actor: str = "local") -> None:
         harness = data.setdefault("self_harness", {})
         harness["risk_limited"] = bool(enabled)
         harness["auto_run"] = bool(enabled)
-        from maverick.config import reset_config_cache
         # Persist the authorization record before publishing a control bit.
         # Runtime readers do not take the dashboard settings lock, so writing
         # first would create a window where an unaudited state was observable.
-        try:
-            from maverick.audit import EventKind, record_global
-            audited = record_global(
-                EventKind.LEARNING_CONTROL_CHANGED,
-                control="governed_learning",
-                enabled=bool(enabled),
-                actor=actor,
-                acknowledged=False,
-                phase="authorized",
-            )
-        except Exception:
-            audited = False
+        from maverick.audit import EventKind, audit_event
+        from maverick.config import reset_config_cache
+
+        audited = audit_event(
+            EventKind.LEARNING_CONTROL_CHANGED,
+            _global=True,
+            control="governed_learning",
+            enabled=bool(enabled),
+            actor=actor,
+            acknowledged=False,
+            phase="authorized",
+        )
         if not audited:
             raise RuntimeError("global learning control audit could not be persisted")
         _write(data)
@@ -651,21 +650,20 @@ def set_dgm(
         # subsequent atomic overlay replacement is the commit. Record the
         # authorization before publishing so an audit failure can never leave
         # even a transiently observable enabled state.
-        try:
-            from maverick.audit import EventKind, record_global
-            audited = record_global(
-                EventKind.LEARNING_CONTROL_CHANGED,
-                control="self_modify",
-                enabled=bool(enabled),
-                actor=actor,
-                acknowledged=bool(acknowledged),
-                previous_requested=bool(before_status["requested"]),
-                previous_effective=bool(before_status["effective"]),
-                previous_state=before_status["state"],
-                phase="authorized",
-            )
-        except Exception:
-            audited = False
+        from maverick.audit import EventKind, audit_event
+
+        audited = audit_event(
+            EventKind.LEARNING_CONTROL_CHANGED,
+            _global=True,
+            control="self_modify",
+            enabled=bool(enabled),
+            actor=actor,
+            acknowledged=bool(acknowledged),
+            previous_requested=bool(before_status["requested"]),
+            previous_effective=bool(before_status["effective"]),
+            previous_state=before_status["state"],
+            phase="authorized",
+        )
         if not audited:
             raise RuntimeError("global DGM control audit could not be persisted")
         _write(data)
@@ -740,19 +738,17 @@ def set_ekko(enabled: bool, *, actor: str = "local") -> dict:
         before = _load_overlay_for_update()
         data = json.loads(json.dumps(before))
         data.setdefault("ekko", {})["enable"] = bool(enabled)
-        try:
-            from maverick.audit import EventKind, record_global
+        from maverick.audit import EventKind, audit_event
 
-            audited = record_global(
-                EventKind.EKKO_CONTROL_CHANGED,
-                control="ekko",
-                enabled=bool(enabled),
-                actor=actor,
-                previous_enabled=bool(before_status.get("enable", False)),
-                phase="authorized",
-            )
-        except Exception:
-            audited = False
+        audited = audit_event(
+            EventKind.EKKO_CONTROL_CHANGED,
+            _global=True,
+            control="ekko",
+            enabled=bool(enabled),
+            actor=actor,
+            previous_enabled=bool(before_status.get("enable", False)),
+            phase="authorized",
+        )
         if not audited:
             raise RuntimeError("global Ekko control audit could not be persisted")
 

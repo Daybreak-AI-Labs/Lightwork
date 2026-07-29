@@ -54,6 +54,61 @@ def test_init_from_file_installs(monkeypatch, tmp_path):
     assert private_path_is_restricted(dst.parent, 0o700)
 
 
+def test_init_from_file_is_idempotent(monkeypatch, tmp_path):
+    """A deployment retry with identical bytes must not republish config."""
+    import maverick.file_lock as file_lock
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    body = '[client]\nid = "acme-corp"\nenforce = true\n'
+    src = tmp_path / "client.toml"
+    src.write_text(body, encoding="utf-8")
+    dst = tmp_path / "installed" / "config.toml"
+    dst.parent.mkdir()
+    dst.write_text(body, encoding="utf-8")
+    file_lock.harden_path_permissions(dst, 0o600)
+    monkeypatch.setenv("MAVERICK_CONFIG", str(dst))
+
+    def unexpected_write(*_args, **_kwargs):
+        raise AssertionError("identical config must not be republished")
+
+    monkeypatch.setattr(file_lock, "atomic_write_bytes", unexpected_write)
+    result = CliRunner().invoke(main, ["init", "--from-file", str(src)])
+
+    assert result.exit_code == 0, result.output
+    assert "config unchanged" in result.output
+    assert dst.read_text(encoding="utf-8") == body
+    assert private_path_is_restricted(dst, 0o600)
+
+
+def test_init_from_file_line_endings_are_idempotent(monkeypatch, tmp_path):
+    """A Windows/Unix line-ending change must not republish logical TOML."""
+    import maverick.file_lock as file_lock
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    body = '[client]\nid = "acme-corp"\nenforce = true\n'
+    src = tmp_path / "client.toml"
+    src.write_bytes(body.encode("utf-8"))
+    dst = tmp_path / "installed" / "config.toml"
+    dst.parent.mkdir()
+    installed = body.replace("\n", "\r\n").encode("utf-8")
+    dst.write_bytes(installed)
+    file_lock.harden_path_permissions(dst, 0o600)
+    monkeypatch.setenv("MAVERICK_CONFIG", str(dst))
+
+    def unexpected_write(*_args, **_kwargs):
+        raise AssertionError("line endings must not republish logical TOML")
+
+    monkeypatch.setattr(file_lock, "atomic_write_bytes", unexpected_write)
+    result = CliRunner().invoke(main, ["init", "--from-file", str(src)])
+
+    assert result.exit_code == 0, result.output
+    assert "config unchanged" in result.output
+    assert dst.read_bytes() == installed
+    assert private_path_is_restricted(dst, 0o600)
+
+
 def test_init_from_file_is_0600_at_creation_not_world_readable(monkeypatch, tmp_path):
     """The config temp must have private custody before any key byte is written.
 

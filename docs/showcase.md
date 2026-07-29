@@ -19,7 +19,7 @@ An entry qualifies when all of these hold:
   config (`config.toml` fragments, goal templates, skills) to reproduce the
   setup.
 - **It ships evidence of a real run** (see below).
-- **It respects the [trademark policy](TRADEMARK.md)** — "built with
+- **It respects the [trademark policy](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/TRADEMARK.md)** — "built with
   Lightwork" is fine (nominative use); naming your product "Lightwork-anything"
   or implying it is the official Lightwork is not.
 

@@ -9,7 +9,7 @@ We take that seriously.
 **Do not file public GitHub issues for vulnerabilities.** Use one of:
 
 1. **GitHub Security Advisories** (preferred):
-   https://github.com/Day-AI-Labs/Lightwork/security/advisories/new
+   https://github.com/Daybreak-AI-Labs/Lightwork/security/advisories/new
 2. **Email**: `security@` the project's domain (or the maintainer's
    public email on their GitHub profile if no domain is set up).
 
@@ -76,7 +76,7 @@ Reports in scope (above) qualify for recognition and rewards.
 | Low | hardening gaps, missing defense-in-depth, doc-level issues | 10 days | next minor |
 
 **Rewards.** Monetary reward amounts per tier are published on the
-[security advisories page](https://github.com/Day-AI-Labs/Lightwork/security/advisories)
+[security advisories page](https://github.com/Daybreak-AI-Labs/Lightwork/security/advisories)
 and may change between program cycles; every valid report receives credit in
 the advisory (unless anonymity is requested) and a hall-of-fame entry below.
 Duplicates go to the first reporter; severity is judged by maintainers
