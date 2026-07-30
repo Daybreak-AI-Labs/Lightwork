@@ -24,16 +24,20 @@ async fn main() -> Result<()> {
     // Spawn `maverick mcp` as a child process; rmcp wires up stdio JSON-RPC and
     // performs the MCP initialize handshake. `()` is the (no-op) client handler.
     let client = ()
-        .serve(TokioChildProcess::new(
-            Command::new("maverick").configure(|cmd| {
+        .serve(TokioChildProcess::new(Command::new("maverick").configure(
+            |cmd| {
                 cmd.arg("mcp");
-            }),
-        )?)
+            },
+        ))?)
         .await?;
 
     let tools = client.list_all_tools().await?;
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
-    println!("Lightwork exposes {} tools: {}", tools.len(), names.join(", "));
+    println!(
+        "Lightwork exposes {} tools: {}",
+        tools.len(),
+        names.join(", ")
+    );
     for expected in ["maverick_start", "maverick_status", "maverick_facts_get"] {
         if !names.contains(&expected) {
             bail!("MCP server is missing tool '{expected}'");

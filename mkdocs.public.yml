@@ -5,6 +5,15 @@ INHERIT: mkdocs.yml
 # is private by default and cannot leak merely because it was omitted from nav.
 docs_dir: .public-docs
 
+# A missing link on the customer-facing site is a release defect. The private
+# documentation inherits informational diagnostics because many engineering
+# pages intentionally cite repository-relative sources outside docs_dir; the
+# reviewed public stage contains every supported target and therefore fails
+# strict builds on missing links.
+validation:
+  links:
+    not_found: warn
+
 # The verifier requires this navigation and docs/public-docs.txt to describe
 # the exact same document set.
 nav:

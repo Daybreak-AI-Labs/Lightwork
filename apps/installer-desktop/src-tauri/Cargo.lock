@@ -1699,12 +1699,15 @@ dependencies = [
 name = "maverick-installer-desktop"
 version = "0.1.7"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tempfile",
  "tokio",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

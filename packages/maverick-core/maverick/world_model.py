@@ -15,6 +15,7 @@ import contextlib
 import functools
 import hashlib
 import logging
+import math
 import os
 import secrets
 import sqlite3
@@ -45,7 +46,7 @@ log = logging.getLogger(__name__)
 # intentional override from the untouched compatibility constant.
 _INITIAL_DEFAULT_DB = data_dir("world.db")
 DEFAULT_DB = _INITIAL_DEFAULT_DB
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -596,6 +597,11 @@ MIGRATIONS: dict[int, list[str]] = {
         "CREATE INDEX IF NOT EXISTS idx_approval_audit_outbox_pending "
         "ON approval_audit_outbox(delivered_at, approval_id)",
     ],
+    # v31 Postgres introduces a dedicated BIGSERIAL fact write clock. SQLite's
+    # INTEGER PRIMARY KEY ``facts.id`` already serves as its 64-bit logical
+    # write clock and advances on every upsert, so its matching migration is a
+    # no-op that keeps the governed backend ladders at the same release head.
+    31: [],
 }
 
 
@@ -1284,7 +1290,7 @@ class WorldModel:
                     "UPDATE goals SET status = 'blocked', "
                     "result = COALESCE(result, '') || ?, "
                     "updated_at = ? "
-                    "WHERE status IN ('active', 'pending') AND updated_at < ?",
+                    "WHERE status IN ('active', 'pending') AND updated_at <= ?",
                     (marker, now, cutoff),
                 )
                 return cur.rowcount
@@ -1296,7 +1302,7 @@ class WorldModel:
             # is negligible.
             rows = conn.execute(
                 "SELECT id, result FROM goals "
-                "WHERE status IN ('active', 'pending') AND updated_at < ?",
+                "WHERE status IN ('active', 'pending') AND updated_at <= ?",
                 (cutoff,),
             ).fetchall()
             from .crypto_at_rest import EncryptionUnavailable
@@ -2254,6 +2260,23 @@ class WorldModel:
             return int(cur.rowcount or 0)
 
     # ----- facts -----
+    @staticmethod
+    def _open_temporal_fact(conn, key: str):
+        """Return this key's one open history window under the write lock."""
+        return conn.execute(
+            "SELECT value, trust_tier, valid_from FROM fact_history "
+            "WHERE key = ? AND valid_to IS NULL "
+            "ORDER BY valid_from DESC LIMIT 1",
+            (key,),
+        ).fetchone()
+
+    @staticmethod
+    def _temporal_write_time(now: float, open_row) -> float:
+        """Keep one key's validity intervals ordered through clock rollback."""
+        if open_row is not None and now <= float(open_row[2]):
+            return math.nextafter(float(open_row[2]), math.inf)
+        return now
+
     def upsert_fact(
         self, key: str, value: str, episode_id: int | None = None,
         *, source: str = "", trust_tier: int = 3, sensitivity: str = "internal",
@@ -2271,10 +2294,7 @@ class WorldModel:
         enc = _enc_field(value)
         with self._writing() as conn:
             if self._temporal_memory:
-                prior = conn.execute(
-                    "SELECT value, trust_tier FROM facts WHERE key = ? LIMIT 1",
-                    (key,),
-                ).fetchone()
+                prior = self._open_temporal_fact(conn, key)
                 # A new version is recorded when the value changes OR the trust
                 # tier changes -- a higher/lower-trust source re-asserting the
                 # same value is a distinct belief worth its own audit window.
@@ -2284,6 +2304,11 @@ class WorldModel:
                     or int(prior[1]) != int(trust_tier)
                 )
                 if changed:
+                    # Temporal validity must never run backwards for this key,
+                    # even if the host clock rolls back. Clamp against the
+                    # indexed open-history row, not MAX(updated_at) over the
+                    # entire facts table (which made bulk ingestion O(N^2)).
+                    now = self._temporal_write_time(now, prior)
                     # Close the open window, then open a new one for this value:
                     # the prior value is preserved with the instant it stopped
                     # being current instead of being overwritten and lost.
@@ -2302,7 +2327,10 @@ class WorldModel:
             conn.execute(
                 "INSERT INTO facts(key, value, source_episode_id, updated_at, "
                 "source, trust_tier, sensitivity) VALUES(?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+                "ON CONFLICT(key) DO UPDATE SET "
+                "id = (SELECT COALESCE(MAX(id), 0) + 1 FROM facts), "
+                "value = excluded.value, "
+                "source_episode_id = excluded.source_episode_id, "
                 "updated_at = excluded.updated_at, source = excluded.source, "
                 "trust_tier = excluded.trust_tier, sensitivity = excluded.sensitivity",
                 (key, enc, episode_id, now, source, int(trust_tier), sensitivity),
@@ -2310,7 +2338,12 @@ class WorldModel:
 
     def get_facts(self) -> dict[str, str]:
         """All current facts as ``{key: value}``, newest first."""
-        rows = self._read_all("SELECT key, value FROM facts ORDER BY updated_at DESC")
+        # ``id`` advances on both insert and upsert, so it is the durable
+        # logical write clock. Wall time remains metadata/retention authority
+        # and cannot reorder recall after an NTP or VM-clock rollback.
+        rows = self._read_all(
+            "SELECT key, value FROM facts ORDER BY id DESC"
+        )
         return {r["key"]: _dec_field(r["value"]) for r in rows}
 
     def get_facts_with_trust(self) -> dict[str, tuple[str, int]]:
@@ -2318,7 +2351,9 @@ class WorldModel:
         the provenance the Memory Guard filters on at recall (see
         :func:`maverick.memory_guard.filter_facts`)."""
         rows = self._read_all(
-            "SELECT key, value, trust_tier FROM facts ORDER BY updated_at DESC")
+            "SELECT key, value, trust_tier FROM facts "
+            "ORDER BY id DESC"
+        )
         return {r["key"]: (_dec_field(r["value"]), int(r["trust_tier"])) for r in rows}
 
     def facts_matching(self, token: str) -> dict[str, str]:
@@ -2438,10 +2473,12 @@ class WorldModel:
         existed until this moment survives the delete."""
         with self._writing() as conn:
             if self._temporal_memory:
+                open_row = self._open_temporal_fact(conn, key)
+                closed_at = self._temporal_write_time(time.time(), open_row)
                 conn.execute(
                     "UPDATE fact_history SET valid_to = ? "
                     "WHERE key = ? AND valid_to IS NULL",
-                    (time.time(), key),
+                    (closed_at, key),
                 )
             return conn.execute("DELETE FROM facts WHERE key = ?", (key,)).rowcount
 
@@ -2452,7 +2489,7 @@ class WorldModel:
         delete (and is itself opt-in)."""
         rows = self._read_all(
             "SELECT key FROM facts WHERE updated_at < ? "
-            "ORDER BY updated_at ASC LIMIT ?",
+            "ORDER BY updated_at ASC, id ASC LIMIT ?",
             (older_than, max(1, int(limit))),
         )
         return [r["key"] for r in rows]
@@ -2467,7 +2504,8 @@ class WorldModel:
         like = self._like_escape(key_prefix) + "%"
         rows = self._read_all(
             "SELECT key, length(value) AS sz FROM facts "
-            "WHERE key LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?",
+            "WHERE key LIKE ? ESCAPE '\\' "
+            "ORDER BY id DESC LIMIT ?",
             (like, limit),
         )
         return [(r["key"], r["sz"]) for r in rows]
@@ -2484,7 +2522,7 @@ class WorldModel:
             rows = self._read_all(
                 "SELECT key, value FROM facts WHERE key LIKE ? ESCAPE '\\' "
                 "AND (key LIKE ? ESCAPE '\\' OR value LIKE ? ESCAPE '\\') "
-                "ORDER BY updated_at DESC LIMIT ?",
+                "ORDER BY id DESC LIMIT ?",
                 (pfx, q, q, limit),
             )
             return [(r["key"], _dec_field(r["value"])) for r in rows]
@@ -2495,7 +2533,7 @@ class WorldModel:
         # match SQLite LIKE's ASCII semantics on the plaintext path.
         rows = self._read_all(
             "SELECT key, value FROM facts WHERE key LIKE ? ESCAPE '\\' "
-            "ORDER BY updated_at DESC",
+            "ORDER BY id DESC",
             (pfx,),
         )
         needle = query.lower()

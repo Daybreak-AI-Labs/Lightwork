@@ -22,11 +22,19 @@ npm run check
 Expected output ends with:
 
 ```
-Lightwork exposes 8 tools: maverick_answer, maverick_fact_set, ...
+Lightwork exposes 10 tools: maverick_answer, maverick_fact_set, ...
 maverick_facts_get round-trip OK
+maverick_facts_get structuredContent OK: {"facts":{...}}
 OK: TypeScript client drove Lightwork over MCP end-to-end
 ```
 
 CI runs exactly this on every change to the MCP server or the clients (see
 `.github/workflows/mcp-clients.yml`), so a break in `maverick mcp` or the
 documented tool surface fails the build.
+
+This example passes a reviewed child environment rather than all of
+`process.env`: Lightwork-owned settings, provider/identity inputs, and required
+runtime/proxy/CA names only. The Python child still loads the normal CLI config
+and enabled vaults. See the
+[client quickstart](../../../docs/clients/typescript-quickstart.md#child-environment-cli-config-and-vaults)
+for the exact boundary.

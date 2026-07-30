@@ -13,12 +13,17 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 import uuid
 import zipfile
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+_SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(_SCRIPT_DIR))
+from release_version import validate_version  # noqa: E402
+
 SKU_DIRS = (
     Path("demo/grc-concierge"),
     Path("demo/platform-threat-hunter"),
@@ -27,7 +32,6 @@ SKU_DIRS = (
 )
 TEXT_SUFFIXES = {".html", ".json", ".md", ".py", ".sh", ".txt", ".toml", ".yaml", ".yml"}
 TEXT_FILENAMES = {"LICENSE"}
-VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){2}(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?$")
 ARTIFACT_RE = re.compile(r"^lightwork-[a-z0-9]+(?:-[a-z0-9]+)*$")
 REVISION_RE = re.compile(r"^(?:[0-9a-f]{7,64}|unknown)$")
 DEPENDENCY_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(.*)$")
@@ -256,8 +260,16 @@ def _cyclonedx_bom(
 def build(version: str, source_revision: str, output_dir: Path) -> list[Path]:
     version = version.removeprefix("v")
     source_revision = source_revision.casefold()
-    if not VERSION_RE.fullmatch(version):
-        raise ValueError(f"version must be a semantic release version, got {version!r}")
+    try:
+        release = validate_version(version)
+    except ValueError as exc:
+        raise ValueError(
+            f"version must be a canonical public release version, got {version!r}"
+        ) from exc
+    if release.version != version:
+        raise ValueError(
+            f"version must be a canonical public release version, got {version!r}"
+        )
     if not REVISION_RE.fullmatch(source_revision):
         raise ValueError("source revision must be 7-64 hexadecimal characters or 'unknown'")
     output_dir.mkdir(parents=True, exist_ok=True)

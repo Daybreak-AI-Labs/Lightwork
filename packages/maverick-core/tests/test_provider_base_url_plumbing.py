@@ -33,6 +33,7 @@ _URL_VARS = ("VLLM_BASE_URL", "TGI_BASE_URL", "OPENAI_COMPATIBLE_BASE_URL")
 def clean_provider_env(monkeypatch, tmp_path):
     for v in _KEY_VARS + _URL_VARS:
         monkeypatch.delenv(v, raising=False)
+    monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE", raising=False)
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     return tmp_path / "config.toml"
 
@@ -131,11 +132,14 @@ def test_predicate_ignores_empty_interpolated_key(clean_provider_env, monkeypatc
     assert any_provider_configured() is False
 
 
-def test_channel_server_accepts_config_only_provider(clean_provider_env, monkeypatch):
+def test_channel_server_accepts_selected_keyless_local_provider(
+    clean_provider_env, monkeypatch,
+):
     """`maverick serve` had its own hard-coded ANTHROPIC_API_KEY-only gate
     (server.py build_from_config), refusing config-only self-hosted setups
     that `start` and the dashboard accept (round-3 platform-test finding)."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE", "vllm:stub")
     clean_provider_env.write_text(
         '[providers.vllm]\nbase_url = "http://127.0.0.1:9911/v1"\n'
         "[channels.cli]\nenabled = true\n",

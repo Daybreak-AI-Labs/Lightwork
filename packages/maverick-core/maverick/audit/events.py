@@ -114,6 +114,7 @@ class EventKind:
     TOOL_RESULT     = "tool_result"
     SHIELD_BLOCK    = "shield_block"
     CAPABILITY_DENIED = "capability_denied"
+    SANDBOX_DENIED = "sandbox_denied"
     # Per-call token exchange (zero-trust): one row per minted, single-tool,
     # short-lived capability token, so the Operating Record shows the scoped
     # credential each tool call actually ran under -- not just the run-long grant.

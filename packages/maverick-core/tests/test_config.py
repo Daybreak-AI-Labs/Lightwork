@@ -4,6 +4,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
 from maverick.config import _interp, config_path, get_safety, load_config
 
 
@@ -338,13 +339,102 @@ def test_env_file_key_satisfies_any_provider_configured(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
-    for var in cfg_mod.PROVIDER_KEY_ENV_VARS + cfg_mod.PROVIDER_BASE_URL_ENV_VARS:
+    for var in (
+        cfg_mod.PROVIDER_CREDENTIAL_ENV_VARS
+        + cfg_mod.PROVIDER_BASE_URL_ENV_VARS
+    ):
         monkeypatch.delenv(var, raising=False)
     try:
         assert cfg_mod.any_provider_configured() is True
     finally:
         os.environ.pop("ANTHROPIC_API_KEY", None)
         cfg_mod.reset_config_cache()
+
+
+def test_incomplete_azure_credential_does_not_satisfy_configured_probe(monkeypatch):
+    import maverick.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "load_config", dict)
+    for var in (
+        cfg_mod.PROVIDER_CREDENTIAL_ENV_VARS
+        + cfg_mod.PROVIDER_BASE_URL_ENV_VARS
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("AZURE_OPENAI_AD_TOKEN", "static-entra-token")
+
+    assert cfg_mod.any_provider_configured() is False
+
+
+@pytest.mark.parametrize(
+    ("auth_name", "auth_value"),
+    [
+        ("AZURE_OPENAI_AD_TOKEN", "static-entra-token"),
+        ("AZURE_OPENAI_AUTH", "entra_id"),
+        ("AZURE_OPENAI_API_KEY", "azure-api-key"),
+    ],
+)
+def test_complete_azure_route_satisfies_configured_probe(
+    monkeypatch, auth_name, auth_value,
+):
+    import maverick.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "load_config", dict)
+    for var in (
+        cfg_mod.PROVIDER_CREDENTIAL_ENV_VARS
+        + cfg_mod.PROVIDER_BASE_URL_ENV_VARS
+        + ("AZURE_OPENAI_AUTH", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT")
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://res.openai.azure.com")
+    monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT", "gpt5")
+    monkeypatch.setenv(auth_name, auth_value)
+
+    assert cfg_mod.any_provider_configured() is True
+
+
+def test_azure_config_auth_mode_satisfies_configured_probe(monkeypatch):
+    import maverick.config as cfg_mod
+
+    table = {
+        "base_url": "https://res.openai.azure.com",
+        "auth_mode": "entra_id",
+    }
+    monkeypatch.setattr(
+        cfg_mod,
+        "load_config",
+        lambda: {"providers": {"azure": table}},
+    )
+    for var in (
+        cfg_mod.PROVIDER_CREDENTIAL_ENV_VARS
+        + cfg_mod.PROVIDER_BASE_URL_ENV_VARS
+        + ("AZURE_OPENAI_AUTH", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT")
+    ):
+        monkeypatch.delenv(var, raising=False)
+    # A conflicting environment mode must not override the admitted table.
+    monkeypatch.setenv("AZURE_OPENAI_AUTH", "api_key")
+    monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT", "gpt5")
+
+    assert cfg_mod.azure_provider_configuration_missing(table) == ()
+    assert cfg_mod.any_provider_configured() is True
+
+
+def test_codex_login_file_satisfies_configured_probe(tmp_path, monkeypatch):
+    import maverick.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "load_config", dict)
+    for var in (
+        cfg_mod.PROVIDER_CREDENTIAL_ENV_VARS
+        + cfg_mod.PROVIDER_BASE_URL_ENV_VARS
+        + ("AZURE_OPENAI_AUTH", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT")
+    ):
+        monkeypatch.delenv(var, raising=False)
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    assert cfg_mod.any_provider_configured() is False
+    (codex_home / "auth.json").write_text("{}", encoding="utf-8")
+    assert cfg_mod.any_provider_configured() is True
 
 
 def test_env_file_recheck_is_throttled(monkeypatch):

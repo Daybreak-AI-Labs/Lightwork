@@ -61,32 +61,47 @@ You should see the tool list (10 tools), then the swarm's final answer.
 
 ## What works
 
-The MCP server exposes a small, stable control surface — **8
-`maverick_*` tools**, not the 100+ in-kernel tools. You drive the swarm;
-the kernel runs the tools internally.
+The MCP server exposes **10 `maverick_*` tools** while the much larger
+in-kernel registry stays behind the swarm. The
+[registry-backed TypeScript surface table](./typescript-quickstart.md#what-works)
+is canonical for names and arguments; it covers goal lifecycle, queued
+answers, skills, facts, and governed fleet memory.
 
-- `maverick_start` `{title, description?, max_dollars?, max_wall_seconds?, max_depth?}`
-  — start a goal; returns the final answer.
-- `maverick_status` — list recent goals + open questions.
-- `maverick_resume` `{goal_id}` — resume a paused goal.
-- `maverick_answer` `{question_id, answer}` — answer a queued question.
-- `maverick_skill_install` `{source}` / `maverick_skills_list`.
-- `maverick_fact_set` `{key, value}` / `maverick_facts_get`.
-- `maverick_fleet_ingest` `{agent_id, vendor, kind, goal_text}` — deposit an
-  external agent's experience into governed fleet memory (roster-gated).
-- `maverick_fleet_recall` `{agent_id, vendor, query}` — governed, audited
-  memory read for an external fleet agent.
+## Typed results (`structuredContent`)
 
-The 100+ in-kernel tools (web search, repo map, editor, Slack, S3, …)
-are **not** individually exposed over MCP — the swarm decides which to
-use while running a goal.
+Besides the human-readable `result.Content`, every tool returns a
+`result.StructuredContent` JSON object matching its `outputSchema`. For example,
+`maverick_facts_get` returns `{ "facts": { … } }`, which the SDK exposes as a
+`JsonElement`:
+
+```csharp
+var factsResult = await client.CallToolAsync("maverick_facts_get");
+if (factsResult.StructuredContent is { } structured &&
+    structured.TryGetProperty("facts", out var facts))
+{
+    Console.WriteLine(facts);
+}
+```
+
+The shapes are identical across languages — see the
+[TypeScript quickstart](./typescript-quickstart.md#typed-results-structuredcontent)
+for the registry-backed per-tool table.
+
+## Child environment, CLI config, and vaults
+
+This minimal .NET snippet leaves child-environment handling to the SDK, so
+`maverick mcp` inherits the .NET process environment. The Python child also
+loads the same CLI `config.toml`, dashboard/tenant settings, secret-provider
+files, and enabled vaults; credentials are resolved there, not sent as MCP
+arguments. For production, apply the
+[reviewed filtered-environment policy](./typescript-quickstart.md#child-environment-cli-config-and-vaults)
+used by the runnable TypeScript example.
 
 ## What's gated
 
-- The 50+ third-party tools (Slack, GitHub Actions, S3, Salesforce,
-  …) read credentials from the same env / `~/.maverick/config.toml`
-  the CLI uses. The C# client doesn't pass credentials — the kernel
-  reads them once.
+- Third-party tools (Slack, GitHub Actions, S3, Salesforce, …) resolve
+  credentials inside the Python child through the CLI's config and secret
+  providers; they are not fields in MCP requests.
 - Some tools require optional extras (`maverick-agent[redis]`,
   `[s3]`, etc.). Install only what you use.
 

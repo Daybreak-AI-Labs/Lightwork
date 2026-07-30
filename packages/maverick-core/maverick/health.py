@@ -6,12 +6,19 @@ review).
 """
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
 import sys
 
 import click
+
+from .sandbox.gvisor import (
+    GVisorRuntimeValidationError,
+    validate_docker_gvisor_runtime,
+)
+from .sandbox_names import BUILTIN_SANDBOX_BACKENDS
 
 GREEN = click.style("✓", fg="green")
 YELLOW = click.style("!", fg="yellow")
@@ -223,6 +230,87 @@ def _check_sandbox_podman() -> None:
              fix="podman is installed but unresponsive")
 
 
+def _check_sandbox_gvisor(cfg: dict) -> None:
+    """Verify Docker reports an approved runsc runtime registration."""
+    if not shutil.which("docker"):
+        _row(
+            RED,
+            "sandbox",
+            "gvisor needs Docker, but docker is not on PATH",
+            fix="install Docker and gVisor/runsc, then register runsc with Docker",
+        )
+        return
+    configured = cfg.get("sandbox", {}).get("runtime", "runsc")
+    try:
+        runtime = validate_docker_gvisor_runtime(configured)
+    except GVisorRuntimeValidationError as exc:
+        _row(
+            RED,
+            "sandbox",
+            str(exc),
+            fix=(
+                "register an approved runsc runtime with an exact runsc path "
+                "or io.containerd.runsc.v1 runtimeType"
+            ),
+        )
+        return
+    except (OSError, subprocess.CalledProcessError):
+        _row(
+            RED,
+            "sandbox",
+            "gvisor Docker daemon/runtime probe failed",
+            fix="start Docker and confirm `docker info` succeeds",
+        )
+        return
+    except subprocess.TimeoutExpired:
+        _row(
+            RED,
+            "sandbox",
+            "gvisor Docker daemon/runtime probe timed out",
+            fix="restart Docker and confirm `docker info` succeeds",
+        )
+        return
+    _row(
+        GREEN,
+        "sandbox",
+        f"gvisor runtime {runtime!r} registration metadata validated; "
+        "Docker responding",
+    )
+
+
+def _check_sandbox_modal(cfg: dict) -> None:
+    allow_network = cfg.get("sandbox", {}).get("allow_network", False)
+    acknowledged = allow_network is True or (
+        isinstance(allow_network, str)
+        and allow_network.strip().lower() in {"1", "true", "yes", "on"}
+    )
+    if not acknowledged:
+        _row(
+            RED,
+            "sandbox",
+            "modal selected with allow_network=false; execution will fail closed",
+            fix="set [sandbox] allow_network = true to acknowledge Modal networking",
+        )
+        return
+    try:
+        modal_present = importlib.util.find_spec("modal") is not None
+    except (ImportError, ValueError):
+        modal_present = False
+    if not modal_present:
+        _row(
+            RED,
+            "sandbox",
+            "modal package is not installed",
+            fix="install the reviewed `packages/maverick-core[modal]` extra",
+        )
+        return
+    _row(
+        GREEN,
+        "sandbox",
+        "modal package present (authentication is verified on first execution)",
+    )
+
+
 def _check_sandbox_kubernetes(cfg: dict) -> None:
     if not shutil.which("kubectl"):
         _row(RED, "sandbox", "kubectl not on PATH",
@@ -271,6 +359,9 @@ def _check_sandbox(cfg: dict) -> None:
     if backend == "docker":
         _check_sandbox_docker()
         return
+    if backend == "gvisor":
+        _check_sandbox_gvisor(cfg)
+        return
     if backend == "podman":
         _check_sandbox_podman()
         return
@@ -289,6 +380,9 @@ def _check_sandbox(cfg: dict) -> None:
     if backend == "firecracker":
         _check_sandbox_firecracker(cfg)
         return
+    if backend == "modal":
+        _check_sandbox_modal(cfg)
+        return
     if backend == "ssh":
         host = cfg.get("sandbox", {}).get("host", "")
         if not host:
@@ -297,8 +391,37 @@ def _check_sandbox(cfg: dict) -> None:
             return
         _row(YELLOW, "sandbox", f"ssh -> {host} (live check not performed)")
         return
-    _row(YELLOW, "sandbox", f"backend={backend} not recognized",
-         fix="supported: local, docker, podman, devcontainer, kubernetes, firecracker, ssh")
+    if backend.startswith("ep:"):
+        name = backend[3:].strip()
+        try:
+            from .sandbox.sdk import installed_entry_point_names
+
+            installed = installed_entry_point_names()
+        except Exception:
+            installed = ()
+        if name and name in installed:
+            _row(
+                GREEN,
+                "sandbox",
+                f"external sandbox entry point {name!r} is installed",
+            )
+        else:
+            _row(
+                RED,
+                "sandbox",
+                f"external sandbox entry point {name or '(empty)'!r} is not installed",
+                fix=(
+                    "install the backend package or select one of: "
+                    + (", ".join(installed) if installed else "no installed entry points")
+                ),
+            )
+        return
+    _row(
+        YELLOW,
+        "sandbox",
+        f"backend={backend} not recognized",
+        fix=f"supported: {', '.join(BUILTIN_SANDBOX_BACKENDS)}, or ep:<name>",
+    )
 
 
 CHANNEL_DEPS = {

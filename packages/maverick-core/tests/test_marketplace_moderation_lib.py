@@ -36,7 +36,7 @@ _GOOD_MANIFEST = """\
 [plugin]
 name = "weather"
 version = "0.1.0"
-api_version = "1"
+api_version = "2"
 description = "Weather lookups"
 author = "Jane Dev <jane@example.com>"
 license = "MIT"

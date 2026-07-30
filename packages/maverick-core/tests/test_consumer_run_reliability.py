@@ -14,51 +14,122 @@ from pathlib import Path
 
 import pytest
 
-# ---------- A: provider key gate accepts config-configured providers ----------
+# ---------- A: provider gate validates the selected route --------------------
 
-def test_has_configured_provider_detects_base_url(monkeypatch):
+def test_require_llm_key_accepts_selected_route(monkeypatch):
     from maverick import cli
     monkeypatch.setattr(
-        "maverick.config.load_config",
-        lambda: {"providers": {"openai_compatible": {"base_url": "http://127.0.0.1:1234/v1"}}},
+        cli,
+        "_model_route_configuration_missing",
+        lambda model=None: ("ollama", ()),
     )
-    assert cli._has_configured_provider() is True
+    assert cli._require_llm_key("ollama:qwen") == "config"
 
 
-def test_has_configured_provider_detects_api_key(monkeypatch):
+def test_require_llm_key_blocks_when_selected_route_is_incomplete(monkeypatch):
     from maverick import cli
     monkeypatch.setattr(
-        "maverick.config.load_config",
-        lambda: {"providers": {"anthropic": {"api_key": "sk-real"}}},
+        cli,
+        "_model_route_configuration_missing",
+        lambda model=None: ("anthropic", ("api_key",)),
     )
-    assert cli._has_configured_provider() is True
-
-
-def test_has_configured_provider_false_for_empty_interpolated_key(monkeypatch):
-    # config interpolates ${UNSET} to "" -- an empty key is NOT availability.
-    from maverick import cli
-    monkeypatch.setattr(
-        "maverick.config.load_config",
-        lambda: {"providers": {"anthropic": {"api_key": ""}}},
-    )
-    assert cli._has_configured_provider() is False
-
-
-def test_require_llm_key_accepts_config_provider(monkeypatch):
-    from maverick import cli
-    for var in cli._PROVIDER_ENV_VARS:
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr(cli, "_has_configured_provider", lambda: True)
-    assert cli._require_llm_key() == "config"
-
-
-def test_require_llm_key_blocks_when_nothing_configured(monkeypatch):
-    from maverick import cli
-    for var in cli._PROVIDER_ENV_VARS:
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr(cli, "_has_configured_provider", lambda: False)
     with pytest.raises(SystemExit):
-        cli._require_llm_key()
+        cli._require_llm_key("anthropic:test")
+
+
+@pytest.mark.parametrize("provider", ["ollama", "tgi", "vllm"])
+def test_keyless_local_route_is_not_rejected(provider, monkeypatch):
+    from maverick import cli
+
+    monkeypatch.setattr("maverick.config.load_config", dict)
+    assert cli._require_llm_key(f"{provider}:test") == "config"
+
+
+def test_codex_login_is_not_rejected(monkeypatch):
+    from maverick import cli
+
+    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr(
+        "maverick.providers.codex_cli_provider._auth_file_present",
+        lambda: True,
+    )
+    assert cli._require_llm_key("codex_cli:gpt-5") == "config"
+
+
+def test_codex_config_table_token_is_not_rejected(monkeypatch):
+    from maverick import cli
+
+    monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda: {
+            "providers": {"codex_cli": {"api_key": "configured-token"}}  # pragma: allowlist secret
+        },
+    )
+    monkeypatch.setattr(
+        "maverick.providers.codex_cli_provider._auth_file_present",
+        lambda: False,
+    )
+    assert cli._require_llm_key("codex_cli:gpt-5") == "config"
+
+
+def test_unrelated_provider_key_does_not_unblock_selected_route(monkeypatch):
+    from maverick import cli
+
+    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "unrelated-openai-key")
+    with pytest.raises(SystemExit):
+        cli._require_llm_key("anthropic:test")
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        "anthropic",
+        "openai",
+        "openrouter",
+        "ollama",
+        "gemini",
+        "moonshot",
+        "deepseek",
+        "xai",
+        "tgi",
+        "vllm",
+        "azure",
+        "bedrock",
+        "openai_compatible",
+        "codex_cli",
+    ],
+)
+def test_cli_selected_route_contract_matches_operator_preflight(
+    provider, monkeypatch,
+):
+    from maverick import cli, config
+    from maverick.operator_preflight import _route_configuration_missing
+
+    for name in (
+        config.PROVIDER_CREDENTIAL_ENV_VARS
+        + config.PROVIDER_BASE_URL_ENV_VARS
+        + (
+            "AZURE_OPENAI_AUTH",
+            "AZURE_OPENAI_ENDPOINT",
+            "AZURE_OPENAI_DEPLOYMENT",
+            "AWS_REGION",
+        )
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(config, "load_config", dict)
+    monkeypatch.setattr(
+        "maverick.providers.codex_cli_provider._auth_file_present",
+        lambda: False,
+    )
+
+    selected, missing = cli._model_route_configuration_missing(
+        f"{provider}:test"
+    )
+    assert selected == provider
+    assert missing == _route_configuration_missing(provider, {})
 
 
 # ---------- B: an erroring run marks its goal failed (no ghost) ----------
@@ -114,7 +185,7 @@ def test_chat_threads_conversation_across_turns(tmp_path: Path, monkeypatch):
     from click.testing import CliRunner
     from maverick.world_model import open_world
 
-    monkeypatch.setattr(cli, "_require_llm_key", lambda: "test")
+    monkeypatch.setattr(cli, "_require_llm_key", lambda *args: "test")
 
     seen: list = []
 
@@ -156,7 +227,7 @@ def test_chat_starts_new_conversation_for_each_repl_session(tmp_path: Path, monk
     import maverick.orchestrator as orch
     from click.testing import CliRunner
 
-    monkeypatch.setattr(cli, "_require_llm_key", lambda: "test")
+    monkeypatch.setattr(cli, "_require_llm_key", lambda *args: "test")
 
     seen: list[int] = []
 

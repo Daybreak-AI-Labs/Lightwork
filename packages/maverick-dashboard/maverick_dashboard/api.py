@@ -39,7 +39,6 @@ from starlette.responses import (
 )
 
 from ._shared import (
-    _any_provider_key_set,
     _get_sse_semaphore,
     _world,
     require_provider_or_400,
@@ -3704,7 +3703,7 @@ async def draft_flow_endpoint(request: Request, payload: FlowDraftIn) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick_dashboard._shared import require_provider_or_400
-    require_provider_or_400()
+    require_provider_or_400(role="orchestrator")
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request, source="flow-authoring")
     from maverick.flow.draft import draft_flow
@@ -3737,7 +3736,7 @@ async def flow_chat_endpoint(request: Request, payload: FlowChatIn) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick_dashboard._shared import require_provider_or_400
-    require_provider_or_400()
+    require_provider_or_400(role="orchestrator")
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request, source="flow-authoring")
     from maverick.flow import Flow
@@ -7157,13 +7156,19 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
     from maverick.jd_hiring import draft_from_jd
 
     llm = None
+    llm_model = None
     budget = None
-    from maverick.config import any_provider_configured
-    if any_provider_configured():
+    from maverick.config import load_config
+    from maverick.operator_preflight import _role_configuration_missing
+
+    _, missing = _role_configuration_missing("writer", load_config())
+    if not missing:
         try:
             from maverick.budget import Budget
-            from maverick.llm import LLM
-            llm = LLM()
+            from maverick.llm import LLM, model_for_role
+
+            llm_model = model_for_role("writer")
+            llm = LLM(model=llm_model)
             # A draft is one bounded completion; cap it like workflow drafting
             # so the endpoint can't be spammed into a cost amplifier.
             budget = Budget(max_dollars=0.50)
@@ -7173,7 +7178,8 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
     try:
         profile = await run_in_threadpool(
             lambda: draft_from_jd(payload.role_title, payload.jd_text,
-                                  industry=payload.industry, llm=llm, budget=budget))
+                                  industry=payload.industry, llm=llm,
+                                  model=llm_model, budget=budget))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -7972,13 +7978,7 @@ async def run_fleet_agent(
     # read-only viewer is 403'd up front (owner-scoping alone is not authz: a
     # viewer can own a fleet yet must never run one).
     require_permission(request, "operate")
-    if not _any_provider_key_set():
-        raise HTTPException(
-            status_code=400,
-            detail=("No AI provider is connected yet — an administrator needs "
-                    "to add a provider key before agents can run "
-                    "(run 'maverick init')."),
-        )
+    require_provider_or_400()
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request)
 
@@ -8694,17 +8694,7 @@ def _extract_binary_doc_text(raw: bytes, filename: str) -> str | None:
 
 
 def _require_provider_for_drafting() -> None:
-    if not _any_provider_key_set():
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "No AI provider is connected yet — drafting a workflow needs "
-                "one, and an administrator can set it up (run 'maverick init', "
-                "export a provider key such as ANTHROPIC_API_KEY / "
-                "OPENAI_API_KEY / GEMINI_API_KEY, or set [providers.<name>] "
-                "in the server configuration)."
-            ),
-        )
+    require_provider_or_400(role="orchestrator")
 
 
 def _drafter_for(form: str):

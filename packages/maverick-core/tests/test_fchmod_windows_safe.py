@@ -13,7 +13,8 @@ def _no_fchmod(monkeypatch):
     """Simulate Windows: os.fchmod raises AttributeError when called."""
     def _boom(*_a, **_k):
         raise AttributeError("module 'os' has no attribute 'fchmod'")
-    monkeypatch.setattr(os, "fchmod", _boom)
+    # Python 3.12 on Windows has no attribute; newer builds may expose a stub.
+    monkeypatch.setattr(os, "fchmod", _boom, raising=False)
 
 
 def test_sealing_atomic_write_survives_no_fchmod(_no_fchmod, tmp_path):

@@ -79,3 +79,34 @@ def test_validation_error_page_does_not_echo_detail(monkeypatch, tmp_path):
     # The crafted value and validation internals must not appear in the HTML.
     assert "PWNED_REFLECTED" not in resp.text
     assert "marker_xyzzy" not in resp.text
+
+
+def test_runtime_policy_error_is_actionable_and_path_safe(monkeypatch):
+    from maverick.runtime_overrides import RuntimeOverridesSecurityError
+    from maverick_dashboard import app as dash_app
+
+    @dash_app.app.get("/__policy_unavailable")
+    async def policy_unavailable():
+        raise RuntimeOverridesSecurityError(
+            "private path C:/Users/example/runtime-overrides.toml"
+        )
+
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    client = TestClient(dash_app.app, raise_server_exceptions=False)
+
+    html = client.get(
+        "/__policy_unavailable",
+        headers={"Accept": "text/html"},
+    )
+    assert html.status_code == 503
+    assert "Operator policy unavailable" in html.text
+    assert "maverick doctor" in html.text
+    assert "C:/Users/example" not in html.text
+
+    api = client.get(
+        "/__policy_unavailable",
+        headers={"Accept": "application/json"},
+    )
+    assert api.status_code == 503
+    assert api.json()["code"] == "operator_policy_unavailable"
+    assert "C:/Users/example" not in api.text

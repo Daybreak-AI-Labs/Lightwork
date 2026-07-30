@@ -1326,9 +1326,9 @@ class MCPServer:
             # The frozen creation snapshot: a CreateTaskResult always reports the
             # initial `working` status, even if a fast tool already finished.
             return {"task": task.create_result}
-        # Side-effectful action tools (start/resume) can't be re-derived, so
-        # they stash their structured result here during dispatch; reset per
-        # call so a prior call's value can't leak.
+        # Action tools cannot safely be re-derived after dispatch, so they
+        # stash their structured result here; reset per call so a prior call's
+        # value cannot leak.
         self._structured_override = None
         pending = self._resource_pending_updates()
         if pending is None:
@@ -1381,9 +1381,9 @@ class MCPServer:
             "isError": False,
             "content": [{"type": "text", "text": result}],
         }
-        # Tools that declare an outputSchema (the read-only query tools) also
-        # return structuredContent, so typed cross-language clients get parsed
-        # JSON instead of re-parsing the text block. Additive + best-effort:
+        # Every tool declares an outputSchema and returns structuredContent, so
+        # typed cross-language clients get parsed JSON instead of re-parsing
+        # the text block. Additive + best-effort:
         # the text block stays for back-compat, and a structured-form failure
         # never fails the call. Structured data is scanned before it is
         # attached, because it may carry fields absent from the text block
@@ -1451,7 +1451,9 @@ class MCPServer:
     def _tool_fleet_ingest(self, args: dict) -> str:
         from maverick import fleet_memory
         ok, reason = fleet_memory.ingest(dict(args), shield=self._shield)
-        return json.dumps({"ok": bool(ok), "reason": reason})
+        result = {"ok": bool(ok), "reason": reason}
+        self._structured_override = result
+        return json.dumps(result)
 
     def _tool_fleet_recall(self, args: dict) -> str:
         from maverick import fleet_memory
@@ -1462,7 +1464,9 @@ class MCPServer:
             domain=str(args.get("domain", "") or "") or None,
             shield=self._shield,
         )
-        return json.dumps({"context": context, "reason": reason})
+        result = {"context": context, "reason": reason}
+        self._structured_override = result
+        return json.dumps(result)
 
     def _structured_result(self, name: str) -> dict | None:
         """Structured form of a query tool's result, matching its outputSchema.

@@ -60,7 +60,11 @@ pub fn average_hash_from_rgb_bytes(
     }
     let expected = width.saturating_mul(height).saturating_mul(3);
     if rgb.len() != expected {
-        return Err(format!("expected {} rgb bytes, got {}", expected, rgb.len()));
+        return Err(format!(
+            "expected {} rgb bytes, got {}",
+            expected,
+            rgb.len()
+        ));
     }
     let gray: Vec<i128> = rgb
         .chunks_exact(3)

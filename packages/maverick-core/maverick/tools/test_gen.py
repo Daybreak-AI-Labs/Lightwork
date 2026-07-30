@@ -19,6 +19,10 @@ from typing import Any
 
 from . import Tool
 
+# This is a production tool module, not a pytest module.  Its public factory
+# keeps the registry name ``test_gen`` without being collected as a test.
+__test__ = False
+
 # Map a type-hint name to a Hypothesis strategy expression.
 _STRATEGY = {
     "int": "st.integers()",

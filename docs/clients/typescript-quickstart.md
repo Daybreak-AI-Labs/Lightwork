@@ -21,16 +21,25 @@ npm i @modelcontextprotocol/sdk
 Set your provider key the same way the CLI expects (e.g.
 `export ANTHROPIC_API_KEY=…`).
 
-## 20-line quickstart
+Copy the runnable example's
+[`environment.ts`](../../examples/clients/typescript/environment.ts) beside
+`quickstart.ts`. That helper is the single reviewed child-environment
+allowlist; the contract test keeps it aligned with every configured provider.
+
+## Quickstart
 
 ```ts
 // quickstart.ts — node 20+ / bun / deno
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { selectLightworkMcpEnvironment } from "./environment.js";
 
+const serverEnv = selectLightworkMcpEnvironment(process.env);
 const transport = new StdioClientTransport({
   command: "maverick",
   args: ["mcp"],
+  // Do not pass process.env: unrelated secrets and Python injection knobs stay out.
+  env: serverEnv,
 });
 
 const client = new Client({ name: "ts-quickstart", version: "0.1.0" }, {
@@ -63,9 +72,9 @@ You should see the tool list (10 tools), then the swarm's final answer.
 
 ## What works
 
-The MCP server exposes a small, stable control surface — **8
-`maverick_*` tools**, not the 100+ in-kernel tools. You drive the swarm;
-the kernel runs the tools internally.
+The MCP server exposes a small, stable control surface — **10
+`maverick_*` tools** — while the much larger in-kernel registry stays behind
+the swarm. You drive the swarm; the kernel runs those internal tools.
 
 - `maverick_start` `{title, description?, max_dollars?, max_wall_seconds?, max_depth?}`
   — start a goal; returns the final answer.
@@ -74,14 +83,15 @@ the kernel runs the tools internally.
 - `maverick_answer` `{question_id, answer}` — answer a queued question.
 - `maverick_skill_install` `{source}` / `maverick_skills_list`.
 - `maverick_fact_set` `{key, value}` / `maverick_facts_get`.
-- `maverick_fleet_ingest` `{agent_id, vendor, kind, goal_text}` — deposit an
+- `maverick_fleet_ingest`
+  `{agent_id, vendor, kind, goal_text, reflection?, domain?}` — deposit an
   external agent's experience into governed fleet memory (roster-gated).
-- `maverick_fleet_recall` `{agent_id, vendor, query}` — governed, audited
+- `maverick_fleet_recall` `{agent_id, vendor, query, domain?}` — governed, audited
   memory read for an external fleet agent.
 
-The 100+ in-kernel tools (web search, repo map, editor, Slack, S3, …)
-are **not** individually exposed over MCP — the swarm decides which to
-use while running a goal.
+In-kernel tools such as web search, repo map, editor, Slack, and S3 are **not**
+individually exposed over MCP — the swarm decides which to use while running a
+goal.
 
 ## Typed results (`structuredContent`)
 
@@ -101,22 +111,41 @@ The shape per tool:
 |------|---------------------|
 | `maverick_start`, `maverick_resume` | `{ goal_id, answer }` |
 | `maverick_status` | `{ goals, open_questions }` |
-| `maverick_skills_list` | `{ skills }` |
-| `maverick_facts_get` | `{ facts }` |
 | `maverick_answer` | `{ question_id }` |
-| `maverick_fact_set` | `{ key }` |
 | `maverick_skill_install` | `{ name, path }` |
+| `maverick_skills_list` | `{ skills }` |
+| `maverick_fact_set` | `{ key }` |
+| `maverick_fleet_ingest` | `{ ok, reason }` |
+| `maverick_fleet_recall` | `{ context?, reason }` |
+| `maverick_facts_get` | `{ facts }` |
 
 `maverick_start` / `maverick_resume` expose `goal_id` so you can chain a
 follow-up `maverick_status` or `maverick_resume` without scraping it out
 of the text block.
 
+## Child environment, CLI config, and vaults
+
+The runnable TypeScript example deliberately gives the MCP child a **filtered**
+environment, not all of `process.env`. It forwards Lightwork-owned
+`MAVERICK_*` settings and their supported `LIGHTWORK_*` aliases, plus the
+reviewed provider, identity, proxy/CA, and runtime names in
+`LIGHTWORK_MCP_ENV_ALLOWLIST`. Unrelated ambient secrets and Python injection
+variables stay out.
+
+Filtering the environment does not create a second configuration system. The
+child still runs the same CLI entry point and, through the forwarded
+home/config path variables, loads the same `config.toml`, dashboard overlay,
+tenant selection, mounted secret-provider files, and enabled OAuth/browser
+vaults. Provider keys may therefore come from an explicitly forwarded provider
+variable or the normal Lightwork config/secret path. The Java, C#, Go, and Rust
+minimal snippets rely on their SDKs' inherited child environment; production
+launchers should apply an equivalent reviewed allowlist.
+
 ## What's gated
 
-- The 50+ third-party tools (Slack, GitHub Actions, S3, Salesforce,
-  …) read credentials from the same env / `~/.maverick/config.toml`
-  the CLI uses. The TS client doesn't pass credentials — the kernel
-  reads them once.
+- Third-party tools (Slack, GitHub Actions, S3, Salesforce, …) resolve
+  credentials inside the Python child through the same CLI config and secret
+  providers; they are not fields in MCP requests.
 - Some tools require optional extras (`maverick-agent[redis]`,
   `[s3]`, etc.). Install only what you use.
 

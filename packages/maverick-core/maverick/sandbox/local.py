@@ -32,6 +32,14 @@ _ALWAYS_STRIP_ENV = (
     "GITHUB_TOKEN",
     "GH_TOKEN",
     "GITLAB_TOKEN",
+    # GitHub Actions command files are a cross-step code-injection surface.
+    # A model-driven child that appends to GITHUB_PATH/GITHUB_ENV can alter the
+    # trusted step that follows it even when ordinary credentials are scrubbed.
+    "GITHUB_ENV",
+    "GITHUB_OUTPUT",
+    "GITHUB_PATH",
+    "GITHUB_STATE",
+    "GITHUB_STEP_SUMMARY",
     # The SWE-bench gold patch: "GOLD_PATCH" matches no secret keyword in
     # _SECRET_ENV_RE, so without this a `printenv` in a non-opaque child leaks
     # the benchmark answer. shell.py only popped it for opaque runs.
@@ -49,6 +57,7 @@ _ALWAYS_STRIP_ENV = (
 _GIT_CONFIG_INJECT_RE = re.compile(r"^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$")
 
 _TRUE = {"1", "true", "yes", "on"}
+_CREATE_SUSPENDED = 0x00000004
 
 
 def _truthy(value: str | None) -> bool:
@@ -92,7 +101,7 @@ def scrub_env(source: dict | None = None) -> dict:
     src = os.environ if source is None else source
     out: dict = {}
     for k, v in src.items():
-        if k in _ALWAYS_STRIP_ENV or _SECRET_ENV_RE.search(k):
+        if k.upper() in _ALWAYS_STRIP_ENV or _SECRET_ENV_RE.search(k):
             continue
         out[k] = v
     # Keep git's COUNT/KEY_*/VALUE_* config-injection family all-or-nothing: if
@@ -104,6 +113,133 @@ def scrub_env(source: dict | None = None) -> dict:
         for k in git_family:
             out.pop(k, None)
     return out
+
+
+def _reap_process_group(proc: subprocess.Popen) -> None:
+    """Best-effort POSIX cleanup for descendants that outlive the shell."""
+    killpg = getattr(os, "killpg", None)
+    if killpg is None:  # pragma: no cover -- Windows has no POSIX process groups
+        return
+    try:
+        # start_new_session=True makes the direct child's pid its process-group
+        # id. A redirected `nohup ... &` can survive communicate() unless the
+        # group is explicitly reaped even after an otherwise successful command.
+        killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def _create_windows_kill_job(proc: subprocess.Popen) -> int | None:
+    """Atomically contain a Windows subprocess tree in a kill-on-close Job.
+
+    ``taskkill /T`` loses the tree once a short-lived shell exits. Start the
+    shell suspended, assign it to a Job Object whose descendants inherit
+    membership, then resume it. Closing the job handle after success or timeout
+    deterministically terminates every surviving descendant.
+    """
+    if os.name != "nt":
+        return None
+
+    import ctypes
+    from ctypes import wintypes
+
+    class _BasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_longlong),
+            ("PerJobUserTimeLimit", ctypes.c_longlong),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        ]
+
+    class _ExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BasicLimitInformation),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_job = kernel32.CreateJobObjectW
+    create_job.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+    create_job.restype = wintypes.HANDLE
+    set_job = kernel32.SetInformationJobObject
+    set_job.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    )
+    set_job.restype = wintypes.BOOL
+    assign_job = kernel32.AssignProcessToJobObject
+    assign_job.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    assign_job.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    job = create_job(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        limits = _ExtendedLimitInformation()
+        limits.BasicLimitInformation.LimitFlags = 0x00002000
+        if not set_job(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        process_handle = wintypes.HANDLE(int(proc._handle))  # type: ignore[attr-defined]
+        if not assign_job(job, process_handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        # Popen intentionally starts this Windows child suspended so assignment
+        # has no race. Python retains the process handle but closes the primary
+        # thread handle, so resume the contained process through ntdll.
+        ntdll = ctypes.WinDLL("ntdll")
+        resume_process = ntdll.NtResumeProcess
+        resume_process.argtypes = (wintypes.HANDLE,)
+        resume_process.restype = ctypes.c_long
+        status = resume_process(process_handle)
+        if status != 0:
+            raise OSError(f"NtResumeProcess failed with NTSTATUS 0x{status & 0xFFFFFFFF:08x}")
+        return int(job)
+    except BaseException:
+        close_handle(job)
+        raise
+
+
+def _close_windows_kill_job(job: int | None) -> None:
+    """Close a Windows Job Object, terminating every associated process.
+
+    The job does not permit breakaway, so its kill-on-close limit is the
+    authoritative tree boundary. Do not supplement it with PID snapshots:
+    process identifiers can be recycled between enumeration and termination.
+    """
+    if os.name != "nt" or job is None:
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    close_handle = ctypes.WinDLL("kernel32", use_last_error=True).CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    if not close_handle(wintypes.HANDLE(job)):
+        raise ctypes.WinError(ctypes.get_last_error())
 
 
 @dataclass
@@ -146,6 +282,11 @@ class LocalBackend:
         effective = self.timeout if timeout is None else timeout
         child_env = scrub_env()
 
+        windows_creation_flags = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | _CREATE_SUSPENDED
+            if os.name == "nt"
+            else 0
+        )
         proc = subprocess.Popen(
             cmd,
             # LocalBackend is the intentional unsandboxed host-exec path
@@ -163,12 +304,23 @@ class LocalBackend:
             # children of a compound list) reparent to init and keep consuming
             # the host after exec() returns 124. Every container backend reaps
             # on timeout; the default local backend must bound the host too.
-            # POSIX-only semantics, ignored on Windows (matching the os.killpg
-            # fallback below).
-            start_new_session=True,
+            start_new_session=os.name != "nt",
+            creationflags=windows_creation_flags,
         )
+        windows_job: int | None = None
         try:
+            try:
+                windows_job = _create_windows_kill_job(proc)
+            except BaseException:
+                proc.kill()
+                proc.wait(timeout=5)
+                raise
             out, err = proc.communicate(timeout=effective)
+            if os.name == "nt":
+                _close_windows_kill_job(windows_job)
+                windows_job = None
+            else:
+                _reap_process_group(proc)
             return ExecResult(
                 stdout=(out or "")[-8000:],
                 stderr=(err or "")[-2000:],
@@ -179,11 +331,13 @@ class LocalBackend:
             # start_new_session made the child the group leader, so its pid IS
             # the pgid. Fall back to killing the direct child where process
             # groups don't exist (Windows) or the group is already gone.
-            killpg = getattr(os, "killpg", None)
             try:
-                if killpg is not None:
-                    killpg(proc.pid, signal.SIGKILL)
-                else:  # pragma: no cover -- Windows: no process groups
+                if os.name == "nt":
+                    _close_windows_kill_job(windows_job)
+                    windows_job = None
+                elif getattr(os, "killpg", None) is not None:
+                    _reap_process_group(proc)
+                else:  # pragma: no cover -- unusual non-POSIX host
                     proc.kill()
             except OSError:
                 proc.kill()
@@ -201,3 +355,6 @@ class LocalBackend:
                 stderr=f"TIMEOUT after {effective}s",
                 exit_code=124,
             )
+        finally:
+            if windows_job is not None:
+                _close_windows_kill_job(windows_job)

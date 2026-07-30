@@ -10,6 +10,7 @@ from __future__ import annotations
 import sys
 import textwrap
 
+import maverick.ts_plugin_host as plugin_host
 import pytest
 from maverick.tools import Tool
 from maverick.ts_plugin_host import (
@@ -17,6 +18,15 @@ from maverick.ts_plugin_host import (
     load_configured_ts_plugins,
     load_ts_plugin,
 )
+
+
+@pytest.fixture(autouse=True)
+def _close_plugin_children_after_each_test():
+    """Do not retain persistent fixture subprocesses across the full suite."""
+    yield
+    plugin_host._close_all_children()
+    plugin_host._CHILDREN.clear()
+
 
 # argv: fake_plugin.py <sentinel-path> [--describe]
 FAKE_PLUGIN = textwrap.dedent('''

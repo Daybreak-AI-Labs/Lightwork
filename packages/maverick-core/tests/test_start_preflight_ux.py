@@ -72,6 +72,56 @@ def test_missing_sdk_exits_2_and_creates_no_goal(tmp_path, monkeypatch):
     assert _goal_count(tmp_path) == 0
 
 
+def test_sdk_gate_uses_effective_local_routes_not_anthropic_default(
+    tmp_path, monkeypatch,
+):
+    _isolate(monkeypatch, tmp_path)
+    from maverick import config
+    from maverick.llm import ROLE_MODELS
+
+    cfg_path = tmp_path / "config.toml"
+    cfg_path.write_text(
+        "[models]\n"
+        + "\n".join(f'{role} = "ollama:qwen3"' for role in ROLE_MODELS)
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAVERICK_CONFIG", str(cfg_path))
+    monkeypatch.setenv("MAVERICK_ROLES_FILE", str(tmp_path / "roles.toml"))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE", raising=False)
+    for role in ROLE_MODELS:
+        monkeypatch.delenv(
+            f"MAVERICK_MODEL_OVERRIDE_{role.upper()}",
+            raising=False,
+        )
+    import maverick.runtime_overrides as runtime_overrides
+
+    monkeypatch.setattr(
+        runtime_overrides,
+        "OVERRIDES_PATH",
+        tmp_path / "runtime-overrides.toml",
+    )
+    config.reset_config_cache()
+    import maverick.cli as cli_mod
+    import maverick.providers as providers
+
+    monkeypatch.setattr(cli_mod, "_require_llm_key", lambda *args: "config")
+    seen: list[str] = []
+
+    def capture(specs):
+        seen.extend(specs)
+        return ["stop after route capture"]
+
+    monkeypatch.setattr(providers, "missing_sdks", capture)
+    result = CliRunner().invoke(cli_mod.main, ["start", "local-only goal"])
+
+    assert result.exit_code == 2, result.output
+    assert seen == ["ollama:qwen3"]
+    assert "stop after route capture" in result.output
+    assert _goal_count(tmp_path) == 0
+
+
 def test_missing_sdks_helper_detects_absent_module(monkeypatch):
     import importlib.util
 

@@ -12,10 +12,16 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from typing import Any
 
 from ..paths import data_dir
+from ..sandbox.gvisor import (
+    GVisorRuntimeValidationError,
+    validate_docker_gvisor_runtime,
+)
+from ..sandbox_names import BUILTIN_SANDBOX_BACKENDS
 from . import Tool
 
 _DIAG_SCHEMA: dict[str, Any] = {
@@ -68,6 +74,65 @@ def _check_config_dir() -> list[str]:
     return out
 
 
+def _check_gvisor(cfg: dict[str, Any]) -> list[str]:
+    if not shutil.which("docker"):
+        return ["    [FAIL] gvisor needs the docker binary, not on PATH"]
+    try:
+        validate_docker_gvisor_runtime(cfg.get("runtime", "runsc"))
+    except GVisorRuntimeValidationError as exc:
+        return [f"    [FAIL] {exc}"]
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):
+        return ["    [FAIL] gvisor Docker daemon/runtime probe failed"]
+    return []
+
+
+def _check_modal(cfg: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    allow_network = cfg.get("allow_network", False)
+    acknowledged = allow_network is True or (
+        isinstance(allow_network, str)
+        and allow_network.strip().lower() in {"1", "true", "yes", "on"}
+    )
+    if not acknowledged:
+        out.append(
+            "    [FAIL] modal requires allow_network=true; "
+            "otherwise execution fails closed"
+        )
+    try:
+        import importlib.util
+
+        modal_present = importlib.util.find_spec("modal") is not None
+    except (ImportError, ValueError):
+        modal_present = False
+    if not modal_present:
+        out.append("    [FAIL] modal package not installed")
+    return out
+
+
+def _recognized_sandbox_backend(backend: str) -> bool:
+    return backend in BUILTIN_SANDBOX_BACKENDS or backend.startswith("ep:")
+
+
+def _check_external_backend(backend: str) -> list[str]:
+    name = backend[3:].strip()
+    try:
+        from ..sandbox.sdk import installed_entry_point_names
+
+        installed = installed_entry_point_names()
+    except Exception:
+        installed = ()
+    if name and name in installed:
+        return []
+    return [
+        f"    [FAIL] external sandbox entry point "
+        f"{name or '(empty)'!r} is not installed"
+    ]
+
+
 def _check_sandbox() -> list[str]:
     try:
         from ..config import get_sandbox
@@ -79,6 +144,8 @@ def _check_sandbox() -> list[str]:
     if backend == "docker":
         if not shutil.which("docker"):
             out.append("    ✗ docker binary not on PATH")
+    if backend == "gvisor":
+        out.extend(_check_gvisor(cfg))
     if backend == "podman":
         if not shutil.which("podman"):
             out.append("    ✗ podman binary not on PATH")
@@ -94,9 +161,19 @@ def _check_sandbox() -> list[str]:
             out.append("    ✗ firecracker binary not on PATH")
         elif provider == "e2b" and not os.environ.get("E2B_API_KEY"):
             out.append("    ✗ firecracker provider=e2b but E2B_API_KEY unset")
+    if backend == "modal":
+        out.extend(_check_modal(cfg))
     if backend == "ssh":
         if not shutil.which("ssh"):
             out.append("    ✗ ssh binary not on PATH")
+    if backend.startswith("ep:"):
+        out.extend(_check_external_backend(backend))
+    if not _recognized_sandbox_backend(backend):
+        out.append(
+            "    [FAIL] unrecognized sandbox backend; supported: "
+            + ", ".join(BUILTIN_SANDBOX_BACKENDS)
+            + ", or ep:<name>"
+        )
     return out
 
 

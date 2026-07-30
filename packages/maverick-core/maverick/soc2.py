@@ -308,20 +308,21 @@ def _probe_audit_chain() -> dict[str, Any]:
 def _probe_signing_key() -> dict[str, Any]:
     """Report whether an audit signing key (the chain's trust anchor) is present.
 
-    A present trust anchor means this host can sign new audit rows; without one
+    A present signing key means this process can sign new audit rows; without one
     the log is append-only NDJSON but not cryptographically tamper-evident. The
-    anchor can take two forms, BOTH of which count as present:
+    active key can take two forms, BOTH of which count as present:
 
       - a local private ``.key`` file, or
       - an **off-host** key (KMS / secrets-manager), held in memory and injected
         at deploy time via ``MAVERICK_AUDIT_SIGNING_KEY`` /
-        ``MAVERICK_AUDIT_SIGNING_KEY_WRAPPED``. Such a key leaves a ``.injected``
-        marker + ``.pub`` next to the (deliberately absent) ``.key``.
+        ``MAVERICK_AUDIT_SIGNING_KEY_WRAPPED``.
 
-    Counting only ``.key`` files would report ``absent`` for the *more secure*
-    off-host custody that enterprise mode actually **requires**
-    (``signing.require_offhost_signing``) -- failing the SOC 2 gate precisely when
-    key custody is strongest. Fail-soft: any error -> ``status`` ``unknown``.
+    An injected key leaves a ``.injected`` marker + ``.pub`` next to the
+    deliberately absent ``.key``. That marker remains useful as a historical
+    verification anchor, but it does *not* prove that the current process still
+    has private-key material after a restart. Counting a marker alone as
+    signing-capable would let a posture check pass while new rows are unsigned.
+    Fail-soft: any error -> ``status`` ``unknown``.
     """
     import os
 
@@ -338,21 +339,68 @@ def _probe_signing_key() -> dict[str, Any]:
         return result
     result["key_dir"] = str(key_dir)
 
-    keys = _safe(lambda: sorted(p.name for p in key_dir.glob("*.key")), None)
-    if keys is None:
+    key_paths = _safe(lambda: sorted(key_dir.glob("*.key")), None)
+    if key_paths is None:
         result["error"] = "could not enumerate key directory"
         return result
-    # Off-host key custody: a provisioned injected key (``.injected`` marker) or a
-    # signing key configured via env (raw or KMS-wrapped). Either is a real anchor.
+    # A marker proves historical/public-key provisioning only. Current off-host
+    # signing capability requires the raw or KMS-wrapped private key to be
+    # configured in this process.
     injected = _safe(lambda: sorted(p.name for p in key_dir.glob("*.injected")), []) or []
-    offhost_env = bool(
-        os.environ.get("MAVERICK_AUDIT_SIGNING_KEY")
-        or os.environ.get("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED")
+    raw_configured = bool(os.environ.get("MAVERICK_AUDIT_SIGNING_KEY", ""))
+    wrapped_value = os.environ.get("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", "")
+
+    # Use the signer's one-shot consume/cache path. Reading and decoding the
+    # raw env value here would bypass its explicit environment-erasure
+    # invariant and prolong private-key exposure through same-user /proc reads.
+    injected_keypair = _safe(signing._injected_keypair, None)
+    raw_usable = (
+        isinstance(injected_keypair, tuple)
+        and len(injected_keypair) == 3
     )
-    present = bool(keys or injected or offhost_env)
+    wrapped_usable = bool(
+        wrapped_value
+        and _safe(lambda: signing._kms_wrapped_keypair() is not None, False)
+    )
+
+    disk_usable = False
+    disk_error: str | None = None
+    if key_paths:
+        try:
+            active = signing._active_key_id(key_dir)
+            if active is None:
+                for candidate in key_paths:
+                    if not signing._is_valid_key_id(candidate.stem):
+                        raise ValueError(
+                            "audit key directory contains an invalid key filename"
+                        )
+                active = max(
+                    key_paths,
+                    key=lambda path: path.stat().st_mtime_ns,
+                ).stem
+            signing._read_disk_keypair(key_dir, active)
+            disk_usable = True
+        except (OSError, ValueError) as exc:
+            disk_error = str(exc)
+
+    offhost_required = bool(_safe(signing.require_offhost_signing, False))
+    offhost_usable = raw_usable or wrapped_usable
+    present = offhost_usable or (disk_usable and not offhost_required)
     result["present"] = present
-    result["key_count"] = len(keys)
-    result["offhost_key"] = bool(injected or offhost_env)
+    result["key_count"] = len(key_paths)
+    result["offhost_key"] = offhost_usable
+    result["offhost_required"] = offhost_required
+    result["raw_key_configured"] = raw_configured
+    result["raw_key_usable"] = raw_usable
+    result["wrapped_key_configured"] = bool(wrapped_value)
+    result["wrapped_key_usable"] = wrapped_usable
+    result["disk_key_usable"] = disk_usable
+    if disk_error is not None:
+        result["disk_key_error"] = disk_error
+    result["historical_injected_key_count"] = len(injected)
+    result["verification_anchor_present"] = bool(
+        disk_usable or injected or offhost_usable
+    )
     result["status"] = STATUS_ENABLED if present else STATUS_ABSENT
     return result
 

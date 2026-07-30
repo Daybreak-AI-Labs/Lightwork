@@ -60,7 +60,10 @@ pub enum KeySource {
 /// (`sha256(pub)[:16]`). Enforced so a crafted `key_id` cannot escape the keys
 /// dir via path traversal — the same guard as Python's `_KEY_ID_RE`.
 fn is_valid_key_id(key_id: &str) -> bool {
-    key_id.len() == 16 && key_id.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    key_id.len() == 16
+        && key_id
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 fn load_verifying_key(bytes: &[u8]) -> Option<VerifyingKey> {
@@ -190,34 +193,36 @@ pub fn verify_chain_text(text: &str, keys: &KeySource) -> Vec<ChainBreak> {
 
         match pub_opt {
             None => {
-                breaks.push(ChainBreak::new(n, "no_pubkey", format!("key_id {:?}", key_id)));
+                breaks.push(ChainBreak::new(
+                    n,
+                    "no_pubkey",
+                    format!("key_id {:?}", key_id),
+                ));
             }
             Some(vk) => {
                 // Ed25519 signs the RAW 32 hash bytes (bytes.fromhex(row_hash)),
                 // not the hex string. A non-hex / wrong-length sig or hash is a
                 // break, never a panic — same as Python catching ValueError.
                 match (hex::decode(sig), hex::decode(row_hash)) {
-                    (Ok(sig_bytes), Ok(msg_bytes)) => {
-                        match sig_bytes.as_slice().try_into() {
-                            Ok(sig_arr) => {
-                                let signature = Signature::from_bytes(sig_arr);
-                                if vk.verify_strict(&msg_bytes, &signature).is_err() {
-                                    breaks.push(ChainBreak::new(
-                                        n,
-                                        "bad_signature",
-                                        "Ed25519 verify failed",
-                                    ));
-                                }
-                            }
-                            Err(_) => {
+                    (Ok(sig_bytes), Ok(msg_bytes)) => match sig_bytes.as_slice().try_into() {
+                        Ok(sig_arr) => {
+                            let signature = Signature::from_bytes(sig_arr);
+                            if vk.verify_strict(&msg_bytes, &signature).is_err() {
                                 breaks.push(ChainBreak::new(
                                     n,
                                     "bad_signature",
-                                    "malformed sig/hash: bad signature length",
+                                    "Ed25519 verify failed",
                                 ));
                             }
                         }
-                    }
+                        Err(_) => {
+                            breaks.push(ChainBreak::new(
+                                n,
+                                "bad_signature",
+                                "malformed sig/hash: bad signature length",
+                            ));
+                        }
+                    },
                     _ => {
                         breaks.push(ChainBreak::new(
                             n,
@@ -272,7 +277,11 @@ fn truncate12(s: &str) -> String {
 /// verifies fully.
 pub fn verify_file(path: &Path, keys: &KeySource) -> Vec<ChainBreak> {
     if !path.exists() {
-        return vec![ChainBreak::new(0, "missing_file", path.display().to_string())];
+        return vec![ChainBreak::new(
+            0,
+            "missing_file",
+            path.display().to_string(),
+        )];
     }
     let raw = match std::fs::read(path) {
         Ok(b) => b,
@@ -340,10 +349,7 @@ mod tests {
         // With a trusted pubkey the caller expected signed rows: absence is
         // "stripped", i.e. malformed (matches Python).
         let text = "{\"event\": \"x\"}\n";
-        let breaks = verify_chain_text(
-            text,
-            &KeySource::Pinned("00".repeat(32)),
-        );
+        let breaks = verify_chain_text(text, &KeySource::Pinned("00".repeat(32)));
         assert_eq!(breaks.len(), 1);
         assert_eq!(breaks[0].reason, "malformed");
     }

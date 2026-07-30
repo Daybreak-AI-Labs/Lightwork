@@ -123,11 +123,11 @@ def test_compose_validation(client, runner_stub):
     assert runner_stub == []  # nothing invalid ever reached the runner
 
 
-def test_compose_requires_provider_key(client, monkeypatch):
+def test_compose_requires_complete_model_route(client, monkeypatch):
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
                 "OPENROUTER_API_KEY", "MOONSHOT_API_KEY", "DEEPSEEK_API_KEY",
                 "XAI_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     r = client.post("/api/v1/goals/compose", json={"title": "t"})
     assert r.status_code == 400
-    assert "provider key" in r.json()["detail"]
+    assert "model route" in r.json()["detail"].lower()

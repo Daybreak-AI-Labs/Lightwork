@@ -544,25 +544,38 @@ def test_an_unsigned_writer_also_survives_a_concurrent_erase(
 
     stop = threading.Event()
     committed = [0]
+    failures: list[BaseException] = []
 
     def _writer() -> None:
         w = AuditLog(audit_dir)
-        while not stop.is_set():
-            if w.record(AuditEvent(ts=time.time(), kind=EventKind.TOOL_CALL,
-                                   agent="concurrent", goal_id=None,
-                                   payload={"n": committed[0]})):
-                committed[0] += 1
-            time.sleep(0.0005)
+        try:
+            while not stop.is_set():
+                if w.record(AuditEvent(ts=time.time(), kind=EventKind.TOOL_CALL,
+                                       agent="concurrent", goal_id=None,
+                                       payload={"n": committed[0]})):
+                    committed[0] += 1
+                time.sleep(0.0005)
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
 
     t = threading.Thread(target=_writer)
     t.start()
     try:
-        time.sleep(0.05)
+        warmup_deadline = time.monotonic() + 5
+        while committed[0] < 6 and time.monotonic() < warmup_deadline:
+            time.sleep(0.005)
+        before_erase = committed[0]
         erase.scrub_user("slack", "victim", audit_dir=audit_dir)
-        time.sleep(0.05)
+        cooldown_deadline = time.monotonic() + 5
+        while (
+            committed[0] < before_erase + 6
+            and time.monotonic() < cooldown_deadline
+        ):
+            time.sleep(0.005)
     finally:
         stop.set()
         t.join(timeout=10)
+    assert not failures, failures
 
     present = 0
     for line in path.read_text(encoding="utf-8").splitlines():

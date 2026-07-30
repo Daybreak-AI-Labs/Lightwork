@@ -1652,12 +1652,16 @@ lacked `workdir`, crashing path-confined tools).
 `runsc` runtime (`--runtime=runsc`), interposing a userspace application kernel
 between a possibly prompt-injected agent and the host — stronger isolation than
 seccomp + dropped capabilities alone. It reuses every Docker knob (image,
-network, memory/pids/cpu caps, non-root); `[sandbox] runtime` overrides the
-runtime for a custom registration. **Warm-container reuse** (`[sandbox]
-reuse_container`, default off): instead of a fresh `docker run --rm` per
-command (a cold start each time), keep one container alive and `docker exec`
-into it, so the 2nd..Nth command in a run skip container startup; torn down on
-`close()`.
+network, memory/pids/cpu caps, non-root); `[sandbox] runtime` may select only
+an approved runsc registration whose Docker metadata declares an exact runsc
+`path`/`runtimeArgs` or the official `io.containerd.runsc.v1` runtime type.
+Ambiguous aliases and literal `runc` fail closed in construction, health, and
+diagnosis. This catches misconfiguration; it does not cryptographically attest
+the runtime binary, so the Docker daemon administrator remains a trust boundary.
+**Warm-container reuse** (`[sandbox] reuse_container`, default off): instead
+of a fresh `docker run --rm` per command (a cold start each time), keep one
+container alive and `docker exec` into it, so the 2nd..Nth command in a run
+skip container startup; torn down on `close()`.
 
 ## LLM providers & routing
 

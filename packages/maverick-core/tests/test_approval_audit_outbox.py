@@ -124,8 +124,8 @@ def test_sqlite_v30_migration_creates_outbox_and_reports_head(tmp_path):
     from maverick.world_model import SCHEMA_VERSION, WorldModel
 
     world = WorldModel(tmp_path / "world.db")
-    assert SCHEMA_VERSION == 30
-    assert world.schema_version == 30
+    assert SCHEMA_VERSION >= 30
+    assert world.schema_version == SCHEMA_VERSION
     with world._writing() as conn:
         columns = {
             row[1] for row in conn.execute(
@@ -146,14 +146,14 @@ def test_sqlite_v30_migration_creates_outbox_and_reports_head(tmp_path):
 def test_postgres_v30_migration_is_additive_tenant_scoped_and_rls_bound():
     from maverick.world_model_backends import postgres
 
-    assert postgres._PG_SCHEMA_VERSION == 30
+    assert postgres._PG_SCHEMA_VERSION >= 30
     statements = dict(postgres.MIGRATIONS)[30]
     joined = "\n".join(statements)
     assert "CREATE TABLE IF NOT EXISTS approval_audit_outbox" in joined
     assert "tenant_id" in joined
     assert "delivered_at" in joined
     assert "approval_audit_outbox" in postgres._RLS_TABLES
-    assert postgres.pending_migrations(29) == [(30, statements)]
+    assert (30, statements) in postgres.pending_migrations(29)
 
 
 def test_quorum_does_not_become_effective_until_every_vote_is_audited(tmp_path):

@@ -13,6 +13,8 @@ from urllib.parse import quote
 
 import click
 
+from ..sandbox_names import BUILTIN_SANDBOX_BACKENDS
+
 # Council round-2 perf-seat fix: keep the top-level import surface
 # minimal so `maverick --help` and `maverick version` don't pay for
 # heavy submodules (orchestrator, agent, swarm, skills, sandbox) they
@@ -49,58 +51,60 @@ def _default_model() -> str:
     return DEFAULT_MODEL
 
 
-_PROVIDER_ENV_VARS = (
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
-    "OPENROUTER_API_KEY", "MOONSHOT_API_KEY", "DEEPSEEK_API_KEY",
-    "XAI_API_KEY",
-)
-
-
 def _fact_subject_token(channel: str, user: str) -> str:
     """Stable, delimiter-safe token for explicitly user-scoped facts."""
     return f"{quote(channel, safe='')}:{quote(user, safe='')}"
 
 
-def _has_configured_provider() -> bool:
-    """True if any provider surface is configured (shared predicate).
+def _model_route_configuration_missing(
+    model_spec: str | None = None,
+) -> tuple[str, tuple[str, ...]]:
+    """Return the selected model provider and its missing prerequisites.
 
-    Delegates to ``maverick.config.any_provider_configured`` so the CLI
-    preflight, the LLM clients, and the dashboard agree on what "configured"
-    means: well-known key env vars, self-hosted base-URL env vars
-    (``VLLM_BASE_URL`` / ``TGI_BASE_URL`` / ``OPENAI_COMPATIBLE_BASE_URL``),
-    or a ``[providers.<name>]`` table with a non-empty ``api_key`` /
-    ``base_url``. Before this, each component implemented a different subset
-    and a keyless self-hosted setup passed one gate and failed the next.
+    A global "some credential exists" probe cannot answer whether the route
+    this command will actually instantiate is usable. It also rejects valid
+    keyless routes such as Ollama/vLLM/TGI localhost defaults and authenticated
+    Codex CLI installs. Delegate to the operator preflight's provider contract
+    so the CLI and preflight cannot drift.
     """
+    from ..config import load_config
+    from ..operator_preflight import _route_configuration_missing
+    from ..providers import _canonical
+
+    spec = str(model_spec or _default_model()).strip()
+    provider = _canonical(spec.split(":", 1)[0] if ":" in spec else "anthropic")
+    return provider, _route_configuration_missing(provider, load_config())
+
+
+def _require_llm_key(model_spec: str | None = None) -> str:
+    """Refuse cleanly when a selected route (or any swarm route) is incomplete."""
     try:
-        from ..config import any_provider_configured
-        return any_provider_configured()
-    except Exception:  # pragma: no cover -- never block on a config read
-        return False
+        if model_spec is None:
+            from ..config import load_config
+            from ..operator_preflight import _routed_configuration_missing
 
-
-def _require_llm_key() -> str:
-    """Council UX/capabilities fix: don't sys.exit(2) on missing ANTHROPIC_API_KEY.
-
-    First, check every supported provider's env var; return the first
-    one set (the LLM facade dispatches on model id, not env var, so any
-    valid provider config is fine). Then accept a provider configured in
-    config.toml (local / OpenAI-compatible models keep credentials there,
-    not in a well-known env var). If neither, print an actionable error
-    that points at ``maverick init`` and exit cleanly.
-    """
-    for var in _PROVIDER_ENV_VARS:
-        if os.environ.get(var):
-            return var
-    if _has_configured_provider():
+            routed = _routed_configuration_missing(load_config())
+            missing_routes = {
+                provider: fields
+                for provider, fields in routed.items()
+                if fields
+            }
+        else:
+            provider, missing = _model_route_configuration_missing(model_spec)
+            missing_routes = {provider: missing} if missing else {}
+    except Exception:
+        missing_routes = {"selected": ("configuration",)}
+    if not missing_routes:
         return "config"
+    from ..operator_preflight import _format_route_missing
+
+    detail = _format_route_missing(missing_routes)
     click.echo(
-        "Lightwork can't reach an LLM. No provider key is set.\n"
+        "Lightwork can't reach an LLM through every selected model route. "
+        f"Missing: {detail}.\n"
         "\n"
-        "Set one up with:  maverick init\n"
-        "Or export an existing key, for example:\n"
-        "  export ANTHROPIC_API_KEY=sk-ant-...\n"
-        "  export OPENAI_API_KEY=sk-...",
+        "Configure that route with:  maverick init\n"
+        "Then verify it with:       maverick preflight",
         err=True,
     )
     sys.exit(2)
@@ -117,6 +121,14 @@ def _humanize_run_error(e: Exception) -> str:
     name = type(e).__name__.lower()
     msg = str(e).strip()
     low = msg.lower()
+    from ..runtime_overrides import RuntimeOverridesSecurityError
+
+    if isinstance(e, RuntimeOverridesSecurityError):
+        return (
+            "Lightwork stopped because the operator policy is unavailable.\n"
+            "  Restore or repair runtime-overrides.toml, then run "
+            "`maverick doctor` before retrying."
+        )
     # Sandbox backends already raise an actionable RuntimeError, e.g.
     # "Docker not available. ... change [sandbox] backend to 'local'".
     if isinstance(e, RuntimeError) and (
@@ -294,6 +306,27 @@ def _configure_cli_logging() -> None:
         pass
 
 
+def _configure_cli_text_streams() -> None:
+    """Keep redirected/frozen Windows consoles from crashing on Unicode.
+
+    PyInstaller can freeze ``sys.stdout``/``stderr`` with the active Windows
+    code page (often cp1252) and ``errors='strict'``.  Lightwork's human-facing
+    CLI intentionally uses a few status glyphs, so one unrepresentable glyph
+    must degrade to ``?`` rather than aborting an otherwise healthy command.
+    Preserve the selected encoding and only relax the error policy.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (AttributeError, OSError, ValueError):
+            # Click's test streams and embedded hosts may not be reconfigurable.
+            # Their existing encoding policy remains authoritative.
+            continue
+
+
 @click.group(epilog=(
     "New here? Start with these four:\n"
     "\n"
@@ -311,8 +344,18 @@ def _configure_cli_logging() -> None:
 @click.pass_context
 def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     """Lightwork: multi-agent swarm for long-horizon work."""
+    _configure_cli_text_streams()
     _configure_cli_logging()
     ctx.ensure_object(dict)
+    if ctx.invoked_subcommand == "mcp":
+        from .._mcp_parent_guard import ParentGuardError, arm_from_environment
+
+        try:
+            arm_from_environment()
+        except ParentGuardError as exc:
+            raise click.ClickException(
+                f"refusing unsafe tagged MCP launch: {exc}"
+            ) from exc
     # Default the world DB to the ACTIVE TENANT's world.db (selected via
     # MAVERICK_TENANT) so one business's run history / goals / facts never pool
     # into another's -- the same isolation the channel server already gets via
@@ -341,6 +384,13 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
 
             db = str(Workspace.current().db_path)
     ctx.obj["db"] = Path(db)
+    if model:
+        from ..llm import ModelNotAllowedError, require_model_allowed
+
+        try:
+            model = require_model_allowed(model)
+        except (ModelNotAllowedError, ValueError) as exc:
+            raise click.BadParameter(str(exc), param_hint="'--model'") from exc
     ctx.obj["model"] = model  # resolved lazily on first use
     # `--model` is a run-wide override. The agents resolve their model via
     # model_for_role(), not the LLM facade's default, so threading it through
@@ -3277,8 +3327,7 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
 @click.option("--max-depth", default=3, type=int)
 @click.option("--workdir", default=None)
 @click.option("--sandbox", "sandbox_backend", default=None,
-              type=click.Choice(["local", "docker", "podman", "devcontainer",
-                                 "kubernetes", "ssh", "firecracker"]))
+              type=click.Choice(BUILTIN_SANDBOX_BACKENDS))
 @click.option("--domain", default=None,
               help="Run as a specific domain agent's specialist (see "
                    "`maverick domains-audit` for available domains).")
@@ -3387,11 +3436,13 @@ def start(
         sys.exit(3)
     from .. import providers as _providers
     from ..config import load_config as _load_config
-    _specs = {
-        s for s in (_load_config().get("models") or {}).values()
-        if isinstance(s, str) and s
-    }
-    _specs.add(ctx.obj["model"] or _kernel().DEFAULT_MODEL)
+    from ..operator_preflight import _model_specs
+
+    # Check the same effective offline routes the agents will resolve. Raw
+    # config values plus DEFAULT_MODEL ignored tenant role edits, dashboard
+    # pins, the admin allow-list, and could demand an Anthropic SDK even when
+    # every executable route was local.
+    _specs = _model_specs(_load_config())
     _sdk_msgs = _providers.missing_sdks(sorted(_specs))
     if _sdk_msgs:
         for m in _sdk_msgs:
@@ -3783,14 +3834,16 @@ def debate(ctx, question: str, rounds: int, max_dollars: float,
     """
     from ..budget import Budget
     from ..debate import DebateParticipant, run_debate
+    from ..llm import model_for_role
+
     # Friendly preflight (round-3 platform-test finding: an unconfigured
     # install got a raw anthropic-SDK TypeError traceback here), and route
     # through the configured role models instead of hard DEFAULT_MODEL
     # (kernel rule 2) -- debaters argue at the analyst tier.
-    _require_llm_key()
-    from ..llm import model_for_role
+    selected_model = ctx.obj["model"] or model_for_role("analyst")
+    _require_llm_key(selected_model)
     k = _kernel()
-    llm = k.LLM(model=ctx.obj["model"] or model_for_role("analyst"))
+    llm = k.LLM(model=selected_model)
     participants = [
         DebateParticipant(
             name="Proponent",
@@ -3948,14 +4001,16 @@ def plan_reflect(ctx, goal: str, max_iterations: int, max_dollars: float) -> Non
     iteration cap is reached, or the budget runs out.
     """
     from ..budget import Budget
+    from ..llm import model_for_role
     from ..plan_execute_reflect import run_plan_execute_reflect
+
     # Same preflight + role routing as `debate` (round-3 finding): planning
     # belongs to the orchestrator tier, and a missing provider must refuse
     # cleanly, not traceback inside the anthropic client constructor.
-    _require_llm_key()
-    from ..llm import model_for_role
+    selected_model = ctx.obj["model"] or model_for_role("orchestrator")
+    _require_llm_key(selected_model)
     k = _kernel()
-    llm = k.LLM(model=ctx.obj["model"] or model_for_role("orchestrator"))
+    llm = k.LLM(model=selected_model)
     result = run_plan_execute_reflect(
         goal,
         planner_complete=llm.complete,
@@ -4363,8 +4418,7 @@ def answer(ctx, question_id: int, answer: tuple[str, ...]) -> None:
 @click.option("--max-wall-seconds", type=float, default=None,
               help="Raise the wall-clock cap for this resume.")
 @click.option("--sandbox", "sandbox_backend", default=None,
-              type=click.Choice(["local", "docker", "podman", "devcontainer",
-                                 "kubernetes", "ssh", "firecracker"]),
+              type=click.Choice(BUILTIN_SANDBOX_BACKENDS),
               help="Sandbox backend for this resume (default: the [sandbox] config).")
 @click.pass_context
 @_humane_errors
@@ -4375,7 +4429,6 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
     Pass the goal id positionally (``maverick resume 7``) or via ``--goal-id``;
     omit both to resume the current active/blocked goal.
     """
-    _require_llm_key()
     world = open_world(ctx.obj["db"])
     # The positional arg and --goal-id are equivalent; the option wins if both
     # are given. The budget-halt / error messages suggest the positional form.
@@ -4399,6 +4452,10 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
         for q in open_qs:
             click.echo(f"  #{q.id}: {q.question}")
         return
+    # Validate the local resume target before provider readiness. Looking up a
+    # goal (including the graceful "nothing to resume" path) needs no LLM and
+    # should remain useful while an operator is repairing provider credentials.
+    _require_llm_key()
     k = _kernel()
     llm = k.LLM(model=ctx.obj["model"] or k.DEFAULT_MODEL)
     # Honor [budget] config, and let --max-dollars/--max-wall-seconds raise
@@ -5802,20 +5859,33 @@ def watch(ctx, path: str, run: bool, max_dollars: float) -> None:
 
         if run:
             # Don't sys.exit in the watch loop: just skip this marker and continue.
-            # Mirror _require_llm_key(): a provider configured in config.toml
-            # (local / OpenAI-compatible setups keep credentials there, not in a
-            # well-known env var) counts too, so a config-only install isn't
-            # wrongly told "no provider key set" and skipped.
-            if (not any(os.environ.get(v) for v in _PROVIDER_ENV_VARS)
-                    and not _has_configured_provider()):
+            selected_model = ctx.obj["model"] or _default_model()
+            try:
+                from ..config import load_config
+                from ..operator_preflight import _routed_configuration_missing
+
+                missing_routes = {
+                    provider: fields
+                    for provider, fields in _routed_configuration_missing(
+                        load_config()
+                    ).items()
+                    if fields
+                }
+            except Exception:
+                missing_routes = {"selected": ("configuration",)}
+            if missing_routes:
+                from ..operator_preflight import _format_route_missing
+
+                detail = _format_route_missing(missing_routes)
                 click.echo(
-                    "Skipping --run: no provider key set. Run 'maverick init' to configure.",
+                    f"Skipping --run: selected routes are incomplete ({detail}). "
+                    "Run 'maverick init' to configure.",
                     err=True,
                 )
                 continue
             k = _kernel()
             world = open_world(ctx.obj["db"])
-            llm = k.LLM(model=ctx.obj["model"] or k.DEFAULT_MODEL)
+            llm = k.LLM(model=selected_model)
             sandbox = k.build_sandbox(workdir=str(p.parent if p.is_file() else p))
             title = (m.text or (m.follow_lines[0] if m.follow_lines else "")).strip()[:80]
             goal_text = m.to_goal()

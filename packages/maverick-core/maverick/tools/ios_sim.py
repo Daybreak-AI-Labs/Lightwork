@@ -100,9 +100,14 @@ def _op_shutdown(device: str) -> str:
     return f"shutdown {device}"
 
 
-def _op_install(device: str, app_path: str) -> str:
+def _op_install(device: str, app_path: str, sandbox: Any = None) -> str:
     if not device or not app_path:
         return "ERROR: install requires device_id and app_path"
+    from .ffmpeg_tool import _safe_path
+    try:
+        app_path = _safe_path(sandbox, app_path)
+    except ValueError as e:
+        return f"ERROR: {e}"
     code, out, err = _simctl(["install", device, app_path], timeout=180)
     if code != 0:
         return f"ERROR: install ({code}): {(err or out).strip()[:200]}"
@@ -136,9 +141,14 @@ def _op_terminate(device: str, bundle_id: str) -> str:
     return f"terminated {bundle_id}"
 
 
-def _op_screenshot(device: str, out_path: str) -> str:
+def _op_screenshot(device: str, out_path: str, sandbox: Any = None) -> str:
     if not device or not out_path:
         return "ERROR: screenshot requires device_id and out_path"
+    from .ffmpeg_tool import _safe_path
+    try:
+        out_path = _safe_path(sandbox, out_path)
+    except ValueError as e:
+        return f"ERROR: {e}"
     code, out, err = _simctl(["io", device, "screenshot", out_path])
     if code != 0:
         return f"ERROR: screenshot ({code}): {(err or out).strip()[:200]}"
@@ -154,7 +164,7 @@ def _op_open_url(device: str, url: str) -> str:
     return f"opened {url}"
 
 
-def _run(args: dict[str, Any]) -> str:
+def _run(args: dict[str, Any], sandbox: Any = None) -> str:
     op = args.get("op")
     if not op:
         return "ERROR: op is required"
@@ -171,7 +181,7 @@ def _run(args: dict[str, Any]) -> str:
         if op == "shutdown":
             return _op_shutdown(device)
         if op == "install":
-            return _op_install(device, args.get("app_path") or "")
+            return _op_install(device, args.get("app_path") or "", sandbox)
         if op == "uninstall":
             return _op_uninstall(device, args.get("bundle_id") or "")
         if op == "launch":
@@ -179,7 +189,7 @@ def _run(args: dict[str, Any]) -> str:
         if op == "terminate":
             return _op_terminate(device, args.get("bundle_id") or "")
         if op == "screenshot":
-            return _op_screenshot(device, args.get("out_path") or "")
+            return _op_screenshot(device, args.get("out_path") or "", sandbox)
         if op == "open_url":
             return _op_open_url(device, args.get("url") or "")
     except Exception as e:
@@ -187,7 +197,7 @@ def _run(args: dict[str, Any]) -> str:
     return f"ERROR: unknown op {op!r}"
 
 
-def ios_sim() -> Tool:
+def ios_sim(sandbox: Any = None) -> Tool:
     return Tool(
         name="ios_sim",
         description=(
@@ -197,5 +207,5 @@ def ios_sim() -> Tool:
             "device_id defaults to 'booted'."
         ),
         input_schema=_IOS_SCHEMA,
-        fn=_run,
+        fn=lambda args: _run(args, sandbox),
     )

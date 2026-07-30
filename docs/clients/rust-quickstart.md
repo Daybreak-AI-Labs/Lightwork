@@ -92,6 +92,16 @@ The shapes are identical across languages — see the
 [TypeScript quickstart](./typescript-quickstart.md) for the full
 per-tool table.
 
+## Child environment, CLI config, and vaults
+
+This minimal Rust snippet does not clear or replace the Tokio command
+environment, so `maverick mcp` inherits the Rust process environment. The
+Python child also loads the same CLI `config.toml`, dashboard/tenant settings,
+secret-provider files, and enabled vaults; credentials are resolved there, not
+sent as MCP arguments. For production, apply the
+[reviewed filtered-environment policy](./typescript-quickstart.md#child-environment-cli-config-and-vaults)
+used by the runnable TypeScript example.
+
 ## Why no `maverick-rs` crate?
 
 Same reason there's no `maverick-go` or `maverick-ts`: porting a

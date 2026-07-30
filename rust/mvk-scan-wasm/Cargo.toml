@@ -9,6 +9,7 @@ edition.workspace = true
 # the literal. Must stay in sync with [workspace.package] license in rust/Cargo.toml.
 license = "LicenseRef-Proprietary"
 description = "wasm-bindgen binding for the Lightwork native safety scanners (TypeScript / edge)."
+repository = "https://github.com/Daybreak-AI-Labs/Lightwork"
 
 [lib]
 crate-type = ["cdylib"]

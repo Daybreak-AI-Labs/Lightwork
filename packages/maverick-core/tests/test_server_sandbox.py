@@ -10,7 +10,8 @@ def test_build_from_config_uses_configured_sandbox_backend(monkeypatch, tmp_path
         pass
 
     class _FakeLLM:
-        pass
+        def __init__(self, **_kwargs):
+            pass
 
     calls = {}
 

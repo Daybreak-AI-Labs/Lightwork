@@ -20,6 +20,8 @@ on:
       - 'packages/maverick-mcp/**'
       - 'examples/clients/csharp/**'
       - 'docs/clients/csharp-quickstart.md'
+      - 'requirements/ci.txt'
+      - 'scripts/verify_constraint_closure.py'
       - '.github/workflows/mcp-client-csharp.yml'
   pull_request:
     paths:
@@ -27,23 +29,45 @@ on:
       - 'packages/maverick-mcp/**'
       - 'examples/clients/csharp/**'
       - 'docs/clients/csharp-quickstart.md'
+      - 'requirements/ci.txt'
+      - 'scripts/verify_constraint_closure.py'
       - '.github/workflows/mcp-client-csharp.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-clients-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_CONSTRAINT: ${{ github.workspace }}/requirements/ci.txt
 
 jobs:
   csharp:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "8.0.423"
       - name: Install Lightwork (kernel + MCP server)
         run: |
-          pip install -e ./packages/maverick-core
-          pip install --no-deps -e ./packages/maverick-mcp
+          python -I -m pip install --upgrade \
+            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'packaging==26.2'
+          python -I -m pip install -e ./packages/maverick-core
+          python -I -m pip install --no-deps -e ./packages/maverick-mcp
+          python -I -m pip check
+          python -I scripts/verify_constraint_closure.py
       - name: Run the C# MCP client end-to-end
         working-directory: examples/clients/csharp
-        run: dotnet run
+        run: |
+          dotnet restore --locked-mode
+          dotnet run --no-restore

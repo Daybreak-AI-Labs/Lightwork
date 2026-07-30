@@ -53,6 +53,16 @@ def test_check_enforces_every_cap():
             b.check()
 
 
+def test_zero_wall_cap_trips_when_monotonic_clock_has_not_ticked(monkeypatch):
+    import maverick.budget as budget_module
+
+    monkeypatch.setattr(budget_module.time, "monotonic", lambda: 123.0)
+    budget = _budget(max_wall_seconds=0.0)
+
+    with pytest.raises(BudgetExceeded, match="wall time"):
+        budget.check()
+
+
 def test_nonfinite_or_negative_usage_fails_closed():
     b = _budget()
     for bad in (float("inf"), float("nan"), -1):

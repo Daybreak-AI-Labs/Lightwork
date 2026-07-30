@@ -138,10 +138,11 @@ def _provider_state(cfg: dict[str, Any] | None) -> tuple[Check, bool]:
             False,
         )
     try:
-        from .config import any_provider_configured
-
-        configured = bool(any_provider_configured())
+        routed = _routed_configuration_missing(cfg)
+        ready = sorted(provider for provider, missing in routed.items() if not missing)
+        configured = bool(ready)
     except Exception:
+        ready = []
         configured = False
     if not configured:
         return (
@@ -149,7 +150,7 @@ def _provider_state(cfg: dict[str, Any] | None) -> tuple[Check, bool]:
                 "provider",
                 "Model provider",
                 "blocked",
-                "No provider credential or self-hosted endpoint is configured.",
+                "No selected model route has complete offline prerequisites.",
                 "maverick init",
             ),
             False,
@@ -159,26 +160,35 @@ def _provider_state(cfg: dict[str, Any] | None) -> tuple[Check, bool]:
             "provider",
             "Model provider",
             "ready",
-            "At least one credential or self-hosted endpoint is configured.",
+            f"Ready selected provider route(s): {', '.join(ready)}.",
         ),
         True,
     )
 
 
 def _model_specs(cfg: dict[str, Any]) -> tuple[str, ...]:
-    specs: set[str] = {
-        value
-        for value in (cfg.get("models") or {}).values()
+    """Deterministically resolve every model route a normal swarm may use.
+
+    The resolver is shared with ``model_for_role`` for environment, tenant
+    role edits, config, dashboard pins, and the admin allow-list. Dynamic
+    cost/local/energy routing performs live probes and therefore belongs to
+    ``doctor``, not this offline preflight.
+    """
+    try:
+        from .llm import ROLE_MODELS, offline_model_for_role
+    except Exception:
+        return ()
+    configured = cfg.get("models")
+    configured = configured if isinstance(configured, dict) else {}
+    roles = set(ROLE_MODELS) | {
+        str(role)
+        for role, value in configured.items()
         if isinstance(value, str) and value.strip()
     }
-    # The runtime's actual default is the authority; never duplicate a model id.
-    try:
-        from .llm import DEFAULT_MODEL
-
-        if DEFAULT_MODEL:
-            specs.add(DEFAULT_MODEL)
-    except Exception:
-        pass
+    specs = {
+        offline_model_for_role(role, config=cfg)
+        for role in roles
+    }
     return tuple(sorted(specs))
 
 
@@ -200,7 +210,10 @@ def _route_configuration_missing(
 ) -> tuple[str, ...]:
     """Return missing non-network prerequisites for one routed provider."""
 
-    from .config import PROVIDER_KEY_ENV_MAP
+    from .config import (
+        PROVIDER_KEY_ENV_MAP,
+        azure_provider_configuration_missing,
+    )
 
     table = _provider_table(cfg, provider)
     configured_key = _present(table.get("api_key")) or any(
@@ -224,33 +237,7 @@ def _route_configuration_missing(
             if not present
         )
     if provider == "azure":
-        endpoint = _present(table.get("base_url")) or _present(
-            os.environ.get("AZURE_OPENAI_ENDPOINT")
-        )
-        key = _present(table.get("api_key")) or _present(
-            os.environ.get("AZURE_OPENAI_API_KEY")
-        )
-        ad_token = _present(os.environ.get("AZURE_OPENAI_AD_TOKEN"))
-        auth_mode = os.environ.get("AZURE_OPENAI_AUTH", "").strip().lower()
-        # Match the provider's mutually-exclusive auth contract. A static
-        # Entra token or an explicit DefaultAzureCredential posture is a valid
-        # non-network prerequisite; neither should be mislabeled "missing API
-        # key". Conflicting or unknown modes remain blocked.
-        authentication = (
-            (key and not ad_token and auth_mode in {"", "api_key"})
-            or (ad_token and not key and auth_mode in {"", "entra_id"})
-            or (not key and not ad_token and auth_mode == "entra_id")
-        )
-        deployment = _present(os.environ.get("AZURE_OPENAI_DEPLOYMENT"))
-        return tuple(
-            item
-            for item, present in (
-                ("endpoint", endpoint),
-                ("authentication", authentication),
-                ("deployment", deployment),
-            )
-            if not present
-        )
+        return azure_provider_configuration_missing(dict(table))
     if provider == "bedrock":
         key = _present(table.get("api_key")) or _present(
             os.environ.get("BEDROCK_API_KEY")
@@ -265,10 +252,9 @@ def _route_configuration_missing(
         try:
             from .providers.codex_cli_provider import _auth_file_present
 
-            authenticated = _present(os.environ.get("CODEX_ACCESS_TOKEN"))
-            authenticated = authenticated or _auth_file_present()
+            authenticated = configured_key or _auth_file_present()
         except Exception:
-            authenticated = False
+            authenticated = configured_key
         return () if authenticated else ("login",)
     if provider not in {
         "anthropic",
@@ -283,6 +269,65 @@ def _route_configuration_missing(
     return () if configured_key else ("api_key",)
 
 
+def _routed_configuration_missing(
+    cfg: dict[str, Any],
+) -> dict[str, tuple[str, ...]]:
+    """Canonical provider prerequisite state for every selected model route."""
+    from .providers import _canonical
+
+    routed: dict[str, tuple[str, ...]] = {}
+    for spec in _model_specs(cfg):
+        provider = _canonical(
+            spec.split(":", 1)[0] if ":" in spec else "anthropic"
+        )
+        routed[provider] = _route_configuration_missing(provider, cfg)
+    return routed
+
+
+def _format_route_missing(
+    missing: Mapping[str, tuple[str, ...]],
+) -> str:
+    """Render secret-free, copyable provider prerequisites for operators."""
+    from .config import PROVIDER_KEY_ENV_MAP
+
+    exact_hints = {
+        ("openai_compatible", "base_url"): "OPENAI_COMPATIBLE_BASE_URL",
+        ("azure", "endpoint"): "AZURE_OPENAI_ENDPOINT",
+        ("azure", "deployment"): "AZURE_OPENAI_DEPLOYMENT",
+        (
+            "azure",
+            "authentication",
+        ): "AZURE_OPENAI_API_KEY or Azure Entra credentials",
+        ("bedrock", "region"): "AWS_REGION",
+        ("codex_cli", "login"): "codex login",
+    }
+    rendered: list[str] = []
+    for provider, fields in sorted(missing.items()):
+        labels: list[str] = []
+        for field in fields:
+            if field == "api_key" and PROVIDER_KEY_ENV_MAP.get(provider):
+                labels.append("/".join(PROVIDER_KEY_ENV_MAP[provider]))
+            else:
+                labels.append(exact_hints.get((provider, field), field))
+        rendered.append(f"{provider}: {', '.join(labels)}")
+    return "; ".join(rendered)
+
+
+def _role_configuration_missing(
+    role: str,
+    cfg: dict[str, Any],
+) -> tuple[str, tuple[str, ...]]:
+    """Return the deterministic effective provider and prerequisites for ROLE."""
+    from .llm import offline_model_for_role
+    from .providers import _canonical
+
+    spec = offline_model_for_role(role, config=cfg)
+    provider = _canonical(
+        spec.split(":", 1)[0] if ":" in spec else "anthropic"
+    )
+    return provider, _route_configuration_missing(provider, cfg)
+
+
 def _route_state(cfg: dict[str, Any] | None) -> Check:
     if cfg is None:
         return Check(
@@ -293,14 +338,7 @@ def _route_state(cfg: dict[str, Any] | None) -> Check:
             "maverick init --fast",
         )
     try:
-        from .providers import _canonical
-
-        routed: dict[str, tuple[str, ...]] = {}
-        for spec in _model_specs(cfg):
-            provider = _canonical(
-                spec.split(":", 1)[0] if ":" in spec else "anthropic"
-            )
-            routed[provider] = _route_configuration_missing(provider, cfg)
+        routed = _routed_configuration_missing(cfg)
     except Exception as exc:
         return Check(
             "model_routes",
@@ -313,10 +351,7 @@ def _route_state(cfg: dict[str, Any] | None) -> Check:
         provider: fields for provider, fields in routed.items() if fields
     }
     if missing:
-        detail = "; ".join(
-            f"{provider}: {', '.join(fields)}"
-            for provider, fields in sorted(missing.items())
-        )
+        detail = _format_route_missing(missing)
         return Check(
             "model_routes",
             "Model routes",

@@ -86,10 +86,41 @@ class DockerBackend:
     # run skip container startup. Opt-in (``[sandbox] reuse_container``); the
     # container is torn down on ``close()``. Default off -> run-per-command.
     reuse_container: bool = False
+    # Workspace-relative files/directories that model-driven commands may read
+    # but must not mutate. Each is overlaid as a separate read-only bind mount
+    # inside /workspace. Paths are resolved beneath ``workdir`` at construction
+    # time; absolute paths, escapes, and symlinks outside the workspace fail
+    # closed. In-process filesystem tools enforce the same list at the agent
+    # dispatch chokepoint.
+    read_only_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.workdir = Path(self.workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
+        if isinstance(self.read_only_paths, (str, bytes)) or not isinstance(
+            self.read_only_paths, (list, tuple)
+        ):
+            raise ValueError("read_only_paths must be a list of relative paths")
+        workspace = self.workdir.resolve()
+        validated: list[tuple[Path, str]] = []
+        normalized: list[str] = []
+        for raw in self.read_only_paths:
+            if not isinstance(raw, str) or not raw.strip():
+                raise ValueError("read_only_paths entries must be non-empty strings")
+            relative = Path(raw)
+            if relative.is_absolute():
+                raise ValueError("read_only_paths entries must be workspace-relative")
+            try:
+                source = (workspace / relative).resolve(strict=True)
+                contained = source.relative_to(workspace)
+            except (OSError, ValueError) as exc:
+                raise ValueError(
+                    f"read_only_paths entry escapes or is missing: {raw!r}"
+                ) from exc
+            validated.append((source, f"/workspace/{contained.as_posix()}"))
+            normalized.append(contained.as_posix())
+        self.read_only_paths = tuple(normalized)
+        self._read_only_mounts = tuple(validated)
         self._warm_name: str | None = None
         self._verify_docker()
 
@@ -118,6 +149,12 @@ class DockerBackend:
             "--security-opt", "no-new-privileges",
             *container_user_args(self.allow_root),
         ]
+        # ``_read_only_mounts`` is derived by ``__post_init__``.  Keep this
+        # helper tolerant of legacy/unpickled instances (and focused timeout
+        # tests) that predate that private cache; the public default is no
+        # read-only overlays, so an absent cache is equivalent to ``()``.
+        for source, destination in getattr(self, "_read_only_mounts", ()):
+            flags.extend(["-v", f"{source}:{destination}:ro"])
         if self.runtime:
             flags.extend(["--runtime", str(self.runtime)])
         if self.pids_limit:

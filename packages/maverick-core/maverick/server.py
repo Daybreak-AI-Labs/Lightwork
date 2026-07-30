@@ -792,23 +792,33 @@ def _advise_channel_tenancy(server) -> None:
 
 def build_from_config() -> Server:
     cfg = load_config()
-    # Shared predicate (maverick.config): env keys, base-url envs, or a
-    # [providers.<name>] table all count. This was the last hard-coded
-    # ANTHROPIC_API_KEY-only gate -- `start` and the dashboard already
-    # accepted config-only self-hosted setups that `serve` refused.
-    from .config import any_provider_configured
-    if not any_provider_configured():
+    # Validate the routes this server can actually instantiate. A credential
+    # for an unrelated provider must not unblock startup, while valid keyless
+    # localhost and Codex CLI routes must not be rejected.
+    from .operator_preflight import (
+        _format_route_missing,
+        _routed_configuration_missing,
+    )
+
+    missing_routes = {
+        provider: fields
+        for provider, fields in _routed_configuration_missing(cfg).items()
+        if fields
+    }
+    if missing_routes:
+        detail = _format_route_missing(missing_routes)
         raise RuntimeError(
-            "No LLM provider configured. Run 'maverick init', export "
-            "ANTHROPIC_API_KEY (or another provider key), or add a "
-            "[providers.<name>] api_key/base_url to ~/.maverick/config.toml."
+            "No LLM provider route is complete "
+            f"({detail}). Run 'maverick init' or `maverick preflight`."
         )
 
     world = open_world()
     sandbox = None
     server = None
     try:
-        llm = LLM()
+        from .llm import model_for_role
+
+        llm = LLM(model=model_for_role("orchestrator"))
         sandbox_cfg = cfg.get("sandbox", {})
         backend = sandbox_cfg.get("backend")
         # Default workdir mirrors config.get_sandbox()'s documented

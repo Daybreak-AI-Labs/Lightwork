@@ -25,6 +25,7 @@ from .pricing import (
     assert_price_evidenced,
     load_pricing_evidence_pack,
 )
+from .runtime_overrides import budget_override
 
 log = logging.getLogger(__name__)
 
@@ -579,8 +580,11 @@ class Budget:
             raise BudgetExceeded(f"${self.dollars:.2f} > ${self.max_dollars:.2f}")
         if self.tool_calls > self.max_tool_calls:
             raise BudgetExceeded(f"tool calls {self.tool_calls} > {self.max_tool_calls}")
-        if self.elapsed() > self.max_wall_seconds:
-            raise BudgetExceeded(f"wall time {self.elapsed():.0f}s > {self.max_wall_seconds:.0f}s")
+        elapsed = self.elapsed()
+        if elapsed >= self.max_wall_seconds:
+            raise BudgetExceeded(
+                f"wall time {elapsed:.0f}s >= {self.max_wall_seconds:.0f}s"
+            )
 
     def check_projected(self, est_cost: float) -> None:
         """Raise BEFORE a call whose estimated cost would push spend over the
@@ -734,13 +738,9 @@ def budget_from_config(*, defaults: dict | None = None,
     # Dashboard-set spend cap (settings page; lives in runtime-overrides.toml,
     # never config.toml). A live UI choice sits above [budget] config, below an
     # explicit per-call override / env flag.
-    try:
-        from .runtime_overrides import budget_override
-        dash_cap = budget_override()
-        if dash_cap is not None:
-            kwargs["max_dollars"] = dash_cap
-    except Exception:  # pragma: no cover -- overlay never blocks a run
-        pass
+    dash_cap = budget_override()
+    if dash_cap is not None:
+        kwargs["max_dollars"] = dash_cap
     # Env override for the documented MAVERICK_BUDGET_DOLLARS. The cookbooks
     # use `MAVERICK_BUDGET_DOLLARS=0.5 maverick start ...` to cap a single
     # invocation, but nothing read it -- so the cap silently did nothing and

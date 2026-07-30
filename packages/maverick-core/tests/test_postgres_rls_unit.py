@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from contextlib import contextmanager
 
 import pytest
@@ -14,12 +15,204 @@ class RecordingCursor:
     def execute(self, sql: str, params: tuple[object, ...] | None = None) -> None:
         self.calls.append((sql, params))
 
+    def fetchone(self):
+        return (None,)
+
 
 class RetentionCursor(RecordingCursor):
     rowcount = 2
 
     def fetchone(self):
         return (2,)
+
+
+class TemporalDeleteCursor(RecordingCursor):
+    rowcount = 1
+
+    def fetchone(self):
+        return None
+
+
+class FactTrustSnapshotCursor(RecordingCursor):
+    def fetchall(self):
+        return [("risk:vendor", "external value", 0)]
+
+
+class SubjectFactPurgeCursor(RecordingCursor):
+    def fetchall(self):
+        # An own + compatibility-legacy row may share the same natural key.
+        return [
+            ("user:sms:alice:email",),
+            ("user:sms:alice:email",),
+            ("user:sms:alice:phone",),
+        ]
+
+
+class FactHistoryCursor(RecordingCursor):
+    def fetchall(self):
+        return [
+            (1, "k", "legacy", 300.0, None, "old", 2, "internal", None),
+            (2, "k", "own", 200.0, 300.0, "new", 3, "internal", "acme"),
+        ]
+
+
+def test_effective_history_splits_legacy_only_across_own_overlap():
+    rows = [
+        (1, "user:sms:alice:email", "legacy", 100.0, None, "old", 2, "internal", None),
+        (2, "user:sms:alice:email", "own", 200.0, 300.0, "new", 3, "internal", "acme"),
+    ]
+
+    projected = postgres._effective_fact_history_rows(rows, "acme")
+
+    assert [
+        (row[2], row[3], row[4], row[8])
+        for row in projected
+    ] == [
+        ("legacy", 100.0, 200.0, None),
+        ("own", 200.0, 300.0, "acme"),
+        ("legacy", 300.0, None, None),
+    ]
+    # The unbound administrative history keeps its prior raw multi-tenant view.
+    assert postgres._effective_fact_history_rows(rows, None) == rows
+
+
+def test_subject_fact_purge_locks_tables_and_accounts_returned_keys(monkeypatch):
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = SubjectFactPurgeCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+
+    assert world.delete_facts_matching("sms:alice") == [
+        "user:sms:alice:email",
+        "user:sms:alice:phone",
+    ]
+    assert len(cur.calls) == 3
+    lock_sql, lock_params = cur.calls[0]
+    live_sql, live_params = cur.calls[1]
+    history_sql, history_params = cur.calls[2]
+    assert lock_sql == (
+        "LOCK TABLE fact_history, facts IN SHARE ROW EXCLUSIVE MODE"
+    )
+    assert lock_params is None
+    assert live_sql.startswith("DELETE FROM facts")
+    assert live_sql.endswith("RETURNING key")
+    assert history_sql.startswith("DELETE FROM fact_history")
+    for sql in (live_sql, history_sql):
+        assert "(tenant_id = %s OR tenant_id IS NULL)" in sql
+    assert live_params == ("user:sms:alice:%", "acme")
+    assert history_params == ("user:sms:alice:%", "acme")
+
+
+def test_compatibility_history_projects_before_database_side_limit(monkeypatch):
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = FactHistoryCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+
+    history = world.fact_history("k", limit=2)
+
+    assert [version.value for version in history] == ["legacy", "own"]
+    [(sql, params)] = cur.calls
+    assert "WITH scoped AS" in sql
+    assert "JOIN LATERAL" in sql
+    assert "LAG(id) OVER (ORDER BY segment_start)" in sql
+    assert sql.endswith("ORDER BY MIN(segment_start) DESC, id DESC LIMIT %s")
+    assert params == ("k", "acme", "acme", 2)
+
+
+def test_fact_upsert_advances_write_order_sequence(monkeypatch):
+    """A same-timestamp update must sort after a newer key on Postgres too."""
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: None)
+    monkeypatch.setattr(
+        "maverick.world_model._temporal_memory_enabled", lambda: False
+    )
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = RecordingCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    world.upsert_fact("older-key", "updated last")
+
+    sql, _ = cur.calls[-1]
+    assert "write_seq = EXCLUDED.write_seq" in sql
+    assert "SET id =" not in sql
+    source = inspect.getsource(PostgresWorldModel.upsert_fact)
+    assert '"SELECT MAX(updated_at)' not in source
+    assert "fact-write-order:" not in source
+    recall_source = inspect.getsource(PostgresWorldModel.get_facts)
+    assert "ORDER BY write_seq DESC" in recall_source
+
+
+def test_fact_value_and_trust_share_one_snapshot(monkeypatch):
+    """A recall cannot splice a value and trust tier from separate writes."""
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: None)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = FactTrustSnapshotCursor()
+    tx_count = 0
+
+    @contextmanager
+    def tx():
+        nonlocal tx_count
+        tx_count += 1
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+
+    assert world.get_facts_with_trust() == {
+        "risk:vendor": ("external value", 0)
+    }
+    assert tx_count == 1
+    assert len(cur.calls) == 1
+    sql, params = cur.calls[0]
+    assert "SELECT key, value, trust_tier FROM (" in sql
+    assert "FROM facts" in sql
+    assert "ORDER BY write_seq DESC" in sql
+    assert params == ()
+
+
+def test_temporal_delete_uses_same_per_key_advisory_lock(monkeypatch):
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr(
+        "maverick.world_model._temporal_memory_enabled", lambda: True
+    )
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = TemporalDeleteCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+    assert world.delete_fact("shared-key") == 1
+
+    sql = [statement for statement, _params in cur.calls]
+    lock_index = next(
+        index
+        for index, statement in enumerate(sql)
+        if "pg_advisory_xact_lock" in statement
+    )
+    delete_index = next(
+        index
+        for index, statement in enumerate(sql)
+        if statement.startswith("DELETE FROM facts")
+    )
+    assert lock_index < delete_index
+    assert "fact:acme:shared-key" in str(cur.calls[lock_index][1])
 
 
 def test_rls_sets_fail_closed_sentinel_without_active_tenant(monkeypatch):

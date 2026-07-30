@@ -44,8 +44,7 @@ fn average_hash_from_pixels(
     width: usize,
     height: usize,
 ) -> PyResult<String> {
-    mvk_scan::phash::average_hash_from_pixels(&pixels, width, height)
-        .map_err(PyValueError::new_err)
+    mvk_scan::phash::average_hash_from_pixels(&pixels, width, height).map_err(PyValueError::new_err)
 }
 
 /// Average-hash of a contiguous row-major RGB byte buffer (e.g. PIL's
@@ -53,8 +52,7 @@ fn average_hash_from_pixels(
 /// object, not a million tuples. Mirrors `average_hash_from_pixels` bit-for-bit.
 #[pyfunction]
 fn average_hash_from_rgb_bytes(rgb: &[u8], width: usize, height: usize) -> PyResult<String> {
-    mvk_scan::phash::average_hash_from_rgb_bytes(rgb, width, height)
-        .map_err(PyValueError::new_err)
+    mvk_scan::phash::average_hash_from_rgb_bytes(rgb, width, height).map_err(PyValueError::new_err)
 }
 
 /// Bit distance between two 16-hex-char hashes. Mirrors `perceptual_hash.hamming`.

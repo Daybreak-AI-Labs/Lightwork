@@ -6,10 +6,12 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import re
 import subprocess
 import sys
 import tarfile
+import textwrap
 import zipfile
 from pathlib import Path
 
@@ -54,6 +56,69 @@ def _continued_shell_command(step: str, first_line: str) -> str:
         start += 1
         command.append(lines[start].strip())
     return "\n".join(command)
+
+
+def _release_input_assembler() -> str:
+    workflow = (
+        REPO_ROOT / ".github" / "workflows" / "release.yml"
+    ).read_text(encoding="utf-8")
+    step = _workflow_step(
+        workflow,
+        "Validate exact producer cohorts and assemble trusted release inputs",
+    )
+    marker = "python -I - <<'PY'\n"
+    source = step.split(marker, 1)[1].rsplit("\n          PY", 1)[0]
+    return textwrap.dedent(source)
+
+
+def _release_input_fixture(root: Path, *, tag: str = "v1.2.3") -> tuple[Path, Path]:
+    version = tag.removeprefix("v")
+    input_root = root / "release-inputs"
+    output_root = root / "dist"
+    expected = {
+        "binary-linux": {"maverick-linux-x86_64"},
+        "binary-macos": {"maverick-macos-arm64"},
+        "binary-windows": {"maverick-windows-x86_64.exe"},
+        "standalone": {
+            f"lightwork-environment-threat-hunter-{version}.zip",
+            f"lightwork-grc-concierge-{version}.zip",
+            f"lightwork-model-risk-ai-assurance-officer-{version}.zip",
+            f"lightwork-platform-threat-hunter-{version}.zip",
+            f"lightwork-standalone-skus-{version}.cdx.json",
+            f"lightwork-standalone-skus-{version}.sha256",
+        },
+        "sbom": {f"maverick-sbom-{tag}.cdx.json"},
+    }
+    for producer, names in expected.items():
+        producer_root = input_root / producer
+        producer_root.mkdir(parents=True)
+        for name in names:
+            (producer_root / name).write_bytes(f"{producer}:{name}\n".encode())
+    output_root.mkdir()
+    return input_root, output_root
+
+
+def _run_release_input_assembler(
+    root: Path,
+    input_root: Path,
+    *,
+    tag: str = "v1.2.3",
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "RELEASE_INPUT_ROOT": str(input_root),
+            "RELEASE_TAG": tag,
+        }
+    )
+    return subprocess.run(
+        [sys.executable, "-I", "-c", _release_input_assembler()],
+        cwd=root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def _load_sku_builder():
@@ -402,6 +467,8 @@ def test_public_python_release_cohort_is_complete_and_lockstep():
         f"maverick-knowledge>={release_version}"
     ]
     assert core_extras["release-runtime"] == ["openai>=1.30"]
+    assert core_extras["postgres"] == ["psycopg[binary,pool]>=3.1"]
+    assert "tzdata>=2026.3" in core["dependencies"]
 
 
 def test_ci_constraints_cover_every_release_base_dependency():
@@ -537,9 +604,12 @@ def test_standalone_skus_are_github_source_assets_not_pypi_packages():
     assert "git checkout --detach" in release_workflow
     assert "cyclonedx-bom==7.3.1" in release_workflow
     assert "SBOM generation failed (non-fatal)" not in release_workflow
-    assert 'target_tags+=("$CONTAINER_IMAGE:latest")' in release_workflow
-    assert "startsWith(github.ref, 'refs/tags/v')" in publish_workflow
-    assert "attempt $i/180" in publish_workflow
+    assert 'target_tags=("$CONTAINER_IMAGE:$version")' in release_workflow
+    assert "$CONTAINER_IMAGE:latest" not in release_workflow
+    assert 'workflows: ["Release"]' in publish_workflow
+    assert "types: [completed]" in publish_workflow
+    assert "github.event.workflow_run.conclusion == 'success'" in publish_workflow
+    assert "attempt $i/8" in publish_workflow
     for sku in (
         "grc-concierge",
         "platform-threat-hunter",
@@ -564,6 +634,14 @@ def test_release_cohort_dependency_environments_are_complete():
     assert "--no-deps" not in binary_step
     assert " -e " not in binary_step
     assert "python -m pip check" in binary_step
+    assert "python scripts/verify_constraint_closure.py" in binary_step
+    for build_tool in (
+        "pip==26.1.2",
+        "setuptools==83.0.0",
+        "wheel==0.47.0",
+        "packaging==26.2",
+    ):
+        assert build_tool in binary_step
     assert "verify_release_runtime" in binary_step
     assert "version('pywhispercpp') == '1.5.0'" in binary_step
 
@@ -576,7 +654,7 @@ def test_release_cohort_dependency_environments_are_complete():
     assert 'grep -F "pywhispercpp engine (installed)"' in smoke_step
 
     sbom_step = _workflow_step(
-        release, "Generate CycloneDX SBOM for the release"
+        release, "Generate the isolated release-runtime SBOM"
     )
     assert "python scripts/install_release_cohort.py \\" in sbom_step
     assert '--target-python "$SBOM_ENV/bin/python"' in sbom_step
@@ -586,15 +664,24 @@ def test_release_cohort_dependency_environments_are_complete():
     assert '"$SBOM_ENV/bin/maverick" release-runtime-check' in sbom_step
     assert 'cyclonedx-py environment "$SBOM_ENV/bin/python"' in sbom_step
     assert "--pyproject packages/maverick-core/pyproject.toml" in sbom_step
+    assert sbom_step.count("scripts/verify_constraint_closure.py") == 2
+    for build_tool in (
+        "pip==26.1.2",
+        "setuptools==83.0.0",
+        "wheel==0.47.0",
+        "packaging==26.2",
+    ):
+        assert sbom_step.count(build_tool) == 2
 
     agent_workflow = (
         REPO_ROOT / ".github" / "workflows" / "agent-on-pr.yml"
     ).read_text(encoding="utf-8")
     agent_step = _workflow_step(agent_workflow, "Install Lightwork")
-    assert agent_step.count("python -m pip install") == 1
+    assert agent_step.count('"$trusted_python" -I -m pip install') == 2
     assert all(f'$source_root/{path}' in agent_step for path in paths)
     assert '--constraint "$source_root/requirements/ci.txt"' in agent_step
-    assert "python -m pip check" in agent_step
+    assert '"$trusted_python" -I -m pip check' in agent_step
+    assert "verify_constraint_closure.py" in agent_step
     assert "--no-deps" not in agent_step
 
     ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
@@ -675,6 +762,7 @@ def test_pypi_release_builds_are_commit_anchored_and_byte_reproducible():
     build_step = _workflow_step(
         publish, "Validate the tag and build the complete release cohort"
     )
+    bootstrap_step = _workflow_step(publish, "Install pinned build tools")
 
     assert 'export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"' in build_step
     assert "export PYTHONHASHSEED=0" in build_step
@@ -683,14 +771,44 @@ def test_pypi_release_builds_are_commit_anchored_and_byte_reproducible():
     assert build_step.count("python -m build --outdir") == 2
     assert "if first != second:" in build_step
     assert "release artifacts are not reproducible from this commit" in build_step
+    assert "python -I scripts/verify_constraint_closure.py" in bootstrap_step
+    for build_tool in (
+        "pip==26.1.2",
+        "setuptools==83.0.0",
+        "wheel==0.47.0",
+        "packaging==26.2",
+        "build==1.5.0",
+    ):
+        assert build_tool in bootstrap_step
 
     # Resume remains fail-closed: determinism supports the exact digest
     # comparison; it does not replace or weaken it.
     preflight = _workflow_step(
         publish, "Preflight every distribution and existing PyPI release"
     )
-    assert "if existing != expected:" in preflight
-    assert "PyPI {name}=={version} differs from this build" in preflight
+    assert (
+        "from verify_github_release_assets import "
+        "require_digest_matching_subset"
+        in preflight
+    )
+    assert "missing = require_digest_matching_subset(" in preflight
+    assert "if existing != expected:" not in preflight
+    assert 'label=f"PyPI {name}=={version}"' in preflight
+
+    # The registry workflow is downstream of the complete Release workflow,
+    # checks out that successful run's immutable source SHA, and withholds OIDC
+    # publication until artifact signing/attachment also succeeds.
+    assert 'workflows: ["Release"]' in publish
+    assert "types: [completed]" in publish
+    assert "ref: ${{ github.event.workflow_run.head_sha || github.sha }}" in publish
+    assert "not successful Release SHA $RELEASE_SOURCE_SHA" in publish
+    publish_job = publish.split("\n  publish:", maxsplit=1)[1].split(
+        "\n  verify-published:",
+        maxsplit=1,
+    )[0]
+    assert "needs: [build, sign]" in publish_job
+    assert "github.event_name == 'workflow_run'" in publish_job
+    assert "github.event.workflow_run.conclusion == 'success'" in publish_job
 
 
 def test_native_source_bootstrap_is_not_advertised_as_a_product_installer():
@@ -759,7 +877,15 @@ def test_tauri_binary_apps_use_tracked_locks_and_a_pinned_toolchain():
     ).read_text(encoding="utf-8")
     assert 'toolchain: "1.97.1"' in desktop
     assert "src-tauri/Cargo.lock" in desktop
-    assert "pnpm tauri build -- --locked" in desktop
+    build_step = _workflow_step(desktop, "Build bundle (unsigned)")
+    for required_argument in (
+        "pnpm tauri build",
+        '--target "$BUNDLE_TARGET"',
+        '--config "$TAURI_BUILD_CONFIG"',
+        "--ci",
+        "-- --locked",
+    ):
+        assert required_argument in build_step
 
 
 def test_public_site_contains_the_commit_bound_governance_benchmark():
@@ -769,6 +895,7 @@ def test_public_site_contains_the_commit_bound_governance_benchmark():
     public_config = (REPO_ROOT / "mkdocs.public.yml").read_text(
         encoding="utf-8"
     )
+    base_config = (REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8")
     docs_workflow = (
         REPO_ROOT / ".github" / "workflows" / "docs.yml"
     ).read_text(encoding="utf-8")
@@ -799,6 +926,11 @@ def test_public_site_contains_the_commit_bound_governance_benchmark():
     assert "Governance Frontier benchmark: benchmarks/governance-frontier.md" in (
         public_config
     )
+    assert "- pymdownx.snippets:" in base_config
+    assert "!relative $docs_dir" in base_config
+    assert "restrict_base_path: true" in base_config
+    assert "check_paths: true" in base_config
+    assert "not_found: warn" in public_config
     assert "./benchmarks/governance-frontier.md" in gateway
     assert "source_name.startswith(\"@repo/\")" in docs_workflow
     assert "benchmarks/GOVERNANCE_FRONTIER_RESULTS.md" in docs_workflow
@@ -924,27 +1056,44 @@ def test_customer_surfaces_do_not_reference_the_retired_repository_owner():
         )
     }
     checked.update(public_sources)
-    checked.update(
-        path
-        for root in (REPO_ROOT / "apps", REPO_ROOT / "deploy")
-        for path in root.rglob("*")
-        if path.is_file()
-        and path.suffix.lower()
-        in {
-            ".el",
-            ".html",
-            ".json",
-            ".md",
-            ".ps1",
-            ".rb",
-            ".rs",
-            ".sh",
-            ".toml",
-            ".wxs",
-            ".yaml",
-            ".yml",
-        }
-    )
+    customer_suffixes = {
+        ".el",
+        ".html",
+        ".json",
+        ".md",
+        ".ps1",
+        ".rb",
+        ".rs",
+        ".sh",
+        ".toml",
+        ".wxs",
+        ".yaml",
+        ".yml",
+    }
+    generated_directories = {
+        ".git",
+        ".venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "node_modules",
+        "target",
+    }
+    for root in (REPO_ROOT / "apps", REPO_ROOT / "deploy"):
+        for current, directories, filenames in os.walk(root):
+            # Customer-surface review must be deterministic in a developer
+            # checkout. Generated dependency trees can contain dangling links
+            # and are neither shipped source nor part of the repository review.
+            directories[:] = [
+                name
+                for name in directories
+                if name.casefold() not in generated_directories
+            ]
+            checked.update(
+                Path(current) / filename
+                for filename in filenames
+                if Path(filename).suffix.lower() in customer_suffixes
+            )
     # The verifier is the sole intentional compatibility boundary: old signed
     # releases must remain verifiable after the organization rename.
     checked.discard(REPO_ROOT / "deploy" / "verify-release.sh")
@@ -998,6 +1147,7 @@ def test_ci_posture_tools_are_exactly_pinned_and_secret_scan_uses_module():
         "detect-secrets": "1.5.0",
         "pip-audit": "2.10.0",
         "psycopg": "3.3.4",
+        "psycopg-pool": "3.3.1",
         "ruff": "0.15.15",
         "vulture": "2.16",
     }
@@ -1010,12 +1160,352 @@ def test_ci_posture_tools_are_exactly_pinned_and_secret_scan_uses_module():
         assert f"{name}=={version}" in workflow
         assert f"{name}>=" not in workflow
     assert "python -m detect_secrets scan --baseline" in workflow
+    assert workflow.count("python scripts/verify_constraint_closure.py") >= 4
+    assert "pgvector/pgvector:pg16@sha256:" in workflow
+    for live_test in (
+        "test_postgres_world.py",
+        "test_pgvector_isolation_pg.py",
+        "test_postgres_fact_history.py",
+        "test_postgres_facts_trust.py",
+        "test_postgres_governed_records_capacity.py",
+    ):
+        assert live_test in workflow
+
+
+def test_release_tags_require_main_ancestry_and_isolated_concurrency():
+    release = (
+        REPO_ROOT / ".github" / "workflows" / "release.yml"
+    ).read_text(encoding="utf-8")
+    publish = (
+        REPO_ROOT / ".github" / "workflows" / "publish.yml"
+    ).read_text(encoding="utf-8")
+    native = (
+        REPO_ROOT / ".github" / "workflows" / "native.yml"
+    ).read_text(encoding="utf-8")
+
+    for workflow in (release, publish, native):
+        assert "git merge-base --is-ancestor" in workflow
+        assert "refs/remotes/origin/main" in workflow
+    assert "sha: ${{ steps.release-ref.outputs.sha }}" in release
+    assert 'echo "sha=$tag_sha" >> "$GITHUB_OUTPUT"' in release
+    assert "outputs.ref" not in release
+    assert 'echo "ref=refs/tags/$tag"' not in release
+    assert release.count(
+        "ref: ${{ needs.validate-release-tag.outputs.sha }}"
+    ) == 6
+    assert (
+        "group: lightwork-release-${{ inputs.tag || github.ref_name }}"
+        in release
+    )
+    assert (
+        "group: lightwork-release-${{ github.event.workflow_run.head_branch || "
+        "github.ref_name }}"
+        in publish
+    )
+    assert (
+        native.count(
+            "needs: [core, verify-audit, python, wasm, validate-native-tag]"
+        )
+        == 2
+    )
+    pypi_job = native.split("  publish-pypi:", 1)[1].split(
+        "  publish-npm:",
+        1,
+    )[0]
+    assert "actions/checkout@" not in pypi_job
+    assert "id-token: write" in pypi_job
+    assert "contents: write" not in pypi_job
+
+
+def test_release_version_policy_has_one_canonical_cross_channel_spelling():
+    module_path = REPO_ROOT / "scripts" / "release_version.py"
+    spec = importlib.util.spec_from_file_location("release_version", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    stable = module.validate_tag("v1.2.3")
+    prerelease = module.validate_tag("v1.2.3rc1")
+    developmental = module.validate_tag("v1.2.3.dev4")
+    postrelease = module.validate_tag("v1.2.3.post2")
+    assert (stable.version, stable.prerelease) == ("1.2.3", False)
+    assert (prerelease.version, prerelease.prerelease) == ("1.2.3rc1", True)
+    assert (developmental.version, developmental.prerelease) == (
+        "1.2.3.dev4",
+        True,
+    )
+    assert (postrelease.version, postrelease.prerelease) == (
+        "1.2.3.post2",
+        False,
+    )
+
+    for invalid in (
+        "1.2.3",
+        "v1.2",
+        "v01.2.3",
+        "v1.2.3-rc1",
+        "v1.2.3.rc1",
+        "v1.2.3..",
+        "v1.2.3+local",
+    ):
+        try:
+            module.validate_tag(invalid)
+        except ValueError:
+            pass
+        else:  # pragma: no cover - assertion branch
+            raise AssertionError(f"accepted noncanonical release tag: {invalid}")
+
+
+def test_standalone_builder_accepts_every_canonical_release_version(tmp_path):
+    builder = _load_sku_builder()
+    versions = tuple(
+        f"1.2.3{prerelease}{postrelease}{developmental}"
+        for prerelease in ("", "a1", "b2", "rc3")
+        for postrelease in ("", ".post4")
+        for developmental in ("", ".dev5")
+    )
+    assert len(versions) == 16
+
+    for version in versions:
+        output = builder.build(
+            version,
+            "a" * 40,
+            tmp_path / version,
+        )
+        assert len(output) == 6
+        assert all(version in path.name for path in output)
+
+
+def test_reusable_agent_separates_untrusted_execution_from_pr_write():
+    workflow = (
+        REPO_ROOT / ".github" / "workflows" / "agent-on-pr.yml"
+    ).read_text(encoding="utf-8")
+    review_job = workflow.split("  agent-review:", 1)[1].split(
+        "  post-review:",
+        1,
+    )[0]
+    post_job = workflow.split("  post-review:", 1)[1]
+
+    assert "lightwork-agent-review-${{ github.repository }}-${{ github.workflow }}" in workflow
+    assert "cancel-in-progress: true" in workflow
+    assert "pull-requests: write" not in review_job
+    assert "ANTHROPIC_API_KEY" in review_job
+    assert '"$trusted_python" -I -m pip install' in review_job
+    assert '"$trusted_python" -I -m pip check' in review_job
+    assert '"$trusted_python" -I -m maverick.cli overrides load' in review_job
+    assert '"$trusted_python" -I -m maverick.cli start "$review_goal"' in review_job
+    unisolated_python = []
+    for line in review_job.splitlines():
+        command = line.strip()
+        if command.startswith("#"):
+            continue
+        if re.match(r"python(?:3(?:\.\d+)*)?\s", command) and not re.match(
+            r"python(?:3(?:\.\d+)*)?\s+-I(?:\s|$)",
+            command,
+        ):
+            unisolated_python.append(command)
+    assert unisolated_python == []
+    assert 'backend = "docker"' in review_job
+    assert "require_container = true" in review_job
+    assert "allow_network = false" in review_job
+    assert "allow_root = false" in review_job
+    assert "python:3.12-slim@sha256:" in review_job
+    assert "MAVERICK_REQUIRE_CONTAINER_BACKEND: '1'" in review_job
+    assert "WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}" in review_job
+    assert "WORKFLOW_SHA: ${{ job.workflow_sha }}" in review_job
+    assert '"$LIGHTWORK_REF" != "$WORKFLOW_SHA"' in review_job
+    assert "ref: ${{ job.workflow_sha }}" in review_job
+    assert "ref: ${{ inputs.lightwork_ref }}" not in review_job
+    assert "Materialize an isolated PR review workspace" in review_job
+    assert "git archive \"$PR_HEAD_SHA\"" in review_job
+    assert "git archive \"$PR_BASE_SHA\"" in review_job
+    assert 'merge_base="$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"' in review_job
+    assert '"$merge_base" "$PR_HEAD_SHA"' in review_job
+    assert "PR_DIFF.patch" in review_job
+    assert "requested.is_absolute()" in review_job
+    assert "candidate.is_relative_to(policy_root)" in review_job
+    assert "overrides_path escapes the trusted base" in review_job
+    assert "read_only_paths = {read_only_paths}" in review_job
+    assert "Verify trusted review evidence was not mutated" in review_job
+    assert "review evidence integrity OK" in review_job
+    assert "sha256:${AGENT_DIFF_SHA256}" in review_job
+    assert "| tee /tmp/agent-output.txt" not in review_job
+    assert "> /tmp/agent-output.txt 2>&1" in review_job
+    assert "Sanitize review output before crossing the job boundary" in review_job
+    sanitizer = _workflow_step(
+        review_job,
+        "Sanitize review output before crossing the job boundary",
+    )
+    assert '"$pythonLocation/bin/python" -I -S - <<\'PY\'' in sanitizer
+    assert "LIGHTWORK_SOURCE_TOKEN" not in sanitizer
+    assert "import unicodedata" in sanitizer
+    assert 'not in {"Cc", "Cf", "Cs"}' in sanitizer
+    assert 're.sub(r"(?m)^::"' in sanitizer
+    assert "github_pat_" in sanitizer
+    assert "PRIVATE KEY" in sanitizer
+    assert "<pre>" not in sanitizer
+    assert "```" not in sanitizer
+    assert "pull-requests: write" in post_job
+    assert "actions/checkout@" not in post_job
+    assert "ANTHROPIC_API_KEY" not in post_job
+    assert "OPENAI_API_KEY" not in post_job
+    assert '.replace(/</g, "&lt;")' in post_job
+    assert '.replace(/>/g, "&gt;")' in post_job
+    assert '.replace(/@/g, "＠")' in post_job
+    assert "escaped.slice(0, max)" in post_job
+    assert "const max = 50000" in post_job
+    assert "<pre>\\n" in post_job
+
+
+def test_reusable_agent_diff_excludes_diverged_base_only_changes(tmp_path):
+    repo = tmp_path / "repo"
+    subprocess.run(
+        ["git", "init", "-b", "main", str(repo)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Lightwork test")
+    (repo / "common.txt").write_text("common\n", encoding="utf-8")
+    git("add", "common.txt")
+    git("commit", "-m", "common")
+    git("switch", "-c", "feature")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    git("add", "feature.txt")
+    git("commit", "-m", "feature change")
+    head_sha = git("rev-parse", "HEAD")
+    git("switch", "main")
+    (repo / "base-only.txt").write_text("base only\n", encoding="utf-8")
+    git("add", "base-only.txt")
+    git("commit", "-m", "base advanced")
+    base_sha = git("rev-parse", "HEAD")
+
+    merge_base = git("merge-base", base_sha, head_sha)
+    wrong_two_dot = set(
+        git("diff", "--name-only", base_sha, head_sha).splitlines()
+    )
+    reviewed = set(
+        git("diff", "--name-only", merge_base, head_sha).splitlines()
+    )
+    assert wrong_two_dot == {"base-only.txt", "feature.txt"}
+    assert reviewed == {"feature.txt"}
+
+
+def test_native_release_uses_locked_python_tools_and_preserves_wheel_bytes():
+    workflow = (
+        REPO_ROOT / ".github" / "workflows" / "native.yml"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "PIP_CONSTRAINT: ${{ github.workspace }}/requirements/ci.txt"
+        in workflow
+    )
+    assert "'pip==26.1.2'" in workflow
+    assert "'pytest==9.1.1'" in workflow
+    assert "'cryptography==49.0.0'" in workflow
+    assert "maturin-version: v1.14.1" in workflow
+    assert workflow.count('toolchain: "1.97.1"') == 4
+    assert "jetli/wasm-pack-action@" not in workflow
+    assert "cargo install wasm-pack --version 0.15.0 --locked" in workflow
+    assert workflow.count("--locked") >= 6
+    assert "ubuntu-latest" not in workflow
+    assert "macos-latest" not in workflow
+    assert "windows-latest" not in workflow
+    assert (
+        "os: [ubuntu-24.04, macos-15, macos-15-intel, windows-2022]"
+        in workflow
+    )
+    assert (REPO_ROOT / "rust" / "Cargo.lock").is_file()
+    toolchain = tomllib.loads(
+        (REPO_ROOT / "rust-toolchain.toml").read_text(encoding="utf-8")
+    )
+    assert toolchain["toolchain"]["channel"] == "1.97.1"
+    assert "pip install --upgrade pip" not in workflow
+    assert '"cryptography>=44.0.1"' not in workflow
+    assert "--allow-unconstrained maverick-native" in workflow
+    assert "maverick-native-wheel.sha256" in workflow
+    assert "wheel mutated during parity testing" in workflow
+    assert "Preflight existing native PyPI bytes" in workflow
+    assert "PyPI maverick-native=={version} conflicts with this build" in workflow
+    assert "Verify final native PyPI bytes" in workflow
+    assert "final native PyPI verification OK" in workflow
+    assert "native PyPI propagation incomplete after final retry" in workflow
+    assert 'epoch="$(git show -s --format=%ct HEAD)"' in workflow
+    assert "native wheel reproducibility OK" in workflow
+    assert "wasm npm reproducibility OK" in workflow
+    assert "maverick-native-target-first" in workflow
+    assert "maverick-native-target-second" in workflow
+    assert "wasm-publish-target-first" in workflow
+    assert "wasm-publish-target-second" in workflow
+    assert "npm pack --pack-destination" in workflow
+    assert "name: mvk-scan-wasm-npm" in workflow
+    assert workflow.count("sha256sum -c SHA256SUMS") == 2
+    assert "wasm-pack build --target nodejs --out-dir pkg --release" in workflow
+    assert (
+        "wasm-pack build --target bundler --out-dir pkg-publish-first --release"
+        in workflow
+    )
+    assert (
+        "wasm-pack build --target bundler --out-dir pkg-publish-second --release"
+        in workflow
+    )
+    assert "wasm-pack build rust/mvk-scan-wasm" not in workflow
+    publish_npm = workflow.split("\n  publish-npm:", maxsplit=1)[1]
+    assert "wasm-pack build" not in publish_npm
+    assert "actions/checkout@" not in publish_npm
+    assert "name: mvk-scan-wasm-npm" in publish_npm
+    assert "vars.MAVERICK_NATIVE_NPM_ENABLED == 'true'" in publish_npm
+    assert "Preflight existing npm bytes" in publish_npm
+    assert "npm preflight OK: exact" in publish_npm
+    assert "conflicts with this build" in publish_npm
+    assert 'npm publish "$NPM_PACKAGE" --access public' in publish_npm
+    assert "MAVERICK_NATIVE_NPM_ENABLED is true but NPM_TOKEN is unset" in publish_npm
+    assert "Verify final npm bytes" in publish_npm
+    assert "final npm verification OK" in publish_npm
+    assert "npm package propagation incomplete after final retry" in publish_npm
 
 
 def test_secret_scan_excludes_only_the_rotating_signed_manifest():
     baseline = json.loads(
         (REPO_ROOT / ".secrets.baseline").read_text(encoding="utf-8")
     )
+    findings = [
+        finding
+        for path, path_findings in baseline["results"].items()
+        for finding in path_findings
+    ]
+    assert findings
+    assert all("\\" not in path for path in baseline["results"])
+    assert all(finding.get("is_secret") is False for finding in findings)
+    pre_push = (
+        REPO_ROOT / "scripts" / "pre-push-lint.sh"
+    ).read_text(encoding="utf-8")
+    assert 'filename.replace("\\\\", "/")' in pre_push
+    assert "python -c 'import detect_secrets'" in pre_push
+    assert "python -m detect_secrets scan --baseline" in pre_push
+    assert "FAIL detect-secrets scanner error" in pre_push
+    assert "mktemp -d" in pre_push
+    assert 'SCAN_BASELINE="$scan_baseline"' in pre_push
+    assert "trap cleanup_pre_push EXIT" in pre_push
+    assert 'rm -rf -- "$ppl_state_dir"' in pre_push
+    assert "/tmp/scan.baseline" not in pre_push
+    assert "/tmp/detect-secrets.out" not in pre_push
+    assert "command -v detect-secrets" not in pre_push
+    assert "python3 -" not in pre_push
+
     regex_filters = [
         item
         for item in baseline["filters_used"]
@@ -1065,6 +1555,108 @@ def test_ci_constraints_satisfy_shipped_network_security_floors():
         assert "urllib3>=2.7.0" in manifest
 
 
+def test_privileged_release_job_downloads_only_named_producer_artifacts():
+    release = (
+        REPO_ROOT / ".github" / "workflows" / "release.yml"
+    ).read_text(encoding="utf-8")
+    final_release_job = release.split("\n  release:", 1)[1]
+
+    assert "merge-multiple:" not in final_release_job
+    assert final_release_job.count("uses: actions/download-artifact@") == 5
+    expected_downloads = {
+        "Download the Linux binary producer": (
+            "maverick-linux-x86_64",
+            "binary-linux",
+        ),
+        "Download the macOS binary producer": (
+            "maverick-macos-arm64",
+            "binary-macos",
+        ),
+        "Download the Windows binary producer": (
+            "maverick-windows-x86_64.exe",
+            "binary-windows",
+        ),
+        "Download the standalone source producer": (
+            "standalone-sku-source",
+            "standalone",
+        ),
+        "Download the release-runtime SBOM producer": (
+            "release-runtime-sbom",
+            "sbom",
+        ),
+    }
+    for step_name, (artifact_name, producer_directory) in expected_downloads.items():
+        step = _workflow_step(final_release_job, step_name)
+        assert f"          name: {artifact_name}" in step
+        assert (
+            "          path: ${{ runner.temp }}/release-inputs/"
+            f"{producer_directory}"
+        ) in step
+
+    assemble_position = final_release_job.index(
+        "Validate exact producer cohorts and assemble trusted release inputs"
+    )
+    sign_position = final_release_job.index(
+        "Sign release artifacts (keyless, Sigstore)"
+    )
+    assert assemble_position < sign_position
+
+
+def test_release_input_assembler_accepts_only_the_exact_producer_cohort(tmp_path):
+    input_root, output_root = _release_input_fixture(tmp_path)
+
+    result = _run_release_input_assembler(tmp_path, input_root)
+
+    assert result.returncode == 0, result.stderr
+    assert "assembled 10 allowlisted release inputs" in result.stdout
+    assert {path.name for path in output_root.iterdir()} == {
+        "maverick-linux-x86_64",
+        "maverick-macos-arm64",
+        "maverick-windows-x86_64.exe",
+        "lightwork-environment-threat-hunter-1.2.3.zip",
+        "lightwork-grc-concierge-1.2.3.zip",
+        "lightwork-model-risk-ai-assurance-officer-1.2.3.zip",
+        "lightwork-platform-threat-hunter-1.2.3.zip",
+        "lightwork-standalone-skus-1.2.3.cdx.json",
+        "lightwork-standalone-skus-1.2.3.sha256",
+        "maverick-sbom-v1.2.3.cdx.json",
+    }
+
+
+def test_release_input_assembler_rejects_an_extra_producer_file_before_copy(
+    tmp_path,
+):
+    input_root, output_root = _release_input_fixture(tmp_path)
+    (input_root / "sbom" / "unrequested-evidence.json").write_text(
+        "not allowlisted\n",
+        encoding="utf-8",
+    )
+
+    result = _run_release_input_assembler(tmp_path, input_root)
+
+    assert result.returncode != 0
+    assert "release producer 'sbom' filename mismatch" in result.stderr
+    assert list(output_root.iterdir()) == []
+
+
+def test_release_input_assembler_rejects_a_cross_producer_collision_before_copy(
+    tmp_path,
+):
+    input_root, output_root = _release_input_fixture(tmp_path)
+    expected_sbom = input_root / "sbom" / "maverick-sbom-v1.2.3.cdx.json"
+    expected_sbom.unlink()
+    (input_root / "sbom" / "maverick-linux-x86_64").write_text(
+        "attempted binary replacement\n",
+        encoding="utf-8",
+    )
+
+    result = _run_release_input_assembler(tmp_path, input_root)
+
+    assert result.returncode != 0
+    assert "release producer 'sbom' filename mismatch" in result.stderr
+    assert list(output_root.iterdir()) == []
+
+
 def test_release_delivery_toolchains_and_artifacts_are_deterministic():
     release = (
         REPO_ROOT / ".github" / "workflows" / "release.yml"
@@ -1099,6 +1691,10 @@ def test_release_delivery_toolchains_and_artifacts_are_deterministic():
     assert "provenance: mode=max" in release
     assert "sbom: true" in release
     assert "PYTHON_DIGEST=@sha256:" in release
+    ci_workflow = (
+        REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    ).read_text(encoding="utf-8")
+    assert "--build-arg 'PYTHON_DIGEST=@sha256:" in ci_workflow
     assert "Generate a complete release checksum manifest" in release
     assert "sha256sum --check" in release
     assert "fail_on_unmatched_files: true" in release
@@ -1114,18 +1710,35 @@ def test_release_delivery_toolchains_and_artifacts_are_deterministic():
     # token. Safe resume compares already-published filenames and hashes rather
     # than allowing skip-existing to mask unrelated bytes.
     assert "Preflight every distribution and existing PyPI release" in publish
-    assert "PyPI {name}=={version} differs from this build" in publish
+    assert "require_digest_matching_subset" in publish
     assert "(cd dist-all && sha256sum --check SHA256SUMS)" in publish
     assert "scripts/normalize_python_artifacts.py" in publish
     assert "dist-first/*.whl dist-first/*.tar.gz" in publish
     assert "dist-second/*.whl dist-second/*.tar.gz" in publish
     assert "attestations: true" in publish
-    assert "Fail if signatures were not attached to the release" in publish
+    assert "Attach signatures to the draft release" in publish
+    assert "Verify existing published Python evidence without mutation" in publish
+    assert "finalize-release:" in publish
+    assert "Verify every signed byte in the exact release state" in publish
+    assert (
+        "Publish only after every artifact and exact container tag verify"
+        in publish
+    )
+    assert 'gh release edit "$RELEASE_TAG" --draft=false' in publish
+    assert (
+        "Release $RELEASE_TAG is already published and fully verified; no-op"
+        in publish
+    )
+    assert "Create the signed release as a draft" in release
+    assert "draft: true" in release
+    assert "verify-published-release:" in release
+    assert "Verify the published release without mutating it" in release
     assert "release-manifest.json" in publish
     assert 'gh release upload "$TAG" \\' in publish
     assert "dist/SHA256SUMS" in publish
     assert "dist/release-manifest.json" in publish
     assert "verify-published:" in publish
+    assert "needs: [build, sign]" in publish
     assert "needs: [build, publish]" in publish
     assert "Require exact final filenames and SHA-256 digests on PyPI" in publish
     assert "outside the release manifest" in publish
@@ -1134,24 +1747,74 @@ def test_release_delivery_toolchains_and_artifacts_are_deterministic():
     docker_job = release.split("\n  docker-image:", 1)[1].split(
         "\n  binaries:", 1
     )[0]
+    sbom_job = release.split("\n  release-runtime-sbom:", 1)[1].split(
+        "\n  verify-published-release:", 1
+    )[0]
     final_release_job = release.split("\n  release:", 1)[1]
+    finalizer_job = publish.split("\n  finalize-release:", 1)[1]
     assert ":sha-$GITHUB_SHA" in docker_job
     assert ":latest" not in docker_job
     assert "steps.build.outputs.digest" in docker_job
-    draft_position = final_release_job.index(
-        "Create the signed release as a draft"
-    )
-    promote_position = final_release_job.index(
-        "Promote and verify the signed container digest"
-    )
-    publish_position = final_release_job.index(
-        "Publish the verified draft release"
-    )
-    assert draft_position < promote_position < publish_position
+    assert "Generate the isolated release-runtime SBOM" in sbom_job
+    assert "cyclonedx-py environment" in sbom_job
     assert "draft: true" in final_release_job
-    assert 'gh "${args[@]}"' in final_release_job
-    assert "$CONTAINER_IMAGE:latest" in final_release_job
-    assert "needs: [validate-release-tag, docker-image, binaries" in release
+    assert "--draft=false" not in final_release_job
+    assert "python -m pip install" not in final_release_job
+    assert "cyclonedx-py" not in final_release_job
+    assert "Promote and verify" not in final_release_job
+    verify_position = finalizer_job.index(
+        "Verify every signed byte in the exact release state"
+    )
+    promote_position = finalizer_job.index(
+        "Promote and verify the signed exact-version container tag"
+    )
+    publish_position = finalizer_job.index(
+        "Publish only after every artifact and exact container tag verify"
+    )
+    assert verify_position < promote_position < publish_position
+    assert "scripts/verify_github_release_assets.py" in finalizer_job
+    promotion_step = _workflow_step(
+        finalizer_job,
+        "Promote and verify the signed exact-version container tag",
+    )
+    assert promotion_step.count("for attempt in $(seq 1 5)") == 2
+    assert "confirmed_absent=false" in promotion_step
+    assert "manifest unknown" in promotion_step
+    assert "Registry inspection failed operationally" in promotion_step
+    assert "Unable to determine whether" in promotion_step
+    assert 'if [ "$confirmed_absent" = "true" ]; then' in promotion_step
+    assert "imagetools inspect \"$CONTAINER_TARGET\" 2>/dev/null" not in promotion_step
+    publish_step = _workflow_step(
+        finalizer_job,
+        "Publish only after every artifact and exact container tag verify",
+    )
+    remote_verify_position = publish_step.index(
+        'assets="$RUNNER_TEMP/lightwork-published-release-assets"'
+    )
+    assert publish_step.index('gh release edit "$RELEASE_TAG" --draft=false') < (
+        remote_verify_position
+    )
+    assert 'rm -rf "$assets"' in publish_step
+    assert 'gh release download "$RELEASE_TAG" --dir "$assets"' in publish_step
+    assert "scripts/verify_github_release_assets.py" in publish_step
+    assert '"$GITHUB_WORKSPACE/deploy/verify-release.sh"' in publish_step
+    assert 'if [ "${#bundles[@]}" -ne 18 ]; then' in publish_step
+    assert "cosign verify-blob" in publish_step
+    assert (
+        "Fresh published release bytes and signatures verify exactly"
+        in publish_step
+    )
+    assert 'target_tags=("$CONTAINER_IMAGE:$version")' in final_release_job
+    assert ":latest" not in final_release_job
+    assert ":latest" not in finalizer_job
+    for required_need in (
+        "validate-release-tag",
+        "docker-image",
+        "binaries",
+        "standalone-sku-artifacts",
+        "release-runtime-sbom",
+    ):
+        assert f"        {required_need}," in final_release_job
     assert "cosign sign --yes" in final_release_job
     assert '"$CONTAINER_IMAGE@$CONTAINER_DIGEST"' in final_release_job
     assert "maverick-container-" in final_release_job

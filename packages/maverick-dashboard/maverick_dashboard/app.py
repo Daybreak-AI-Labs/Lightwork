@@ -45,6 +45,7 @@ from fastapi.responses import (
 from fastapi.templating import Jinja2Templates
 from maverick import a2a
 from maverick.oidc import VerifiedPrincipal
+from maverick.runtime_overrides import RuntimeOverridesSecurityError
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -1250,6 +1251,36 @@ async def overflow_exception_handler(request: Request, exc: OverflowError):
             request, "404.html", {"path": request.url.path}, status_code=404,
         )
     return JSONResponse({"detail": "not found"}, status_code=404)
+
+
+@app.exception_handler(RuntimeOverridesSecurityError)
+async def runtime_policy_exception_handler(
+    request: Request,
+    exc: RuntimeOverridesSecurityError,
+):
+    """Make a fail-closed operator-policy stop actionable without leaking paths."""
+    log.error(
+        "operator runtime policy is unavailable on %s: %s",
+        request.url.path,
+        exc,
+    )
+    if _wants_html(request):
+        return templates.TemplateResponse(
+            request,
+            "500.html",
+            {"path": request.url.path, "policy_error": True},
+            status_code=503,
+        )
+    return JSONResponse(
+        {
+            "detail": (
+                "operator policy is unavailable; restore or repair "
+                "runtime-overrides.toml before retrying"
+            ),
+            "code": "operator_policy_unavailable",
+        },
+        status_code=503,
+    )
 
 
 @app.exception_handler(Exception)
@@ -2984,6 +3015,8 @@ async def roles_page(request: Request) -> HTMLResponse:
         if role:
             selected = resolved_role(role)
         model_options = model_picker_options()
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception:  # never 500 the page if the role layer is unavailable
         roles = []
     return templates.TemplateResponse(
@@ -3379,6 +3412,8 @@ async def mcp_page(request: Request, saved: str = "") -> HTMLResponse:
     try:
         from maverick.runtime_overrides import mcp_overlay
         overlay = mcp_overlay()
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception:
         overlay = {}
 
@@ -3481,6 +3516,8 @@ async def tools_page(request: Request) -> HTMLResponse:
         reg = base_registry(world=wm, sandbox=sb)
         tools = [{"name": t.name, "description": (t.description or "")[:240]}
                  for t in sorted(reg.all(), key=lambda x: x.name)]
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
     return templates.TemplateResponse(
@@ -3534,6 +3571,8 @@ def _permissions_snapshot() -> dict:
     try:
         from maverick.runtime_overrides import denied_tools as _overlay
         snap["overlay_denied"] = sorted(_overlay())
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception:
         snap["overlay_denied"] = []
 
@@ -3545,6 +3584,8 @@ def _permissions_snapshot() -> dict:
         wm = _world()  # honor the configured backend (SQLite or Postgres)
         reg = base_registry(world=wm, sandbox=build_sandbox())
         enabled = {t.name for t in reg.all()}
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception as e:
         snap["error"] = (snap["error"] or "") + f" registry: {type(e).__name__}: {e}"
         enabled = set()
@@ -3557,6 +3598,8 @@ def _permissions_snapshot() -> dict:
     try:
         from maverick.plugins import installed_plugins
         snap["plugins"] = installed_plugins()
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception:
         snap["plugins"] = {}
     return snap
@@ -5122,13 +5165,7 @@ async def webhook_gitlab(request: Request, bg: BackgroundTasks) -> JSONResponse:
     if _issue_webhook_replay_seen(f"gitlab:{delivery}", replay_window_seconds()):
         raise HTTPException(status_code=409, detail="duplicate webhook delivery")
 
-    if not _any_provider_key_set():
-        raise HTTPException(
-            status_code=400,
-            detail=("No AI provider is connected yet — an administrator needs "
-                    "to add a provider key before goals can run "
-                    "(run 'maverick init')."),
-        )
+    require_provider_or_400()
     check_goal_rate_limit(request, source="webhook:gitlab")
     w = _world()
     title = f"{event.issue_id}: {event.title}".strip()
@@ -5262,13 +5299,7 @@ async def _handle_issue_webhook(
     if _issue_webhook_replay_seen(dedup_signature, replay_window_seconds()):
         raise HTTPException(status_code=409, detail="duplicate webhook delivery")
 
-    if not _any_provider_key_set():
-        raise HTTPException(
-            status_code=400,
-            detail=("No AI provider is connected yet — an administrator needs "
-                    "to add a provider key before goals can run "
-                    "(run 'maverick init')."),
-        )
+    require_provider_or_400()
     check_goal_rate_limit(request, source=f"webhook:{provider}")
     w = _world()
     title = f"{event.issue_id}: {event.title}".strip()

@@ -14,13 +14,32 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+ppl_state_dir="$(mktemp -d "${TMPDIR:-/tmp}/lightwork-prepush.XXXXXXXX")" || {
+  echo "FAILED — could not create isolated pre-push workspace."
+  exit 1
+}
+cleanup_pre_push() {
+  case "$ppl_state_dir" in
+    "${TMPDIR:-/tmp}"/lightwork-prepush.*) rm -rf -- "$ppl_state_dir" ;;
+    *) printf 'refusing to clean unexpected path: %s\n' "$ppl_state_dir" >&2 ;;
+  esac
+}
+trap cleanup_pre_push EXIT
+
+# CI gates must validate repository defaults, not inherit the operator's active
+# tenant/config or race through shared /tmp filenames.
+export MAVERICK_HOME="$ppl_state_dir/maverick-home"
+unset MAVERICK_CONFIG
+mkdir -p "$MAVERICK_HOME"
+ppl_output="$ppl_state_dir/gate.out"
+
 fail=0
 run() {  # run "<name>" <command...>
   local name="$1"; shift
-  if "$@" >/tmp/ppl.out 2>&1; then
+  if "$@" >"$ppl_output" 2>&1; then
     printf '  ok   %s\n' "$name"
   else
-    printf '  FAIL %s\n' "$name"; sed 's/^/       /' /tmp/ppl.out | tail -20
+    printf '  FAIL %s\n' "$name"; sed 's/^/       /' "$ppl_output" | tail -20
     fail=1
   fi
 }
@@ -47,14 +66,31 @@ else
 fi
 
 echo "== detect-secrets vs audited baseline (TRACKED files only) =="
-if command -v detect-secrets >/dev/null 2>&1; then
-  cp .secrets.baseline /tmp/scan.baseline
-  detect-secrets scan --baseline /tmp/scan.baseline >/dev/null 2>&1
-  if python3 - <<'PY'
-import json, sys
+if python -c 'import detect_secrets' >/dev/null 2>&1; then
+  scan_dir="$ppl_state_dir/secrets"
+  scan_baseline="$scan_dir/scan.baseline"
+  scan_log="$scan_dir/detect-secrets.out"
+  # Git Bash on Windows creates the already-isolated directory successfully
+  # but returns non-zero for `mkdir -m`, producing a false gate failure. The
+  # unique 0700 parent is the security boundary; use portable mkdir here.
+  if ! mkdir "$scan_dir" || ! cp .secrets.baseline "$scan_baseline"; then
+    echo "  FAIL could not prepare detect-secrets baseline"
+    fail=1
+  elif ! python -m detect_secrets scan --baseline "$scan_baseline" \
+      >"$scan_log" 2>&1; then
+    echo "  FAIL detect-secrets scanner error"
+    sed 's/^/       /' "$scan_log" | tail -20
+    fail=1
+  elif SCAN_BASELINE="$scan_baseline" python - <<'PY'
+import json, os, sys
 old = json.load(open(".secrets.baseline"))["results"]
-new = json.load(open("/tmp/scan.baseline"))["results"]
-pairs = lambda r: {(f, i["hashed_secret"]) for f, items in r.items() for i in items}
+new = json.load(open(os.environ["SCAN_BASELINE"]))["results"]
+def pairs(results):
+    return {
+        (filename.replace("\\", "/"), item["hashed_secret"])
+        for filename, items in results.items()
+        for item in items
+    }
 extra = sorted(pairs(new) - pairs(old))
 if extra:
     print("new secret(s) not in .secrets.baseline:")
@@ -62,9 +98,14 @@ if extra:
         print(f"  {f}  (sha1 {h[:16]}...)")
     sys.exit(1)
 PY
-  then echo "  ok   no new secrets"; else echo "  FAIL new secret(s) — add '# pragma: allowlist secret' or re-audit the baseline"; fail=1; fi
+  then
+    echo "  ok   no new secrets"
+  else
+    echo "  FAIL new secret(s) — add '# pragma: allowlist secret' or re-audit the baseline"
+    fail=1
+  fi
 else
-  echo "  skip detect-secrets not installed (pip install 'detect-secrets>=1.5')"
+  echo "  skip detect-secrets not installed (python -m pip install 'detect-secrets>=1.5')"
 fi
 
 echo "== custom CI gates =="

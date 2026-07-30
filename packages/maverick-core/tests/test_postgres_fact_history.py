@@ -87,6 +87,24 @@ def test_delete_closes_open_window(temporal_world):
     assert hist[0].valid_to is not None
 
 
+def test_delete_window_survives_clock_rollback(
+    temporal_world, monkeypatch,
+):
+    from maverick.world_model_backends import postgres
+
+    w = temporal_world
+    k = w._kp + "rollback-delete"
+    times = iter((1_000.0, 999.0))
+    monkeypatch.setattr(postgres.time, "time", lambda: next(times))
+
+    w.upsert_fact(k, "here")
+    assert w.delete_fact(k) == 1
+
+    [version] = w.fact_history(k)
+    assert version.valid_to is not None
+    assert version.valid_to > version.valid_from
+
+
 def test_gdpr_history_export_and_purge(temporal_world):
     w = temporal_world
     tok = w._kp.replace("-", "")  # token must be embeddable in a key

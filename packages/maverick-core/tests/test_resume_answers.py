@@ -52,7 +52,7 @@ def test_resume_builds_and_passes_a_sandbox(tmp_path: Path, monkeypatch):
     from click.testing import CliRunner
     from maverick.world_model import open_world
 
-    monkeypatch.setattr(cli, "_require_llm_key", lambda: "test")
+    monkeypatch.setattr(cli, "_require_llm_key", lambda *args: "test")
     captured: dict = {}
 
     def fake_run_goal_sync(llm, world, bud, goal_id, **kwargs):

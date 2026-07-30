@@ -66,6 +66,7 @@ from pathlib import Path
 from typing import Any
 
 from .embeddable import no_cli
+from .runtime_overrides import RuntimeOverridesSecurityError
 
 log = logging.getLogger(__name__)
 
@@ -147,6 +148,8 @@ def _allowed_plugin_names() -> set[str] | None:
     try:
         from .runtime_overrides import plugin_overlay
         on, off = plugin_overlay()
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception:  # pragma: no cover -- overlay never breaks discovery
         on, off = set(), set()
     if not on and not off:

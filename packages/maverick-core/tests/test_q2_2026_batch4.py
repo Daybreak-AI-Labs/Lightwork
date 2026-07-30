@@ -239,8 +239,10 @@ def test_dashboard_theme_cookie_persists(dashboard_client):
     assert resp.status_code == 200
     cookies = resp.cookies
     assert cookies.get("mvk_theme") == "light"
-    # Next visit without the query param should pick up the cookie.
-    resp2 = dashboard_client.get("/", cookies={"mvk_theme": "light"})
+    # The client cookie jar should carry the server-set value into the next
+    # request; passing per-request cookies is deprecated and bypasses that
+    # persistence behavior.
+    resp2 = dashboard_client.get("/")
     assert 'class="theme-light' in resp2.text
 
 

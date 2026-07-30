@@ -17,11 +17,14 @@ the next goal with no restart. config.toml is never touched.
 """
 from __future__ import annotations
 
+import copy
 import functools
 import logging
 import math
 import re
 import threading
+from collections import OrderedDict
+from pathlib import Path
 
 from .paths import data_dir
 
@@ -37,6 +40,33 @@ _VALID_TOOL_NAME = re.compile(r"^[a-z0-9_-]+$")
 # disable_tool, silently re-enabling a tool the operator just denied. Serialize
 # every mutator's read-modify-write in-process (RLock) and cross-process (flock).
 _OVERRIDE_LOCK = threading.RLock()
+_mutation_context = threading.local()
+_LKG_LIMIT = 8
+_LOAD_FAILURE_LIMIT = 32
+_MAX_OVERRIDE_BYTES = 1024 * 1024
+_KNOWN_TOP_LEVEL = frozenset(
+    {"security", "models", "budget", "plugins", "access", "styles", "mcp_servers"}
+)
+_MCP_SPEC_KEYS = frozenset(
+    {
+        "command",
+        "args",
+        "env",
+        "inherit_env",
+        "pin_sha256",
+        "url",
+        "headers",
+        "auth_token",
+        "oauth",
+        "enabled",
+    }
+)
+_last_known_good: OrderedDict[str, dict] = OrderedDict()
+_announced_load_failures: OrderedDict[tuple[str, str], None] = OrderedDict()
+
+
+class RuntimeOverridesSecurityError(RuntimeError):
+    """The operator policy exists but cannot be read or validated safely."""
 
 
 def _serialized(fn):
@@ -47,7 +77,12 @@ def _serialized(fn):
     def _wrap(*args, **kwargs):
         from .file_lock import cross_process_lock
         with _OVERRIDE_LOCK, cross_process_lock(OVERRIDES_PATH):
-            return fn(*args, **kwargs)
+            previous = getattr(_mutation_context, "strict_reads", False)
+            _mutation_context.strict_reads = True
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                _mutation_context.strict_reads = previous
     return _wrap
 
 
@@ -59,18 +94,303 @@ def _tomllib():
     return tomllib
 
 
-def _load() -> dict:
-    if not OVERRIDES_PATH.exists():
-        return {}
+def _cache_key() -> str:
+    """Stable lexical identity for the policy path.
+
+    Resolving symlinks makes the key depend on whether the link currently
+    exists: after a valid symlink-backed policy is loaded, deleting the link
+    would otherwise change the key and bypass its last-known-good policy.
+    """
     try:
-        with open(OVERRIDES_PATH, "rb") as f:
-            return _tomllib().load(f)
-    except (OSError, ValueError, UnicodeDecodeError) as e:
-        log.warning("runtime_overrides: cannot read %s: %s", OVERRIDES_PATH, e)
+        return str(OVERRIDES_PATH.absolute())
+    except OSError:
+        return str(OVERRIDES_PATH)
+
+
+def _remember_valid(key: str, state: dict) -> dict:
+    """Cache a bounded, detached last-known-good policy for transient damage."""
+    detached = copy.deepcopy(state)
+    _last_known_good[key] = detached
+    _last_known_good.move_to_end(key)
+    while len(_last_known_good) > _LKG_LIMIT:
+        _last_known_good.popitem(last=False)
+    return copy.deepcopy(detached)
+
+
+def _read_overlay(path: Path) -> dict:
+    with open(path, "rb") as f:
+        content = f.read(_MAX_OVERRIDE_BYTES + 1)
+    if len(content) > _MAX_OVERRIDE_BYTES:
+        raise ValueError(
+            f"runtime override exceeds {_MAX_OVERRIDE_BYTES} bytes"
+        )
+    return _tomllib().loads(content.decode("utf-8"))
+
+
+def _require_table(state: dict, name: str) -> dict:
+    value = state.get(name, {})
+    if not isinstance(value, dict):
+        raise ValueError(f"[{name}] must be a TOML table")
+    return value
+
+
+def _reject_unknown_keys(table: dict, allowed: set[str] | frozenset[str], label: str) -> None:
+    unknown = sorted(str(key) for key in set(table) - set(allowed))
+    if unknown:
+        raise ValueError(f"{label} contains unknown key(s): {', '.join(unknown)}")
+
+
+def _require_optional_type(
+    table: dict,
+    key: str,
+    expected_type: type,
+    *,
+    label: str,
+) -> None:
+    if key in table and not isinstance(table[key], expected_type):
+        raise ValueError(f"{label} must be a {expected_type.__name__}")
+
+
+def _require_string_map(table: dict, key: str, *, label: str) -> None:
+    if key not in table:
+        return
+    value = table[key]
+    if not isinstance(value, dict) or any(
+        not isinstance(map_key, str) or not isinstance(map_value, str)
+        for map_key, map_value in value.items()
+    ):
+        raise ValueError(f"{label} must be a string-to-string table")
+
+
+def _require_string_list(
+    table: dict,
+    key: str,
+    pattern: re.Pattern[str],
+    *,
+    label: str,
+) -> None:
+    if key not in table:
+        return
+    values = table[key]
+    if not isinstance(values, list):
+        raise ValueError(f"{label} must be a list")
+    for value in values:
+        if not isinstance(value, str) or not pattern.fullmatch(value):
+            raise ValueError(f"{label} contains an invalid entry")
+
+
+def _validate_loaded_state(state: object) -> dict:
+    """Validate every dashboard-owned surface before it can affect policy.
+
+    A syntactically valid but structurally damaged security table must not be
+    treated as an empty deny/allow list.  Validating all known sections also
+    prevents a dashboard mutation from silently discarding malformed state.
+    Unknown top-level sections are rejected so misspelled security controls
+    cannot silently become inert.
+    """
+    if not isinstance(state, dict):
+        raise ValueError("runtime override root must be a TOML table")
+    _reject_unknown_keys(state, _KNOWN_TOP_LEVEL, "runtime override")
+
+    security = _require_table(state, "security")
+    _reject_unknown_keys(security, {"denied_tools"}, "security")
+    _require_string_list(
+        security,
+        "denied_tools",
+        _VALID_TOOL_NAME,
+        label="security.denied_tools",
+    )
+
+    models = _require_table(state, "models")
+    for role, model in models.items():
+        if (
+            not isinstance(role, str)
+            or not _VALID_ROLE.fullmatch(role)
+            or not isinstance(model, str)
+            or not _VALID_MODEL.fullmatch(model.strip())
+        ):
+            raise ValueError("models contains an invalid role or model id")
+
+    budget = _require_table(state, "budget")
+    _reject_unknown_keys(budget, {"max_dollars"}, "budget")
+    if "max_dollars" in budget:
+        value = budget["max_dollars"]
+        if isinstance(value, bool):
+            raise ValueError("budget.max_dollars must be a positive number")
+        try:
+            amount = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("budget.max_dollars must be a positive number") from exc
+        if not math.isfinite(amount) or amount <= 0:
+            raise ValueError("budget.max_dollars must be a positive number")
+
+    plugins = _require_table(state, "plugins")
+    _reject_unknown_keys(plugins, {"enabled", "disabled"}, "plugins")
+    _require_string_list(
+        plugins,
+        "enabled",
+        _VALID_PLUGIN,
+        label="plugins.enabled",
+    )
+    _require_string_list(
+        plugins,
+        "disabled",
+        _VALID_PLUGIN,
+        label="plugins.disabled",
+    )
+
+    access = _require_table(state, "access")
+    _reject_unknown_keys(access, {"allowed_models"}, "access")
+    _require_string_list(
+        access,
+        "allowed_models",
+        _VALID_MODEL,
+        label="access.allowed_models",
+    )
+
+    styles = _require_table(state, "styles")
+    _reject_unknown_keys(styles, {"active"}, "styles")
+    if "active" in styles and (
+        not isinstance(styles["active"], str) or not styles["active"].strip()
+    ):
+        raise ValueError("styles.active must be a non-empty string")
+
+    servers = _require_table(state, "mcp_servers")
+    for name, spec in servers.items():
+        if (
+            not isinstance(name, str)
+            or not _VALID_SERVER_NAME.fullmatch(name)
+            or not isinstance(spec, dict)
+        ):
+            raise ValueError("mcp_servers contains an invalid server definition")
+        _reject_unknown_keys(spec, _MCP_SPEC_KEYS, f"mcp_servers.{name}")
+
+        label = f"mcp_servers.{name}"
+        _require_optional_type(spec, "command", str, label=f"{label}.command")
+        _require_optional_type(spec, "url", str, label=f"{label}.url")
+        has_command = "command" in spec
+        has_url = "url" in spec
+        if has_command == has_url:
+            raise ValueError(
+                f"{label} must define exactly one non-empty command or url"
+            )
+        selected = spec["command"] if has_command else spec["url"]
+        if not selected.strip():
+            raise ValueError(
+                f"{label} must define exactly one non-empty command or url"
+            )
+
+        _require_string_list(
+            spec,
+            "args",
+            re.compile(r"^[^\0\r\n]*$"),
+            label=f"{label}.args",
+        )
+        _require_string_map(spec, "env", label=f"{label}.env")
+        _require_string_map(spec, "headers", label=f"{label}.headers")
+        _require_optional_type(
+            spec,
+            "inherit_env",
+            bool,
+            label=f"{label}.inherit_env",
+        )
+        _require_optional_type(
+            spec,
+            "auth_token",
+            str,
+            label=f"{label}.auth_token",
+        )
+        _require_optional_type(
+            spec,
+            "pin_sha256",
+            str,
+            label=f"{label}.pin_sha256",
+        )
+        _require_optional_type(spec, "oauth", dict, label=f"{label}.oauth")
+        if "enabled" in spec and not isinstance(spec["enabled"], bool):
+            raise ValueError(f"{label}.enabled must be a boolean")
+        from .mcp_client import MCPServerSpec
+
+        try:
+            MCPServerSpec.from_config(
+                name,
+                {key: value for key, value in spec.items() if key != "enabled"},
+            )
+        except Exception as exc:
+            # MCPServerSpec is a second validation layer. Normalize all of its
+            # failures so callers never mistake a schema/delegation bug for an
+            # absent runtime policy and fall back to unrestricted defaults.
+            raise ValueError(f"{label} is invalid") from exc
+
+    return state
+
+
+def _load() -> dict:
+    key = _cache_key()
+    try:
+        # lstat distinguishes a genuinely absent policy from a dangling or
+        # unreadable symlink, which must fail closed rather than look empty.
+        OVERRIDES_PATH.lstat()
+    except FileNotFoundError:
+        with _OVERRIDE_LOCK:
+            retained = key in _last_known_good
+            for failure in tuple(_announced_load_failures):
+                if failure[0] == key:
+                    _announced_load_failures.pop(failure, None)
+        if retained:
+            return _recover_or_raise(
+                key,
+                FileNotFoundError(
+                    "operator policy disappeared after a valid policy was loaded"
+                ),
+            )
         return {}
+    except OSError as exc:
+        return _recover_or_raise(key, exc)
+    try:
+        state = _validate_loaded_state(_read_overlay(OVERRIDES_PATH))
+    except Exception as exc:
+        # Every read, schema, and delegated MCP validation failure has the same
+        # fail-closed contract. Critical consumers special-case
+        # RuntimeOverridesSecurityError; leaking a KeyError/TypeError here lets
+        # their generic resilience catches silently discard the entire policy.
+        return _recover_or_raise(key, exc)
+    with _OVERRIDE_LOCK:
+        for failure in tuple(_announced_load_failures):
+            if failure[0] == key:
+                _announced_load_failures.pop(failure, None)
+        return _remember_valid(key, state)
 
 
-_announced: set[str] = set()
+def _recover_or_raise(key: str, exc: Exception) -> dict:
+    with _OVERRIDE_LOCK:
+        if (
+            key in _last_known_good
+            and not getattr(_mutation_context, "strict_reads", False)
+        ):
+            state = copy.deepcopy(_last_known_good[key])
+            _last_known_good.move_to_end(key)
+            fingerprint = (key, f"{type(exc).__name__}: {exc}")
+            if fingerprint not in _announced_load_failures:
+                _announced_load_failures[fingerprint] = None
+                _announced_load_failures.move_to_end(fingerprint)
+                while len(_announced_load_failures) > _LOAD_FAILURE_LIMIT:
+                    _announced_load_failures.popitem(last=False)
+                log.error(
+                    "runtime_overrides: cannot read or validate %s; retaining "
+                    "the in-process last-known-good policy: %s",
+                    OVERRIDES_PATH,
+                    exc,
+                )
+            return state
+    raise RuntimeOverridesSecurityError(
+        f"refusing to continue with unreadable or invalid operator policy "
+        f"{OVERRIDES_PATH}; repair or restore the file"
+    ) from exc
+
+
+_ANNOUNCED_LIMIT = 64
+_announced: OrderedDict[str, None] = OrderedDict()
 
 
 def denied_tools() -> set[str]:
@@ -94,7 +414,9 @@ def denied_tools() -> set[str]:
     if valid:
         key = ",".join(sorted(valid))
         if key not in _announced:
-            _announced.add(key)
+            _announced[key] = None
+            while len(_announced) > _ANNOUNCED_LIMIT:
+                _announced.popitem(last=False)
             log.info(
                 "runtime_overrides: %s is denying %d tool(s) via the dashboard "
                 "overlay: %s", OVERRIDES_PATH, len(valid), ", ".join(sorted(valid)),
@@ -226,7 +548,7 @@ def _render_mcp(servers: dict[str, dict]) -> str:
         for key, val in servers[name].items():
             if key == "name":  # the table key already carries the name
                 continue
-            body += f"{key} = {_toml_inline(val)}\n"
+            body += f"{_toml_string(str(key))} = {_toml_inline(val)}\n"
     return body
 
 
@@ -284,7 +606,13 @@ def _write_state(denied: set[str], models: dict[str, str] | None,
     # Unique temp + os.replace (0600): a fixed ".toml.tmp" collides under two
     # concurrent writers -- one os.replace moves it out from under the other.
     from .file_lock import atomic_write_text
+    # Parse and validate before replacement. A renderer/schema bug must never
+    # atomically replace the last valid operator policy with corrupt TOML.
+    state = _validate_loaded_state(_tomllib().loads(body))
     atomic_write_text(OVERRIDES_PATH, body)
+    # Keep the fallback synchronized with writes from this process.
+    with _OVERRIDE_LOCK:
+        _remember_valid(_cache_key(), state)
 
 
 def _toml_string(value: str) -> str:
@@ -508,6 +836,7 @@ def remove_mcp_server(name: str) -> bool:
 
 
 __all__ = [
+    "RuntimeOverridesSecurityError",
     "denied_tools", "disable_tool", "enable_tool",
     "default_model_override", "set_default_model", "clear_default_model",
     "role_model_override", "set_role_models",

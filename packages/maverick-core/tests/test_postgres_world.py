@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import uuid
 
 import pytest
 
@@ -102,6 +103,25 @@ def test_facts_upsert_overwrites(world):
     world.upsert_fact("pg:color", "blue")
     world.upsert_fact("pg:color", "green")  # ON CONFLICT(key) -> update
     assert world.get_facts().get("pg:color") == "green"
+
+
+def test_facts_newest_write_order_survives_clock_rollback(
+    world, monkeypatch,
+):
+    from maverick.world_model_backends import postgres
+
+    prefix = f"pg:order:{uuid.uuid4().hex}:"
+    key_a, key_b = prefix + "a", prefix + "b"
+    times = iter((1_000.0, 1_001.0, 999.0))
+    monkeypatch.setattr(postgres.time, "time", lambda: next(times))
+
+    world.upsert_fact(key_a, "first")
+    world.upsert_fact(key_b, "second")
+    world.upsert_fact(key_a, "updated last")
+
+    keys = list(world.get_facts())
+    assert keys.index(key_a) < keys.index(key_b)
+    assert len(world.list_facts(prefix, limit=10)) == 2
 
 
 def test_facts_matching_is_prefix_scoped(world):
@@ -371,6 +391,17 @@ def test_reclaim_orphan_goals(world):
     # max_age_seconds=0 -> the just-touched active goal qualifies as stale.
     n = world.reclaim_orphan_goals(max_age_seconds=0)
     assert n >= 1
+    assert world.get_goal(g).status == "blocked"
+
+
+def test_reclaim_includes_goal_exactly_at_cutoff(world, monkeypatch):
+    from maverick.world_model_backends import postgres as postgres_module
+
+    monkeypatch.setattr(postgres_module.time, "time", lambda: 1_000.0)
+    g = world.create_goal("orphan-at-exact-cutoff")
+    world.set_goal_status(g, "active")
+
+    assert world.reclaim_orphan_goals(max_age_seconds=0) >= 1
     assert world.get_goal(g).status == "blocked"
 
 
@@ -1003,9 +1034,11 @@ def test_reclaim_orphan_goals_preserves_sealed_result(world, monkeypatch, tmp_pa
     no longer decrypts -- the deliverable was permanently lost on crash
     recovery. (Mirrors the SQLite backend's at-rest branch.)"""
     from maverick import crypto_at_rest as car
+    from maverick.world_model_backends import postgres as postgres_module
 
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "at_rest.key")
+    monkeypatch.setattr(postgres_module.time, "time", lambda: 1_000.0)
     assert car.at_rest_enabled() is True
 
     gid = world.create_goal("orphan-enc")
@@ -1054,6 +1087,217 @@ def test_delete_facts_matching_is_tenant_scoped(world):
         assert world.get_fact(key) == "globex-alice-value"
     finally:
         reset_tenant(tok)
+
+
+def test_fact_compatibility_read_prefers_tenant_row_over_newer_legacy(
+    world, monkeypatch
+):
+    """Legacy NULL fallback must never overwrite an explicit tenant belief."""
+    from maverick.paths import reset_tenant, set_tenant
+
+    monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
+    key = f"tenant-precedence:{uuid.uuid4().hex}"
+    tok = set_tenant("acme")
+    try:
+        world.upsert_fact(key, "acme", trust_tier=3)
+    finally:
+        reset_tenant(tok)
+    # Write legacy later so write order alone would select the wrong row.
+    world.upsert_fact(key, "legacy-newer", trust_tier=0)
+
+    tok = set_tenant("acme")
+    try:
+        assert world.get_fact(key) == "acme"
+        assert world.get_facts()[key] == "acme"
+        assert world.get_facts_with_trust()[key] == ("acme", 3)
+    finally:
+        reset_tenant(tok)
+
+
+def test_subject_fact_erasure_purges_readable_legacy_rows(world, monkeypatch):
+    """Art.17 scope must cover legacy rows exposed by compatibility reads."""
+    from maverick import world_model as wm
+    from maverick.paths import reset_tenant, set_tenant
+
+    monkeypatch.setattr(wm, "_temporal_memory_enabled", lambda: True)
+    monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
+    subject = f"sms:{uuid.uuid4().hex}"
+    key = f"user:{subject}:email"
+    world.upsert_fact(key, "legacy@example.test")
+
+    tok = set_tenant("acme")
+    try:
+        assert world.facts_matching(subject) == {
+            key: "legacy@example.test"
+        }
+        assert world.delete_facts_matching(subject) == [key]
+        assert world.facts_matching(subject) == {}
+        assert world.fact_history_matching(subject) == {}
+    finally:
+        reset_tenant(tok)
+
+    assert world.get_fact(key) is None
+    assert world.fact_history(key) == []
+
+
+def test_history_precedence_projects_effective_legacy_and_tenant_timeline(
+    world, monkeypatch,
+):
+    """Legacy history resumes outside exact tenant validity windows."""
+    from maverick import world_model as wm
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick.world_model_backends import postgres
+
+    monkeypatch.setattr(wm, "_temporal_memory_enabled", lambda: True)
+    monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
+    times = iter((100.0, 200.0, 300.0))
+    monkeypatch.setattr(postgres.time, "time", lambda: next(times))
+    subject = f"sms:{uuid.uuid4().hex}"
+    key = f"user:{subject}:email"
+
+    world.upsert_fact(key, "legacy")
+    tok = set_tenant("acme")
+    try:
+        world.upsert_fact(key, "own")
+        assert world.delete_fact(key) == 1
+
+        assert world.get_fact(key, as_of=150.0) == "legacy"
+        assert world.get_fact(key, as_of=250.0) == "own"
+        assert world.get_fact(key, as_of=350.0) == "legacy"
+
+        history = world.fact_history(key)
+        assert [
+            (version.value, version.valid_from, version.valid_to)
+            for version in history
+        ] == [
+            ("legacy", 300.0, None),
+            ("own", 200.0, 300.0),
+            ("legacy", 100.0, 200.0),
+        ]
+        exported = world.fact_history_matching(subject)[key]
+        assert [
+            (version.value, version.valid_from, version.valid_to)
+            for version in exported
+        ] == list(reversed([
+            ("legacy", 300.0, None),
+            ("own", 200.0, 300.0),
+            ("legacy", 100.0, 200.0),
+        ]))
+    finally:
+        world.delete_facts_matching(subject)
+        reset_tenant(tok)
+
+
+def test_history_limit_applies_after_effective_precedence_projection(
+    world, monkeypatch,
+):
+    """Hidden recent legacy rows cannot evict older point-readable history."""
+    from maverick import world_model as wm
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick.world_model_backends import postgres
+
+    monkeypatch.setattr(wm, "_temporal_memory_enabled", lambda: True)
+    monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
+    times = iter((100.0, 105.0, 110.0, 120.0))
+    monkeypatch.setattr(postgres.time, "time", lambda: next(times))
+    subject = f"sms:{uuid.uuid4().hex}"
+    key = f"user:{subject}:email"
+
+    world.upsert_fact(key, "legacy-visible")
+    tok = set_tenant("acme")
+    try:
+        world.upsert_fact(key, "own")
+    finally:
+        reset_tenant(tok)
+    # These are newer raw legacy versions, but the own interval hides both.
+    world.upsert_fact(key, "legacy-hidden-1")
+    world.upsert_fact(key, "legacy-hidden-2")
+
+    tok = set_tenant("acme")
+    try:
+        history = world.fact_history(key, limit=2)
+        assert [
+            (version.value, version.valid_from, version.valid_to)
+            for version in history
+        ] == [
+            ("own", 105.0, None),
+            ("legacy-visible", 100.0, 105.0),
+        ]
+        assert world.get_fact(key, as_of=102.0) == "legacy-visible"
+        assert world.get_fact(key, as_of=115.0) == "own"
+    finally:
+        world.delete_facts_matching(subject)
+        reset_tenant(tok)
+
+
+def test_unbound_fact_delete_mutates_only_legacy_null_row(world, monkeypatch):
+    """The unbound admin read view is not authority to delete named tenants."""
+    from maverick.paths import reset_tenant, set_tenant
+
+    monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
+    key = f"exact-delete:{uuid.uuid4().hex}"
+    for tenant, value in (("acme", "a"), ("globex", "g")):
+        tok = set_tenant(tenant)
+        try:
+            world.upsert_fact(key, value)
+        finally:
+            reset_tenant(tok)
+    world.upsert_fact(key, "legacy")
+
+    assert world.delete_fact(key) == 1
+    for tenant, value in (("acme", "a"), ("globex", "g")):
+        tok = set_tenant(tenant)
+        try:
+            assert world.get_fact(key) == value
+        finally:
+            reset_tenant(tok)
+
+
+def test_unbound_temporal_upsert_does_not_close_named_tenant_history(
+    world, monkeypatch
+):
+    from maverick import world_model as wm
+    from maverick.paths import reset_tenant, set_tenant
+
+    monkeypatch.setattr(wm, "_temporal_memory_enabled", lambda: True)
+    monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "0")
+    key = f"exact-history:{uuid.uuid4().hex}"
+    tok = set_tenant("acme")
+    try:
+        world.upsert_fact(key, "acme")
+    finally:
+        reset_tenant(tok)
+
+    world.upsert_fact(key, "legacy")
+    with world._tx() as cur:
+        cur.execute(
+            "SELECT tenant_id, COUNT(*) FROM fact_history "
+            "WHERE key = %s AND valid_to IS NULL GROUP BY tenant_id",
+            (key,),
+        )
+        open_by_tenant = {row[0]: int(row[1]) for row in cur.fetchall()}
+    assert open_by_tenant["acme"] == 1
+    assert open_by_tenant[None] == 1
+
+
+def test_fact_write_sequence_crosses_32_bit_limit(world):
+    """The logical write clock remains valid beyond SERIAL's signed limit."""
+    key = f"write-seq:{uuid.uuid4().hex}"
+    with world._tx() as cur:
+        cur.execute("SELECT pg_get_serial_sequence('facts', 'write_seq')")
+        sequence = cur.fetchone()[0]
+        cur.execute("SELECT COALESCE(MAX(write_seq), 0) FROM facts")
+        current = int(cur.fetchone()[0])
+        floor = max(current, 2_147_483_646)
+        cur.execute("SELECT setval(%s, %s, true)", (sequence, floor))
+
+    world.upsert_fact(key, "before")
+    world.upsert_fact(key, "after")
+    with world._tx() as cur:
+        cur.execute("SELECT write_seq FROM facts WHERE key = %s", (key,))
+        write_seq = int(cur.fetchone()[0])
+    assert write_seq > 2_147_483_647
+    assert world.get_fact(key) == "after"
 
 
 @pytest.mark.skipif(
@@ -1146,6 +1390,152 @@ def test_concurrent_upsert_fact_single_open_window(world, monkeypatch):
         )
         open_windows = cur.fetchone()[0]
     assert open_windows == 1, f"expected exactly one open window, got {open_windows}"
+
+
+def test_concurrent_temporal_upsert_delete_matches_live_state(world, monkeypatch):
+    """The per-key lock must make live state and the open window agree."""
+    import threading
+
+    from maverick import world_model as wm
+    from maverick.world_model_backends.postgres import PostgresWorldModel
+
+    monkeypatch.setattr(wm, "_temporal_memory_enabled", lambda: True)
+    key = f"pg:upsert-delete:{uuid.uuid4().hex}"
+    world.upsert_fact(key, "initial")
+    barrier = threading.Barrier(2)
+    errors: list[str] = []
+
+    def upsert():
+        try:
+            candidate = PostgresWorldModel(dsn=_DSN)
+            barrier.wait()
+            candidate.upsert_fact(key, "concurrent")
+            candidate.close()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(repr(exc))
+
+    def delete():
+        try:
+            candidate = PostgresWorldModel(dsn=_DSN)
+            barrier.wait()
+            candidate.delete_fact(key)
+            candidate.close()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(repr(exc))
+
+    threads = [threading.Thread(target=upsert), threading.Thread(target=delete)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert errors == [], errors
+    assert all(not thread.is_alive() for thread in threads)
+    current = world.get_fact(key)
+    history = world.fact_history(key, limit=10)
+    open_rows = [version for version in history if version.valid_to is None]
+    assert bool(current is not None) == bool(open_rows)
+    if current is not None:
+        assert len(open_rows) == 1
+        assert open_rows[0].value == current
+    assert all(
+        version.valid_to is None or version.valid_to >= version.valid_from
+        for version in history
+    )
+
+
+def test_concurrent_subject_purge_serializes_temporal_upsert(world, monkeypatch):
+    """A matching upsert linearizes after the live + history purge."""
+    import threading
+    from contextlib import contextmanager
+
+    from maverick import world_model as wm
+    from maverick.world_model_backends.postgres import PostgresWorldModel
+
+    monkeypatch.setattr(wm, "_temporal_memory_enabled", lambda: True)
+    subject = f"sms:{uuid.uuid4().hex}"
+    seed_key = f"user:{subject}:seed"
+    concurrent_key = f"user:{subject}:concurrent"
+    world.upsert_fact(seed_key, "erase")
+
+    eraser = PostgresWorldModel(dsn=_DSN)
+    writer = PostgresWorldModel(dsn=_DSN)
+    lock_acquired = threading.Event()
+    release_purge = threading.Event()
+    writer_started = threading.Event()
+    writer_done = threading.Event()
+    errors: list[str] = []
+    removed: list[str] = []
+    original_tx = eraser._tx
+
+    class PausingCursor:
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def execute(self, sql, params=None):
+            result = self._cursor.execute(sql, params)
+            if sql.startswith("LOCK TABLE fact_history, facts"):
+                lock_acquired.set()
+                if not release_purge.wait(timeout=10):
+                    raise TimeoutError("test did not release subject-purge lock")
+            return result
+
+        def __getattr__(self, name):
+            return getattr(self._cursor, name)
+
+    @contextmanager
+    def paused_tx():
+        with original_tx() as cursor:
+            yield PausingCursor(cursor)
+
+    monkeypatch.setattr(eraser, "_tx", paused_tx)
+
+    def purge():
+        try:
+            removed.extend(eraser.delete_facts_matching(subject))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"purge: {exc!r}")
+
+    def upsert():
+        writer_started.set()
+        try:
+            writer.upsert_fact(concurrent_key, "survives")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"upsert: {exc!r}")
+        finally:
+            writer_done.set()
+
+    purge_thread = threading.Thread(target=purge)
+    writer_thread = threading.Thread(target=upsert)
+    try:
+        purge_thread.start()
+        assert lock_acquired.wait(timeout=10)
+        writer_thread.start()
+        assert writer_started.wait(timeout=10)
+        assert not writer_done.wait(timeout=0.2)
+        release_purge.set()
+        purge_thread.join(timeout=10)
+        writer_thread.join(timeout=10)
+
+        assert errors == []
+        assert not purge_thread.is_alive()
+        assert not writer_thread.is_alive()
+        assert removed == [seed_key]
+        assert world.get_fact(seed_key) is None
+        assert world.fact_history(seed_key) == []
+        assert world.get_fact(concurrent_key) == "survives"
+        [current] = world.fact_history(concurrent_key)
+        assert current.value == "survives"
+        assert current.valid_to is None
+    finally:
+        release_purge.set()
+        if purge_thread.ident is not None:
+            purge_thread.join(timeout=10)
+        if writer_thread.ident is not None:
+            writer_thread.join(timeout=10)
+        eraser.close()
+        writer.close()
+        world.delete_facts_matching(subject)
 
 
 def test_answer_cannot_cross_tenant(world, monkeypatch):

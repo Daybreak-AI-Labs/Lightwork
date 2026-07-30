@@ -632,6 +632,10 @@ def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8
             except BudgetExceeded:
                 raise  # exhausted budget fails the CASE closed, never the heuristic
             except Exception as e:  # pragma: no cover -- one bad sample abstains
+                from .llm import ModelNotAllowedError
+
+                if isinstance(e, ModelNotAllowedError):
+                    raise
                 _judge.degraded += 1
                 log.warning("eval: llm judge sample failed (%s)", e)
             finally:
@@ -712,6 +716,10 @@ def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None =
         except BudgetExceeded:
             raise  # exhausted budget is indeterminate, not a scored failure
         except Exception as e:  # pragma: no cover -- a failed generation isn't a success
+            from .llm import ModelNotAllowedError
+
+            if isinstance(e, ModelNotAllowedError):
+                raise
             _run.degraded += 1
             log.warning("eval: llm runner failed (%s)", e)
             return ""
@@ -758,6 +766,10 @@ def llm_paraphraser(llm, *, budget=None, model: str | None = None,
             except BudgetExceeded:
                 raise  # the validator catches this and skips the check whole
             except Exception as e:  # pragma: no cover -- one bad paraphrase drops
+                from .llm import ModelNotAllowedError
+
+                if isinstance(e, ModelNotAllowedError):
+                    raise
                 log.warning("eval: llm paraphraser failed (%s)", e)
         return out
     return _paraphrase

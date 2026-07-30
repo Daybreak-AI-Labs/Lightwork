@@ -19,9 +19,22 @@ python -m pip install -e ./packages/maverick-core -e ./packages/maverick-mcp
 
 Add the official [Java MCP SDK](https://github.com/modelcontextprotocol/java-sdk)
 (`io.modelcontextprotocol.sdk:mcp`) to your build — pin the version for
-reproducibility:
+reproducibility. The 1.1.3 SDK POM fixes its Jackson cohort at 3.0.3, so import
+the patched Jackson 3.1 LTS BOM in the application build:
 
 ```xml
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>tools.jackson</groupId>
+      <artifactId>jackson-bom</artifactId>
+      <version>3.1.5</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+
 <dependency>
   <groupId>io.modelcontextprotocol.sdk</groupId>
   <artifactId>mcp</artifactId>
@@ -29,14 +42,15 @@ reproducibility:
 </dependency>
 ```
 
-(Gradle: `implementation("io.modelcontextprotocol.sdk:mcp:1.1.3")`.)
-Requires JDK 17+. Set your provider key the same way the CLI expects
+(Gradle: add `implementation(platform("tools.jackson:jackson-bom:3.1.5"))`,
+then `implementation("io.modelcontextprotocol.sdk:mcp:1.1.3")`.)
+The checked example and CI use JDK 21. Set your provider key the same way the CLI expects
 (e.g. `export ANTHROPIC_API_KEY=…`).
 
 ## Quickstart
 
 ```java
-// Client.java — JDK 17+
+// Client.java — JDK 21
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.ServerParameters;
@@ -81,25 +95,11 @@ You should see the tool list (10 tools), then the swarm's final answer.
 
 ## What works
 
-The MCP server exposes a small, stable control surface — **8
-`maverick_*` tools**, not the 100+ in-kernel tools. You drive the swarm;
-the kernel runs the tools internally.
-
-- `maverick_start` `{title, description?, max_dollars?, max_wall_seconds?, max_depth?}`
-  — start a goal; returns the final answer.
-- `maverick_status` — list recent goals + open questions.
-- `maverick_resume` `{goal_id}` — resume a paused goal.
-- `maverick_answer` `{question_id, answer}` — answer a queued question.
-- `maverick_skill_install` `{source}` / `maverick_skills_list`.
-- `maverick_fact_set` `{key, value}` / `maverick_facts_get`.
-- `maverick_fleet_ingest` `{agent_id, vendor, kind, goal_text}` — deposit an
-  external agent's experience into governed fleet memory (roster-gated).
-- `maverick_fleet_recall` `{agent_id, vendor, query}` — governed, audited
-  memory read for an external fleet agent.
-
-The 100+ in-kernel tools (web search, repo map, editor, Slack, S3, …)
-are **not** individually exposed over MCP — the swarm decides which to
-use while running a goal.
+The MCP server exposes **10 `maverick_*` tools** while the much larger
+in-kernel registry stays behind the swarm. The
+[registry-backed TypeScript surface table](./typescript-quickstart.md#what-works)
+is canonical for names and arguments; it covers goal lifecycle, queued
+answers, skills, facts, and governed fleet memory.
 
 ## Typed results
 
@@ -117,12 +117,21 @@ The shapes are identical across languages — see the
 [TypeScript quickstart](./typescript-quickstart.md) for the full
 per-tool table.
 
+## Child environment, CLI config, and vaults
+
+This minimal JVM snippet leaves child-environment handling to the SDK, so
+`maverick mcp` inherits the Java process environment. The Python child also
+loads the same CLI `config.toml`, dashboard/tenant settings, secret-provider
+files, and enabled vaults; credentials are resolved there, not sent as MCP
+arguments. For production, apply the
+[reviewed filtered-environment policy](./typescript-quickstart.md#child-environment-cli-config-and-vaults)
+used by the runnable TypeScript example.
+
 ## What's gated
 
-- The 50+ third-party tools (Slack, GitHub Actions, S3, Salesforce,
-  …) read credentials from the same env / `~/.maverick/config.toml`
-  the CLI uses. The JVM client doesn't pass credentials — the kernel
-  reads them once.
+- Third-party tools (Slack, GitHub Actions, S3, Salesforce, …) resolve
+  credentials inside the Python child through the CLI's config and secret
+  providers; they are not fields in MCP requests.
 - Some tools require optional extras (`maverick-agent[redis]`,
   `[s3]`, etc.). Install only what you use.
 

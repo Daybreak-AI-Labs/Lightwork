@@ -346,7 +346,16 @@ def _stub_draft(monkeypatch, draft):
 
 def _provider(monkeypatch, present):
     import maverick_dashboard.api as api
-    monkeypatch.setattr(api, "_any_provider_key_set", lambda: present)
+    from fastapi import HTTPException
+
+    def _route_gate(**kwargs):
+        if not present:
+            raise HTTPException(
+                status_code=400,
+                detail="The selected AI model route is incomplete.",
+            )
+
+    monkeypatch.setattr(api, "require_provider_or_400", _route_gate)
 
 
 def _post_builder_form(client, path, form, user):
@@ -381,12 +390,12 @@ def test_draft_endpoint_returns_draft(monkeypatch, tmp_path):
     assert r.json()["name"] == "x"
 
 
-def test_draft_endpoint_needs_provider_key(monkeypatch, tmp_path):
+def test_draft_endpoint_needs_complete_model_route(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _provider(monkeypatch, False)
     r = _client().post("/api/v1/workflows/draft", json={"description": "x"})
     assert r.status_code == 400
-    assert "provider" in r.json()["detail"].lower()
+    assert "model route" in r.json()["detail"].lower()
 
 
 def test_draft_endpoint_requires_a_brief(monkeypatch, tmp_path):
@@ -766,12 +775,12 @@ def test_refine_endpoint_requires_an_instruction(monkeypatch, tmp_path):
     assert r.status_code == 400
 
 
-def test_refine_endpoint_needs_provider_key(monkeypatch, tmp_path):
+def test_refine_endpoint_needs_complete_model_route(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _provider(monkeypatch, False)
     r = _client().post("/api/v1/workflows/refine", json={"instruction": "x", "current": {}})
     assert r.status_code == 400
-    assert "provider" in r.json()["detail"].lower()
+    assert "model route" in r.json()["detail"].lower()
 
 
 def test_tools_endpoint_includes_risk(monkeypatch, tmp_path):

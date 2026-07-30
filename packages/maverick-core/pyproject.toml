@@ -38,6 +38,9 @@ dependencies = [
     "cryptography>=48.0.1",
     "idna>=3.15",
     "tomli>=2.0; python_version<'3.11'",
+    # zoneinfo has no bundled database on Windows and minimal Linux images may
+    # omit the system database. Finance off-hours rules require IANA zones.
+    "tzdata>=2026.3",
 ]
 
 [project.optional-dependencies]
@@ -55,7 +58,7 @@ vllm       = ["openai>=1.30"]
 chroma     = ["chromadb>=0.4"]
 qdrant     = ["qdrant-client>=1.6", "fastembed>=0.3"]
 weaviate   = ["weaviate-client>=4.5"]
-postgres   = ["psycopg[binary]>=3.1"]
+postgres   = ["psycopg[binary,pool]>=3.1"]
 saml       = ["pysaml2>=7.3"]
 grpc       = ["grpcio>=1.60", "grpcio-tools>=1.60"]
 queue      = ["arq>=0.25"]
@@ -80,7 +83,7 @@ gemini-session  = ["httpx>=0.27"]
 capture         = ["playwright>=1.40"]
 browser         = ["playwright>=1.40", "lxml>=5.0"]
 computer-use    = ["pillow>=12.3.0", "mss>=9.0", "pyautogui>=0.9.54"]
-pdf             = ["pdfplumber>=0.10", "pypdf>=6.13.3"]
+pdf             = ["pdfplumber>=0.10", "pypdf>=6.14.2"]
 clipboard       = ["pyperclip>=1.8"]
 voice           = ["faster-whisper>=1.0"]
 # CLAP zero-shot audio understanding (tools/audio_understanding.py,

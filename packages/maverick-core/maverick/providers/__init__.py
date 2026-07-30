@@ -12,6 +12,7 @@ DeepSeek/xAI clients translate the format on the fly.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from typing import Any
 
 # Each entry: (canonical name, list of accepted aliases).
@@ -51,6 +52,7 @@ def _canonical(name: str) -> str:
 def get_provider_client(
     name: str, api_key: str | None = None, base_url: str | None = None,
     default_headers: dict | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> Any:
     """Lazy-import and instantiate the named provider client.
 
@@ -104,7 +106,12 @@ def get_provider_client(
         return VLLMClient(api_key=api_key, base_url=base_url)
     if canon == "azure":
         from .azure_openai_provider import AzureOpenAIClient
-        return AzureOpenAIClient(api_key=api_key, base_url=base_url)
+        return AzureOpenAIClient(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers=default_headers,
+            environment=environment,
+        )
     if canon == "bedrock":
         from .bedrock_provider import BedrockClient
         return BedrockClient(api_key=api_key, base_url=base_url)

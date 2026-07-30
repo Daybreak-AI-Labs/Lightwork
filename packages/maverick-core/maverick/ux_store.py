@@ -171,6 +171,10 @@ class UxStore:
             gallery = data["gallery"]
             if gid not in gallery and len(gallery) >= MAX_GALLERY:
                 raise ValueError(f"gallery is full (max {MAX_GALLERY})")
+            # Dict insertion order is the durable tie-breaker when several
+            # curations share one coarse wall-clock tick. Re-inserting an
+            # existing goal also moves its recency position forward.
+            gallery.pop(gid, None)
             gallery[gid] = entry
             self._save(data)
             return entry
@@ -188,9 +192,15 @@ class UxStore:
         """Featured runs, newest-curated first: [{goal_id, blurb, curator, at}]."""
         with self._lock:
             data = self._load()
-        out = [{"goal_id": int(gid), **entry} for gid, entry in data["gallery"].items()]
-        out.sort(key=lambda e: -float(e.get("at", 0)))
-        return out
+        indexed = [
+            (index, {"goal_id": int(gid), **entry})
+            for index, (gid, entry) in enumerate(data["gallery"].items())
+        ]
+        indexed.sort(
+            key=lambda item: (float(item[1].get("at", 0)), item[0]),
+            reverse=True,
+        )
+        return [entry for _, entry in indexed]
 
 
 _shared: UxStore | None = None

@@ -263,6 +263,8 @@ def test_pip_accepts_preserved_staged_name_and_rejects_old_rename(tmp_path):
         text=True,
     )
     assert rejected.returncode != 0
-    assert "invalid wheel filename" in (
-        rejected.stdout + rejected.stderr
-    ).lower()
+    rejection = (rejected.stdout + rejected.stderr).lower()
+    assert (
+        "invalid wheel filename" in rejection
+        or "not a valid wheel filename" in rejection
+    )

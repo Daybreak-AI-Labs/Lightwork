@@ -509,8 +509,7 @@ class TestStructuredOutput:
             assert schema and schema["type"] == "object"
 
     def test_all_tools_declare_output_schema(self):
-        # Completion proof: the structured-output story covers all 8 tools, so
-        # every typed client gets parsed JSON regardless of which tool it calls.
+        # Completion proof: every registered tool has a typed result contract.
         for t in TOOLS:
             schema = t.get("outputSchema")
             assert schema and schema["type"] == "object", t["name"]
@@ -542,6 +541,50 @@ class TestStructuredOutput:
         assert "set k" in out["content"][0]["text"]  # back-compat text
         # the echoed key lets a typed client confirm the write it just made.
         assert out["structuredContent"] == {"key": "k"}
+
+    def test_fleet_tools_return_structured_content(self, monkeypatch):
+        import maverick.fleet_memory as fleet_memory
+
+        monkeypatch.setattr(
+            fleet_memory,
+            "ingest",
+            lambda record, shield: (True, "accepted"),
+        )
+        monkeypatch.setattr(
+            fleet_memory,
+            "recall",
+            lambda query, **kwargs: ("governed context", "matched"),
+        )
+        server = MCPServer()
+        server._shield = None
+        monkeypatch.setattr(server, "_shield_required", lambda: False)
+
+        ingested = server.handle_tools_call({
+            "name": "maverick_fleet_ingest",
+            "arguments": {
+                "agent_id": "agent-1",
+                "vendor": "test",
+                "kind": "lesson",
+                "goal_text": "document the result",
+            },
+        })
+        assert ingested["structuredContent"] == {
+            "ok": True,
+            "reason": "accepted",
+        }
+
+        recalled = server.handle_tools_call({
+            "name": "maverick_fleet_recall",
+            "arguments": {
+                "agent_id": "agent-1",
+                "vendor": "test",
+                "query": "result",
+            },
+        })
+        assert recalled["structuredContent"] == {
+            "context": "governed context",
+            "reason": "matched",
+        }
 
     def test_fact_set_stamps_tool_provenance(self, isolated_wm):
         # An MCP client is an untrusted author, so its fact is tiered TOOL (1),

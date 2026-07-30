@@ -150,6 +150,16 @@ def test_azure_auth_supports_static_entra_token(monkeypatch):
     assert mode == "entra_id"
 
 
+def test_azure_entra_token_is_not_forwarded_as_an_api_key(monkeypatch):
+    import maverick.llm as llm
+
+    _clear_azure_auth(monkeypatch)
+    monkeypatch.setenv("AZURE_OPENAI_AD_TOKEN", "entra-token")
+    monkeypatch.setattr(llm, "_configured_provider_api_key", lambda _provider: None)
+
+    assert llm._provider_api_key("azure", None) is None
+
+
 def test_azure_auth_uses_documented_default_credential_path(monkeypatch):
     from maverick.providers.azure_openai_provider import AzureOpenAIClient
 

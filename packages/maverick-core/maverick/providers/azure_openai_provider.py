@@ -35,7 +35,7 @@ implicitly: selecting Entra authentication is an operator decision.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from .openai_provider import OpenAIClient
 
@@ -46,12 +46,15 @@ _AUTH_MODES = frozenset({"api_key", "entra_id"})
 def _azure_auth(
     api_key: str | None,
     azure_ad_token_provider: Callable[[], str] | None,
+    *,
+    environment: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, object], object | None, str]:
     """Resolve exactly one Azure authentication mechanism."""
-    raw_key = api_key if api_key is not None else os.environ.get("AZURE_OPENAI_API_KEY")
+    env = os.environ if environment is None else environment
+    raw_key = api_key if api_key is not None else env.get("AZURE_OPENAI_API_KEY")
     key = raw_key.strip() if raw_key is not None else ""
-    token = os.environ.get("AZURE_OPENAI_AD_TOKEN", "").strip()
-    mode = os.environ.get("AZURE_OPENAI_AUTH", "").strip().lower()
+    token = env.get("AZURE_OPENAI_AD_TOKEN", "").strip()
+    mode = env.get("AZURE_OPENAI_AUTH", "").strip().lower()
     if mode and mode not in _AUTH_MODES:
         raise RuntimeError(
             "AZURE_OPENAI_AUTH must be either 'api_key' or 'entra_id'."
@@ -104,7 +107,7 @@ def _azure_auth(
             ) from e
         credential = DefaultAzureCredential()
         scope = (
-            os.environ.get("AZURE_OPENAI_TOKEN_SCOPE", _DEFAULT_ENTRA_SCOPE).strip()
+            env.get("AZURE_OPENAI_TOKEN_SCOPE", _DEFAULT_ENTRA_SCOPE).strip()
             or _DEFAULT_ENTRA_SCOPE
         )
         provider = get_bearer_token_provider(credential, scope)
@@ -143,6 +146,8 @@ class AzureOpenAIClient(OpenAIClient):
         api_key: str | None = None,
         base_url: str | None = None,
         azure_ad_token_provider: Callable[[], str] | None = None,
+        default_headers: dict | None = None,
+        environment: Mapping[str, str] | None = None,
     ):
         try:
             from openai import AsyncAzureOpenAI, AzureOpenAI
@@ -150,20 +155,21 @@ class AzureOpenAIClient(OpenAIClient):
             raise ImportError(
                 "openai SDK not installed. Run: python -m pip install -e './packages/maverick-core[openai]'"
             ) from e
+        env = os.environ if environment is None else environment
         endpoint = (
             base_url
-            or os.environ.get("AZURE_OPENAI_ENDPOINT")
+            or env.get("AZURE_OPENAI_ENDPOINT")
             or ""
         ).rstrip("/")
-        deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "").strip()
-        version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21").strip()
+        deployment = env.get("AZURE_OPENAI_DEPLOYMENT", "").strip()
+        version = env.get("AZURE_OPENAI_API_VERSION", "2024-10-21").strip()
         if not endpoint or not deployment:
             raise RuntimeError(
                 "Azure OpenAI requires AZURE_OPENAI_ENDPOINT + "
                 "AZURE_OPENAI_DEPLOYMENT."
             )
         auth, credential, auth_mode = _azure_auth(
-            api_key, azure_ad_token_provider,
+            api_key, azure_ad_token_provider, environment=env,
         )
         # Build the dedicated Azure clients directly — they send the selected
         # API-key/Entra header + `api-version` query + route to the
@@ -182,6 +188,8 @@ class AzureOpenAIClient(OpenAIClient):
         from .base import llm_http_timeout
         _timeout = llm_http_timeout()
         _extra = {"timeout": _timeout} if _timeout is not None else {}
+        if default_headers:
+            _extra["default_headers"] = dict(default_headers)
         self._sync = AzureOpenAI(
             azure_endpoint=endpoint,
             api_version=version,

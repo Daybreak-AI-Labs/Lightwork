@@ -3,11 +3,19 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
 from maverick_channels.base import Channel, IncomingMessage, Reply, as_reply
 
 
 def test_as_reply_shims_str():
-    r = as_reply("hello")
+    from maverick import deprecations
+
+    # Other channel tests can exercise this process-wide warn-once path first.
+    # Reset the registry so this test verifies and consumes its own warning
+    # deterministically regardless of suite order.
+    deprecations.reset_warned()
+    with pytest.warns(DeprecationWarning, match="bare str"):
+        r = as_reply("hello")
     assert isinstance(r, Reply)
     assert r.text == "hello" and r.attachments == [] and r.thread_ref is None
 

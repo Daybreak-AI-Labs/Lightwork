@@ -25,7 +25,9 @@ hot-path methods.
 from __future__ import annotations
 
 import hashlib
+import heapq
 import logging
+import math
 import os
 import secrets
 import threading
@@ -606,6 +608,16 @@ _APPROVAL_AUDIT_OUTBOX_MIGRATION = [
     "ON approval_audit_outbox(tenant_id, delivered_at, approval_id);",
 ]
 
+# v31: a dedicated 64-bit logical write clock for fact recall ordering.
+# Conflicting inserts reuse the one sequence value already materialized in
+# EXCLUDED.write_seq, avoiding both 32-bit SERIAL exhaustion and primary-key
+# churn on every reassertion.
+_FACT_WRITE_SEQUENCE_MIGRATION = [
+    "ALTER TABLE facts ADD COLUMN IF NOT EXISTS write_seq BIGSERIAL;",
+    "CREATE INDEX IF NOT EXISTS idx_pg_facts_write_seq "
+    "ON facts(write_seq DESC);",
+]
+
 MIGRATIONS: list[tuple[int, list[str]]] = [
     (1, SCHEMA),
     (10, _TENANT_MIGRATION),
@@ -627,6 +639,7 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     (28, _GOAL_OWNER_MIGRATION),
     (29, _ERASURE_RECEIPTS_MIGRATION),
     (30, _APPROVAL_AUDIT_OUTBOX_MIGRATION),
+    (31, _FACT_WRITE_SEQUENCE_MIGRATION),
 ]
 
 # Highest migration version = the reported schema version.
@@ -796,6 +809,104 @@ def _approval_outbox_scope(column: str = "tenant_id") -> tuple[str, list]:
     if tenant is None:
         return f"{column} IS NULL", []
     return f"{column} = %s", [tenant]
+
+
+def _mutation_tenant_scope(column: str = "tenant_id") -> tuple[str, list]:
+    """Exact tenant predicate for ordinary writes and deletes.
+
+    ``_tenant_scope`` deliberately exposes legacy NULL rows to compatibility
+    reads and exposes every tenant to the unbound administrative read view.
+    Neither behavior grants mutation authority: unbound callers may change
+    only legacy NULL rows, and bound callers may change only their exact
+    tenant. Legacy ownership must be assigned explicitly before mutation.
+    """
+    tenant = _active_tenant()
+    if tenant is None:
+        return f"{column} IS NULL", []
+    return f"{column} = %s", [tenant]
+
+
+def _tenant_precedence(column: str = "tenant_id") -> tuple[str, list]:
+    """Ordering expression that prefers an active tenant over legacy NULL."""
+    tenant = _active_tenant()
+    if tenant is None:
+        return "0", []
+    return f"CASE WHEN {column} = %s THEN 0 ELSE 1 END", [tenant]
+
+
+def _effective_fact_history_rows(rows: list[tuple], tenant: str | None) -> list[tuple]:
+    """Project raw history into the timeline visible to ``tenant``.
+
+    Rows use the internal shape ``(id, key, value, valid_from, valid_to,
+    source, trust_tier, sensitivity, tenant_id)``.  In compatibility mode an
+    active tenant can read both its own and legacy-NULL facts.  Tenant rows win
+    only while their validity window overlaps a legacy row; the non-overlapping
+    legacy portions remain point-readable and therefore must remain in history
+    and subject-access exports too.
+    """
+    if tenant is None or not rows:
+        return list(rows)
+
+    by_key: dict[str, list[tuple]] = {}
+    for row in rows:
+        by_key.setdefault(str(row[1]), []).append(row)
+
+    projected: list[tuple] = []
+    for key_rows in by_key.values():
+        starts: dict[float, list[tuple]] = {}
+        ends: dict[float, list[int]] = {}
+        points: set[float] = set()
+        for row in key_rows:
+            row_id = int(row[0])
+            valid_from = float(row[3])
+            valid_to = None if row[4] is None else float(row[4])
+            starts.setdefault(valid_from, []).append(row)
+            points.add(valid_from)
+            if valid_to is not None:
+                ends.setdefault(valid_to, []).append(row_id)
+                points.add(valid_to)
+
+        ordered_points = sorted(points)
+        active: set[int] = set()
+        candidates: list[tuple[int, float, int, tuple]] = []
+        key_projection: list[tuple] = []
+        for index, start in enumerate(ordered_points):
+            for row_id in ends.get(start, ()):
+                active.discard(row_id)
+            for row in starts.get(start, ()):
+                row_id = int(row[0])
+                active.add(row_id)
+                precedence = 0 if row[8] == tenant else 1
+                heapq.heappush(
+                    candidates,
+                    (precedence, -float(row[3]), -row_id, row),
+                )
+            while candidates and int(candidates[0][3][0]) not in active:
+                heapq.heappop(candidates)
+
+            end = (
+                ordered_points[index + 1]
+                if index + 1 < len(ordered_points)
+                else None
+            )
+            if not candidates or (end is not None and end <= start):
+                continue
+            selected = list(candidates[0][3])
+            selected[3] = start
+            selected[4] = end
+            fragment = tuple(selected)
+            if (
+                key_projection
+                and key_projection[-1][0] == fragment[0]
+                and key_projection[-1][4] == start
+            ):
+                previous = list(key_projection[-1])
+                previous[4] = end
+                key_projection[-1] = tuple(previous)
+            else:
+                key_projection.append(fragment)
+        projected.extend(key_projection)
+    return projected
 
 
 def _erasure_tenant_scope(column: str = "tenant_id") -> tuple[str, list]:
@@ -1378,7 +1489,7 @@ class PostgresWorldModel:
         if frag:
             sql += " AND " + frag
             params += fparams
-        sql += " ORDER BY updated_at ASC LIMIT %s"
+        sql += " ORDER BY updated_at ASC, id ASC LIMIT %s"
         params.append(max(1, int(limit)))
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
@@ -2093,7 +2204,7 @@ class PostgresWorldModel:
                 "UPDATE goals SET status = 'blocked', "
                 "result = COALESCE(result, '') || %s, "
                 "updated_at = %s "
-                "WHERE status IN ('active', 'pending') AND updated_at < %s"
+                "WHERE status IN ('active', 'pending') AND updated_at <= %s"
             )
             params: list = [marker, now, cutoff]
             if frag:
@@ -2109,7 +2220,7 @@ class PostgresWorldModel:
         # set on startup is tiny, so the row-by-row cost is negligible.
         sel = (
             "SELECT id, result FROM goals "
-            "WHERE status IN ('active', 'pending') AND updated_at < %s"
+            "WHERE status IN ('active', 'pending') AND updated_at <= %s"
         )
         sparams: list = [cutoff]
         if frag:
@@ -2396,6 +2507,25 @@ class PostgresWorldModel:
 
     # ----- facts (global key/value memory) -----
 
+    def _locked_open_fact_history(self, cur, key: str, tenant: str | None):
+        """Lock one temporal key and return its current window + tenant scope."""
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtext(%s))",
+            (f"fact:{tenant or ''}:{key}",),
+        )
+        frag, params = _mutation_tenant_scope()
+        sql = (
+            "SELECT value, trust_tier, valid_from FROM fact_history "
+            "WHERE key = %s AND valid_to IS NULL"
+        )
+        p: list = [key]
+        if frag:
+            sql += " AND " + frag
+            p += params
+        sql += " ORDER BY valid_from DESC LIMIT 1"
+        cur.execute(sql, tuple(p))
+        return cur.fetchone(), frag, params
+
     def upsert_fact(
         self, key: str, value: str, episode_id: int | None = None,
         *, source: str = "", trust_tier: int = 3, sensitivity: str = "internal",
@@ -2419,22 +2549,9 @@ class PostgresWorldModel:
                 # write that would otherwise leave TWO open windows (valid_to IS
                 # NULL) under a race. Per-key advisory lock (auto-released at
                 # COMMIT); other keys hash elsewhere and don't contend.
-                cur.execute(
-                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
-                    (f"fact:{tenant or ''}:{key}",),
+                open_row, frag, params = self._locked_open_fact_history(
+                    cur, key, tenant
                 )
-                frag, params = _tenant_scope()
-                sql = (
-                    "SELECT value, trust_tier FROM fact_history "
-                    "WHERE key = %s AND valid_to IS NULL"
-                )
-                p: list = [key]
-                if frag:
-                    sql += " AND " + frag
-                    p += params
-                sql += " ORDER BY valid_from DESC LIMIT 1"
-                cur.execute(sql, tuple(p))
-                open_row = cur.fetchone()
                 # A new version is recorded when the open window's value or trust
                 # tier differs (or there is no open window yet) -- the same
                 # "distinct belief" rule the SQLite backend applies.
@@ -2444,6 +2561,11 @@ class PostgresWorldModel:
                     or int(open_row[1]) != int(trust_tier)
                 )
                 if changed:
+                    # Preserve a valid per-key temporal window through clock
+                    # rollback without globally serializing every tenant fact
+                    # write or scanning MAX(updated_at).
+                    if open_row is not None and now <= float(open_row[2]):
+                        now = math.nextafter(float(open_row[2]), math.inf)
                     close = "UPDATE fact_history SET valid_to = %s WHERE key = %s AND valid_to IS NULL"
                     cp: list = [now, key]
                     if frag:
@@ -2462,6 +2584,7 @@ class PostgresWorldModel:
                 "source, trust_tier, sensitivity, tenant_id) "
                 "VALUES(%s, %s, %s, %s, %s, %s, %s, %s) "
                 "ON CONFLICT ((COALESCE(tenant_id, '')), key) DO UPDATE SET "
+                "write_seq = EXCLUDED.write_seq, "
                 "value = EXCLUDED.value, "
                 "source_episode_id = EXCLUDED.source_episode_id, "
                 "updated_at = EXCLUDED.updated_at, "
@@ -2474,12 +2597,18 @@ class PostgresWorldModel:
 
     def get_facts(self) -> dict[str, str]:
         frag, params = _tenant_scope()
-        sql = "SELECT key, value FROM facts"
+        precedence, precedence_params = _tenant_precedence()
+        sql = (
+            "SELECT key, value FROM ("
+            "SELECT key, value, write_seq, "
+            f"ROW_NUMBER() OVER (PARTITION BY key ORDER BY {precedence}, "
+            "write_seq DESC) AS fact_rank FROM facts"
+        )
         if frag:
             sql += " WHERE " + frag
-        sql += " ORDER BY updated_at DESC"
+        sql += ") AS ranked WHERE fact_rank = 1 ORDER BY write_seq DESC"
         with self._tx() as cur:
-            cur.execute(sql, tuple(params))
+            cur.execute(sql, tuple(precedence_params + params))
             rows = cur.fetchall()
         return {r[0]: _unseal(r[1]) for r in rows}
 
@@ -2492,24 +2621,26 @@ class PostgresWorldModel:
         ``min_recall_trust`` on this backend whether or not temporal history is
         on -- closing the old non-temporal fallback. A pre-migration row with no
         explicit tier reads as 3 (first-party) via the column DEFAULT, so the
-        guard keeps rather than drops memory it cannot tier. Read is
-        tenant-scoped identically to ``get_facts``.
+        guard keeps rather than drops memory it cannot tier. Value and tier
+        must be selected in the same transaction: separate snapshots could
+        pair an older untrusted value with a newer trusted reassertion.
+        Read is tenant-scoped identically to ``get_facts``.
         """
-        facts = self.get_facts()
-        if not facts:
-            return {}
         frag, params = _tenant_scope()
-        sql = "SELECT key, trust_tier FROM facts"
+        precedence, precedence_params = _tenant_precedence()
+        sql = (
+            "SELECT key, value, trust_tier FROM ("
+            "SELECT key, value, trust_tier, write_seq, "
+            f"ROW_NUMBER() OVER (PARTITION BY key ORDER BY {precedence}, "
+            "write_seq DESC) AS fact_rank FROM facts"
+        )
         if frag:
             sql += " WHERE " + frag
-        tiers: dict[str, int] = {}
-        try:
-            with self._tx() as cur:
-                cur.execute(sql, tuple(params))
-                tiers = {r[0]: int(r[1]) for r in cur.fetchall()}
-        except Exception:  # pragma: no cover -- never block recall on tiering
-            tiers = {}
-        return {k: (v, tiers.get(k, 3)) for k, v in facts.items()}
+        sql += ") AS ranked WHERE fact_rank = 1 ORDER BY write_seq DESC"
+        with self._tx() as cur:
+            cur.execute(sql, tuple(precedence_params + params))
+            rows = cur.fetchall()
+        return {r[0]: (_unseal(r[1]), int(r[2])) for r in rows}
 
     def facts_matching(self, token: str) -> dict[str, str]:
         """Facts explicitly scoped to ``token`` by ``user:<token>:`` key prefix.
@@ -2525,35 +2656,43 @@ class PostgresWorldModel:
 
     def delete_facts_matching(self, token: str) -> list[str]:
         """Delete user-scoped facts (see :meth:`facts_matching`); return the keys."""
-        keys = sorted(self.facts_matching(token).keys())
         prefix = f"user:{token}:" if token else ""
-        # Scope BOTH deletes to the active tenant. `keys` is gathered tenant-
-        # scoped (facts_matching -> get_facts -> _tenant_scope), but facts are
-        # UNIQUE per (tenant, key): another tenant can hold the same key, so a
-        # DELETE keyed only on `key` would erase that tenant's row too -- a
-        # cross-tenant GDPR over-deletion. The read side scopes; the write side
-        # must match.
-        frag, fparams = _tenant_scope()
+        if not prefix:
+            return []
+        # A bound compatibility tenant can read legacy NULL rows, so an Art.17
+        # erase must purge those rows too. The unbound administrative view still
+        # receives authority over legacy NULL rows only.
+        frag, fparams = _erasure_tenant_scope()
+        escaped = self._like_escape(prefix) + "%"
         with self._tx() as cur:
-            if keys:
-                ph = ",".join(["%s"] * len(keys))
-                sql = f"DELETE FROM facts WHERE key IN ({ph})"
-                params = list(keys)
-                if frag:
-                    sql += " AND " + frag
-                    params += fparams
-                cur.execute(sql, tuple(params))
+            # Match temporal upsert's table-access order. SHARE ROW EXCLUSIVE
+            # blocks concurrent INSERT/UPDATE/DELETE on both tables until this
+            # live + history purge commits, while ordinary reads remain available.
+            cur.execute(
+                "LOCK TABLE fact_history, facts IN SHARE ROW EXCLUSIVE MODE"
+            )
+            delete = (
+                "DELETE FROM facts WHERE key LIKE %s ESCAPE '\\'"
+            )
+            delete_params: list = [escaped]
+            if frag:
+                delete += " AND " + frag
+                delete_params += fparams
+            delete += " RETURNING key"
+            cur.execute(delete, tuple(delete_params))
+            # Compatibility scope can contain an own and legacy row with the
+            # same natural key. Preserve the public list-of-unique-keys contract.
+            keys = sorted({row[0] for row in cur.fetchall()})
             # GDPR Art.17: hard-purge the bitemporal history for the WHOLE subject
             # prefix (not just live keys) so a value individually deleted earlier
             # -- window closed, row retained -- is erased too and can't be
             # recovered via get_fact(as_of=...). No-op when temporal never wrote.
-            if prefix:
-                sql = "DELETE FROM fact_history WHERE key LIKE %s ESCAPE '\\'"
-                params = [self._like_escape(prefix) + "%"]
-                if frag:
-                    sql += " AND " + frag
-                    params += fparams
-                cur.execute(sql, tuple(params))
+            sql = "DELETE FROM fact_history WHERE key LIKE %s ESCAPE '\\'"
+            params = [escaped]
+            if frag:
+                sql += " AND " + frag
+                params += fparams
+            cur.execute(sql, tuple(params))
         return keys
 
     def fact_history_matching(self, token: str) -> dict[str, list]:
@@ -2565,24 +2704,33 @@ class PostgresWorldModel:
         from ..world_model import FactVersion
         prefix = f"user:{token}:"
         frag, params = _tenant_scope()
+        tenant = _active_tenant()
+        compatibility_tenant = (
+            tenant if tenant is not None and not _strict_tenant_isolation()
+            else None
+        )
         sql = (
-            "SELECT key, value, valid_from, valid_to, source, trust_tier, sensitivity "
-            "FROM fact_history WHERE key LIKE %s ESCAPE '\\'"
+            "SELECT id, key, value, valid_from, valid_to, source, trust_tier, "
+            "sensitivity, tenant_id FROM fact_history "
+            "WHERE key LIKE %s ESCAPE '\\'"
         )
         p: list = [self._like_escape(prefix) + "%"]
         if frag:
             sql += " AND " + frag
             p += params
-        sql += " ORDER BY key, valid_from"
+        sql += " ORDER BY key, valid_from, id"
         with self._tx() as cur:
             cur.execute(sql, tuple(p))
-            rows = cur.fetchall()
+            rows = _effective_fact_history_rows(
+                cur.fetchall(), compatibility_tenant
+            )
+        rows.sort(key=lambda row: (row[1], row[3], row[0]))
         out: dict[str, list] = {}
         for r in rows:
-            out.setdefault(r[0], []).append(FactVersion(
-                value=_unseal(r[1]), valid_from=r[2], valid_to=r[3],
-                source=r[4] or "", trust_tier=int(r[5]),
-                sensitivity=r[6] or "internal",
+            out.setdefault(r[1], []).append(FactVersion(
+                value=_unseal(r[2]), valid_from=r[3], valid_to=r[4],
+                source=r[5] or "", trust_tier=int(r[6]),
+                sensitivity=r[7] or "internal",
             ))
         return out
 
@@ -2597,6 +2745,7 @@ class PostgresWorldModel:
         ``fact_history`` as it stood at that instant (requires ``[memory]
         temporal``); returns None when no recorded version covered that time."""
         frag, params = _tenant_scope()
+        precedence, precedence_params = _tenant_precedence()
         if as_of is not None:
             sql = (
                 "SELECT value FROM fact_history WHERE key = %s AND valid_from <= %s "
@@ -2606,7 +2755,10 @@ class PostgresWorldModel:
             if frag:
                 sql += " AND " + frag
                 p += params
-            sql += " ORDER BY valid_from DESC LIMIT 1"
+            sql += (
+                f" ORDER BY {precedence}, valid_from DESC, id DESC LIMIT 1"
+            )
+            p += precedence_params
             with self._tx() as cur:
                 cur.execute(sql, tuple(p))
                 row = cur.fetchone()
@@ -2616,7 +2768,8 @@ class PostgresWorldModel:
         if frag:
             sql += " AND " + frag
             p += params
-        sql += " LIMIT 1"
+        sql += f" ORDER BY {precedence}, write_seq DESC LIMIT 1"
+        p += precedence_params
         with self._tx() as cur:
             cur.execute(sql, tuple(p))
             row = cur.fetchone()
@@ -2627,24 +2780,84 @@ class PostgresWorldModel:
         temporal``). The row whose ``valid_to is None`` is the current value."""
         from ..world_model import FactVersion
         frag, params = _tenant_scope()
-        sql = (
-            "SELECT value, valid_from, valid_to, source, trust_tier, sensitivity "
-            "FROM fact_history WHERE key = %s"
+        tenant = _active_tenant()
+        row_limit = max(1, int(limit))
+        compatibility_tenant = (
+            tenant if tenant is not None and not _strict_tenant_isolation()
+            else None
         )
-        p: list = [key]
-        if frag:
-            sql += " AND " + frag
-            p += params
-        sql += " ORDER BY valid_from DESC LIMIT %s"
-        p.append(max(1, int(limit)))
+        columns = (
+            "id, key, value, valid_from, valid_to, source, trust_tier, "
+            "sensitivity, tenant_id"
+        )
+        if compatibility_tenant is not None:
+            # Project the effective compatibility timeline in Postgres so the
+            # transfer and Python allocation remain bounded by ``limit``. Every
+            # raw interval boundary starts a half-open segment; a lateral lookup
+            # applies the same own-over-legacy precedence as ``get_fact(as_of)``.
+            # Adjacent segments selecting the same source row are collapsed,
+            # while a legacy row interrupted by an own interval stays split.
+            sql = (
+                f"WITH scoped AS (SELECT {columns} FROM fact_history "
+                "WHERE key = %s"
+            )
+            p: list = [key]
+            if frag:
+                sql += " AND " + frag
+                p += params
+            sql += (
+                "), points AS ("
+                "SELECT valid_from AS point FROM scoped "
+                "UNION SELECT valid_to AS point FROM scoped "
+                "WHERE valid_to IS NOT NULL"
+                "), segments AS ("
+                "SELECT point AS segment_start, "
+                "LEAD(point) OVER (ORDER BY point) AS segment_end FROM points"
+                "), selected AS ("
+                "SELECT chosen.*, segments.segment_start, segments.segment_end "
+                "FROM segments JOIN LATERAL ("
+                f"SELECT {columns} FROM scoped "
+                "WHERE valid_from <= segments.segment_start "
+                "AND (valid_to IS NULL OR valid_to > segments.segment_start) "
+                "ORDER BY CASE WHEN tenant_id = %s THEN 0 ELSE 1 END, "
+                "valid_from DESC, id DESC LIMIT 1"
+                ") AS chosen ON TRUE"
+                "), marked AS ("
+                "SELECT selected.*, CASE WHEN "
+                "LAG(id) OVER (ORDER BY segment_start) = id THEN 0 ELSE 1 END "
+                "AS starts_group FROM selected"
+                "), grouped AS ("
+                "SELECT marked.*, SUM(starts_group) OVER "
+                "(ORDER BY segment_start) AS segment_group FROM marked"
+                ") "
+                "SELECT id, key, value, MIN(segment_start) AS valid_from, "
+                "CASE WHEN COUNT(*) FILTER (WHERE segment_end IS NULL) > 0 "
+                "THEN NULL ELSE MAX(segment_end) END AS valid_to, "
+                "source, trust_tier, sensitivity, tenant_id FROM grouped "
+                "GROUP BY segment_group, id, key, value, source, trust_tier, "
+                "sensitivity, tenant_id "
+                "ORDER BY MIN(segment_start) DESC, id DESC LIMIT %s"
+            )
+            p += [compatibility_tenant, row_limit]
+        else:
+            # Strict and unbound administrative views retain the prior global
+            # database-side bound and do not receive compatibility projection.
+            sql = f"SELECT {columns} FROM fact_history WHERE key = %s"
+            p = [key]
+            if frag:
+                sql += " AND " + frag
+                p += params
+            sql += " ORDER BY valid_from DESC, id DESC LIMIT %s"
+            p.append(row_limit)
         with self._tx() as cur:
             cur.execute(sql, tuple(p))
             rows = cur.fetchall()
+        rows.sort(key=lambda row: (row[3], row[0]), reverse=True)
         return [
             FactVersion(
-                value=_unseal(r[0]), valid_from=r[1], valid_to=r[2],
-                source=r[3] or "", trust_tier=int(r[4]),
-                sensitivity=r[5] or "internal",
+                value=_unseal(r[2]), valid_from=r[3], valid_to=r[4],
+                source=r[5] or "", trust_tier=int(r[6]),
+                sensitivity=r[7] or "internal",
             )
             for r in rows
         ]
@@ -2656,11 +2869,18 @@ class PostgresWorldModel:
         closed (valid_to = now) rather than erased, so the record that the fact
         existed until this moment survives the delete."""
         from ..world_model import _temporal_memory_enabled
-        frag, params = _tenant_scope()
+        frag, params = _mutation_tenant_scope()
+        tenant = _active_tenant()
         with self._tx() as cur:
             if _temporal_memory_enabled():
+                open_row, frag, params = self._locked_open_fact_history(
+                    cur, key, tenant
+                )
+                closed_at = time.time()
+                if open_row is not None and closed_at <= float(open_row[2]):
+                    closed_at = math.nextafter(float(open_row[2]), math.inf)
                 close = "UPDATE fact_history SET valid_to = %s WHERE key = %s AND valid_to IS NULL"
-                cp: list = [time.time(), key]
+                cp: list = [closed_at, key]
                 if frag:
                     close += " AND " + frag
                     cp += params
@@ -2676,12 +2896,19 @@ class PostgresWorldModel:
     def list_facts(self, key_prefix: str, limit: int = 50) -> list[tuple[str, int]]:
         like = self._like_escape(key_prefix) + "%"
         frag, params = _tenant_scope()
-        sql = "SELECT key, length(value) AS sz FROM facts WHERE key LIKE %s ESCAPE '\\'"
-        p: list = [like]
+        precedence, precedence_params = _tenant_precedence()
+        sql = (
+            "SELECT key, sz FROM ("
+            "SELECT key, length(value) AS sz, write_seq, "
+            f"ROW_NUMBER() OVER (PARTITION BY key ORDER BY {precedence}, "
+            "write_seq DESC) AS fact_rank FROM facts "
+            "WHERE key LIKE %s ESCAPE '\\'"
+        )
+        p: list = precedence_params + [like]
         if frag:
             sql += " AND " + frag
             p += params
-        sql += " ORDER BY updated_at DESC LIMIT %s"
+        sql += ") AS ranked WHERE fact_rank = 1 ORDER BY write_seq DESC LIMIT %s"
         p.append(limit)
         with self._tx() as cur:
             cur.execute(sql, tuple(p))
@@ -2693,18 +2920,26 @@ class PostgresWorldModel:
     ) -> list[tuple[str, str]]:
         pfx = self._like_escape(key_prefix) + "%"
         frag, params = _tenant_scope()
+        precedence, precedence_params = _tenant_precedence()
         from ..crypto_at_rest import at_rest_enabled
         if not at_rest_enabled():
             q = "%" + self._like_escape(query) + "%"
             sql = (
-                "SELECT key, value FROM facts WHERE key LIKE %s ESCAPE '\\' "
-                "AND (key LIKE %s ESCAPE '\\' OR value LIKE %s ESCAPE '\\')"
+                "SELECT key, value FROM (SELECT key, value, write_seq, "
+                "ROW_NUMBER() OVER (PARTITION BY key ORDER BY "
+                f"{precedence}, write_seq DESC) AS fact_rank FROM facts "
+                "WHERE key LIKE %s ESCAPE '\\'"
             )
-            p: list = [pfx, q, q]
+            p: list = precedence_params + [pfx]
             if frag:
                 sql += " AND " + frag
                 p += params
-            sql += " ORDER BY updated_at DESC LIMIT %s"
+            sql += (
+                ") AS ranked WHERE fact_rank = 1 AND "
+                "(key LIKE %s ESCAPE '\\' OR value LIKE %s ESCAPE '\\') "
+                "ORDER BY write_seq DESC LIMIT %s"
+            )
+            p += [q, q]
             p.append(limit)
             with self._tx() as cur:
                 cur.execute(sql, tuple(p))
@@ -2715,12 +2950,17 @@ class PostgresWorldModel:
         # and the returned value would be ciphertext. Keys are plaintext: narrow
         # the scan by prefix in SQL, then decrypt + substring-match in Python.
         # Mirrors the SQLite backend (case-insensitive, like SQLite LIKE).
-        sql = "SELECT key, value FROM facts WHERE key LIKE %s ESCAPE '\\'"
-        p = [pfx]
+        sql = (
+            "SELECT key, value FROM (SELECT key, value, write_seq, "
+            "ROW_NUMBER() OVER (PARTITION BY key ORDER BY "
+            f"{precedence}, write_seq DESC) AS fact_rank FROM facts "
+            "WHERE key LIKE %s ESCAPE '\\'"
+        )
+        p = precedence_params + [pfx]
         if frag:
             sql += " AND " + frag
             p += params
-        sql += " ORDER BY updated_at DESC"
+        sql += ") AS ranked WHERE fact_rank = 1 ORDER BY write_seq DESC"
         with self._tx() as cur:
             cur.execute(sql, tuple(p))
             rows = cur.fetchall()
@@ -3812,8 +4052,8 @@ class PostgresWorldModel:
             cur.execute(
                 "LOCK TABLE conversations, turns, goals, episodes, artifacts, "
                 "attachments, goal_events, goal_origins, messages, "
-                "processed_messages, questions, share_links, signoffs, facts, "
-                "fact_history IN SHARE ROW EXCLUSIVE MODE"
+                "processed_messages, questions, share_links, signoffs, "
+                "fact_history, facts IN SHARE ROW EXCLUSIVE MODE"
             )
             plan = self._conversation_erasure_plan_cursor(cur, requested)
             if (

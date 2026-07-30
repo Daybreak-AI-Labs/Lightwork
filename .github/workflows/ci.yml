@@ -14,16 +14,21 @@ env:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
       - name: Install ruff
         run: python -m pip install 'ruff==0.15.15'
       - name: Lint
@@ -252,17 +257,67 @@ jobs:
         run: python -m maverick.control_data_plane_soak --ci
 
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
+      - name: OSV Scanner across every reviewed dependency surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          scanner="$RUNNER_TEMP/osv-scanner"
+          report="$GITHUB_WORKSPACE/osv-results.json"
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+            --output "$scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v2.3.8/osv-scanner_linux_amd64"
+          echo "bc98e15319ed0d515e3f9235287ba53cdc5535d576d24fd573978ecfe9ab92dc  $scanner" |
+            sha256sum --check
+          chmod 0755 "$scanner"
+
+          # OSV recognizes a conventional requirements.txt filename. The
+          # reviewed CI lock is copied byte-for-byte so every platform-marked
+          # exact pin is scanned without creating a second Python lock.
+          python_lock="$RUNNER_TEMP/requirements.txt"
+          cp requirements/ci.txt "$python_lock"
+          "$scanner" scan source \
+            --config osv-scanner.toml \
+            --lockfile "$python_lock" \
+            --lockfile rust/Cargo.lock \
+            --lockfile examples/clients/rust/Cargo.lock \
+            --lockfile apps/desktop/src-tauri/Cargo.lock \
+            --lockfile apps/installer-desktop/src-tauri/Cargo.lock \
+            --lockfile examples/clients/typescript/package-lock.json \
+            --lockfile apps/installer-desktop/pnpm-lock.yaml \
+            --lockfile examples/clients/csharp/packages.lock.json \
+            --lockfile examples/clients/go/go.mod \
+            --lockfile go/model-proxy/go.mod \
+            --lockfile examples/clients/java/pom.xml \
+            --lockfile demo/dsar-concierge/requirements-standalone.txt \
+            --lockfile demo/environment-threat-hunter/requirements.txt \
+            --lockfile demo/grc-concierge/requirements.txt \
+            --lockfile demo/model-risk-ai-assurance-officer/requirements.txt \
+            --lockfile demo/pia-concierge/requirements-standalone.txt \
+            --lockfile demo/platform-threat-hunter/requirements.txt \
+            --format json \
+            --output-file "$report"
+      - name: Upload cross-ecosystem vulnerability report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: osv-cross-ecosystem
+          path: osv-results.json
+          if-no-files-found: warn
       - name: Install packages (so pip-audit sees the real dependency tree)
         run: |
           set -x
+          python -m pip install --upgrade \
+            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'packaging==26.2'
           # Resolve all first-party base dependencies together so pip-audit
           # sees the complete cohort rather than a hand-reconstructed subset.
           python -m pip install \
@@ -282,7 +337,7 @@ jobs:
             'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' \
             'httpx>=0.27' 'python-multipart>=0.0.31' \
             'starlette>=1.3.1' 'requests>=2.33.0' 'urllib3>=2.7.0' \
-            'pillow>=12.3.0' 'pypdf>=6.13.3' 'aiohttp>=3.14.1' \
+            'pillow>=12.3.0' 'pypdf>=6.14.2' 'aiohttp>=3.14.1' \
             'click>=8.3.3' 'cryptography>=48.0.1' 'twilio>=9.0'
           python -m pip check
       - name: pip-audit (known CVEs in dependencies)
@@ -300,6 +355,63 @@ jobs:
           python -m pip install --upgrade 'pip==26.1.2' 'setuptools==83.0.0'
           python -m pip install 'pip-audit==2.10.0'
           pip-audit
+      - name: pip-audit every reviewed optional-dependency lock entry
+        # The installed runtime above exercises the primary network surface.
+        # This second pass audits every exact pin in requirements/ci.txt,
+        # including integrations and platform markers that are not installable
+        # together on one Linux runner. Removing markers is safe here because
+        # the file has one version per project across every supported platform.
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOCK_AUDIT_FILE="$RUNNER_TEMP/lightwork-all-python-lock.txt"
+          export LOCK_AUDIT_FILE
+          python -I - <<'PY'
+          import os
+          from pathlib import Path
+
+          from packaging.requirements import Requirement
+
+          source = Path("requirements/ci.txt")
+          locked = []
+          seen = set()
+          for line_number, raw in enumerate(
+              source.read_text(encoding="utf-8").splitlines(),
+              start=1,
+          ):
+              value = raw.strip()
+              if not value or value.startswith("#"):
+                  continue
+              requirement = Requirement(value)
+              specifiers = list(requirement.specifier)
+              if (
+                  requirement.url
+                  or requirement.extras
+                  or len(specifiers) != 1
+                  or specifiers[0].operator != "=="
+                  or "*" in specifiers[0].version
+              ):
+                  raise SystemExit(
+                      f"{source}:{line_number}: not one exact registry pin"
+                  )
+              name = requirement.name.lower().replace("_", "-")
+              if name in seen:
+                  raise SystemExit(f"{source}:{line_number}: duplicate project {name}")
+              seen.add(name)
+              locked.append(f"{requirement.name}=={specifiers[0].version}")
+          if len(locked) < 100:
+              raise SystemExit(f"unexpectedly small Python lock: {len(locked)}")
+          Path(os.environ["LOCK_AUDIT_FILE"]).write_text(
+              "\n".join(sorted(locked, key=str.casefold)) + "\n",
+              encoding="utf-8",
+          )
+          print(f"materialized {len(locked)} exact cross-platform pins")
+          PY
+          python -I -m pip_audit \
+            --requirement "$LOCK_AUDIT_FILE" \
+            --no-deps \
+            --disable-pip \
+            --strict
       - name: SAST (bandit, high-severity)
         # BLOCKING static-analysis gate over shipped source (tests excluded:
         # asserts / subprocess there are expected). High-severity tests catch
@@ -341,23 +453,41 @@ jobs:
           print(f"license policy OK: 0 strong-copyleft across {len(scanned)} packages")
           PY
       - name: SBOM (CycloneDX, supply-chain transparency)
-        # Emit a CycloneDX SBOM of the exact resolved dependency tree as a
-        # required build artifact. A green supply-chain job must never silently
-        # omit the artifact regulated buyers rely on.
+        # Build the same isolated release-runtime profile shipped in frozen
+        # binaries/containers, then describe that target environment. CI tools
+        # (bandit, pip-audit, CycloneDX itself) are deliberately excluded from
+        # the buyer-facing runtime inventory.
         run: |
-          python -m pip install 'cyclonedx-bom==7.3.1'
-          # Generate from the installed environment (the same tree pip-audit saw).
-          cyclonedx-py environment -o sbom.cyclonedx.json
-          test -s sbom.cyclonedx.json
+          set -euo pipefail
+          python -I -m pip install 'cyclonedx-bom==7.3.1'
+          SBOM_ENV="$RUNNER_TEMP/lightwork-ci-release-runtime"
+          python -m venv "$SBOM_ENV"
+          "$SBOM_ENV/bin/python" -I -m pip install --upgrade \
+            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'packaging==26.2'
+          python scripts/install_release_cohort.py \
+            --source-root . \
+            --target-python "$SBOM_ENV/bin/python" \
+            --constraint requirements/ci.txt \
+            --core-extra release-runtime
+          "$SBOM_ENV/bin/python" -I -m pip check
+          "$SBOM_ENV/bin/python" -I scripts/verify_constraint_closure.py
+          "$SBOM_ENV/bin/maverick" release-runtime-check
+          cyclonedx-py environment "$SBOM_ENV/bin/python" \
+            --pyproject packages/maverick-core/pyproject.toml \
+            -o sbom.release-runtime.cyclonedx.json
+          test -s sbom.release-runtime.cyclonedx.json
+      - name: Verify installed dependency constraint closure
+        run: python scripts/verify_constraint_closure.py
       - name: Upload SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: sbom-cyclonedx
-          path: sbom.cyclonedx.json
+          path: sbom.release-runtime.cyclonedx.json
           if-no-files-found: error
 
   release-cohort:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -365,7 +495,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
       - name: Install release verification tools
         run: python -m pip install build pytest
       - name: Verify the release cohort manifest and package metadata
@@ -399,8 +529,12 @@ jobs:
           test "$(find dist-cohort -maxdepth 1 -name '*.whl' | wc -l)" -eq 8
 
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    # The complete deterministic suite is intentionally broad and currently
+    # takes about 46 minutes on a Windows validation host before dependency
+    # installation.  Keep enough job headroom that a healthy Linux matrix run
+    # cannot be killed by runner variance or setup time.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -415,6 +549,9 @@ jobs:
       - name: Install packages
         run: |
           set -x
+          python -m pip install --upgrade \
+            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'packaging==26.2'
           # All local distributions are direct requirements in one resolver
           # transaction, so no sibling can fall back to a public lookalike and
           # every declared base dependency is present.
@@ -432,6 +569,7 @@ jobs:
             -e ./apps/installer-cli \
             pytest pytest-asyncio pytest-timeout 'pyjwt[crypto]'
           python -m pip check
+          python scripts/verify_constraint_closure.py
       - name: Show installed packages
         run: python -m pip list
       - name: Test (bounded, with diagnostics)
@@ -460,6 +598,32 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  windows-process-containment:
+    name: Windows process containment (Python ${{ matrix.python-version }})
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the focused test dependency
+        run: python -m pip install "pytest==9.1.1"
+      - name: Test Windows Job Object process-tree containment
+        env:
+          PYTHONPATH: ${{ github.workspace }}/packages/maverick-core
+        run: >-
+          python -m pytest -q
+          packages/maverick-core/tests/test_local_backend_process_reaping.py
+
   posture:
     # The suite runs with MAVERICK_SECURE_DEFAULT=0, which keeps each control's
     # explicit on/off mechanics under test but means ~19,000 passing tests
@@ -471,18 +635,21 @@ jobs:
     # failure fails this job, and a fixed failure also fails until the baseline
     # is deliberately reduced. requirements/ci.txt keeps this measurement
     # reproducible instead of absorbing dependency drift into the baseline.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
       - name: Install packages
         run: |
           set -x
+          python -m pip install --upgrade \
+            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'packaging==26.2'
           python -m pip install \
             -e ./packages/maverick-core \
             -e ./packages/maverick-shield \
@@ -494,6 +661,7 @@ jobs:
             -e ./apps/installer-cli \
             pytest pytest-asyncio pytest-timeout 'pyjwt[crypto]'
           python -m pip check
+          python scripts/verify_constraint_closure.py
       - name: Test and gate the production security posture
         env:
           MAVERICK_TEST_SECURE_DEFAULT: "1"
@@ -538,14 +706,15 @@ jobs:
     # missed attack or over-blocked benign case. A named job (not buried in
     # the test matrix) so the gate is visible in the checks list. The corpus
     # is maverick_shield/redteam_corpus.jsonl — grow it by PR.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
       - name: Install shield
         run: pip install -e ./packages/maverick-shield
       - name: Red-team gate (zero missed attacks)
@@ -560,14 +729,15 @@ jobs:
     # pass@1 aggregation) against scripted solvers and asserts grading still
     # works. A code change that breaks the harness wiring fails here, fast,
     # without any API key. Deterministic and offline by construction.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
       - name: Install packages
         run: |
           set -x
@@ -584,14 +754,15 @@ jobs:
     # model, or network. Semantics and signed evidence are hard gates; local
     # latency observations are captured in the temporary report but are not an
     # environment-sensitive pass/fail threshold.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
       - name: Install governance benchmark dependencies
         run: |
           python -m pip install -e './packages/maverick-core[audit-signing]'
@@ -623,12 +794,14 @@ jobs:
     # DB-backed tests for the Postgres world-model backend. The default `test`
     # job has no Postgres, so test_postgres_world.py skips there; this job
     # stands up a service + DSN so the backend is actually exercised in CI.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     services:
       postgres:
         # pgvector image = postgres:16 + the `vector` extension, so the same
         # service also exercises the pgvector knowledge store (round-trip below).
-        image: pgvector/pgvector:pg16
+        # pgvector/pgvector:pg16 multi-arch index, resolved 2026-07-29.
+        image: pgvector/pgvector:pg16@sha256:a36250871de0833b8757561c72f2477ef1ddd1101afa4e617fb552e0de514c6b
         env:
           POSTGRES_USER: maverick
           POSTGRES_PASSWORD: maverick
@@ -646,28 +819,43 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
       - name: Install
         run: |
           set -x
-          pip install -e ./packages/maverick-core
+          python -m pip install --upgrade \
+            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'packaging==26.2'
+          pip install -e './packages/maverick-core[postgres]'
           pip install -e ./packages/maverick-knowledge
-          pip install 'psycopg==3.3.4' 'psycopg-binary==3.3.4'
-          pip install pytest pytest-asyncio
-      - name: Test PostgresWorldModel
+          pip install \
+            'psycopg==3.3.4' 'psycopg-binary==3.3.4' \
+            'psycopg-pool==3.3.1'
+          pip install pytest pytest-asyncio pytest-timeout
+          python -m pip check
+          python scripts/verify_constraint_closure.py
+      - name: Test live Postgres backends and governance invariants
         env:
           MAVERICK_PG_DSN: postgres://maverick:maverick@localhost:5432/maverick_test
-        run: python -m pytest -vvs packages/maverick-core/tests/test_postgres_world.py
+        run: >-
+          timeout --verbose --signal=ABRT --kill-after=30s 10m
+          python -m pytest -vvs --timeout=180 --timeout-method=signal
+          packages/maverick-core/tests/test_postgres_world.py
+          packages/maverick-core/tests/test_pgvector_isolation_pg.py
+          packages/maverick-core/tests/test_postgres_fact_history.py
+          packages/maverick-core/tests/test_postgres_facts_trust.py
+          packages/maverick-core/tests/test_postgres_governed_records_capacity.py
       - name: Test pgvector knowledge store
         env:
           MAVERICK_PG_DSN: postgres://maverick:maverick@localhost:5432/maverick_test
         run: >-
-          python -m pytest -vvs
-          packages/maverick-knowledge/tests/test_knowledge.py
-          -k PgVectorLive
+          timeout --verbose --signal=ABRT --kill-after=30s 5m
+          python -m pytest -vvs --timeout=180 --timeout-method=signal
+          packages/maverick-knowledge/tests/test_knowledge.py -k PgVectorLive
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -678,7 +866,9 @@ jobs:
         # registry blip doesn't fail the whole job.
         run: |
           n=0; max=4
-          until docker build -f deploy/docker/Dockerfile -t maverick:ci .; do
+          until docker build \
+            --build-arg 'PYTHON_DIGEST=@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de' \
+            -f deploy/docker/Dockerfile -t maverick:ci .; do
             n=$((n+1))
             if [ "$n" -ge "$max" ]; then
               echo "::error::docker build failed after $max attempts (registry/network)"

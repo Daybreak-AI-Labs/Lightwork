@@ -17,7 +17,11 @@ gpt-4o-mini — all in the same swarm.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +33,7 @@ from .pricing import (
     VersionedPricingProvider,
     load_pricing_evidence_pack,
 )
+from .runtime_overrides import RuntimeOverridesSecurityError
 
 # Latest Claude family as of 2026-05.
 MODEL_OPUS = "claude-opus-4-8"
@@ -404,25 +409,48 @@ class LLMResponse:
                 self.thinking_blocks = []
 
 
-def _resolve_model_for_role(role: str) -> str:
-    """Return the model spec for a role (may be 'provider:id' or bare id).
+class ModelNotAllowedError(PermissionError):
+    """A requested model is outside the operator's active hard allow-list."""
 
-    Resolution order:
-      1. Per-role env override `MAVERICK_MODEL_OVERRIDE_<ROLE>` (set by
-         best-of-N to swap models per attempt).
-      2. Global override `MAVERICK_MODEL_OVERRIDE` (set by the CLI's
-         `maverick --model <id>` flag) -- an explicit, run-wide choice that
-         beats config so the documented flag actually applies to every agent.
-      3. ``~/.maverick/config.toml`` -> ``[models]`` -> role
-      4. Cost-aware router (opt-in: `MAVERICK_COST_ROUTING=1` or
-         `[routing] cost_aware = true`) -- among the user's configured
-         providers, the cheapest one at the role's capability tier.
-      5. ``ROLE_MODELS`` defaults
-      6. ``DEFAULT_MODEL``
 
-    The user's explicit choices (1, 2, 3) always win; the router only gets a
-    say when no model was pinned, and it returns None (defers to 5) unless
-    the operator opted in. This keeps "users own model choice" intact.
+def _allowed_model_specs() -> set[str]:
+    """Canonical active allow-list; empty means unrestricted.
+
+    Runtime-override parsing owns the fail-closed posture for an unreadable
+    operator policy. Do not swallow that security error here: treating a broken
+    allow-list as empty would silently turn it into unrestricted access.
+    """
+    from .runtime_overrides import allowed_models
+
+    return {_canonical_spec(spec) for spec in allowed_models()}
+
+
+def require_model_allowed(spec: str) -> str:
+    """Return canonical ``provider:model`` after enforcing the hard allow-list.
+
+    Unlike role routing's convenience fallback, an explicit dispatch choice
+    must never be silently replaced: callers that pin a forbidden model receive
+    a policy error before provider/client work begins.
+    """
+    canonical = _canonical_spec(spec)
+    allowed = _allowed_model_specs()
+    if allowed and canonical not in allowed:
+        raise ModelNotAllowedError(
+            f"model {canonical!r} is not allowed by [access] allowed_models"
+        )
+    return canonical
+
+
+def _explicit_model_for_role(
+    role: str,
+    *,
+    config: dict[str, Any] | None = None,
+) -> str | None:
+    """Resolve operator-pinned model authority without live routing probes.
+
+    ``config`` is an optional already-loaded snapshot used by deterministic
+    preflight.  Normal runtime resolution leaves it unset and therefore uses
+    the canonical active-tenant configuration loader.
     """
     override = os.environ.get(f"MAVERICK_MODEL_OVERRIDE_{role.upper()}")
     if override:
@@ -435,7 +463,12 @@ def _resolve_model_for_role(role: str) -> str:
         return global_override
     try:
         from .config import get_role_model
-        spec = get_role_model(role)
+
+        spec = (
+            get_role_model(role)
+            if config is None
+            else get_role_model(role, config=config)
+        )
         if spec:
             return spec
     except Exception:
@@ -447,11 +480,40 @@ def _resolve_model_for_role(role: str) -> str:
     # that still yields to a more specific config [models].<role>.
     try:
         from .runtime_overrides import default_model_override, role_model_override
+
         pinned = role_model_override(role) or default_model_override()
         if pinned:
             return pinned
     except Exception:  # pragma: no cover -- never let the overlay break resolution
         pass
+    return None
+
+
+def _resolve_model_for_role(role: str) -> str:
+    """Return the model spec for a role (may be 'provider:id' or bare id).
+
+    Resolution order:
+      1. Per-role env override `MAVERICK_MODEL_OVERRIDE_<ROLE>` (set by
+         best-of-N to swap models per attempt).
+      2. Global override `MAVERICK_MODEL_OVERRIDE` (set by the CLI's
+         `maverick --model <id>` flag) -- an explicit, run-wide choice that
+         beats config so the documented flag actually applies to every agent.
+      3. ``~/.maverick/config.toml`` -> ``[models]`` -> role
+      4. Dashboard role/default pin from ``runtime-overrides.toml``
+      5. Local-first router (opt-in)
+      6. Cost-aware router (opt-in: `MAVERICK_COST_ROUTING=1` or
+         `[routing] cost_aware = true`) -- among the user's configured
+         providers, the cheapest one at the role's capability tier.
+      7. ``ROLE_MODELS`` defaults, optionally energy-adjusted
+      8. ``DEFAULT_MODEL``
+
+    The user's explicit choices (1-4) always win; the router only gets a
+    say when no model was pinned, and it returns None (defers to 7) unless
+    the operator opted in. This keeps "users own model choice" intact.
+    """
+    explicit = _explicit_model_for_role(role)
+    if explicit:
+        return explicit
     # Local-first (opt-in, off by default). When [system] local_first is on and
     # a configured local model's server is reachable, keep the work on-machine;
     # returns None otherwise, so this is a no-op for the default install and
@@ -489,14 +551,11 @@ def _resolve_model_for_role(role: str) -> str:
     return final
 
 
-def model_for_role(role: str) -> str:
-    """Resolve the model for ``role`` (see ``_resolve_model_for_role``), then
-    enforce the admin allow-list: if one is set and the resolved model isn't in
-    it, fall back to an allowed model (DEFAULT_MODEL if allowed, else the first).
-    A hard cap -- a config.toml or env pin outside the allow-list can't run."""
-    final = _resolve_model_for_role(role)
+def _apply_allowed_model_policy(final: str) -> str:
+    """Apply the dashboard's hard model allow-list to one resolved spec."""
     try:
         from .runtime_overrides import allowed_models
+
         allow = allowed_models()
         if allow:
             allow_canon = {_canonical_spec(a) for a in allow}
@@ -512,9 +571,33 @@ def model_for_role(role: str) -> str:
                     # sorted(allow)[0] -- lexicographic-first could force a cheap
                     # bulk role onto the most expensive allowed model.
                     final = _cheapest_allowed(allow)
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception:  # pragma: no cover -- allow-list never breaks resolution
         pass
     return final
+
+
+def offline_model_for_role(
+    role: str,
+    *,
+    config: dict[str, Any] | None = None,
+) -> str:
+    """Resolve the deterministic route used by offline readiness checks.
+
+    This shares all explicit operator authority and the final admin allow-list
+    with :func:`model_for_role`, but deliberately skips local reachability,
+    live cost routing, and battery state.  Those mutable probes belong to
+    ``maverick doctor``; preflight must remain deterministic and network-free.
+    """
+    explicit = _explicit_model_for_role(role, config=config)
+    final = explicit or ROLE_MODELS.get(role, DEFAULT_MODEL)
+    return _apply_allowed_model_policy(final)
+
+
+def model_for_role(role: str) -> str:
+    """Resolve the live model route and enforce the admin hard allow-list."""
+    return _apply_allowed_model_policy(_resolve_model_for_role(role))
 
 
 def _canonical_spec(spec: str) -> str:
@@ -574,14 +657,25 @@ def _allowlist_filter_fallbacks(models: list[str]) -> list[str]:
     we filter the *fallbacks*; the primary is left untouched (it is what the
     non-failover path runs anyway).
     """
-    try:
-        from .runtime_overrides import allowed_models
-        allow = allowed_models()
-    except Exception:  # pragma: no cover -- allow-list never blocks a call
-        return models
+    allow = _allowed_model_specs()
     if not allow:
         return models
-    return [m for m in models if m in allow]
+    return [m for m in models if _canonical_spec(m) in allow]
+
+
+def _fallback_chain_for_dispatch(
+    raw_primary: str,
+    canonical_primary: str,
+) -> list[str]:
+    """Resolve a configured chain without making aliases a config footgun."""
+    from .provider_failover import fallback_models
+
+    chain = fallback_models(raw_primary)
+    if not chain and raw_primary != canonical_primary:
+        # Preserve exact-key compatibility while also finding chains declared
+        # under the canonical spelling of an alias/bare primary pin.
+        chain = fallback_models(canonical_primary)
+    return _allowlist_filter_fallbacks(chain)
 
 
 def _record_provider_call(provider: str) -> None:
@@ -727,10 +821,16 @@ def _parse_spec(spec: str) -> tuple[str, str]:
     lookup in ``_provider_api_key``, which would otherwise miss the key and
     fail auth at call time.
     """
-    if ":" in spec:
-        provider, model_id = spec.split(":", 1)
+    if not isinstance(spec, str) or not spec.strip():
+        raise ValueError("model spec must be a non-empty string")
+    clean_spec = spec.strip()
+    if ":" in clean_spec:
+        provider, model_id = clean_spec.split(":", 1)
     else:
-        provider, model_id = "anthropic", spec
+        provider, model_id = "anthropic", clean_spec
+    model_id = model_id.strip()
+    if not model_id:
+        raise ValueError("model spec must include a model id")
     from .providers import _canonical
     return _canonical(provider), model_id
 
@@ -748,19 +848,148 @@ def _configured_provider_api_key(provider: str) -> str | None:
     return str(key).strip() if key else None
 
 
-def _provider_api_key(provider: str, anthropic_api_key: str | None) -> str | None:
+def _provider_api_key(
+    provider: str,
+    anthropic_api_key: str | None,
+    *,
+    provider_config: Mapping[str, Any] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> str | None:
     """Return the explicit API key override for provider-client creation."""
     if provider == "anthropic" and anthropic_api_key:
-        return anthropic_api_key
-    key = _configured_provider_api_key(provider)
+        return anthropic_api_key.strip() or None
+    if provider_config is None:
+        key = _configured_provider_api_key(provider)
+    else:
+        raw_key = provider_config.get("api_key")
+        key = (
+            raw_key.strip() or None
+            if isinstance(raw_key, str)
+            else str(raw_key).strip() if raw_key else None
+        )
     if key:
         return key
     from .config import PROVIDER_KEY_ENV_MAP
+    env = os.environ if environment is None else environment
     for env_key in PROVIDER_KEY_ENV_MAP.get(provider, ()):
-        value = os.environ.get(env_key, "").strip()
+        value = env.get(env_key, "").strip()
         if value:
             return value
     return None
+
+
+_PROVIDER_BASE_URL_ENV_MAP: dict[str, tuple[str, ...]] = {
+    "anthropic": ("ANTHROPIC_BASE_URL",),
+    "openai": ("OPENAI_BASE_URL",),
+    "moonshot": ("MOONSHOT_BASE_URL",),
+    "deepseek": ("DEEPSEEK_BASE_URL",),
+    "xai": ("XAI_BASE_URL",),
+    "tgi": ("TGI_BASE_URL",),
+    "vllm": ("VLLM_BASE_URL",),
+    "azure": ("AZURE_OPENAI_ENDPOINT",),
+    "openai_compatible": ("OPENAI_COMPATIBLE_BASE_URL",),
+}
+_AZURE_CLIENT_ENV_NAMES = (
+    "AZURE_OPENAI_AD_TOKEN",
+    "AZURE_OPENAI_API_VERSION",
+    "AZURE_OPENAI_AUTH",
+    "AZURE_OPENAI_DEPLOYMENT",
+    "AZURE_OPENAI_TOKEN_SCOPE",
+)
+_PROVIDER_SNAPSHOT_RETRIES = 3
+_CLIENT_CACHE_MAX = 32
+
+
+@dataclass(frozen=True, repr=False)
+class _ProviderClientConfig:
+    """One immutable provider-client admission snapshot.
+
+    The secret-bearing values intentionally do not appear in ``repr``.  Cache
+    identity uses only ``fingerprint`` so credentials and auth headers never
+    become dict keys that diagnostics might print.
+    """
+
+    api_key: str | None
+    base_url: str | None
+    default_headers: tuple[tuple[str, str], ...]
+    auth_mode: str | None
+    provider_environment: tuple[tuple[str, str], ...]
+    fingerprint: str
+
+    def headers_dict(self) -> dict[str, str] | None:
+        return dict(self.default_headers) if self.default_headers else None
+
+    def environment_dict(self) -> dict[str, str]:
+        return dict(self.provider_environment)
+
+
+def _provider_config_snapshot(
+    provider: str,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Read provider config against one stable environment generation.
+
+    ``load_config`` may populate wizard-managed environment values and performs
+    live ``${VAR}`` interpolation.  A seqlock-style retry prevents a rotation
+    during that read from pairing the old config table with the new credential
+    environment (or vice versa).
+    """
+    from .config import get_provider_config
+
+    for _ in range(_PROVIDER_SNAPSHOT_RETRIES):
+        before = dict(os.environ)
+        try:
+            raw = get_provider_config(provider) or {}
+            provider_config = dict(raw) if isinstance(raw, dict) else {}
+        except Exception:  # pragma: no cover -- provider config remains fail-soft
+            provider_config = {}
+        after = dict(os.environ)
+        if before == after:
+            return provider_config, before
+    # Never manufacture a mixed generation merely to make progress. A caller
+    # can retry once the configuration rotation settles.
+    raise RuntimeError(
+        f"provider configuration changed during {provider!r} client admission"
+    )
+
+
+def _canonical_headers(value: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, dict):
+        return ()
+    headers: dict[str, str] = {}
+    for raw_name, raw_value in value.items():
+        if not isinstance(raw_name, str):
+            continue
+        name = raw_name.strip()
+        if name:
+            headers[name] = str(raw_value)
+    return tuple(sorted(headers.items(), key=lambda item: (item[0].casefold(), item[0])))
+
+
+def _provider_config_fingerprint(
+    *,
+    api_key: str | None,
+    base_url: str | None,
+    default_headers: tuple[tuple[str, str], ...],
+    auth_mode: str | None,
+    provider_environment: tuple[tuple[str, str], ...],
+) -> str:
+    canonical = json.dumps(
+        {
+            "api_key": api_key,
+            "base_url": base_url,
+            # HTTP names are case-insensitive. Preserve configured casing when
+            # constructing the client, but hash equivalent spellings equally.
+            "default_headers": sorted(
+                (name.casefold(), value) for name, value in default_headers
+            ),
+            "auth_mode": auth_mode,
+            "provider_environment": provider_environment,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _run_preflight(model_id, system, messages, tools, max_tokens) -> None:
@@ -958,9 +1187,12 @@ class LLM:
         self._anthropic_api_key = api_key  # legacy back-compat
         # Compatibility/debug view: latest client created for each provider.
         self._clients: dict[str, Any] = {}
-        # Actual cache key includes tenant and resolved endpoint credentials so
-        # a long-lived server LLM never reuses one tenant's client for another.
-        self._client_cache: dict[tuple[str, str | None, str | None, str | None], Any] = {}
+        # Bounded LRU keyed by tenant + a one-way fingerprint of every
+        # client-affecting field. Raw credentials/headers never become a
+        # diagnostic-visible key, and a rotation cannot reuse the prior client.
+        self._client_cache: OrderedDict[
+            tuple[str, str | None, str], Any
+        ] = OrderedDict()
         # Wave 12 (council F12a): lock the provider cache so two
         # concurrent calls don't double-init httpx connection pools.
         import threading as _threading
@@ -968,52 +1200,116 @@ class LLM:
 
     def _provider_client_config(
         self, provider: str
-    ) -> tuple[str | None, str | None, dict | None]:
-        key = _provider_api_key(provider, self._anthropic_api_key)
-        # [providers.<name>] base_url: the CLI preflight already
-        # accepts this config key as "a configured provider"; plumb it
-        # into the client too. It used to be read by the preflight and
-        # then dropped, so a self-hosted setup configured only via
-        # config dialed the client's env-var/localhost default and
-        # died with "Couldn't reach the LLM provider".
+    ) -> _ProviderClientConfig:
+        # Resolve ALL client-affecting values from the same admitted
+        # config+environment generation. Previously api_key and endpoint were
+        # separate get_provider_config() reads, so a rotation between them could
+        # pair old credentials with a new gateway.
+        pcfg, environment = _provider_config_snapshot(provider)
+        key = _provider_api_key(
+            provider,
+            self._anthropic_api_key,
+            provider_config=pcfg,
+            environment=environment,
+        )
+
         base_url = None
-        default_headers = None
-        try:
-            from .config import get_provider_config
-            pcfg = get_provider_config(provider) or {}
-            bu = pcfg.get("base_url")
-            if isinstance(bu, str) and bu.strip():
-                base_url = bu.strip()
-            # Data-residency / ZDR: operator-set extra request headers a
-            # compliance gateway enforces. Accept only a str->str dict.
-            dh = pcfg.get("default_headers")
-            if isinstance(dh, dict):
-                clean = {str(k): str(v) for k, v in dh.items() if isinstance(k, str)}
-                if clean:
-                    default_headers = clean
-        except Exception:  # pragma: no cover -- config read fails soft
-            base_url = None
-            default_headers = None
-        return key, base_url, default_headers
+        raw_base_url = pcfg.get("base_url")
+        if isinstance(raw_base_url, str) and raw_base_url.strip():
+            base_url = raw_base_url.strip()
+        if base_url is None:
+            for env_name in _PROVIDER_BASE_URL_ENV_MAP.get(provider, ()):
+                value = environment.get(env_name, "").strip()
+                if value:
+                    base_url = value
+                    break
+        # Bedrock derives its endpoint from region rather than a BASE_URL env.
+        # Resolve that derivation here so cache identity rotates with AWS_REGION.
+        if provider == "bedrock" and base_url is None:
+            region = environment.get("AWS_REGION", "").strip()
+            if region:
+                base_url = (
+                    f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1"
+                )
+
+        default_headers = _canonical_headers(pcfg.get("default_headers"))
+        raw_auth_mode = pcfg.get("auth_mode")
+        auth_mode = None
+        if isinstance(raw_auth_mode, str) and raw_auth_mode.strip():
+            auth_mode = raw_auth_mode.strip().lower()
+        elif provider == "azure":
+            auth_mode = (
+                environment.get("AZURE_OPENAI_AUTH", "").strip().lower() or None
+            )
+
+        provider_environment: tuple[tuple[str, str], ...] = ()
+        if provider == "azure":
+            azure_environment = {
+                name: environment.get(name, "")
+                for name in _AZURE_CLIENT_ENV_NAMES
+            }
+            if auth_mode is not None:
+                azure_environment["AZURE_OPENAI_AUTH"] = auth_mode
+            provider_environment = tuple(sorted(azure_environment.items()))
+
+        fingerprint = _provider_config_fingerprint(
+            api_key=key,
+            base_url=base_url,
+            default_headers=default_headers,
+            auth_mode=auth_mode,
+            provider_environment=provider_environment,
+        )
+        return _ProviderClientConfig(
+            api_key=key,
+            base_url=base_url,
+            default_headers=default_headers,
+            auth_mode=auth_mode,
+            provider_environment=provider_environment,
+            fingerprint=fingerprint,
+        )
 
     def _get_client(self, provider: str):
         from .paths import current_tenant_id
-        key, base_url, default_headers = self._provider_client_config(provider)
-        cache_key = (provider, current_tenant_id(), key, base_url)
-        # Fast-path: read without lock (dict reads are atomic in CPython).
-        if cache_key in self._client_cache:
-            return self._client_cache[cache_key]
+        tenant_id = current_tenant_id()
         with self._clients_lock:
-            # Re-check under the lock in case another thread populated it.
-            if cache_key not in self._client_cache:
-                from .providers import get_provider_client
-                client = get_provider_client(
-                    provider, api_key=key, base_url=base_url,
-                    default_headers=default_headers,
-                )
-                self._client_cache[cache_key] = client
-                self._clients[provider] = client
-            return self._client_cache[cache_key]
+            # Snapshot and admission share the cache lock. This prevents an
+            # older, slow resolution from being inserted after a newer one.
+            config = self._provider_client_config(provider)
+            cache_key = (provider, tenant_id, config.fingerprint)
+            cached = self._client_cache.get(cache_key)
+            if cached is not None:
+                self._client_cache.move_to_end(cache_key)
+                return cached
+
+            from .providers import get_provider_client
+
+            factory_kwargs: dict[str, Any] = {
+                "api_key": config.api_key,
+                "base_url": config.base_url,
+                "default_headers": config.headers_dict(),
+            }
+            if provider == "azure":
+                # Azure's key-vs-Entra selection, static token, deployment, and
+                # API version must consume the same environment snapshot too.
+                factory_kwargs["environment"] = config.environment_dict()
+            client = get_provider_client(provider, **factory_kwargs)
+
+            # A provider/tenant has exactly one current client in this LLM.
+            # Drop stale rotations immediately, then enforce a global LRU cap
+            # for long-lived multi-tenant servers.
+            stale_keys = [
+                key
+                for key in self._client_cache
+                if key[:2] == (provider, tenant_id) and key != cache_key
+            ]
+            for stale_key in stale_keys:
+                self._client_cache.pop(stale_key, None)
+            self._client_cache[cache_key] = client
+            self._client_cache.move_to_end(cache_key)
+            while len(self._client_cache) > _CLIENT_CACHE_MAX:
+                self._client_cache.popitem(last=False)
+            self._clients[provider] = client
+            return client
 
     def complete(
         self,
@@ -1028,13 +1324,18 @@ class LLM:
         effort: str | None = None,
         _no_failover: bool = False,
     ) -> LLMResponse:
+        raw_requested_model = model or self.model
+        requested_model = require_model_allowed(raw_requested_model)
         # Provider failover (opt-in, default off): when a fallback chain is
         # configured for this model, try each in turn. No chain -> this block is
         # skipped and the original single-call path below runs unchanged.
         if not _no_failover:
             from .failover_policy import order_chain, policy_should_retry
-            from .provider_failover import failover, fallback_models
-            _chain = _allowlist_filter_fallbacks(fallback_models(model or self.model))
+            from .provider_failover import failover
+            _chain = _fallback_chain_for_dispatch(
+                raw_requested_model, requested_model
+            )
+            _chain = [require_model_allowed(candidate) for candidate in _chain]
             if _chain:
                 # The policy engine narrows WHICH errors fail over and skips
                 # cooling-down models; with no [provider_failover.policy] both
@@ -1044,9 +1345,9 @@ class LLM:
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
                         model=m, on_delta=on_delta, effort=effort, _no_failover=True)))
-                    for m in order_chain([model or self.model, *_chain])
+                    for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
-        provider, model_id = _parse_spec(model or self.model)
+        provider, model_id = _parse_spec(requested_model)
         # Provider-qualified spec for the pricing/ledger paths
         # (_estimate_call_cost / _call_spend): _lookup_price's self-hosted $0
         # rule keys off the "ollama:"/"vllm:"/"tgi:" prefix that _parse_spec
@@ -1183,21 +1484,26 @@ class LLM:
         effort: str | None = None,
         _no_failover: bool = False,
     ) -> LLMResponse:
+        raw_requested_model = model or self.model
+        requested_model = require_model_allowed(raw_requested_model)
         # Provider failover (opt-in, default off) — see complete(). No configured
         # chain -> skipped, and the original single-call path below is unchanged.
         if not _no_failover:
             from .failover_policy import order_chain, policy_should_retry
-            from .provider_failover import afailover, fallback_models
-            _chain = _allowlist_filter_fallbacks(fallback_models(model or self.model))
+            from .provider_failover import afailover
+            _chain = _fallback_chain_for_dispatch(
+                raw_requested_model, requested_model
+            )
+            _chain = [require_model_allowed(candidate) for candidate in _chain]
             if _chain:
                 return await afailover([
                     (m, (lambda m=m: self.complete_async(
                         system, messages, tools=tools, budget=budget,
                         max_tokens=max_tokens, thinking_budget=thinking_budget,
                         model=m, effort=effort, _no_failover=True)))
-                    for m in order_chain([model or self.model, *_chain])
+                    for m in order_chain([requested_model, *_chain])
                 ], should_retry=policy_should_retry)
-        provider, model_id = _parse_spec(model or self.model)
+        provider, model_id = _parse_spec(requested_model)
         # Provider-qualified spec for the pricing/ledger paths -- see complete().
         _price_spec = f"{provider}:{model_id}"
         # Egress lock (no-op unless enterprise mode is on): see complete().
@@ -1376,7 +1682,9 @@ class LLM:
         returned usage. Returns whether a warm request was sent; never raises."""
         if os.environ.get("MAVERICK_CACHE_MESSAGES", "1") == "0":
             return False
-        provider, model_id = _parse_spec(model or self.model)
+        provider, model_id = _parse_spec(
+            require_model_allowed(model or self.model)
+        )
         if provider != "anthropic":
             return False
         try:

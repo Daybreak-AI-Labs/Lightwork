@@ -14,14 +14,25 @@ name: Go (model proxy)
 on:
   push:
     branches: [main]
+    paths:
+      - "go/model-proxy/**"
+      - "packages/maverick-core/maverick/model_proxy.py"
+      - "requirements/ci.txt"
+      - "scripts/verify_constraint_closure.py"
+      - ".github/workflows/go-model-proxy.yml"
   pull_request:
     paths:
       - "go/model-proxy/**"
       - "packages/maverick-core/maverick/model_proxy.py"
+      - "requirements/ci.txt"
+      - "scripts/verify_constraint_closure.py"
       - ".github/workflows/go-model-proxy.yml"
 
 permissions:
   contents: read
+
+env:
+  PIP_CONSTRAINT: ${{ github.workspace }}/requirements/ci.txt
 
 concurrency:
   group: go-model-proxy-${{ github.ref }}
@@ -30,17 +41,20 @@ concurrency:
 jobs:
   go:
     name: go (build + vet + test -race)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: go/model-proxy
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "stable"
-      - run: go build ./...
-      - run: go vet ./...
+          go-version: "1.26.5"
+      - run: go build -mod=readonly ./...
+      - run: go vet -mod=readonly ./...
       - name: gofmt (no diff)
         run: |
           unformatted="$(gofmt -l .)"
@@ -49,19 +63,29 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
-      - run: go test -race ./...
+      - run: go test -mod=readonly -race ./...
 
   parity:
     name: parity fixture matches Python
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.11"
+          python-version: "3.12.13"
       # model_proxy imports maverick.config; an editable core install is enough
       # to regenerate the fixture from the source-of-truth Python.
-      - run: pip install -e ./packages/maverick-core
+      - name: Install the locked Python parity environment
+        run: |
+          python -I -m pip install --upgrade \
+            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'packaging==26.2'
+          python -I -m pip install -e ./packages/maverick-core
+          python -I -m pip check
+          python -I scripts/verify_constraint_closure.py
       - run: python3 go/model-proxy/gen_parity.py
       - name: fixture is up to date
         run: |

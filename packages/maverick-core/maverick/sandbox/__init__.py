@@ -14,11 +14,14 @@ import importlib.util
 import logging
 import os
 import shutil
+import subprocess
 from pathlib import Path, PurePosixPath
 
+from ..sandbox_names import BUILTIN_SANDBOX_BACKENDS
 from .devcontainer import DevcontainerBackend
 from .docker import DockerBackend
 from .firecracker import FirecrackerBackend
+from .gvisor import GVisorRuntimeValidationError, validate_docker_gvisor_runtime
 from .kubernetes import KubernetesBackend
 from .local import ExecResult, LocalBackend
 from .podman import PodmanBackend
@@ -26,6 +29,7 @@ from .sdk import SDK_VERSION, SandboxV2
 from .ssh import SSHBackend
 
 __all__ = [
+    "BUILTIN_SANDBOX_BACKENDS",
     "LocalBackend",
     "DockerBackend",
     "PodmanBackend",
@@ -146,6 +150,23 @@ def fs_is_host_visible(sandbox: object | None) -> bool:
 class SandboxPolicyError(RuntimeError):
     """Raised when the configured sandbox backend violates deployment policy
     (e.g. the unsandboxed ``local`` backend under enterprise/require-container)."""
+
+
+def _validated_gvisor_runtime(value: object) -> str:
+    """Validate the configured name against Docker's runtime metadata."""
+    try:
+        return validate_docker_gvisor_runtime(value)
+    except GVisorRuntimeValidationError as exc:
+        raise SandboxPolicyError(str(exc)) from exc
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ) as exc:
+        raise SandboxPolicyError(
+            "cannot validate sandbox backend=gvisor because Docker's runtime "
+            f"registry probe failed: {exc}"
+        ) from exc
 
 
 def _config_truthy_env(name: str) -> bool:
@@ -288,6 +309,17 @@ def _degrade_to_local(chosen: str, full_cfg: dict, wd: Path, timeout: float):
     return LocalBackend(workdir=wd, timeout=timeout)
 
 
+def _read_only_paths_for_backend(chosen: str, full_cfg: dict | None):
+    """Return immutable mounts only for backends that actually enforce them."""
+    paths = (full_cfg or {}).get("read_only_paths") or ()
+    if paths and chosen not in {"docker", "gvisor"}:
+        raise ValueError(
+            "sandbox.read_only_paths requires backend='docker' or 'gvisor'; "
+            f"backend={chosen!r} cannot enforce immutable mounts"
+        )
+    return paths
+
+
 def build_sandbox(
     workdir: str | Path | None = None,
     backend: str | None = None,
@@ -329,6 +361,7 @@ def build_sandbox(
     # chosen but a container backend is required, upgrade to an available one or
     # fail closed. Extracted to keep build_sandbox under the complexity cap.
     chosen = _resolve_local_under_policy(chosen, full_cfg)
+    read_only_paths = _read_only_paths_for_backend(chosen, full_cfg)
     wd = Path(workdir or cfg.get("workdir", str(Path.cwd()))).expanduser()
     # Coerce defensively: [sandbox] timeout is hand-editable, and a non-numeric
     # ("fast") or non-positive value would otherwise raise here and crash the
@@ -368,8 +401,13 @@ def build_sandbox(
         image = _resolve_image(full_cfg)
         # gVisor is Docker with the runsc runtime; reuse every Docker knob and
         # just swap the runtime. A configured [sandbox] runtime overrides the
-        # default so an operator can point gvisor at a custom runsc registration.
-        runtime = full_cfg.get("runtime") or ("runsc" if chosen == "gvisor" else None)
+        # default only when Docker's registration metadata identifies an approved
+        # runsc name/path or the official containerd runsc runtime type.
+        runtime = (
+            _validated_gvisor_runtime(full_cfg.get("runtime"))
+            if chosen == "gvisor"
+            else None
+        )
         kwargs = dict(
             allow_network=_config_bool(full_cfg.get("allow_network"), False),
             pids_limit=full_cfg.get("pids_limit", 512),
@@ -384,7 +422,11 @@ def build_sandbox(
         # warm knob and is not cross-run pool eligible because it keeps a live
         # container mounted to the run workdir.
         reuse_container = _config_bool(full_cfg.get("reuse_container"), False)
-        if _config_bool(full_cfg.get("cross_run_pool"), False) and not reuse_container:
+        if (
+            _config_bool(full_cfg.get("cross_run_pool"), False)
+            and not reuse_container
+            and not read_only_paths
+        ):
             from . import pool as _pool
             pooled = _pool.shared_pool().acquire(
                 "docker", image, workdir=wd, timeout=timeout,
@@ -393,7 +435,9 @@ def build_sandbox(
                 return pooled
         return DockerBackend(
             workdir=wd, image=image, timeout=timeout, runtime=runtime,
-            reuse_container=reuse_container, **kwargs,
+            reuse_container=reuse_container,
+            read_only_paths=read_only_paths,
+            **kwargs,
         )
     if chosen == "podman":
         image = _resolve_image(full_cfg)

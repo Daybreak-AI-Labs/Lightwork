@@ -203,6 +203,10 @@ def _injected_keypair() -> tuple[bytes, bytes, str] | None:
     """
     global _INJECTED_KEYPAIR_CACHE
     if _INJECTED_KEYPAIR_CACHE is not _INJECTED_KEYPAIR_UNREAD:
+        # Late mutation of the process environment cannot replace the active
+        # process signer, but it must still be scrubbed immediately. Leaving a
+        # raw private key behind would expose it through same-user /proc reads.
+        os.environ.pop(_SIGNING_KEY_ENV, None)
         return _INJECTED_KEYPAIR_CACHE
 
     raw = os.environ.pop(_SIGNING_KEY_ENV, None)

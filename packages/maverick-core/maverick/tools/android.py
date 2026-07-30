@@ -97,9 +97,14 @@ def _op_shell(device: str, cmd: str) -> str:
     return f"exit={code}\n{body[-4000:]}"
 
 
-def _op_install(device: str, apk: str) -> str:
+def _op_install(device: str, apk: str, sandbox: Any = None) -> str:
     if not apk:
         return "ERROR: install requires apk_path"
+    from .ffmpeg_tool import _safe_path
+    try:
+        apk = _safe_path(sandbox, apk)
+    except ValueError as e:
+        return f"ERROR: {e}"
     code, out, err = _adb(["install", "-r", apk], device=device, timeout=180)
     if code != 0:
         return f"ERROR: install ({code}): {(err or out).strip()[:300]}"
@@ -115,9 +120,14 @@ def _op_uninstall(device: str, package: str) -> str:
     return f"uninstalled: {package}"
 
 
-def _op_screenshot(device: str, out_path: str) -> str:
+def _op_screenshot(device: str, out_path: str, sandbox: Any = None) -> str:
     if not out_path:
         return "ERROR: screenshot requires out_path"
+    from .ffmpeg_tool import _safe_path
+    try:
+        out_path = _safe_path(sandbox, out_path)
+    except ValueError as e:
+        return f"ERROR: {e}"
     # adb exec-out screencap streams the png bytes directly.
     cmd = ["adb"]
     if device:
@@ -180,7 +190,7 @@ def _op_logcat(device: str, lines: int) -> str:
     return out[-8000:]
 
 
-def _run(args: dict[str, Any]) -> str:
+def _run(args: dict[str, Any], sandbox: Any = None) -> str:
     op = args.get("op")
     if not op:
         return "ERROR: op is required"
@@ -193,11 +203,11 @@ def _run(args: dict[str, Any]) -> str:
         if op == "shell":
             return _op_shell(device, args.get("cmd") or "")
         if op == "install":
-            return _op_install(device, args.get("apk_path") or "")
+            return _op_install(device, args.get("apk_path") or "", sandbox)
         if op == "uninstall":
             return _op_uninstall(device, args.get("package") or "")
         if op == "screenshot":
-            return _op_screenshot(device, args.get("out_path") or "")
+            return _op_screenshot(device, args.get("out_path") or "", sandbox)
         if op == "tap":
             x = int(args.get("x") or 0)
             y = int(args.get("y") or 0)
@@ -213,7 +223,7 @@ def _run(args: dict[str, Any]) -> str:
     return f"ERROR: unknown op {op!r}"
 
 
-def android() -> Tool:
+def android(sandbox: Any = None) -> Tool:
     return Tool(
         name="android",
         description=(
@@ -223,5 +233,5 @@ def android() -> Tool:
             "the adb binary on PATH (Android platform-tools)."
         ),
         input_schema=_ANDROID_SCHEMA,
-        fn=_run,
+        fn=lambda args: _run(args, sandbox),
     )
