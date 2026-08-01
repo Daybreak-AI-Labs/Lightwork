@@ -157,7 +157,46 @@
       <button class="btn" data-tab="ropa" type="button">RoPA ({{ records.ropa | length }})</button>
       <button class="btn" data-tab="dsar" type="button">DSARs ({{ records.dsar | length }})</button>
       <button class="btn" data-tab="paper" type="button">Vendor paper ({{ records.paper | length }})</button>
+      <button class="btn" data-tab="lineage" type="button">Lineage</button>
       <button class="btn" data-tab="incidents" type="button">Incidents ({{ records.incidents | length }}){% if records.incidents_breached %} <span class="badge blocked">{{ records.incidents_breached }} past 72h</span>{% endif %}</button>
+    </div>
+
+    <div class="pw-tab" id="pw-tab-lineage" hidden>
+      <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-3);">
+        The entity graph: one identity per vendor/person/document/clause,
+        connected by time-stamped edges derived from your governed records —
+        every hop cites the record it came from. Ask the three questions a
+        regulator asks.
+      </p>
+      <div class="pw-form">
+        <div class="pw-form-row">
+          <label><span>Vendor</span>
+            <input class="ctl" id="pw-lin-vendor" maxlength="200"
+                   placeholder="Acme Corp"></label>
+          <label><span>As-of date (optional, for point-in-time)</span>
+            <input class="ctl" id="pw-lin-asof" type="date"></label>
+        </div>
+        <div class="pw-form-actions">
+          <button class="btn btn--primary" id="pw-lin-dossier" type="button">Dossier</button>
+          <button class="btn" id="pw-lin-why" type="button">Why was it approved?</button>
+          <span class="pw-form-err" id="pw-lin-err" role="alert"></span>
+        </div>
+        <div class="pw-form-row" style="margin-top:var(--sp-2);">
+          <label><span>Blast radius — a clause or document that turned out bad</span>
+            <input class="ctl" id="pw-lin-blast-name" maxlength="200"
+                   placeholder="subprocessors  ·  acme-dpa.pdf"></label>
+          <label><span>Kind</span>
+            <select class="ctl" id="pw-lin-blast-kind">
+              <option value="clause">clause</option>
+              <option value="document">document</option>
+              <option value="person">person</option>
+            </select></label>
+        </div>
+        <div class="pw-form-actions">
+          <button class="btn" id="pw-lin-blast" type="button">What relied on it?</button>
+        </div>
+      </div>
+      <div id="pw-lin-result"></div>
     </div>
 
     <div class="pw-tab" id="pw-tab-paper" hidden>
@@ -669,6 +708,109 @@
         });
     });
   }
+
+  // Lineage: the three regulator queries against the entity graph.
+  (function () {
+    var out = document.getElementById('pw-lin-result');
+    var err = document.getElementById('pw-lin-err');
+    if (!out) { return; }
+    var esc = function (s) {
+      return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+      });
+    };
+    var when = function (ts) {
+      return ts ? new Date(ts * 1000).toISOString().slice(0, 10) : '';
+    };
+    var ref = function (r) {
+      return ' <code style="font-size:var(--text-xs);">' +
+        esc(r.record_type) + ':' + esc(r.record_id) + '</code>';
+    };
+    function ask(url) {
+      err.textContent = '';
+      out.innerHTML = '';
+      fetch(url).then(function (r) {
+        return r.text().then(function (t) {
+          if (!r.ok) { throw new Error('HTTP ' + r.status + ': ' + t.slice(0, 200)); }
+          return JSON.parse(t);
+        });
+      }).then(render).catch(function (e) { err.textContent = e.message; });
+    }
+    function render(data) {
+      if (data.found === false) {
+        out.innerHTML = '<div class="panel" style="margin-top:var(--sp-3);">' +
+          '<p class="muted">The graph has no entity by that name. It only ' +
+          'knows what the records say — check the spelling, or create the ' +
+          'record first.</p></div>';
+        return;
+      }
+      var html = '<div class="panel" style="margin-top:var(--sp-3);">';
+      if (data.chain) {                       // why()
+        if (!data.decision) {
+          html += '<p>' + esc(data.note) + '</p>';
+        } else {
+          html += '<p><strong>' + esc(data.decision.what) + '</strong> on ' +
+            when(data.decision.at) + ref(data.decision) + '</p><ul>';
+          data.chain.slice(1).forEach(function (c) {
+            html += '<li>' + esc(c.step.replace(/_/g, ' ')) + ' — ' +
+              esc(c.what) + ref(c) + '</li>';
+          });
+          html += '</ul>';
+        }
+      } else if (data.summary) {              // dossier()
+        var s = data.summary;
+        html += '<p><strong>' + esc(data.entity.name) + '</strong></p>';
+        html += '<p>Reviews: ' + (s.reviews.length ? s.reviews.map(function (r) {
+          return esc(r.record_type) + ':' + esc(r.record_id) +
+            (r.current ? ' (current)' : ' (superseded)');
+        }).join(', ') : 'none') + '</p>';
+        html += '<p>Decisions: ' + (s.decisions.length ? s.decisions.map(function (d) {
+          return esc(d.decision) + ' by ' + esc(d.by) + ' on ' + when(d.at);
+        }).join('; ') : 'none') + '</p>';
+        html += '<p>Open clause gaps: ' + (s.open_clause_gaps.length
+          ? s.open_clause_gaps.map(esc).join(', ') : 'none') + '</p>';
+        html += '<p>Documents: ' + (s.documents.map(esc).join(', ') || 'none') +
+          '</p><p>People: ' + (s.people.map(esc).join(', ') || 'none') + '</p>';
+      } else if (data.records) {              // blast_radius()
+        html += '<p><strong>' + esc(data.entity.name) + '</strong> is relied on by ' +
+          data.records.length + ' record(s), touching ' +
+          data.vendors.length + ' vendor(s).</p>';
+        html += '<p>Records: ' + data.records.map(function (r) {
+          return esc(r.record_type) + ':' + esc(r.record_id);
+        }).join(', ') + '</p>';
+        html += '<p>Vendors: ' + (data.vendors.map(esc).join(', ') || 'none') + '</p>';
+        html += '<p>Decisions that relied on it: ' + (data.decisions.length
+          ? data.decisions.map(function (d) {
+              return esc(d.decision) + ' by ' + esc(d.by) + ' on ' + when(d.at) +
+                ' <code style="font-size:var(--text-xs);">' +
+                esc(d.record_type) + ':' + esc(d.record_id) + '</code>';
+            }).join('; ') : 'none') + '</p>';
+      }
+      out.innerHTML = html + '</div>';
+    }
+    var vendorQ = function () {
+      var v = document.getElementById('pw-lin-vendor').value.trim();
+      if (!v) { err.textContent = 'Name a vendor first.'; return null; }
+      return encodeURIComponent(v);
+    };
+    document.getElementById('pw-lin-dossier').addEventListener('click', function () {
+      var v = vendorQ(); if (!v) { return; }
+      var asof = document.getElementById('pw-lin-asof').value;
+      ask('/api/v1/graph/dossier?vendor=' + v +
+          (asof ? '&as_of=' + encodeURIComponent(asof) : ''));
+    });
+    document.getElementById('pw-lin-why').addEventListener('click', function () {
+      var v = vendorQ(); if (!v) { return; }
+      ask('/api/v1/graph/why?vendor=' + v);
+    });
+    document.getElementById('pw-lin-blast').addEventListener('click', function () {
+      var name = document.getElementById('pw-lin-blast-name').value.trim();
+      if (!name) { err.textContent = 'Name a clause or document first.'; return; }
+      ask('/api/v1/graph/blast-radius?kind=' +
+          document.getElementById('pw-lin-blast-kind').value +
+          '&name=' + encodeURIComponent(name));
+    });
+  })();
 
   // The clause playbook editor: loaded lazily the first time it is opened, so
   // the page does not pay for it on every render.
