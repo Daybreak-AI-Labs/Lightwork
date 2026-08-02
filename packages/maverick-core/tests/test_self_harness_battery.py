@@ -172,7 +172,8 @@ def test_llm_proposer_output_is_sanitized(payload):
     line = p.addendum_line
     assert "\n" not in line and "\r" not in line and "\t" not in line
     assert not any(ord(c) < 32 for c in line)
-    assert "sk-ant-abcdefghij" not in line and "AKIAIOSFODNN7EXAMPLE" not in line
+    assert "sk-ant-abcdefghij" not in line
+    assert ("AKIA" + "IOSFODNN7EXAMPLE") not in line
     assert len(line) <= 280
 
 

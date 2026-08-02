@@ -1449,7 +1449,9 @@ def test_native_release_uses_locked_python_tools_and_preserves_wheel_bytes():
     assert "final native PyPI verification OK" in workflow
     assert "native PyPI propagation incomplete after final retry" in workflow
     assert 'epoch="$(git show -s --format=%ct HEAD)"' in workflow
+    assert 'RUSTFLAGS=-C link-arg=/Brepro' in workflow
     assert "native wheel reproducibility OK" in workflow
+    assert "changed_members={changed}" in workflow
     assert "wasm npm reproducibility OK" in workflow
     assert workflow.count(
         "CARGO_TARGET_DIR: ${{ runner.temp }}/maverick-native-target"

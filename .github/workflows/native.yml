@@ -134,6 +134,11 @@ jobs:
           echo "SOURCE_DATE_EPOCH=$epoch" >> "$GITHUB_ENV"
           echo "PYTHONHASHSEED=0" >> "$GITHUB_ENV"
           echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+          # Rust's own MSVC determinism test uses /Brepro to replace PE/COFF
+          # and debug-directory timestamps with deterministic content hashes.
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "RUSTFLAGS=-C link-arg=/Brepro" >> "$GITHUB_ENV"
+          fi
       - name: Build the maverick_native wheel (first clean build)
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         env:
@@ -142,9 +147,8 @@ jobs:
           command: build
           args: --release --locked -m rust/mvk-scan-py/Cargo.toml --out dist-first
           maturin-version: v1.14.1
-      # MSVC records the absolute build directory in linker metadata. Clean the
-      # fixed target directory between builds so this remains a real clean-build
-      # reproducibility check without manufacturing a path-only byte difference.
+      # Reuse one fixed path but remove every compiled artifact between builds:
+      # this remains a real clean-build check without adding path variance.
       - name: Clean native target before the second build
         shell: bash
         env:
@@ -164,6 +168,7 @@ jobs:
           python -I -S - <<'PY'
           import hashlib
           import shutil
+          import zipfile
           from pathlib import Path
 
           def inventory(root):
@@ -175,9 +180,28 @@ jobs:
           first = inventory("dist-first")
           second = inventory("dist-second")
           if len(first) != 1 or first != second:
+              def members(root):
+                  wheels = sorted(Path(root).glob("*.whl"))
+                  if len(wheels) != 1:
+                      return {}
+                  with zipfile.ZipFile(wheels[0]) as archive:
+                      return {
+                          item.filename: hashlib.sha256(
+                              archive.read(item.filename)
+                          ).hexdigest()
+                          for item in archive.infolist()
+                      }
+
+              first_members = members("dist-first")
+              second_members = members("dist-second")
+              changed = sorted(
+                  name for name in first_members.keys() | second_members.keys()
+                  if first_members.get(name) != second_members.get(name)
+              )
               raise SystemExit(
                   f"native wheel builds are not byte-reproducible: "
-                  f"first={first}, second={second}"
+                  f"first={first}, second={second}, "
+                  f"changed_members={changed}"
               )
           Path("dist").mkdir()
           wheel_name = next(iter(first))
