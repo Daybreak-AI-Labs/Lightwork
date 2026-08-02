@@ -85,12 +85,23 @@ def distill(trajectories: list[dict], *, top_k: int = 3) -> dict | None:
         if trg and trg not in triggers:
             triggers.append(trg)
 
+    # Goal IDS, not just titles: the entity graph derives its
+    # skill -> goal lineage from these, and lineage must come from exact
+    # keys -- a title is prose, an id is provenance. Absent ids (older
+    # callers) simply yield a skill with no source edges, never a guess.
+    source_goal_ids = []
+    for t in chosen:
+        gid = t.get("goal_id")
+        if isinstance(gid, int) and gid > 0 and gid not in source_goal_ids:
+            source_goal_ids.append(gid)
+
     return {
         "name": name,
         "triggers": triggers,
         "tools_needed": tools,
         "summary": " ".join(goals[0].split()),
         "n_examples": len(chosen),
+        "source_goal_ids": source_goal_ids,
     }
 
 
@@ -118,6 +129,15 @@ def to_skill_markdown(skill: dict) -> str:
     lines.append(f"distilled_at: {skill.get('distilled_at') or _utc_now_iso()}")
     lines.append(f"n_examples: {int(skill.get('n_examples', 1))}")
     lines.append(f"source: {skill.get('source') or 'auto-distilled-local-v2'}")
+    # The exact goals this skill was distilled from (space-separated ids,
+    # special-char-free). This is what lets the entity graph answer "this run
+    # turned out to be tainted -- which learned skills depend on it?" with
+    # lineage instead of guesswork; a skill written before this key simply
+    # reads as provenance-unknown.
+    gids = [str(int(g)) for g in (skill.get("source_goal_ids") or [])
+            if isinstance(g, int) and g > 0]
+    if gids:
+        lines.append(f"source_goal_ids: {' '.join(gids[:16])}")
     lines.append("---")
     lines.append("")
     lines.append("# What this does")

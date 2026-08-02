@@ -172,6 +172,77 @@ def clause_playbook_show(fmt: str) -> None:
         click.echo("\n* = your language, not the shipped position.")
 
 
+@main.group("graph")
+def graph_group() -> None:
+    """The entity graph -- lineage and dossier queries across your records."""
+
+
+@graph_group.command("rebuild")
+def graph_rebuild_cmd() -> None:
+    """Regenerate the index from the governed stores (always safe: derived)."""
+    from ..entity_graph import rebuild
+    result = rebuild()
+    if not result.get("enabled"):
+        raise click.ClickException(
+            "the entity graph is disabled ([entity_graph] enable)")
+    click.echo(f"rebuilt: {result['entities']} entities, "
+               f"{result['edges']} edges")
+
+
+@graph_group.command("dossier")
+@click.argument("vendor")
+@click.option("--as-of", "as_of", default="",
+              help="Epoch or YYYY-MM-DD: the graph as it stood on that date.")
+def graph_dossier_cmd(vendor: str, as_of: str) -> None:
+    """Everything the graph knows about VENDOR, with record ids."""
+    import json as _json
+
+    from ..entity_graph import dossier
+    ts = None
+    if as_of:
+        try:
+            ts = float(as_of)
+        except ValueError:
+            import datetime as _dt
+            day = _dt.datetime.strptime(as_of, "%Y-%m-%d").replace(
+                tzinfo=_dt.timezone.utc)
+            ts = (day + _dt.timedelta(days=1)).timestamp()
+    result = dossier(vendor, as_of=ts)
+    click.echo(_json.dumps(result.get("summary") or result, indent=2,
+                           default=str))
+
+
+@graph_group.command("why")
+@click.argument("vendor")
+def graph_why_cmd(vendor: str) -> None:
+    """Walk VENDOR's latest decision back to its evidence, hop by hop."""
+    from ..entity_graph import why
+    result = why(vendor)
+    if not result.get("found"):
+        raise click.ClickException("the graph has no such vendor")
+    if not result.get("decision"):
+        click.echo(result.get("note", "no decision recorded"))
+        return
+    for step in result["chain"]:
+        click.echo(f"[{step['step']:18}] {step['what']}  "
+                   f"({step['record_type']}:{step['record_id']})")
+
+
+@graph_group.command("blast")
+@click.argument("kind", type=click.Choice(
+    ["clause", "document", "person", "goal", "skill"]))
+@click.argument("name")
+def graph_blast_cmd(kind: str, name: str) -> None:
+    """KIND NAME turned out bad -- what relied on it?"""
+    import json as _json
+
+    from ..entity_graph import blast_radius
+    result = blast_radius(kind, name)
+    click.echo(_json.dumps(
+        {k: result[k] for k in ("records", "vendors", "skills", "decisions")
+         if k in result}, indent=2, default=str))
+
+
 @main.command("dpia")
 @click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text",
               help="Output format.")

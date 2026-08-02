@@ -1098,6 +1098,34 @@ class TestDreamCycle:
         assert report.skills_distilled == 0
         assert not store.exists() or not list(store.glob("*.md"))
 
+    def test_owned_goal_text_stays_out_of_active_multi_owner_tenant_store(
+        self, tmp_path, monkeypatch,
+    ):
+        """Tenant isolation is not owner isolation: keep private titles out."""
+        monkeypatch.setattr(dreaming, "settings", lambda: dict(_SETTINGS))
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+        monkeypatch.setenv("MAVERICK_TENANT", "acme")
+        private = "bob-private-ledger-reconciliation"
+        world = _FakeWorld([
+            _FakeGoal(f"{private} monthly", 2.0, owner="bob"),
+            _FakeGoal(f"{private} quarterly", 1.0, owner="bob"),
+        ])
+
+        report = dreaming.dream_cycle(
+            world, profiles=PROFILES,
+            reflexion_path=tmp_path / "reflexions.ndjson",
+            insights_path=tmp_path / "insights.ndjson",
+            skill_stats_path=tmp_path / "skill_stats.json",
+            audit=False,
+        )
+
+        from maverick.paths import data_dir
+        tenant_store = data_dir("learned-skills")
+        assert "acme" in tenant_store.parts
+        assert report.goals_replayed == 0
+        assert report.skills_distilled == 0
+        assert not tenant_store.exists() or not list(tenant_store.glob("*.md"))
+
     def test_full_cycle_consolidates_per_department(self, tmp_path, monkeypatch):
         monkeypatch.setattr(dreaming, "settings", lambda: dict(_SETTINGS))
         rpath = tmp_path / "reflexions.ndjson"

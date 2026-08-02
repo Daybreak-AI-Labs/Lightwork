@@ -1389,6 +1389,18 @@ def pick_assessments() -> dict[str, Any]:
     )
     draft = _q_confirm("Let a model re-word your standard clauses to match "
                        "vendor drafting?", default=True)
+    console.print()
+    console.print(
+        "[dim]The entity graph links your records into one lineage: every "
+        "vendor, reviewer, document, and clause becomes one identity, and "
+        "every review/decision becomes a dated, citable edge — so you can ask "
+        "'why did we approve this vendor?', 'what did we know on the day we "
+        "signed?', and 'this clause turned out bad — what relied on it?'. "
+        "Derived and read-only: it is rebuilt from your records and never "
+        "stores anything they don't say.[/dim]"
+    )
+    graph = _q_confirm("Enable the entity graph (lineage & dossier queries)?",
+                       default=True)
     out: dict[str, Any] = {}
     if not discovery:
         out["doc_discovery"] = False
@@ -1398,6 +1410,8 @@ def pick_assessments() -> dict[str, Any]:
         out["privacy_ops"] = False
     if not draft:
         out["paper_review_use_model"] = False
+    if not graph:
+        out["entity_graph"] = False
     return out
 
 
@@ -3468,7 +3482,8 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     # Assessment assists + privacy ops are default-on; write tables only when
     # the operator opted OUT of something (write-only-on-divergence).
     body = {k: v for k, v in assessments.items()
-            if k not in ("privacy_ops", "paper_review_use_model")}
+            if k not in ("privacy_ops", "paper_review_use_model",
+                         "entity_graph")}
     lines: list[str] = []
     if body:
         lines += ["", "[assessments]"]
@@ -3480,6 +3495,9 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     if "paper_review_use_model" in assessments:
         lines += ["", "[paper_review]"]
         _emit_kv(lines, "use_model", assessments["paper_review_use_model"])
+    if "entity_graph" in assessments:
+        lines += ["", "[entity_graph]"]
+        _emit_kv(lines, "enable", assessments["entity_graph"])
     return lines
 
 

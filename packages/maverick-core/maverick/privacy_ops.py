@@ -1994,6 +1994,23 @@ def get_paper_review(review_id: str) -> dict | None:
     return _PAPER.load(review_id)
 
 
+def graph_source_records() -> dict[str, list[dict]]:
+    """Full privacy records for the entity graph's derivation pass.
+
+    The graph is a derived index: it reads records, never writes them, and
+    every edge it emits cites the record id it came from. Exposed as one
+    accessor so the store objects stay private to this module."""
+    if not enabled():
+        return {}
+    return {
+        "dpa_reviews": _DPA.list(),
+        "paper_reviews": _PAPER.list(),
+        "ai_systems": _AI.list(),
+        "dsars": _DSAR.list(),
+        "incidents": _INCIDENT.list(),
+    }
+
+
 def paper_redline_bytes(review_id: str) -> bytes | None:
     """The exact tracked-changes package that was filed, or None."""
     record = _PAPER.load(review_id)

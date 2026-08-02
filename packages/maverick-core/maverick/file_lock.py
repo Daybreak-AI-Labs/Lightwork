@@ -63,12 +63,20 @@ __all__ = [
 
 
 # A Windows byte-range lock is process-scoped enough that competing threads can
-# otherwise receive ``EDEADLK`` instead of waiting for each other.  A fixed set
-# of local stripes serializes same-process contenders without creating an
-# attacker-controlled, unbounded mapping of path -> Lock objects.  POSIX also
+# otherwise receive ``EDEADLK`` instead of waiting for each other.  POSIX also
 # benefits because ``flock`` semantics can vary for multiple descriptors in one
-# process.
-_LOCAL_LOCK_STRIPES = tuple(threading.RLock() for _ in range(64))
+# process.  The in-process serialization is a REFCOUNTED PER-PATH registry, not
+# a fixed stripe table: this used to be 64 hash-shared stripes, and holding a
+# stripe SHARED BY UNRELATED PATHS across the whole critical section deadlocked
+# whenever two paths collided while callers nested other locks inside -- the
+# self-harness promotion path (harness lock -> addenda lock -> audit-writer
+# lock -> audit-file lock) wedged against the audit writer (writer lock ->
+# audit-file lock) about 1 run in 64, hash-salt dependent.  Entries are created
+# on acquisition and dropped when the last concurrent user releases, so memory
+# is bounded by CONCURRENT lock users -- strictly tighter than the old fixed
+# table under the same attacker-controlled-path model, with no false sharing.
+_LOCAL_PATH_LOCKS: dict[str, list] = {}
+_LOCAL_PATH_LOCKS_GUARD = threading.Lock()
 _THREAD_LOCK_STATE = threading.local()
 _WINDOWS_LOCK_INITIALIZATION_SECONDS = 2.0
 
@@ -218,9 +226,31 @@ def _open_lock_file(path: Path) -> int:
         raise
 
 
-def _local_lock_for(path: Path) -> threading.RLock:
+@contextmanager
+def _exclusive_local_lock(path: Path):
+    """Hold THIS path's in-process lock -- and no other path's.
+
+    The per-path RLock keeps same-path contenders (and, on platforms where the
+    OS lock degrades, the whole in-process serialization) exactly as strict as
+    the old stripe table, while guaranteeing that two different lock files can
+    never block each other -- the property whose absence deadlocked nested
+    acquisitions. The registry entry lives only while someone holds or waits."""
     canonical = _canonical_lock_path(path)
-    return _LOCAL_LOCK_STRIPES[hash(canonical) % len(_LOCAL_LOCK_STRIPES)]
+    with _LOCAL_PATH_LOCKS_GUARD:
+        entry = _LOCAL_PATH_LOCKS.get(canonical)
+        if entry is None:
+            entry = _LOCAL_PATH_LOCKS[canonical] = [threading.RLock(), 0]
+        entry[1] += 1
+    lock: threading.RLock = entry[0]
+    lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()
+        with _LOCAL_PATH_LOCKS_GUARD:
+            entry[1] -= 1
+            if entry[1] <= 0:
+                _LOCAL_PATH_LOCKS.pop(canonical, None)
 
 
 def _windows_set_private_dacl(path: Path) -> None:
@@ -1275,7 +1305,7 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
     target = Path(target)
     lock_path = target.parent / (target.name + ".lock")
     canonical = _canonical_lock_path(lock_path)
-    with _local_lock_for(lock_path):
+    with _exclusive_local_lock(lock_path):
         held: dict[str, tuple[int, bool]] = getattr(
             _THREAD_LOCK_STATE, "held", {},
         )
@@ -1330,7 +1360,7 @@ def cross_process_lock(target: str | Path, *, strict: bool = False):
                     # (a non-POSIX or network/overlay FS that answers LOCK_EX
                     # with ENOLCK/EOPNOTSUPP). Cross-process serialization is
                     # impossible there; the in-process lock held above
-                    # (``_local_lock_for``) still serializes this process, so
+                    # (``_exclusive_local_lock``) still serializes this process, so
                     # degrade to it rather than make every audit write and
                     # security-state read-modify-write fail on such a platform.
                     # A lock-FILE creation failure (the ``os.open`` above) still

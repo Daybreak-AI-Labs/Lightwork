@@ -788,3 +788,108 @@ def test_cross_process_lock_rejects_hardlinked_sidecar(tmp_path):
             pytest.fail("a hardlinked lock sidecar was accepted")
 
     assert outside.read_bytes() == b"do-not-lock-or-mutate"
+
+
+# --- per-path in-process locking: the stripe-collision deadlock class -------
+
+def test_distinct_paths_never_share_the_in_process_lock(tmp_path):
+    """Regression: the in-process side of cross_process_lock was 64 hash-shared
+    stripes, held for the whole critical section. Two UNRELATED lock files
+    landing on one stripe deadlocked any nested acquisition (observed: the
+    self-harness promotion path vs the audit writer, ~1 run in 64). A thread
+    holding path A must never block a different path B -- for every B."""
+    import threading
+
+    from maverick.file_lock import cross_process_lock
+
+    inside = threading.Event()
+    release = threading.Event()
+
+    def hold_a():
+        with cross_process_lock(tmp_path / "a.state"):
+            inside.set()
+            release.wait(timeout=30)
+
+    t = threading.Thread(target=hold_a, daemon=True)
+    t.start()
+    assert inside.wait(timeout=10)
+    try:
+        # With 64 stripes, ~16 of 1000 distinct paths would share A's stripe
+        # and block forever; per-path locks must sail through all of them.
+        for i in range(1000):
+            with cross_process_lock(tmp_path / f"b{i}.state"):
+                pass
+    finally:
+        release.set()
+        t.join(timeout=10)
+    assert not t.is_alive()
+
+
+def test_nested_cross_path_locks_cannot_abba_deadlock(tmp_path):
+    """The exact shape that wedged self-harness: thread 1 audits from inside a
+    store lock (store file-lock -> writer lock -> audit file-lock) while
+    thread 2 audits directly (writer lock -> audit file-lock)."""
+    import threading
+
+    from maverick.file_lock import cross_process_lock
+
+    writer_lock = threading.Lock()
+    store, audit = tmp_path / "store.state", tmp_path / "audit.log"
+    done = []
+
+    def promoter():
+        for _ in range(50):
+            with cross_process_lock(store):
+                with writer_lock, cross_process_lock(audit):
+                    pass
+        done.append("promoter")
+
+    def auditor():
+        for _ in range(50):
+            with writer_lock, cross_process_lock(audit):
+                pass
+        done.append("auditor")
+
+    threads = [threading.Thread(target=promoter, daemon=True),
+               threading.Thread(target=auditor, daemon=True)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert done.count("promoter") == 1 and done.count("auditor") == 1
+
+
+def test_same_path_contenders_still_serialize(tmp_path):
+    """The fix must not loosen same-path exclusion: two threads bumping a
+    counter under the same lock lose no update."""
+    import json
+    import threading
+
+    from maverick.file_lock import atomic_write_text, cross_process_lock
+
+    target = tmp_path / "counter.json"
+    atomic_write_text(target, json.dumps({"n": 0}))
+
+    def bump():
+        for _ in range(50):
+            with cross_process_lock(target):
+                n = json.loads(target.read_text())["n"]
+                atomic_write_text(target, json.dumps({"n": n + 1}))
+
+    threads = [threading.Thread(target=bump, daemon=True) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    assert json.loads(target.read_text())["n"] == 200
+
+
+def test_lock_registry_does_not_accumulate(tmp_path):
+    """Entries live only while someone holds or waits -- the bounded-memory
+    property the old stripe table existed to provide."""
+    from maverick.file_lock import _LOCAL_PATH_LOCKS, cross_process_lock
+
+    for i in range(200):
+        with cross_process_lock(tmp_path / f"f{i}.state"):
+            assert _LOCAL_PATH_LOCKS          # live while held
+    assert not _LOCAL_PATH_LOCKS              # empty once released
