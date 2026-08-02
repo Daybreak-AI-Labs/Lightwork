@@ -94,6 +94,28 @@ def _isolate_maverick_home(tmp_path, monkeypatch, request):
     return tmp_path
 
 
+@pytest.fixture
+def local_audit_key_custody(monkeypatch):
+    """Select the on-disk audit-key path for tests that exercise it directly.
+
+    The production-posture harness injects a test-scoped off-host signing key,
+    and runtime correctly gives that key precedence over local key files. Tests
+    for local rotation, custody, and corruption therefore need to opt into the
+    local source explicitly; otherwise they pass or fail against the injected
+    signer instead of the path named by the test.
+    """
+    from maverick.audit import signing
+
+    monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY", raising=False)
+    monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", raising=False)
+    monkeypatch.setenv("MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY", "0")
+    signing._reset_injected_keypair_cache()
+    try:
+        yield
+    finally:
+        signing._reset_injected_keypair_cache()
+
+
 @pytest.fixture(autouse=True)
 def _isolate_root_logging():
     """Snapshot + restore the root logger around every test.

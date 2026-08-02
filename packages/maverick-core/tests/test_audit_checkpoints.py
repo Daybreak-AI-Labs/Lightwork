@@ -304,6 +304,7 @@ def test_checkpoint_signature_and_parser_share_one_byte_snapshot(
     assert reads.count("audit-checkpoint-00000000000000000001.ndjson") == 1
 
 
+@pytest.mark.usefixtures("local_audit_key_custody")
 def test_pinned_key_set_supports_rotation_and_rejects_new_signer(
     isolated_audit,
 ):

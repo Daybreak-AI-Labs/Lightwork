@@ -8,6 +8,8 @@ import time
 import types
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def _fake_httpx(monkeypatch, **methods):
     mod = types.ModuleType("httpx")
@@ -535,6 +537,7 @@ def test_audit_verify_flags_nonhex_sig_instead_of_crashing(tmp_path, monkeypatch
     assert any(b.reason == "bad_signature" for b in breaks)
 
 
+@pytest.mark.usefixtures("local_audit_key_custody")
 def test_audit_verify_rejects_lone_pubkey(tmp_path, monkeypatch):
     """A .pub with no sibling .key (attacker-dropped) is not trusted."""
     if not _crypto_available():

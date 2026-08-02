@@ -160,6 +160,7 @@ def test_manifest_cannot_shorten_the_governed_retention_period():
         validate_manifest(manifest)
 
 
+@pytest.mark.usefixtures("local_audit_key_custody")
 def test_receipt_records_key_era_and_survives_authorized_rotation(tmp_path):
     from maverick.audit.signing import rotate_audit_keypair
 
