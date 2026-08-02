@@ -1441,6 +1441,10 @@ def test_native_release_uses_locked_python_tools_and_preserves_wheel_bytes():
     assert "pip install --upgrade pip" not in workflow
     assert '"cryptography>=44.0.1"' not in workflow
     assert "--allow-unconstrained maverick-native" in workflow
+    assert "python -I -m venv .native-parity-venv" in workflow
+    assert 'parity_python=".native-parity-venv/Scripts/python.exe"' in workflow
+    assert 'parity_python=".native-parity-venv/bin/python"' in workflow
+    assert workflow.count('"$parity_python" -I') >= 7
     assert "maverick-native-wheel.sha256" in workflow
     assert "wheel mutated during parity testing" in workflow
     assert "Preflight existing native PyPI bytes" in workflow

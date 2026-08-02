@@ -232,17 +232,26 @@ jobs:
           )
           print(f"captured {wheel.name}: sha256:{digest}")
           PY
-          python -I -m pip install --upgrade \
+          # setup-python's Windows image carries runner-owned pipx packages in
+          # the global environment. Verify dependency closure inside a fresh
+          # venv so image contents cannot contaminate the release gate.
+          python -I -m venv .native-parity-venv
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            parity_python=".native-parity-venv/Scripts/python.exe"
+          else
+            parity_python=".native-parity-venv/bin/python"
+          fi
+          "$parity_python" -I -m pip install --upgrade \
             'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
             'packaging==26.2' 'pytest==9.1.1' 'certifi==2026.7.22'
           # --no-index forces the install to use the wheel we just built; if no
           # wheel matches this OS/Python the install fails hard (not a silent skip).
-          python -I -m pip install \
+          "$parity_python" -I -m pip install \
             --no-index --find-links dist maverick-native
           # Make `maverick` importable so the shim under test loads (deps-free:
           # maverick.safety.unicode_filter pulls only stdlib).
-          python -I -m pip install -e packages/maverick-core --no-deps
-          python -I scripts/verify_constraint_closure.py \
+          "$parity_python" -I -m pip install -e packages/maverick-core --no-deps
+          "$parity_python" -I scripts/verify_constraint_closure.py \
             --allow-unconstrained maverick-native
           # HARD GATE: the parity tests self-skip when the native module is
           # absent. After explicitly building+installing it, a skip would be a
@@ -251,7 +260,7 @@ jobs:
           # Python hot path (a real accelerator), so assert its shim swapped in;
           # the secret/PII detectors are deliberately NOT (CPython `re` is faster
           # — see rust/README.md), so assert the extension functions merely exist.
-          python - <<'PY'
+          "$parity_python" -I - <<'PY'
           import maverick_native as n
           from maverick.safety import unicode_filter as uf
           assert uf._native is not None, "shim did not pick up maverick_native"
@@ -263,11 +272,11 @@ jobs:
           assert hasattr(n, "pii_scan_spans"), "missing native pii_scan_spans"
           print("native present:", n.__file__)
           PY
-          python -I -m pytest \
+          "$parity_python" -I -m pytest \
             packages/maverick-core/tests/test_native_unicode_parity.py \
             packages/maverick-core/tests/test_native_detect_parity.py \
             -vv
-          python -I - <<'PY'
+          "$parity_python" -I - <<'PY'
           import hashlib
           import os
           from pathlib import Path
