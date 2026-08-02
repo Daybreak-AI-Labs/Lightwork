@@ -209,6 +209,16 @@ def analysis_report(review, *, version: int, reviewer: str,
 
 # --- filing ---------------------------------------------------------------
 
+# Redline bytes by (case_id, instrument, version), so the desk can hand the
+# reviewer the exact .docx that was filed. Kept OUT of the round entry itself:
+# entries are serialized into the case page, and binary doesn't belong there.
+_REDLINES: dict[tuple[str, str, int], bytes] = {}
+
+
+def redline_bytes(case_id: str, instrument: str, version: int) -> bytes:
+    return _REDLINES.get((case_id, instrument, version), b"")
+
+
 def _safe(part: str) -> str:
     keep = [ch if (ch.isalnum() or ch in "-_") else "-" for ch in (part or "")]
     return "".join(keep).strip("-")[:60] or "vendor"
@@ -246,6 +256,10 @@ def file_paper_review(case: Case, review, redline_result, *, reviewer: str,
     except Exception as e:  # pragma: no cover -- tenant/network variance
         error = f"{type(e).__name__}: {e}"
 
+    if redline_result is not None:
+        _REDLINES[(case.id, review.instrument, version)] = \
+            redline_result.content
+
     d = review.to_dict()
     entry = {
         "version": version,
@@ -262,6 +276,7 @@ def file_paper_review(case: Case, review, redline_result, *, reviewer: str,
         "drafted_with_model": d["drafted_with_model"],
         "reviewer": reviewer,
         "at": time.time(),
+        "has_redline": redline_result is not None,
         "attachment_ids": attachments,
         "filed": bool(attachments) and not error,
         "error": error,
@@ -276,4 +291,4 @@ def file_paper_review(case: Case, review, redline_result, *, reviewer: str,
 
 __all__ = ["PAPER_SOURCES", "DOCX_MIME", "ACCEPTED_MIMES", "accepted_upload",
            "reviewers", "queue_for", "case_by_number", "assign_unassigned",
-           "analysis_report", "file_paper_review"]
+           "analysis_report", "file_paper_review", "redline_bytes"]

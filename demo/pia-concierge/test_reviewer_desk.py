@@ -104,6 +104,7 @@ def desk(demo, tmp_path, monkeypatch):
     STORE.tickets.clear()
     STORE.onetrust.clear()
     STORE._paper_seq.clear()
+    demo["paper_desk"]._REDLINES.clear()
 
     client = TestClient(app_mod.app)
     monkeypatch.setattr(
@@ -283,6 +284,77 @@ def test_redline_attached_is_a_real_tracked_changes_docx(desk, monkeypatch):
     _upload(desk["client"], "Acme-DPA.docx", original, DOCX_MIME)
     ins, dels = dr.revision_count(captured["content"])
     assert ins >= 1 and dels >= 1
+
+
+def test_redline_is_downloadable_from_the_desk(desk):
+    """The rounds table's Redline button serves the exact tracked-changes
+    .docx that was filed — the reviewer opens it in Word without a trip
+    through the tenant."""
+    from maverick import docx_redline as dr
+    client = desk["client"]
+    original = _docx([p for p in VENDOR_DPA.split("\n") if p.strip()])
+    _upload(client, "Acme-DPA.docx", original, DOCX_MIME)
+    r = client.get("/reviewer/case/LW-PIA-0001/round/1/redline")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith(DOCX_MIME)
+    assert "Acme-CRM-dpa-v1-redline.docx" in r.headers["content-disposition"]
+    ins, dels = dr.revision_count(r.content)
+    assert ins >= 1 and dels >= 1
+    assert client.get("/reviewer/case/LW-PIA-0001/round/9/redline"
+                      ).status_code == 404
+    assert client.get("/reviewer/case/LW-PIA-9999/round/1/redline"
+                      ).status_code == 404
+
+
+def test_mock_tenant_retains_and_serves_the_filed_bytes(desk):
+    """What lands on the tenant must be openable there: the mock keeps the
+    uploaded bytes and serves them back bearer-gated."""
+    client = desk["client"]
+    original = _docx([p for p in VENDOR_DPA.split("\n") if p.strip()])
+    _upload(client, "Acme-DPA.docx", original, DOCX_MIME)
+    atts = desk["ot_mock"].mock_state()["attachments"]
+    redline = next(a for a in atts.values()
+                   if a["filename"].endswith("-redline.docx"))
+    assert redline["content"] and len(redline["content"]) == redline["bytes"]
+    r = client.get(f"/ot-api/api/document/v2/attachments/{redline['id']}/file",
+                   headers={"Authorization": "Bearer demo-bearer-token"})
+    assert r.status_code == 200 and r.content == redline["content"]
+    assert client.get(
+        f"/ot-api/api/document/v2/attachments/{redline['id']}/file"
+    ).status_code == 401
+
+
+def test_documents_open_from_the_onetrust_viewer(desk):
+    """The OneTrust-look record pop-out lists the vendor's documents and each
+    one opens: the memo renders as text, the redline downloads for Word."""
+    client = desk["client"]
+    original = _docx([p for p in VENDOR_DPA.split("\n") if p.strip()])
+    _upload(client, "Acme-DPA.docx", original, DOCX_MIME)
+    # The viewer keys documents off a record's subject: give Acme CRM one.
+    OneTrustAssessment = desk["ot_mock"].OneTrustAssessment
+    ot = OneTrustAssessment(
+        assessment_id="OT-ASMT-9001", name="PIA — Acme CRM",
+        template="Privacy Impact Assessment", subject="Acme CRM",
+        status="Completed", risk_level="high", result={})
+    desk["store"].onetrust[ot.assessment_id] = ot
+    html = client.get("/onetrust").text
+    assert "Acme-CRM-dpa-v1-redline.docx" in html
+    assert "Acme-CRM-dpa-v1-analysis.txt" in html
+
+    atts = desk["ot_mock"].mock_state()["attachments"]
+    memo = next(a for a in atts.values()
+                if a["filename"].endswith("-analysis.txt"))
+    redline = next(a for a in atts.values()
+                   if a["filename"].endswith("-redline.docx"))
+    r = client.get(f"/onetrust/attachment/{memo['id']}")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/plain")
+    assert "VENDOR PAPER REVIEW — Acme CRM" in r.text
+    r = client.get(f"/onetrust/attachment/{redline['id']}")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith(DOCX_MIME)
+    assert "attachment" in r.headers["content-disposition"]
+    assert client.get("/onetrust/attachment/att-none").status_code == 404
 
 
 def _tiny_pdf(text: str) -> bytes:

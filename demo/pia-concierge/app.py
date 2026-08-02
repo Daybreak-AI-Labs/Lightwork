@@ -381,6 +381,109 @@ _FINDINGS_BY_RISK = {
 _SEED_REQUESTERS = ("Jordan Diaz", "Sam Patel", "Alex Kim",
                     "Riley Moore", "Casey Lee")
 
+# A short vendor DPA with real departures from our standard positions, so the
+# seeded paper round below is produced by the REAL deterministic engine
+# rather than hand-written fixture findings.
+_SEED_PAPER_PARAGRAPHS = (
+    "DATA PROCESSING AGREEMENT",
+    "This Data Processing Agreement is entered into between {vendor} (the "
+    "Processor) and the Customer (the Controller) pursuant to Article 28 "
+    "GDPR.",
+    "1. The Processor shall process personal data only on documented "
+    "instructions from the Controller.",
+    "2. Processor personnel are bound by appropriate obligations of "
+    "confidentiality.",
+    "3. The Processor may engage sub-processors at its sole discretion "
+    "without prior notice to the Controller.",
+    "4. The Processor shall notify the Controller of a personal data breach "
+    "without undue delay.",
+    "5. Upon termination of services, the Processor may retain personal data "
+    "for as long as it deems appropriate.",
+)
+
+
+def _seed_risk_report(vendor: str, risk: str, findings: list[dict]) -> bytes:
+    """Same shape as the report the live protocol run attaches."""
+    rationale = ("; ".join(f["text"] for f in findings)
+                 or "No findings — standard processing.")
+    return (f"Risk analysis — {vendor}\nRating filed: {risk.capitalize()}\n"
+            f"Rationale: {rationale}\nInstrument: dpa — external processing "
+            "of personal data on the controller's behalf\n").encode()
+
+
+def _seed_notice_report(vendor: str) -> bytes:
+    return (
+        f"Privacy notice cross-check — {vendor}\n"
+        "Notice reviewed : Global Vacation Clubs Privacy Notice (published)\n"
+        "Covered         : contact data (name, email address, phone number), "
+        "payment details\n"
+        "Recommendation  : confirm this vendor's processing purpose is named "
+        "in the 'Sharing' section before renewal; no sale/share language "
+        "change required.\n").encode()
+
+
+def _seed_paper_docx(vendor: str) -> bytes:
+    """The vendor's fixture DPA as a minimal valid .docx, so the seeded
+    redline is their document edited in place with tracked changes."""
+    import io
+    import zipfile
+    from xml.sax.saxutils import escape
+
+    from maverick import docx_redline as dr
+    body = "".join(
+        f'<w:p><w:r><w:t xml:space="preserve">'
+        f'{escape(p.format(vendor=vendor))}</w:t></w:r></w:p>'
+        for p in _SEED_PAPER_PARAGRAPHS)
+    doc = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+           f'<w:document xmlns:w="{dr._W_NS}"><w:body>{body}{dr._SECT_PR}'
+           "</w:body></w:document>")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", dr._CONTENT_TYPES)
+        z.writestr("_rels/.rels", dr._ROOT_RELS)
+        z.writestr("word/_rels/document.xml.rels", dr._DOCUMENT_RELS)
+        z.writestr("word/settings.xml", dr._SETTINGS)
+        z.writestr("word/document.xml", doc)
+    return buf.getvalue()
+
+
+def _seed_paper_round(case: Case, reviewer: str) -> None:
+    """A filed vendor-paper round as tenant history: run the real engine
+    (deterministic, no model) over the fixture DPA and file it through the
+    same code path the desk uses. Attachments land on the mock tenant
+    directly — the app isn't serving HTTP yet at seed time."""
+    text = "\n".join(p.format(vendor=case.subject)
+                     for p in _SEED_PAPER_PARAGRAPHS)
+    review = backend.review_vendor_paper(
+        text, vendor=case.subject,
+        document_name=f"{case.subject} — DPA (vendor draft).docx",
+        use_model=False)
+    if review is None:
+        return
+    redline = backend.build_redline(
+        review, original=_seed_paper_docx(case.subject),
+        mime=paper_desk.DOCX_MIME,
+        date=_dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        title=f"{case.subject} — DPA (Lightwork redline)")
+
+    class _SeedFiler:
+        """ensure_vendor hands back the NAME as the record id;
+        seed_attachment resolves it against the mock's vendor rows."""
+
+        def ensure_vendor(self, name: str) -> dict:
+            return {"id": name, "name": name}
+
+        def attach_to_record(self, record_id: str, filename: str,
+                             content: bytes, *,
+                             mime: str = "text/plain") -> str:
+            return _ot_mock.seed_attachment(record_id, filename, content,
+                                            mime)
+
+    entry = paper_desk.file_paper_review(case, review, redline,
+                                         reviewer=reviewer,
+                                         client=_SeedFiler())
+    entry["at"] = case.created_at + 3600     # history, not "just now"
+
 
 def _seed_tenant() -> None:
     """A year of backdated OneTrust history (PIA_SEED_TENANT=1, the launcher
@@ -479,8 +582,26 @@ def _seed_tenant() -> None:
             case_id=case_id)
         ticket.created_at = created
         STORE.tickets[ticket_no] = ticket
-    print(f"[seed] tenant history: {len(STORE.onetrust)} OneTrust records "
-          f"(disable with PIA_SEED_TENANT=0)")
+        # The deliverables the live run attaches, retained as OPENABLE
+        # documents on the vendor's mock record.
+        _ot_mock.seed_attachment(vendor, f"risk-analysis-{case_id}.txt",
+                                 _seed_risk_report(vendor, risk, findings),
+                                 "text/plain")
+        _ot_mock.seed_attachment(vendor, f"notice-crosscheck-{case_id}.txt",
+                                 _seed_notice_report(vendor), "text/plain")
+    n_docs = len(_ot_mock.ATTACHMENTS)
+    if CAPS["paper_redline"]:
+        # Two vendors also carry a filed vendor-paper round (analysis memo +
+        # tracked-changes redline), so the Documents tab and the reviewer
+        # desk both open with history to click through.
+        for subject in ("Wayne Payments", "Rekall VR Training"):
+            case = next((c for c in STORE.cases.values()
+                         if c.subject == subject), None)
+            if case is not None:
+                _seed_paper_round(case, rng.choice(reviewers))
+        n_docs = len(_ot_mock.ATTACHMENTS)
+    print(f"[seed] tenant history: {len(STORE.onetrust)} OneTrust records, "
+          f"{n_docs} vendor documents (disable with PIA_SEED_TENANT=0)")
 
 
 @app.on_event("startup")
@@ -1884,9 +2005,62 @@ async def _send_back_case(case: Case, decided_by: str, *, via: str) -> None:
 # ===========================================================================
 # Mock OneTrust — tenant API (the verified wire protocol) + viewer
 # ===========================================================================
+import ot_mock as _ot_mock  # noqa: E402
 from ot_mock import router as _ot_router  # noqa: E402
 
 app.include_router(_ot_router)
+
+
+def _vendor_documents(subject: str) -> list[dict]:
+    """The documents sitting on a vendor's mock-tenant record — what the
+    agent filed there (risk analysis, notice cross-check, paper-review memo
+    + redline), plus anything seeded. Matched by vendor NAME because the
+    viewer's records only know their subject."""
+    name = (subject or "").strip().lower()
+    if not name:
+        return []
+    vendor = next((v for v in _ot_mock.VENDORS
+                   if v["name"].strip().lower() == name), None)
+    if vendor is None:
+        return []
+    docs = [a for a in _ot_mock.ATTACHMENTS.values()
+            if a.get("linked_to") == vendor["id"]]
+    return [{
+        "id": a["id"], "filename": a.get("filename", ""),
+        "bytes": a.get("bytes", 0),
+        "kind": ("docx" if str(a.get("filename", "")).endswith(".docx")
+                 else "text" if str(a.get("filename", "")).endswith(".txt")
+                 else "other"),
+        "available": bool(a.get("content")),
+    } for a in docs]
+
+
+_ATT_FILENAME_RE = re.compile(r"[^A-Za-z0-9._ -]")
+
+
+@app.get("/onetrust/attachment/{att_id}")
+async def onetrust_attachment(att_id: str) -> Response:
+    """Open a document from the tenant's Documents tab: text renders in the
+    browser, a .docx downloads for Word (that's where tracked changes live)."""
+    att = _ot_mock.ATTACHMENTS.get(att_id)
+    if att is None:
+        return PlainTextResponse("unknown attachment", status_code=404)
+    content = att.get("content") or b""
+    if not content:
+        return PlainTextResponse(
+            "attachment content is no longer retained by the demo tenant",
+            status_code=410)
+    filename = _ATT_FILENAME_RE.sub("-", att.get("filename") or "document")
+    if filename.endswith(".docx"):
+        return Response(
+            content, media_type=paper_desk.DOCX_MIME,
+            headers={"Content-Disposition":
+                     f'attachment; filename="{filename}"'})
+    if filename.endswith(".txt"):
+        return Response(content, media_type="text/plain; charset=utf-8")
+    return Response(
+        content, media_type=att.get("mime") or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.get("/onetrust", response_class=HTMLResponse)
@@ -1917,6 +2091,7 @@ async def onetrust_viewer(request: Request) -> HTMLResponse:
         "findings": (a.result or {}).get("findings", []),
         "answers": (a.result or {}).get("answers", []),
         "controls": a.controls,
+        "documents": _vendor_documents(a.subject),
         "addenda": a.addenda,
         "needs_re_review": a.needs_re_review,
         "decided_by": a.decided_by,
@@ -2254,6 +2429,28 @@ async def reviewer_round_report(case_id: str, version: int) -> Response:
     for entry in case.paper_reviews:
         if entry["version"] == version:
             return PlainTextResponse(entry["report"])
+    return PlainTextResponse("unknown version", status_code=404)
+
+
+@app.get("/reviewer/case/{case_id}/round/{version}/redline")
+async def reviewer_round_redline(case_id: str, version: int) -> Response:
+    """The tracked-changes .docx as filed — the reviewer opens it in Word
+    without a trip through the tenant."""
+    case = STORE.cases.get(case_id)
+    if not case:
+        return PlainTextResponse("unknown case", status_code=404)
+    for entry in case.paper_reviews:
+        if entry["version"] == version:
+            content = paper_desk.redline_bytes(
+                case.id, entry["instrument"], version)
+            if not content:
+                return PlainTextResponse("no redline for this round",
+                                         status_code=404)
+            filename = entry.get("redline_filename") or "redline.docx"
+            return Response(
+                content, media_type=paper_desk.DOCX_MIME,
+                headers={"Content-Disposition":
+                         f'attachment; filename="{filename}"'})
     return PlainTextResponse("unknown version", status_code=404)
 
 

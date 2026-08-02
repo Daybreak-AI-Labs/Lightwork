@@ -232,6 +232,36 @@ function openRecord(r) {
     });
   }
 
+  // The agent's deliverables, retained by the tenant and openable here:
+  // risk analysis + notice cross-check from the protocol run, and the
+  // paper-review memo + tracked-changes redline from the reviewer desk.
+  const docs = r.documents || [];
+  section(b, 'Documents — vendor record (' + docs.length + ')');
+  if (!docs.length) {
+    b.appendChild(el('div', 'otd__msg',
+      'None yet — the agent attaches its risk analysis, notice cross-check ' +
+      'and any paper-review redline here when it files.'));
+  }
+  docs.forEach(function (doc) {
+    const d = el('div', 'otd__ans');
+    const row = el('div');
+    const a = document.createElement('a');
+    a.href = '/onetrust/attachment/' + encodeURIComponent(doc.id);
+    a.textContent = '📄 ' + doc.filename;
+    a.style.cssText = 'color:#2a7ab0;font-weight:600;text-decoration:none;';
+    if (doc.kind === 'text') a.target = '_blank';
+    row.appendChild(a);
+    d.appendChild(row);
+    const kb = doc.bytes >= 1024
+      ? (doc.bytes / 1024).toFixed(1) + ' KB' : doc.bytes + ' B';
+    const hint = doc.kind === 'docx'
+      ? ' · Word document — downloads; open it to see the tracked changes'
+      : doc.kind === 'text' ? ' · opens in a new tab' : '';
+    d.appendChild(el('div', 'note', kb + hint +
+      (doc.available ? '' : ' · content no longer retained')));
+    b.appendChild(d);
+  });
+
   // "We're just adding stuff": documents appended after the assessment.
   section(b, 'Documents added after assessment (' + (r.addenda || []).length + ')');
   (r.addenda || []).forEach(function (a) {
