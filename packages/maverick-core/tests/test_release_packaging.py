@@ -1419,6 +1419,7 @@ def test_native_release_uses_locked_python_tools_and_preserves_wheel_bytes():
     )
     assert "'pip==26.1.2'" in workflow
     assert "'pytest==9.1.1'" in workflow
+    assert "'certifi==2026.7.22'" in workflow
     assert "'cryptography==49.0.0'" in workflow
     assert "maturin-version: v1.14.1" in workflow
     assert workflow.count('toolchain: "1.97.1"') == 4
@@ -1450,8 +1451,16 @@ def test_native_release_uses_locked_python_tools_and_preserves_wheel_bytes():
     assert 'epoch="$(git show -s --format=%ct HEAD)"' in workflow
     assert "native wheel reproducibility OK" in workflow
     assert "wasm npm reproducibility OK" in workflow
-    assert "maverick-native-target-first" in workflow
-    assert "maverick-native-target-second" in workflow
+    assert workflow.count(
+        "CARGO_TARGET_DIR: ${{ runner.temp }}/maverick-native-target"
+    ) == 3
+    assert "Clean native target before the second build" in workflow
+    assert (
+        "cargo clean --manifest-path rust/mvk-scan-py/Cargo.toml"
+        in workflow
+    )
+    assert "maverick-native-target-first" not in workflow
+    assert "maverick-native-target-second" not in workflow
     assert "wasm-publish-target-first" in workflow
     assert "wasm-publish-target-second" in workflow
     assert "npm pack --pack-destination" in workflow

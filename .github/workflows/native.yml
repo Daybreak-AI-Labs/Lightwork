@@ -137,15 +137,23 @@ jobs:
       - name: Build the maverick_native wheel (first clean build)
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/maverick-native-target-first
+          CARGO_TARGET_DIR: ${{ runner.temp }}/maverick-native-target
         with:
           command: build
           args: --release --locked -m rust/mvk-scan-py/Cargo.toml --out dist-first
           maturin-version: v1.14.1
+      # MSVC records the absolute build directory in linker metadata. Clean the
+      # fixed target directory between builds so this remains a real clean-build
+      # reproducibility check without manufacturing a path-only byte difference.
+      - name: Clean native target before the second build
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/maverick-native-target
+        run: cargo clean --manifest-path rust/mvk-scan-py/Cargo.toml
       - name: Build the maverick_native wheel (second clean build)
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         env:
-          CARGO_TARGET_DIR: ${{ runner.temp }}/maverick-native-target-second
+          CARGO_TARGET_DIR: ${{ runner.temp }}/maverick-native-target
         with:
           command: build
           args: --release --locked -m rust/mvk-scan-py/Cargo.toml --out dist-second
@@ -202,7 +210,7 @@ jobs:
           PY
           python -I -m pip install --upgrade \
             'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
-            'packaging==26.2' 'pytest==9.1.1'
+            'packaging==26.2' 'pytest==9.1.1' 'certifi==2026.7.22'
           # --no-index forces the install to use the wheel we just built; if no
           # wheel matches this OS/Python the install fails hard (not a silent skip).
           python -I -m pip install \
