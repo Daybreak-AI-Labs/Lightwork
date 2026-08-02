@@ -264,3 +264,41 @@ def test_revision_ids_are_unique():
     xml = _document_xml(res.content)
     ids = re.findall(r'w:id="(\d+)"', xml)
     assert len(ids) == len(set(ids)) and len(ids) >= 5
+
+
+# --- the plain builder (generated deliverables) ----------------------------
+
+def test_build_docx_is_valid_opc_with_red_fill_runs():
+    content = dr.build_docx([
+        ("title", [("DATA PROCESSING AGREEMENT", False)]),
+        ("para", [("between ", False), ("Acme Corp", True),
+                  (" and ", False), ("[CONTROLLER]", True)]),
+        ("heading", [("1. Instructions", False)]),
+        ("para", [("Processor shall follow instructions.", False)]),
+        ("para", []),
+    ])
+    assert_valid_opc(content)
+    doc = _document_xml(content)
+    # Filled values are red; template prose is not.
+    assert doc.count(f'<w:color w:val="{dr.FILL_COLOR}"/>') == 2
+    assert "Acme Corp" in doc and "[CONTROLLER]" in doc
+    # A generated document must never fake tracked changes.
+    assert dr.revision_count(content) == (0, 0)
+
+
+def test_text_to_docx_turns_rule_underlines_into_headings():
+    text = ("VENDOR PAPER REVIEW — Acme  (v1)\n"
+            "====================\n"
+            "Document reviewed : a.docx\n"
+            "\n"
+            "RECOMMENDATION\n"
+            "--------------------\n"
+            "Do not sign & fix <clauses> first.\n")
+    content = dr.text_to_docx(text, title="Analysis memo")
+    assert_valid_opc(content)
+    doc = _document_xml(content)
+    # Rule lines disappear; the lines above them become bold headings.
+    assert "====" not in doc and "----" not in doc
+    assert doc.count("<w:b/>") >= 3   # title + two headings
+    # Body text survives, XML-escaped.
+    assert "Do not sign &amp; fix &lt;clauses&gt; first." in doc

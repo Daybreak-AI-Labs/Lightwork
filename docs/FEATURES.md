@@ -579,6 +579,25 @@ here.
     same without a terminal. Clauses left alone keep the shipped position, so
     a partial playbook is a valid one, and a missing or malformed one degrades
     to the shipped language rather than emitting a blank demand.
+  - *Drafting OUR paper* (`paper_review.draft_our_paper`,
+    `GET /api/v1/privacy/our-paper`, the **Draft our paper** button on the
+    Vendor paper tab, `maverick clause-playbook draft <vendor>`;
+    `[paper_review] org_name`, wizard question) — the other half of the
+    paper-source question: when the vendor signs OUR paper, generate our
+    template DPA or CCPA/CPRA addendum as a real `.docx` whose clause body is
+    the operator's playbook and whose vendor-specific values (party names,
+    effective date) are **rendered in red (`FF0000`)** and listed in a cover
+    note, so counsel verifies exactly what the machine inserted. Entirely
+    deterministic — no model touches it; a missing org name or date stays a
+    red bracketed placeholder rather than a guess, and the generated draft
+    carries zero fabricated tracked changes (`revision_count == (0, 0)`).
+  - *The negotiation round-trip* — a renegotiated vendor draft (v2+ for the
+    same vendor+instrument) is automatically diffed against the previous
+    round's demands: the saved record and memo gain a **NEGOTIATION
+    PROGRESS** section naming which demanded changes the counter-party
+    accepted (`closed_from_previous`) and how many remain open, so a
+    negotiation reads as converging (or not) instead of as unrelated
+    reviews.
 - **The entity graph** (`entity_graph.py`, `/api/v1/graph/*`, the **Lineage**
   tab on `/privacy`, `maverick graph rebuild|dossier|why|blast`;
   `[entity_graph] enable`, wizard step) — one resolved identity per vendor /

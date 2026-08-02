@@ -129,7 +129,9 @@ _RECOMMENDATION_LABEL = {
 
 
 def analysis_report(review, *, version: int, reviewer: str,
-                    redline_filename: str, redline_result) -> str:
+                    redline_filename: str, redline_result,
+                    closed_from_previous: list | None = None,
+                    previous_version: int = 0) -> str:
     """The reviewer-facing memo that goes on the vendor record beside the
     redline. Plain text on purpose: it has to be readable in OneTrust's
     document preview, and it must state what was NOT done as clearly as what
@@ -153,6 +155,22 @@ def analysis_report(review, *, version: int, reviewer: str,
         "-" * 68,
         _RECOMMENDATION_LABEL.get(d["recommendation"], d["recommendation"]),
         "",
+    ]
+    if closed_from_previous is not None and previous_version:
+        lines += ["NEGOTIATION PROGRESS", "-" * 68]
+        if closed_from_previous:
+            lines.append(
+                f"This draft closes {len(closed_from_previous)} of the "
+                f"change(s) we demanded in v{previous_version}:")
+            lines += [f"   + {c}" for c in closed_from_previous]
+        else:
+            lines.append(
+                f"None of the changes we demanded in v{previous_version} "
+                "were accepted in this draft.")
+        if d["gaps"]:
+            lines.append(f"{d['gaps']} demand(s) remain open — see CONCERNS.")
+        lines.append("")
+    lines += [
         "CONCERNS",
         "-" * 68,
     ]
@@ -237,9 +255,29 @@ def file_paper_review(case: Case, review, redline_result, *, reviewer: str,
     stem = f"{_safe(vendor_name)}-{review.instrument}-v{version}"
     report_name = f"{stem}-analysis.txt"
     redline_name = f"{stem}-redline.docx"
+
+    # The negotiation round-trip: when the vendor sends a renegotiated draft,
+    # diff its gaps against the PREVIOUS round for this instrument so the
+    # memo says which of our demanded changes they accepted. Requirement
+    # labels come from the previous entry itself -- a closed gap has no
+    # concern object in the current review.
+    prev = next((e for e in reversed(case.paper_reviews)
+                 if e.get("instrument") == review.instrument
+                 and e.get("kind") != "our_paper"), None)
+    closed: list | None = None
+    prev_version = 0
+    if prev is not None:
+        prev_version = int(prev.get("version") or 0)
+        prev_reqs = prev.get("gap_reqs") or {}
+        now_keys = {c.clause_key for c in review.gaps}
+        closed = sorted(str(prev_reqs[k]) for k in
+                        set(prev_reqs) - now_keys)
+
     report = analysis_report(review, version=version, reviewer=reviewer,
                              redline_filename=redline_name,
-                             redline_result=redline_result)
+                             redline_result=redline_result,
+                             closed_from_previous=closed,
+                             previous_version=prev_version)
 
     attachments: list[str] = []
     error = ""
@@ -281,6 +319,11 @@ def file_paper_review(case: Case, review, redline_result, *, reviewer: str,
         "filed": bool(attachments) and not error,
         "error": error,
         "report": report,
+        # Round-trip bookkeeping: what this round demands (for the NEXT round
+        # to diff against) and what this round settled from the previous one.
+        "gap_reqs": {c.clause_key: c.requirement for c in review.gaps},
+        "closed_from_previous": closed or [],
+        "previous_version": prev_version,
     }
     case.paper_reviews.append(entry)
     case.log(f"Vendor paper reviewed ({d['instrument_label']} v{version}): "
@@ -289,6 +332,88 @@ def file_paper_review(case: Case, review, redline_result, *, reviewer: str,
     return entry
 
 
+def file_our_paper(case: Case, *, reviewer: str, client=None) -> dict | None:
+    """The vendor signs OUR paper: draft our template instrument with this
+    vendor's values filled **in red**, and file it onto the vendor's record
+    under the next sequential version.
+
+    Deterministic end to end -- the clause language is the operator's
+    playbook; the only things inserted are the party names and date, and
+    every insertion is listed in the cover note and rendered red in the
+    document so counsel verifies exactly what the machine filled in.
+    Returns None off-platform (standalone has no Word engine)."""
+    draft = backend.draft_our_paper(case.subject, instrument="dpa")
+    if draft is None:
+        return None
+    vendor_name = case.subject
+    version = STORE.next_paper_version(vendor_name, draft.instrument)
+    stem = f"{_safe(vendor_name)}-{draft.instrument}-v{version}"
+    draft_name = f"{stem}-our-paper.docx"
+    note_name = f"{stem}-our-paper-note.txt"
+    d = draft.to_dict()
+    note = "\n".join([
+        f"OUR PAPER DRAFT — {vendor_name}  (v{version})",
+        "=" * 68,
+        f"Instrument     : {d['instrument_label']}",
+        "Drafted by     : Lightwork (deterministic; no model)",
+        f"Drafted at     : {_iso(time.time())}",
+        f"Prepared for   : {reviewer}",
+        f"Clauses        : {d['clause_count']}, from the operator's clause "
+        "playbook",
+        "",
+        "AUTO-FILLED VALUES (rendered in red in the document)",
+        "-" * 68,
+        *[f"   - {f}" for f in d["filled"]],
+        "",
+        "Verify every red value before signature. All non-red language is "
+        "our standard position; changing it re-opens clause review.",
+    ])
+
+    attachments: list[str] = []
+    error = ""
+    try:
+        client = client or backend.onetrust_client()
+        vendor = client.ensure_vendor(vendor_name)
+        attachments.append(client.attach_to_record(
+            vendor["id"], note_name, note.encode("utf-8"),
+            mime="text/plain"))
+        attachments.append(client.attach_to_record(
+            vendor["id"], draft_name, draft.content, mime=DOCX_MIME))
+    except Exception as e:  # pragma: no cover -- tenant/network variance
+        error = f"{type(e).__name__}: {e}"
+
+    _REDLINES[(case.id, draft.instrument, version)] = draft.content
+    entry = {
+        "kind": "our_paper",
+        "version": version,
+        "instrument": draft.instrument,
+        "instrument_label": d["instrument_label"],
+        "filename": "our template",
+        "report_filename": note_name,
+        "redline_filename": draft_name,
+        "clauses_present": d["clause_count"],
+        "clauses_total": d["clause_count"],
+        "gaps": 0,
+        "high": 0,
+        "recommendation": "our_paper_governs",
+        "drafted_with_model": False,
+        "reviewer": reviewer,
+        "at": time.time(),
+        "has_redline": True,
+        "attachment_ids": attachments,
+        "filed": bool(attachments) and not error,
+        "error": error,
+        "report": note,
+        "filled": d["filled"],
+    }
+    case.paper_reviews.append(entry)
+    case.log(f"Our-paper draft filed ({d['instrument_label']} v{version}): "
+             f"{len(d['filled'])} value(s) auto-filled in red — "
+             f"{draft_name} on the vendor record.")
+    return entry
+
+
 __all__ = ["PAPER_SOURCES", "DOCX_MIME", "ACCEPTED_MIMES", "accepted_upload",
            "reviewers", "queue_for", "case_by_number", "assign_unassigned",
-           "analysis_report", "file_paper_review", "redline_bytes"]
+           "analysis_report", "file_paper_review", "file_our_paper",
+           "redline_bytes"]

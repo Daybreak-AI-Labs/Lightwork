@@ -424,6 +424,90 @@ def build_redlined_docx(
                          synthesized=True)
 
 
+# --- plain document builder (generated deliverables) -----------------------
+
+# Auto-inserted values in a generated draft are rendered in this colour so
+# counsel can see at a glance exactly what the machine filled in. Red is the
+# convention the receiving lawyer already knows.
+FILL_COLOR = "FF0000"
+
+
+def _styled_run(text: str, *, red: bool = False, bold: bool = False) -> str:
+    props = ""
+    if red or bold:
+        props = ("<w:rPr>" + ("<w:b/>" if bold else "")
+                 + (f'<w:color w:val="{FILL_COLOR}"/>' if red else "")
+                 + "</w:rPr>")
+    return (f"<w:r>{props}<w:t xml:space=\"preserve\">{_esc(text)}</w:t>"
+            "</w:r>")
+
+
+def build_docx(blocks: list[tuple]) -> bytes:
+    """A plain (untracked) ``.docx`` from ``(style, runs)`` blocks.
+
+    ``style`` is ``"title"``, ``"heading"``, or ``"para"``; ``runs`` is a list
+    of ``(text, red)`` pairs where ``red`` marks an auto-filled value. Used
+    for generated deliverables -- the our-paper draft, the risk-analysis and
+    notice reports -- so everything the agent files opens as a real Word
+    document. Reuses the same OPC package parts as the redline writer (and the
+    same ``w:trackChanges`` settings, so counsel's edits are captured)."""
+    body: list[str] = []
+    for style, runs in blocks:
+        rendered = "".join(
+            _styled_run(text, red=bool(red), bold=(style in ("title",
+                                                             "heading")))
+            for text, red in runs if text)
+        if not rendered:
+            body.append("<w:p/>")
+            continue
+        if style == "title":
+            body.append(f'<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+                        f"{rendered}</w:p>")
+        else:
+            body.append(f"<w:p>{rendered}</w:p>")
+    document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<w:document xmlns:w="{_W_NS}"><w:body>{"".join(body)}{_SECT_PR}'
+        "</w:body></w:document>"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+        out.writestr("[Content_Types].xml", _CONTENT_TYPES)
+        out.writestr("_rels/.rels", _ROOT_RELS)
+        out.writestr("word/_rels/document.xml.rels", _DOCUMENT_RELS)
+        out.writestr("word/settings.xml", _SETTINGS)
+        out.writestr("word/document.xml", document)
+    return buf.getvalue()
+
+
+_RULE_LINE = re.compile(r"^[=\-]{4,}$")
+
+
+def text_to_docx(text: str, *, title: str = "") -> bytes:
+    """Render a plain-text report as a ``.docx``.
+
+    Keeps the report writers' single source of truth (the text) and derives
+    the Word document from it: a line followed by a ``----``/``====`` rule
+    becomes a heading, the rule itself disappears, everything else is a
+    paragraph. Blank lines become spacing paragraphs."""
+    lines = (text or "").split("\n")
+    blocks: list[tuple] = []
+    if title:
+        blocks.append(("title", [(title, False)]))
+        blocks.append(("para", []))
+    i = 0
+    while i < len(lines):
+        line = lines[i].rstrip()
+        nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if line.strip() and _RULE_LINE.match(nxt):
+            blocks.append(("heading", [(line.strip(), False)]))
+            i += 2
+            continue
+        blocks.append(("para", [(line, False)] if line else []))
+        i += 1
+    return build_docx(blocks)
+
+
 def revision_count(docx_bytes: bytes) -> tuple[int, int]:
     """``(insertions, deletions)`` actually present in a package -- used by
     tests and by the filing step to prove the artifact really carries tracked
@@ -440,4 +524,5 @@ def revision_count(docx_bytes: bytes) -> tuple[int, int]:
 
 
 __all__ = ["ClauseEdit", "RedlineResult", "RedlineError", "DOCX_MIME",
-           "redline_docx", "build_redlined_docx", "revision_count"]
+           "FILL_COLOR", "redline_docx", "build_redlined_docx", "build_docx",
+           "text_to_docx", "revision_count"]

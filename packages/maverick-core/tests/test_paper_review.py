@@ -329,3 +329,132 @@ def test_analysis_memo_is_shared_and_states_its_limits():
     assert "A. Novak" in memo and "acme-dpa-redline.docx" in memo
     assert "CONFLICTS WITH OUR POSITION" in memo
     assert "a model cannot create or clear a finding" in memo
+
+
+# --- drafting OUR paper (the vendor signs our template) --------------------
+
+def _draft_doc_xml(content: bytes) -> str:
+    import io
+    import zipfile
+    return zipfile.ZipFile(io.BytesIO(content)).read(
+        "word/document.xml").decode()
+
+
+def test_draft_our_paper_fills_values_in_red(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    from maverick import config
+    config.reset_config_cache()
+    try:
+        d = pr.draft_our_paper("Acme Corp", instrument="dpa",
+                               org="Globex Holdings LLC",
+                               effective_date="2026-08-02")
+        assert d.instrument == "dpa" and d.clause_count == 10
+        assert d.filled == ["processor: Acme Corp",
+                            "controller: Globex Holdings LLC",
+                            "effective date: 2026-08-02"]
+        doc = _draft_doc_xml(d.content)
+        from maverick.docx_redline import FILL_COLOR, revision_count
+        # Every auto-filled value is a red run; template language is not.
+        assert doc.count(f'w:val="{FILL_COLOR}"') >= 5
+        assert "Acme Corp" in doc and "Globex Holdings LLC" in doc
+        # The body is our standard clause language (the 72h breach term).
+        assert "seventy-two (72) hours" in doc
+        # A draft is a clean document -- no fabricated tracked changes.
+        assert revision_count(d.content) == (0, 0)
+    finally:
+        config.reset_config_cache()
+
+
+def test_draft_without_values_keeps_red_placeholders(tmp_path, monkeypatch):
+    # A missing org or date must never be guessed: it stays a bracketed
+    # placeholder, still rendered red so counsel cannot miss it.
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    from maverick import config
+    config.reset_config_cache()
+    try:
+        d = pr.draft_our_paper("", instrument="dpa")
+        doc = _draft_doc_xml(d.content)
+        assert "[CONTROLLER LEGAL ENTITY]" in doc
+        assert "[PROCESSOR LEGAL ENTITY]" in doc
+        assert "[EFFECTIVE DATE]" in doc
+    finally:
+        config.reset_config_cache()
+
+
+def test_draft_org_name_comes_from_config(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[paper_review]\norg_name = "Daybreak Labs, Inc."\n',
+                   encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
+    from maverick import config
+    config.reset_config_cache()
+    try:
+        d = pr.draft_our_paper("Acme Corp")
+        assert "controller: Daybreak Labs, Inc." in d.filled
+        assert "Daybreak Labs, Inc." in _draft_doc_xml(d.content)
+    finally:
+        config.reset_config_cache()
+
+
+def test_draft_respects_the_operator_playbook(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    from maverick import config
+    config.reset_config_cache()
+    try:
+        mine = "Supplier shall not appoint any Sub-Processor without consent."
+        pr.write_playbook({**pr.default_playbook(), "subprocessors": mine})
+        doc = _draft_doc_xml(pr.draft_our_paper("Acme Corp").content)
+        assert mine in doc
+        assert pr.OUR_POSITIONS["subprocessors"] not in doc
+    finally:
+        config.reset_config_cache()
+
+
+def test_draft_addendum_uses_service_provider_terms(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    from maverick import config
+    config.reset_config_cache()
+    try:
+        d = pr.draft_our_paper("Vendor X", instrument="addendum")
+        doc = _draft_doc_xml(d.content)
+        assert "CCPA/CPRA SERVICE-PROVIDER ADDENDUM" in doc
+        assert "[BUSINESS LEGAL ENTITY]" in doc
+        assert "Cal. Civ. Code" in doc      # the checklist citations
+        try:
+            pr.draft_our_paper("Vendor X", instrument="nda")
+            raise AssertionError("unknown instrument must be rejected")
+        except ValueError:
+            pass
+    finally:
+        config.reset_config_cache()
+
+
+# --- the negotiation round-trip in the memo --------------------------------
+
+def test_memo_reports_negotiation_progress():
+    r = pr.review_paper(DPA_TEXT, vendor="Acme", use_model=False)
+    memo = pr.analysis_memo(
+        r, version=2, closed_from_previous=[
+            "Sub-processor authorization and flow-down"], previous_version=1)
+    assert "NEGOTIATION PROGRESS" in memo
+    assert "closes 1 of the change(s) we demanded in v1" in memo
+    assert "+ Sub-processor authorization and flow-down" in memo
+    # Nothing accepted reads as exactly that -- not as silence.
+    memo2 = pr.analysis_memo(r, version=2, closed_from_previous=[],
+                             previous_version=1)
+    assert "None of the changes we demanded in v1" in memo2
+    # A first round has no progress section at all.
+    memo3 = pr.analysis_memo(r, version=1)
+    assert "NEGOTIATION PROGRESS" not in memo3
+
+
+def test_requirement_labels_cover_both_instruments():
+    dpa = pr.requirement_labels("dpa")
+    add = pr.requirement_labels("addendum")
+    assert dpa["subprocessors"] == "Sub-processor authorization and flow-down"
+    assert "no_sale" in add and "limited_purpose" in add

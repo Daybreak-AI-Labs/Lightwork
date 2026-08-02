@@ -692,7 +692,9 @@ _RECOMMENDATION_LABEL = {
 
 def analysis_memo(review: PaperReview, *, version: int = 1,
                   reviewed_by: str = "", redline_filename: str = "",
-                  redline_result=None, now: float | None = None) -> str:
+                  redline_result=None, now: float | None = None,
+                  closed_from_previous: list | None = None,
+                  previous_version: int = 0) -> str:
     """The reviewer-facing memo that accompanies the redline.
 
     Plain text on purpose: it has to stay readable in a document preview
@@ -720,6 +722,22 @@ def analysis_memo(review: PaperReview, *, version: int = 1,
         "-" * 68,
         _RECOMMENDATION_LABEL.get(d["recommendation"], d["recommendation"]),
         "",
+    ]
+    if closed_from_previous is not None and previous_version:
+        lines += ["NEGOTIATION PROGRESS", "-" * 68]
+        if closed_from_previous:
+            lines.append(
+                f"This draft closes {len(closed_from_previous)} of the "
+                f"change(s) we demanded in v{previous_version}:")
+            lines += [f"   + {c}" for c in closed_from_previous]
+        else:
+            lines.append(
+                f"None of the changes we demanded in v{previous_version} "
+                "were accepted in this draft.")
+        if d["gaps"]:
+            lines.append(f"{d['gaps']} demand(s) remain open — see CONCERNS.")
+        lines.append("")
+    lines += [
         "CONCERNS",
         "-" * 68,
     ]
@@ -772,6 +790,102 @@ def analysis_memo(review: PaperReview, *, version: int = 1,
     return "\n".join(lines)
 
 
+def requirement_labels(instrument: str) -> dict:
+    """Clause key -> human requirement, for reporting on clauses that are no
+    longer gaps (their concern objects don't exist in the current review)."""
+    return {row[0]: row[1] for row in _checklist_for(instrument)}
+
+
+# --- drafting OUR paper ----------------------------------------------------
+
+_PARTY_TERMS = {"dpa": ("Controller", "Processor"),
+                "addendum": ("Business", "Service Provider")}
+
+_DRAFT_TITLES = {"dpa": "DATA PROCESSING AGREEMENT",
+                 "addendum": "CCPA/CPRA SERVICE-PROVIDER ADDENDUM"}
+
+
+@dataclass
+class OurPaperDraft:
+    """Our template instrument, filled for one vendor. ``filled`` names every
+    value that was auto-inserted -- exactly the runs rendered in red."""
+
+    vendor: str
+    instrument: str
+    content: bytes
+    filled: list = field(default_factory=list)
+    clause_count: int = 0
+
+    def to_dict(self) -> dict:
+        return {"vendor": self.vendor, "instrument": self.instrument,
+                "instrument_label": INSTRUMENT_LABELS.get(self.instrument,
+                                                          self.instrument),
+                "filled": list(self.filled),
+                "clause_count": self.clause_count,
+                "bytes": len(self.content)}
+
+
+def draft_our_paper(vendor: str, *, instrument: str = "dpa",
+                    org: str = "", effective_date: str = "") -> OurPaperDraft:
+    """When the vendor signs OUR paper: our template instrument as a real
+    ``.docx``, with every vendor-specific value auto-filled **in red** so
+    counsel sees at a glance what the machine inserted and what is template.
+
+    Entirely deterministic -- the clause language is the operator's playbook
+    (shipped positions underneath), never a model's drafting. A missing org
+    name or date becomes a red bracketed placeholder rather than a guess."""
+    if instrument not in _PARTY_TERMS:
+        raise ValueError(f"unknown instrument {instrument!r}")
+    from .docx_redline import build_docx
+    us, them = _PARTY_TERMS[instrument]
+    org = (org or "").strip() or str(_config().get("org_name", "")).strip()
+    positions = load_playbook()
+    checklist = _checklist_for(instrument)
+
+    filled: list[str] = []
+
+    def fill(value: str, placeholder: str, label: str) -> tuple:
+        shown = value or placeholder
+        filled.append(f"{label}: {shown}")
+        return (shown, True)
+
+    vendor_run = fill((vendor or "").strip(), f"[{them.upper()} LEGAL ENTITY]",
+                      them.lower())
+    org_run = fill(org, f"[{us.upper()} LEGAL ENTITY]", us.lower())
+    date_run = fill((effective_date or "").strip(), "[EFFECTIVE DATE]",
+                    "effective date")
+
+    blocks: list[tuple] = [
+        ("title", [(_DRAFT_TITLES[instrument], False)]),
+        ("para", []),
+        ("para", [
+            ("This agreement is entered into between ", False), org_run,
+            (f' (the "{us}") and ', False), vendor_run,
+            (f' (the "{them}"), effective as of ', False), date_run,
+            (". Values shown in red were inserted for this vendor and must "
+             "be verified before signature; all other language is our "
+             "standard position.", False)]),
+        ("para", []),
+    ]
+    for i, row in enumerate(checklist, start=1):
+        key, requirement, citation = row[0], row[1], row[2]
+        blocks.append(("heading", [(f"{i}. {requirement} ({citation})",
+                                    False)]))
+        blocks.append(("para", [(positions.get(key, OUR_POSITIONS.get(
+            key, "")), False)]))
+        blocks.append(("para", []))
+    blocks += [
+        ("heading", [("Signatures", False)]),
+        ("para", [(f"For the {us}: ", False),
+                  ("[name, title, date]", True)]),
+        ("para", [(f"For the {them}: ", False),
+                  ("[name, title, date]", True)]),
+    ]
+    return OurPaperDraft(vendor=(vendor or "").strip(), instrument=instrument,
+                         content=build_docx(blocks), filled=filled,
+                         clause_count=len(checklist))
+
+
 def _config() -> dict:
     try:
         from .config import load_config
@@ -802,6 +916,7 @@ def review_paper(text: str, *, vendor: str = "", instrument: str = "",
 
 __all__ = ["INSTRUMENTS", "INSTRUMENT_LABELS", "ADDENDUM_CHECKLIST",
            "OUR_POSITIONS", "PLAYBOOK_FILENAME", "Concern", "PaperReview",
-           "classify_instrument", "analyze", "draft_language", "review_paper",
-           "analysis_memo", "playbook_path", "default_playbook",
-           "write_playbook", "load_playbook"]
+           "OurPaperDraft", "classify_instrument", "analyze",
+           "draft_language", "review_paper", "analysis_memo",
+           "draft_our_paper", "requirement_labels", "playbook_path",
+           "default_playbook", "write_playbook", "load_playbook"]

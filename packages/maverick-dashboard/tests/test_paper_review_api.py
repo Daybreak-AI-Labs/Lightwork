@@ -217,3 +217,43 @@ def test_privacy_page_renders_the_vendor_paper_tab():
     assert "pw-paper-form" in page.text
     # The worklist gained an owner column and the two ownership filters.
     assert "Mine (" in page.text and "Unassigned (" in page.text
+
+
+# --- our-paper drafter + the negotiation round-trip ------------------------
+
+def test_our_paper_draft_downloads_with_red_fills():
+    r = client.get("/api/v1/privacy/our-paper",
+                   params={"vendor": "Acme Corp", "instrument": "dpa"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith(DOCX_MIME)
+    assert 'filename="Acme Corp-dpa-our-paper.docx"' \
+        in r.headers["content-disposition"]
+    doc = zipfile.ZipFile(io.BytesIO(r.content)).read(
+        "word/document.xml").decode()
+    from maverick.docx_redline import FILL_COLOR, revision_count
+    assert doc.count(f'w:val="{FILL_COLOR}"') >= 5
+    # The vendor value is filled; the unset org stays a red placeholder.
+    assert "Acme Corp" in doc and "[CONTROLLER LEGAL ENTITY]" in doc
+    # A draft is a clean document, not fabricated tracked changes.
+    assert revision_count(r.content) == (0, 0)
+    assert client.get("/api/v1/privacy/our-paper",
+                      params={"vendor": "x", "instrument": "nda"}
+                      ).status_code == 400
+
+
+def test_renegotiated_draft_reports_which_demands_were_accepted():
+    first = _upload().json()
+    assert first["gaps"] >= 2
+    assert first["previous_version"] == 0
+    # v2: they accepted our sub-processor clause verbatim, kept the rest.
+    from maverick.paper_review import OUR_POSITIONS
+    v2 = _upload(paragraphs=VENDOR_DPA[:2] + [
+        VENDOR_DPA[2], OUR_POSITIONS["subprocessors"]]).json()
+    assert v2["version"] == 2 and v2["previous_version"] == 1
+    assert ("Sub-processor authorization and flow-down"
+            in v2["closed_from_previous"])
+    assert v2["gaps"] < first["gaps"]
+    memo = client.get(
+        f"/api/v1/privacy/paper-reviews/{v2['id']}/memo").text
+    assert "NEGOTIATION PROGRESS" in memo
+    assert "+ Sub-processor authorization and flow-down" in memo

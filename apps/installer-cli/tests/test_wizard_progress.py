@@ -92,6 +92,10 @@ def test_run_prints_step_indicators(monkeypatch):
     # Decline the final "write config and finish?" so we stop cleanly
     # right after the prompt loop, before write_config / smoke_test.
     monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **kw: False)
+    # Free-text questions in unstubbed steps (e.g. the drafting org name)
+    # keep their defaults rather than reaching a real prompt.
+    monkeypatch.setattr(wizard, "_q_text",
+                        lambda *a, **kw: kw.get("default", ""))
 
     rc = wizard.run()
     assert rc == 0

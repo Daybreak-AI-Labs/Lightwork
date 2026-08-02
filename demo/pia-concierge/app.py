@@ -402,24 +402,33 @@ _SEED_PAPER_PARAGRAPHS = (
 )
 
 
-def _seed_risk_report(vendor: str, risk: str, findings: list[dict]) -> bytes:
-    """Same shape as the report the live protocol run attaches."""
+def _seed_report(kind: str, case_id: str, title: str,
+                 body: str) -> tuple[str, bytes, str]:
+    """A seeded deliverable in the same format the live run files: a Word
+    document on the platform, honest plain text in standalone. Returns
+    (filename, content, mime)."""
+    docx = backend.report_docx(body, title=title)
+    if docx is not None:
+        return f"{kind}-{case_id}.docx", docx, paper_desk.DOCX_MIME
+    return (f"{kind}-{case_id}.txt", f"{title}\n{body}".encode(),
+            "text/plain")
+
+
+def _seed_risk_body(risk: str, findings: list[dict]) -> str:
     rationale = ("; ".join(f["text"] for f in findings)
                  or "No findings — standard processing.")
-    return (f"Risk analysis — {vendor}\nRating filed: {risk.capitalize()}\n"
-            f"Rationale: {rationale}\nInstrument: dpa — external processing "
-            "of personal data on the controller's behalf\n").encode()
+    return (f"Rating filed: {risk.capitalize()}\nRationale: {rationale}\n"
+            "Instrument: dpa — external processing of personal data on the "
+            "controller's behalf\n")
 
 
-def _seed_notice_report(vendor: str) -> bytes:
-    return (
-        f"Privacy notice cross-check — {vendor}\n"
-        "Notice reviewed : Global Vacation Clubs Privacy Notice (published)\n"
-        "Covered         : contact data (name, email address, phone number), "
-        "payment details\n"
-        "Recommendation  : confirm this vendor's processing purpose is named "
-        "in the 'Sharing' section before renewal; no sale/share language "
-        "change required.\n").encode()
+_SEED_NOTICE_BODY = (
+    "Notice reviewed : Global Vacation Clubs Privacy Notice (published)\n"
+    "Covered         : contact data (name, email address, phone number), "
+    "payment details\n"
+    "Recommendation  : confirm this vendor's processing purpose is named "
+    "in the 'Sharing' section before renewal; no sale/share language "
+    "change required.\n")
 
 
 def _seed_paper_docx(vendor: str) -> bytes:
@@ -583,12 +592,17 @@ def _seed_tenant() -> None:
         ticket.created_at = created
         STORE.tickets[ticket_no] = ticket
         # The deliverables the live run attaches, retained as OPENABLE
-        # documents on the vendor's mock record.
-        _ot_mock.seed_attachment(vendor, f"risk-analysis-{case_id}.txt",
-                                 _seed_risk_report(vendor, risk, findings),
-                                 "text/plain")
-        _ot_mock.seed_attachment(vendor, f"notice-crosscheck-{case_id}.txt",
-                                 _seed_notice_report(vendor), "text/plain")
+        # documents on the vendor's mock record (same format as the live
+        # run: Word on the platform, plain text standalone).
+        for name, content, mime in (
+            _seed_report("risk-analysis", case_id,
+                         f"Risk analysis — {vendor}",
+                         _seed_risk_body(risk, findings)),
+            _seed_report("notice-crosscheck", case_id,
+                         f"Privacy-notice cross-check — {vendor}",
+                         _SEED_NOTICE_BODY),
+        ):
+            _ot_mock.seed_attachment(vendor, name, content, mime)
     n_docs = len(_ot_mock.ATTACHMENTS)
     if CAPS["paper_redline"]:
         # Two vendors also carry a filed vendor-paper round (analysis memo +
@@ -1742,18 +1756,37 @@ def _run_onetrust_protocol(case: Case) -> dict:
 
     # Deliverables land on the VENDOR record (assessment-level attach is
     # session-gated on real tenants).
-    report = (f"Risk analysis — {case.subject}\nRating filed: {risk_option}"
+    report = (f"Rating filed: {risk_option}"
               f"\nRationale: {rationale}\nInstrument: "
               f"{instrument['instrument'] or 'none required'} — "
               f"{instrument['reason']}\n")
-    client.attach_to_record(vendor["id"], f"risk-analysis-{case.id}.txt",
-                            report.encode())
-    client.attach_to_record(
-        vendor["id"], f"notice-crosscheck-{case.id}.txt",
-        notice_check.recommendations_doc(case.subject, picked, check,
-                                         siblings).encode())
-    steps.append("Attached risk analysis + notice recommendations to the "
-                 "vendor record (two-step upload → link)")
+    notice_text = notice_check.recommendations_doc(case.subject, picked,
+                                                   check, siblings)
+    # Word documents on the platform; the standalone agent has no Word
+    # engine and files the honest plain text instead.
+    risk_docx = backend.report_docx(report,
+                                    title=f"Risk analysis — {case.subject}")
+    if risk_docx is not None:
+        client.attach_to_record(vendor["id"], f"risk-analysis-{case.id}.docx",
+                                risk_docx, mime=paper_desk.DOCX_MIME)
+        client.attach_to_record(
+            vendor["id"], f"notice-crosscheck-{case.id}.docx",
+            backend.report_docx(
+                notice_text,
+                title=f"Privacy-notice cross-check — {case.subject}"),
+            mime=paper_desk.DOCX_MIME)
+        steps.append("Attached risk analysis + notice recommendations to the "
+                     "vendor record as Word documents (two-step upload → "
+                     "link)")
+    else:
+        client.attach_to_record(
+            vendor["id"], f"risk-analysis-{case.id}.txt",
+            (f"Risk analysis — {case.subject}\n" + report).encode())
+        client.attach_to_record(
+            vendor["id"], f"notice-crosscheck-{case.id}.txt",
+            notice_text.encode())
+        steps.append("Attached risk analysis + notice recommendations to the "
+                     "vendor record (two-step upload → link)")
 
     value = value_ledger.case_value(
         kind="ai_assessment" if facts["ai"] else "privacy_assessment",
@@ -2214,6 +2247,13 @@ def _analyze_addendum(ot: OneTrustAssessment, case: Case | None,
         entry["re_review"] = True
         entry["summary"] = ("Not machine-readable (scanned or unsupported "
                             "format) — attached; human review required.")
+    # Retain the uploaded bytes on the vendor's mock record so the addendum
+    # row in the pop-out is openable, like every other filed document.
+    try:
+        entry["attachment_id"] = _ot_mock.seed_attachment(
+            ot.subject, filename, data, mime)
+    except Exception:  # pragma: no cover -- viewer convenience, never fatal
+        entry["attachment_id"] = ""
     ot.addenda.append(entry)
     if entry["re_review"]:
         ot.needs_re_review = True
@@ -2330,9 +2370,11 @@ async def reviewer_case(request: Request, case_id: str,
 
 
 @app.post("/reviewer/case/{case_id}/paper-source")
-async def reviewer_paper_source(case_id: str,
-                                source: str = Form(...)) -> JSONResponse:
-    """Question one: our paper, or theirs? On our paper the round ends here."""
+async def reviewer_paper_source(case_id: str, source: str = Form(...),
+                                who: str = Form("")) -> JSONResponse:
+    """Question one: our paper, or theirs? On OUR paper the desk drafts our
+    template for this vendor (values filled in red) and files it; on theirs
+    it asks for the document to review."""
     case = STORE.cases.get(case_id)
     if not case:
         return JSONResponse({"ok": False, "error": "unknown case"},
@@ -2344,10 +2386,38 @@ async def reviewer_paper_source(case_id: str,
             status_code=400)
     case.paper_source = choice
     if choice == "ours":
-        case.log("Vendor is on OUR paper — no third-party document to review.")
-        return JSONResponse({"ok": True, "source": choice, "upload": False,
-                             "message": "On our paper — nothing to redline. "
-                                        "Our template already governs."})
+        if not CAPS["paper_redline"]:
+            case.log("Vendor is on OUR paper — no third-party document to "
+                     "review.")
+            return JSONResponse(
+                {"ok": True, "source": choice, "upload": False,
+                 "message": "On our paper — nothing to redline. Our template "
+                            "already governs."})
+        reviewer = (who or case.assigned_to or "Privacy Reviewer").strip()
+        entry = await asyncio.to_thread(paper_desk.file_our_paper, case,
+                                        reviewer=reviewer)
+        if entry is None:
+            return JSONResponse(
+                {"ok": True, "source": choice, "upload": False,
+                 "message": "On our paper — nothing to redline. Our template "
+                            "already governs."})
+        gid = getattr(case, "goal_id", None)
+        _audit("TOOL_CALL", ANALYST, gid, tool="paper_draft", case=case_id,
+               vendor=case.subject, instrument=entry["instrument"],
+               version=entry["version"], filled=len(entry["filled"]))
+        if gid:
+            _post_event(gid, ANALYST, "artifact",
+                        f"Drafted our {entry['instrument_label']} for "
+                        f"{case.subject} (v{entry['version']}): "
+                        f"{len(entry['filled'])} value(s) auto-filled in red, "
+                        f"filed to the vendor record.")
+        return JSONResponse(
+            {"ok": True, "source": choice, "upload": False, "round": entry,
+             "message": f"On our paper — I've drafted our "
+                        f"{entry['instrument_label']} for {case.subject} as "
+                        f"v{entry['version']} and filed it to the vendor "
+                        "record. The vendor-specific values are in red — "
+                        "verify them before it goes out for signature."})
     case.log("Vendor is on THEIR paper — document requested for review.")
     return JSONResponse({"ok": True, "source": choice, "upload": True,
                          "message": "Please upload their document (.docx or "

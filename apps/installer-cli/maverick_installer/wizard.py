@@ -1391,6 +1391,15 @@ def pick_assessments() -> dict[str, Any]:
                        "vendor drafting?", default=True)
     console.print()
     console.print(
+        "[dim]When a vendor signs YOUR paper, Lightwork drafts your template "
+        "DPA/addendum as a Word document with the vendor-specific values "
+        "filled in red for counsel to verify. Your legal entity name goes on "
+        "the party line; leave blank to keep a red placeholder.[/dim]"
+    )
+    org_name = _q_text("Legal entity name for drafted agreements (blank = "
+                       "placeholder)", default="").strip()
+    console.print()
+    console.print(
         "[dim]The entity graph links your records into one lineage: every "
         "vendor, reviewer, document, and clause becomes one identity, and "
         "every review/decision becomes a dated, citable edge — so you can ask "
@@ -1410,6 +1419,8 @@ def pick_assessments() -> dict[str, Any]:
         out["privacy_ops"] = False
     if not draft:
         out["paper_review_use_model"] = False
+    if org_name:
+        out["paper_review_org"] = org_name
     if not graph:
         out["entity_graph"] = False
     return out
@@ -3483,7 +3494,7 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     # the operator opted OUT of something (write-only-on-divergence).
     body = {k: v for k, v in assessments.items()
             if k not in ("privacy_ops", "paper_review_use_model",
-                         "entity_graph")}
+                         "paper_review_org", "entity_graph")}
     lines: list[str] = []
     if body:
         lines += ["", "[assessments]"]
@@ -3492,9 +3503,13 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     if "privacy_ops" in assessments:
         lines += ["", "[privacy_ops]"]
         _emit_kv(lines, "enable", assessments["privacy_ops"])
-    if "paper_review_use_model" in assessments:
+    if "paper_review_use_model" in assessments \
+            or "paper_review_org" in assessments:
         lines += ["", "[paper_review]"]
-        _emit_kv(lines, "use_model", assessments["paper_review_use_model"])
+        if "paper_review_use_model" in assessments:
+            _emit_kv(lines, "use_model", assessments["paper_review_use_model"])
+        if "paper_review_org" in assessments:
+            _emit_kv(lines, "org_name", assessments["paper_review_org"])
     if "entity_graph" in assessments:
         lines += ["", "[entity_graph]"]
         _emit_kv(lines, "enable", assessments["entity_graph"])

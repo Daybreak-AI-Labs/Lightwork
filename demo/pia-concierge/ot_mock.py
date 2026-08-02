@@ -639,10 +639,13 @@ async def ot_notice_versions(guid: str) -> JSONResponse:
 
 def seed_attachment(vendor_name: str, filename: str, content: bytes,
                     mime: str) -> str:
-    """Fixture path for the tenant seeder: place a document on a vendor's
-    record directly (no HTTP), creating the vendor row when the seeded name
-    isn't in the base fixture set. Live filings always go through the wire
-    protocol — this exists only so a seeded tenant has documents to open."""
+    """Direct (no-HTTP) placement of a document on a vendor's record,
+    creating the vendor row when the name isn't in the base fixture set.
+
+    Two callers, neither of which is the agent: the tenant seeder (fixture
+    history) and the demo UI's addenda upload (a browser action on the
+    viewer, not a wire-protocol filing). The agent's own filings always go
+    through the verified upload → link protocol above."""
     name = (vendor_name or "").strip()
     vendor = next((v for v in VENDORS
                    if v["name"].strip().lower() == name.lower()), None)
