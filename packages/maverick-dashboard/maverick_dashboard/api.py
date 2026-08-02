@@ -1124,7 +1124,8 @@ async def graph_blast_radius(request: Request, kind: str,
     """Reverse reachability: this clause/document/person turned out to be a
     problem -- which records, vendors, and decisions relied on it?"""
     require_permission(request, "operate")
-    if kind not in ("clause", "document", "person", "vendor", "system"):
+    if kind not in ("clause", "document", "person", "vendor", "system",
+                    "goal", "skill"):
         raise HTTPException(status_code=400, detail="unsupported entity kind")
     graph = _entity_graph_or_403()
     return await run_in_threadpool(graph.blast_radius, kind, name[:300])

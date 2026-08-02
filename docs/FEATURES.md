@@ -597,9 +597,16 @@ here.
   clause findings → documents), *what did we know when we signed?*
   (`dossier(as_of=…)` reconstructs the point-in-time picture), and *this
   clause turned out bad — what relied on it?* (`blast_radius()` reverse
-  reachability to records, vendors, and decisions). The episodic plane
-  (world-model goals/episodes) deliberately stays out until goals carry a
-  linkable id — heuristic title-matching would fabricate lineage.
+  reachability to records, vendors, and decisions). The **episodic plane**
+  joins on exact keys only — episode→goal (foreign key), goal→agent
+  (`goal.domain`), goal→owner — and the **procedural plane** joins through
+  `source_goal_ids`, the goal ids the local distiller now stamps into each
+  learned skill's frontmatter. A goal's *title* is prose and is never matched
+  against vendors or systems; a skill distilled before provenance stamping
+  reads as provenance-unknown rather than guessed. Together they close the
+  memory-integrity loop: *"this run turned out to be tainted — which learned
+  skills depend on it?"* is `blast_radius("goal", id)`, the compliance
+  version of a product recall applied to the platform's own memory.
 - **Assessment assignment** (`assessment.assign_assessment`,
   `POST /api/v1/assess/sessions/{id}/assign`, the **owner** column plus
   *Mine* / *Unassigned* filters on every department worklist) — every other

@@ -35,9 +35,14 @@ The three acceptance queries this exists to answer:
    out bad; which reviews, vendors, and decisions relied on it?
 
 SQLite (WAL) under ``data_dir("entity_graph")``, stdlib only. The episodic
-plane (world-model goals/episodes) is deliberately NOT in this first ring:
-episode records carry no subject field, and heuristic title-matching would
-break the no-fabricated-edges rule. It joins when goals carry a linkable id.
+plane joins on exact keys only -- episode -> goal (foreign key), goal ->
+agent (``goal.domain`` names the pack) and owner -- and the procedural plane
+joins through ``source_goal_ids``, the goal ids the distiller now stamps into
+each learned skill's frontmatter. A goal's TITLE is prose and is never
+matched against vendors or systems; a skill distilled before provenance
+stamping reads as provenance-unknown rather than guessed. That closes the
+memory-integrity loop: "this run turned out to be tainted -- which learned
+skills depend on it?" is :func:`blast_radius` on the goal.
 """
 from __future__ import annotations
 
@@ -52,9 +57,10 @@ log = logging.getLogger(__name__)
 
 # Entity kinds the deriver emits. A record node is an entity too -- lineage is
 # record -> concept, so both ends must be nodes.
-CONCEPT_KINDS = ("vendor", "system", "person", "document", "clause")
+CONCEPT_KINDS = ("vendor", "system", "person", "document", "clause", "agent")
 RECORD_KINDS = ("assessment", "dpa_review", "paper_review",
-                "security_review", "ai_system", "dsar", "incident")
+                "security_review", "ai_system", "dsar", "incident",
+                "goal", "episode", "skill")
 
 _DEFAULT_STALENESS_SECONDS = 60.0
 _MAX_EDGES_PER_RECORD = 64
@@ -146,17 +152,22 @@ class _Builder:
         self.conn = conn
         self._ids: dict[tuple[str, str], int] = {}
 
-    def entity(self, kind: str, name: str) -> int | None:
-        display = str(name or "").strip()
-        canonical = _canonical(display)
+    def entity(self, kind: str, name: str,
+               display: str | None = None) -> int | None:
+        """Intern one entity. ``display`` overrides the human label while the
+        identity stays keyed on ``name`` -- used for goals, whose stable key is
+        the numeric id but whose readable face is the title."""
+        raw = str(name or "").strip()
+        canonical = _canonical(raw)
         if not canonical:
             return None
+        shown = str(display or raw).strip() or raw
         key = (kind, canonical)
         eid = self._ids.get(key)
         if eid is None:
             cur = self.conn.execute(
                 "INSERT OR IGNORE INTO entities(kind, canonical, display) "
-                "VALUES (?, ?, ?)", (kind, canonical, display))
+                "VALUES (?, ?, ?)", (kind, canonical, shown))
             if cur.lastrowid:
                 eid = cur.lastrowid
             else:
@@ -166,7 +177,7 @@ class _Builder:
             self._ids[key] = eid
         self.conn.execute(
             "INSERT OR IGNORE INTO aliases(entity_id, alias) VALUES (?, ?)",
-            (eid, display))
+            (eid, raw))
         return eid
 
     def edge(self, src: int | None, rel: str, dst: int | None, *,
@@ -377,6 +388,100 @@ def _derive_security(b: _Builder) -> None:
                    valid_from=decided)
 
 
+def _derive_world(b: _Builder) -> None:
+    """The episodic ring, on exact keys only: every episode belongs to a goal
+    (foreign key), every goal names the specialist pack that ran it
+    (``goal.domain``) and its owner. A goal's TITLE is prose and is never
+    matched against vendors/systems -- that would fabricate lineage."""
+    try:
+        # Through the backend factory, never WorldModel() directly: a
+        # Postgres-backed tenant's graph must read the world that tenant
+        # actually runs on (the repo's factory guard enforces this).
+        from .world_model import open_world
+        world = open_world()
+        goals = world.list_goals(limit=5000)
+        episodes = world.list_episodes(limit=5000)
+    except Exception as e:  # pragma: no cover -- world plane optional
+        log.debug("entity_graph: world sources unavailable: %s", e)
+        return
+    goal_nodes: dict[int, int | None] = {}
+    for g in goals:
+        gid = int(getattr(g, "id", 0) or 0)
+        created = float(getattr(g, "created_at", 0) or 0)
+        if not gid or not created:
+            continue
+        title = str(getattr(g, "title", "") or "")[:120]
+        node = b.entity("goal", str(gid),
+                        display=f"#{gid} {title}".strip())
+        goal_nodes[gid] = node
+        if getattr(g, "domain", ""):
+            b.edge(node, "performed_by", b.entity("agent", g.domain),
+                   record_type="goal", record_id=str(gid),
+                   valid_from=created,
+                   detail=str(getattr(g, "status", "") or ""))
+        if getattr(g, "owner", ""):
+            b.edge(node, "owned_by", _person(b, g.owner),
+                   record_type="goal", record_id=str(gid),
+                   valid_from=created)
+    for ep in episodes:
+        eid = int(getattr(ep, "id", 0) or 0)
+        gid = int(getattr(ep, "goal_id", 0) or 0)
+        started = float(getattr(ep, "started_at", 0) or 0)
+        if not eid or not started or gid not in goal_nodes:
+            continue
+        cost = float(getattr(ep, "cost_dollars", 0) or 0)
+        outcome = str(getattr(ep, "outcome", "") or "")
+        b.edge(b.entity("episode", f"ep-{eid}"), "part_of", goal_nodes[gid],
+               record_type="episode", record_id=str(eid),
+               valid_from=started,
+               detail=f"{outcome} ${cost:.2f}".strip())
+
+
+_FRONTMATTER_ID_RE = re.compile(r"^source_goal_ids:\s*([0-9 ]+)\s*$")
+_FRONTMATTER_AT_RE = re.compile(r"^distilled_at:\s*(\S+)\s*$")
+
+
+def _derive_skills(b: _Builder) -> None:
+    """The procedural ring: learned skills, linked to the exact goals they
+    were distilled from (``source_goal_ids`` in the SKILL.md frontmatter,
+    stamped by the distiller). A skill written before that key existed gets a
+    node but no source edges -- provenance-unknown, stated honestly rather
+    than guessed. This is what makes 'this run was tainted; which learned
+    skills depend on it?' a graph query."""
+    import calendar
+    try:
+        from .paths import data_dir
+        store = data_dir("learned-skills", tenant=None)
+        paths = sorted(store.glob("*.md"))
+    except Exception as e:  # pragma: no cover -- skills plane optional
+        log.debug("entity_graph: skill store unavailable: %s", e)
+        return
+    for path in paths[:2000]:
+        try:
+            head = path.read_text(encoding="utf-8", errors="ignore")[:4000]
+        except OSError:
+            continue
+        gids: list[int] = []
+        stamped = 0.0
+        for line in head.splitlines()[:40]:
+            m = _FRONTMATTER_ID_RE.match(line)
+            if m:
+                gids = [int(x) for x in m.group(1).split()][:16]
+            m = _FRONTMATTER_AT_RE.match(line)
+            if m:
+                try:
+                    stamped = calendar.timegm(time.strptime(
+                        m.group(1), "%Y-%m-%dT%H:%M:%SZ"))
+                except ValueError:
+                    stamped = 0.0
+        valid_from = stamped or (path.stat().st_mtime if path.exists() else 0)
+        node = b.entity("skill", path.stem)
+        for gid in gids:
+            b.edge(node, "distilled_from", b.entity("goal", str(gid)),
+                   record_type="skill", record_id=path.stem,
+                   valid_from=valid_from)
+
+
 def _close_superseded(conn: sqlite3.Connection) -> None:
     """A newer review of the same vendor+family closes its predecessor's
     ``reviews`` edge and gains a ``supersedes`` edge, so ``as_of`` returns the
@@ -434,6 +539,8 @@ def rebuild() -> dict:
                 _derive_assessments(b)
                 _derive_privacy(b)
                 _derive_security(b)
+                _derive_world(b)
+                _derive_skills(b)
                 _close_superseded(conn)
                 conn.execute(
                     "INSERT OR REPLACE INTO meta(key, value) "
@@ -711,6 +818,11 @@ def blast_radius(kind: str, name: str) -> dict:
                 "entity": {"kind": start["kind"], "name": start["display"]},
                 "records": records,
                 "vendors": sorted(vendors),
+                # The memory-integrity cut: learned skills whose lineage
+                # includes this entity (a tainted goal reaches the skills it
+                # taught via their distilled_from edges).
+                "skills": sorted({r["record_id"] for r in records
+                                  if r["record_type"] == "skill"}),
                 "decisions": [
                     {"decision": d["rel"].removesuffix("_by"),
                      "by": d["dst"]["name"], "at": d["valid_from"],

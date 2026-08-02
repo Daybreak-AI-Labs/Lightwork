@@ -234,3 +234,103 @@ def test_empty_stores_build_an_empty_graph_without_raising():
     assert result["enabled"] and result["entities"] == 0
     assert eg.dossier("Nobody")["found"] is False
     assert eg.stats()["edges"] == 0
+
+
+# --- ring two: the episodic plane (exact keys only) -------------------------
+
+def _world(tmp_path):
+    from maverick.world_model import WorldModel
+    return WorldModel(tmp_path / "world.db")
+
+
+def test_episodic_ring_derives_goal_agent_and_episode_edges(tmp_path, monkeypatch):
+    from maverick import world_model
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    w = _world(tmp_path)
+    gid = w.create_goal("Review Acme CRM vendor risk", domain="finance_ap")
+    ep = w.start_episode(gid)
+    w.end_episode(ep, "reviewed", "done", cost_dollars=0.42,
+                  input_tokens=100, output_tokens=200)
+    eg.rebuild()
+    hood = eg.neighborhood("goal", str(gid))
+    assert hood["found"]
+    rels = {e["rel"] for e in hood["edges"]}
+    assert "performed_by" in rels and "part_of" in rels
+    agent = next(e for e in hood["edges"] if e["rel"] == "performed_by")
+    assert agent["dst"] == {"kind": "agent", "name": "finance_ap"}
+    episode = next(e for e in hood["edges"] if e["rel"] == "part_of")
+    assert "done" in episode["detail"] and "$0.42" in episode["detail"]
+    # The goal node reads like a goal, not a bare number.
+    assert "Review Acme CRM" in hood["entity"]["name"]
+
+
+def test_goal_titles_never_fabricate_vendor_edges(tmp_path, monkeypatch):
+    # A goal TITLED with a vendor's name must not link to the vendor entity:
+    # titles are prose, and lineage only comes from exact keys.
+    from maverick import world_model
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    _dpa_review(vendor="Acme Corp")
+    w = _world(tmp_path)
+    w.create_goal("Acme Corp", domain="privacy_pia")
+    eg.rebuild()
+    hood = eg.neighborhood("vendor", "Acme Corp")
+    assert hood["found"]
+    assert all(e["src"]["kind"] != "goal" and e["dst"]["kind"] != "goal"
+               for e in hood["edges"])
+
+
+# --- ring two: the procedural plane (skill lineage) --------------------------
+
+def _distill_skill(goal_ids):
+    from maverick.skill.distillation_local import distill_and_save
+    trajectories = [
+        {"goal": "reconcile vendor invoices", "goal_id": gid, "success": True,
+         "tools": ["ledger_read"], "t": 100.0 + gid}
+        for gid in goal_ids
+    ]
+    return distill_and_save(trajectories)
+
+
+def test_distiller_stamps_source_goal_ids_into_the_frontmatter(tmp_path, monkeypatch):
+    path = _distill_skill([7, 9])
+    assert path is not None
+    head = path.read_text(encoding="utf-8")
+    # Most-recent run first, matching the distiller's selection order.
+    assert "source_goal_ids: 9 7" in head
+
+
+def test_tainted_run_reaches_the_skills_it_taught(tmp_path, monkeypatch):
+    """THE memory-integrity query: an episode turns out to be tainted; walk
+    episode -> goal -> every learned skill distilled from it."""
+    from maverick import world_model
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    w = _world(tmp_path)
+    gid = w.create_goal("reconcile vendor invoices", domain="finance_ap")
+    ep = w.start_episode(gid)
+    w.end_episode(ep, "reconciled", "done", cost_dollars=0.10,
+                  input_tokens=10, output_tokens=10)
+    path = _distill_skill([gid])
+    assert path is not None
+    eg.rebuild()
+    out = eg.blast_radius("goal", str(gid))
+    assert out["found"]
+    assert path.stem in out["skills"]
+    # And the skill's own neighborhood names its source goal with provenance.
+    skill_hood = eg.neighborhood("skill", path.stem, depth=1)
+    src = next(e for e in skill_hood["edges"] if e["rel"] == "distilled_from")
+    assert src["record_type"] == "skill" and src["record_id"] == path.stem
+
+
+def test_pre_provenance_skill_reads_as_unknown_not_guessed(tmp_path, monkeypatch):
+    from maverick.paths import data_dir
+    store = data_dir("learned-skills", tenant=None)
+    store.mkdir(parents=True, exist_ok=True)
+    (store / "old-skill.md").write_text(
+        "---\nname: old-skill\ntriggers:\n  - something\n"
+        "distilled_at: 2025-01-01T00:00:00Z\nn_examples: 2\n"
+        "source: auto-distilled-local-v2\n---\n# What this does\n",
+        encoding="utf-8")
+    eg.rebuild()
+    hood = eg.neighborhood("skill", "old-skill", depth=1)
+    assert hood["found"]
+    assert not [e for e in hood["edges"] if e["rel"] == "distilled_from"]

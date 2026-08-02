@@ -229,7 +229,8 @@ def graph_why_cmd(vendor: str) -> None:
 
 
 @graph_group.command("blast")
-@click.argument("kind", type=click.Choice(["clause", "document", "person"]))
+@click.argument("kind", type=click.Choice(
+    ["clause", "document", "person", "goal", "skill"]))
 @click.argument("name")
 def graph_blast_cmd(kind: str, name: str) -> None:
     """KIND NAME turned out bad -- what relied on it?"""
@@ -238,7 +239,7 @@ def graph_blast_cmd(kind: str, name: str) -> None:
     from ..entity_graph import blast_radius
     result = blast_radius(kind, name)
     click.echo(_json.dumps(
-        {k: result[k] for k in ("records", "vendors", "decisions")
+        {k: result[k] for k in ("records", "vendors", "skills", "decisions")
          if k in result}, indent=2, default=str))
 
 
