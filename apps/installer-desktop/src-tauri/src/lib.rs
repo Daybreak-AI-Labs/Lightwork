@@ -842,8 +842,10 @@ async fn run_bootstrap(app: AppHandle, mut cancel: watch::Receiver<bool>) -> Res
         let _ = tokio::time::timeout(CANCEL_GRACE, child.wait()).await;
         verify_process_tree(&mut process_tree, false).await?;
         return Err(format!(
-            "Installer exited but descendants kept its output pipes open; "
-                "the owned process tree was terminated.{}",
+            concat!(
+                "Installer exited but descendants kept its output pipes open; ",
+                "the owned process tree was terminated.{}"
+            ),
             signal_error
                 .map(|error| format!(" Initial forced signal failed: {error}"))
                 .unwrap_or_default()

@@ -830,7 +830,11 @@ def _tenant_precedence(column: str = "tenant_id") -> tuple[str, list]:
     """Ordering expression that prefers an active tenant over legacy NULL."""
     tenant = _active_tenant()
     if tenant is None:
-        return "0", []
+        # An integer literal in a PostgreSQL ORDER BY is a select-list ordinal,
+        # not a constant expression.  ``ORDER BY 0`` is therefore invalid SQL.
+        # Unbound reads have no tenant to prefer, so callers omit this ordering
+        # component and fall back to their normal recency order.
+        return "", []
     return f"CASE WHEN {column} = %s THEN 0 ELSE 1 END", [tenant]
 
 
@@ -2598,11 +2602,12 @@ class PostgresWorldModel:
     def get_facts(self) -> dict[str, str]:
         frag, params = _tenant_scope()
         precedence, precedence_params = _tenant_precedence()
+        precedence_order = f"{precedence}, " if precedence else ""
         sql = (
             "SELECT key, value FROM ("
             "SELECT key, value, write_seq, "
-            f"ROW_NUMBER() OVER (PARTITION BY key ORDER BY {precedence}, "
-            "write_seq DESC) AS fact_rank FROM facts"
+            "ROW_NUMBER() OVER (PARTITION BY key ORDER BY "
+            f"{precedence_order}write_seq DESC) AS fact_rank FROM facts"
         )
         if frag:
             sql += " WHERE " + frag
@@ -2628,11 +2633,12 @@ class PostgresWorldModel:
         """
         frag, params = _tenant_scope()
         precedence, precedence_params = _tenant_precedence()
+        precedence_order = f"{precedence}, " if precedence else ""
         sql = (
             "SELECT key, value, trust_tier FROM ("
             "SELECT key, value, trust_tier, write_seq, "
-            f"ROW_NUMBER() OVER (PARTITION BY key ORDER BY {precedence}, "
-            "write_seq DESC) AS fact_rank FROM facts"
+            "ROW_NUMBER() OVER (PARTITION BY key ORDER BY "
+            f"{precedence_order}write_seq DESC) AS fact_rank FROM facts"
         )
         if frag:
             sql += " WHERE " + frag
@@ -2746,6 +2752,7 @@ class PostgresWorldModel:
         temporal``); returns None when no recorded version covered that time."""
         frag, params = _tenant_scope()
         precedence, precedence_params = _tenant_precedence()
+        precedence_order = f"{precedence}, " if precedence else ""
         if as_of is not None:
             sql = (
                 "SELECT value FROM fact_history WHERE key = %s AND valid_from <= %s "
@@ -2756,7 +2763,7 @@ class PostgresWorldModel:
                 sql += " AND " + frag
                 p += params
             sql += (
-                f" ORDER BY {precedence}, valid_from DESC, id DESC LIMIT 1"
+                f" ORDER BY {precedence_order}valid_from DESC, id DESC LIMIT 1"
             )
             p += precedence_params
             with self._tx() as cur:
@@ -2768,7 +2775,7 @@ class PostgresWorldModel:
         if frag:
             sql += " AND " + frag
             p += params
-        sql += f" ORDER BY {precedence}, write_seq DESC LIMIT 1"
+        sql += f" ORDER BY {precedence_order}write_seq DESC LIMIT 1"
         p += precedence_params
         with self._tx() as cur:
             cur.execute(sql, tuple(p))
@@ -2897,11 +2904,12 @@ class PostgresWorldModel:
         like = self._like_escape(key_prefix) + "%"
         frag, params = _tenant_scope()
         precedence, precedence_params = _tenant_precedence()
+        precedence_order = f"{precedence}, " if precedence else ""
         sql = (
             "SELECT key, sz FROM ("
             "SELECT key, length(value) AS sz, write_seq, "
-            f"ROW_NUMBER() OVER (PARTITION BY key ORDER BY {precedence}, "
-            "write_seq DESC) AS fact_rank FROM facts "
+            "ROW_NUMBER() OVER (PARTITION BY key ORDER BY "
+            f"{precedence_order}write_seq DESC) AS fact_rank FROM facts "
             "WHERE key LIKE %s ESCAPE '\\'"
         )
         p: list = precedence_params + [like]
@@ -2921,13 +2929,14 @@ class PostgresWorldModel:
         pfx = self._like_escape(key_prefix) + "%"
         frag, params = _tenant_scope()
         precedence, precedence_params = _tenant_precedence()
+        precedence_order = f"{precedence}, " if precedence else ""
         from ..crypto_at_rest import at_rest_enabled
         if not at_rest_enabled():
             q = "%" + self._like_escape(query) + "%"
             sql = (
                 "SELECT key, value FROM (SELECT key, value, write_seq, "
                 "ROW_NUMBER() OVER (PARTITION BY key ORDER BY "
-                f"{precedence}, write_seq DESC) AS fact_rank FROM facts "
+                f"{precedence_order}write_seq DESC) AS fact_rank FROM facts "
                 "WHERE key LIKE %s ESCAPE '\\'"
             )
             p: list = precedence_params + [pfx]
@@ -2953,7 +2962,7 @@ class PostgresWorldModel:
         sql = (
             "SELECT key, value FROM (SELECT key, value, write_seq, "
             "ROW_NUMBER() OVER (PARTITION BY key ORDER BY "
-            f"{precedence}, write_seq DESC) AS fact_rank FROM facts "
+            f"{precedence_order}write_seq DESC) AS fact_rank FROM facts "
             "WHERE key LIKE %s ESCAPE '\\'"
         )
         p = precedence_params + [pfx]
@@ -3916,10 +3925,17 @@ class PostgresWorldModel:
         episodes = self._erasure_ids(episode_ids or [])
         with self._tx() as cur:
             if episode_ids is None and goals:
-                cur.execute(
-                    "SELECT id FROM episodes WHERE goal_id = ANY(%s)",
-                    (goals,),
+                efrag, efparams = _erasure_tenant_scope("g.tenant_id")
+                episode_sql = (
+                    "SELECT e.id FROM episodes e "
+                    "JOIN goals g ON g.id = e.goal_id "
+                    "WHERE e.goal_id = ANY(%s)"
                 )
+                episode_params: list = [goals]
+                if efrag:
+                    episode_sql += " AND " + efrag
+                    episode_params += efparams
+                cur.execute(episode_sql, tuple(episode_params))
                 episodes = sorted(int(row[0]) for row in cur.fetchall())
             if store == "conversations":
                 if not conversations:
@@ -3959,15 +3975,25 @@ class PostgresWorldModel:
                     params += gfparams
                 cur.execute(sql, tuple(params))
                 return int(cur.fetchone()[0])
-            if store in (
-                "episodes",
-                "episode_facts",
-                "episode_fact_history",
-            ):
+            if store == "episodes":
+                if not episodes:
+                    return 0
+                tfrag, tfparams = _erasure_tenant_scope("g.tenant_id")
+                sql = (
+                    "SELECT COUNT(*) FROM episodes e "
+                    "JOIN goals g ON g.id = e.goal_id "
+                    "WHERE e.id = ANY(%s)"
+                )
+                params = [episodes]
+                if tfrag:
+                    sql += " AND " + tfrag
+                    params += tfparams
+                cur.execute(sql, tuple(params))
+                return int(cur.fetchone()[0])
+            if store in ("episode_facts", "episode_fact_history"):
                 if not episodes:
                     return 0
                 table, field = {
-                    "episodes": ("episodes", "id"),
                     "episode_facts": ("facts", "source_episode_id"),
                     "episode_fact_history": (
                         "fact_history",

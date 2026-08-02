@@ -66,6 +66,7 @@ numpy==2.2.6
 openai==2.46.0
 packageurl-python==0.17.6
 packaging==26.2
+patchelf==0.17.2.4; sys_platform == "linux"
 pefile==2024.8.26
 pillow==12.3.0
 pip==26.1.2

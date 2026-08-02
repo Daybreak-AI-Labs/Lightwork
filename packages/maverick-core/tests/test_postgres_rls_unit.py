@@ -38,6 +38,22 @@ class FactTrustSnapshotCursor(RecordingCursor):
         return [("risk:vendor", "external value", 0)]
 
 
+class EmptyFactCursor(RecordingCursor):
+    def fetchone(self):
+        return None
+
+    def fetchall(self):
+        return []
+
+
+class ErasureReceiptCursor(RecordingCursor):
+    def fetchone(self):
+        return (2,)
+
+    def fetchall(self):
+        return [(201,), (202,)]
+
+
 class SubjectFactPurgeCursor(RecordingCursor):
     def fetchall(self):
         # An own + compatibility-legacy row may share the same natural key.
@@ -183,6 +199,87 @@ def test_fact_value_and_trust_share_one_snapshot(monkeypatch):
     assert "FROM facts" in sql
     assert "ORDER BY write_seq DESC" in sql
     assert params == ()
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "kwargs", "expected_order"),
+    [
+        ("get_facts", (), {}, "ORDER BY write_seq DESC"),
+        ("get_facts_with_trust", (), {}, "ORDER BY write_seq DESC"),
+        ("get_fact", ("missing",), {}, "ORDER BY write_seq DESC LIMIT 1"),
+        (
+            "get_fact",
+            ("missing",),
+            {"as_of": 100.0},
+            "ORDER BY valid_from DESC, id DESC LIMIT 1",
+        ),
+        ("list_facts", ("prefix:",), {}, "ORDER BY write_seq DESC"),
+        (
+            "search_facts",
+            ("prefix:", "needle"),
+            {},
+            "ORDER BY write_seq DESC",
+        ),
+    ],
+)
+def test_unbound_fact_reads_omit_tenant_precedence(
+    monkeypatch,
+    method,
+    args,
+    kwargs,
+    expected_order,
+):
+    """Unbound Postgres reads must never emit invalid ``ORDER BY 0`` SQL."""
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: None)
+    monkeypatch.setattr(
+        "maverick.crypto_at_rest.at_rest_enabled",
+        lambda: False,
+    )
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = EmptyFactCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+
+    getattr(world, method)(*args, **kwargs)
+
+    [(sql, _params)] = cur.calls
+    assert expected_order in sql
+    assert "ORDER BY 0" not in sql
+    assert "CASE WHEN" not in sql
+    assert postgres._tenant_precedence() == ("", [])
+
+
+def test_erasure_receipt_episode_count_scopes_through_parent_goal(monkeypatch):
+    monkeypatch.setattr(postgres, "_active_tenant", lambda: "acme")
+    monkeypatch.setattr(postgres, "_strict_tenant_isolation", lambda: False)
+    world = PostgresWorldModel.__new__(PostgresWorldModel)
+    cur = ErasureReceiptCursor()
+
+    @contextmanager
+    def tx():
+        yield cur
+
+    monkeypatch.setattr(world, "_tx", tx)
+
+    assert world.count_erasure_receipt_store(
+        "episodes",
+        conversation_ids=[1],
+        goal_ids=[11],
+    ) == 2
+
+    assert len(cur.calls) == 2
+    select_sql, select_params = cur.calls[0]
+    count_sql, count_params = cur.calls[1]
+    for sql in (select_sql, count_sql):
+        assert "FROM episodes e JOIN goals g ON g.id = e.goal_id" in sql
+        assert "(g.tenant_id = %s OR g.tenant_id IS NULL)" in sql
+        assert "e.tenant_id" not in sql
+    assert select_params == ([11], "acme")
+    assert count_params == ([201, 202], "acme")
 
 
 def test_temporal_delete_uses_same_per_key_advisory_lock(monkeypatch):

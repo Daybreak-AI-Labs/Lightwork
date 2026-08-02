@@ -56,7 +56,7 @@ DEFAULT_PUBKEY = (
     / "trusted-publisher.pub"
 )
 PINNED_SEEDS = (17, 29, 43)
-SOURCE_SNAPSHOT_POLICY = "ancestor_or_exact_signed_control_trees_lf_v3"
+SOURCE_SNAPSHOT_POLICY = "ancestor_or_exact_signed_tracked_control_trees_lf_v4"
 CONTROL_SOURCE_ROOTS = (
     "packages/maverick-core/maverick",
     "packages/maverick-shield/maverick_shield",
@@ -91,7 +91,7 @@ EXPECTED_FAMILY_CONTROL = {
     "egress_boundary": "egress",
     "capability_attenuation": "capability",
     "agent_trust": "agent_trust",
-    "secret_output": "secret_output",
+    "secret_output": "secret_output",  # pragma: allowlist secret
     "budget_control": "budget",
     "evidence_integrity": "evidence",
 }
@@ -165,7 +165,88 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(_canonical_source_bytes(path)).hexdigest()
 
 
+def _git_repository_root() -> Path | None:
+    """Return ``ROOT`` only when it is the exact Git worktree root.
+
+    An extracted source archive may live beneath an unrelated parent Git
+    repository.  Git commands launched from the archive would otherwise
+    borrow that parent's index and commit metadata, producing an empty or
+    misleading control snapshot.
+    """
+
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        discovered = Path(proc.stdout.decode("utf-8").strip()).resolve()
+    except (UnicodeDecodeError, OSError):
+        return None
+    expected = ROOT.resolve()
+    return expected if discovered == expected else None
+
+
+def _git_tracked_control_paths() -> tuple[str, ...] | None:
+    """Return tracked control sources, or ``None`` outside a Git checkout.
+
+    Build and editable-install steps may create ignored ``*.py`` files inside
+    the control packages (for example generated protobuf stubs).  A filesystem
+    walk would silently bind published evidence to those host-local files even
+    though a clean checkout cannot reproduce them.  The Git index is therefore
+    authoritative whenever it is available.
+    """
+
+    if _git_repository_root() is None:
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "ls-files",
+                "-z",
+                "--",
+                *CONTROL_SOURCE_ROOTS,
+                *CONTROL_SOURCE_METADATA,
+            ],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError as exc:
+        raise RuntimeError("git ls-files failed in the benchmark worktree") from exc
+    if proc.returncode != 0:
+        raise RuntimeError("git ls-files failed in the benchmark worktree")
+    try:
+        entries = proc.stdout.decode("utf-8").split("\0")
+    except UnicodeDecodeError as exc:
+        raise ValueError("tracked control-source paths are not valid UTF-8") from exc
+    metadata = set(CONTROL_SOURCE_METADATA)
+    return tuple(
+        sorted(
+            path
+            for path in entries
+            if path and (path in metadata or path.endswith(".py"))
+        )
+    )
+
+
 def _control_source_paths() -> tuple[str, ...]:
+    tracked = _git_tracked_control_paths()
+    if tracked is not None:
+        return tracked
+
+    # ``git archive`` and source-distribution consumers have no index.  Those
+    # artifacts contain tracked files only, so a deterministic filesystem walk
+    # is the appropriate fallback there.
     paths = set(CONTROL_SOURCE_METADATA)
     for relative_root in CONTROL_SOURCE_ROOTS:
         root = ROOT / relative_root
@@ -182,6 +263,7 @@ def _control_source_scope() -> dict[str, Any]:
         "roots": list(CONTROL_SOURCE_ROOTS),
         "include": ["**/*.py"],
         "metadata": list(CONTROL_SOURCE_METADATA),
+        "selection": "git-tracked-files-with-source-archive-fallback",
         "content_canonicalization": {
             "encoding": "utf-8",
             "line_endings": "lf",
@@ -212,6 +294,9 @@ def _source_file_digests(catalog_path: Path) -> dict[str, str]:
 
 
 def _git_metadata() -> dict[str, Any]:
+    if _git_repository_root() is None:
+        return {"commit": "", "dirty": False, "branch": ""}
+
     def run(*args: str) -> str:
         try:
             return subprocess.run(
@@ -221,8 +306,11 @@ def _git_metadata() -> dict[str, Any]:
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-        except (OSError, subprocess.CalledProcessError):
-            return ""
+        except (OSError, subprocess.CalledProcessError) as exc:
+            command = " ".join(args)
+            raise RuntimeError(
+                f"git {command} failed in the benchmark worktree"
+            ) from exc
 
     status = run("status", "--porcelain")
     return {

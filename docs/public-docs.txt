@@ -44,5 +44,6 @@ showcase.md
 press-kit.md
 integrations/observability-partners.md
 CONTRIBUTING.md
+CLA.md
 CODE_OF_CONDUCT.md
 SECURITY.md|security-policy.md

@@ -15,6 +15,8 @@ import textwrap
 import zipfile
 from pathlib import Path
 
+from packaging.requirements import Requirement
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10
@@ -32,6 +34,31 @@ def _requirement_project_name(requirement: str) -> str:
     match = re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", requirement)
     assert match is not None, f"cannot parse requirement name: {requirement!r}"
     return _normalise_project_name(match.group())
+
+
+def _ci_constraints() -> dict[str, str]:
+    """Parse the reviewed CI lock and require one exact registry pin per line."""
+
+    lines = [
+        line.strip()
+        for line in (REPO_ROOT / "requirements" / "ci.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    constraints: dict[str, str] = {}
+    for line in lines:
+        requirement = Requirement(line)
+        specifiers = list(requirement.specifier)
+        assert requirement.url is None
+        assert not requirement.extras
+        assert len(specifiers) == 1
+        assert specifiers[0].operator == "=="
+        assert "*" not in specifiers[0].version
+        name = _normalise_project_name(requirement.name)
+        assert name not in constraints, f"duplicate CI constraint: {name}"
+        constraints[name] = specifiers[0].version
+    return constraints
 
 
 def _workflow_step(workflow: str, name: str) -> str:
@@ -490,18 +517,7 @@ def test_ci_constraints_cover_every_release_base_dependency():
                     f"{item['distribution']}: {requirement}"
                 )
 
-    requirement_lines = [
-        line.strip()
-        for line in (REPO_ROOT / "requirements" / "ci.txt")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-    assert all(line.count("==") == 1 for line in requirement_lines)
-    constraints = {
-        _normalise_project_name(line.partition("==")[0]): line.partition("==")[2]
-        for line in requirement_lines
-    }
+    constraints = _ci_constraints()
     missing = {
         name: requirements
         for name, requirements in external_requirements.items()
@@ -1128,19 +1144,7 @@ def test_customer_surfaces_do_not_reference_the_retired_repository_owner():
 
 
 def test_ci_posture_tools_are_exactly_pinned_and_secret_scan_uses_module():
-    requirement_lines = [
-        line.strip()
-        for line in (REPO_ROOT / "requirements" / "ci.txt")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-    assert all(line.count("==") == 1 for line in requirement_lines)
-    constraints = {
-        line.partition("==")[0]: line.partition("==")[2]
-        for line in requirement_lines
-    }
-    assert len(constraints) == len(requirement_lines), "duplicate CI constraint"
+    constraints = _ci_constraints()
     expected = {
         "bandit": "1.9.4",
         "cyclonedx-bom": "7.3.1",

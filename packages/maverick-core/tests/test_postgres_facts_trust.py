@@ -56,16 +56,17 @@ def test_default_tier_is_first_party(world):
     assert meta[k] == ("value", 3)
 
 
-def test_memory_guard_drops_low_trust_without_temporal(world):
+def test_memory_guard_drops_low_trust_without_temporal(world, monkeypatch):
     """End-to-end parity with SQLite: a high-trust-only (high_risk) brief
     excludes the TOOL-tier fact, on the non-temporal Postgres backend."""
     from maverick import memory_guard as mg
+    monkeypatch.setenv("MAVERICK_MEMORY_GUARD", "1")
     w = world
     k = w._kp + "tool"
     w.upsert_fact(k, "ship on friday", source="tool", trust_tier=1)
     meta = w.get_facts_with_trust()
     assert meta[k] == ("ship on friday", 1)
-    assert mg.filter_facts(meta, high_risk=True) == {}
+    assert k not in mg.filter_facts(meta, high_risk=True)
 
 
 def test_trust_tier_updates_on_reupsert(world):

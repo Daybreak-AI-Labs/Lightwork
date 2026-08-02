@@ -997,6 +997,9 @@ class TestGeneratedTools:
     ):
         from maverick.safety import consent
 
+        # Registration is setup for this deletion test, not the behavior under
+        # test. Make its high-risk consent explicit under secure-by-default.
+        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
         source = good_tool_source("delete_me")
         sandbox = SecureSandbox()
         live = self_learning.write_generated_tool(
@@ -1048,6 +1051,9 @@ class TestGeneratedTools:
     ):
         from maverick.safety import consent
 
+        # Registration is setup for this deletion test, not the behavior under
+        # test. Make its high-risk consent explicit under secure-by-default.
+        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
         source = good_tool_source("audit_fail")
         self_learning.write_generated_tool(
             "audit_fail",
