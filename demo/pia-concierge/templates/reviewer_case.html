@@ -129,7 +129,8 @@ async function uploadPaper() {
   bubble('bot',
     `Filed to the vendor record as <strong>v${rd.version}</strong>: ` +
     `the analysis memo and the tracked-changes document ` +
-    `<code>${esc(rd.redline_filename)}</code>.` +
+    `<code>${esc(rd.redline_filename)}</code>. Both are openable from the ` +
+    `rounds table below, and from the vendor's Documents in OneTrust.` +
     (rd.filed ? '' : ' <span style="color:var(--medium)">(attachment did not ' +
                      'reach the tenant: ' + esc(rd.error) + ')</span>'));
   ROUNDS.push(rd);
@@ -157,10 +158,14 @@ function renderRounds() {
       <td style="padding:10px 14px">${r.gaps} <span style="color:var(--ink-faint)">
         (${r.high} high)</span></td>
       <td style="padding:10px 14px"><span class="pill ${tone}">${esc(label)}</span></td>
-      <td style="padding:10px 14px;text-align:right">
+      <td style="padding:10px 14px;text-align:right;white-space:nowrap">
         <a class="btn" style="padding:4px 10px;font-size:12px"
            href="/reviewer/case/${CASE}/round/${r.version}/report"
-           target="_blank">Memo</a></td>
+           target="_blank">Memo</a>${r.has_redline ? `
+        <a class="btn" style="padding:4px 10px;font-size:12px;margin-left:6px"
+           href="/reviewer/case/${CASE}/round/${r.version}/redline"
+           title="The tracked-changes .docx as filed — open in Word"
+           >Redline</a>` : ''}</td>
     </tr>`;
   }).join('');
   box.innerHTML = `<div class="card" style="padding:0;overflow:hidden">
