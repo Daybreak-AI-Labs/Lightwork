@@ -10,8 +10,8 @@
 ## Run identity
 
 - Suite: `governance-frontier-v1`
-- Started: `2026-07-30T11:30:48.871652+00:00`
-- Git commit: `c9a2cd81d98fe20c7795c6ea0fe62f139eb1740b`
+- Started: `2026-08-02T18:50:03.896173+00:00`
+- Git commit: `1773aad669eadce36f0a7871c961b1236e7bce65`
 - Working tree dirty during run: `false`
 - Definitions: 40 (24 unsafe, 16 benign) × seeds [17, 29, 43]
 - Arms: 120 governed and 120 disabled-baseline instances
@@ -19,12 +19,12 @@
 - Network claim basis: no model/network API is called; config/overlay, deployment profile, tenant/client, and injected or KMS-wrapped audit-key inputs are cleared; the egress adapter only evaluates URL and provider policy
 - Inherited config/overlay, profile/trust, tenant/client binding, consent override, and audit-key injection inputs: cleared; related process caches reset
 - Consent mode override: cleared; secure defaults explicitly enabled
-- Input digest: `ad0f86cd2e48adf6bd36099abc373c858937154b457312a8b0c374308c0b8a0c`
+- Input digest: `a3a7b2730d9130204222196cab16de9d91391247d749e739cfb82a1a5b4d9595`
 - Manifest signature: `ed25519` (self-signed run integrity)
 - Public evidence: [signed measured manifest](./results/governance-frontier-v1/measured-manifest.json), [trusted publisher key](./results/governance-frontier-v1/trusted-publisher.pub), and [standalone verifier](./results/governance-frontier-v1/verify_manifest.py)
-- Signed manifest file SHA-256 (UTF-8/LF): `352295f76d4f3f9250b1a55efbbc43b94c50a61020006652d793cc0210dc897c`
-- Trusted-key file SHA-256 (UTF-8/LF): `6e3d7d26a1682746dfa44bd4b34f1d2f224103e7954958462af396666aac1775`
-- Ed25519 public-key fingerprint (SHA-256 of the 32 raw key bytes): `77576b020cc0699c47298a0603e1643913b3bb249e9be03fb206bdf17c129549`
+- Signed manifest file SHA-256 (UTF-8/LF): `22325b56e990dfe4873ebba895cce72e493f12e3ccf56c70e116cc4a41e53a58`
+- Trusted-key file SHA-256 (UTF-8/LF): `5654dcd13772d14bc64eafedaec443f497b57f54910122910d365ac602a5580b`
+- Ed25519 public-key fingerprint (SHA-256 of the 32 raw key bytes): `db538a8740ade87d086d775f47f766abeb030c868456b3a2d2804d66361734ac`
 - Publication verification requires the separately downloaded trusted key; the manifest-embedded key is not trusted by itself
 
 ## Scorecard
@@ -67,10 +67,10 @@ reported outside that denominator.
 
 | Path | Samples | Median | p95 |
 |---|---:|---:|---:|
-| Governed control call | 120 | 267.000 µs | 29898.500 µs |
-| Disabled baseline call | 120 | 12.900 µs | 175.500 µs |
-| Paired governance overhead | 120 | 175.250 µs | 29895.000 µs |
-| Harness signed decision append | 120 | 5558.050 µs | 6321.300 µs |
+| Governed control call | 120 | 243.350 µs | 24924.400 µs |
+| Disabled baseline call | 120 | 11.500 µs | 136.100 µs |
+| Paired governance overhead | 120 | 191.750 µs | 24745.400 µs |
+| Harness signed decision append | 120 | 5330.950 µs | 6274.500 µs |
 
 Times are local-machine observations, not an SLA. Each seed changes
 execution order to expose state/order dependence; it is not model
@@ -79,7 +79,7 @@ sampling. Verdicts, not timings, are required to be seed-invariant.
 ## Evidence and custody
 
 - Signed audit events: 190
-- Audit-chain SHA-256: `589fe8caa2225c6c58f9f9c798f1826cd89120df41875f6ad1724db802fa3bdf`
+- Audit-chain SHA-256: `034a0467a515eb334219d8ddfc494285dc5260d70194e0e4bd1643a1ab54a405`
 - Audit chain verified in-run against the run public key: `true`
 - Manifest schema: `maverick-bench-repro/1`
 - Key custody: ephemeral co-located benchmark key; self-signed run integrity only, not off-host custody, publisher identity, or resistance to a same-user actor.
