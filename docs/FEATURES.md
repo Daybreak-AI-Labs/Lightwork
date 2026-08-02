@@ -579,6 +579,34 @@ here.
     same without a terminal. Clauses left alone keep the shipped position, so
     a partial playbook is a valid one, and a missing or malformed one degrades
     to the shipped language rather than emitting a blank demand.
+- **The entity graph** (`entity_graph.py`, `/api/v1/graph/*`, the **Lineage**
+  tab on `/privacy`, `maverick graph rebuild|dossier|why|blast`;
+  `[entity_graph] enable`, wizard step) — one resolved identity per vendor /
+  system / person / document / clause across every record silo, connected by
+  typed, **time-bounded** edges derived from the governed stores (assessments,
+  DPA + vendor-paper reviews, security vendor reviews, AI registry, DSARs,
+  incidents). Three rules make it trustworthy: it is an **index, never a
+  source of truth** (rebuilt from records at any time, every edge cites the
+  record id it derives from, so graph and records cannot disagree); linking is
+  **exact-canonical only** ("Acme Corp." = "acme corp"), never fuzzy — a
+  fabricated edge is worse than a missing one; and **every edge carries
+  `valid_from`/`valid_to`**, with a superseded review's edge closed at its
+  successor's birth. That buys the three questions a regulator actually asks,
+  each answered with citable record ids: *why did we approve this vendor?*
+  (`why()` walks decision → reviewer → reviews in force at decision time →
+  clause findings → documents), *what did we know when we signed?*
+  (`dossier(as_of=…)` reconstructs the point-in-time picture), and *this
+  clause turned out bad — what relied on it?* (`blast_radius()` reverse
+  reachability to records, vendors, and decisions). The **episodic plane**
+  joins on exact keys only — episode→goal (foreign key), goal→agent
+  (`goal.domain`), goal→owner — and the **procedural plane** joins through
+  `source_goal_ids`, the goal ids the local distiller now stamps into each
+  learned skill's frontmatter. A goal's *title* is prose and is never matched
+  against vendors or systems; a skill distilled before provenance stamping
+  reads as provenance-unknown rather than guessed. Together they close the
+  memory-integrity loop: *"this run turned out to be tainted — which learned
+  skills depend on it?"* is `blast_radius("goal", id)`, the compliance
+  version of a product recall applied to the platform's own memory.
 - **Assessment assignment** (`assessment.assign_assessment`,
   `POST /api/v1/assess/sessions/{id}/assign`, the **owner** column plus
   *Mine* / *Unassigned* filters on every department worklist) — every other

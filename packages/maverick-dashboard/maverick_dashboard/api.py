@@ -1067,6 +1067,91 @@ async def attach_from_source(
 # these records carry vendor terms, system inventories, and subject requests.
 # --------------------------------------------------------------------------- #
 
+def _entity_graph_or_403():
+    from maverick import entity_graph
+    if not entity_graph.enabled():
+        raise HTTPException(status_code=403,
+                            detail="the entity graph is disabled "
+                                   "([entity_graph] enable)")
+    return entity_graph
+
+
+def _parse_as_of(value: str) -> float | None:
+    """Accept an epoch float or a YYYY-MM-DD date (end of that day UTC), so
+    'what did we know when we signed on 2026-03-01' needs no epoch math."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        day = _dt.datetime.strptime(text, "%Y-%m-%d").replace(
+            tzinfo=_dt.timezone.utc)
+        return (day + _dt.timedelta(days=1)).timestamp()
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="as_of must be an epoch timestamp or YYYY-MM-DD") from None
+
+
+@router.get("/graph/dossier")
+async def graph_dossier(request: Request, vendor: str,
+                        as_of: str = "") -> dict:
+    """Everything the graph knows about one vendor -- reviews in force,
+    decisions, open clause gaps, documents, people -- each item citing the
+    governed record it derives from. ``as_of`` reconstructs a past date."""
+    require_permission(request, "operate")
+    graph = _entity_graph_or_403()
+    return await run_in_threadpool(
+        graph.dossier, vendor[:200], as_of=_parse_as_of(as_of))
+
+
+@router.get("/graph/why")
+async def graph_why(request: Request, vendor: str) -> dict:
+    """Walk the latest decision on a vendor back to its evidence: decision ->
+    reviewer -> reviews in force at decision time -> clause findings ->
+    documents. The regulator's first question, answered with record ids."""
+    require_permission(request, "operate")
+    graph = _entity_graph_or_403()
+    return await run_in_threadpool(graph.why, vendor[:200])
+
+
+@router.get("/graph/blast-radius")
+async def graph_blast_radius(request: Request, kind: str,
+                             name: str) -> dict:
+    """Reverse reachability: this clause/document/person turned out to be a
+    problem -- which records, vendors, and decisions relied on it?"""
+    require_permission(request, "operate")
+    if kind not in ("clause", "document", "person", "vendor", "system",
+                    "goal", "skill"):
+        raise HTTPException(status_code=400, detail="unsupported entity kind")
+    graph = _entity_graph_or_403()
+    return await run_in_threadpool(graph.blast_radius, kind, name[:300])
+
+
+@router.get("/graph/entity")
+async def graph_entity(request: Request, kind: str, name: str,
+                       depth: int = 2, as_of: str = "") -> dict:
+    require_permission(request, "operate")
+    graph = _entity_graph_or_403()
+    if kind not in graph.CONCEPT_KINDS + graph.RECORD_KINDS:
+        raise HTTPException(status_code=400, detail="unsupported entity kind")
+    return await run_in_threadpool(
+        graph.neighborhood, kind, name[:300],
+        depth=max(1, min(int(depth), 4)), as_of=_parse_as_of(as_of))
+
+
+@router.post("/graph/rebuild")
+async def graph_rebuild(request: Request) -> dict:
+    """Regenerate the index from the governed stores. Always safe: the graph
+    is derived, so a rebuild can only ever say what the records say."""
+    require_permission(request, "operate")
+    graph = _entity_graph_or_403()
+    return await run_in_threadpool(graph.rebuild)
+
+
 def _privacy_ops_or_403():
     from maverick import privacy_ops
     if not privacy_ops.enabled():

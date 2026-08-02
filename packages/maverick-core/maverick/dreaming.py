@@ -1420,6 +1420,10 @@ def dream_cycle(
                     continue
                 successes.append({
                     "goal": getattr(g, "title", "") or "",
+                    # The id, not just the title: the distiller stamps it into
+                    # the skill's frontmatter so the entity graph can trace a
+                    # learned skill back to the exact runs that taught it.
+                    "goal_id": getattr(g, "id", None),
                     "success": True,
                     "tools": tools_by_goal.get(getattr(g, "id", None), []),
                     "t": getattr(g, "updated_at", 0.0) or 0.0,
