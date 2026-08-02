@@ -90,8 +90,12 @@ default 6).
 The launcher seeds **a year of backdated OneTrust history** (27 records:
 a live Under Review queue, completed reviews, a sent-back, addenda) so the
 tenant reads as sustained use — set `PIA_SEED_TENANT=0` for a clean slate.
-Fixtures live only in the demo store; the world model and signed audit
-chain stay clean.
+Every seeded vendor record also carries its **openable documents** (the risk
+analysis and notice cross-check the live run attaches), and two vendors carry
+a filed paper round — analysis memo + a real tracked-changes redline produced
+by the actual engine — so the record pop-out's **Documents** section has
+things to click on before you've run anything. Fixtures live only in the
+demo store; the world model and signed audit chain stay clean.
 
 ## Run it
 
@@ -176,6 +180,13 @@ hand-equivalent steps:
    version for that vendor + instrument, so the Documents tab reads as one
    legible negotiation history (`v1`, `v2`, `v3`) instead of same-named files.
 
+Everything filed is **openable where it landed**: the rounds table has a
+**Memo** button (renders in the browser) and a **Redline** button (downloads
+the tracked-changes `.docx` for Word), and the same files appear under
+**Documents — vendor record** in the OneTrust record pop-out, where the memo
+opens inline and the redline downloads. The mock tenant retains attachment
+bytes (bounded) exactly so this click works in the demo.
+
 The governance line is the point: **which clauses fall short is always decided
 deterministically** — a model can neither invent a finding nor clear one. A
 model is used only to re-word *our* required clause into the vendor's defined
@@ -207,7 +218,9 @@ governance layer, shown after the value lands.
    the queue, Under Review**, in a tenant that shows a year of history — open
    it: the full interview verbatim with the provenance notes, findings,
    required controls with GDPR / ISO 27001 / SOC 2 / NIST citations, and the
-   **Agent speed** row. Click **Approve**. *"The agent did the input and the
+   **Agent speed** row. Scroll to **Documents — vendor record** and click the
+   risk analysis the agent wrote — it opens right there; a redline downloads
+   for Word. Click **Approve**. *"The agent did the input and the
    analysis; your team reviews and approves in the tool they already live
    in. Nothing is Completed until a person clicks."*
 4. The record flips to Completed; the ServiceNow ticket is Resolved with the

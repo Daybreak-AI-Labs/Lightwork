@@ -208,6 +208,18 @@ def test_attachments_are_two_step_onto_the_vendor_record(demo, client):
     state = demo["ot_mock"].mock_state()
     assert state["attachments"][att_id]["linked_to"] == vendor["id"]
     assert state["attachments"][att_id]["filename"] == "risk-analysis.txt"
+    # The tenant RETAINS the bytes (so the demo's Documents tab can open
+    # them) and serves them back, bearer-gated like every other resource.
+    assert state["attachments"][att_id]["content"] == b"findings..."
+    tc = client._http
+    r = tc.get(f"/ot-api/api/document/v2/attachments/{att_id}/file",
+               headers={"Authorization": "Bearer demo-bearer-token"})
+    assert r.status_code == 200 and r.content == b"findings..."
+    assert tc.get(f"/ot-api/api/document/v2/attachments/{att_id}/file"
+                  ).status_code == 401
+    assert tc.get("/ot-api/api/document/v2/attachments/att-none/file",
+                  headers={"Authorization": "Bearer demo-bearer-token"}
+                  ).status_code == 404
 
 
 def test_list_dedupes_the_overlapping_pages(client):

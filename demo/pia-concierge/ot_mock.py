@@ -30,10 +30,19 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from store import STORE, OneTrustAssessment
 
 router = APIRouter(prefix="/ot-api")
+
+# Attachment content is RETAINED so the demo tenant can show the documents the
+# agent filed (the whole point of a Documents tab is opening them). Bounded on
+# both axes so a long-running demo can't grow without limit: oversized uploads
+# are rejected like a tenant would, and once the retained pool exceeds the
+# budget the OLDEST content is evicted (metadata stays, so the row still lists;
+# the download honestly 410s).
+MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+MAX_RETAINED_BYTES = 64 * 1024 * 1024
 
 _SESSION_403 = {"errorCode": "ACCESS-MANAGEMENT-ASSERTIONS_ACCESS_VIOLATION",
                 "message": "assertion failed for token fingerprint"}
@@ -518,13 +527,55 @@ async def ot_upload(request: Request) -> JSONResponse:
     except ValueError:
         return JSONResponse({"errorCode": "INVALID_REQUEST_INPUT"},
                             status_code=400)
+    content = await blob.read()
+    if len(content) > MAX_ATTACHMENT_BYTES:
+        return JSONResponse(
+            {"errorCode": "INVALID_REQUEST_INPUT",
+             "message": "attachment exceeds the size limit"}, status_code=400)
     _SEQ["att"] += 1
     att_id = f"att-{_SEQ['att']}"
     ATTACHMENTS[att_id] = {"id": att_id,
                            "filename": parsed.get("FileName", ""),
-                           "bytes": len(await blob.read()),
+                           "bytes": len(content),
+                           "mime": getattr(blob, "content_type", "") or
+                           "application/octet-stream",
+                           "content": content,
                            "linked_to": ""}
+    _evict_over_budget()
     return JSONResponse({"Id": att_id}, status_code=201)
+
+
+def _evict_over_budget() -> None:
+    retained = sum(len(a.get("content", b"")) for a in ATTACHMENTS.values())
+    if retained <= MAX_RETAINED_BYTES:
+        return
+    for att in ATTACHMENTS.values():        # dict order = upload order
+        if not att.get("content"):
+            continue
+        retained -= len(att["content"])
+        att["content"] = b""
+        att["evicted"] = True
+        if retained <= MAX_RETAINED_BYTES:
+            return
+
+
+@router.get("/api/document/v2/attachments/{att_id}/file")
+async def ot_attachment_file(att_id: str, request: Request) -> Response:
+    """Serve a stored attachment's bytes back. This route exists for the demo
+    viewer (the agent itself never downloads its own deliverables); it is not
+    part of the field-verified write protocol above."""
+    if not _bearer_ok(request):
+        return _missing_bearer()
+    att = ATTACHMENTS.get(att_id)
+    if att is None:
+        return JSONResponse({"errorCode": "NOT_FOUND"}, status_code=404)
+    if not att.get("content"):
+        return JSONResponse(
+            {"errorCode": "GONE",
+             "message": "attachment content was evicted from the demo "
+                        "tenant's retained pool"}, status_code=410)
+    return Response(att["content"], media_type=att.get("mime") or
+                    "application/octet-stream")
 
 
 @router.get("/api/inventory/v2/data-elements")
@@ -584,6 +635,29 @@ async def ot_notice_edit_resource(guid: str) -> JSONResponse:
 @router.get("/api/enterprise-policy/v1/privacynotices/{guid}/versions")
 async def ot_notice_versions(guid: str) -> JSONResponse:
     return JSONResponse(_SESSION_403, status_code=403)
+
+
+def seed_attachment(vendor_name: str, filename: str, content: bytes,
+                    mime: str) -> str:
+    """Fixture path for the tenant seeder: place a document on a vendor's
+    record directly (no HTTP), creating the vendor row when the seeded name
+    isn't in the base fixture set. Live filings always go through the wire
+    protocol — this exists only so a seeded tenant has documents to open."""
+    name = (vendor_name or "").strip()
+    vendor = next((v for v in VENDORS
+                   if v["name"].strip().lower() == name.lower()), None)
+    if vendor is None:
+        _SEQ["vendor"] += 1
+        vendor = {"id": f"ven-{_SEQ['vendor']}", "name": name,
+                  "type": "Vendor"}
+        VENDORS.append(vendor)
+    _SEQ["att"] += 1
+    att_id = f"att-{_SEQ['att']}"
+    ATTACHMENTS[att_id] = {"id": att_id, "filename": filename,
+                           "bytes": len(content), "mime": mime,
+                           "content": content, "linked_to": vendor["id"]}
+    _evict_over_budget()
+    return att_id
 
 
 def mock_state() -> dict[str, Any]:

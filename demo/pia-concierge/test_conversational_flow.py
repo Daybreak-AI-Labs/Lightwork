@@ -62,6 +62,9 @@ def _fresh_world(tmp_path, monkeypatch, demo_app):
     demo_app.STORE.tickets.clear()
     demo_app.STORE.cases.clear()
     demo_app.STORE.onetrust.clear()
+    demo_app.STORE._paper_seq.clear()
+    demo_app._ot_mock.reset_mock()
+    demo_app.paper_desk._REDLINES.clear()
 
     async def _no_email(to, subject, body):
         return "ok (stubbed)"
@@ -481,6 +484,32 @@ def test_tenant_seed_shapes_a_years_history(demo_app, monkeypatch):
     assert v["filed"] == len(records) and v["saved_hours"] > 0
     html = asyncio.run(demo_app.index(_request())).body.decode()
     assert 'id="value-strip"' in html
+
+
+def test_seeded_tenant_documents_are_clickable(demo_app, monkeypatch):
+    """The seeded tenant is not just rows: every vendor record carries the
+    two protocol deliverables as OPENABLE documents, and two vendors carry a
+    filed paper round whose redline is a real tracked-changes .docx."""
+    monkeypatch.setenv("PIA_SEED_TENANT", "1")
+    demo_app._seed_tenant()
+    docs = demo_app._vendor_documents("Wayne Payments")
+    names = [d["filename"] for d in docs]
+    assert any(n.startswith("risk-analysis-") for n in names)
+    assert any(n.startswith("notice-crosscheck-") for n in names)
+    assert any(n.endswith("-redline.docx") for n in names)
+    assert any(n.endswith("-analysis.txt") for n in names)
+    assert all(d["available"] for d in docs)
+    # The round sits on the case too, so the reviewer desk shows history,
+    # and the redline carries real revisions (produced by the real engine).
+    case = next(c for c in demo_app.STORE.cases.values()
+                if c.subject == "Wayne Payments")
+    assert case.paper_reviews and case.paper_reviews[0]["has_redline"]
+    entry = case.paper_reviews[0]
+    content = demo_app.paper_desk.redline_bytes(
+        case.id, entry["instrument"], entry["version"])
+    from maverick import docx_redline as dr
+    ins, dels = dr.revision_count(content)
+    assert ins >= 1 and dels >= 1
 
 
 def test_seeded_vendor_supports_memory_and_carry_forward(demo_app, monkeypatch):
