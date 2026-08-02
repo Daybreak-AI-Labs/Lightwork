@@ -198,7 +198,11 @@ def test_scoped_user_cannot_dispatch_other_departments_agent(monkeypatch, tmp_pa
     from maverick.fleet import Fleet, FleetAgent, save_fleet
     from maverick_dashboard import api, suite_grants
 
-    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    monkeypatch.setattr(
+        api,
+        "require_provider_or_400",
+        lambda **_: pytest.fail("provider preflight ran before department authorization"),
+    )
     save_fleet(Fleet(name="mixed", owner="user:fin", agents=(
         FleetAgent(name="legal_contracts", role="legal",
                    description="", domain="legal_contracts"),
@@ -342,7 +346,11 @@ def test_kernel_gate_blocks_dispatch_and_deploy_for_scoped_user(monkeypatch, tmp
     from maverick.fleet import Fleet, FleetAgent, save_fleet
     from maverick_dashboard import api, suite_grants
 
-    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    monkeypatch.setattr(
+        api,
+        "require_provider_or_400",
+        lambda **_: pytest.fail("provider preflight ran before department authorization"),
+    )
     save_fleet(Fleet(name="mixed", owner="user:fin", agents=(
         FleetAgent(name="legal_contracts", role="legal",
                    description="", domain="legal_contracts"),

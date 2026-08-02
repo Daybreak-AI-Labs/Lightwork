@@ -8063,7 +8063,6 @@ async def run_fleet_agent(
     # read-only viewer is 403'd up front (owner-scoping alone is not authz: a
     # viewer can own a fleet yet must never run one).
     require_permission(request, "operate")
-    require_provider_or_400()
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request)
 
@@ -8101,6 +8100,11 @@ async def run_fleet_agent(
         raise HTTPException(
             status_code=403,
             detail="insufficient department access for this action") from exc
+    # Provider readiness is an operational precondition, not authorization.
+    # Keep it behind owner and department gates so an incomplete deployment
+    # cannot mask their 404/403 responses or disclose configuration state to a
+    # caller who is not allowed to dispatch this agent.
+    require_provider_or_400()
     # Running an agent under the oversight control plane is the paid (Gold)
     # "fleet governance" capability. Fail-open: a no-op unless license enforcement
     # is on and the license lacks it. Checked after existence (404) so a missing
