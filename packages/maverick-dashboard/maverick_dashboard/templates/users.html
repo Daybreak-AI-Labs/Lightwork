@@ -1,12 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Users · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Users &amp; roles</h1>
-  <p class="page-subtitle">
-    Who can use this workspace and what each person is allowed to do. A new
-    authenticated user starts as <code>{{ default_role }}</code> until you
-    change it here.
-  </p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Administration', 'Users &amp; roles',
+               subtitle='Access, one roster',
+               lede='Who can use this workspace and what each person is
+                     allowed to do. A new authenticated user starts as
+                     <code>' ~ default_role ~ '</code> until you change it
+                     here.') %}
+    {{ state('Current state',
+             users | length ~ ' user' ~ ('' if users | length == 1 else 's') ~ ' assigned',
+             badge='SSO on' if auth_on else 'sign-in off',
+             badge_class='ok' if auth_on else 'warn',
+             copy=bootstrap_admins | length ~ ' permanent administrator'
+                  ~ ('' if bootstrap_admins | length == 1 else 's') ~ ' pinned
+                  by the deployment owner. Department access below scopes
+                  which departments each person works with.') }}
+  {% endcall %}
 
   {% if saved %}
   <div class="panel" role="status"

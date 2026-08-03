@@ -90,6 +90,46 @@ def test_launcher_bind_honors_deployment_env(monkeypatch):
     assert mod.bind() == ("0.0.0.0", 9001)     # container/proxy deployments
 
 
+def test_launcher_self_heals_unseeded_workspace(monkeypatch, tmp_path):
+    """serve.py seeds a never-seeded MAVERICK_HOME before serving — honoring
+    the seeder's .workspace-seeded marker and the PIA_SEED_WORKSPACE=0 opt-out."""
+    import importlib.util
+    import sys
+    import types
+    spec = importlib.util.spec_from_file_location("pia_serve_test", HERE / "serve.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    calls: list[bool] = []
+    stub = types.ModuleType("seed_workspace")
+
+    def _seed_main() -> None:
+        calls.append(True)
+        (tmp_path / ".workspace-seeded").write_text("x", encoding="utf-8")
+
+    stub.main = _seed_main
+    monkeypatch.setitem(sys.modules, "seed_workspace", stub)
+
+    # Opted out -> skipped.
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("PIA_SEED_WORKSPACE", "0")
+    mod._maybe_seed_workspace()
+    assert calls == []
+
+    # Default (unset) -> seeds once; the marker then short-circuits reruns.
+    monkeypatch.delenv("PIA_SEED_WORKSPACE", raising=False)
+    mod._maybe_seed_workspace()
+    assert calls == [True]
+    mod._maybe_seed_workspace()
+    assert calls == [True]
+
+    # No MAVERICK_HOME -> nothing to seed against, so never seeds.
+    (tmp_path / ".workspace-seeded").unlink()
+    monkeypatch.delenv("MAVERICK_HOME", raising=False)
+    mod._maybe_seed_workspace()
+    assert calls == [True]
+
+
 def test_deployment_guide_covers_every_target():
     guide = (HERE / "DEPLOYMENT.md").read_text(encoding="utf-8")
     assert "-p 127.0.0.1:8890:8890" in guide

@@ -1,12 +1,24 @@
 {% extends "base.html" %}
 {% block title %}Tenant Overview · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Tenant overview</h1>
-  <p class="page-subtitle">
-    A per-tenant summary: goals by status, today's spend, and how close each
-    tenant is to its daily spend limit. The full roster — and where new
-    workspaces are created — lives on <a href="/tenants">Tenants</a>.
-  </p>
+  {% from "_hero.html" import hero, state %}
+  {% set suspended_count = rows | selectattr('suspended') | list | length %}
+  {% call hero('Administration', 'Tenant overview',
+               subtitle='Per-workspace rollup',
+               lede='A per-tenant summary: goals by status, today\'s spend,
+                     and how close each tenant is to its daily spend limit.
+                     The full roster — and where new workspaces are created —
+                     lives on <a href="/tenants">Tenants</a>.') %}
+    {{ state('Current state',
+             rows | length ~ ' workspace' ~ ('' if rows | length == 1 else 's') ~ ' reporting',
+             badge=(suspended_count ~ ' suspended') if suspended_count
+                   else ('all active' if rows else 'single-tenant'),
+             badge_class='warn' if suspended_count else ('ok' if rows else 'idle'),
+             copy='Spend today across workspaces: $'
+                  ~ ('%.2f' % (rows | sum(attribute='spend_today'))) ~ '.
+                  One budget per workspace — no tenant can spend
+                  another\'s.') }}
+  {% endcall %}
 
   <div class="section-head"><h2>Why create a workspace?</h2></div>
   <div class="panel">

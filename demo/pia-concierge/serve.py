@@ -33,10 +33,32 @@ for _pkg in sorted((_REPO / "packages").glob("maverick-*")):
         sys.path.insert(0, str(_pkg))
 
 
+def _maybe_seed_workspace() -> None:
+    """Self-heal: a fresh MAVERICK_HOME renders bare, empty workspaces.
+
+    When the demo home has never been seeded (no ``.workspace-seeded`` marker
+    — the same marker ``seed_workspace.main`` writes and checks), run the
+    workspace seeder before serving so the first launch demos a lived-in
+    tenant. ``PIA_SEED_WORKSPACE=0`` skips (default "1"); an unset
+    MAVERICK_HOME also skips, since the seeder requires an explicit home.
+    """
+    if os.environ.get("PIA_SEED_WORKSPACE", "1").strip().lower() in ("0", "false", "no"):
+        return
+    home = os.environ.get("MAVERICK_HOME", "")
+    if not home or (Path(home) / ".workspace-seeded").exists():
+        return
+    print("Workspace not seeded yet — seeding demo history first "
+          "(set PIA_SEED_WORKSPACE=0 to skip).")
+    import seed_workspace
+    seed_workspace.main()   # marker-guarded; writes .workspace-seeded
+
+
 async def main() -> None:
     import uvicorn
     from app import app as world_app
     from maverick_dashboard.app import app as dash_app
+
+    _maybe_seed_workspace()
 
     dash_port = int(os.environ.get("DASH_PORT", "8765"))
     world_port = int(os.environ.get("WORLD_PORT", "8890"))

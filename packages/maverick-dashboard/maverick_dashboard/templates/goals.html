@@ -5,8 +5,6 @@
   /* Goals — a clean toolbar (compose + search) over scannable run rows, in the
      same glass family as the rest of the platform. The search JS rebuilds the
      same .g-row markup, so server- and client-rendered rows match. */
-  .g-lede{ margin: 0 0 var(--space-4); }
-  .g-lede p{ margin: var(--space-1) 0 0; color: var(--muted); max-width: 46rem; }
   .g-bar{ display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-bottom: var(--space-4); }
   .g-bar__search{ margin-inline-start: auto; min-width: 16rem; flex: 0 1 22rem; }
   .g-list{ display: flex; flex-direction: column; gap: var(--space-2); }
@@ -28,10 +26,20 @@
     background: var(--glass-soft, var(--surface-1)); }
 </style>
 
-  <div class="g-lede">
-    <h1 class="page-title">Goals</h1>
-    <p>Every run this deployment has executed — search across them, then open a plan, replay, or errors.</p>
-  </div>
+  {% from "_hero.html" import hero, state %}
+  {% set running = goals | selectattr('status', 'equalto', 'running') | list | length %}
+  {% call hero('Your AI workforce', 'Goals',
+               subtitle='Every run on record',
+               lede='Every run this deployment has executed — search across
+                     them, then open a plan, replay, or errors.') %}
+    {{ state('Current state',
+             goals | length ~ ' recent run' ~ ('' if goals | length == 1 else 's'),
+             badge=(running ~ ' running') if running else ('ready' if goals else 'none yet'),
+             badge_class='ok' if goals else 'idle',
+             copy='Start new work from Chat, the Quick Goal form, or the Goal
+                   Map editor — every run lands here with its plan, replay,
+                   and errors.') }}
+  {% endcall %}
 
   <div class="g-bar">
     <a class="btn btn--primary" href="/chat">New goal in Chat</a>

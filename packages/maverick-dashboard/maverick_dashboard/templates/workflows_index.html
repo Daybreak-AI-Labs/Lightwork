@@ -4,24 +4,36 @@
 <style>
   .wfx { max-width: 880px; margin-inline: auto; }
   .wfx :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
-  .wfx__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-1); }
-  .wfx__head h1 { margin: 0; }
-  .wfx__sub { color: var(--muted); margin: 0 0 var(--space-6); }
+  .wfx__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-5); }
   .wfx__section { margin-bottom: var(--space-7); }
   .wfx__section h2 { font-size: var(--text-lg); margin: 0 0 var(--space-3); }
   .wfx__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
 </style>
 
 <div class="wfx">
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Your AI workforce', 'Workflows',
+               subtitle='Reusable, deterministic playbooks',
+               lede='Flow graphs, workflows, and agent playbooks you\'ve built
+                     — schedule them, trigger them from events, or run them on
+                     demand. Browse the full catalog on
+                     <a href="/templates">Templates</a>.') %}
+    {{ state('Current state',
+             ((flows | length ~ ' flows · ') if flows_enabled else '')
+               ~ templates | length ~ ' templates · '
+               ~ playbooks | length ~ ' playbooks',
+             badge='ready' if (flows or templates or playbooks) else 'none yet',
+             badge_class='ok' if (flows or templates or playbooks) else 'idle',
+             copy='Deterministic playbooks, not one-off runs — each executes
+                   the same steps every time, under your schedules, triggers,
+                   budgets, and approval gates.') }}
+  {% endcall %}
   <div class="wfx__head">
-    <h1 class="page-title">Workflows</h1>
-    <span style="display:flex;gap:var(--space-2);">
+    <span style="display:flex;gap:var(--space-2);margin-inline-start:auto;">
       {% if flows_enabled %}<a class="btn" href="/flows/designer">New flow</a>{% endif %}
       <a class="btn btn--primary" href="/workflow-builder">New workflow</a>
     </span>
   </div>
-  <p class="page-subtitle">Reusable, deterministic playbooks — schedule them, trigger them from events, or run them on demand.</p>
-  <p class="wfx__sub">Flow graphs, workflows, and agent playbooks you've built — edit them, or put them on a schedule / webhook. Browse the full catalog on <a href="/templates">Templates</a>.</p>
 
   {% if flows_enabled %}
   <section class="wfx__section" aria-labelledby="wfx-flow-h">

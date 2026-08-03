@@ -1,8 +1,19 @@
 {% extends "base.html" %}
 {% block title %}Projects · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Projects</h1>
-  <p class="page-subtitle">Workspaces that group related goals — a close cycle, an audit, a deal.</p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Your AI workforce', 'Projects',
+               subtitle='Workspaces for related goals',
+               lede='Workspaces that group related goals — a close cycle, an
+                     audit, a deal. Open a project to see its goals and
+                     status at a glance.') %}
+    {{ state('Current state',
+             projects | length ~ ' project' ~ ('' if projects | length == 1 else 's'),
+             badge=((projects | sum(attribute='goal_count')) ~ ' goals filed') if projects else 'none yet',
+             badge_class='ok' if projects else 'idle',
+             copy='Create a project below, then file goals under it from any
+                   goal page — related work stays together.') }}
+  {% endcall %}
 
   <div class="panel">
     <h2 style="margin-top: 0;">New project</h2>

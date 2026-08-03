@@ -1,13 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Tenants · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Tenants</h1>
-  <p class="page-subtitle">
-    Each tenant is an isolated workspace with its own records and daily spend
-    limit. This roster shows every tenant on this deployment — status, plan,
-    and spend limit. The per-workspace rollup lives on
-    <a href="/tenants/overview">Tenant overview</a>.
-  </p>
+  {% from "_hero.html" import hero, state %}
+  {% set active_tenants = tenants | selectattr('status', 'equalto', 'active') | list | length %}
+  {% call hero('Administration', 'Tenants',
+               subtitle='Isolated client workspaces',
+               lede='Each tenant is an isolated workspace with its own records
+                     and daily spend limit. This roster shows every tenant on
+                     this deployment — status, plan, and spend limit. The
+                     per-workspace rollup lives on
+                     <a href="/tenants/overview">Tenant overview</a>.') %}
+    {{ state('Current state',
+             tenants | length ~ ' workspace' ~ ('' if tenants | length == 1 else 's') ~ ' provisioned',
+             badge=(active_tenants ~ ' active') if tenants else 'single-tenant',
+             badge_class='ok' if active_tenants else 'idle',
+             copy='One client per workspace: separate records, knowledge,
+                   budget, and access — any one can be suspended without
+                   touching the rest.') }}
+  {% endcall %}
 
   <div class="section-head"><h2>Why create a workspace?</h2></div>
   <div class="panel">
