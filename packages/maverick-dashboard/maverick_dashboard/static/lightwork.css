@@ -788,3 +788,83 @@
 .mv-copilot__row .input { flex: 1; min-width: 0; }
 .mv-copilot__note { color: var(--muted); font-size: var(--text-xs);
   margin: .4rem 0 0; min-height: 1em; }
+
+/* ---- Dashboard viz (shared chart primitives — see _charts.html) ----------
+   Color classes carry a semantic job (status or the sequential brand hue) and
+   resolve to the ACTIVE theme's tokens, so charts restyle with the theme.   */
+.viz-grid { display: grid; grid-template-columns: repeat(12, 1fr);
+  gap: var(--space-4); margin-bottom: var(--space-4); }
+.viz-card { grid-column: span 4; margin-bottom: 0; }
+.viz-card--wide { grid-column: span 8; }
+.viz-card--full { grid-column: span 12; }
+@media (max-width: 1100px) { .viz-card, .viz-card--wide { grid-column: span 6; } }
+@media (max-width: 760px) { .viz-card, .viz-card--wide, .viz-card--full { grid-column: span 12; } }
+.viz-card h2 { margin-top: 0; }
+.viz-sub { color: var(--muted); font-size: var(--text-xs);
+  margin: -0.25rem 0 var(--space-3); }
+
+/* color jobs — status + the sequential (brand) hue */
+.viz-bg-ok     { background: var(--accent); }
+.viz-bg-brand  { background: linear-gradient(180deg, var(--brand-hi), var(--brand)); }
+.viz-bg-warn   { background: var(--warn); }
+.viz-bg-danger { background: var(--danger); }
+.viz-bg-idle   { background: var(--muted); }
+.viz-bg-info   { background: var(--info); }
+.viz-stroke-ok     { stroke: var(--accent); }
+.viz-stroke-brand  { stroke: var(--brand); }
+.viz-stroke-warn   { stroke: var(--warn); }
+.viz-stroke-danger { stroke: var(--danger); }
+.viz-stroke-idle   { stroke: var(--muted); }
+.viz-stroke-info   { stroke: var(--info); }
+
+/* donut */
+.viz-donut { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
+.viz-donut svg { flex: 0 0 176px; }
+.viz-donut__track { fill: none; stroke: var(--surface-sunken); stroke-width: 18; }
+.viz-donut__seg { fill: none; stroke-width: 18; }
+.viz-donut__num { fill: var(--text); font-size: 2rem; font-weight: 650;
+  font-variant-numeric: tabular-nums; }
+.viz-donut__sub { fill: var(--muted); font-size: 0.7rem; letter-spacing: 0.04em; }
+
+/* legend — identity always carried by text beside the dot, never hue alone */
+.viz-legend { list-style: none; margin: 0; padding: 0; display: grid;
+  gap: 0.45rem; font-size: var(--text-sm); }
+.viz-legend--row { display: flex; gap: var(--space-4); flex-wrap: wrap;
+  margin-top: var(--space-2); }
+.viz-legend__item { display: flex; align-items: center; gap: 0.5rem; }
+.viz-legend__label { color: var(--text); }
+.viz-legend__val { color: var(--muted); font-variant-numeric: tabular-nums; }
+.viz-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+
+/* time-series columns */
+.viz-cols { display: flex; align-items: flex-end; gap: 4px; height: 172px;
+  border-bottom: 1px solid var(--border); padding-bottom: 1px; }
+.viz-cols__col { flex: 1 1 0; min-width: 0; height: 100%;
+  display: flex; flex-direction: column; }
+.viz-cols__plot { flex: 1; display: flex; align-items: flex-end;
+  justify-content: center; gap: 2px; }
+.viz-cols__bar { width: 100%; max-width: 22px; min-height: 2px;
+  border-radius: 4px 4px 0 0; transition: opacity 0.13s ease; }
+.viz-cols__col:hover .viz-cols__bar { opacity: 0.72; }
+.viz-cols__bar--zero { min-height: 0; }
+/* Sparse axis labels may be wider than their (narrow) column — let them
+   overflow instead of truncating to an ellipsis. */
+.viz-cols__lab { color: var(--muted); font-size: var(--text-xs);
+  text-align: center; margin-top: 0.35rem; min-height: 1em;
+  white-space: nowrap; overflow: visible; }
+
+/* horizontal labeled bars */
+.viz-bars { display: grid; gap: 0.55rem; }
+.viz-bars__row { display: grid; grid-template-columns: minmax(7rem, 0.9fr) 2fr auto;
+  align-items: center; gap: var(--space-3); font-size: var(--text-sm); }
+.viz-bars__label { color: var(--text); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.viz-bars__track { position: relative; height: 12px;
+  background: var(--surface-sunken); border-radius: var(--radius-pill);
+  overflow: hidden; }
+.viz-bars__fill { position: absolute; inset: 0 auto 0 0; min-width: 2px;
+  border-radius: var(--radius-pill); background:
+  linear-gradient(90deg, var(--brand), var(--brand-hi)); }
+.viz-bars__fill--bg { opacity: 0.28; }
+.viz-bars__val { color: var(--muted); font-variant-numeric: tabular-nums;
+  white-space: nowrap; }

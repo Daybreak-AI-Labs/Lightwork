@@ -54,22 +54,59 @@
   </div>
 
   {% set _max = (episodes | map(attribute='cost_dollars') | max) if episodes else 0 %}
+  {% from "_charts.html" import donut, columns, bars %}
 
-  <div class="section-head"><h2>Cost per run</h2></div>
-  <div class="panel">
-    {% if episodes %}
-      <div class="spend-bars" role="img"
-           aria-label="Cost of the {{ episodes|length }} most recent runs, oldest on the left to most recent on the right; peak ${{ '%.4f'|format(_max) }}.">
-        {% for e in episodes | reverse %}
-          <div class="spend-bars__col" title="#{{ e.id }} · ${{ '%.4f'|format(e.cost_dollars) }}">
-            <div class="spend-bars__bar" style="height: {{ ((e.cost_dollars / _max * 100) if _max else 0) | round(1) }}%;"></div>
-          </div>
-        {% endfor %}
-      </div>
-      <div class="spend-axis"><span>oldest</span><span>most recent</span></div>
-    {% else %}
-      <p class="muted">No completed episodes yet.</p>
-    {% endif %}
+  <div class="viz-grid">
+    <div class="panel viz-card viz-card--wide">
+      <h2>Daily burn — last 30 days</h2>
+      <p class="viz-sub">Dollars spent per calendar day, from the run ledger. Hover a day for cost and run count.</p>
+      {% if total.runs %}
+        {{ columns(daily, daily_max,
+                   'Daily spend over the last 30 days, oldest on the left.') }}
+      {% else %}
+        <p class="muted">No completed episodes yet — the burn chart draws from
+          the first finished run.</p>
+      {% endif %}
+    </div>
+    <div class="panel viz-card">
+      <h2>Run outcomes</h2>
+      <p class="viz-sub">The {{ episodes | length }} most recent runs, by how they ended.</p>
+      {{ donut([
+           {'label': 'Succeeded', 'value': outcome_mix.success, 'cls': 'ok'},
+           {'label': 'Failed',    'value': outcome_mix.failed,  'cls': 'danger'},
+           {'label': 'Running',   'value': outcome_mix.running, 'cls': 'brand'},
+         ], episodes | length, 'recent runs',
+         'Run outcomes: ' ~ outcome_mix.success ~ ' succeeded, '
+         ~ outcome_mix.failed ~ ' failed, ' ~ outcome_mix.running ~ ' still running.') }}
+    </div>
+    <div class="panel viz-card viz-card--wide">
+      <h2>Cost per run</h2>
+      <p class="viz-sub">The {{ episodes | length }} most recent runs, oldest to newest.</p>
+      {% if episodes %}
+        <div class="spend-bars" role="img"
+             aria-label="Cost of the {{ episodes|length }} most recent runs, oldest on the left to most recent on the right; peak ${{ '%.4f'|format(_max) }}.">
+          {% for e in episodes | reverse %}
+            <div class="spend-bars__col" title="#{{ e.id }} · ${{ '%.4f'|format(e.cost_dollars) }}">
+              <div class="spend-bars__bar" style="height: {{ ((e.cost_dollars / _max * 100) if _max else 0) | round(1) }}%;"></div>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="spend-axis"><span>oldest</span><span>most recent</span></div>
+      {% else %}
+        <p class="muted">No completed episodes yet.</p>
+      {% endif %}
+    </div>
+    <div class="panel viz-card">
+      <h2>Token mix</h2>
+      <p class="viz-sub">Lifetime tokens through the ledger, in vs out.</p>
+      {% set _tokmax = [total.input_tokens, total.output_tokens, 1] | max %}
+      {{ bars([
+           {'label': 'Input',  'value_text': '{:,}'.format(total.input_tokens),
+            'pct': total.input_tokens / _tokmax * 100},
+           {'label': 'Output', 'value_text': '{:,}'.format(total.output_tokens),
+            'pct': total.output_tokens / _tokmax * 100},
+         ], 'Token mix: input vs output tokens across all completed runs.') }}
+    </div>
   </div>
 
   <div class="toolbar">

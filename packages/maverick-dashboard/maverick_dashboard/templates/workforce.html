@@ -21,6 +21,22 @@
     <div class="stat"><div class="num">{{ firm.goals_completed }}</div><div class="label">goals completed</div></div>
   </div>
 
+  {% from "_charts.html" import bars %}
+  {% if dept_rows %}
+  <div class="viz-grid">
+    <div class="panel viz-card viz-card--wide">
+      <h2>Delivery by department</h2>
+      <p class="viz-sub">Goals delivered (solid) against goals taken on (pale), from the Operating Record.</p>
+      {{ bars(dept_rows, 'Goals delivered against goals taken on, by department.') }}
+    </div>
+    <div class="panel viz-card">
+      <h2>Spend by department</h2>
+      <p class="viz-sub">Actual agent spend behind that delivery.</p>
+      {{ bars(dept_spend_rows, 'Agent spend by department.') }}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="panel">
     <div class="section-head"><h2>Delivery</h2></div>
     <p class="muted" style="margin-top: 0;">Firm-wide rollup from the Operating Record — delivery, not usage.</p>
