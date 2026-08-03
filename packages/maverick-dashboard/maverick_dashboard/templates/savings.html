@@ -19,12 +19,21 @@
   .toolbar h2 { margin: 0; }
 </style>
 
-  <h1 class="page-title">Savings</h1>
-  <p class="page-subtitle">Money saved vs the typical human cost — computed from real completed
-    work and <strong>your</strong> cost assumptions below. Agent spend comes from the same ledger as
-    <a href="/spend">Spend</a>.</p>
-
   {% set saved = report.saved %}
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Value & spend', 'Savings',
+               subtitle='Counted, not estimated',
+               lede='Money saved vs the typical human cost — computed from
+                     real completed work and <strong>your</strong> cost
+                     assumptions below. Agent spend comes from the same
+                     ledger as <a href="/spend">Spend</a>.') %}
+    {{ state('Current state',
+             '$' ~ '{:,.2f}'.format(saved) ~ ' saved',
+             badge='net positive' if saved >= 0 else 'net negative',
+             badge_class='ok' if saved >= 0 else 'warn',
+             copy='From completed work only — never a projection. Change the
+                   cost assumptions below and the number recomputes.') }}
+  {% endcall %}
   <div class="sv-hero">
     <div class="stat">
       <div class="num num--big {{ 'sv-pos' if saved >= 0 else 'sv-neg' }}">${{ '{:,.2f}'.format(saved) }}</div>

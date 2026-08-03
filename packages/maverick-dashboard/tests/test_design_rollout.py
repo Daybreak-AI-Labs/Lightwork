@@ -20,10 +20,14 @@ def test_pages_use_shared_page_title(monkeypatch, tmp_path):
     # agents/roles/skills used a bare lowercase <h2>; now the shared <h1>.
     _isolate(monkeypatch, tmp_path)
     c = _client()
+    import re
     for path, label in [("/agents", "Agent Factory"), ("/roles", "Roles"), ("/skills", "Skills"),
                         ("/plugins", "Plugins"), ("/safety", "Safety"), ("/compliance", "Compliance")]:
         t = c.get(path).text
-        assert '<h1 class="page-title">' + label in t, path
+        # The shared <h1 class="page-title"> — plain, or via the hero
+        # component which adds hero-title and an id.
+        assert re.search(
+            r'<h1 class="page-title[^"]*"[^>]*>' + re.escape(label), t), path
 
 
 def test_generic_empties_use_mv_empty():

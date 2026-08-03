@@ -16,9 +16,19 @@
     .aud-hash { font-size: var(--text-xs); word-break: break-all; color: var(--muted); }
   </style>
 
-  <h1 class="page-title">Audit</h1>
-  <p class="page-subtitle">A complete, tamper-resistant record of everything that has happened here — filter or search any event.
-    <a href="/audit/binder">Audit binder (evidence pack) →</a></p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Governance', 'Audit',
+               subtitle='The operating record',
+               lede='A complete, tamper-resistant record of everything that
+                     has happened here — filter or search any event.
+                     <a href="/audit/binder">Audit binder (evidence pack)
+                     →</a>') %}
+    {{ state('Current state', 'Ed25519-signed chain',
+             badge='tamper-evident', badge_class='ok',
+             copy='Showing the last ' ~ n ~ ' events. Every agent action and
+                   every human decision lands here — verify any day\'s chain
+                   with <code>maverick audit verify</code>.') }}
+  {% endcall %}
 
   <div class="panel">
     <form method="get" action="/audit" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">

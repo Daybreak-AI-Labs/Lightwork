@@ -1,8 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Workforce · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Workforce</h1>
-  <p class="page-subtitle">Your AI departments — each team's specialists, what they've delivered, and their performance reviews.</p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Build your workforce', 'Workforce',
+               subtitle='Departments & specialists',
+               lede='Your AI departments — each team\'s specialists, what
+                     they\'ve delivered, and their performance reviews.') %}
+    {{ state('Current state',
+             pack_total ~ ' specialists on staff',
+             badge=departments | length ~ ' departments', badge_class='ok',
+             copy=connector_total ~ ' connectors wired. Every specialist
+                   works inside its declared tool allowlist and risk
+                   ceiling.') }}
+  {% endcall %}
 
   <div class="grid">
     <div class="stat"><div class="num">{{ departments|length }}</div><div class="label">departments</div></div>

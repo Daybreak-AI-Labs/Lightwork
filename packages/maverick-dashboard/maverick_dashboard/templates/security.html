@@ -37,11 +37,20 @@
   }
 </style>
 
-<h1 class="page-title">Security &amp; GRC</h1>
-<p class="page-subtitle">One governed workspace for framework assessments, controls,
-  cited evidence, risks and exceptions, POA&amp;M, vendors, policies, incidents, and audits.
-  Deterministic engines prepare the record; accountable people decide applicability,
-  exceptions, evidence acceptance, and notifications.</p>
+{% from "_hero.html" import hero, state %}
+{% call hero('Governed workspaces', 'Security &amp; GRC',
+             subtitle='Program of record',
+             lede='One governed workspace for framework assessments,
+                   controls, cited evidence, risks and exceptions,
+                   POA&amp;M, vendors, policies, incidents, and audits.
+                   Deterministic engines prepare the record; accountable
+                   people decide applicability, exceptions, evidence
+                   acceptance, and notifications.') %}
+  {{ state('Current state', 'Engines prepare, people decide',
+           badge='governed', badge_class='ok',
+           copy='Every record below cites its evidence; applicability and
+                 exception decisions are named, human, and audited.') }}
+{% endcall %}
 <div class="sec-links">
   <a class="btn" href="/security/report">Readiness board pack</a>
   <a class="btn" href="/security/assurance">Model Risk &amp; AI Assurance</a>
