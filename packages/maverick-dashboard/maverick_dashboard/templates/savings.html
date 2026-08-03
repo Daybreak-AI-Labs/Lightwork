@@ -2,10 +2,8 @@
 {% block title %}Savings · Lightwork{% endblock %}
 {% block content %}
 <style>
-  /* Savings page — scoped. Derived from design-system tokens; the hero saved
-     number is the page's job, so it gets display scale. */
-  .sv-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--space-4); margin-bottom: var(--space-4); }
-  .sv-hero .num--big { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 700; }
+  /* Savings page — scoped. Derived from design-system tokens; stat cards are
+     the shared .grid/.stat pattern the other dashboard pages use. */
   .sv-pos { color: var(--ok, #3fb96f); }
   .sv-neg { color: var(--danger, #e2574c); }
   .sv-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-3); align-items: end; }
@@ -34,9 +32,9 @@
              copy='From completed work only — never a projection. Change the
                    cost assumptions below and the number recomputes.') }}
   {% endcall %}
-  <div class="sv-hero">
+  <div class="grid">
     <div class="stat">
-      <div class="num num--big {{ 'sv-pos' if saved >= 0 else 'sv-neg' }}">${{ '{:,.2f}'.format(saved) }}</div>
+      <div class="num {{ 'sv-pos' if saved >= 0 else 'sv-neg' }}">${{ '{:,.2f}'.format(saved) }}</div>
       <div class="label">saved in the last {{ days }} days ({{ report.currency }})</div>
     </div>
     <div class="stat">

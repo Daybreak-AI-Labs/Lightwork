@@ -459,6 +459,24 @@ def set_toggle(section: str, name: str, enabled: bool) -> None:
         _write(data)
 
 
+# Platform systems whose [section] enable flag an admin may switch from
+# inside the app -- the single authority the /features/switches API trusts.
+SWITCHABLE_SECTIONS: tuple[str, ...] = (
+    "dreaming", "self_improvement", "self_harness", "fleet_memory",
+    "rehearsal", "flows", "threat_hunt", "env_hunt", "entity_graph",
+)
+
+
+def set_section_enable(section: str, enabled: bool) -> None:
+    """Overlay one switchable platform system's ``enable`` flag."""
+    if section not in SWITCHABLE_SECTIONS:
+        raise ValueError("unknown setting")
+    with _locked():
+        data = _load_overlay_for_update()
+        data.setdefault(section, {})["enable"] = bool(enabled)
+        _write(data)
+
+
 def set_model_cost_tier(model: str, band: str | None) -> None:
     """Persist a manager's cost-band override for a model in
     ``[model_cost_tiers]``. ``band=None`` clears the override (back to the

@@ -61,6 +61,7 @@ from .api_schemas import (
     ClausePlaybookIn,
     ComposeIn,
     ConnectionIn,
+    CopilotIn,
     DeliverableEditIn,
     DgmToggleIn,
     DocDiscoverIn,
@@ -71,6 +72,7 @@ from .api_schemas import (
     EventTriggerIn,
     EventTriggerOut,
     FactIn,
+    FeatureSwitchIn,
     FeedbackIn,
     FleetAgentAddIn,
     FleetCreateIn,
@@ -7134,6 +7136,127 @@ async def set_model_cost_tier_endpoint(
     from maverick import config, model_cost_tier
     config.reset_config_cache()
     return model_cost_tier.band_detail(body.model)
+
+
+# Platform systems an operator can switch on/off INSIDE the app -- the
+# replacement for every "edit the server configuration" instruction. Each
+# entry is a config section whose `enable` key settings_store can overlay;
+# the allowlist keeps the endpoint from becoming a generic config writer.
+_FEATURE_SWITCHES: dict = {
+    "dreaming": ("Dreaming", "Consolidates completed goals overnight into "
+                 "reusable lessons the fleet can recall."),
+    "self_improvement": ("Self-improvement", "Proposes and tests its own "
+                         "prompt/skill refinements; every change is gated "
+                         "and reversible."),
+    "self_harness": ("Self-harness", "Re-runs learned skills against known "
+                     "outcomes before they are trusted."),
+    "fleet_memory": ("Fleet memory", "Shares vetted lessons between agents "
+                     "so one agent's fix helps the whole workforce."),
+    "rehearsal": ("Rehearsal", "Practices risky operations in a sandbox "
+                  "before doing them for real."),
+    "flows": ("Flow engine", "Runs the visual flow designer's automations "
+              "end to end."),
+    "threat_hunt": ("Platform threat hunter", "Defensively scans "
+                    "Lightwork's own signed telemetry for anomalies."),
+    "env_hunt": ("Environment threat hunter", "Reads your configured "
+                 "telemetry sources and flags suspicious activity."),
+    "entity_graph": ("Entity graph", "Links vendors, documents, clauses, "
+                     "and decisions into one queryable lineage."),
+}
+
+
+@router.get("/features/switches")
+async def list_feature_switches(request: Request) -> dict:
+    """Every in-app switchable system with its label, plain-language
+    description, and current effective state."""
+    require_permission(request, "view")
+    from maverick import config as _cfg
+
+    def _read() -> list[dict]:
+        loaded = _cfg.load_config() or {}
+        out = []
+        for section, (label, description) in _FEATURE_SWITCHES.items():
+            enabled = bool((loaded.get(section) or {}).get("enable", False))
+            out.append({"section": section, "label": label,
+                        "description": description, "enabled": enabled})
+        return out
+
+    return {"switches": await run_in_threadpool(_read)}
+
+
+@router.post("/features/switches")
+async def set_feature_switch(request: Request,
+                             body: FeatureSwitchIn) -> dict:
+    """Flip one system on or off from inside the app. Admin-gated and
+    allowlisted; persists through the same settings overlay the rest of the
+    in-app configuration uses -- no server files, no restart."""
+    require_permission(request, "admin")
+    if body.section not in _FEATURE_SWITCHES:
+        raise HTTPException(status_code=400,
+                            detail=f"unknown system {body.section!r}")
+    from maverick_dashboard import settings_store
+    await run_in_threadpool(settings_store.set_section_enable, body.section,
+                            bool(body.enabled))
+    from maverick import config as _cfg
+    _cfg.reset_config_cache()
+    return {"section": body.section, "enabled": bool(body.enabled)}
+
+
+@router.post("/copilot")
+async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
+    """One turn of the platform copilot -- the lower-right helper on every
+    page. Answers product questions grounded in the page the user is on.
+    Provider-key gated; the panel falls back to its built-in tips without
+    one. Read-only by design: it explains and points, it never acts."""
+    require_permission(request, "view")
+    require_provider_or_400(role="orchestrator")
+    from maverick_dashboard.app import check_goal_rate_limit
+    check_goal_rate_limit(request, source="copilot")
+    msg = (payload.message or "").strip()[:2000]
+    if not msg:
+        raise HTTPException(status_code=400, detail="empty message")
+    page = (payload.page or "").strip()[:200]
+    history = [
+        {"role": h["role"], "content": str(h["content"])[:2000]}
+        for h in (payload.history or [])[-6:]
+        if isinstance(h, dict) and h.get("role") in ("user", "assistant")
+        and h.get("content")
+    ]
+
+    def _turn() -> str:
+        from maverick.budget import Budget
+        from maverick.llm import LLM, model_for_role
+        llm = LLM(model_for_role("orchestrator"))
+        budget = Budget(max_dollars=0.25, max_output_tokens=1500,
+                        max_tool_calls=0)
+        system = (
+            "You are the Lightwork copilot -- a concise in-app guide for a "
+            "governed AI-workforce platform. The user is on the page "
+            f"{page or 'unknown'} of the Lightwork dashboard. Explain what "
+            "pages and controls do and point the user to the right place; "
+            "keep answers under 120 words, plain language, no code or "
+            "config-file instructions (everything is managed inside the "
+            "app). You cannot take actions -- when asked to do something, "
+            "explain where in the app to do it. If asked something outside "
+            "Lightwork, say so briefly."
+        )
+        resp = llm.complete(
+            system=system,
+            messages=history + [{"role": "user", "content": msg}],
+            budget=budget,
+        )
+        return (getattr(resp, "text", "") or "").strip()
+
+    try:
+        reply = await run_in_threadpool(_turn)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="the copilot's model is unavailable right now") from exc
+    return {"reply": reply or "I could not produce an answer -- try the "
+                              "chat page for a full conversation."}
 
 
 @router.post("/agents/{name}/validate")

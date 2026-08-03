@@ -10,14 +10,25 @@
   .gbar__fill { display: block; height: 100%; border-radius: var(--radius-pill); min-width: 2px; background: linear-gradient(90deg, var(--brand), var(--brand-hi)); }
   .gbar__count { text-align: end; font-variant-numeric: tabular-nums; font-weight: var(--font-semibold); }
 </style>
-  <h1 class="page-title">Oversight</h1>
-  <p class="page-subtitle">
-    Mission control for the agent fleet — every control-plane intervention in one
-    place: org-policy holds (governance), shield blocks, capability + egress
-    denials, consent denials, and killswitch halts. Deep dives:
-    <a href="/approvals">approvals</a>, <a href="/safety">safety</a>,
-    <a href="/fleets">fleets</a>, <a href="/audit">audit</a>.
-  </p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Human oversight', 'Oversight',
+               subtitle='Mission control',
+               lede='Every time a guardrail stepped in — policy holds, shield
+                     blocks, capability and egress denials, consent denials,
+                     and emergency halts — in one place, next to what your
+                     agents are doing right now. Deep dives:
+                     <a href="/approvals">approvals</a>,
+                     <a href="/safety">safety</a>,
+                     <a href="/fleets">fleets</a>,
+                     <a href="/audit">audit</a>.') %}
+    {{ state('Current state',
+             'Halted — all work stopped' if halted else (active ~ ' agent' ~ ('' if active == 1 else 's') ~ ' working now'),
+             badge=(pending ~ ' awaiting sign-off') if pending else 'clear',
+             badge_class='warn' if (halted or pending) else 'ok',
+             copy=total ~ ' intervention' ~ ('' if total == 1 else 's') ~ ' in
+                   this window. Each one is recorded in the audit log kept on
+                   this server.') }}
+  {% endcall %}
 
   <div class="grid">
     <div class="stat">
@@ -198,7 +209,7 @@
     {% if events %}
       <table>
         <thead>
-          <tr><th scope="col">ts</th><th scope="col">guardrail</th><th scope="col">agent</th><th scope="col">goal</th><th scope="col">detail</th></tr>
+          <tr><th scope="col">Time</th><th scope="col">Guardrail</th><th scope="col">Agent</th><th scope="col">Goal</th><th scope="col">Detail</th></tr>
         </thead>
         <tbody>
         {% for ev in events %}
@@ -218,14 +229,6 @@
         held. Every intervention is recorded in the audit log kept on this
         server.
       </p>
-      <details>
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: how interventions are recorded</summary>
-        <p class="muted" style="font-size: var(--text-sm);">These are recorded
-        as <code>governance_denied</code>,
-        <code>shield_block</code>, <code>capability_denied</code>,
-        <code>egress_blocked</code>, <code>consent_result</code>, and
-        <code>halt</code> events in the audit log.</p>
-      </details>
     {% endif %}
   </div>
 {% endblock %}

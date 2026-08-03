@@ -1,24 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Skill Store · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Store</h1>
-  <p class="page-subtitle">Curated skills from the community catalog — each pinned to the exact
-    version that was reviewed, so what you install is what was checked.</p>
-
-  <div class="panel">
-    <p class="muted" style="margin-top: 0;">
-      In-app installation is off by default; an administrator can enable it, and can
-      also point this page at your organization's own catalog.
-    </p>
-    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: catalog configuration</summary>
-      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
-        Each entry is hash-pinned. In-app installs require
-        <code>MAVERICK_ALLOW_SKILL_INSTALL=1</code> on the dashboard process.
-        Point at your own index with <code>[catalogs] indexes</code> in
-        <code>~/.maverick/config.toml</code>.
-      </p>
-    </details>
-  </div>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Workforce capability', 'Store',
+               subtitle='Curated skill catalog',
+               lede='Curated skills from the community catalog — each pinned
+                     to the exact version that was reviewed, so what you
+                     install is what was checked.') %}
+    {{ state('Current state',
+             ((entries | length) ~ ' skill(s) in the catalog') if entries
+             else 'Catalog empty or unreachable',
+             badge='browsable' if entries else 'none yet',
+             badge_class='ok' if entries else 'idle',
+             copy='In-app installation is off by default — your administrator
+                   can switch it on, and can point this page at your
+                   organization\'s own private catalog.') }}
+  {% endcall %}
 
   {% if entries %}
     <div class="card-grid">
@@ -46,8 +43,8 @@
       <p class="mv-empty__title">No catalog entries</p>
       <p class="mv-empty__body">
         The catalog is empty or unreachable right now. Once a community
-        catalog is published (or your administrator points at your own),
-        curated skills appear here for one-click install.
+        catalog is published (or your administrator points this page at your
+        organization's own), curated skills appear here for one-click install.
       </p>
     </div>
   {% endif %}

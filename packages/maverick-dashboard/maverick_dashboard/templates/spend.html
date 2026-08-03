@@ -19,9 +19,20 @@
   .toolbar h2 { margin: 0; }
 </style>
 
-  <h1 class="page-title">Spend</h1>
-  <p class="page-subtitle">Cost, tokens, and per-run economics across completed episodes.
-    Need the monthly statement? Open the <a href="/billing">Billing statement</a>.</p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Value & spend', 'Spend',
+               subtitle='Run economics, from the ledger',
+               lede='Cost, tokens, and per-run economics across completed
+                     episodes — read straight from this deployment\'s own run
+                     ledger, never estimated. Need the monthly statement?
+                     Open the <a href="/billing">Billing statement</a>.') %}
+    {{ state('Current state',
+             '$' ~ '{:,.2f}'.format(total.dollars) ~ ' total spent',
+             badge=total.runs ~ ' completed run' ~ ('' if total.runs == 1 else 's'),
+             badge_class='ok' if total.runs else 'idle',
+             copy='The same episodes power <a href="/savings">Savings</a> and
+                   the monthly statement — one ledger, three views.') }}
+  {% endcall %}
 
   <div class="grid">
     <div class="stat">

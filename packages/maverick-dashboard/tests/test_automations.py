@@ -149,7 +149,7 @@ def test_p0_council_fixes_automations(monkeypatch, tmp_path):
     t = _client().get("/automations").text
     assert "#d92d20" not in t                          # failed runs use --danger, not raw hex
     assert "Run history unavailable" in t              # loadRuns surfaces fetch failure
-    assert 'class="page-title"' in t                   # shared title scale, not bespoke H1
+    assert 'class="page-title hero-title"' in t        # shared title scale via the page hero
     assert 'id="auto-sched-h" tabindex="-1"' in t      # focus landing after a row is deleted
     # base.html primitives: assertive error region + mvConfirm focus-return
     # (the behavior itself ships from the extracted shell script)

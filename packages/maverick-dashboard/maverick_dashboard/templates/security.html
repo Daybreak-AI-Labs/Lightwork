@@ -30,10 +30,23 @@
   .sec-details summary { cursor:pointer; color:var(--link); }
   .sec-empty { color:var(--muted); font-size:var(--text-sm); }
   .sec-overdue { color:var(--danger); font-weight:var(--font-semibold); }
+  .sec-hunters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+                 gap:var(--space-3); margin-top:var(--space-3); }
+  .sec-hunter { display:flex; flex-direction:column; gap:var(--space-2);
+                padding:var(--space-3); border:1px solid var(--border);
+                border-radius:8px; background:var(--surface-2); }
+  .sec-hunter__head { display:flex; justify-content:space-between;
+                      align-items:center; gap:var(--space-2); }
+  .sec-hunter__switch { display:flex; align-items:center; gap:var(--space-2);
+                        cursor:pointer; }
+  .sec-hunter__desc { margin:0; color:var(--muted); font-size:var(--text-sm); }
+  .sec-hunter__foot { display:flex; align-items:center; gap:var(--space-2);
+                      flex-wrap:wrap; margin-top:auto; }
   @media (max-width:900px) {
     .sec-grid { grid-template-columns:1fr; }
     .sec-form { grid-template-columns:1fr; }
     .sec-frameworks { grid-template-columns:1fr; }
+    .sec-hunters { grid-template-columns:1fr; }
   }
 </style>
 
@@ -60,11 +73,26 @@
 
 {% include "_workspace_worklist.html" %}
 
+<div class="section-head"><h2>Defensive hunters</h2></div>
+<div class="panel">
+  <p class="muted">Lightwork ships two always-defensive hunters. Each one is
+    opt-in, reads only telemetry it is allowed to see, and proposes containment
+    to the human approval queue &mdash; switching a hunter on never grants it an
+    autonomous response path. Administrators can turn each hunter on or off
+    here; the change applies immediately, no restart.</p>
+  <div class="sec-hunters" id="sec-hunters" aria-label="Defensive hunter switches">
+    <p class="sec-empty">Loading hunter switches&hellip;</p>
+  </div>
+  <p class="muted" id="sec-hunters-status" role="status" aria-live="polite"></p>
+</div>
+
 {% if not records.enabled %}
 <div class="panel">
   <h2>Security operations are disabled</h2>
-  <p>Enable <code>[security_ops] enable = true</code> in configuration or rerun
-    <code>maverick init</code>. Assessment records remain available above.</p>
+  <p>Security program records are switched off for this deployment, so
+    controls, evidence, risks, and incident records are not being tracked.
+    Ask an administrator to enable Security operations for this workspace.
+    Assessment records remain available above.</p>
 </div>
 {% else %}
 <div class="section-head"><h2>Program insights</h2></div>
@@ -470,6 +498,102 @@
         })
         .catch(function (error) { status.textContent = error.message; });
     });
+  }
+  var huntersHost = document.getElementById('sec-hunters');
+  if (huntersHost) {
+    var hunterConsoles = {
+      threat_hunt: '/security/threats',
+      env_hunt: '/security/soc'
+    };
+    var huntersStatus = document.getElementById('sec-hunters-status');
+    var renderHunter = function (row) {
+      var card = document.createElement('section');
+      card.className = 'sec-hunter';
+      var head = document.createElement('div');
+      head.className = 'sec-hunter__head';
+      var name = document.createElement('strong');
+      name.textContent = row.label;
+      head.appendChild(name);
+      var switchLabel = document.createElement('label');
+      switchLabel.className = 'sec-hunter__switch';
+      var toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.checked = !!row.enabled;
+      toggle.setAttribute('aria-label', 'Turn the ' + row.label + ' on or off');
+      var stateText = document.createElement('span');
+      stateText.textContent = toggle.checked ? 'On' : 'Off';
+      switchLabel.appendChild(toggle);
+      switchLabel.appendChild(stateText);
+      head.appendChild(switchLabel);
+      card.appendChild(head);
+      var description = document.createElement('p');
+      description.className = 'sec-hunter__desc';
+      description.textContent = row.description || '';
+      card.appendChild(description);
+      var foot = document.createElement('div');
+      foot.className = 'sec-hunter__foot';
+      var consoleLink = document.createElement('a');
+      consoleLink.className = 'btn';
+      consoleLink.href = hunterConsoles[row.section];
+      consoleLink.textContent = 'Open console';
+      foot.appendChild(consoleLink);
+      var note = document.createElement('span');
+      note.className = 'muted';
+      note.setAttribute('role', 'status');
+      foot.appendChild(note);
+      card.appendChild(foot);
+      toggle.addEventListener('change', function () {
+        var wanted = toggle.checked;
+        toggle.disabled = true;
+        note.textContent = 'Saving...';
+        fetch('/api/v1/features/switches', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({section: row.section, enabled: wanted})
+        }).then(function (response) {
+          return response.json().then(function (body) {
+            if (!response.ok) {
+              throw new Error(typeof body.detail === 'string'
+                ? body.detail : ('HTTP ' + response.status));
+            }
+            stateText.textContent = body.enabled ? 'On' : 'Off';
+            note.textContent = body.enabled
+              ? 'Hunter switched on.' : 'Hunter switched off.';
+          });
+        }).catch(function (error) {
+          toggle.checked = !wanted;
+          stateText.textContent = toggle.checked ? 'On' : 'Off';
+          note.textContent = error.message;
+        }).then(function () { toggle.disabled = false; });
+      });
+      return card;
+    };
+    fetch('/api/v1/features/switches')
+      .then(function (response) {
+        return response.json().then(function (body) {
+          if (!response.ok) throw new Error(body.detail || ('HTTP ' + response.status));
+          return body;
+        });
+      })
+      .then(function (body) {
+        var rows = (body.switches || []).filter(function (row) {
+          return Object.prototype.hasOwnProperty.call(hunterConsoles, row.section);
+        });
+        huntersHost.textContent = '';
+        if (!rows.length) {
+          var none = document.createElement('p');
+          none.className = 'sec-empty';
+          none.textContent = 'No hunter switches are available on this deployment.';
+          huntersHost.appendChild(none);
+          return;
+        }
+        rows.forEach(function (row) { huntersHost.appendChild(renderHunter(row)); });
+      })
+      .catch(function (error) {
+        huntersHost.textContent = '';
+        huntersStatus.textContent =
+          'Hunter switches could not be loaded: ' + error.message;
+      });
   }
   var controlInitializer = document.querySelector('[data-control-initialize]');
   if (controlInitializer) {

@@ -131,14 +131,18 @@ PAGES: tuple[dict, ...] = (
      "default": "operate", "in_nav": False},
     # The Finance workspace: the same chassis over the finance assessment
     # types (SOX control / fraud risk / ITGC / credit risk / close readiness).
-    {"path": "/finance", "label": "Finance", "group": "Govern", "icon": "spend",
-     "floor": "operate", "default": "operate"},
+    # "Financial Risk", not "Finance": this workspace is the SOX / fraud /
+    # ITGC / credit-risk control record, not day-to-day finance operations.
+    {"path": "/finance", "label": "Financial Risk", "group": "Govern",
+     "icon": "spend", "floor": "operate", "default": "operate"},
     # The partner fleet console: client deployments a partner operates.
     # Operate floor -- rows carry probe endpoints; mutations are admin (API).
     {"path": "/partner", "label": "Partner fleet", "group": "Govern",
      "icon": "graph", "floor": "operate", "default": "operate"},
-    {"path": "/permissions", "label": "Permissions", "group": "Govern", "icon": "key",
-     "floor": "view", "default": "operate"},
+    # Permissions is deployment plumbing, not day-to-day governance work --
+    # it lives with the rest of administration.
+    {"path": "/permissions", "label": "Permissions", "group": "Admin",
+     "icon": "key", "floor": "view", "default": "operate"},
     {"path": "/simulate", "label": "Simulate", "group": "Govern", "icon": "graph",
      "floor": "view", "default": "operate"},
     # Redaction workbench (its preview API requires operate); reached from

@@ -205,6 +205,10 @@
     <!-- ============ LEFT: build a specialist ============ -->
     <div class="af-card">
       <div class="af-card__title">Build a specialist</div>
+      <p class="muted" style="font-size: var(--text-sm); margin: calc(-1 * var(--space-3)) 0 var(--space-4);">
+        Three steps: describe the job, choose the tools it may use, set its
+        guardrails. Nothing changes until you save.
+      </p>
 
       <div class="fld af-picker">
         {% if agents %}
@@ -255,6 +259,7 @@
         <div class="fld">
           <label for="f-persona">What should it do? <span class="sub">— plain English</span></label>
           <textarea id="f-persona" name="persona" rows="6" placeholder="Describe the job in plain English — what it handles, how it should behave, what 'done' looks like.">{{ selected.persona if selected else '' }}</textarea>
+          <p class="sub" style="margin: var(--space-1) 0 0; font-size: var(--text-sm);">The clearer the brief, the better the specialist — say what it handles, and what a finished result looks like.</p>
         </div>
 
         <div class="fld">
@@ -262,10 +267,11 @@
           <div class="chips" id="skill-chips" aria-label="Tools this specialist can use"></div>
           {# The chips sync into this hidden input, which the save script reads. #}
           <input id="f-allow" name="allow_tools" type="hidden" value="{{ selected.allow_tools|join(' ') if selected else '' }}">
+          <p class="sub" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">Select a chip to grant a tool, select again to remove it. Anything not granted here stays out of reach.</p>
         </div>
 
         <div class="fld">
-          <label>Guardrails</label>
+          <label>Guardrails <span class="sub">— the safety limits it works within</span></label>
           <div class="guard-row">
             <span class="tt">Highest risk it may take
               <small>How far it can go without a stricter gate.</small></span>

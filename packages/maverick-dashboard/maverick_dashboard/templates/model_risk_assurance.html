@@ -132,9 +132,32 @@
   }
 </style>
 
-<h1 class="page-title">AI Evidence-Ready Gateway &amp; Assurance Cockpit</h1>
-<p class="page-subtitle">Disclosure enforcement, hash-only interaction receipts,
-  model and policy bindings, regulatory impact review, and exact signed packets.</p>
+{% from "_hero.html" import hero, state %}
+{% call hero('Governed AI assurance', 'AI Evidence-Ready Gateway &amp; Assurance Cockpit',
+             subtitle='Evidence, not certification',
+             lede='Disclosure enforcement, hash-only interaction receipts,
+                   model and policy bindings, regulatory impact review, and
+                   exact signed packets.') %}
+  {% if not gateway_enabled %}
+  {{ state('Current state', 'Gateway is switched off',
+           badge='off', badge_class='idle',
+           copy='No delivery receipts are being recorded. Existing model-risk
+                 records remain available below.') }}
+  {% elif gateway_error %}
+  {{ state('Current state', 'Records unavailable',
+           badge='needs attention', badge_class='warn',
+           copy='Gateway records could not be loaded safely, so no readiness
+                 conclusion is shown.') }}
+  {% else %}
+  {{ state('Current state', gateway_view.status.label,
+           badge=gateway_view.ingestion,
+           badge_class='ok' if gateway_view.status.key == 'ready'
+                       else ('idle' if gateway_view.status.key == 'empty' else 'warn'),
+           copy=gateway_view.done_count ~ ' of ' ~ gateway_view.total_steps
+                ~ ' production-evidence steps complete. '
+                ~ gateway_view.status.detail) }}
+  {% endif %}
+{% endcall %}
 
 <p class="assurance-note"><strong>Decision boundary:</strong> this cockpit reports
   evidence and deterministic control state. It does not certify compliance, make
@@ -143,22 +166,23 @@
 {% if not gateway_enabled %}
   <section class="panel">
     <h2>AI Evidence-Ready Gateway is disabled</h2>
-    <p>Enable <code>[evidence_gateway] enable = true</code>. The installer also
-      enables the evidence graph and Model Risk Officer dependencies. Existing
+    <p>The gateway records disclosure enforcement and hash-only delivery
+      receipts once it is switched on. Ask an administrator to enable the
+      AI Evidence Gateway for this deployment; enabling it also brings in the
+      evidence graph and Model Risk Officer it depends on. Existing
       model-risk records remain available below.</p>
-    <p><strong>Next action:</strong> run
-      <code>maverick preflight --profile cockpit</code>, enable every reported
-      dependency, restart the dashboard, and re-run the command.</p>
+    <p><strong>Next step:</strong> once the gateway is enabled, reload this
+      page &mdash; the readiness checklist will walk through the first
+      production-evidence steps.</p>
   </section>
 {% else %}
   {% if gateway_error %}
   <div class="assurance-alert" role="alert">
     <strong>{{ gateway_error }}</strong>
     <p>{{ gateway_error_action }}</p>
-    <p>Run <code>maverick preflight --profile cockpit</code> for the
-      deterministic blocker and <code>maverick doctor</code> for live
-      connectivity. Inspect the redacted support bundle before sharing it or
-      changing evidence state.</p>
+    <p>The redacted support bundle identifies the failing dependency without
+      exposing evidence content; review it before sharing it or changing
+      evidence state.</p>
   </div>
   {% endif %}
   {% if not gateway_error %}
@@ -200,7 +224,9 @@
     <div class="assurance-next">
       <h3>Next best action: {{ gateway_view.next_action.title }}</h3>
       <p>{{ gateway_view.next_action.detail }}</p>
+      {% if gateway_view.next_action.code %}
       <code>{{ gateway_view.next_action.code }}</code>
+      {% endif %}
       {% if gateway_view.next_action.href %}
         <a class="btn btn--ghost" href="{{ gateway_view.next_action.href }}">
           {{ gateway_view.next_action.label }}
@@ -406,10 +432,10 @@
 <section class="panel">
   <h2>Model Risk &amp; AI Assurance Officer</h2>
   {% if not model_risk_enabled %}
-    <p>Disabled. Enable both <code>[evidence_graph] enable = true</code> and
-      <code>[model_risk_assurance] enable = true</code>.</p>
-    <p>Verify the complete dependency chain with
-      <code>maverick preflight --profile cockpit</code>.</p>
+    <p>Switched off for this deployment. Ask an administrator to enable the
+      Model Risk Officer together with its evidence-graph dependency; governed
+      AI assets, evaluation evidence, and current findings will then be
+      tracked here.</p>
   {% else %}
     {% if model_risk_errors %}
     <div class="assurance-alert" role="status">

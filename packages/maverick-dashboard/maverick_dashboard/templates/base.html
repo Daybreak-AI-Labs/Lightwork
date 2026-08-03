@@ -196,6 +196,141 @@
       </div>
     </form>
   </dialog>
+  <!-- Platform copilot: one helper, every page, lower-right. -->
+  <button class="mv-copilot__fab" id="mv-copilot-fab" type="button"
+          aria-expanded="false" aria-controls="mv-copilot"
+          title="Copilot — need a hand?">💬</button>
+  <div class="mv-copilot" id="mv-copilot" role="dialog"
+       aria-label="Lightwork copilot" hidden>
+    <div class="mv-copilot__head">
+      <strong>Copilot</strong>
+      <button class="btn btn--ghost" id="mv-copilot-close" type="button"
+              aria-label="Close copilot">✕</button>
+    </div>
+    <p class="mv-copilot__hello" id="mv-copilot-hello">Need help getting
+      started on this page?</p>
+    <ul class="mv-copilot__tips" id="mv-copilot-tips"></ul>
+    <div class="mv-copilot__log" id="mv-copilot-log" aria-live="polite"></div>
+    <form id="mv-copilot-form">
+      <div class="mv-copilot__row">
+        <input class="input" id="mv-copilot-input" autocomplete="off"
+               placeholder="Ask about this page…"
+               aria-label="Ask the copilot">
+        <button class="btn btn--primary" id="mv-copilot-send"
+                type="submit">Send</button>
+      </div>
+      <p class="mv-copilot__note" id="mv-copilot-note"></p>
+    </form>
+  </div>
+  <script>
+  (function () {
+    var TIPS = {
+      "/flows":   ["Drag a step from the palette onto the canvas to start.",
+                   "The 💬 Copilot inside the designer builds the flow from a sentence.",
+                   "Dry-run before publishing — nothing real happens until you publish."],
+      "/security":["Start with the readiness board pack for the executive view.",
+                   "Each control row cites its evidence — click through before accepting.",
+                   "The threat hunters are switched on right here on this page."],
+      "/privacy": ["The worklist filters show what actually needs you today.",
+                   "Upload a vendor's DPA under Vendor paper for a tracked-changes redline.",
+                   "The Lineage tab answers 'why did we approve this vendor?'."],
+      "/learning":["Every learning system has a plain-language description and a switch.",
+                   "Nothing learned is trusted until the self-harness re-proves it."],
+      "/workforce":["Open a department to see its team and reviews in a pop-out.",
+                    "Performance reviews come from delivered work, not vibes."],
+      "/goals":   ["A goal is one outcome; the timeline shows every step and cost.",
+                   "Blocked goals name exactly what they are waiting on."],
+      "/agents":  ["Describe the specialist in plain English — Lightwork drafts the rest.",
+                   "Saves that would weaken the safety envelope are rejected, not merged."],
+      "/spend":   ["Every dollar traces to a goal and a model call — click any bar.",
+                   "Set cost tiers to steer routing economics without code."],
+      "/tenants": ["A workspace isolates one client or team: its own records, keys, and budget.",
+                   "Create one per client engagement so evidence never mixes."],
+    };
+    var fab = document.getElementById("mv-copilot-fab");
+    var panel = document.getElementById("mv-copilot");
+    if (!fab || !panel) { return; }
+    function tipsFor(path) {
+      var keys = Object.keys(TIPS);
+      for (var i = 0; i < keys.length; i++) {
+        if (path.indexOf(keys[i]) === 0) { return TIPS[keys[i]]; }
+      }
+      return ["Every page's primary action is the highlighted button up top.",
+              "Anything an agent does lands on the Audit page, signed.",
+              "Admins can switch platform systems on the Learning and Security pages."];
+    }
+    function open() {
+      var list = document.getElementById("mv-copilot-tips");
+      list.innerHTML = "";
+      tipsFor(window.location.pathname).forEach(function (t) {
+        var li = document.createElement("li");
+        li.textContent = t;
+        list.appendChild(li);
+      });
+      panel.hidden = false;
+      fab.setAttribute("aria-expanded", "true");
+    }
+    function close() {
+      panel.hidden = true;
+      fab.setAttribute("aria-expanded", "false");
+    }
+    fab.addEventListener("click", function () {
+      panel.hidden ? open() : close();
+    });
+    document.getElementById("mv-copilot-close")
+      .addEventListener("click", close);
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !panel.hidden) { close(); }
+    });
+
+    // The conversation itself: one turn per send, grounded in this page.
+    var history = [];
+    var log = document.getElementById("mv-copilot-log");
+    var form = document.getElementById("mv-copilot-form");
+    var input = document.getElementById("mv-copilot-input");
+    var note = document.getElementById("mv-copilot-note");
+    function say(role, text) {
+      var d = document.createElement("div");
+      d.className = "mv-copilot__msg mv-copilot__msg--" + role;
+      d.textContent = text;
+      log.appendChild(d);
+      log.scrollTop = log.scrollHeight;
+    }
+    form.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var msg = (input.value || "").trim();
+      if (!msg) { return; }
+      input.value = "";
+      note.textContent = "";
+      say("user", msg);
+      var sendBtn = document.getElementById("mv-copilot-send");
+      sendBtn.disabled = true;
+      fetch("/api/v1/copilot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg,
+                               page: window.location.pathname,
+                               history: history.slice(-6) }),
+      }).then(function (r) {
+        return r.json().then(function (j) { return { s: r.status, j: j }; });
+      }).then(function (x) {
+        if (x.s === 200 && x.j.reply) {
+          say("bot", x.j.reply);
+          history.push({ role: "user", content: msg },
+                       { role: "assistant", content: x.j.reply });
+        } else if (x.s === 400 || x.s === 503) {
+          note.textContent = "Live answers need a model provider — an admin "
+            + "connects one under Admin → Connections. The tips above work "
+            + "without it.";
+        } else {
+          note.textContent = "That didn't go through — try again.";
+        }
+      }).catch(function () {
+        note.textContent = "That didn't go through — try again.";
+      }).finally(function () { sendBtn.disabled = false; input.focus(); });
+    });
+  })();
+  </script>
   <script src="/static/lightwork-ui.js"></script>
   <script src="/static/lightwork-voice.js" defer></script>
 </body>

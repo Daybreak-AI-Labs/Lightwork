@@ -195,9 +195,11 @@ def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch
     _isolate(tmp_path, monkeypatch)
     reset_config_cache()
     t = client.get("/learning").text
-    # engine off -> the section still renders (admin) but points at [flows] enable,
-    # not the live toggles.
+    # engine off -> the section still renders (admin) with an in-app ON button
+    # (the `flows` feature switch), not the live toggles and no config-file copy.
     assert "Turn the flow engine on first" in t
+    assert 'id="lrn-flows-on"' in t
+    assert "[flows]" not in t
     assert 'id="lrn-auto-evolve"' not in t
 
 
@@ -373,3 +375,20 @@ def test_learning_page_renders_the_moat(tmp_path, monkeypatch):
     assert "learning systems are on" in t
     assert "What your workforce has accumulated" in t
     assert "grounded outcomes learned" in t
+
+
+def test_learning_page_is_configured_in_app_not_in_server_files(tmp_path, monkeypatch):
+    # Every learning system is switched from the page itself (the feature-switch
+    # API); the old "edit the server configuration" admin block and the config-key
+    # strings ([section] enable / MAVERICK_* env hints) must be gone from the UI.
+    _isolate(tmp_path, monkeypatch)
+    t = client.get("/learning").text
+    assert 'id="lrn-switches"' in t                  # in-page ON/OFF switch list
+    assert "/api/v1/features/switches" in t          # wired to the existing API
+    assert "For administrators" not in t
+    assert "server configuration" not in t
+    assert "[self_learning] enable" not in t and "MAVERICK_SELF_LEARNING" not in t
+    # Component -> switch-section map ships without exposing config keys.
+    assert 'id="lrn-switch-members"' in t
+    # threat_hunt / env_hunt switches belong to the Security page, not here.
+    assert "threat_hunt" in t and "env_hunt" in t    # named only in the exclusion list

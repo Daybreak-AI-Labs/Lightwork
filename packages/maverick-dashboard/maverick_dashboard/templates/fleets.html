@@ -1,39 +1,39 @@
 {% extends "base.html" %}
 {% block title %}Fleets · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Fleets</h1>
-  <p class="page-subtitle">Operator console — each employee's fleet of role-scoped agents and its oversight trail.</p>
-
-  <div class="panel">
-    <p class="muted">
-      Each employee's fleet of role-scoped agents and the oversight trail over
-      them. Governance can deny an action or hold it for human sign-off
-      (EU AI Act Art 14, the human-oversight requirement); holds land in the
-      <a href="/approvals">approval queue</a>
-      ({{ pending_count }} pending) and every verdict is recorded below.
-    </p>
-  </div>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Human in command', 'Fleets',
+               subtitle='Role-scoped agent rosters',
+               lede='Each employee\'s fleet of role-scoped agents and the
+                     oversight trail over them. Governance can deny an action
+                     or hold it for human sign-off (EU AI Act Art 14, the
+                     human-oversight requirement); holds land in the
+                     <a href="/approvals">approval queue</a> and every verdict
+                     is recorded below.') %}
+    {{ state('Current state', (fleets | length) ~ ' fleet(s)',
+             badge=((pending_count ~ ' awaiting sign-off') if pending_count
+                    else 'queue clear'),
+             badge_class='warn' if pending_count else 'ok',
+             copy='Create a fleet, dispatch tasks to its agents, and review
+                   every governance verdict — all from this page.') }}
+  {% endcall %}
 
   <details class="panel">
     <summary style="cursor: pointer; font-weight: 600;">+ Create a fleet</summary>
     <form id="fleet-create-form" style="margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.5rem; max-width: 48rem;">
-      <input id="fleet-name" name="name" aria-label="Fleet name" placeholder="fleet name (e.g. acme-ops)" required
-             style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
+      <input class="ctl" id="fleet-name" name="name" aria-label="Fleet name"
+             placeholder="fleet name (e.g. acme-ops)" required />
       <div id="agent-rows" style="display: flex; flex-direction: column; gap: 0.4rem;">
         <div class="agent-row" style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
-          <input class="a-name" placeholder="agent name" aria-label="agent name"
-                 style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
-          <input class="a-role" placeholder="role" aria-label="role"
-                 style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
-          <input class="a-desc" placeholder="description (optional)" aria-label="description"
-                 style="flex: 1; min-width: 10rem; padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
+          <input class="a-name ctl" placeholder="agent name" aria-label="agent name" />
+          <input class="a-role ctl" placeholder="role" aria-label="role" />
+          <input class="a-desc ctl" placeholder="description (optional)" aria-label="description"
+                 style="flex: 1; min-width: 10rem;" />
         </div>
       </div>
       <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-        <button type="button" id="add-agent-row"
-                style="padding: 0.4rem 0.8rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">+ add agent</button>
-        <button type="submit"
-                style="padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">Create fleet</button>
+        <button type="button" id="add-agent-row" class="btn">+ add agent</button>
+        <button type="submit" class="btn btn--primary">Create fleet</button>
         <span id="fleet-create-msg" class="muted" role="status" aria-live="polite" style="min-height: 1em;"></span>
       </div>
     </form>
@@ -46,7 +46,7 @@
           <strong>{{ fleet.name }}</strong>
           <span class="muted">owner: <code>{{ fleet.owner or '—' }}</code></span>
           <span class="muted">{{ fleet.agents | length }} agent(s)</span>
-          <button class="fleet-remove-btn" data-fleet="{{ fleet.name }}"
+          <button type="button" class="fleet-remove-btn" data-fleet="{{ fleet.name }}"
                   style="margin-left: auto; padding: 0.3rem 0.7rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Remove</button>
         </div>
         {% if fleet.agents %}
@@ -69,8 +69,7 @@
                 style="margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;">
             <label>
               <div class="muted" style="font-size: 0.7rem; text-transform: uppercase;">assign to</div>
-              <select name="agent" aria-label="agent"
-                      style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);">
+              <select class="ctl" name="agent" aria-label="agent">
                 {% for agent in fleet.agents %}
                   <option value="{{ agent.name }}">{{ agent.name }} ({{ agent.role or 'no role' }})</option>
                 {% endfor %}
@@ -78,11 +77,10 @@
             </label>
             <label style="flex: 1; min-width: 14rem;">
               <div class="muted" style="font-size: 0.7rem; text-transform: uppercase;">task</div>
-              <input name="prompt" type="text" placeholder="what should this agent do?"
-                     style="width: 100%; padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
+              <input class="ctl" name="prompt" type="text" style="width: 100%;"
+                     placeholder="what should this agent do?" />
             </label>
-            <button type="submit"
-                    style="padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">Run</button>
+            <button type="submit" class="btn btn--primary">Run</button>
             <span class="fleet-run-msg muted" role="status" aria-live="polite" style="min-height: 1em;"></span>
           </form>
         {% else %}
@@ -113,10 +111,6 @@
           <p class="muted" style="margin: 0.4rem 0 0;">
             No runs yet — dispatch a task with the form above.
           </p>
-          <details style="margin-top: 0.4rem;">
-            <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: dispatch from the command line</summary>
-            <p class="muted" style="font-size: var(--text-sm); margin: 0.4rem 0 0;">Dispatch a task with <code>maverick fleet run</code>.</p>
-          </details>
         {% endif %}
       </div>
     {% endfor %}
@@ -126,10 +120,6 @@
         No fleets yet — use <strong>+ Create a fleet</strong> above to give an
         employee a roster of role-scoped agents.
       </p>
-      <details style="margin-top: 0.4rem;">
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: create from the command line</summary>
-        <p class="muted" style="font-size: var(--text-sm); margin: 0.4rem 0 0;">Create a fleet with <code>maverick fleet create</code>.</p>
-      </details>
     </div>
   {% endif %}
 

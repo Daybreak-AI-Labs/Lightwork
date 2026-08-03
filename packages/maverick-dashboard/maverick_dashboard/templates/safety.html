@@ -1,12 +1,23 @@
 {% extends "base.html" %}
 {% block title %}Safety · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Safety</h1>
-  <p class="page-subtitle">
-    What Agent Shield — the safety layer that screens what agents read, do,
-    and say — blocked, read from this server's audit log.
-  </p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Agent Shield', 'Safety',
+               subtitle='The screening layer',
+               lede='What Agent Shield — the safety layer that screens what
+                     agents read, do, and say — blocked, read from this
+                     server\'s signed audit log.') %}
+    {{ state('Current state',
+             total ~ ' block' ~ ('' if total == 1 else 's') ~ (' on ' ~ day if day else ' today'),
+             badge=('shield active' if total else 'all clear'),
+             badge_class=('warn' if total else 'ok'),
+             copy='input: ' ~ by_stage.get('input', 0) ~ ' · tool: ' ~
+                  by_stage.get('tool', 0) ~ ' · output: ' ~
+                  by_stage.get('output', 0) ~ ' — every block lands on the
+                  signed audit chain.') }}
+  {% endcall %}
 
+  <div class="section-head"><h2>Time window</h2></div>
   <div class="panel">
     <form method="get" action="/safety" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
       <label>
@@ -26,8 +37,8 @@
     </form>
   </div>
 
+  <div class="section-head"><h2>Blocks {% if day %}on {{ day }}{% else %}today{% endif %}</h2></div>
   <div class="panel">
-    <h2 style="margin-top: 0;">Blocks {% if day %}on {{ day }}{% else %}today{% endif %}</h2>
     <p style="font-size: 2rem; margin: 0.2rem 0;">{{ total }}</p>
     <div class="muted" style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
       <span>input: <strong>{{ by_stage.get('input', 0) }}</strong></span>
@@ -37,8 +48,8 @@
   </div>
 
   {% if top_reasons %}
+  <div class="section-head"><h2>Top reasons</h2></div>
   <div class="panel">
-    <h2 style="margin-top: 0;">Top reasons</h2>
     <table>
       <thead><tr><th scope="col">reason</th><th scope="col">count</th></tr></thead>
       <tbody>
@@ -50,8 +61,8 @@
   </div>
   {% endif %}
 
+  <div class="section-head"><h2>Recent blocks</h2></div>
   <div class="panel">
-    <h2 style="margin-top: 0;">Recent blocks</h2>
     {% if events %}
       <table>
         <thead>
@@ -74,14 +85,9 @@
     {% else %}
       <p class="muted">
         No shield blocks for the selected day — nothing was denied. Every
-        block is recorded in the audit log kept on this server.
+        block is recorded on the signed <a href="/audit">audit log</a> kept
+        on this server, so a quiet day is provable, not assumed.
       </p>
-      <details>
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where blocks are recorded</summary>
-        <p class="muted" style="font-size: var(--text-sm);">Lightwork records
-        these as <code>shield_block</code> events in
-        <code>~/.maverick/audit/YYYY-MM-DD.ndjson</code>.</p>
-      </details>
     {% endif %}
   </div>
 {% endblock %}

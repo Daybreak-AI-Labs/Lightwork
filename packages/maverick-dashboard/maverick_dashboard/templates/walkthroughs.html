@@ -1,34 +1,33 @@
 {% extends "base.html" %}
 {% block title %}Video walkthroughs · Lightwork{% endblock %}
 {% block content %}
-<h1 class="page-title">Video walkthroughs</h1>
-<p class="page-subtitle">Turn any completed run into a captioned video — watch exactly what was done, step by step, and share it with your team.</p>
+{% from "_hero.html" import hero, state %}
+{% call hero('Proof of work', 'Video walkthroughs',
+             subtitle='Watch what was done',
+             lede='Turn any completed run into a captioned video — watch
+                   exactly what was done, step by step, and share it with
+                   your team.') %}
+  {{ state('Current state', (items | length) ~ ' walkthrough(s) on record',
+           badge='ready to watch' if items else 'none yet',
+           badge_class='ok' if items else 'idle',
+           copy='Videos are created and stored on this server — nothing is
+                 uploaded or hosted externally.') }}
+{% endcall %}
 <div class="panel">
   <form id="wt-export" style="display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;">
     <span style="flex: 0 1 14rem;">
       <label for="wt-goal-id" style="display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem;">Run number (from the Goals page)</label>
-      <input id="wt-goal-id" type="number" min="1" required
-             style="width: 100%; padding: 0.45rem 0.6rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px;">
+      <input class="ctl" id="wt-goal-id" type="number" min="1" required
+             style="width: 100%;">
     </span>
-    <button type="submit"
-            style="padding: 0.5rem 1.2rem; background: var(--brand); color: var(--brand-fg); border: 0; border-radius: var(--radius-md); cursor: pointer;">
-      Create video
-    </button>
+    <button type="submit" class="btn btn--primary">Create video</button>
   </form>
   <p id="wt-result" role="status" aria-live="polite" class="muted"
      style="font-size: 0.85rem; margin-bottom: 0;"></p>
-  <details style="margin-top: 0.75rem;">
-    <summary class="muted" style="cursor: pointer; font-size: 0.85rem;">For administrators: storage &amp; requirements</summary>
-    <p class="muted" style="font-size: 0.8rem; margin-bottom: 0;">
-      Videos are generated and stored on this server at
-      <code>{{ artifact_dir }}</code> — nothing is uploaded or hosted
-      externally. Encoding needs Pillow + ffmpeg on the server; without them
-      the export still writes the frame manifest and captions track and
-      reports the exact <code>ffmpeg</code> command to finish the encode —
-      it never fakes a video. Runs can also be exported directly through the
-      API: <code>POST /api/v1/goals/&lt;id&gt;/walkthrough</code>.
-    </p>
-  </details>
+  <p class="muted" style="font-size: 0.8rem; margin: 0.75rem 0 0;">
+    Videos live on this server at <code>{{ artifact_dir }}</code> — nothing
+    leaves your platform.
+  </p>
 </div>
 
 {% if items %}
@@ -94,7 +93,7 @@
       } else {
         // Honest partial result: manifest + captions written, encode pending.
         out.textContent = "The steps and captions were saved, but this server can't encode video yet. " +
-          (j.detail || "") + " Ask your administrator to run: " + (j.ffmpeg_command || []).join(" ");
+          (j.detail || "") + " An administrator can finish enabling video for this platform.";
       }
     } catch (e) {
       out.textContent = "Connection lost — is the dashboard still running?";
