@@ -373,12 +373,16 @@ def test_flow_files_under_review_with_ai_branch_and_escalation(
     assert ai.status == "Under Review"
     links = demo["ot_mock"].mock_state()["links"]
     assert links and links[-1]["toIds"] == [run["ai_assessment_id"]]
-    # Existing vendor linked, not duplicated; deliverables on its record.
+    # Existing vendor linked, not duplicated; deliverables on its record —
+    # Word documents on the platform (standalone files the honest .txt).
     assert run["vendor"]["created"] is False
     attached = [a for a in demo["ot_mock"].mock_state()
                 ["attachments"].values()
                 if a["linked_to"] == run["vendor"]["id"]]
     assert {a["filename"] for a in attached} == {
-        f"risk-analysis-{case.id}.txt", f"notice-crosscheck-{case.id}.txt"}
+        f"risk-analysis-{case.id}.docx", f"notice-crosscheck-{case.id}.docx"}
+    # Openable, not stubs: each retains real OPC bytes.
+    assert all(a["content"][:2] == b"PK" and a["bytes"] > 500
+               for a in attached)
     # Value ledger counted the AI-assessment work product.
     assert run["value"]["privacy_hours"] >= 10.0

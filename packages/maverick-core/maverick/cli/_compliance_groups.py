@@ -172,6 +172,38 @@ def clause_playbook_show(fmt: str) -> None:
         click.echo("\n* = your language, not the shipped position.")
 
 
+@clause_playbook_group.command("draft")
+@click.argument("vendor")
+@click.option("--instrument", type=click.Choice(["dpa", "addendum"]),
+              default="dpa", help="Which of our instruments to draft.")
+@click.option("--org", default="", help="Your legal entity name for the "
+              "party line (defaults to [paper_review] org_name; blank keeps "
+              "a red placeholder).")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write the .docx here (default: <vendor>-<instrument>-"
+              "our-paper.docx).")
+def clause_playbook_draft(vendor: str, instrument: str, org: str,
+                          output) -> None:
+    """Draft OUR instrument for a vendor, values filled in red.
+
+    The clause language is your playbook (shipped positions underneath);
+    the only inserted values are the party names and date, each rendered in
+    red in the document and listed here so counsel verifies exactly what
+    was auto-filled. Deterministic -- no model is involved.
+    """
+    from ..paper_review import draft_our_paper
+    draft = draft_our_paper(vendor, instrument=instrument, org=org)
+    stem = "".join(ch if (ch.isalnum() or ch in "-_") else "-"
+                   for ch in vendor).strip("-")[:60] or "vendor"
+    target = Path(output) if output else Path(
+        f"{stem}-{instrument}-our-paper.docx")
+    target.write_bytes(draft.content)
+    click.echo(f"wrote {target} ({draft.clause_count} clauses)")
+    click.echo("auto-filled (in red — verify before signature):")
+    for value in draft.filled:
+        click.echo(f"  - {value}")
+
+
 @main.group("graph")
 def graph_group() -> None:
     """The entity graph -- lineage and dossier queries across your records."""

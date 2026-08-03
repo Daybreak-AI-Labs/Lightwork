@@ -1406,6 +1406,32 @@ async def get_paper_memo(request: Request, review_id: str) -> Response:
     return PlainTextResponse(record.get("memo") or "")
 
 
+@router.get("/privacy/our-paper")
+async def draft_our_paper_docx(request: Request, vendor: str = "",
+                               instrument: str = "dpa") -> Response:
+    """OUR template instrument for a vendor, as a Word document with every
+    vendor-specific value filled in red for counsel to verify.
+
+    Deterministic: the clause language is the operator's playbook (shipped
+    positions underneath) -- no model is involved. Nothing is stored; the
+    draft is regenerable from the playbook at any time."""
+    require_permission(request, "operate")
+    _privacy_ops_or_403()
+    from maverick import paper_review
+    inst = (instrument or "dpa").strip().lower()
+    try:
+        draft = await run_in_threadpool(
+            paper_review.draft_our_paper, vendor.strip()[:200],
+            instrument=inst)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    stem = _safe_filename(vendor.strip() or "vendor")[:60] or "vendor"
+    return Response(
+        content=draft.content, media_type=_PAPER_DOCX_MIME,
+        headers={"Content-Disposition":
+                 f'attachment; filename="{stem}-{inst}-our-paper.docx"'})
+
+
 @router.get("/privacy/clause-playbook")
 async def get_clause_playbook(request: Request) -> dict:
     """Our standard clause positions -- what a vendor's paper is redlined to.

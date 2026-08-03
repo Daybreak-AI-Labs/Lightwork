@@ -385,3 +385,91 @@ def _tiny_pdf(text: str) -> bytes:
     out += (f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\n"
             f"startxref\n{xref}\n%%EOF\n").encode()
     return bytes(out)
+
+
+# --- our paper: the drafter -----------------------------------------------
+
+def test_our_paper_answer_files_a_red_filled_draft(desk):
+    client = desk["client"]
+    r = client.post("/reviewer/case/LW-PIA-0001/paper-source",
+                    data={"source": "ours", "who": "A. Novak (Privacy)"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] and body["upload"] is False
+    rd = body["round"]
+    assert rd["kind"] == "our_paper" and rd["version"] == 1
+    assert rd["filed"] and len(rd["attachment_ids"]) == 2 and not rd["error"]
+    assert rd["redline_filename"] == "Acme-CRM-dpa-v1-our-paper.docx"
+    assert any("Acme CRM" in f for f in rd["filled"])
+
+    # Filed to the tenant: cover note + the draft, which carries red fills.
+    atts = desk["ot_mock"].mock_state()["attachments"]
+    draft = next(a for a in atts.values()
+                 if a["filename"].endswith("-our-paper.docx"))
+    doc = zipfile.ZipFile(io.BytesIO(draft["content"])).read(
+        "word/document.xml").decode()
+    from maverick.docx_redline import FILL_COLOR, revision_count
+    assert doc.count(f'w:val="{FILL_COLOR}"') >= 4
+    assert "Acme CRM" in doc
+    assert revision_count(draft["content"]) == (0, 0)   # a draft, not a redline
+
+    # The desk serves the same bytes; the note names every red value.
+    dl = client.get("/reviewer/case/LW-PIA-0001/round/1/redline")
+    assert dl.status_code == 200 and dl.content == draft["content"]
+    note = client.get("/reviewer/case/LW-PIA-0001/round/1/report").text
+    assert "AUTO-FILLED VALUES" in note and "Acme CRM" in note
+    assert "Verify every red value before signature" in note
+
+
+def test_our_paper_and_their_paper_share_one_version_stream(desk):
+    client = desk["client"]
+    client.post("/reviewer/case/LW-PIA-0001/paper-source",
+                data={"source": "ours", "who": "A. Novak (Privacy)"})
+    original = _docx([p for p in VENDOR_DPA.split("\n") if p.strip()])
+    rd = _upload(client, "Acme-DPA.docx", original, DOCX_MIME).json()["round"]
+    # The vendor came back with their own paper: the negotiation history for
+    # this instrument keeps counting -- v1 our draft, v2 their redlined paper.
+    assert rd["version"] == 2
+
+
+# --- the negotiation round-trip -------------------------------------------
+
+def test_round_trip_reports_which_demands_were_accepted(desk):
+    client = desk["client"]
+    lines = [p for p in VENDOR_DPA.split("\n") if p.strip()]
+    v1 = _upload(client, "Acme-DPA.docx", _docx(lines),
+                 DOCX_MIME).json()["round"]
+    assert v1["previous_version"] == 0 and v1["gap_reqs"]
+
+    # Their v2 accepts our sub-processor clause verbatim; the rest unchanged.
+    from maverick.paper_review import OUR_POSITIONS
+    v2_doc = _docx(lines[:4] + [OUR_POSITIONS["subprocessors"]])
+    v2 = _upload(client, "Acme-DPA-rev2.docx", v2_doc,
+                 DOCX_MIME).json()["round"]
+    assert v2["version"] == 2 and v2["previous_version"] == 1
+    assert ("Sub-processor authorization and flow-down"
+            in v2["closed_from_previous"])
+    assert v2["gaps"] < v1["gaps"]
+    memo = client.get("/reviewer/case/LW-PIA-0001/round/2/report").text
+    assert "NEGOTIATION PROGRESS" in memo
+    assert "+ Sub-processor authorization and flow-down" in memo
+
+
+# --- addenda are openable too ---------------------------------------------
+
+def test_addendum_upload_is_openable_from_the_tenant(desk):
+    client = desk["client"]
+    OneTrustAssessment = desk["ot_mock"].OneTrustAssessment
+    ot = OneTrustAssessment(
+        assessment_id="OT-ASMT-9100", name="PIA — Acme CRM",
+        template="Privacy Impact Assessment", subject="Acme CRM",
+        status="Completed", risk_level="high", result={})
+    desk["store"].onetrust[ot.assessment_id] = ot
+    pdf = _tiny_pdf("Amendment to the data processing agreement terms.")
+    r = client.post(f"/onetrust/record/{ot.assessment_id}/add-document",
+                    files={"file": ("amendment.pdf", pdf, "application/pdf")})
+    assert r.status_code == 200, r.text
+    entry = r.json()["addendum"]
+    assert entry["attachment_id"]
+    served = client.get(f"/onetrust/attachment/{entry['attachment_id']}")
+    assert served.status_code == 200 and served.content == pdf

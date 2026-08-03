@@ -214,6 +214,26 @@ def review_text_paragraphs(review) -> list[str]:
     return list(getattr(review, "source_paragraphs", []) or [])
 
 
+def draft_our_paper(vendor: str, *, instrument: str = "dpa"):
+    """OUR template instrument filled for this vendor, values in red for
+    counsel to verify. Returns a ``paper_review.OurPaperDraft`` or None
+    off-platform. Deterministic -- clause language is the operator's
+    playbook; no model is involved."""
+    if not CAPS["paper_redline"]:
+        return None
+    from maverick import paper_review
+    return paper_review.draft_our_paper(vendor, instrument=instrument)
+
+
+def report_docx(text: str, *, title: str = "") -> bytes | None:
+    """A plain-text report rendered as a Word document, or None off-platform
+    (the standalone agent files the honest ``.txt`` instead)."""
+    if not CAPS["paper_redline"]:
+        return None
+    from maverick import docx_redline
+    return docx_redline.text_to_docx(text, title=title)
+
+
 def previous_dpa_gaps(vendor: str) -> set[str]:
     if not CAPS["dpa_clause_review"]:
         return set()

@@ -27,6 +27,16 @@
 
 ## Rules
 
+### Operator conventions (owner-mandated)
+
+- CLOCK: begin every working turn by checking the real time (`date -u`) and
+  stamp chat replies with it (`YYYY-MM-DD HH:MM UTC`). Sessions span days;
+  reason about elapsed time instead of assuming "just now".
+- "Give me the commands" means FROM SCRATCH on the owner's machine — Windows
+  PowerShell unless stated otherwise: fresh terminal, clone-or-cd, branch
+  checkout, venv, installs, env vars, launch. Never assume an open shell, a
+  warm venv, or the repo root as cwd. Never hand over only the last step.
+
 ### Environment
 
 - Run tests as `python3 -m pytest`, never bare `pytest`: PATH `pytest` can be

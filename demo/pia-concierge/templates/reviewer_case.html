@@ -80,10 +80,25 @@ async function answerSource(choice) {
                                  : "They have their own paper");
   const fd = new FormData();
   fd.append('source', choice);
+  fd.append('who', WHO);
   const r = await fetch(`/reviewer/case/${CASE}/paper-source`,
                         {method: 'POST', body: fd});
   const j = await r.json();
   bubble('bot', esc(j.message || ''));
+  if (j.round) {
+    // Our-paper path: the draft was filed — show the round with its
+    // Draft button and say what was auto-filled (the red values).
+    if ((j.round.filled || []).length) {
+      bubble('bot', 'Auto-filled in red: ' +
+                    j.round.filled.map(esc).join(' · ') +
+                    (j.round.filed ? '' :
+                     ' <span style="color:var(--medium)">(attachment did ' +
+                     'not reach the tenant: ' + esc(j.round.error) +
+                     ')</span>'));
+    }
+    ROUNDS.push(j.round);
+    renderRounds();
+  }
   if (j.upload) {
     if (!CAN_REDLINE) {
       bubble('bot', "This standalone build can't produce the redline — that " +
@@ -133,6 +148,16 @@ async function uploadPaper() {
     `rounds table below, and from the vendor's Documents in OneTrust.` +
     (rd.filed ? '' : ' <span style="color:var(--medium)">(attachment did not ' +
                      'reach the tenant: ' + esc(rd.error) + ')</span>'));
+  if (rd.previous_version && (rd.closed_from_previous || []).length) {
+    bubble('bot', `Progress against v${rd.previous_version}: this draft ` +
+      `accepts <strong>${rd.closed_from_previous.length}</strong> of the ` +
+      `changes we demanded — ` +
+      rd.closed_from_previous.map(esc).join('; ') + '.' +
+      (rd.gaps ? ` ${rd.gaps} demand(s) remain open.` : ''));
+  } else if (rd.previous_version) {
+    bubble('bot', `None of the changes we demanded in ` +
+                  `v${rd.previous_version} were accepted in this draft.`);
+  }
   ROUNDS.push(rd);
   renderRounds();
   document.getElementById('upload-box').style.display = 'block';
@@ -142,6 +167,7 @@ const REC_LABEL = {
   do_not_sign_without_changes: ['Do not sign as drafted', 'high'],
   acceptable_with_changes: ['Acceptable with the attached changes', 'medium'],
   acceptable: ['Acceptable', 'low'],
+  our_paper_governs: ['Our paper — sent for signature', 'low'],
 };
 
 function renderRounds() {
@@ -161,11 +187,13 @@ function renderRounds() {
       <td style="padding:10px 14px;text-align:right;white-space:nowrap">
         <a class="btn" style="padding:4px 10px;font-size:12px"
            href="/reviewer/case/${CASE}/round/${r.version}/report"
-           target="_blank">Memo</a>${r.has_redline ? `
+           target="_blank">${r.kind === 'our_paper' ? 'Note' : 'Memo'}</a>${r.has_redline ? `
         <a class="btn" style="padding:4px 10px;font-size:12px;margin-left:6px"
            href="/reviewer/case/${CASE}/round/${r.version}/redline"
-           title="The tracked-changes .docx as filed — open in Word"
-           >Redline</a>` : ''}</td>
+           title="${r.kind === 'our_paper'
+                   ? 'Our drafted instrument, values filled in red — open in Word'
+                   : 'The tracked-changes .docx as filed — open in Word'}"
+           >${r.kind === 'our_paper' ? 'Draft' : 'Redline'}</a>` : ''}</td>
     </tr>`;
   }).join('');
   box.innerHTML = `<div class="card" style="padding:0;overflow:hidden">
@@ -187,7 +215,9 @@ if (SOURCE === 'theirs') {
   if (CAN_REDLINE) document.getElementById('upload-box').style.display = 'block';
 } else if (SOURCE === 'ours') {
   bubble('bot', "This vendor is on <strong>our paper</strong> — our template " +
-                "governs, so there's nothing to redline.");
+                "governs" + (ROUNDS.length
+                  ? "; the drafted instrument is in the rounds below."
+                  : ", so there's nothing to redline."));
 } else {
   askSource();
 }

@@ -159,9 +159,14 @@ A privacy reviewer signs in and gets **their own queue, numbered**; picking a
 number (click, or type it) opens one case and asks the question that decides
 the next hour of work: *is this vendor on our paper, or theirs?*
 
-On our paper the round ends — our template already governs. On **their** paper,
-upload the document (`.docx` or a digital PDF) and the desk does the review by
-hand-equivalent steps:
+On **our** paper the desk does the drafting: it generates our template
+instrument as a real Word document with the vendor-specific values (party
+names, effective date) filled **in red** for counsel to verify, files it onto
+the vendor's OneTrust record under version control with a cover note listing
+every auto-filled value, and shows it in the rounds table with a **Draft**
+button. Deterministic — the clause body is the operator's playbook; no model
+touches it. On **their** paper, upload the document (`.docx` or a digital
+PDF) and the desk does the review by hand-equivalent steps:
 
 1. **Reads it** — stdlib extraction, and a scanned PDF is refused honestly
    rather than reviewed as "10 clauses missing".
@@ -179,6 +184,10 @@ hand-equivalent steps:
 5. **Files both onto the vendor's OneTrust record** under the next sequential
    version for that vendor + instrument, so the Documents tab reads as one
    legible negotiation history (`v1`, `v2`, `v3`) instead of same-named files.
+6. **Tracks the negotiation across rounds** — when the vendor's renegotiated
+   draft comes back, upload it as the next round and the memo (and the chat)
+   reports **which of our demanded changes they accepted** and which they
+   still refuse, so the history reads as a converging negotiation.
 
 Everything filed is **openable where it landed**: the rounds table has a
 **Memo** button (renders in the browser) and a **Redline** button (downloads
@@ -218,9 +227,10 @@ governance layer, shown after the value lands.
    the queue, Under Review**, in a tenant that shows a year of history — open
    it: the full interview verbatim with the provenance notes, findings,
    required controls with GDPR / ISO 27001 / SOC 2 / NIST citations, and the
-   **Agent speed** row. Scroll to **Documents — vendor record** and click the
-   risk analysis the agent wrote — it opens right there; a redline downloads
-   for Word. Click **Approve**. *"The agent did the input and the
+   **Agent speed** row. Scroll to **Documents — vendor record** and open the
+   risk analysis and notice cross-check the agent wrote — real Word
+   documents; any paper-review redline or our-paper draft (red-filled
+   values) downloads there too. Click **Approve**. *"The agent did the input and the
    analysis; your team reviews and approves in the tool they already live
    in. Nothing is Completed until a person clicks."*
 4. The record flips to Completed; the ServiceNow ticket is Resolved with the

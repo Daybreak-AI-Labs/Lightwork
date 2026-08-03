@@ -232,6 +232,17 @@
       </form>
       <div id="pw-paper-result"></div>
 
+      <div class="pw-form">
+        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-2);">
+          Vendor signing <strong>your</strong> paper instead? Download your
+          template instrument as a Word document with the vendor-specific
+          values filled <span style="color:#d33;">in red</span> for counsel to
+          verify — clause language comes from your playbook, no model involved.
+          Uses the Vendor and Instrument fields above.
+        </p>
+        <button class="btn" id="pw-our-paper" type="button">Draft our paper (.docx)</button>
+      </div>
+
       <details class="pw-form" id="pw-playbook">
         <summary style="cursor:pointer;">Your clause playbook — the language every redline demands</summary>
         <p class="muted" style="font-size:var(--text-sm);margin:var(--sp-2) 0;">
@@ -708,6 +719,18 @@
           go.disabled = false;
           go.textContent = 'Review their paper';
         });
+    });
+  }
+
+  // Our paper: a straight GET download of the drafted template — the values
+  // filled for this vendor come back in red for counsel to verify.
+  var ourPaperBtn = document.getElementById('pw-our-paper');
+  if (ourPaperBtn) {
+    ourPaperBtn.addEventListener('click', function () {
+      var vendor = (document.getElementById('pw-paper-vendor').value || '').trim();
+      var inst = document.getElementById('pw-paper-instrument').value || 'dpa';
+      window.location = '/api/v1/privacy/our-paper?vendor=' +
+        encodeURIComponent(vendor) + '&instrument=' + encodeURIComponent(inst);
     });
   }
 

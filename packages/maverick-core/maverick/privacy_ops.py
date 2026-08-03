@@ -1929,17 +1929,36 @@ def save_paper_review(review, *, redline: bytes = b"", memo: str = "",
     d = review.to_dict()
     vendor = (d.get("vendor") or "").strip()[:200]
     instrument = d.get("instrument") or "dpa"
-    prior = sum(1 for r in _PAPER.list()
-                if (r.get("vendor") or "").strip().lower() == vendor.lower()
-                and r.get("instrument") == instrument)
-    version = prior + 1
+    rounds = [r for r in _PAPER.list()
+              if (r.get("vendor") or "").strip().lower() == vendor.lower()
+              and r.get("instrument") == instrument]
+    version = len(rounds) + 1
+    # The negotiation round-trip: when this is a renegotiated draft (v2+),
+    # diff its gaps against the PREVIOUS round's, so the memo reports which
+    # of our demanded changes the counter-party accepted and which they
+    # still refuse. Requirement labels come from the checklist because a
+    # closed gap has no concern object in the current review.
+    closed: list[str] | None = None
+    prev_version = 0
+    if rounds:
+        from .paper_review import requirement_labels
+        prev = max(rounds, key=lambda r: r.get("version", 0))
+        prev_version = int(prev.get("version", 0))
+        prev_gaps = {c.get("clause_key") for c in (prev.get("concerns") or [])
+                     if c.get("status") != "present"}
+        now_gaps = {c.get("clause_key") for c in (d.get("concerns") or [])
+                    if c.get("status") != "present"}
+        labels = requirement_labels(instrument)
+        closed = sorted(labels.get(k, str(k))
+                        for k in prev_gaps - now_gaps if k)
     if not memo:
         # Built here, not by the caller, so the version stamped on the memo is
         # the version the record actually got -- one code path, no drift.
         from .paper_review import analysis_memo
         memo = analysis_memo(
             review, version=version, reviewed_by=_actor_label(reviewed_by),
-            redline_filename=redline_filename, redline_result=redline_result)
+            redline_filename=redline_filename, redline_result=redline_result,
+            closed_from_previous=closed, previous_version=prev_version)
     record = {
         "id": _PAPER.new_id(),
         "vendor": vendor,
@@ -1959,6 +1978,8 @@ def save_paper_review(review, *, redline: bytes = b"", memo: str = "",
         "recommendation": d.get("recommendation", ""),
         "drafted_with_model": bool(d.get("drafted_with_model")),
         "concerns": d.get("concerns") or [],
+        "closed_from_previous": closed or [],
+        "previous_version": prev_version,
         "memo": memo,
         "redline_filename": redline_filename or "",
         "redline_bytes": len(redline or b""),

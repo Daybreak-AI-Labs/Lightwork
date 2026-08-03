@@ -255,7 +255,11 @@ function openRecord(r) {
     const kb = doc.bytes >= 1024
       ? (doc.bytes / 1024).toFixed(1) + ' KB' : doc.bytes + ' B';
     const hint = doc.kind === 'docx'
-      ? ' · Word document — downloads; open it to see the tracked changes'
+      ? (String(doc.filename).endsWith('-redline.docx')
+         ? ' · Word document — downloads; open it to see the tracked changes'
+         : String(doc.filename).endsWith('-our-paper.docx')
+           ? ' · Word document — downloads; auto-filled values are in red'
+           : ' · Word document — downloads; opens in Word')
       : doc.kind === 'text' ? ' · opens in a new tab' : '';
     d.appendChild(el('div', 'note', kb + hint +
       (doc.available ? '' : ' · content no longer retained')));
@@ -266,7 +270,19 @@ function openRecord(r) {
   section(b, 'Documents added after assessment (' + (r.addenda || []).length + ')');
   (r.addenda || []).forEach(function (a) {
     const d = el('div', 'otd__finding ' + (a.re_review ? 'medium' : 'low'));
-    d.append(el('div', '', '📎 ' + a.filename), el('div', 'g', a.summary || ''));
+    if (a.attachment_id) {
+      const link = document.createElement('a');
+      link.href = '/onetrust/attachment/' + encodeURIComponent(a.attachment_id);
+      link.textContent = '📎 ' + a.filename;
+      link.style.cssText = 'color:#2a7ab0;font-weight:600;text-decoration:none;';
+      if (String(a.filename || '').toLowerCase().endsWith('.txt')) link.target = '_blank';
+      const row = el('div');
+      row.appendChild(link);
+      d.appendChild(row);
+    } else {
+      d.appendChild(el('div', '', '📎 ' + a.filename));
+    }
+    d.appendChild(el('div', 'g', a.summary || ''));
     if ((a.closed_gaps || []).length) {
       const c = el('div', 'g', '✓ Closes from last review: ' + a.closed_gaps.join('; '));
       c.style.color = '#3c6b00';
