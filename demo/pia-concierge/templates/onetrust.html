@@ -254,6 +254,8 @@ function openRecord(r) {
     d.appendChild(row);
     const kb = doc.bytes >= 1024
       ? (doc.bytes / 1024).toFixed(1) + ' KB' : doc.bytes + ' B';
+    const when = doc.at
+      ? new Date(doc.at * 1000).toISOString().slice(0, 10) + ' · ' : '';
     const hint = doc.kind === 'docx'
       ? (String(doc.filename).endsWith('-redline.docx')
          ? ' · Word document — downloads; open it to see the tracked changes'
@@ -261,7 +263,7 @@ function openRecord(r) {
            ? ' · Word document — downloads; auto-filled values are in red'
            : ' · Word document — downloads; opens in Word')
       : doc.kind === 'text' ? ' · opens in a new tab' : '';
-    d.appendChild(el('div', 'note', kb + hint +
+    d.appendChild(el('div', 'note', when + kb + hint +
       (doc.available ? '' : ' · content no longer retained')));
     b.appendChild(d);
   });

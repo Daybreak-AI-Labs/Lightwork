@@ -56,6 +56,7 @@ def client(demo, monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     demo["ot_mock"].reset_mock()
     demo["app"].STORE.onetrust.clear()
+    demo["app"].STORE._paper_seq.clear()
     tc = TestClient(demo["app"].app)
     return demo["Client"](base_url="/ot-api", token="demo-bearer-token",
                           http=tc)
@@ -374,15 +375,28 @@ def test_flow_files_under_review_with_ai_branch_and_escalation(
     links = demo["ot_mock"].mock_state()["links"]
     assert links and links[-1]["toIds"] == [run["ai_assessment_id"]]
     # Existing vendor linked, not duplicated; deliverables on its record —
-    # Word documents on the platform (standalone files the honest .txt).
+    # Word documents on the platform (standalone files the honest .txt),
+    # named legibly and versioned per vendor, never by case id.
     assert run["vendor"]["created"] is False
     attached = [a for a in demo["ot_mock"].mock_state()
                 ["attachments"].values()
                 if a["linked_to"] == run["vendor"]["id"]]
     assert {a["filename"] for a in attached} == {
-        f"risk-analysis-{case.id}.docx", f"notice-crosscheck-{case.id}.docx"}
-    # Openable, not stubs: each retains real OPC bytes.
-    assert all(a["content"][:2] == b"PK" and a["bytes"] > 500
+        "Acme-Analytics-risk-analysis-v1.docx",
+        "Acme-Analytics-notice-crosscheck-v1.docx"}
+    # Openable, not stubs: real OPC bytes carrying the FULL report — the
+    # executive summary, findings, and the verbatim interview basis.
+    assert all(a["content"][:2] == b"PK" and a["bytes"] > 1500
                for a in attached)
+    import io as _io
+    import zipfile as _zip
+    risk = next(a for a in attached if "risk-analysis" in a["filename"])
+    doc = _zip.ZipFile(_io.BytesIO(risk["content"])).read(
+        "word/document.xml").decode()
+    for section in ("SUMMARY OF RECORD", "EXECUTIVE SUMMARY", "FINDINGS",
+                    "GOVERNANCE"):
+        assert section in doc, section
+    # The actual finding made it into the document, not just a count.
+    assert "Cross-border flows" in doc
     # Value ledger counted the AI-assessment work product.
     assert run["value"]["privacy_hours"] >= 10.0

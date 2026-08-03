@@ -540,6 +540,7 @@ async def ot_upload(request: Request) -> JSONResponse:
                            "mime": getattr(blob, "content_type", "") or
                            "application/octet-stream",
                            "content": content,
+                           "at": time.time(),
                            "linked_to": ""}
     _evict_over_budget()
     return JSONResponse({"Id": att_id}, status_code=201)
@@ -638,7 +639,7 @@ async def ot_notice_versions(guid: str) -> JSONResponse:
 
 
 def seed_attachment(vendor_name: str, filename: str, content: bytes,
-                    mime: str) -> str:
+                    mime: str, at: float | None = None) -> str:
     """Direct (no-HTTP) placement of a document on a vendor's record,
     creating the vendor row when the name isn't in the base fixture set.
 
@@ -658,7 +659,9 @@ def seed_attachment(vendor_name: str, filename: str, content: bytes,
     att_id = f"att-{_SEQ['att']}"
     ATTACHMENTS[att_id] = {"id": att_id, "filename": filename,
                            "bytes": len(content), "mime": mime,
-                           "content": content, "linked_to": vendor["id"]}
+                           "content": content,
+                           "at": at if at is not None else time.time(),
+                           "linked_to": vendor["id"]}
     _evict_over_budget()
     return att_id
 
