@@ -29,6 +29,23 @@ def test_permissions_api_shape(monkeypatch, tmp_path):
     assert isinstance(body["tools"], list)
 
 
+def test_permissions_corrupt_policy_returns_sanitized_503(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    policy = tmp_path / "ro.toml"
+    policy.write_text("invalid TOML from C:/private/operator/path {")
+
+    from maverick_dashboard.app import app
+
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get(
+        "/api/v1/permissions",
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 503
+    assert response.json()["code"] == "operator_policy_unavailable"
+    assert "C:/private/operator/path" not in response.text
+
+
 def test_permissions_tools_include_enabled_flag(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     client = _client()

@@ -283,10 +283,14 @@ def _run_impl(args: dict) -> str:
         return ("ERROR: missing `command` (view, create, str_replace, insert, "
                 "delete, rename)")
     root = _memory_root()
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        return f"ERROR: cannot open memory directory: {e}"
+    # Reads and failed edit/delete/rename calls must stay read-only. Creating
+    # the root eagerly meant even ``memory view`` changed a protected workspace
+    # when MAVERICK_MEMORY_DIR pointed there.
+    if cmd == "create":
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            return f"ERROR: cannot open memory directory: {e}"
 
     if cmd == "rename":
         return _cmd_rename(root, args)

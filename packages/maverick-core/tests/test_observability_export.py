@@ -80,7 +80,7 @@ def test_tool_latency_percentiles_are_exported() -> None:
     assert 'maverick_tool_latency_samples{tool="wire_transfer"} 3' in out
 
 
-def test_provider_error_rate_is_exported() -> None:
+def test_provider_health_is_exported_with_latency_units() -> None:
     from maverick import provider_health
 
     ph = provider_health.get()
@@ -91,6 +91,14 @@ def test_provider_error_rate_is_exported() -> None:
     assert "maverick_provider_error_rate" in out
     assert 'provider="anthropic"' in out
     assert 'model="claude-opus-5"' in out
+    assert (
+        'maverick_provider_latency_ms{model="claude-opus-5",'
+        'provider="anthropic",quantile="0.5"} 75.0'
+    ) in out
+    assert (
+        'maverick_provider_latency_ms{model="claude-opus-5",'
+        'provider="anthropic",quantile="0.95"} 100.0'
+    ) in out
 
 
 def test_latency_budget_breaches_are_exported(monkeypatch) -> None:

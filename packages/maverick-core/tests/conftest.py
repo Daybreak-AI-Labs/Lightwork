@@ -11,6 +11,7 @@ OpenAI translator without burning API credits in CI.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass, field
 
@@ -19,7 +20,7 @@ from maverick.llm import LLMResponse, ToolCall  # noqa: F401 - re-exported for t
 
 
 @pytest.fixture(autouse=True)
-def _isolate_maverick_home(tmp_path, monkeypatch):
+def _isolate_maverick_home(tmp_path, monkeypatch, request):
     """Point user-home resolution at a per-test temp dir on every platform.
 
     maverick resolves ``~/.maverick`` via ``Path.home()`` in ~30 places. On
@@ -57,10 +58,19 @@ def _isolate_maverick_home(tmp_path, monkeypatch):
     # posture instead. Until that is green everywhere it is a separate CI job
     # rather than the default, because a red posture job that blocks every PR
     # gets switched off, and then nothing measures it at all.
-    monkeypatch.setenv(
-        "MAVERICK_SECURE_DEFAULT",
-        os.environ.get("MAVERICK_TEST_SECURE_DEFAULT", "0"),
-    )
+    secure_default = os.environ.get("MAVERICK_TEST_SECURE_DEFAULT", "0")
+    monkeypatch.setenv("MAVERICK_SECURE_DEFAULT", secure_default)
+    if secure_default.strip().lower() in {"1", "true", "yes", "on"}:
+        # The production posture requires off-host audit-key custody. Give each
+        # test a stable, node-id-derived throwaway key so audit-dependent denial
+        # paths exercise the customer posture without needing a CI secret. The
+        # runtime consumes this environment variable on first use; the fixture
+        # reinstalls a fresh test-scoped value for the next isolated test home.
+        key_seed = f"maverick-posture-test:{request.node.nodeid}".encode()
+        monkeypatch.setenv(
+            "MAVERICK_AUDIT_SIGNING_KEY",
+            hashlib.sha256(key_seed).hexdigest(),
+        )
     # The reflexion / dreaming-insight / learned-skill stores expose their
     # no-tenant path as an IMPORT-TIME module constant (the ``legacy`` fallback in
     # ``reflexion``/``dreaming`` ``_tenant_path``), computed once via ``data_dir()``
@@ -82,6 +92,28 @@ def _isolate_maverick_home(tmp_path, monkeypatch):
     except Exception:  # pragma: no cover -- isolation refresh never blocks a test
         pass
     return tmp_path
+
+
+@pytest.fixture
+def local_audit_key_custody(monkeypatch):
+    """Select the on-disk audit-key path for tests that exercise it directly.
+
+    The production-posture harness injects a test-scoped off-host signing key,
+    and runtime correctly gives that key precedence over local key files. Tests
+    for local rotation, custody, and corruption therefore need to opt into the
+    local source explicitly; otherwise they pass or fail against the injected
+    signer instead of the path named by the test.
+    """
+    from maverick.audit import signing
+
+    monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY", raising=False)
+    monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", raising=False)
+    monkeypatch.setenv("MAVERICK_AUDIT_REQUIRE_OFFHOST_KEY", "0")
+    signing._reset_injected_keypair_cache()
+    try:
+        yield
+    finally:
+        signing._reset_injected_keypair_cache()
 
 
 @pytest.fixture(autouse=True)

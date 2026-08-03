@@ -71,7 +71,14 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      # Resolve includes only inside the active docs_dir. The public overlay
+      # changes docs_dir to .public-docs, so an allowlisted page cannot inline
+      # internal repository documents with an --8<-- directive.
+      base_path:
+        - !relative $docs_dir
+      restrict_base_path: true
+      check_paths: true
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
@@ -83,8 +90,10 @@ nav:
   - Home:
       - Welcome: index.md
       - Getting started: getting-started.md
+      - Operator first run: operator-first-run.md
   - Guides:
       - Configuration: configuration.md
+      - Pricing governance: pricing-governance.md
       - Environment variables: env-vars.md
       - Deployment: deployment.md
       - Reference architectures: reference-architectures.md

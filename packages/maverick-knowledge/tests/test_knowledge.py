@@ -296,20 +296,27 @@ class TestLocalEmbedder:
         assert e.model_name == "some-model"
         assert isinstance(e.dim, int)
 
-    def test_local_fails_loud_when_extra_missing(self):
+    def test_local_fails_loud_when_extra_missing(self, monkeypatch):
         import importlib.util
 
         from maverick_knowledge.embed import build_embedder
 
-        if importlib.util.find_spec("sentence_transformers") is None:
-            # A missing extra must surface, not silently degrade to the hash
-            # fallback (which returns plausible-looking but meaningless hits).
-            with pytest.raises(RuntimeError, match="local"):
-                build_embedder({"embedder": "local"})
-        else:
-            e = build_embedder({"embedder": "local"})
-            v = e.embed(["hello"])
-            assert v and isinstance(v[0], list)
+        original_find_spec = importlib.util.find_spec
+        monkeypatch.setattr(
+            importlib.util,
+            "find_spec",
+            lambda name, *args, **kwargs: (
+                None
+                if name == "sentence_transformers"
+                else original_find_spec(name, *args, **kwargs)
+            ),
+        )
+        # A missing extra must surface, not silently degrade to the hash
+        # fallback (which returns plausible-looking but meaningless hits).
+        # Simulate the missing optional package even in full CI environments so
+        # this offline test never downloads a model from the network.
+        with pytest.raises(RuntimeError, match="local"):
+            build_embedder({"embedder": "local"})
 
 
 class TestBuildEmbedderFailLoud:

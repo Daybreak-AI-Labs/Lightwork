@@ -14,10 +14,12 @@ Python kernel via the standard MCP SDK for Go.
 # PyPI publish pending: install from a source clone (pip install -e
 # packages/maverick-core packages/maverick-mcp) or the native installer for now.
 python -m pip install -e ./packages/maverick-core -e ./packages/maverick-mcp
-go get github.com/modelcontextprotocol/go-sdk@latest   # community SDK; pin to a tag
+go get github.com/modelcontextprotocol/go-sdk@v1.6.1
 ```
 
-Set `ANTHROPIC_API_KEY` (or whichever provider key the kernel needs).
+Use Go 1.26.5 or newer so the client inherits the current standard-library
+security fixes. Set `ANTHROPIC_API_KEY` (or whichever provider key the kernel
+needs).
 
 ## Quickstart
 
@@ -89,6 +91,16 @@ if sc, ok := res.StructuredContent.(map[string]any); ok {
 The shapes are identical across languages — see the
 [TypeScript quickstart](./typescript-quickstart.md) for the full
 per-tool table.
+
+## Child environment, CLI config, and vaults
+
+This minimal Go snippet uses `exec.Command` without an explicit `Env`, so
+`maverick mcp` inherits the Go process environment. The Python child also loads
+the same CLI `config.toml`, dashboard/tenant settings, secret-provider files,
+and enabled vaults; credentials are resolved there, not sent as MCP arguments.
+For production, apply the
+[reviewed filtered-environment policy](./typescript-quickstart.md#child-environment-cli-config-and-vaults)
+used by the runnable TypeScript example.
 
 ## SDK status
 

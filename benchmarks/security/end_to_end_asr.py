@@ -172,8 +172,8 @@ def _render(r: dict) -> str:
     lines += [
         "",
         "## Read this honestly",
-        "- Built-in fallback only. The agent-shield SDK (~115 patterns) and the "
-        "LLM cascade are UNAVAILABLE here and would score higher.",
+        "- Built-in fallback only. The private/unpublished agent-shield SDK "
+        "(~115 patterns) and the LLM cascade are UNAVAILABLE and not measured.",
         "- This is DETECTION at the chokepoints. A missed detection is not an "
         "executed attack when the capability layer denies the tool anyway "
         "(containment is proven in `proof/run_proof.py`).",

@@ -166,6 +166,39 @@ def test_dispatch_contract_still_sees_every_known_site() -> None:
     assert len(hits) >= 4, hits
 
 
+def test_dispatch_contract_uses_repository_paths_on_every_os(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "repo"
+    source = root / "packages" / "demo" / "agent.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "def go(tools):\n    return tools.run('fixed', {})\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dispatch_contract, "REPO_ROOT", root)
+
+    assert dispatch_contract.scan_file(source)[0]["file"] == (
+        "packages/demo/agent.py"
+    )
+
+
+def test_dispatch_contract_ignores_generated_package_copies(
+    tmp_path, monkeypatch,
+) -> None:
+    root = tmp_path / "repo"
+    generated = root / "packages" / "demo" / "build" / "lib" / "rogue.py"
+    generated.parent.mkdir(parents=True)
+    generated.write_text(
+        "def go(reg):\n    return reg.run('stripe_charge', {})\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dispatch_contract, "REPO_ROOT", root)
+    monkeypatch.setattr(dispatch_contract, "SEARCH_ROOTS", ("packages",))
+
+    hits, inspected = dispatch_contract.scan()
+    assert hits == []
+    assert inspected == 0
+
+
 def test_dispatch_contract_flags_a_new_ungated_site(tmp_path) -> None:
     """The committed mutant: a fifth dispatch site added without a gate."""
     f = tmp_path / "rogue.py"

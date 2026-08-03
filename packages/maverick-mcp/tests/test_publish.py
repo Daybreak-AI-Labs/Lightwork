@@ -6,14 +6,18 @@ from maverick_mcp.server import SERVER_VERSION
 
 
 def test_manifest_name_is_reverse_dns():
-    assert publish.manifest_name("maverick") == "io.github.day-ai-labs/maverick"
-    assert publish.manifest_name("Maverick", owner="Day-AI-Labs") == \
-        "io.github.day-ai-labs/maverick"
+    assert (
+        publish.manifest_name("maverick")
+        == "io.github.daybreak-ai-labs/maverick"
+    )
+    assert publish.manifest_name("Maverick", owner="Example-Org") == \
+        "io.github.example-org/maverick"
 
 
 def test_build_manifest_shape():
     m = publish.build_manifest()
-    assert m["name"] == "io.github.day-ai-labs/maverick"
+    assert m["name"] == "io.github.daybreak-ai-labs/maverick"
+    assert m["name"].rsplit("/", 1)[1] == "maverick"
     assert m["version"] == SERVER_VERSION
     assert m["$schema"] == publish.SCHEMA_URL
     assert m["repository"]["source"] == "github"
@@ -68,7 +72,7 @@ def test_main_emits_valid_json(capsys):
     assert rc == 0
     import json
     out = json.loads(capsys.readouterr().out)
-    assert out["name"] == "io.github.day-ai-labs/maverick"
+    assert out["name"] == "io.github.daybreak-ai-labs/maverick"
 
 
 def test_main_validate_ok(capsys):

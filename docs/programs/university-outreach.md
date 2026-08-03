@@ -44,7 +44,7 @@ Hi <name>,
 I maintain Lightwork, a proprietary self-hosted multi-agent runtime
 (recursive agent swarm, hard budget caps, sandboxed execution, signed
 audit log — ~2,000 tests in CI, Python 3.10-3.12). Repo:
-https://github.com/Day-AI-Labs/maverick
+https://github.com/Daybreak-AI-Labs/Lightwork
 
 I'm setting up a small number of university partnerships for <semester>:
 your students take on scoped projects against the real codebase — new
@@ -80,7 +80,7 @@ educational license, a project menu, and weekly maintainer office hours
 for your students.
 
 The project menu is public if you'd like to gauge fit first:
-https://github.com/Day-AI-Labs/maverick/blob/main/docs/programs/university-outreach.md
+https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/docs/programs/university-outreach.md
 
 If the timing is wrong, a pointer to a colleague who runs project courses
 would be just as welcome.

@@ -13,6 +13,8 @@ from urllib.parse import quote
 
 import click
 
+from ..sandbox_names import BUILTIN_SANDBOX_BACKENDS
+
 # Council round-2 perf-seat fix: keep the top-level import surface
 # minimal so `maverick --help` and `maverick version` don't pay for
 # heavy submodules (orchestrator, agent, swarm, skills, sandbox) they
@@ -49,58 +51,60 @@ def _default_model() -> str:
     return DEFAULT_MODEL
 
 
-_PROVIDER_ENV_VARS = (
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
-    "OPENROUTER_API_KEY", "MOONSHOT_API_KEY", "DEEPSEEK_API_KEY",
-    "XAI_API_KEY",
-)
-
-
 def _fact_subject_token(channel: str, user: str) -> str:
     """Stable, delimiter-safe token for explicitly user-scoped facts."""
     return f"{quote(channel, safe='')}:{quote(user, safe='')}"
 
 
-def _has_configured_provider() -> bool:
-    """True if any provider surface is configured (shared predicate).
+def _model_route_configuration_missing(
+    model_spec: str | None = None,
+) -> tuple[str, tuple[str, ...]]:
+    """Return the selected model provider and its missing prerequisites.
 
-    Delegates to ``maverick.config.any_provider_configured`` so the CLI
-    preflight, the LLM clients, and the dashboard agree on what "configured"
-    means: well-known key env vars, self-hosted base-URL env vars
-    (``VLLM_BASE_URL`` / ``TGI_BASE_URL`` / ``OPENAI_COMPATIBLE_BASE_URL``),
-    or a ``[providers.<name>]`` table with a non-empty ``api_key`` /
-    ``base_url``. Before this, each component implemented a different subset
-    and a keyless self-hosted setup passed one gate and failed the next.
+    A global "some credential exists" probe cannot answer whether the route
+    this command will actually instantiate is usable. It also rejects valid
+    keyless routes such as Ollama/vLLM/TGI localhost defaults and authenticated
+    Codex CLI installs. Delegate to the operator preflight's provider contract
+    so the CLI and preflight cannot drift.
     """
+    from ..config import load_config
+    from ..operator_preflight import _route_configuration_missing
+    from ..providers import _canonical
+
+    spec = str(model_spec or _default_model()).strip()
+    provider = _canonical(spec.split(":", 1)[0] if ":" in spec else "anthropic")
+    return provider, _route_configuration_missing(provider, load_config())
+
+
+def _require_llm_key(model_spec: str | None = None) -> str:
+    """Refuse cleanly when a selected route (or any swarm route) is incomplete."""
     try:
-        from ..config import any_provider_configured
-        return any_provider_configured()
-    except Exception:  # pragma: no cover -- never block on a config read
-        return False
+        if model_spec is None:
+            from ..config import load_config
+            from ..operator_preflight import _routed_configuration_missing
 
-
-def _require_llm_key() -> str:
-    """Council UX/capabilities fix: don't sys.exit(2) on missing ANTHROPIC_API_KEY.
-
-    First, check every supported provider's env var; return the first
-    one set (the LLM facade dispatches on model id, not env var, so any
-    valid provider config is fine). Then accept a provider configured in
-    config.toml (local / OpenAI-compatible models keep credentials there,
-    not in a well-known env var). If neither, print an actionable error
-    that points at ``maverick init`` and exit cleanly.
-    """
-    for var in _PROVIDER_ENV_VARS:
-        if os.environ.get(var):
-            return var
-    if _has_configured_provider():
+            routed = _routed_configuration_missing(load_config())
+            missing_routes = {
+                provider: fields
+                for provider, fields in routed.items()
+                if fields
+            }
+        else:
+            provider, missing = _model_route_configuration_missing(model_spec)
+            missing_routes = {provider: missing} if missing else {}
+    except Exception:
+        missing_routes = {"selected": ("configuration",)}
+    if not missing_routes:
         return "config"
+    from ..operator_preflight import _format_route_missing
+
+    detail = _format_route_missing(missing_routes)
     click.echo(
-        "Lightwork can't reach an LLM. No provider key is set.\n"
+        "Lightwork can't reach an LLM through every selected model route. "
+        f"Missing: {detail}.\n"
         "\n"
-        "Set one up with:  maverick init\n"
-        "Or export an existing key, for example:\n"
-        "  export ANTHROPIC_API_KEY=sk-ant-...\n"
-        "  export OPENAI_API_KEY=sk-...",
+        "Configure that route with:  maverick init\n"
+        "Then verify it with:       maverick preflight",
         err=True,
     )
     sys.exit(2)
@@ -117,6 +121,14 @@ def _humanize_run_error(e: Exception) -> str:
     name = type(e).__name__.lower()
     msg = str(e).strip()
     low = msg.lower()
+    from ..runtime_overrides import RuntimeOverridesSecurityError
+
+    if isinstance(e, RuntimeOverridesSecurityError):
+        return (
+            "Lightwork stopped because the operator policy is unavailable.\n"
+            "  Restore or repair runtime-overrides.toml, then run "
+            "`maverick doctor` before retrying."
+        )
     # Sandbox backends already raise an actionable RuntimeError, e.g.
     # "Docker not available. ... change [sandbox] backend to 'local'".
     if isinstance(e, RuntimeError) and (
@@ -294,6 +306,27 @@ def _configure_cli_logging() -> None:
         pass
 
 
+def _configure_cli_text_streams() -> None:
+    """Keep redirected/frozen Windows consoles from crashing on Unicode.
+
+    PyInstaller can freeze ``sys.stdout``/``stderr`` with the active Windows
+    code page (often cp1252) and ``errors='strict'``.  Lightwork's human-facing
+    CLI intentionally uses a few status glyphs, so one unrepresentable glyph
+    must degrade to ``?`` rather than aborting an otherwise healthy command.
+    Preserve the selected encoding and only relax the error policy.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (AttributeError, OSError, ValueError):
+            # Click's test streams and embedded hosts may not be reconfigurable.
+            # Their existing encoding policy remains authoritative.
+            continue
+
+
 @click.group(epilog=(
     "New here? Start with these four:\n"
     "\n"
@@ -311,8 +344,18 @@ def _configure_cli_logging() -> None:
 @click.pass_context
 def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     """Lightwork: multi-agent swarm for long-horizon work."""
+    _configure_cli_text_streams()
     _configure_cli_logging()
     ctx.ensure_object(dict)
+    if ctx.invoked_subcommand == "mcp":
+        from .._mcp_parent_guard import ParentGuardError, arm_from_environment
+
+        try:
+            arm_from_environment()
+        except ParentGuardError as exc:
+            raise click.ClickException(
+                f"refusing unsafe tagged MCP launch: {exc}"
+            ) from exc
     # Default the world DB to the ACTIVE TENANT's world.db (selected via
     # MAVERICK_TENANT) so one business's run history / goals / facts never pool
     # into another's -- the same isolation the channel server already gets via
@@ -320,11 +363,19 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
     # ~/.maverick/world.db, so single-tenant installs are unchanged. An explicit
     # --db always wins.
     if db is None:
-        if ctx.invoked_subcommand == "config-lint":
-            # config-lint is diagnostic-only and never opens the world DB. A
-            # corrupt config may make the strict client floor unknowable, so
-            # resolving the ordinary Workspace path here would abort silently
-            # before config-lint can print the parse error it exists to report.
+        if ctx.invoked_subcommand in {
+            "config-lint",
+            "doctor",
+            "gen-stubs",
+            "init",
+            "preflight",
+            "version",
+        }:
+            # These setup/diagnostic commands never need the world DB. A
+            # corrupt config can make the strict client floor unknowable, so
+            # resolving the ordinary Workspace path here would abort before
+            # the command can report or repair the problem. `init` belongs in
+            # this set because it is the recovery path for a broken config.
             from ..paths import diagnostic_data_dir
 
             db = str(diagnostic_data_dir("world.db"))
@@ -333,6 +384,13 @@ def main(ctx: click.Context, db: str | None, model: str | None) -> None:
 
             db = str(Workspace.current().db_path)
     ctx.obj["db"] = Path(db)
+    if model:
+        from ..llm import ModelNotAllowedError, require_model_allowed
+
+        try:
+            model = require_model_allowed(model)
+        except (ModelNotAllowedError, ValueError) as exc:
+            raise click.BadParameter(str(exc), param_hint="'--model'") from exc
     ctx.obj["model"] = model  # resolved lazily on first use
     # `--model` is a run-wide override. The agents resolve their model via
     # model_for_role(), not the LLM facade's default, so threading it through
@@ -383,7 +441,11 @@ def _install_config_from_file(src: str) -> None:
     except Exception:
         pass
     dst = config_path()
-    from ..file_lock import atomic_write_bytes, ensure_private_directory
+    from ..file_lock import (
+        atomic_write_bytes,
+        ensure_private_directory,
+        ensure_private_file,
+    )
 
     # A provisioned config may contain inline provider keys. Tighten the
     # directory with a protected Windows DACL and publish the bytes from a
@@ -391,6 +453,23 @@ def _install_config_from_file(src: str) -> None:
     # provide the equivalent Windows custody boundary.
     ensure_private_directory(dst.parent)
     data = src_path.read_bytes()
+    try:
+        installed = dst.read_bytes() if dst.is_file() else b""
+        unchanged = (
+            dst.is_file()
+            and installed.replace(b"\r\n", b"\n")
+            == data.replace(b"\r\n", b"\n")
+        )
+    except OSError:
+        unchanged = False
+    if unchanged:
+        # A retried deployment should be a true no-op: do not rotate the inode,
+        # mtime, or watcher state when the same logical TOML is installed,
+        # including when a cross-platform checkout changed line endings.
+        # Still repair/verify custody in case an older release left wide perms.
+        ensure_private_file(dst, 0o600)
+        click.echo(click.style(f"config unchanged -> {dst} (0600)", fg="green"))
+        return
     atomic_write_bytes(dst, data, mode=0o600)
     click.echo(click.style(f"installed config -> {dst} (0600)", fg="green"))
 
@@ -447,8 +526,10 @@ def version() -> None:
         ("maverick-agent",     ("maverick-agent", "maverick")),
         ("maverick-shield",    ("maverick-shield",)),
         ("maverick-channels",  ("maverick-channels",)),
+        ("maverick-evolve",    ("maverick-evolve",)),
         ("maverick-dashboard", ("maverick-dashboard",)),
         ("maverick-mcp-server", ("maverick-mcp-server",)),
+        ("maverick-knowledge", ("maverick-knowledge",)),
         ("maverick-installer", ("maverick-installer",)),
     ]
     for display, candidates in pkg_names:
@@ -496,6 +577,23 @@ def version() -> None:
         pass
     click.echo(f"  python:                {sys.version.split()[0]}")
     click.echo(f"  platform:              {sys.platform}")
+
+
+@main.command("release-runtime-check")
+def release_runtime_check() -> None:
+    """Verify provider SDKs bundled in a full release artifact."""
+    from ..providers import verify_release_runtime
+
+    try:
+        verify_release_runtime()
+    except Exception as exc:
+        raise click.ClickException(
+            f"full release provider runtime is unavailable: {exc}"
+        ) from exc
+    click.echo(
+        "release runtime ready: Anthropic and OpenAI-compatible provider "
+        "SDKs are available"
+    )
 
 
 @main.command()
@@ -3229,8 +3327,7 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
 @click.option("--max-depth", default=3, type=int)
 @click.option("--workdir", default=None)
 @click.option("--sandbox", "sandbox_backend", default=None,
-              type=click.Choice(["local", "docker", "podman", "devcontainer",
-                                 "kubernetes", "ssh", "firecracker"]))
+              type=click.Choice(BUILTIN_SANDBOX_BACKENDS))
 @click.option("--domain", default=None,
               help="Run as a specific domain agent's specialist (see "
                    "`maverick domains-audit` for available domains).")
@@ -3339,11 +3436,13 @@ def start(
         sys.exit(3)
     from .. import providers as _providers
     from ..config import load_config as _load_config
-    _specs = {
-        s for s in (_load_config().get("models") or {}).values()
-        if isinstance(s, str) and s
-    }
-    _specs.add(ctx.obj["model"] or _kernel().DEFAULT_MODEL)
+    from ..operator_preflight import _model_specs
+
+    # Check the same effective offline routes the agents will resolve. Raw
+    # config values plus DEFAULT_MODEL ignored tenant role edits, dashboard
+    # pins, the admin allow-list, and could demand an Anthropic SDK even when
+    # every executable route was local.
+    _specs = _model_specs(_load_config())
     _sdk_msgs = _providers.missing_sdks(sorted(_specs))
     if _sdk_msgs:
         for m in _sdk_msgs:
@@ -3735,14 +3834,16 @@ def debate(ctx, question: str, rounds: int, max_dollars: float,
     """
     from ..budget import Budget
     from ..debate import DebateParticipant, run_debate
+    from ..llm import model_for_role
+
     # Friendly preflight (round-3 platform-test finding: an unconfigured
     # install got a raw anthropic-SDK TypeError traceback here), and route
     # through the configured role models instead of hard DEFAULT_MODEL
     # (kernel rule 2) -- debaters argue at the analyst tier.
-    _require_llm_key()
-    from ..llm import model_for_role
+    selected_model = ctx.obj["model"] or model_for_role("analyst")
+    _require_llm_key(selected_model)
     k = _kernel()
-    llm = k.LLM(model=ctx.obj["model"] or model_for_role("analyst"))
+    llm = k.LLM(model=selected_model)
     participants = [
         DebateParticipant(
             name="Proponent",
@@ -3900,14 +4001,16 @@ def plan_reflect(ctx, goal: str, max_iterations: int, max_dollars: float) -> Non
     iteration cap is reached, or the budget runs out.
     """
     from ..budget import Budget
+    from ..llm import model_for_role
     from ..plan_execute_reflect import run_plan_execute_reflect
+
     # Same preflight + role routing as `debate` (round-3 finding): planning
     # belongs to the orchestrator tier, and a missing provider must refuse
     # cleanly, not traceback inside the anthropic client constructor.
-    _require_llm_key()
-    from ..llm import model_for_role
+    selected_model = ctx.obj["model"] or model_for_role("orchestrator")
+    _require_llm_key(selected_model)
     k = _kernel()
-    llm = k.LLM(model=ctx.obj["model"] or model_for_role("orchestrator"))
+    llm = k.LLM(model=selected_model)
     result = run_plan_execute_reflect(
         goal,
         planner_complete=llm.complete,
@@ -4315,8 +4418,7 @@ def answer(ctx, question_id: int, answer: tuple[str, ...]) -> None:
 @click.option("--max-wall-seconds", type=float, default=None,
               help="Raise the wall-clock cap for this resume.")
 @click.option("--sandbox", "sandbox_backend", default=None,
-              type=click.Choice(["local", "docker", "podman", "devcontainer",
-                                 "kubernetes", "ssh", "firecracker"]),
+              type=click.Choice(BUILTIN_SANDBOX_BACKENDS),
               help="Sandbox backend for this resume (default: the [sandbox] config).")
 @click.pass_context
 @_humane_errors
@@ -4327,7 +4429,6 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
     Pass the goal id positionally (``maverick resume 7``) or via ``--goal-id``;
     omit both to resume the current active/blocked goal.
     """
-    _require_llm_key()
     world = open_world(ctx.obj["db"])
     # The positional arg and --goal-id are equivalent; the option wins if both
     # are given. The budget-halt / error messages suggest the positional form.
@@ -4351,6 +4452,10 @@ def resume(ctx, goal_id_arg, goal_id, max_depth: int, max_dollars, max_wall_seco
         for q in open_qs:
             click.echo(f"  #{q.id}: {q.question}")
         return
+    # Validate the local resume target before provider readiness. Looking up a
+    # goal (including the graceful "nothing to resume" path) needs no LLM and
+    # should remain useful while an operator is repairing provider credentials.
+    _require_llm_key()
     k = _kernel()
     llm = k.LLM(model=ctx.obj["model"] or k.DEFAULT_MODEL)
     # Honor [budget] config, and let --max-dollars/--max-wall-seconds raise
@@ -4832,6 +4937,193 @@ def _erase_subject_knowledge(channel: str, user: str) -> dict[str, int]:
         return {}
 
 
+def _prepare_erasure_proof(world, conversation_ids):
+    """Build and best-effort persist the exact pre-delete closure."""
+    plan_hook = getattr(world, "plan_conversation_erasure", None)
+    if not callable(plan_hook):
+        error = "world backend has no pre-delete erasure planning/receipt API"
+        click.echo(
+            f"warning: {error}; deletion will continue without a complete "
+            "post-hoc goal-graph certificate.",
+            err=True,
+        )
+        return None, None, None, False, error
+
+    try:
+        plan = plan_hook(conversation_ids)
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        click.echo(
+            "warning: pre-delete erasure planning failed "
+            f"({error}); deletion will continue without a complete "
+            "post-hoc goal-graph certificate.",
+            err=True,
+        )
+        return None, None, None, False, error
+
+    try:
+        from ..erasure_receipts import build_manifest, persist_receipt
+        from ..paths import current_tenant_id
+
+        manifest = build_manifest(
+            tenant_id=current_tenant_id() or "shared",
+            conversation_ids=plan["conversation_ids"],
+            goal_ids=plan["goal_ids"],
+            episode_ids=plan["episode_ids"],
+        )
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        click.echo(
+            "warning: pre-delete erasure manifest could not be created "
+            f"({error}); deletion will continue with an in-memory race check, "
+            "but verification will remain indeterminate.",
+            err=True,
+        )
+        return plan, None, None, False, error
+    try:
+        signed = persist_receipt(world, manifest)
+    except Exception as exc:
+        # Art. 17 deletion is not held hostage by assurance infrastructure.
+        # The unsigned in-memory closure still race-checks deletion, but can
+        # never support a clean certificate.
+        error = f"{type(exc).__name__}: {exc}"
+        click.echo(
+            "warning: durable signed erasure proof is unavailable "
+            f"({error}); deletion will continue, but verification will "
+            "remain indeterminate.",
+            err=True,
+        )
+        return plan, manifest, None, False, error
+    return plan, manifest, signed, True, ""
+
+
+def _dispatch_backend_erasure(world, conversation_ids, erasure_plan):
+    """Use a backend's atomic erase hook, including closure race checks."""
+    backend_erase = getattr(world, "erase_conversations", None)
+    if not callable(backend_erase):
+        raise click.ClickException(
+            "the configured world backend does not implement the atomic "
+            "erase_conversations contract; refusing a partial legacy SQL "
+            "deletion. Upgrade the backend or export and erase through a "
+            "supported SQLite/Postgres deployment."
+        )
+    if erasure_plan is None:
+        return backend_erase(conversation_ids)
+
+    import inspect
+
+    try:
+        parameters = inspect.signature(backend_erase).parameters
+    except (TypeError, ValueError):
+        return backend_erase(conversation_ids)
+    if {
+        "expected_conversation_ids",
+        "expected_goal_ids",
+        "expected_episode_ids",
+    }.issubset(parameters):
+        return backend_erase(
+            conversation_ids,
+            expected_conversation_ids=erasure_plan["conversation_ids"],
+            expected_goal_ids=erasure_plan["goal_ids"],
+            expected_episode_ids=erasure_plan["episode_ids"],
+        )
+    if {
+        "expected_conversation_ids",
+        "expected_goal_ids",
+    }.issubset(parameters):
+        return backend_erase(
+            conversation_ids,
+            expected_conversation_ids=erasure_plan["conversation_ids"],
+            expected_goal_ids=erasure_plan["goal_ids"],
+        )
+    return backend_erase(conversation_ids)
+
+
+def _erasure_failure_label(error: BaseException) -> str:
+    """Describe an erase failure without echoing subject-bearing paths/data."""
+    errno = getattr(error, "errno", None)
+    return (
+        f"{type(error).__name__} (errno {errno})"
+        if isinstance(errno, int)
+        else type(error).__name__
+    )
+
+
+def _unlink_erasure_attachments(
+    attachment_paths,
+) -> tuple[int, list[str]]:
+    """Unlink attachment files and report every unverified outcome."""
+    removed = 0
+    errors: list[str] = []
+    for path in attachment_paths:
+        try:
+            target = Path(path)
+            existed = target.exists()
+            target.unlink(missing_ok=True)
+            if target.exists():
+                raise OSError("attachment path remains after unlink")
+            if existed:
+                removed += 1
+        except OSError as error:
+            errors.append(_erasure_failure_label(error))
+    return removed, errors
+
+
+def _erase_conversation_user_notes(
+    channel,
+    conversations,
+) -> tuple[int, str | None]:
+    """Scrub derived subject notes with an explicit verification outcome."""
+    try:
+        from .. import user_notes
+
+        return (
+            user_notes.erase_notes(
+                channel,
+                {conv.user_id for conv in conversations if conv.user_id},
+                strict=True,
+            ),
+            None,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        error = _erasure_failure_label(exc)
+        click.echo(
+            "warning: erased the database but could not scrub user notes "
+            f"({error}); they may retain prior preferences.",
+            err=True,
+        )
+        return 0, error
+
+
+def _persist_erasure_auxiliary_closure(
+    world,
+    signed_receipt,
+    failures: list[str],
+) -> tuple[bool, str | None]:
+    """Create the post-delete proof only when every auxiliary step succeeded."""
+    if failures:
+        return False, "; ".join(failures)
+    if signed_receipt is None:
+        return False, "durable pre-delete receipt is unavailable"
+    try:
+        from ..erasure_receipts import persist_erasure_closure
+
+        persist_erasure_closure(
+            world,
+            signed_receipt,
+            expected_tenant=signed_receipt["tenant_id"],
+        )
+    except Exception as exc:
+        error = _erasure_failure_label(exc)
+        click.echo(
+            "warning: auxiliary erasure closure could not be durably "
+            f"stored ({error}); the clean certificate is withheld.",
+            err=True,
+        )
+        return False, error
+    return True, None
+
+
 @main.command()
 @click.option("--channel", required=True, help="Channel name (e.g. telegram, sms).")
 @click.option("--user", required=True, help="The channel user_id to erase.")
@@ -4868,117 +5160,41 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     # these conversations. We use ALL turns (not just recent), so a
     # conversation with >10k turns doesn't leave orphan attachments.
     conv_ids = [c.id for c in convs]
-    backend_erase = getattr(world, "erase_conversations", None)
-    if backend_erase is not None:
-        goal_ids, attachment_paths, removed_turns = backend_erase(conv_ids)
-    else:
-        placeholders = ",".join("?" * len(conv_ids))
-        goal_ids: set[int] = set()
-        for row in world.conn.execute(
-            f"SELECT DISTINCT goal_id FROM turns "
-            f"WHERE conversation_id IN ({placeholders}) AND goal_id IS NOT NULL",
-            conv_ids,
-        ).fetchall():
-            goal_ids.add(row[0])
+    (
+        erasure_plan,
+        erasure_manifest,
+        signed_erasure_receipt,
+        durable_erasure_proof,
+        receipt_error,
+    ) = _prepare_erasure_proof(world, conv_ids)
 
-        # Step 1b: expand to the transitive closure of subgoals. A recursive
-        # swarm creates child goals via parent_id that are NOT tied to a turn,
-        # so they're missing from the turn-derived set above. Deleting a parent
-        # while a child still references it (goals.parent_id FK) aborts the
-        # whole transaction -- a required Art.17 erasure that silently does
-        # nothing. Walk the parent_id tree so every descendant is included.
-        if goal_ids:
-            frontier = list(goal_ids)
-            while frontier:
-                fph = ",".join("?" * len(frontier))
-                child_rows = world.conn.execute(
-                    f"SELECT id FROM goals WHERE parent_id IN ({fph})", frontier,
-                ).fetchall()
-                new_children = [r[0] for r in child_rows if r[0] not in goal_ids]
-                goal_ids.update(new_children)
-                frontier = new_children
+    goal_ids, attachment_paths, removed_turns = _dispatch_backend_erasure(
+        world,
+        conv_ids,
+        erasure_plan,
+    )
 
-        # Step 2: collect attachment paths to unlink (after commit).
-        attachment_paths: list[str] = []
-        for gid in goal_ids:
-            for a in world.list_attachments(gid):
-                attachment_paths.append(a.path)
-
-        # Step 3: cascade DELETEs in a single transaction.
-        removed_turns = 0
-        try:
-            world.conn.execute("BEGIN IMMEDIATE")
-            # Defer FK checks to COMMIT so deleting parents and children in one
-            # statement can't trip the goals.parent_id self-FK mid-statement.
-            # Combined with the transitive-closure expansion above, every
-            # referenced row is gone by COMMIT, so the deferred check passes.
-            world.conn.execute("PRAGMA defer_foreign_keys = ON")
-            cur = world.conn.execute(
-                f"DELETE FROM turns WHERE conversation_id IN ({placeholders})",
-                conv_ids,
-            )
-            removed_turns = cur.rowcount
-
-            if goal_ids:
-                gph = ",".join("?" * len(goal_ids))
-                gids = list(goal_ids)
-                # FK checks are deferred to COMMIT (above) and the goal_ids set
-                # is the full subgoal closure, so delete order is not load-bearing.
-                world.conn.execute(f"DELETE FROM goal_events WHERE goal_id IN ({gph})", gids)
-                world.conn.execute(f"DELETE FROM messages    WHERE goal_id IN ({gph})", gids)
-                world.conn.execute(f"DELETE FROM questions   WHERE goal_id IN ({gph})", gids)
-                world.conn.execute(f"DELETE FROM attachments WHERE goal_id IN ({gph})", gids)
-                # facts.source_episode_id REFERENCES episodes(id): a fact the agent
-                # distilled from this user's run carries their PII in `value` AND
-                # holds an FK to the episode we're about to delete. Leaving it both
-                # (a) violated Art.17 (PII survived erasure) and (b) tripped the
-                # deferred-FK check at COMMIT once the user had any fact, aborting
-                # the whole erase. Delete those facts before the episodes.
-                world.conn.execute(
-                    f"DELETE FROM facts WHERE source_episode_id IN "
-                    f"(SELECT id FROM episodes WHERE goal_id IN ({gph}))", gids,
-                )
-                world.conn.execute(f"DELETE FROM episodes    WHERE goal_id IN ({gph})", gids)
-                world.conn.execute(
-                    f"DELETE FROM processed_messages WHERE goal_id IN ({gph})", gids,
-                )
-                world.conn.execute(f"DELETE FROM goals WHERE id IN ({gph})", gids)
-
-            world.conn.execute(
-                f"DELETE FROM conversations WHERE id IN ({placeholders})", conv_ids,
-            )
-            world.conn.commit()
-        except Exception:
-            world.conn.rollback()
-            raise
-
-    # Step 4: now that DB rows are gone, unlink files. A failure here
-    # only leaks file bytes (no row points at them) -- the metadata is
-    # already erased, which is the part that matters legally.
-    removed_attachments = 0
-    for p in attachment_paths:
-        try:
-            Path(p).unlink(missing_ok=True)
-            removed_attachments += 1
-        except OSError:
-            pass
+    # Step 4: now that DB rows are gone, unlink files. File bytes remain
+    # personal data even when their database metadata is gone, so any unlink
+    # failure blocks the clean certificate while leaving deletion completed.
+    removed_attachments, attachment_errors = _unlink_erasure_attachments(
+        attachment_paths
+    )
+    for error in attachment_errors:
+        click.echo(
+            "warning: erased the database but could not remove an attachment "
+            f"file ({error}); the clean certificate is withheld.",
+            err=True,
+        )
 
     # Step 4b: remove derived per-user preference notes from the dreaming
     # store. These live outside world.db, so the SQL cascade above cannot
     # erase them; use the concrete matched conversation user_ids so CLI
     # family erasure (local -> local:<uuid>) removes every scoped note.
-    removed_user_notes = 0
-    try:
-        from .. import user_notes as _user_notes
-        removed_user_notes = _user_notes.erase_notes(
-            channel, {c.user_id for c in convs if c.user_id},
-        )
-    except Exception as exc:  # pragma: no cover - defensive
-        click.echo(
-            f"warning: erased the database but could not scrub user notes "
-            f"({type(exc).__name__}: {exc}); they may retain prior preferences.",
-            err=True,
-        )
+    removed_user_notes, user_notes_error = _erase_conversation_user_notes(
+        channel,
+        convs,
+    )
 
     # Step 4c: scrub explicitly user-scoped global facts. Facts are global
     # key/value pairs with no per-user attribution, so erase only touches
@@ -4998,15 +5214,17 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     # the dynamically resolved DB already exists, so a cache-disabled install
     # does not create an empty cache file. Best-effort after the command's
     # irreversible --yes confirmation above.
+    llm_cache_error: str | None = None
     try:
         from ..cache.llm import LLMCache, default_db_path
         _llm_cache_db = default_db_path()
         if _llm_cache_db.exists():
             LLMCache().purge_all_authorities_for_erasure(confirmed=True)
     except Exception as exc:  # pragma: no cover - defensive
+        llm_cache_error = _erasure_failure_label(exc)
         click.echo(
             f"warning: erased the database but could not clear the LLM cache "
-            f"({type(exc).__name__}: {exc}); it may retain prior prompts.",
+            f"({llm_cache_error}); it may retain prior prompts.",
             err=True,
         )
 
@@ -5021,14 +5239,16 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     # violate Art.17, but blindly re-signing old tampering would destroy audit
     # evidence).
     audit_scrubbed = 0
+    audit_scrub_error: str | None = None
     try:
         from ..audit import scrub_user
-        audit_scrubbed, _ = scrub_user(channel, user)
+        audit_scrubbed, _ = scrub_user(channel, user, strict=True)
     except Exception as exc:
+        audit_scrub_error = _erasure_failure_label(exc)
         click.echo(
             f"warning: erased the database but could not scrub the audit log "
-            f"({type(exc).__name__}: {exc}); run `maverick audit grep {user}` "
-            "to check.",
+            f"({audit_scrub_error}); use the receipt id with `erase-verify` "
+            "after repairing audit storage.",
             err=True,
         )
 
@@ -5045,10 +5265,15 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     # verified them before mutation.
     from .. import audit
 
+    audit_reanchor_error: str | None = None
     try:
         audit.reanchor_after_erase()
     except Exception as e:  # pragma: no cover - defensive
-        click.echo(f"⚠ audit re-anchor failed: {e}", err=True)
+        audit_reanchor_error = _erasure_failure_label(e)
+        click.echo(
+            f"warning: audit re-anchor failed ({audit_reanchor_error})",
+            err=True,
+        )
 
     # GDPR Art. 30: record that an erasure happened without deriving a stable
     # identifier from the subject. Low-entropy user IDs (phone numbers, short
@@ -5057,19 +5282,101 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     import secrets
 
     knowledge_chunks = sum(knowledge_removed.values())
-    audit.record(
-        "erase",
-        channel=channel,
-        erasure_id=secrets.token_hex(8),
-        conversations=len(convs),
-        turns=removed_turns,
-        goals=len(goal_ids),
-        attachments=removed_attachments,
-        audit_lines_scrubbed=audit_scrubbed,
-        facts_scrubbed=len(scrubbed_fact_keys),
-        user_notes_scrubbed=removed_user_notes,
-        knowledge_chunks_scrubbed=knowledge_chunks,
+    erasure_id = (
+        erasure_manifest["receipt_id"]
+        if isinstance(erasure_manifest, dict)
+        else secrets.token_hex(16)
     )
+    closure_failures = [
+        *attachment_errors,
+        *(
+            [f"user_notes: {user_notes_error}"]
+            if user_notes_error is not None
+            else []
+        ),
+        *(
+            [f"llm_cache: {llm_cache_error}"]
+            if llm_cache_error is not None
+            else []
+        ),
+        *(
+            [f"audit_scrub: {audit_scrub_error}"]
+            if audit_scrub_error is not None
+            else []
+        ),
+        *(
+            [f"audit_reanchor: {audit_reanchor_error}"]
+            if audit_reanchor_error is not None
+            else []
+        ),
+    ]
+    audit_record_error: str | None = None
+    try:
+        audit_recorded = audit.record(
+            "erase",
+            channel=channel,
+            erasure_id=erasure_id,
+            durable_proof=durable_erasure_proof,
+            auxiliary_checks_passed=not closure_failures,
+            conversations=len(convs),
+            turns=removed_turns,
+            goals=len(goal_ids),
+            attachments=removed_attachments,
+            audit_lines_scrubbed=audit_scrubbed,
+            facts_scrubbed=len(scrubbed_fact_keys),
+            user_notes_scrubbed=removed_user_notes,
+            knowledge_chunks_scrubbed=knowledge_chunks,
+        )
+        if not audit_recorded:
+            audit_record_error = (
+                "audit sink did not acknowledge the erase marker"
+            )
+    except audit.AuditRefused:
+        # Deletion has already committed and cannot honestly be rolled back.
+        # A policy-level refusal must still reach the caller, though: returning
+        # success would turn "strict audit declined this action marker" into a
+        # silently unaudited administrative action.
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        audit_record_error = _erasure_failure_label(exc)
+    if audit_record_error is not None:
+        closure_failures.append(f"audit_record: {audit_record_error}")
+        click.echo(
+            "warning: the erase marker was not durably recorded "
+            f"({audit_record_error}); the clean certificate is withheld.",
+            err=True,
+        )
+
+    (
+        durable_erasure_closure,
+        closure_error,
+    ) = _persist_erasure_auxiliary_closure(
+        world,
+        signed_erasure_receipt,
+        closure_failures,
+    )
+
+    # Automatic same-process proof uses the exact pre-delete closure. When the
+    # signed row could not be persisted, the unsigned manifest still checks all
+    # database stores but deliberately leaves durable_proof=false and
+    # indeterminate=true.
+    from ..erasure_verify import verify_erasure
+
+    try:
+        verification = verify_erasure(
+            user,
+            channel=channel,
+            receipt=signed_erasure_receipt or erasure_manifest,
+            world=world,
+        )
+    except Exception as exc:  # pragma: no cover - last-resort proof isolation
+        verify_error = f"{type(exc).__name__}: {exc}"
+        receipt_error = receipt_error or verify_error
+        verification = {
+            "clean": False,
+            "residual": {},
+            "errors": {"verification": verify_error},
+        }
 
     click.echo(
         f"erased {len(convs)} conversation(s), {removed_turns} turn(s), "
@@ -5080,6 +5387,35 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
         f"{removed_user_notes} user note(s) scrubbed, "
         f"{knowledge_chunks} knowledge chunk(s) scrubbed"
     )
+    if erasure_manifest is not None:
+        click.echo(
+            f"  erasure receipt: {erasure_manifest['receipt_id']} "
+            f"(durable proof: {'yes' if durable_erasure_proof else 'no'}; "
+            "auxiliary closure: "
+            f"{'yes' if durable_erasure_closure else 'no'})"
+        )
+    if verification["clean"]:
+        click.echo("  verification: CLEAN (signed receipt closure is zero)")
+    elif verification["residual"]:
+        click.echo(
+            "warning: automatic verification found residual data: "
+            + ", ".join(
+                f"{store}={count}"
+                for store, count in sorted(verification["residual"].items())
+            ),
+            err=True,
+        )
+    else:
+        detail = (
+            closure_error
+            or receipt_error
+            or "; ".join(verification["errors"].values())
+        )
+        click.echo(
+            "warning: deletion completed without a clean certificate"
+            + (f" ({detail})" if detail else ""),
+            err=True,
+        )
     if knowledge_removed:
         click.echo(
             "  knowledge removed (per collection): "
@@ -5096,18 +5432,43 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
 @click.option("--channel", required=True, help="Channel name (e.g. telegram, sms).")
 @click.option("--user", required=True, help="The channel user_id to verify.")
 @click.option("--tenant", default=None, help="Tenant data plane (default: active).")
+@click.option(
+    "--receipt-id",
+    default=None,
+    help=(
+        "Receipt id required for the signed scope + auxiliary completion proof."
+    ),
+)
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
-def erase_verify(channel: str, user: str, tenant: str | None, as_json: bool) -> None:
+@click.pass_context
+def erase_verify(
+    ctx,
+    channel: str,
+    user: str,
+    tenant: str | None,
+    receipt_id: str | None,
+    as_json: bool,
+) -> None:
     """Verify a (channel, user_id) was fully erased: zero residual records.
 
     Right-to-erasure proof (GDPR Art. 17): reuses the DSAR export, whose
     subject-matching agrees with the erase path, so any residual count is an
-    incomplete erasure. Read-only; run it after `maverick erase`.
+    incomplete erasure. A clean result requires the immutable signed scope
+    receipt and its bound signed auxiliary-store completion record. Read-only;
+    run it after `maverick erase`.
     """
     import json as _json
 
     from ..erasure_verify import verify_erasure
-    report = verify_erasure(user, channel=channel, tenant=tenant)
+
+    world = open_world(ctx.obj["db"])
+    report = verify_erasure(
+        user,
+        channel=channel,
+        tenant=tenant,
+        receipt_id=receipt_id,
+        world=world,
+    )
     if as_json:
         click.echo(_json.dumps(report, default=str))
         if not report["clean"]:
@@ -5117,6 +5478,19 @@ def erase_verify(channel: str, user: str, tenant: str | None, as_json: bool) -> 
         click.echo(click.style(
             f"CLEAN: no residual data for {channel}:{user}", fg="green"))
         return
+    if not report["residual"]:
+        click.echo(click.style(
+            f"INDETERMINATE for {channel}:{user} - no clean certificate:",
+            fg="yellow",
+        ))
+        for store, error in sorted(report["errors"].items()):
+            click.echo(f"  {store}: {error}")
+        if not receipt_id:
+            click.echo(
+                "  pass --receipt-id from the erase command to verify the "
+                "signed scope and auxiliary completion closure"
+            )
+        raise SystemExit(1)
     click.echo(click.style(
         f"RESIDUAL DATA for {channel}:{user} — erasure incomplete:", fg="red"))
     for store, n in sorted(report["residual"].items()):
@@ -5485,20 +5859,33 @@ def watch(ctx, path: str, run: bool, max_dollars: float) -> None:
 
         if run:
             # Don't sys.exit in the watch loop: just skip this marker and continue.
-            # Mirror _require_llm_key(): a provider configured in config.toml
-            # (local / OpenAI-compatible setups keep credentials there, not in a
-            # well-known env var) counts too, so a config-only install isn't
-            # wrongly told "no provider key set" and skipped.
-            if (not any(os.environ.get(v) for v in _PROVIDER_ENV_VARS)
-                    and not _has_configured_provider()):
+            selected_model = ctx.obj["model"] or _default_model()
+            try:
+                from ..config import load_config
+                from ..operator_preflight import _routed_configuration_missing
+
+                missing_routes = {
+                    provider: fields
+                    for provider, fields in _routed_configuration_missing(
+                        load_config()
+                    ).items()
+                    if fields
+                }
+            except Exception:
+                missing_routes = {"selected": ("configuration",)}
+            if missing_routes:
+                from ..operator_preflight import _format_route_missing
+
+                detail = _format_route_missing(missing_routes)
                 click.echo(
-                    "Skipping --run: no provider key set. Run 'maverick init' to configure.",
+                    f"Skipping --run: selected routes are incomplete ({detail}). "
+                    "Run 'maverick init' to configure.",
                     err=True,
                 )
                 continue
             k = _kernel()
             world = open_world(ctx.obj["db"])
-            llm = k.LLM(model=ctx.obj["model"] or k.DEFAULT_MODEL)
+            llm = k.LLM(model=selected_model)
             sandbox = k.build_sandbox(workdir=str(p.parent if p.is_file() else p))
             title = (m.text or (m.follow_lines[0] if m.follow_lines else "")).strip()[:80]
             goal_text = m.to_goal()
@@ -5705,6 +6092,193 @@ def audit_verify(
 
     if any_break:
         raise SystemExit(1)
+
+
+@audit.group("checkpoint")
+def audit_checkpoint() -> None:
+    """Publish and verify independently held live audit-tip commitments."""
+
+
+@audit_checkpoint.command("publish")
+@click.option(
+    "--checkpoint-dir",
+    required=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Independent/WORM directory that will hold signed checkpoints.",
+)
+@click.option("--day", default=None, help="YYYY-MM-DD (default: today).")
+@click.option(
+    "--pubkey",
+    multiple=True,
+    help=(
+        "Pinned Ed25519 public key in hex. Repeat during an authorized key "
+        "rotation."
+    ),
+)
+@click.option(
+    "--supersede-digest",
+    default=None,
+    help="Exact SHA-256 of the latest checkpoint being superseded.",
+)
+@click.option(
+    "--lifecycle-reason",
+    type=click.Choice(["gdpr_reanchor"], case_sensitive=True),
+    default=None,
+    help="Bounded reason for an authorized changed-prefix supersession.",
+)
+def audit_checkpoint_publish(
+    checkpoint_dir: Path,
+    day: str | None,
+    pubkey: tuple[str, ...],
+    supersede_digest: str | None,
+    lifecycle_reason: str | None,
+) -> None:
+    """Publish the current signed day tip to an independent checkpoint store."""
+    from ..audit.checkpoints import AuditCheckpointError, publish_checkpoint
+    from ..paths import data_dir
+
+    _require_day_opt(day)
+    try:
+        path = publish_checkpoint(
+            data_dir("audit"),
+            checkpoint_dir,
+            day=day,
+            trusted_pubkeys=pubkey or None,
+            supersedes_checkpoint_sha256=supersede_digest,
+            lifecycle_reason=lifecycle_reason,
+        )
+    except (AuditCheckpointError, ImportError, OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    import hashlib
+
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        sequence = int(path.stem.rsplit("-", 1)[-1])
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(
+            f"checkpoint was published but its receipt could not be read: {exc}"
+        ) from exc
+    click.echo(f"published {path}")
+    click.echo(f"retain externally: sequence={sequence} sha256={digest}")
+
+
+@audit_checkpoint.command("retire")
+@click.option(
+    "--checkpoint-dir",
+    required=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Independent/WORM directory containing signed checkpoints.",
+)
+@click.option(
+    "--supersede-digest",
+    required=True,
+    help="Exact SHA-256 of the latest checkpoint being retired.",
+)
+@click.option(
+    "--lifecycle-reason",
+    required=True,
+    type=click.Choice(["retention_purge"], case_sensitive=True),
+    help="Bounded reason for retirement.",
+)
+@click.option(
+    "--pubkey",
+    multiple=True,
+    help=(
+        "Pinned Ed25519 public key in hex. Repeat during an authorized key "
+        "rotation."
+    ),
+)
+def audit_checkpoint_retire(
+    checkpoint_dir: Path,
+    supersede_digest: str,
+    lifecycle_reason: str,
+    pubkey: tuple[str, ...],
+) -> None:
+    """Retire a checkpoint after an exact signed retention purge."""
+    from ..audit.checkpoints import AuditCheckpointError, retire_checkpoint
+    from ..paths import data_dir
+
+    try:
+        path = retire_checkpoint(
+            data_dir("audit"),
+            checkpoint_dir,
+            supersedes_checkpoint_sha256=supersede_digest,
+            lifecycle_reason=lifecycle_reason,
+            trusted_pubkeys=pubkey or None,
+        )
+    except (AuditCheckpointError, ImportError, OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"retired by signed lifecycle record {path}")
+
+
+@audit_checkpoint.command("verify")
+@click.option(
+    "--checkpoint-dir",
+    required=True,
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Independent/WORM directory containing signed checkpoints.",
+)
+@click.option(
+    "--minimum-sequence",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Latest sequence retained by an independent verifier/SIEM.",
+)
+@click.option(
+    "--minimum-digest",
+    default=None,
+    help="SHA-256 retained externally for --minimum-sequence.",
+)
+@click.option(
+    "--pubkey",
+    multiple=True,
+    help="Pinned Ed25519 public key in hex; repeat to trust a rotation set.",
+)
+def audit_checkpoint_verify(
+    checkpoint_dir: Path,
+    minimum_sequence: int | None,
+    minimum_digest: str | None,
+    pubkey: tuple[str, ...],
+) -> None:
+    """Verify published checkpoint history and every committed audit prefix."""
+    from ..audit.checkpoints import verify_checkpoints
+    from ..paths import data_dir
+
+    try:
+        breaks = verify_checkpoints(
+            data_dir("audit"),
+            checkpoint_dir,
+            trusted_pubkeys=pubkey or None,
+            minimum_sequence=minimum_sequence,
+            minimum_digest=minimum_digest,
+        )
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if breaks:
+        for item in breaks:
+            click.echo(
+                f"FAIL checkpoint {item.sequence}: {item.reason} — {item.detail}",
+                err=True,
+            )
+        raise SystemExit(1)
+    if pubkey and minimum_sequence is not None and minimum_digest is not None:
+        click.echo(
+            f"OK: independent audit checkpoints intact and externally pinned "
+            f"({checkpoint_dir})"
+        )
+    else:
+        missing = []
+        if not pubkey:
+            missing.append("--pubkey")
+        if minimum_sequence is None:
+            missing.append("--minimum-sequence")
+        if minimum_digest is None:
+            missing.append("--minimum-digest")
+        click.echo(
+            "OK: independent audit checkpoints intact internally; independent "
+            f"assurance incomplete without {', '.join(missing)} "
+            f"({checkpoint_dir})"
+        )
 
 
 @audit.command("seal")

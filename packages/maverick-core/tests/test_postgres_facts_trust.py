@@ -56,16 +56,17 @@ def test_default_tier_is_first_party(world):
     assert meta[k] == ("value", 3)
 
 
-def test_memory_guard_drops_low_trust_without_temporal(world):
+def test_memory_guard_drops_low_trust_without_temporal(world, monkeypatch):
     """End-to-end parity with SQLite: a high-trust-only (high_risk) brief
     excludes the TOOL-tier fact, on the non-temporal Postgres backend."""
     from maverick import memory_guard as mg
+    monkeypatch.setenv("MAVERICK_MEMORY_GUARD", "1")
     w = world
     k = w._kp + "tool"
     w.upsert_fact(k, "ship on friday", source="tool", trust_tier=1)
     meta = w.get_facts_with_trust()
     assert meta[k] == ("ship on friday", 1)
-    assert mg.filter_facts(meta, high_risk=True) == {}
+    assert k not in mg.filter_facts(meta, high_risk=True)
 
 
 def test_trust_tier_updates_on_reupsert(world):
@@ -76,3 +77,37 @@ def test_trust_tier_updates_on_reupsert(world):
     w.upsert_fact(k, "v", source="user", trust_tier=3)
     meta = w.get_facts_with_trust()
     assert meta[k] == ("v", 3)
+
+
+def test_recall_does_not_open_a_second_snapshot_between_value_and_tier(world):
+    """A separate writer cannot be interleaved between value and tier reads.
+
+    The former implementation called ``get_facts`` and then opened a second
+    transaction for tiers. Hooking that call lets a writer deterministically
+    replace a tier-0 value with tier 3 between snapshots, producing the unsafe
+    pair ``("external", 3)``. Atomic recall never calls the hook.
+    """
+    from maverick.world_model_backends.postgres import PostgresWorldModel
+
+    reader = world
+    writer = PostgresWorldModel(dsn=_DSN)
+    k = reader._kp + "atomic"
+    writer.upsert_fact(k, "external", source="import", trust_tier=0)
+    original_get_facts = reader.get_facts
+    interleaved = False
+
+    def split_snapshot():
+        nonlocal interleaved
+        facts = original_get_facts()
+        writer.upsert_fact(k, "approved", source="user", trust_tier=3)
+        interleaved = True
+        return facts
+
+    reader.get_facts = split_snapshot
+    try:
+        meta = reader.get_facts_with_trust()
+    finally:
+        writer.close()
+
+    assert interleaved is False
+    assert meta[k] == ("external", 0)

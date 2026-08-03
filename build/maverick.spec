@@ -8,10 +8,16 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy
 # already bundled; core also owns domain TOML packs, built-in skill Markdown,
 # the gRPC contract, and environment-hunter Sigma rules.  Hidden imports alone
 # do not make those resources available in a frozen binary.
-_datas = collect_data_files('maverick') + collect_data_files('maverick_dashboard')
+_datas = (
+    collect_data_files('maverick')
+    + collect_data_files('maverick_dashboard')
+    + collect_data_files('maverick_shield')
+)
 for _dist in (
     'maverick-agent', 'maverick-shield', 'maverick-channels',
-    'maverick-dashboard', 'maverick-mcp-server', 'maverick-installer',
+    'maverick-evolve', 'maverick-dashboard', 'maverick-mcp-server',
+    'maverick-knowledge', 'maverick-installer', 'pywhispercpp',
+    'openai',
 ):
     try:
         _datas += copy_metadata(_dist)
@@ -40,6 +46,7 @@ a = Analysis(
         'asyncio.queues',
         'asyncio.subprocess',
         'multipart',
+        '_pywhispercpp',
     ] + collect_submodules('maverick')
       # The maverick_* siblings are separate top-level packages imported only
       # inside function bodies (cli.py: `from maverick_dashboard...`), which
@@ -49,7 +56,11 @@ a = Analysis(
       + collect_submodules('maverick_mcp')
       + collect_submodules('maverick_channels')
       + collect_submodules('maverick_shield')
-      + collect_submodules('maverick_installer'),
+      + collect_submodules('maverick_evolve')
+      + collect_submodules('maverick_knowledge')
+      + collect_submodules('maverick_installer')
+      + collect_submodules('pywhispercpp')
+      + collect_submodules('openai'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -97,12 +97,24 @@ def all_modules() -> dict[str, Path]:
         base = REPO_ROOT / "packages" / pkg
         if not base.is_dir():
             continue
-        for p in sorted(base.rglob("*.py")):
-            if _is_test(p):
-                continue
-            name = _module_name(p)
-            if name:
-                out[name] = p
+        # Only immediate import-package roots are source. Recursive scanning
+        # from the distribution root also walks ``build/lib`` and unpacked
+        # sdists left by packaging tests, classifying copied modules under
+        # names such as ``build.lib.maverick.agent``. Besides creating hundreds
+        # of false UNREACHED entries, those artifacts vary by local build
+        # history, so the committed ledger stops describing the repository.
+        source_roots = sorted(
+            child
+            for child in base.iterdir()
+            if child.is_dir() and (child / "__init__.py").is_file()
+        )
+        for source_root in source_roots:
+            for p in sorted(source_root.rglob("*.py")):
+                if _is_test(p):
+                    continue
+                name = _module_name(p)
+                if name:
+                    out[name] = p
     return out
 
 

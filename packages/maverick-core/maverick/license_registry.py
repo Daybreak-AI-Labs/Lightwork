@@ -15,6 +15,7 @@ REGULATORY licenses.
 """
 from __future__ import annotations
 
+import copy
 import json
 import time
 import uuid
@@ -22,6 +23,10 @@ import uuid
 _STATUSES = ("active", "pending", "lapsed", "surrendered")
 # Renewal-runway bands, keyed the way the DSAR aging bands are.
 _BANDS = ("overdue", "d0_30", "d31_60", "d61_90", "d90_plus")
+
+
+class LicenseRegistryError(RuntimeError):
+    """The regulatory-license register could not complete a safe mutation."""
 
 
 def _store_path():
@@ -41,10 +46,9 @@ def _load() -> list[dict]:
 
 def _save(rows: list[dict]) -> None:
     p = _store_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(rows, indent=1), encoding="utf-8")
-    tmp.replace(p)
+    from .file_lock import atomic_write_text
+
+    atomic_write_text(p, json.dumps(rows, indent=1))
 
 
 def _locked():
@@ -52,12 +56,37 @@ def _locked():
     return cross_process_lock(_store_path().with_suffix(".lock"))
 
 
-def _audit(kind: str, **payload) -> None:
+def _audit(kind: str, **payload) -> bool:
+    from .audit import audit_event
+
+    return audit_event(kind, agent="license-register", **payload)
+
+
+def _save_with_audit(
+    rows: list[dict],
+    prior: list[dict],
+    *,
+    existed_before: bool,
+    kind: str,
+    payload: dict,
+) -> None:
+    """Publish a mutation, restoring the exact prior store on audit refusal."""
+    _save(rows)
+    from .audit import AuditRefused
+
     try:
-        from .audit import record
-        record(kind, agent="license-register", **payload)
-    except Exception:  # pragma: no cover -- audit is best-effort here
-        pass
+        _audit(kind, **payload)
+    except AuditRefused:
+        try:
+            if existed_before:
+                _save(prior)
+            else:
+                _store_path().unlink(missing_ok=True)
+        except Exception as rollback_exc:
+            raise LicenseRegistryError(
+                "audit refused license-register mutation and rollback failed"
+            ) from rollback_exc
+        raise
 
 
 def add_license(*, name: str, jurisdiction: str, authority: str,
@@ -85,10 +114,21 @@ def add_license(*, name: str, jurisdiction: str, authority: str,
     }
     with _locked():
         rows = _load()
+        prior = copy.deepcopy(rows)
+        existed_before = _store_path().exists()
         rows.append(rec)
-        _save(rows)
-    _audit("LICENSE_REGISTERED", license=rec["id"], name=rec["name"],
-           jurisdiction=rec["jurisdiction"], by=added_by)
+        _save_with_audit(
+            rows,
+            prior,
+            existed_before=existed_before,
+            kind="LICENSE_REGISTERED",
+            payload={
+                "license": rec["id"],
+                "name": rec["name"],
+                "jurisdiction": rec["jurisdiction"],
+                "by": added_by,
+            },
+        )
     return rec
 
 
@@ -129,6 +169,8 @@ def attach_evidence(license_id: str, *, note: str, filename: str = "",
     against the license. Returns the updated record or None."""
     with _locked():
         rows = _load()
+        prior = copy.deepcopy(rows)
+        existed_before = _store_path().exists()
         for rec in rows:
             if rec.get("id") == license_id:
                 rec["evidence"].append({"at": time.time(),
@@ -137,8 +179,13 @@ def attach_evidence(license_id: str, *, note: str, filename: str = "",
                                         "by": by})
                 rec["history"].append({"at": time.time(),
                                        "event": "evidence", "by": by})
-                _save(rows)
-                _audit("LICENSE_EVIDENCE", license=license_id, by=by)
+                _save_with_audit(
+                    rows,
+                    prior,
+                    existed_before=existed_before,
+                    kind="LICENSE_EVIDENCE",
+                    payload={"license": license_id, "by": by},
+                )
                 return rec
     return None
 
@@ -150,6 +197,8 @@ def renew(license_id: str, *, note: str = "", by: str = "local") -> dict | None:
     records that a human renewed; it never files with the authority."""
     with _locked():
         rows = _load()
+        prior = copy.deepcopy(rows)
+        existed_before = _store_path().exists()
         for rec in rows:
             if rec.get("id") == license_id:
                 base = float(rec.get("renewal_at", time.time()))
@@ -161,9 +210,17 @@ def renew(license_id: str, *, note: str = "", by: str = "local") -> dict | None:
                                             "filename": "", "by": by})
                 rec["history"].append({"at": time.time(),
                                        "event": "renewed", "by": by})
-                _save(rows)
-                _audit("LICENSE_RENEWED", license=license_id, by=by,
-                       next_renewal=rec["renewal_at"])
+                _save_with_audit(
+                    rows,
+                    prior,
+                    existed_before=existed_before,
+                    kind="LICENSE_RENEWED",
+                    payload={
+                        "license": license_id,
+                        "by": by,
+                        "next_renewal": rec["renewal_at"],
+                    },
+                )
                 return rec
     return None
 
@@ -173,18 +230,35 @@ def set_status(license_id: str, status: str, *, by: str = "local") -> dict | Non
         raise ValueError(f"status must be one of {_STATUSES}")
     with _locked():
         rows = _load()
+        prior = copy.deepcopy(rows)
+        existed_before = _store_path().exists()
         for rec in rows:
             if rec.get("id") == license_id:
                 rec["status"] = status
                 rec["history"].append({"at": time.time(),
                                        "event": f"status:{status}",
                                        "by": by})
-                _save(rows)
-                _audit("LICENSE_STATUS", license=license_id, status=status,
-                       by=by)
+                _save_with_audit(
+                    rows,
+                    prior,
+                    existed_before=existed_before,
+                    kind="LICENSE_STATUS",
+                    payload={
+                        "license": license_id,
+                        "status": status,
+                        "by": by,
+                    },
+                )
                 return rec
     return None
 
 
-__all__ = ["add_license", "list_licenses", "runway", "attach_evidence",
-           "renew", "set_status"]
+__all__ = [
+    "LicenseRegistryError",
+    "add_license",
+    "list_licenses",
+    "runway",
+    "attach_evidence",
+    "renew",
+    "set_status",
+]

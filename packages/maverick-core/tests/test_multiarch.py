@@ -3,12 +3,11 @@
 hadolint is not available in the test environment, so this is the
 documented fallback: basic invariant checks that the Dockerfile parses
 structurally (ARG-before-FROM, known instructions only) and that the
-arch-independence contract holds (no native-extra installs, gated riscv64
-fallback, buildx + QEMU guidance present).
+supported-platform and reduced-cohort contracts hold (amd64 + ARM64 only,
+manifest-driven installs, buildx + QEMU guidance present).
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -45,8 +44,8 @@ def test_dockerfile_parses_with_known_instructions_only():
 
 def test_base_image_is_arg_gated_with_slim_default():
     instructions = _instructions()
-    # ARG BASE_IMAGE must precede FROM so --build-arg can swap in the
-    # riscv64 fallback base (debian sid/trixie).
+    # ARG BASE_IMAGE must precede FROM so reviewed compatible images can be
+    # selected without changing the Dockerfile.
     arg_idx = next(i for i, line in enumerate(instructions)
                    if line.startswith("ARG BASE_IMAGE"))
     from_idx = next(i for i, line in enumerate(instructions)
@@ -56,26 +55,24 @@ def test_base_image_is_arg_gated_with_slim_default():
     assert instructions[from_idx].startswith("FROM ${BASE_IMAGE}")
 
 
-def test_riscv64_fallback_is_gated_not_assumed():
+def test_riscv64_is_explicitly_unsupported():
     text = _DOCKERFILE.read_text()
-    # Conditional CPython bootstrap for bare-Debian bases...
-    assert "command -v python3" in text
-    # ...and the README-documented verification step, stated in the header.
-    assert "docker manifest inspect python:3.12-slim" in text
-    assert "debian:sid-slim" in text
+    script = (_MA / "build.sh").read_text()
+    readme = (_MA / "README.md").read_text()
+    assert "riscv64 is intentionally unsupported" in text
+    assert "linux/amd64|linux/arm64" in script
+    assert "linux/riscv64" not in script
+    assert "RISC-V is intentionally unsupported" in readme
 
 
-def test_image_stays_pure_python_by_default():
+def test_image_uses_the_manifest_driven_reduced_cohort():
     text = _DOCKERFILE.read_text()
-    assert "pip install ./packages/maverick-core" in text
-    # Dashboard (pydantic-core, compiled Rust) is opt-in.
+    assert "scripts/install_release_cohort.py" in text
+    assert "--only maverick-agent maverick-shield" in text
     assert "ARG INSTALL_DASHBOARD=0" in text
-    # No native-wheel extras may sneak into the default install.
-    run_lines = [line for line in _instructions() if line.startswith("RUN")]
-    joined = " ".join(run_lines)
-    for native in ("torch", "grpcio", "pyarrow", "playwright"):
-        assert native not in joined, native
-    assert not re.search(r"pip install \S*\[", joined), "no extras in the image"
+    assert "--only maverick-agent maverick-shield maverick-dashboard" in text
+    assert "release-cohort.toml" in text
+    assert "requirements/ci.txt" in text
     assert 'ENTRYPOINT ["maverick"]' in text
 
 
@@ -83,15 +80,14 @@ def test_build_script_targets_multiple_platforms_via_buildx():
     text = (_MA / "build.sh").read_text()
     assert "docker buildx build" in text
     assert "linux/amd64,linux/arm64" in text
-    assert "linux/riscv64" in text          # documented, opt-in
     assert "tonistiigi/binfmt --install all" in text  # QEMU prerequisite
     assert "Dockerfile.multiarch" in text
 
 
-def test_readme_is_honest_about_riscv64_and_extras():
+def test_readme_is_honest_about_native_dependencies_and_scope():
     text = (_MA / "README.md").read_text()
-    assert re.search(r"could not be\s+verified", text, re.IGNORECASE)
-    # The known wheel gaps must be listed per extra.
-    for native in ("grpcio", "torch", "pyarrow", "pydantic-core"):
-        assert native in text, native
+    assert "not pure Python" in text
+    assert "pywhispercpp" in text
+    assert "ARM64 wheels" in text
+    assert "eight-package release cohort" in text
     assert "setup-qemu-action" in text

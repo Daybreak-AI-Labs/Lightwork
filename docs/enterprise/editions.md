@@ -1,11 +1,12 @@
 # Editions
 
-Lightwork is **proprietary, commercially licensed** software ([`../../LICENSE`](../../LICENSE)).
-Production use requires a license — [contact us](https://github.com/Day-AI-Labs/Lightwork).
+Lightwork is **proprietary, commercially licensed** software
+([`LICENSE`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/LICENSE)).
+Production use requires a license — [contact us](https://github.com/Daybreak-AI-Labs/Lightwork).
 
 > Editions are the **distribution** split (open-core). The commercial **pricing
 > tiers** within Enterprise — Basic / Gold / Platinum — and the canonical SKU list
-> live in [`../product-portfolio.md`](../product-portfolio.md).
+> are provided in the commercial proposal for each deployment.
 
 | | **Community ("lite")** *(planned)* | **Enterprise** |
 |---|---|---|

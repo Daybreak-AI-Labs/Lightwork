@@ -124,7 +124,19 @@ class Server:
             if tenant_by_user_enabled()
             else None
         )
-        world = self.world if tenant is None else world_for_tenant(tenant)
+        if tenant is None:
+            world = self.world
+        else:
+            # Postgres is one shared transactional backend whose row-level
+            # tenant boundary comes from tenant_scope/current_tenant_strict.
+            # Creating a tenant SQLite world here silently splits channel
+            # writes from the configured Postgres dashboard and workers.
+            from .world_model_backends import PostgresWorldModel
+
+            if isinstance(self.world, PostgresWorldModel):
+                world = self.world
+            else:
+                world = world_for_tenant(tenant)
         return tenant, world
 
     def _tenant_door_refusal(self, tenant: str | None) -> str | None:
@@ -227,6 +239,20 @@ class Server:
             log.exception("tenant world resolution failed; rejecting message")
             return "⚠ Tenant isolation is unavailable for this message. Try again later."
 
+        # Pin the authenticated tenant across the *entire* lifecycle. Postgres
+        # derives INSERT tenant_id values and read predicates from this context,
+        # so entering it only around dispatch would leave the conversation and
+        # goal rows unscoped. SQLite also benefits: attachment/audit paths and
+        # the selected tenant world now share one unambiguous context.
+        with tenant_scope(tenant=tenant):
+            return await self._handle_message_in_tenant(
+                msg, principal_id=principal_id, tenant=tenant, world=world,
+            )
+
+    async def _handle_message_in_tenant(
+        self, msg, *, principal_id: str, tenant: str | None, world,
+    ) -> str:
+        """Process an authenticated message inside its already-pinned tenant."""
         # Multi-tenant serve: enforce the tenant roster + plan at the channel
         # door BEFORE any goal is created. No-op until an operator provisions
         # tenants. Read-only refusal reasons (suspended / over daily-spend cap /
@@ -299,19 +325,17 @@ class Server:
                                     exc_info=True)
 
             try:
-                # Per-user tenant isolation when enabled (no-op otherwise): scopes
-                # both queue-envelope creation and local execution to the
-                # authenticated sender, then restores. asyncio.to_thread preserves
-                # this context for the synchronous dispatcher without blocking a
-                # channel event loop on broker or gRPC I/O.
+                # The caller's tenant scope covers queue-envelope creation and
+                # local execution. asyncio.to_thread preserves this context for
+                # the synchronous dispatcher without blocking a channel event
+                # loop on broker or gRPC I/O.
                 from .runner import run_goal_in_background_async
-                with tenant_scope(channel=msg.channel, user_id=principal_id):
-                    dispatch_status = await run_goal_in_background_async(
-                        goal_id, max_depth=self.max_depth,
-                        channel=msg.channel or "unknown",
-                        user_id=f"{msg.channel or 'unknown'}:{principal_id}",
-                        conversation_id=conversation.id,
-                    )
+                dispatch_status = await run_goal_in_background_async(
+                    goal_id, max_depth=self.max_depth,
+                    channel=msg.channel or "unknown",
+                    user_id=f"{msg.channel or 'unknown'}:{principal_id}",
+                    conversation_id=conversation.id,
+                )
             except Exception:
                 log.exception("goal #%s dispatch failed", goal_id)
                 try:
@@ -768,23 +792,33 @@ def _advise_channel_tenancy(server) -> None:
 
 def build_from_config() -> Server:
     cfg = load_config()
-    # Shared predicate (maverick.config): env keys, base-url envs, or a
-    # [providers.<name>] table all count. This was the last hard-coded
-    # ANTHROPIC_API_KEY-only gate -- `start` and the dashboard already
-    # accepted config-only self-hosted setups that `serve` refused.
-    from .config import any_provider_configured
-    if not any_provider_configured():
+    # Validate the routes this server can actually instantiate. A credential
+    # for an unrelated provider must not unblock startup, while valid keyless
+    # localhost and Codex CLI routes must not be rejected.
+    from .operator_preflight import (
+        _format_route_missing,
+        _routed_configuration_missing,
+    )
+
+    missing_routes = {
+        provider: fields
+        for provider, fields in _routed_configuration_missing(cfg).items()
+        if fields
+    }
+    if missing_routes:
+        detail = _format_route_missing(missing_routes)
         raise RuntimeError(
-            "No LLM provider configured. Run 'maverick init', export "
-            "ANTHROPIC_API_KEY (or another provider key), or add a "
-            "[providers.<name>] api_key/base_url to ~/.maverick/config.toml."
+            "No LLM provider route is complete "
+            f"({detail}). Run 'maverick init' or `maverick preflight`."
         )
 
     world = open_world()
     sandbox = None
     server = None
     try:
-        llm = LLM()
+        from .llm import model_for_role
+
+        llm = LLM(model=model_for_role("orchestrator"))
         sandbox_cfg = cfg.get("sandbox", {})
         backend = sandbox_cfg.get("backend")
         # Default workdir mirrors config.get_sandbox()'s documented

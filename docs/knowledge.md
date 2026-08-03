@@ -76,8 +76,9 @@ compliance flows:
   removes the subject's document chunks along with their world-model rows, and
   the erase's signed audit event records the count.
 - **Erasure verification.** `maverick erase-verify` folds the subject's residual
-  knowledge-chunk count into its verdict — a subject is not "clean" while any of
-  their documents survive in the vector store.
+  knowledge-chunk count into its verdict. A subject is not "clean" while any of
+  their documents survive in the vector store, and an unavailable configured
+  knowledge store yields `INDETERMINATE` rather than an assumed zero.
 - **Knowledge-only cleanup.** `maverick knowledge residual --channel X --user Y`
   and `maverick knowledge erase-subject ...` for targeted checks and removals.
 

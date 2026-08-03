@@ -126,3 +126,50 @@ def test_existing_env_backup_created_at_0600(tmp_path: Path, monkeypatch):
     if os.name != "nt":  # NTFS reports 0o666 regardless of the chmod
         assert all(m == 0o600 for m in observed_backup_modes)
         assert stat.S_IMODE(backup.stat().st_mode) == 0o600
+
+
+def test_identical_wizard_retry_does_not_rewrite_or_create_backups(
+    tmp_path: Path, monkeypatch
+):
+    """An installer retry with the same answers is a custody check, not a write."""
+    from maverick_installer import wizard
+
+    monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(wizard, "ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(wizard, "CONFIG_FILE", tmp_path / "config.toml")
+    kwargs = {
+        "providers": ["anthropic"],
+        "role_models": {},
+        "channels": {},
+        "safety": {"profile": "balanced"},
+        "budget": {
+            "max_dollars": 5.0,
+            "max_wall_seconds": 600,
+            "max_tool_calls": 30,
+        },
+        "sandbox": {"backend": "local", "workdir": "~/maverick-workspace"},
+        "keys": {"ANTHROPIC_API_KEY": "sk-ant-test"},
+        "capabilities": {},
+    }
+    wizard.write_config(**kwargs)
+    config_before = wizard.CONFIG_FILE.stat()
+    env_before = wizard.ENV_FILE.stat()
+
+    def unexpected_open(*_args, **_kwargs):
+        raise AssertionError("identical retry must not open a wizard write path")
+
+    monkeypatch.setattr(wizard.os, "open", unexpected_open)
+    wizard.write_config(**kwargs)
+
+    config_after = wizard.CONFIG_FILE.stat()
+    env_after = wizard.ENV_FILE.stat()
+    assert (config_after.st_ino, config_after.st_mtime_ns) == (
+        config_before.st_ino,
+        config_before.st_mtime_ns,
+    )
+    assert (env_after.st_ino, env_after.st_mtime_ns) == (
+        env_before.st_ino,
+        env_before.st_mtime_ns,
+    )
+    assert not (tmp_path / "config.toml.bak").exists()
+    assert not (tmp_path / ".env.bak").exists()

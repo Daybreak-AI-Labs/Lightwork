@@ -78,9 +78,9 @@ KNOWN_UNCOVERED: dict[str, str] = {
 
 def _rel(path: Path) -> str:
     try:
-        return str(path.relative_to(REPO_ROOT))
+        return path.relative_to(REPO_ROOT).as_posix()
     except ValueError:
-        return str(path)
+        return path.as_posix()
 
 
 def _is_test(path: Path) -> bool:
@@ -90,6 +90,11 @@ def _is_test(path: Path) -> bool:
         or path.name == "conftest.py"
         or "benchmarks" in path.parts
     )
+
+
+def _is_generated(path: Path) -> bool:
+    """Exclude ignored build outputs that duplicate already-scanned sources."""
+    return any(part in {"build", "dist", ".tox", ".venv"} for part in path.parts)
 
 
 def _dotted(node: ast.AST) -> str:
@@ -161,7 +166,7 @@ def scan(roots: tuple[str, ...] | None = None) -> dict[str, set[str]]:
         if not base.is_dir():
             continue
         for path in sorted(base.rglob("*.py")):
-            if _is_test(path):
+            if _is_test(path) or _is_generated(path):
                 continue
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8"))

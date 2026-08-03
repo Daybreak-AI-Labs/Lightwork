@@ -8,15 +8,15 @@ from __future__ import annotations
 
 import time
 
-from maverick.world_model import WorldModel
+from maverick.world_model import SCHEMA_VERSION, WorldModel
 
 
 def _wm(tmp_path) -> WorldModel:
     return WorldModel(tmp_path / "world.db")
 
 
-def test_schema_is_v28(tmp_path):
-    assert _wm(tmp_path).schema_version == 28
+def test_schema_is_current(tmp_path):
+    assert _wm(tmp_path).schema_version == SCHEMA_VERSION
 
 
 def test_overwrite_when_temporal_disabled(tmp_path, monkeypatch):
@@ -65,6 +65,38 @@ def test_temporal_delete_closes_window(tmp_path, monkeypatch):
     assert w.get_fact("k") is None
     hist = w.fact_history("k")
     assert len(hist) == 1 and hist[0].valid_to is not None  # history survives delete
+
+
+def test_temporal_delete_window_survives_clock_rollback(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_TEMPORAL_MEMORY", "1")
+    times = iter((1_000.0, 999.0))
+    monkeypatch.setattr("maverick.world_model.time.time", lambda: next(times))
+    w = _wm(tmp_path)
+
+    w.upsert_fact("k", "v")
+    assert w.delete_fact("k") == 1
+
+    [version] = w.fact_history("k")
+    assert version.valid_to is not None
+    assert version.valid_to > version.valid_from
+
+
+def test_temporal_change_after_rollback_reassertion_keeps_valid_window(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("MAVERICK_TEMPORAL_MEMORY", "1")
+    times = iter((1_000.0, 900.0, 901.0))
+    monkeypatch.setattr("maverick.world_model.time.time", lambda: next(times))
+    w = _wm(tmp_path)
+
+    w.upsert_fact("k", "v1")
+    w.upsert_fact("k", "v1")  # no new version, rolled-back wall timestamp
+    w.upsert_fact("k", "v2")
+
+    new, old = w.fact_history("k")
+    assert new.valid_from > old.valid_from
+    assert old.valid_to == new.valid_from
+    assert old.valid_to >= old.valid_from
 
 
 def test_provenance_stored(tmp_path):

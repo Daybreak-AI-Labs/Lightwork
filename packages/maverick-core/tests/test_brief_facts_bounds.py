@@ -8,6 +8,7 @@ The QA block right next to it has had _QA_MAX_* caps all along.
 """
 from __future__ import annotations
 
+import inspect
 import tempfile
 from pathlib import Path
 
@@ -28,6 +29,10 @@ def test_small_fact_set_unchanged():
 
 def test_fact_count_capped_newest_kept(monkeypatch):
     monkeypatch.setenv("MAVERICK_BRIEF_FACTS_MAX", "5")
+    # Windows can return the same wall-clock value for several rapid writes.
+    # Freeze it explicitly so the insertion-sequence tie-breaker is exercised
+    # on every platform.
+    monkeypatch.setattr("maverick.world_model.time.time", lambda: 1_000.0)
     w = _world()
     for i in range(12):
         w.upsert_fact(f"k{i:02d}", f"v{i}")
@@ -37,6 +42,48 @@ def test_fact_count_capped_newest_kept(monkeypatch):
     assert "k11: v11" in block          # newest kept
     assert "k00: v0" not in block       # oldest dropped
     assert "7 more fact(s) omitted" in block
+
+
+def test_upserted_fact_is_newest_even_when_wall_clock_ties(monkeypatch):
+    monkeypatch.setattr("maverick.world_model.time.time", lambda: 1_000.0)
+    w = _world()
+    w.upsert_fact("older-key", "first")
+    w.upsert_fact("newer-key", "second")
+    w.upsert_fact("older-key", "updated last")
+
+    assert list(w.get_facts()) == ["older-key", "newer-key"]
+    assert w.get_facts()["older-key"] == "updated last"
+    assert w.count_facts() == 2
+
+
+def test_latest_write_stays_newest_through_wall_clock_rollback(monkeypatch):
+    times = iter((1_000.0, 1_001.0, 999.0))
+    monkeypatch.setattr(
+        "maverick.world_model.time.time", lambda: next(times)
+    )
+    w = _world()
+    w.upsert_fact("a", "first")
+    w.upsert_fact("b", "second")
+    w.upsert_fact("a", "updated after rollback")
+
+    assert list(w.get_facts()) == ["a", "b"]
+    assert w.count_facts() == 2
+
+
+def test_fact_write_clock_avoids_full_table_timestamp_scan():
+    """Newest-write correctness must stay O(log N), not scan all facts/write."""
+    w = _world()
+    for i in range(20):
+        w.upsert_fact(f"k{i}", str(i))
+
+    source = inspect.getsource(WorldModel.upsert_fact)
+    assert '"SELECT MAX(updated_at)' not in source
+    plan = w._read_all(  # noqa: SLF001 - regression checks SQLite's real plan
+        "EXPLAIN QUERY PLAN SELECT COALESCE(MAX(id), 0) + 1 FROM facts"
+    )
+    detail = " ".join(str(row["detail"]).upper() for row in plan)
+    assert "SCAN FACTS" not in detail
+    assert "SEARCH FACTS" in detail
 
 
 def test_long_value_truncated(monkeypatch):

@@ -6,11 +6,11 @@ keeps state on a persistent volume; secrets come from the platform's secret
 store, never the image. Pick the one that matches where you already run things.
 
 > All four target the same container (`deploy/docker/Dockerfile` /
-> `ghcr.io/day-ai-labs/maverick`), expose the dashboard on port **8765**, and
-> use the auth-exempt **`/healthz`** probe. The dashboard/control plane is a
-> single SQLite writer — run **one** instance until you switch
-> `[world_model] backend = "postgres"` and add a `maverick worker` pool, after
-> which the web tier scales horizontally.
+> `ghcr.io/daybreak-ai-labs/lightwork`), expose the dashboard on port **8765**, and
+> use auth-exempt **`/readyz`** readiness and **`/livez`** liveness probes where
+> the platform supports both. Keep exactly **one** dashboard/control-plane
+> instance, including with `[world_model] backend = "postgres"`; Postgres and
+> the queue let you scale the separate `maverick worker` tier, not the web tier.
 
 | Platform | Manifest | State | Secrets |
 |---|---|---|---|
@@ -26,10 +26,11 @@ kubectl apply -f deploy/reference-architectures/kubernetes/maverick.yaml
 kubectl -n maverick port-forward svc/maverick 8765:80
 ```
 
-Namespaced, runs as non-root, readiness-gated on `/healthz`, state on a 10Gi
-PVC. Put real values into the `maverick-secrets` Secret from your secret
-manager (External Secrets Operator / Sealed Secrets) — the checked-in manifest
-ships placeholders. Add an Ingress/Gateway for TLS termination.
+Namespaced, runs as non-root, readiness-gated on `/readyz` and liveness-gated
+on `/livez`, with state on a 10Gi PVC. Put real values into the
+`maverick-secrets` Secret from your secret manager (External Secrets Operator /
+Sealed Secrets) — the checked-in manifest ships placeholders. Add an
+Ingress/Gateway for TLS termination.
 
 ## AWS ECS (Fargate)
 
@@ -40,7 +41,8 @@ aws ecs register-task-definition \
 
 Fill in `ACCOUNT_ID`, `REGION`, the EFS `fileSystemId`, and the Secrets Manager
 ARNs, then create a service behind an ALB whose target group points at
-container port 8765 with health-check path `/healthz`.
+container port 8765. The task-level liveness check uses `/livez`; configure the
+ALB target group's readiness check on `/readyz`.
 
 ## Fly.io
 
@@ -51,19 +53,20 @@ fly secrets set ANTHROPIC_API_KEY=... MAVERICK_DASHBOARD_TOKEN=...
 fly deploy
 ```
 
-`force_https` is on; `min_machines_running = 1` keeps the single writer alive.
+`force_https` is on; `min_machines_running = 1` keeps the single writer alive,
+and the service readiness check uses `/readyz`.
 
 ## Railway
 
 Create a project from the repo, add a Volume mounted at `/state`, set
 `ANTHROPIC_API_KEY` and `MAVERICK_DASHBOARD_TOKEN` in the service variables, and
 deploy. Railway injects `$PORT`; the start command binds the dashboard to it and
-health-checks `/healthz`.
+health-checks `/readyz`.
 
 ## Scaling to multi-tenant / multi-worker
 
 These blueprints use one dashboard/control-plane node. To add processing
-capacity, see the hosted pieces in [`FEATURES.md`](./FEATURES.md): the Postgres
+capacity, see the [enterprise architecture](enterprise/architecture.md): the Postgres
 world-model backend (tenant isolation + migrations), the `QueueDispatcher`
 (arq) worker pool, per-tenant KMS/egress, and the operator console. Once
 Postgres + queue are configured, keep one web/control-plane replica (`maverick

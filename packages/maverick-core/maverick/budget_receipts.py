@@ -271,16 +271,16 @@ def mint(
             # silently invisible: record it so a missing anchor for an
             # existing chain shows up in the signed audit log even though the
             # prior floor itself can't be recovered from the deleted file.
-            try:
-                from .audit import EventKind, record
-                record(EventKind.CONFIG_REMEDIATED, agent="budget_receipts",
-                       resource=str(chain_path), field="receipt_head_anchor",
-                       detail=f"head anchor absent for a non-empty chain "
-                              f"({pre_mint_count} existing receipt(s)); "
-                              "(re)bootstrapping -- verify this was an upgrade, "
-                              "not a deleted anchor")
-            except Exception:
-                pass  # failure-policy: best_effort
+            from .audit import EventKind, audit_event
+
+            audit_event(
+                EventKind.CONFIG_REMEDIATED, agent="budget_receipts",
+                resource=str(chain_path), field="receipt_head_anchor",
+                detail=f"head anchor absent for a non-empty chain "
+                       f"({pre_mint_count} existing receipt(s)); "
+                       "(re)bootstrapping -- verify this was an upgrade, "
+                       "not a deleted anchor",
+            )
         prev_line = _last_line(chain_path)
         payload = {
             "goal_id": int(goal_id),

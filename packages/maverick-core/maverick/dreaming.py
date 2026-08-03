@@ -1412,10 +1412,11 @@ def dream_cycle(
             log.debug("dreaming: trajectory tool join skipped: %s", e)
         try:
             for g in world.list_goals(status="done", limit=max_goals, order="desc"):
-                # Learned skill files are tenant-shared today. Never fold an
-                # owner-scoped user's goal title into that shared artifact;
-                # missing owner metadata is ambiguous and therefore skipped.
-                # Owner-specific skill stores/retrieval can relax this later.
+                # Learned skill files are tenant-scoped but remain shared by
+                # every owner inside that tenant. Never fold an owner-scoped
+                # user's goal title into that tenant-wide artifact; missing
+                # owner metadata is ambiguous and therefore skipped. A future
+                # owner-scoped store *and retrieval path* can relax this.
                 if getattr(g, "owner", None) != "":
                     continue
                 successes.append({

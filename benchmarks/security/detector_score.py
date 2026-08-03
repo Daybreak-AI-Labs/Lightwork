@@ -61,7 +61,9 @@ BACKENDS: dict[str, Callable[[str], bool]] = {
 
 # Backends we cannot measure here, reported for honesty (not silently dropped).
 UNAVAILABLE = {
-    "agent_shield_sdk": "pip install agent-shield (full ~115-pattern ruleset)",
+    "agent_shield_sdk": (
+        "private/unpublished full SDK; unavailable from public PyPI"
+    ),
     "cascade_deep_llm": "needs an LLM judge + API key (MAVERICK_CASCADE_SHIELD=1)",
 }
 

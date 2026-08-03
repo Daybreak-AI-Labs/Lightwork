@@ -17,8 +17,9 @@ def test_sandbox_choice_lists_every_real_backend():
     # the backends build_sandbox() actually supports must be offered.
     result = CliRunner().invoke(main, ["start", "--sandbox", "nope", "x"])
     assert result.exit_code != 0
-    for backend in ("local", "docker", "podman", "devcontainer",
-                    "kubernetes", "ssh", "firecracker"):
+    from maverick.sandbox_names import BUILTIN_SANDBOX_BACKENDS
+
+    for backend in BUILTIN_SANDBOX_BACKENDS:
         assert backend in result.output
 
 
@@ -44,6 +45,17 @@ def test_humanize_auth_error():
 def test_humanize_generic_points_to_debug_flag():
     msg = _humanize_run_error(ValueError("something weird"))
     assert "MAVERICK_DEBUG" in msg
+
+
+def test_humanize_operator_policy_error_is_actionable_and_path_safe():
+    from maverick.runtime_overrides import RuntimeOverridesSecurityError
+
+    msg = _humanize_run_error(
+        RuntimeOverridesSecurityError("C:/private/runtime-overrides.toml")
+    )
+    assert "operator policy is unavailable" in msg
+    assert "maverick doctor" in msg
+    assert "C:/private" not in msg
 
 
 def test_humane_errors_prints_message_and_exits_nonzero(capsys):

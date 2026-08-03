@@ -81,31 +81,45 @@ def purge_audit_files(
         # <= : the day-file dated exactly `days` ago is expired and must be
         # purged. Strict < kept it, making the window days+1.
         if day <= cutoff_day:
-            # Capture what is about to be destroyed BEFORE unlinking, so the
-            # signed purge record commits to the exact tip and row count. After
-            # the unlink this is unrecoverable, and a purge row that cannot name
-            # the tip is refused by verify_anchors (see _purge_authorizes).
-            tip, count = _tip_and_count(path)
-            removed.append(path.name)
-            if not dry_run:
-                try:
+            if dry_run:
+                # Dry-run is intentionally non-mutating, including no lock
+                # sidecar creation. The result is advisory and can race a live
+                # writer; the enforcing pass takes the strict day lock below.
+                tip, count = _tip_and_count(path)
+                removed.append(path.name)
+                purged.append(
+                    {"day": path.stem, "tip_hash": tip, "row_count": count}
+                )
+                continue
+
+            # Capture and unlink under the exact sidecar lock used by append,
+            # GDPR rewrite, and checkpoint publication. Without this, a writer
+            # can append between the captured tip and unlink, making the signed
+            # purge marker attest to bytes other than those actually destroyed.
+            from ..file_lock import cross_process_lock
+
+            try:
+                with cross_process_lock(path, strict=True):
+                    if not path.exists():
+                        continue
+                    tip, count = _tip_and_count(path)
                     path.unlink()
-                except OSError as e:
-                    log.warning("retention: cannot unlink %s: %s", path, e)
-                    removed.pop()
-                    continue
-                # The rewrite/append lock sidecar guards a file that no longer
-                # exists. Left behind it is one empty inode per purged day,
-                # forever -- unbounded growth inside the routine whose whole
-                # job is to bound it.
-                sidecar = path.parent / (path.name + ".lock")
-                try:
-                    sidecar.unlink()
-                except OSError:
-                    pass
-            purged.append({
-                "day": path.stem, "tip_hash": tip, "row_count": count,
-            })
+            except (OSError, RuntimeError) as e:
+                # Retention must not destroy a file when it cannot coordinate
+                # with writers or prove which bytes it is deleting.
+                log.warning("retention: cannot safely purge %s: %s", path, e)
+                kept += 1
+                continue
+
+            removed.append(path.name)
+            purged.append(
+                {"day": path.stem, "tip_hash": tip, "row_count": count}
+            )
+            # Keep the sidecar as the durable coordination inode. Unlinking it
+            # after releasing the OS lock creates an ABA window: another writer
+            # may already hold the old inode while a third process creates and
+            # locks a replacement. There is at most one sidecar per retained
+            # audit day, and checkpoint retirement deliberately reuses it.
         else:
             kept += 1
     if purged and not dry_run:

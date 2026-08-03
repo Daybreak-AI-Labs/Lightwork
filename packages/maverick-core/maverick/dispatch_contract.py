@@ -34,6 +34,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SEARCH_ROOTS = ("packages", "apps")
+_GENERATED_PARTS = frozenset({
+    "__pycache__",
+    ".tox",
+    ".venv",
+    "build",
+    "dist",
+    "site-packages",
+})
 
 #: Files allowed to dispatch directly. agent.py owns the eleven-gate chain;
 #: tool_authz.py is the gate every other site routes through.
@@ -85,7 +93,7 @@ def _production_callers_of(rel: str, cls: str, meth: str) -> list[str]:
         if not base.is_dir():
             continue
         for p in sorted(base.rglob("*.py")):
-            if _is_test(p) or _rel(p) == rel:
+            if _is_test(p) or _is_generated(p) or _rel(p) == rel:
                 continue
             try:
                 tree = ast.parse(p.read_text(encoding="utf-8"))
@@ -108,13 +116,27 @@ REGISTRY_NAMES = frozenset({"reg", "registry", "tools", "_registry", "base_regis
 
 def _rel(p: Path) -> str:
     try:
-        return str(p.relative_to(REPO_ROOT))
+        # Contract identities are repository paths, not host-OS paths. The
+        # allowlists and anti-blindness sentinel deliberately use `/` on every
+        # runner, so normalize Windows paths too.
+        return p.relative_to(REPO_ROOT).as_posix()
     except ValueError:
-        return str(p)
+        return p.as_posix()
 
 
 def _is_test(p: Path) -> bool:
     return "tests" in p.parts or p.name.startswith("test_")
+
+
+def _is_generated(p: Path) -> bool:
+    """Ignore build/install copies that are not editable product source."""
+    try:
+        parts = p.relative_to(REPO_ROOT).parts
+    except ValueError:
+        parts = p.parts
+    return any(part in _GENERATED_PARTS for part in parts) or any(
+        part.startswith("maverick_agent-") for part in parts
+    )
 
 
 def scan_file(path: Path) -> list[dict]:
@@ -169,7 +191,7 @@ def scan(roots: tuple[str, ...] | None = None) -> tuple[list[dict], int]:
         if not base.is_dir():
             continue
         for p in sorted(base.rglob("*.py")):
-            if _is_test(p):
+            if _is_test(p) or _is_generated(p):
                 continue
             inspected += 1
             hits.extend(scan_file(p))

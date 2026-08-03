@@ -112,6 +112,10 @@ _LEARNED_FIELDS = frozenset({"ts", "need", "kind", "name", "source", "outcome"})
 _MAX_LEARNED_LEDGER_BYTES = 16 * 1024 * 1024
 
 
+class GeneratedToolRemovalError(RuntimeError):
+    """A generated tool could not be removed with durable revocation proof."""
+
+
 # --------------------------------------------------------------------------
 # config / gating
 # --------------------------------------------------------------------------
@@ -1398,6 +1402,81 @@ def generated_tool_names() -> set[str]:
     return names
 
 
+def delete_generated_tool(name: str, *, actor: str = "system") -> dict[str, Any]:
+    """Revoke and remove one persisted generated tool, fail-closed.
+
+    Deletion is an authority lifecycle transition, not merely ``Path.unlink``:
+    the exact tenant/name/source-digest grant is first invalidated with a
+    signed consent-ledger tombstone. A durable audit row recording that
+    revocation must then land before source removal can proceed. A live proxy
+    rechecks the same grant on every call, so revocation immediately disables
+    already-loaded instances as well as future discovery.
+
+    Returns a source-free evidence summary. Raises ``FileNotFoundError`` when
+    the file does not exist and leaves the source in place when revocation or
+    audit evidence cannot be made durable.
+    """
+    if not _NAME_RE.fullmatch(name):
+        raise ValueError(
+            f"tool name {name!r} must be lowercase id (a-z0-9_), 2-41 chars"
+        )
+
+    from .audit import EventKind, audit_event
+    from .paths import current_tenant_id
+    from .safety.consent import revoke
+
+    tenant = current_tenant_id() or "shared"
+    target = generated_tools_dir() / f"{name}.py"
+    with cross_process_lock(target, strict=True):
+        if not target.is_file():
+            raise FileNotFoundError(target)
+        source = _read_generated_source(target)
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        scope = _generated_consent_scope(tenant, name, digest)
+
+        consent_revoked = revoke(
+            "register-generated-tool",
+            scope=scope,
+            strict=True,
+            write_tombstone=True,
+        )
+        if _generated_consent_granted(
+            tenant=tenant,
+            name=name,
+            digest=digest,
+        ):
+            raise GeneratedToolRemovalError(
+                "generated-tool authority remained active after revocation"
+            )
+
+        recorded = audit_event(
+            EventKind.LEARNING_UPDATE,
+            agent="self_learning",
+            operation="generated_tool_authority_revoked",
+            name=name,
+            tenant=tenant,
+            source_sha256=digest,
+            consent_revoked=consent_revoked,
+            actor=str(actor or "system")[:256],
+        )
+        if not recorded:
+            raise GeneratedToolRemovalError(
+                "generated-tool revocation could not be recorded in the audit log"
+            )
+
+        # Revocation and its audit evidence are durable before this point. If
+        # unlink now fails, the source remains present but cannot execute; the
+        # caller can safely retry removal without resurrecting authority.
+        target.unlink()
+
+    return {
+        "name": name,
+        "tenant": tenant,
+        "source_sha256": digest,
+        "consent_revoked": consent_revoked,
+    }
+
+
 def write_generated_tool(
     name: str, source: str, *, need: str = "",
     sandbox: Any = None, require_approval: bool = True,
@@ -1442,6 +1521,8 @@ def write_generated_tool(
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
     tenant = current_tenant_id() or "shared"
     scope = _generated_consent_scope(tenant, name, digest)
+    target = generated_tools_dir() / f"{name}.py"
+    existed_before_consent = target.exists()
     if not require_approval:
         log.warning(
             "require_approval=False no longer bypasses generated-tool consent"
@@ -1473,6 +1554,11 @@ def write_generated_tool(
         if target.exists():
             raise ValueError(
                 f"generated tool {name!r} already exists; refusing to overwrite it"
+            )
+        if existed_before_consent:
+            raise ValueError(
+                f"generated tool {name!r} changed during approval; "
+                "retry to obtain a fresh digest-bound decision"
             )
         check_learning_halt("self_learning", "generated_tool_persistence")
         atomic_write_text(target, source, mode=0o600)
@@ -1778,7 +1864,8 @@ __all__ = [
     "Candidate", "search_capabilities", "acquire_skill", "add_mcp_server",
     "acquire_mcp_server", "mcp_acquisition_enabled",
     "provider_egress_enabled",
-    "write_generated_tool", "load_generated_tools", "audit_generated_source",
+    "write_generated_tool", "delete_generated_tool", "load_generated_tools",
+    "GeneratedToolRemovalError", "audit_generated_source",
     "preflight",
     "validate_spec_url", "probe_openapi_spec", "discover_openapi_spec",
     "LEARNED_PATH", "GENERATED_TOOLS_DIR",  # noqa: F822 - dynamic __getattr__ API

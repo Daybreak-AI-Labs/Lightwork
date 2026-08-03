@@ -12,6 +12,8 @@ import asyncio
 import os
 from typing import Any
 
+from maverick.runtime_overrides import RuntimeOverridesSecurityError
+
 # One process-wide WorldModel cache keyed by absolute DB path (was a
 # separate dict per module). Tests clear it via ``<module>._world_cache``.
 _world_cache: dict[str, Any] = {}
@@ -56,20 +58,48 @@ def _any_provider_key_set() -> bool:
         return False
 
 
-def require_provider_or_400() -> None:
-    """Raise HTTP 400 if no LLM provider is configured, with the canonical
-    setup message. The goal/chat/webhook routes each used to inline this block;
-    the copies had already drifted (some omitted GEMINI_API_KEY)."""
-    if _any_provider_key_set():
+def require_provider_or_400(*, role: str | None = None) -> None:
+    """Raise HTTP 400 unless the route(s) this operation uses are complete.
+
+    ``role=None`` validates every deterministic swarm route before goal state
+    is created. A drafting endpoint can name its one role so an unrelated or
+    incomplete worker route does not block a single bounded completion.
+    """
+    try:
+        from maverick.config import load_config
+        from maverick.operator_preflight import (
+            _format_route_missing,
+            _role_configuration_missing,
+            _routed_configuration_missing,
+        )
+
+        cfg = load_config()
+        if role is None:
+            missing = {
+                provider: fields
+                for provider, fields in _routed_configuration_missing(cfg).items()
+                if fields
+            }
+        else:
+            provider, fields = _role_configuration_missing(role, cfg)
+            missing = {provider: fields} if fields else {}
+    except RuntimeOverridesSecurityError:
+        # This is an operator-policy integrity failure, not an incomplete model
+        # route. Let the app's explicit handler return the actionable 503.
+        raise
+    except Exception:
+        missing = {"selected": ("configuration",)}
+    if not missing:
         return
     from fastapi import HTTPException
+
+    missing_detail = _format_route_missing(missing)
     raise HTTPException(
         status_code=400,
         detail=(
-            "No AI provider is connected yet — an administrator needs to add a "
-            "provider key or endpoint before this can run (run 'maverick init', "
-            "export ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY, or add "
-            "a [providers.<name>] api_key/base_url to the server configuration)."
+            "The selected AI model route is incomplete "
+            f"({missing_detail}). An administrator can run 'maverick init' and "
+            "'maverick preflight' before this operation."
         ),
     )
 

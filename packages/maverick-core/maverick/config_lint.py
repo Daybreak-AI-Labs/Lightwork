@@ -132,6 +132,10 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "minimum_train_families",
         "minimum_holdout_families",
     },
+    # Definition import reaches third-party APIs and can materialize recurring
+    # work, so both opt-ins are closed-schema booleans rather than permissive
+    # string truthiness.
+    "automation_import": {"enable", "create_schedules"},
     # Evidence release is a high-trust, fail-closed boundary.  V1 deliberately
     # exposes only the master opt-in; misspelled enforcement keys must not
     # silently create an open-ended policy surface.
@@ -257,6 +261,9 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "allow_cross_tenant",
         "require_signed_receipt",
     },
+    "automation_import": {"enable", "create_schedules"},
+    "models": {"cascade"},
+    "routing": {"cost_aware"},
 }
 
 _UNIVERSAL_BOOL_KEYS = ("enabled", "enable")

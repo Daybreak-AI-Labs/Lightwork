@@ -14,6 +14,11 @@ def test_classify_online_shapes():
     assert classify("ALTER TABLE approvals ADD COLUMN claimed_by TEXT") == "online"
     assert classify("CREATE INDEX IF NOT EXISTS idx_x ON t(a)") == "online"
     assert classify("CREATE TABLE IF NOT EXISTS t (id INTEGER)") == "online"
+    assert (
+        classify("CREATE TRIGGER IF NOT EXISTS immutable BEFORE UPDATE ON t BEGIN "
+                 "SELECT RAISE(ABORT, 'immutable'); END")
+        == "online"
+    )
     assert classify("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')") == "online"
     assert classify("") == "online"  # documented placeholder bump
     assert classify("   ") == "online"
@@ -24,9 +29,11 @@ def test_classify_offline_shapes():
     assert classify("ALTER TABLE t RENAME TO t2") == "offline"
     assert classify("CREATE INDEX idx ON t(a)") == "offline"      # not IF NOT EXISTS
     assert classify("CREATE TABLE t (id INTEGER)") == "offline"   # not IF NOT EXISTS
+    assert classify("CREATE TRIGGER immutable BEFORE UPDATE ON t BEGIN END") == "offline"
     assert classify("UPDATE t SET a = 1") == "offline"
     assert classify("DELETE FROM t WHERE a = 1") == "offline"
     assert classify("DROP TABLE t") == "offline"
+    assert classify("DROP TRIGGER immutable") == "offline"
 
 
 def test_classify_unknown_fails_closed():

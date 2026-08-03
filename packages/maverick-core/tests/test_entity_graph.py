@@ -146,6 +146,10 @@ def test_as_of_reconstructs_what_was_known_at_signing():
     then_ids = {r["record_id"] for r in then_d["summary"]["reviews"]}
     assert len(then_ids) == 1              # at signing time, only v1 existed
     assert then_ids != {current[0]["record_id"]}
+    # v1 was superseded later, but it and its clause findings were current at
+    # the requested point in time.
+    assert all(r["current"] for r in then_d["summary"]["reviews"])
+    assert "subprocessors" in then_d["summary"]["open_clause_gaps"]
 
 
 def test_superseded_review_edge_is_closed_not_deleted():
@@ -281,10 +285,10 @@ def test_goal_titles_never_fabricate_vendor_edges(tmp_path, monkeypatch):
 
 # --- ring two: the procedural plane (skill lineage) --------------------------
 
-def _distill_skill(goal_ids):
+def _distill_skill(goal_ids, goal="reconcile vendor invoices"):
     from maverick.skill.distillation_local import distill_and_save
     trajectories = [
-        {"goal": "reconcile vendor invoices", "goal_id": gid, "success": True,
+        {"goal": goal, "goal_id": gid, "success": True,
          "tools": ["ledger_read"], "t": 100.0 + gid}
         for gid in goal_ids
     ]
@@ -319,6 +323,29 @@ def test_tainted_run_reaches_the_skills_it_taught(tmp_path, monkeypatch):
     skill_hood = eg.neighborhood("skill", path.stem, depth=1)
     src = next(e for e in skill_hood["edges"] if e["rel"] == "distilled_from")
     assert src["record_type"] == "skill" and src["record_id"] == path.stem
+
+
+def test_skill_lineage_reads_only_the_active_tenant_store():
+    from maverick.paths import tenant_scope
+
+    with tenant_scope(tenant="tenant-a"):
+        a_path = _distill_skill([101], goal="reconcile acme invoices")
+        assert a_path is not None and "tenant-a" in a_path.parts
+        eg.rebuild()
+        assert eg.neighborhood("skill", a_path.stem, depth=1)["found"]
+
+    with tenant_scope(tenant="tenant-b"):
+        # Tenant B must neither index nor resolve tenant A's learned skill.
+        b_path = _distill_skill([202], goal="review globex contracts")
+        assert b_path is not None and "tenant-b" in b_path.parts
+        eg.rebuild()
+        assert not eg.neighborhood("skill", a_path.stem, depth=1)["found"]
+        assert eg.neighborhood("skill", b_path.stem, depth=1)["found"]
+
+    with tenant_scope(tenant="tenant-a"):
+        # The other direction is isolated too; tenant A's existing graph never
+        # acquires a tenant B node.
+        assert not eg.neighborhood("skill", b_path.stem, depth=1)["found"]
 
 
 def test_pre_provenance_skill_reads_as_unknown_not_guessed(tmp_path, monkeypatch):

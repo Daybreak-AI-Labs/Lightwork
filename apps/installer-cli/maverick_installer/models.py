@@ -79,9 +79,10 @@ PROVIDERS: dict[str, dict] = {
         "label": "xAI Grok",
         "env": "XAI_API_KEY",
         "models": [
-            {"id": "grok-4-latest",  "notes": "Flagship. Reasoning + tools."},
-            {"id": "grok-4-mini",    "notes": "Cheaper sibling."},
-            {"id": "grok-code-fast", "notes": "Code-tuned, low latency."},
+            {"id": "grok-4.5",       "notes": "Current flagship. Reasoning + tools."},
+            {"id": "grok-build-0.1", "notes": "Current build/code model."},
+            {"id": "grok-4.3",       "notes": "Current lower-cost general model."},
+            {"id": "grok-code-fast", "notes": "Legacy alias; estimate-only pricing."},
         ],
     },
     "gemini": {

@@ -120,6 +120,7 @@ def _install_eps(monkeypatch, *eps):
 
 def test_entry_point_backend_loads_and_conforms(monkeypatch, tmp_path):
     _install_eps(monkeypatch, _FakeEP("warm", _GoodExternal))
+    assert sdk.installed_entry_point_names() == ("warm",)
     sb = sdk.load_entry_point_backend("warm", workdir=tmp_path, timeout=30,
                                       options={"region": "eu"})
     assert isinstance(sb, _GoodExternal)

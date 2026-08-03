@@ -233,18 +233,20 @@ def export_capsule(
                "sig": sig.hex()}
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    from .audit import EventKind, audit_event
+
+    # Refuse before publishing the portable learned-state artifact when the
+    # deployment's configured audit guarantee declines its export row.
+    audit_event(
+        EventKind.LEARNING_UPDATE, agent="operating_record",
+        capsule="export", n_records=len(records), key_id=key_id,
+    )
     # Atomic write: a crash mid-write must not leave a truncated capsule that
     # verify_capsule would then flag as unreadable / invalid-signature. The
     # capsule may contain learned operational state, so stage it with 0600
     # permissions before atomically replacing the destination.
     from .file_lock import atomic_write_text
     atomic_write_text(out, json.dumps(capsule, indent=2, default=str), mode=0o600)
-    try:
-        from .audit import EventKind, record
-        record(EventKind.LEARNING_UPDATE, agent="operating_record",
-               capsule="export", n_records=len(records), key_id=key_id)
-    except Exception:  # pragma: no cover
-        pass
     return out
 
 

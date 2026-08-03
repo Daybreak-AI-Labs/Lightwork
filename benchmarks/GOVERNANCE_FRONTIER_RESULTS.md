@@ -10,8 +10,8 @@
 ## Run identity
 
 - Suite: `governance-frontier-v1`
-- Started: `2026-08-02T00:34:19.741075+00:00`
-- Git commit: `38b9881954c6b0847ebd6123174efba84864ade6`
+- Started: `2026-08-02T22:17:24.831611+00:00`
+- Git commit: `02a784db4a53233acde6af01729900be5703c950`
 - Working tree dirty during run: `false`
 - Definitions: 40 (24 unsafe, 16 benign) × seeds [17, 29, 43]
 - Arms: 120 governed and 120 disabled-baseline instances
@@ -19,9 +19,13 @@
 - Network claim basis: no model/network API is called; config/overlay, deployment profile, tenant/client, and injected or KMS-wrapped audit-key inputs are cleared; the egress adapter only evaluates URL and provider policy
 - Inherited config/overlay, profile/trust, tenant/client binding, consent override, and audit-key injection inputs: cleared; related process caches reset
 - Consent mode override: cleared; secure defaults explicitly enabled
-- Input digest: `28c7aaa33781373d56fcf111c18904a07432e0b749d472ab70f7b4ae725d8505`
+- Input digest: `a3a7b2730d9130204222196cab16de9d91391247d749e739cfb82a1a5b4d9595`
 - Manifest signature: `ed25519` (self-signed run integrity)
-- Publication verification requires the separate checked-in `trusted-publisher.pub`; the manifest-embedded key is not trusted by itself
+- Public evidence: [signed measured manifest](./results/governance-frontier-v1/measured-manifest.json), [trusted publisher key](./results/governance-frontier-v1/trusted-publisher.pub), and [standalone verifier](./results/governance-frontier-v1/verify_manifest.py)
+- Signed manifest file SHA-256 (UTF-8/LF): `6a38a5c85f675f226e3fbedc80afbcdde593ffe30bc7af706f32061e6f746a7d`
+- Trusted-key file SHA-256 (UTF-8/LF): `a0c982e195f9db4b40a8ea755372fb491992eff108fa3cb0927deb5206728f28`
+- Ed25519 public-key fingerprint (SHA-256 of the 32 raw key bytes): `cc836e6a68b2410fbff34d40d96fcbfafed37fd3645d3befeb8db310d90d6f6c`
+- Publication verification requires the separately downloaded trusted key; the manifest-embedded key is not trusted by itself
 
 ## Scorecard
 
@@ -63,10 +67,10 @@ reported outside that denominator.
 
 | Path | Samples | Median | p95 |
 |---|---:|---:|---:|
-| Governed control call | 120 | 143.913 µs | 9151.832 µs |
-| Disabled baseline call | 120 | 15.765 µs | 102.133 µs |
-| Paired governance overhead | 120 | 93.784 µs | 9148.259 µs |
-| Harness signed decision append | 120 | 1791.560 µs | 3180.842 µs |
+| Governed control call | 120 | 300.900 µs | 32699.900 µs |
+| Disabled baseline call | 120 | 12.550 µs | 160.800 µs |
+| Paired governance overhead | 120 | 202.950 µs | 32697.500 µs |
+| Harness signed decision append | 120 | 6589.900 µs | 8186.800 µs |
 
 Times are local-machine observations, not an SLA. Each seed changes
 execution order to expose state/order dependence; it is not model
@@ -75,7 +79,7 @@ sampling. Verdicts, not timings, are required to be seed-invariant.
 ## Evidence and custody
 
 - Signed audit events: 190
-- Audit-chain SHA-256: `df030315d3bd1ae7ec45bfb55f6d01ed6a26a67c1ca4369e56137e2cc71827c4`
+- Audit-chain SHA-256: `5e4df094187fa8e5ba8fd6b8a0efe9f5f9d84dfa4593816a0ae06c3de4854baf`
 - Audit chain verified in-run against the run public key: `true`
 - Manifest schema: `maverick-bench-repro/1`
 - Key custody: ephemeral co-located benchmark key; self-signed run integrity only, not off-host custody, publisher identity, or resistance to a same-user actor.
@@ -112,6 +116,23 @@ re-sign altered evidence.
   rerunning the benchmark.
 - The separate public-key file still needs a trusted distribution and
   review channel to establish publisher identity.
+
+## Verify the published evidence without Lightwork source
+
+Download the signed manifest, trusted publisher key, and standalone
+verifier linked under **Run identity**, keep them in one directory,
+install `cryptography`, and run:
+
+```bash
+python verify_manifest.py measured-manifest.json trusted-publisher.pub
+```
+
+That check independently verifies the Ed25519 signature and prints the
+downloaded-file SHA-256 values plus the raw-key fingerprint. It does
+**not** recompute the manifest's signed control-source digests.
+Source-binding verification requires a licensed Lightwork source
+snapshot at the measured commit and the full tracked-artifact command
+below.
 
 ## Defensible claim
 

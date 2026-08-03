@@ -3,8 +3,9 @@
 Reads installed distribution metadata (``importlib.metadata``) and classifies
 each package's license into an SPDX-ish category — permissive / weak-copyleft /
 strong-copyleft / public-domain / unknown — via a keyword map over the license
-field and Trove classifiers. ``policy_check`` flags packages whose category is in
-a denylist (default: ``strong-copyleft`` — GPL/AGPL — the categories that create
+``License-Expression``, Trove classifiers, or the legacy ``License`` field, in
+that order. ``policy_check`` flags packages whose category is in a denylist
+(default: ``strong-copyleft`` — GPL/AGPL — the categories that create
 distribution obligations for a proprietary product).
 
 The classifier and policy check are pure and unit-tested; ``scan_distributions``
@@ -45,11 +46,18 @@ def classify_license(text: str) -> str:
 
 
 def _license_from_metadata(meta) -> str:
-    """Best license string from distribution metadata (License field or Trove
-    classifiers like 'License :: OSI Approved :: MIT License')."""
-    field = (meta.get("License") or "").strip()
-    if field and field.lower() not in {"unknown", "license"}:
-        return field
+    """Return the distribution's best governing-license declaration.
+
+    PEP 639's SPDX ``License-Expression`` is authoritative. For older metadata,
+    a structured Trove classifier is more reliable than the legacy free-text
+    ``License`` field: projects commonly put bundled third-party notices and
+    complete license texts in that field, which must not be mistaken for the
+    distribution's governing license.
+    """
+    expression = (meta.get("License-Expression") or "").strip()
+    if expression and expression.lower() not in {"unknown", "license"}:
+        return expression
+
     parts: list[str] = []
     # importlib metadata exposes repeated headers via get_all.
     getter = getattr(meta, "get_all", None)
@@ -57,7 +65,13 @@ def _license_from_metadata(meta) -> str:
     for c in classifiers or []:
         if c.startswith("License ::"):
             parts.append(c.split("::")[-1].strip())
-    return "; ".join(parts)
+    if parts:
+        return "; ".join(parts)
+
+    field = (meta.get("License") or "").strip()
+    if field and field.lower() not in {"unknown", "license"}:
+        return field
+    return ""
 
 
 def scan_distributions(dists=None) -> list[dict]:

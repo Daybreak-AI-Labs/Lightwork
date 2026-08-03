@@ -309,13 +309,70 @@ def test_the_purged_day_listing_is_empty_without_a_purge(audit_dir) -> None:
     assert retention_purged_days(audit_dir) == []
 
 
-def test_a_purge_leaves_no_orphaned_lock_sidecar(purged) -> None:
-    """Retention exists to bound growth; it must not leak one inode per day."""
+def test_a_purge_preserves_the_coordination_sidecar(purged) -> None:
+    """The stable lock inode prevents an unlink/recreate ABA race."""
     leftovers = sorted(
         p.name for p in purged.iterdir()
         if p.name.endswith(".lock") and p.name.startswith(_day(40)[:7])
     )
-    assert leftovers == [], leftovers
+    assert leftovers == sorted(
+        [f"{_day(40)}.ndjson.lock", f"{_day(39)}.ndjson.lock"]
+    ), leftovers
+
+
+def test_purge_holds_day_lock_through_tip_capture_and_unlink(
+    audit_dir,
+    monkeypatch,
+) -> None:
+    from maverick.file_lock import cross_process_lock
+
+    path = _write_day(audit_dir, _day(40))
+    assert ensure_anchors(audit_dir) == 1
+    captured = threading.Event()
+    release = threading.Event()
+    contender_acquired = threading.Event()
+    failures: list[BaseException] = []
+    original_tip = retention._tip_and_count
+
+    def paused_tip(candidate):
+        result = original_tip(candidate)
+        if candidate == path:
+            captured.set()
+            assert release.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(retention, "_tip_and_count", paused_tip)
+
+    def purge() -> None:
+        try:
+            retention.purge_audit_files(
+                days=30,
+                audit_dir=audit_dir,
+            )
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+
+    def contend() -> None:
+        try:
+            with cross_process_lock(path, strict=True):
+                contender_acquired.set()
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+
+    purge_thread = threading.Thread(target=purge)
+    purge_thread.start()
+    assert captured.wait(timeout=5)
+    contender_thread = threading.Thread(target=contend)
+    contender_thread.start()
+    time.sleep(0.05)
+    assert not contender_acquired.is_set()
+    release.set()
+    purge_thread.join(timeout=5)
+    contender_thread.join(timeout=5)
+
+    assert not failures
+    assert contender_acquired.is_set()
+    assert not path.exists()
 
 
 def test_a_dry_run_purge_writes_no_record(audit_dir) -> None:
@@ -408,12 +465,25 @@ def _concurrent_erase(audit_dir: Path, *, delete: bool) -> tuple[int, int]:
     t = threading.Thread(target=writer)
     t.start()
     try:
-        time.sleep(0.05)
+        # Fsync + Windows handle-bound custody can make one signed append take
+        # tens of milliseconds. A fixed 50 ms warm-up therefore made the
+        # anti-vacuity assertion depend on machine speed. Wait for observed
+        # durable commits instead: the test still requires a substantial writer
+        # stream, but slow/loaded runners get the same race as fast ones.
+        warmup_deadline = time.monotonic() + 5
+        while committed[0] < 6 and time.monotonic() < warmup_deadline:
+            time.sleep(0.005)
+        before_erase = committed[0]
         if delete:
             erase.delete_user("slack", "victim", audit_dir=audit_dir)
         else:
             erase.scrub_user("slack", "victim", audit_dir=audit_dir)
-        time.sleep(0.05)
+        cooldown_deadline = time.monotonic() + 5
+        while (
+            committed[0] < before_erase + 6
+            and time.monotonic() < cooldown_deadline
+        ):
+            time.sleep(0.005)
     finally:
         stop.set()
         t.join(timeout=10)
@@ -474,25 +544,38 @@ def test_an_unsigned_writer_also_survives_a_concurrent_erase(
 
     stop = threading.Event()
     committed = [0]
+    failures: list[BaseException] = []
 
     def _writer() -> None:
         w = AuditLog(audit_dir)
-        while not stop.is_set():
-            if w.record(AuditEvent(ts=time.time(), kind=EventKind.TOOL_CALL,
-                                   agent="concurrent", goal_id=None,
-                                   payload={"n": committed[0]})):
-                committed[0] += 1
-            time.sleep(0.0005)
+        try:
+            while not stop.is_set():
+                if w.record(AuditEvent(ts=time.time(), kind=EventKind.TOOL_CALL,
+                                       agent="concurrent", goal_id=None,
+                                       payload={"n": committed[0]})):
+                    committed[0] += 1
+                time.sleep(0.0005)
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
 
     t = threading.Thread(target=_writer)
     t.start()
     try:
-        time.sleep(0.05)
+        warmup_deadline = time.monotonic() + 5
+        while committed[0] < 6 and time.monotonic() < warmup_deadline:
+            time.sleep(0.005)
+        before_erase = committed[0]
         erase.scrub_user("slack", "victim", audit_dir=audit_dir)
-        time.sleep(0.05)
+        cooldown_deadline = time.monotonic() + 5
+        while (
+            committed[0] < before_erase + 6
+            and time.monotonic() < cooldown_deadline
+        ):
+            time.sleep(0.005)
     finally:
         stop.set()
         t.join(timeout=10)
+    assert not failures, failures
 
     present = 0
     for line in path.read_text(encoding="utf-8").splitlines():

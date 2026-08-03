@@ -1,13 +1,13 @@
 [build-system]
-requires = ["setuptools>=83.0.0"]
+requires = ["setuptools==83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "maverick-shield"
-version = "0.1.6"
+version = "0.1.7"
 description = "Agent Shield integration + builtin fallback rules for Lightwork"
 requires-python = ">=3.10"
-license = { text = "LicenseRef-Proprietary" }
+license = "LicenseRef-Proprietary"
 authors = [{ name = "cdayAI" }]
 readme = "README.md"
 # Built-in rules ship as part of this package. agent-shield SDK is opt-in.
@@ -17,7 +17,7 @@ dependencies = []
 scan = ["agent-shield>=14.0"]
 
 [project.urls]
-Homepage = "https://github.com/Day-AI-Labs/maverick"
+Homepage = "https://github.com/Daybreak-AI-Labs/Lightwork"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -76,7 +76,11 @@ def test_openai_provider_records_deepseek_cache_hit_tokens():
     fake_resp.usage = fake_usage
 
     budget = Budget(max_dollars=10.0)
-    OpenAIClient._from_response(fake_resp, budget, model="deepseek-chat")
+    OpenAIClient._from_response(
+        fake_resp,
+        budget,
+        model="deepseek-v4-flash",
+    )
 
     assert budget.input_tokens == 1200
     assert budget.cache_read_tokens == 800

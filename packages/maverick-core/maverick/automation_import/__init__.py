@@ -19,38 +19,77 @@ Gated by ``[automation_import] enable`` / ``MAVERICK_AUTOMATION_IMPORT``.
 """
 from __future__ import annotations
 
-# Importers self-register on import. Keep this list as the platforms grow.
-from . import (
-    make,  # noqa: E402,F401  -- registers "make"
-    n8n,  # noqa: E402,F401  -- registers "n8n"
-    notion,  # noqa: E402,F401  -- registers "notion" (connect-and-trigger)
-    power_automate,  # noqa: E402,F401  -- registers "power_automate"
-    uipath,  # noqa: E402,F401  -- registers "uipath"
-    workato,  # noqa: E402,F401  -- registers "workato"
-    zapier,  # noqa: E402,F401  -- registers "zapier" (connect-and-trigger)
-)
+import logging
+import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # These connectors are imported by get_importer() through the lazy registry.
+    # Declare that runtime edge statically without paying startup import cost.
+    from . import (  # noqa: F401
+        make,
+        n8n,
+        notion,
+        power_automate,
+        uipath,
+        workato,
+        zapier,
+    )
+
 from .base import (
     Importer,
     ImporterError,
     available_sources,
     get_importer,
     register,
+    register_lazy,
     translate_all,
 )
 from .ir import ImportedAutomation, ImportedStep, ImportedTrigger
 from .materialize import MaterializeResult, materialize
 
+log = logging.getLogger(__name__)
+
+# Keep discovery cheap: importing ``maverick.automation_import`` is part of CLI
+# and dashboard startup, but most processes never connect to any of these
+# platforms.  Register module names now and import only the selected connector
+# in ``get_importer``.  ``from maverick.automation_import import n8n`` remains
+# supported by Python's normal package-submodule import behavior.
+for _source in (
+    "make",
+    "n8n",
+    "notion",
+    "power_automate",
+    "uipath",
+    "workato",
+    "zapier",
+):
+    register_lazy(_source, f"{__name__}.{_source}")
+
 
 def enabled() -> bool:
     """True when automation import is switched on (off by default)."""
     from ..config import env_flag
-    v = env_flag("MAVERICK_AUTOMATION_IMPORT")
+    env_name = "MAVERICK_AUTOMATION_IMPORT"
+    v = env_flag(env_name)
     if v is not None:
         return v
+    if os.environ.get(env_name, "").strip():
+        log.warning(
+            "automation import: %s must be one of 1/0, true/false, yes/no, "
+            "or on/off; disabling automation import",
+            env_name,
+        )
+        return False
     try:
         from ..config import get_automation_import
         return bool(get_automation_import().get("enable", False))
-    except Exception:  # pragma: no cover -- never block on config
+    except Exception as exc:  # never block on config, but make degradation visible
+        log.warning(
+            "automation import: could not read feature configuration (%s); "
+            "disabling automation import",
+            exc,
+        )
         return False
 
 
@@ -66,5 +105,6 @@ __all__ = [
     "get_importer",
     "materialize",
     "register",
+    "register_lazy",
     "translate_all",
 ]

@@ -7,7 +7,7 @@
 Der sicherste Weg im Terminal ist, das veröffentlichte Paket mit pipx zu installieren, statt ein entferntes Bootstrap-Skript auszuführen:
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
 python -m pip install -e ./packages/maverick-core
@@ -22,7 +22,7 @@ Das PyPI-Paket heißt `maverick-agent` (der Name `maverick` ist bereits von eine
 Aus dem Quellcode, während Sie daran entwickeln:
 
 ```bash
-git clone https://github.com/Day-AI-Labs/maverick
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd maverick
 pip install -e ./packages/maverick-core
 pip install -e ./apps/installer-cli

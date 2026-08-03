@@ -45,7 +45,7 @@ primary_region = "iad"
   timeout = "5s"
   grace_period = "10s"
   method = "get"
-  path = "/healthz"
+  path = "/readyz"
 
 [[vm]]
   size = "shared-cpu-2x"

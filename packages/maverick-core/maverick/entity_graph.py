@@ -451,7 +451,11 @@ def _derive_skills(b: _Builder) -> None:
     import calendar
     try:
         from .paths import data_dir
-        store = data_dir("learned-skills", tenant=None)
+        # Distillation resolves its default store through the active tenant.
+        # Read the identical namespace here: forcing the legacy/shared root
+        # makes a tenant's learned skills invisible to its own graph and risks
+        # indexing unrelated root-level skills instead.
+        store = data_dir("learned-skills")
         paths = sorted(store.glob("*.md"))
     except Exception as e:  # pragma: no cover -- skills plane optional
         log.debug("entity_graph: skill store unavailable: %s", e)
@@ -668,18 +672,28 @@ def dossier(vendor: str, *, as_of: float | None = None) -> dict:
         return hood
     edges = hood["edges"]
     reviews = [e for e in edges if e["rel"] == "reviews"]
+    # With no historical cutoff, only open-ended review edges are in force.
+    # With ``as_of``, neighborhood() has already removed every edge that was
+    # not valid at that instant, including reviews superseded before it.  A
+    # review that was superseded *later* is therefore current for this view
+    # even though its stored ``valid_to`` is non-null today.
+    in_force_reviews = [
+        e for e in reviews if as_of is not None or e["valid_to"] is None
+    ]
+    in_force_review_keys = {
+        (e["record_type"], e["record_id"]) for e in in_force_reviews
+    }
     open_gaps = sorted({
         e["dst"]["name"] for e in edges
         if e["rel"] in ("clause_missing", "clause_conflicting",
                         "clause_unclear")
-        and any(r["record_id"] == e["record_id"] and r["valid_to"] is None
-                for r in reviews)})
+        and (e["record_type"], e["record_id"]) in in_force_review_keys})
     return {
         **hood,
         "summary": {
             "reviews": [{"record_type": e["record_type"],
                          "record_id": e["record_id"],
-                         "current": e["valid_to"] is None,
+                         "current": e in in_force_reviews,
                          "since": e["valid_from"]} for e in reviews],
             "decisions": [
                 {"decision": e["rel"].removesuffix("_by"),

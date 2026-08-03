@@ -254,12 +254,19 @@ def _audit(kind: str, *, required: bool = False, **payload) -> bool:
     Starting or resuming invasive observation is different: those authorization
     events fail closed when the tenant audit ledger is unavailable.
     """
-    try:
-        from maverick.audit import record
+    from maverick.audit import AuditRefused, audit_event
 
-        persisted = bool(record(kind, agent="dashboard", **payload))
-    except Exception:
-        persisted = False
+    try:
+        persisted = audit_event(kind, agent="dashboard", **payload)
+    except AuditRefused as exc:
+        if required:
+            raise HTTPException(
+                status_code=503,
+                detail="Ekko authorization audit was refused",
+            ) from exc
+        # Pause/stop/erase already completed before their evidence call. Keep
+        # the safety result, but never return a false successful audit status.
+        raise
     if required and not persisted:
         raise HTTPException(
             status_code=503,

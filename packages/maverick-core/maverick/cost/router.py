@@ -16,15 +16,18 @@ Useful when the user has multiple BYOK adapters configured. We pick:
 Opt-in. Off by default; flipped on via ``MAVERICK_COST_ROUTING=1``
 or ``[routing] cost_aware = true`` in config.
 
-Per-million pricing (input + output averaged) is the table in
-``_PRICING``. Numbers are May 2026 list rates; off when wrong but
-correctable in one place.
+Per-million pricing (input + output averaged) comes from the immutable,
+versioned provider in :mod:`maverick.llm`. The ``_PRICING`` tuple list is only
+a compatibility view; routing decisions retain each quote's provenance and
+exclude unverified rates unless explicitly used for planning.
 """
 from __future__ import annotations
 
 import logging
 import os
 from dataclasses import dataclass
+
+from ..pricing import ModelPrice, UnverifiedRateError
 
 log = logging.getLogger(__name__)
 
@@ -37,12 +40,12 @@ TIER_PREMIUM = 2
 
 
 # (provider, model_id, tier). The per-million input/output rates are NOT
-# duplicated here: llm.MODEL_PRICES is the single billing source of truth, so
-# the router derives every rate from it via _rate_for() below. Earlier the
+# duplicated here: llm.MODEL_PRICING_PROVIDER is the source of truth, so the
+# router derives every rate and its provenance from it. Earlier the
 # table hard-coded its own numbers AND its own model ids (gpt-5*, grok-4,
-# gemini-2.5-*, a date-suffixed Haiku) that didn't exist in MODEL_PRICES — they
+# gemini-2.5-*, a date-suffixed Haiku) that had no canonical quote — they
 # scored against stale rates and billed at the Sonnet fallback. Every id here
-# now resolves in MODEL_PRICES.
+# now resolves in the versioned rate card.
 _TIERS: list[tuple[str, str, int]] = [
     # Anthropic
     ("anthropic", "claude-haiku-4-5",   TIER_CHEAP),
@@ -56,59 +59,99 @@ _TIERS: list[tuple[str, str, int]] = [
     ("openai",    "gpt-5.4",            TIER_BASE),
     ("openai",    "gpt-5.4-pro",        TIER_PREMIUM),
     # DeepSeek
-    ("deepseek",  "deepseek-chat",      TIER_CHEAP),
-    ("deepseek",  "deepseek-reasoner",  TIER_BASE),
+    ("deepseek",  "deepseek-v4-flash",  TIER_CHEAP),
+    ("deepseek",  "deepseek-v4-pro",    TIER_BASE),
     # Moonshot / Kimi
     ("moonshot",  "moonshot-v1-128k",   TIER_BASE),
     # xAI
-    ("xai",       "grok-4-latest",      TIER_BASE),
+    ("xai",       "grok-4.5",           TIER_BASE),
     # Gemini
     ("gemini",    "gemini-3.5-flash",   TIER_CHEAP),
     ("gemini",    "gemini-3.5-pro",     TIER_PREMIUM),
     # OpenRouter: cheap, near-frontier-on-coding open models. Additive/opt-in —
     # only considered when OPENROUTER_API_KEY (or [providers.openrouter]) is set
-    # AND cost routing is enabled. vendor/model ids resolve in llm.MODEL_PRICES.
+    # AND cost routing is enabled. These rows remain estimate-only until their
+    # OpenRouter sources are verified.
     ("openrouter", "minimax/minimax-m2.5",     TIER_CHEAP),
     ("openrouter", "deepseek/deepseek-v4-pro", TIER_CHEAP),
     ("openrouter", "qwen/qwen3-coder-next",    TIER_CHEAP),
 ]
 
 
-def _rate_for(model_id: str) -> tuple[float, float] | None:
-    """(in_per_mtok, out_per_mtok) for a model id from the canonical
-    llm.MODEL_PRICES catalog, or None if absent (so a stale tier entry is
-    dropped from routing rather than scored against an invented rate)."""
-    try:
-        from ..llm import MODEL_PRICES
-    except ImportError:
+def price_quote_for_model(
+    model_id: str,
+    *,
+    estimate_only: bool = False,
+) -> ModelPrice | None:
+    """Canonical quote for routing, billing-grade unless explicitly estimated."""
+
+    if not model_id:
         return None
-    return MODEL_PRICES.get(model_id)
+    from ..llm import model_price_quote
+
+    keys = [model_id]
+    if ":" in model_id:
+        keys.append(model_id.split(":", 1)[1])
+    for key in keys:
+        try:
+            quote = model_price_quote(key, estimate_only=estimate_only)
+        except UnverifiedRateError:
+            # ``None`` is the router's long-standing "not safely priceable"
+            # signal. Billing itself raises the more specific hard-stop.
+            return None
+        if quote is not None:
+            return quote
+    return None
 
 
-# (provider, model_id, tier, $/Mtok input, $/Mtok output) — rates pulled from
-# llm.MODEL_PRICES at import so there is exactly one place to edit pricing.
-_PRICING: list[tuple[str, str, int, float, float]] = [
-    (provider, mid, tier, rate[0], rate[1])
+def _rate_for(
+    model_id: str,
+    *,
+    estimate_only: bool = False,
+) -> tuple[float, float] | None:
+    """Rates from a provenance-carrying quote, never from a bare tuple."""
+
+    quote = price_quote_for_model(model_id, estimate_only=estimate_only)
+    return quote.rates if quote is not None else None
+
+
+def _estimate_quote_for(model_id: str) -> ModelPrice | None:
+    """Import-time helper for the complete planning catalog."""
+
+    try:
+        return price_quote_for_model(model_id, estimate_only=True)
+    except (ImportError, ValueError):
+        return None
+
+
+# Complete router catalog, including provisional rows for explicit estimate-only
+# planning. Live ``pick`` filters those rows unless its caller opts in.
+_PRICE_ENTRIES: list[tuple[str, str, int, ModelPrice]] = [
+    (provider, mid, tier, quote)
     for provider, mid, tier in _TIERS
-    if (rate := _rate_for(mid)) is not None
+    if (quote := _estimate_quote_for(mid)) is not None
+]
+
+# Legacy display/test view. It is derived from _PRICE_ENTRIES and is never the
+# source for a routing or billing decision.
+_PRICING: list[tuple[str, str, int, float, float]] = [
+    (provider, mid, tier, quote.input_per_mtok, quote.output_per_mtok)
+    for provider, mid, tier, quote in _PRICE_ENTRIES
 ]
 
 
-def price_for_model(model_id: str) -> tuple[float, float] | None:
-    """Return (in_per_mtok, out_per_mtok) for a model_id from the router's
-    pricing table, or None if it isn't listed.
+def price_for_model(
+    model_id: str,
+    *,
+    estimate_only: bool = False,
+) -> tuple[float, float] | None:
+    """Return rates, or ``None`` when absent/unverified for the requested use.
 
-    Budget billing (budget._lookup_price) consults this as a secondary
-    lookup for any selectable model. Every id in the table now lives in
-    llm.MODEL_PRICES (the rates are derived from it), so this resolves to
-    the same canonical rate rather than a stale duplicate.
+    ``estimate_only=True`` is required to obtain provisional rates. Budget
+    billing resolves the quote itself so it can retain provenance evidence.
     """
-    if not model_id:
-        return None
-    for _provider, mid, _tier, in_price, out_price in _PRICING:
-        if mid == model_id:
-            return (in_price, out_price)
-    return None
+
+    return _rate_for(model_id, estimate_only=estimate_only)
 
 
 @dataclass
@@ -178,7 +221,13 @@ def role_policy(role: str) -> RolePolicy:
         from ..config import load_config
         roles = (((load_config() or {}).get("routing") or {}).get("roles") or {})
         raw = roles.get(role)
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "cost routing: could not read policy for role %r (%s); "
+            "using an empty policy",
+            role,
+            exc,
+        )
         raw = None
     if not isinstance(raw, dict):
         return RolePolicy()
@@ -202,15 +251,37 @@ def role_policy(role: str) -> RolePolicy:
 
 
 def _enabled() -> bool:
-    if os.environ.get("MAVERICK_COST_ROUTING", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }:
-        return True
+    from ..config import env_flag
+
+    env_name = "MAVERICK_COST_ROUTING"
+    env = env_flag(env_name)
+    if env is not None:
+        return env
+    if os.environ.get(env_name, "").strip():
+        log.warning(
+            "cost routing: %s must be one of 1/0, true/false, yes/no, or "
+            "on/off; disabling cost routing",
+            env_name,
+        )
+        return False
     try:
         from ..config import load_config
         cfg = (load_config() or {}).get("routing") or {}
-        return bool(cfg.get("cost_aware"))
-    except Exception:
+        value = cfg.get("cost_aware", False)
+        if not isinstance(value, bool):
+            log.warning(
+                "cost routing: routing.cost_aware must be true or false, got "
+                "%s; disabling cost routing",
+                type(value).__name__,
+            )
+            return False
+        return value
+    except Exception as exc:
+        log.warning(
+            "cost routing: could not read routing.cost_aware (%s); "
+            "disabling cost routing",
+            exc,
+        )
         return False
 
 
@@ -225,7 +296,12 @@ def _allowed_providers() -> set[str] | None:
     try:
         from ..config import load_config
         routing = (load_config() or {}).get("routing") or {}
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "cost routing: could not read routing.allowed_providers (%s); "
+            "using the unrestricted legacy provider set",
+            exc,
+        )
         return None
     allowed = routing.get("allowed_providers")
     if not isinstance(allowed, list):
@@ -315,11 +391,14 @@ def _is_unhealthy(stat: dict | None, threshold: float) -> bool:
     return (stat.get("error_rate") or 0.0) >= threshold
 
 
-def pick(signal: CostSignal) -> str | None:
+def pick(signal: CostSignal, *, estimate_only: bool = False) -> str | None:
     """Return ``"provider:model_id"`` or ``None`` to use the default.
 
     Returning None means: defer to the legacy ``model_for_role()``
-    path. The caller MUST treat None as "no opinion".
+    path. The caller MUST treat None as "no opinion". Provisional rate rows
+    are excluded unless the caller explicitly selects planning-only
+    ``estimate_only`` mode; a live route therefore cannot be selected from an
+    unverified price.
     """
     if not _enabled():
         return None
@@ -329,8 +408,19 @@ def pick(signal: CostSignal) -> str | None:
     policy = role_policy(signal.role) if signal.role else RolePolicy()
     tier = policy.tier if policy.tier is not None else signal.tier
 
-    # Tier-filter then cost-sort.
-    candidates = [c for c in _PRICING if c[2] >= tier]
+    # Tier-filter then cost-sort. Construct the scoring rows from rich quotes,
+    # retaining provisional rows only in explicit planning mode.
+    candidates = [
+        (
+            provider,
+            model,
+            candidate_tier,
+            quote.input_per_mtok,
+            quote.output_per_mtok,
+        )
+        for provider, model, candidate_tier, quote in _PRICE_ENTRIES
+        if candidate_tier >= tier and (estimate_only or quote.verified)
+    ]
     if policy.providers:
         candidates = [c for c in candidates if c[0] in policy.providers]
     if policy.deny_providers:
@@ -380,5 +470,6 @@ def pick(signal: CostSignal) -> str | None:
 
 __all__ = [
     "CostSignal", "RolePolicy", "pick", "role_policy", "signal_for_role",
-    "price_for_model", "TIER_CHEAP", "TIER_BASE", "TIER_PREMIUM",
+    "price_for_model", "price_quote_for_model",
+    "TIER_CHEAP", "TIER_BASE", "TIER_PREMIUM",
 ]

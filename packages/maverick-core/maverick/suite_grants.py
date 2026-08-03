@@ -272,15 +272,15 @@ def granted_suites(principal: str) -> frozenset[str] | None:
 
 def _audit_grant_change(actor: str, principal: str, old, new) -> None:
     """One tamper-evident audit row per grant change, so who-granted-whom-what
-    is provable rather than a silent JSON edit. Fail-soft: an audit error never
-    blocks the mutation (mirrors the tenant registry's billing audit)."""
-    try:
-        from .audit import EventKind, record
-        record(EventKind.ACCESS_GRANT_CHANGED, agent=actor or "local",
-               actor=actor or "local", principal=principal, field="suites",
-               tenant="", old=old, new=new)
-    except Exception:  # pragma: no cover -- audit must never break the store
-        pass
+    is provable rather than a silent JSON edit. Ordinary writer outages remain
+    fail-soft; an explicit policy/custody refusal propagates."""
+    from .audit import EventKind, audit_event
+
+    audit_event(
+        EventKind.ACCESS_GRANT_CHANGED, agent=actor or "local",
+        actor=actor or "local", principal=principal, field="suites",
+        tenant="", old=old, new=new,
+    )
 
 
 def set_suites(principal: str, suites: object, *, actor: str = "") -> None:
@@ -297,10 +297,24 @@ def set_suites(principal: str, suites: object, *, actor: str = "") -> None:
     with _locked(store_path()):
         data = _load()
         old = data.get(principal)
-        data[principal] = sorted(cleaned)
+        new = sorted(cleaned)
+        if old == new:
+            return
+        prior = dict(data)
+        data[principal] = new
         _write(data)
-    if old != sorted(cleaned):
-        _audit_grant_change(actor, principal, old, sorted(cleaned))
+        from .audit import AuditRefused
+
+        try:
+            _audit_grant_change(actor, principal, old, new)
+        except AuditRefused:
+            try:
+                _write(prior)
+            except Exception as rollback_exc:
+                raise SuiteGrantStoreError(
+                    "audit refused suite-grant change and rollback failed"
+                ) from rollback_exc
+            raise
 
 
 def remove_grant(principal: str, *, actor: str = "") -> None:
@@ -309,11 +323,22 @@ def remove_grant(principal: str, *, actor: str = "") -> None:
     removed = None
     with _locked(store_path()):
         data = _load()
+        prior = dict(data)
         removed = data.pop(principal, None)
         if removed is not None:
             _write(data)
-    if removed is not None:
-        _audit_grant_change(actor, principal, removed, None)
+            from .audit import AuditRefused
+
+            try:
+                _audit_grant_change(actor, principal, removed, None)
+            except AuditRefused:
+                try:
+                    _write(prior)
+                except Exception as rollback_exc:
+                    raise SuiteGrantStoreError(
+                        "audit refused suite-grant removal and rollback failed"
+                    ) from rollback_exc
+                raise
 
 
 def suite_allowed_for(principal: str | None, suite: str | None) -> bool:

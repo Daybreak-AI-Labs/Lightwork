@@ -201,10 +201,10 @@ def active_for_principal(principal: str) -> bool | None:
 
 def group_names_for_principal(principal: str) -> frozenset[str]:
     """The displayNames of every SCIM group the (active) principal belongs to."""
-    from .scim import _load_groups
+    from .scim import _load_effective_groups
 
     users = _matching_users(principal)
-    groups = _load_groups()
+    groups = _load_effective_groups()
     if not users or not groups:
         return frozenset()
 

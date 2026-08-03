@@ -9,14 +9,14 @@ ASR_on = fraction the shield lets through. Reduction = block rate.
 
 | routing | block rate (95% CI) | ASR off → on | benign FP |
 |---|---|---|---|
-| targeted chokepoint | 74.2% [57–86] | 1.000 → 0.258 | 6.2% |
-| any chokepoint (defense-in-depth) | 74.2% [57–86] | 1.000 → 0.258 | 6.2% [2–20] |
+| targeted chokepoint | 71.0% [53–84] | 1.000 → 0.290 | 6.2% |
+| any chokepoint (defense-in-depth) | 71.0% [53–84] | 1.000 → 0.290 | 6.2% [2–20] |
 
 ## Block rate by targeted surface
 
 | chokepoint | blocked / total |
 |---|---|
-| `scan_input` | 12/17 (70.6%) |
+| `scan_input` | 11/17 (64.7%) |
 | `scan_tool_call` | 3/3 (100.0%) |
 | `scan_output` | 8/11 (72.7%) |
 
@@ -30,7 +30,7 @@ ASR_on = fraction the shield lets through. Reduction = block rate.
 | indirect_injection | 3/3 (100.0%) |
 | instruction_override | 4/4 (100.0%) |
 | jailbreak_framing | 2/3 (66.7%) |
-| persona_takeover | 4/4 (100.0%) |
+| persona_takeover | 3/4 (75.0%) |
 | privilege_escalation | 1/1 (100.0%) |
 | sandbox_escape | 1/1 (100.0%) |
 | secret_exfil | 3/4 (75.0%) |
@@ -38,6 +38,6 @@ ASR_on = fraction the shield lets through. Reduction = block rate.
 | tool_output_injection | 1/3 (33.3%) |
 
 ## Read this honestly
-- Built-in fallback only. The agent-shield SDK (~115 patterns) and the LLM cascade are UNAVAILABLE here and would score higher.
+- Built-in fallback only. The private/unpublished agent-shield SDK (~115 patterns) and the LLM cascade are UNAVAILABLE and not measured.
 - This is DETECTION at the chokepoints. A missed detection is not an executed attack when the capability layer denies the tool anyway (containment is proven in `proof/run_proof.py`).
 - `train_corpus` is excluded (memorization, not capability).

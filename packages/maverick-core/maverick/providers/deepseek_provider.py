@@ -2,8 +2,9 @@
 
 DeepSeek's API is OpenAI-compatible at https://api.deepseek.com/v1.
 
-Default model is `deepseek-chat` (V3.2). Other models:
-`deepseek-reasoner` (R1-line reasoning), `deepseek-coder`.
+Default model is `deepseek-v4-flash`. The legacy `deepseek-chat` and
+`deepseek-reasoner` aliases remain callable but are estimate-only until a
+current, directly applicable price is captured.
 
 API key env var: DEEPSEEK_API_KEY.
 """
@@ -15,7 +16,7 @@ from .openai_provider import OpenAIClient
 
 
 class DeepSeekClient(OpenAIClient):
-    DEFAULT_MODEL = "deepseek-chat"
+    DEFAULT_MODEL = "deepseek-v4-flash"
     # DeepSeek bills cache hits (prompt_cache_hit_tokens) at ~10% of the
     # cache-miss input rate (a ~90% discount), far steeper than OpenAI's 0.5x.
     # Inheriting 0.5x would over-charge cached input ~5x.

@@ -21,7 +21,7 @@ import (
 	"os"
 	"time"
 
-	proxy "github.com/Day-AI-Labs/maverick/go/model-proxy"
+	proxy "github.com/Daybreak-AI-Labs/Lightwork/go/model-proxy"
 )
 
 func main() {

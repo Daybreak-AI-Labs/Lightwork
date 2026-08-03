@@ -56,7 +56,7 @@ DEFAULT_PUBKEY = (
     / "trusted-publisher.pub"
 )
 PINNED_SEEDS = (17, 29, 43)
-SOURCE_SNAPSHOT_POLICY = "ancestor_or_exact_signed_control_trees_lf_v3"
+SOURCE_SNAPSHOT_POLICY = "ancestor_or_exact_signed_tracked_control_trees_lf_v4"
 CONTROL_SOURCE_ROOTS = (
     "packages/maverick-core/maverick",
     "packages/maverick-shield/maverick_shield",
@@ -91,7 +91,7 @@ EXPECTED_FAMILY_CONTROL = {
     "egress_boundary": "egress",
     "capability_attenuation": "capability",
     "agent_trust": "agent_trust",
-    "secret_output": "secret_output",
+    "secret_output": "secret_output",  # pragma: allowlist secret
     "budget_control": "budget",
     "evidence_integrity": "evidence",
 }
@@ -165,7 +165,88 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(_canonical_source_bytes(path)).hexdigest()
 
 
+def _git_repository_root() -> Path | None:
+    """Return ``ROOT`` only when it is the exact Git worktree root.
+
+    An extracted source archive may live beneath an unrelated parent Git
+    repository.  Git commands launched from the archive would otherwise
+    borrow that parent's index and commit metadata, producing an empty or
+    misleading control snapshot.
+    """
+
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        discovered = Path(proc.stdout.decode("utf-8").strip()).resolve()
+    except (UnicodeDecodeError, OSError):
+        return None
+    expected = ROOT.resolve()
+    return expected if discovered == expected else None
+
+
+def _git_tracked_control_paths() -> tuple[str, ...] | None:
+    """Return tracked control sources, or ``None`` outside a Git checkout.
+
+    Build and editable-install steps may create ignored ``*.py`` files inside
+    the control packages (for example generated protobuf stubs).  A filesystem
+    walk would silently bind published evidence to those host-local files even
+    though a clean checkout cannot reproduce them.  The Git index is therefore
+    authoritative whenever it is available.
+    """
+
+    if _git_repository_root() is None:
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "ls-files",
+                "-z",
+                "--",
+                *CONTROL_SOURCE_ROOTS,
+                *CONTROL_SOURCE_METADATA,
+            ],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError as exc:
+        raise RuntimeError("git ls-files failed in the benchmark worktree") from exc
+    if proc.returncode != 0:
+        raise RuntimeError("git ls-files failed in the benchmark worktree")
+    try:
+        entries = proc.stdout.decode("utf-8").split("\0")
+    except UnicodeDecodeError as exc:
+        raise ValueError("tracked control-source paths are not valid UTF-8") from exc
+    metadata = set(CONTROL_SOURCE_METADATA)
+    return tuple(
+        sorted(
+            path
+            for path in entries
+            if path and (path in metadata or path.endswith(".py"))
+        )
+    )
+
+
 def _control_source_paths() -> tuple[str, ...]:
+    tracked = _git_tracked_control_paths()
+    if tracked is not None:
+        return tracked
+
+    # ``git archive`` and source-distribution consumers have no index.  Those
+    # artifacts contain tracked files only, so a deterministic filesystem walk
+    # is the appropriate fallback there.
     paths = set(CONTROL_SOURCE_METADATA)
     for relative_root in CONTROL_SOURCE_ROOTS:
         root = ROOT / relative_root
@@ -182,6 +263,7 @@ def _control_source_scope() -> dict[str, Any]:
         "roots": list(CONTROL_SOURCE_ROOTS),
         "include": ["**/*.py"],
         "metadata": list(CONTROL_SOURCE_METADATA),
+        "selection": "git-tracked-files-with-source-archive-fallback",
         "content_canonicalization": {
             "encoding": "utf-8",
             "line_endings": "lf",
@@ -212,6 +294,9 @@ def _source_file_digests(catalog_path: Path) -> dict[str, str]:
 
 
 def _git_metadata() -> dict[str, Any]:
+    if _git_repository_root() is None:
+        return {"commit": "", "dirty": False, "branch": ""}
+
     def run(*args: str) -> str:
         try:
             return subprocess.run(
@@ -221,8 +306,11 @@ def _git_metadata() -> dict[str, Any]:
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-        except (OSError, subprocess.CalledProcessError):
-            return ""
+        except (OSError, subprocess.CalledProcessError) as exc:
+            command = " ".join(args)
+            raise RuntimeError(
+                f"git {command} failed in the benchmark worktree"
+            ) from exc
 
     status = run("status", "--porcelain")
     return {
@@ -1145,6 +1233,28 @@ def render_report(manifest: dict) -> str:
     latency = metrics["latency"]
     signature = manifest.get("signature") or {}
     families = results["family_metrics"]
+    manifest_bytes = (
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    publisher_key_hex = str(signature.get("pubkey") or "").lower()
+    try:
+        publisher_key_bytes = bytes.fromhex(publisher_key_hex)
+    except ValueError:
+        publisher_key_bytes = b""
+    valid_publisher_key = (
+        len(publisher_key_hex) == 64 and len(publisher_key_bytes) == 32
+    )
+    publisher_key_file_sha256 = (
+        hashlib.sha256((publisher_key_hex + "\n").encode("ascii")).hexdigest()
+        if valid_publisher_key
+        else "unavailable"
+    )
+    publisher_key_fingerprint = (
+        hashlib.sha256(publisher_key_bytes).hexdigest()
+        if valid_publisher_key
+        else "unavailable"
+    )
 
     def pct(value: float | None) -> str:
         return "n/a" if value is None else f"{value:.1%}"
@@ -1195,8 +1305,19 @@ def render_report(manifest: dict) -> str:
         f"- Input digest: `{manifest['inputs_digest']}`",
         f"- Manifest signature: `{signature.get('alg', 'UNSIGNED')}` "
         "(self-signed run integrity)",
-        "- Publication verification requires the separate checked-in "
-        "`trusted-publisher.pub`; the manifest-embedded key is not trusted by itself",
+        "- Public evidence: [signed measured manifest]"
+        "(./results/governance-frontier-v1/measured-manifest.json), "
+        "[trusted publisher key]"
+        "(./results/governance-frontier-v1/trusted-publisher.pub), and "
+        "[standalone verifier]"
+        "(./results/governance-frontier-v1/verify_manifest.py)",
+        f"- Signed manifest file SHA-256 (UTF-8/LF): `{manifest_sha256}`",
+        "- Trusted-key file SHA-256 (UTF-8/LF): "
+        f"`{publisher_key_file_sha256}`",
+        "- Ed25519 public-key fingerprint (SHA-256 of the 32 raw key bytes): "
+        f"`{publisher_key_fingerprint}`",
+        "- Publication verification requires the separately downloaded "
+        "trusted key; the manifest-embedded key is not trusted by itself",
         "",
         "## Scorecard",
         "",
@@ -1329,6 +1450,23 @@ def render_report(manifest: dict) -> str:
             "  rerunning the benchmark.",
             "- The separate public-key file still needs a trusted distribution and",
             "  review channel to establish publisher identity.",
+            "",
+            "## Verify the published evidence without Lightwork source",
+            "",
+            "Download the signed manifest, trusted publisher key, and standalone",
+            "verifier linked under **Run identity**, keep them in one directory,",
+            "install `cryptography`, and run:",
+            "",
+            "```bash",
+            "python verify_manifest.py measured-manifest.json trusted-publisher.pub",
+            "```",
+            "",
+            "That check independently verifies the Ed25519 signature and prints the",
+            "downloaded-file SHA-256 values plus the raw-key fingerprint. It does",
+            "**not** recompute the manifest's signed control-source digests.",
+            "Source-binding verification requires a licensed Lightwork source",
+            "snapshot at the measured commit and the full tracked-artifact command",
+            "below.",
             "",
             "## Defensible claim",
             "",

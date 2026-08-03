@@ -19,31 +19,63 @@ the agent running. Audit failures should NEVER crash the swarm.
 """
 from __future__ import annotations
 
-from .erase import delete_user, scrub_user  # noqa: F401
-from .errors import AuditRefused  # noqa: F401
-from .events import AuditEvent, EventKind  # noqa: F401
-from .reader import day_files, event_paths, iter_events  # noqa: F401
-from .signing import (  # noqa: F401
-    AuditSigner,
-    ChainBreak,
-    ensure_anchors,
-    reanchor_file,
-    verify_anchors,
-    verify_chain,
-)
-from .writer import (  # noqa: F401
-    AuditLog,
-    AuditWriteRefused,
-    audit_event,
-    default_audit_log,
-    global_audit_log,
-    goal_context,
-    reanchor_after_erase,
-    record,
-    record_global,
-    reset_goal_context,
-    set_goal_context,
-)
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    # Runtime exports are lazy below. Keep their module edge explicit for
+    # static reachability tools without reintroducing package-import effects.
+    from . import erase  # noqa: F401
+
+# Keep package import side-effect free. In particular, offline signature and
+# checkpoint verification must not import writer.py, whose live sink resolves
+# deployment config and tenant storage. Public names retain their historical
+# ``maverick.audit`` locations and are cached after first use.
+_EXPORT_MODULE = {
+    "AuditCheckpointError": ".checkpoints",
+    "CheckpointBreak": ".checkpoints",
+    "latest_checkpoint_sequence": ".checkpoints",
+    "publish_checkpoint": ".checkpoints",
+    "verify_checkpoints": ".checkpoints",
+    "delete_user": ".erase",
+    "scrub_user": ".erase",
+    "AuditRefused": ".errors",
+    "AuditEvent": ".events",
+    "EventKind": ".events",
+    "day_files": ".reader",
+    "event_paths": ".reader",
+    "iter_events": ".reader",
+    "AuditSigner": ".signing",
+    "ChainBreak": ".signing",
+    "ensure_anchors": ".signing",
+    "reanchor_file": ".signing",
+    "verify_anchors": ".signing",
+    "verify_chain": ".signing",
+    "AuditLog": ".writer",
+    "AuditWriteRefused": ".writer",
+    "audit_event": ".writer",
+    "default_audit_log": ".writer",
+    "global_audit_log": ".writer",
+    "goal_context": ".writer",
+    "reanchor_after_erase": ".writer",
+    "record": ".writer",
+    "record_global": ".writer",
+    "reset_goal_context": ".writer",
+    "set_goal_context": ".writer",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORT_MODULE.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module_name, __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_EXPORT_MODULE))
 
 __all__ = [
     "AuditEvent",
@@ -51,6 +83,8 @@ __all__ = [
     "AuditLog",
     "AuditRefused",
     "AuditWriteRefused",
+    "AuditCheckpointError",
+    "CheckpointBreak",
     "audit_event",
     "default_audit_log",
     "global_audit_log",
@@ -65,6 +99,9 @@ __all__ = [
     "reanchor_file",
     "ensure_anchors",
     "verify_anchors",
+    "publish_checkpoint",
+    "verify_checkpoints",
+    "latest_checkpoint_sequence",
     "day_files",
     "event_paths",
     "iter_events",

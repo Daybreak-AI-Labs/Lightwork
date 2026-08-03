@@ -922,6 +922,13 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
     interlocked cycle as successful."""
     try:
         from . import self_harness
+        from .llm import require_model_allowed
+
+        if model_id is not None:
+            # A caller-selected candidate model is an explicit policy pin. Keep
+            # the original corpus key spelling, but reject it before any
+            # evaluator can downgrade the violation into a harmless dry pass.
+            require_model_allowed(str(model_id))
         st = self_harness.settings() if self_harness.enabled() else None
         provider_egress = _learning_provider_egress_enabled()
         # ONE budget pot for everything this cycle evaluates -- the model-wide
@@ -1141,7 +1148,11 @@ def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration bounda
         return report, retired
     except Halted:
         raise
-    except Exception:  # pragma: no cover -- a maintenance cycle never perturbs a run
+    except Exception as exc:  # pragma: no cover -- maintenance stays best-effort
+        from .llm import ModelNotAllowedError
+
+        if isinstance(exc, ModelNotAllowedError):
+            raise
         log.debug("self-harness cycle failed", exc_info=True)
         from . import self_harness
         return self_harness.SelfHarnessReport(model_id=str(model_id or "")), 0

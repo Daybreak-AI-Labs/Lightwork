@@ -170,6 +170,22 @@ def test_tests_are_not_scanned(tmp_path) -> None:
         [m for m in census if "/tests/" in m]
 
 
+def test_generated_build_copies_are_not_scanned(tmp_path) -> None:
+    root = tmp_path / "packages"
+    generated = root / "example" / "build" / "lib" / "example"
+    generated.mkdir(parents=True)
+    (generated / "client.py").write_text(
+        "import aiohttp\naiohttp.ClientSession()\n",
+        encoding="utf-8",
+    )
+    original = gate.REPO_ROOT
+    gate.REPO_ROOT = tmp_path
+    try:
+        assert gate.scan(roots=("packages",)) == {}
+    finally:
+        gate.REPO_ROOT = original
+
+
 # -- CLI -------------------------------------------------------------------
 
 def test_the_cli_refuses_an_empty_scan(monkeypatch, capsys) -> None:

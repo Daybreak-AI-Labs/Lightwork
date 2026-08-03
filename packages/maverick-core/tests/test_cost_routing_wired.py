@@ -48,7 +48,7 @@ def test_enabled_routes_base_role_to_cheapest_provider(_clean, monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "x")
     from maverick.llm import model_for_role
     # coder is TIER_BASE; with only DeepSeek keyed, the cheapest base-tier
-    # option is deepseek -> "deepseek:deepseek-chat".
+    # option is deepseek -> a current v4 model.
     got = model_for_role("coder")
     assert got.startswith("deepseek:"), got
 
@@ -112,7 +112,7 @@ def test_config_provider_key_is_passed_to_provider_client(_clean, monkeypatch, t
 
     monkeypatch.setattr(providers, "get_provider_client", fake_get_provider_client)
 
-    client = LLM("deepseek:deepseek-reasoner")._get_client("deepseek")
+    client = LLM("deepseek:deepseek-v4-pro")._get_client("deepseek")
 
     assert isinstance(client, DummyClient)
     assert calls == [("deepseek", "config-key")]

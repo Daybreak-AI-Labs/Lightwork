@@ -38,11 +38,25 @@ class Message:
     namespace: str | None = None
 
 
+class _Inbox(queue.Queue[Message]):
+    """Queue plus a per-recipient audit/admission lock.
+
+    Producers serialize only with other producers for this inbox. That lets a
+    strict audit refusal happen before a message becomes visible without
+    serializing unrelated recipients or holding Queue's internal mutex during
+    filesystem I/O.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(maxsize=1000)
+        self.send_lock = threading.Lock()
+
+
 # Legacy callers that do not provide a namespace retain their historical string
 # keys (some integration tests intentionally inspect ``_inboxes``). Hardened
 # SwarmContext callers use ``(namespace, agent_id)`` keys.
 _InboxKey = str | tuple[str, str]
-_inboxes: dict[_InboxKey, queue.Queue[Message]] = {}
+_inboxes: dict[_InboxKey, _Inbox] = {}
 _inboxes_lock = threading.Lock()
 
 # An inbox is created lazily for any agent/recipient id that send/recv/peek
@@ -83,7 +97,7 @@ def _get_inbox(
     agent_id: str,
     *,
     namespace: str | None = None,
-) -> queue.Queue[Message] | None:
+) -> _Inbox | None:
     """Get-or-create an inbox, or return ``None`` when the registry is full."""
     key = _inbox_key(agent_id, namespace)
     with _inboxes_lock:
@@ -93,7 +107,7 @@ def _get_inbox(
                 _evict_empty_inboxes_locked(reserve=1)
             if len(_inboxes) >= _MAX_INBOXES:
                 return None
-            q = queue.Queue(maxsize=1000)
+            q = _Inbox()
             _inboxes[key] = q
         return q
 
@@ -123,22 +137,28 @@ def send(
             recipient,
         )
         return False
-    try:
-        inbox.put_nowait(msg)
-    except queue.Full:
-        log.warning("agent_bus: inbox full for %s; dropping message", recipient)
-        return False
-    # Audit-log so the trace records inter-agent traffic. Fail-safe.
-    try:
-        from .audit import record
-        record(
+    with inbox.send_lock:
+        if inbox.full():
+            log.warning("agent_bus: inbox full for %s; dropping message", recipient)
+            return False
+        # Audit before making the message visible. Ordinary writer outages
+        # remain fail-soft; a configured compliance/custody refusal prevents
+        # delivery instead of allowing an unrecorded action then raising.
+        from .audit import audit_event
+
+        audit_event(
             "agent_message",
             agent=sender, goal_id=goal_id,
             recipient=recipient,
             correlation_id=correlation_id,
         )
-    except Exception:  # pragma: no cover
-        pass
+        try:
+            # Every producer for this inbox holds send_lock, while consumers can
+            # only free capacity, so this cannot become full after the check.
+            inbox.put_nowait(msg)
+        except queue.Full:  # pragma: no cover -- defensive Queue invariant
+            log.error("agent_bus: inbox capacity changed under producer lock")
+            return False
     return True
 
 

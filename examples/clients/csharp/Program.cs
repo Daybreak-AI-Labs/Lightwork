@@ -11,6 +11,7 @@
 //
 // Run locally:  dotnet run
 using ModelContextProtocol.Client;
+using System.Text.Json;
 
 // Start `maverick mcp` as a subprocess; the SDK manages stdio JSON-RPC.
 var transport = new StdioClientTransport(new()
@@ -43,6 +44,16 @@ if (res.Content.Count == 0)
     return 1;
 }
 Console.WriteLine("maverick_facts_get round-trip OK");
+
+if (res.StructuredContent is not { } structured ||
+    structured.ValueKind != JsonValueKind.Object ||
+    !structured.TryGetProperty("facts", out _))
+{
+    Console.Error.WriteLine(
+        "maverick_facts_get returned no structuredContent with 'facts'");
+    return 1;
+}
+Console.WriteLine("maverick_facts_get structuredContent OK");
 
 Console.WriteLine("OK: C# client drove Lightwork over MCP end-to-end");
 return 0;

@@ -105,7 +105,7 @@ def test_cap_change_cannot_publish_between_cap_read_and_reservation(
     # fails this assertion deterministically.
     assert registry._REGISTRY_LOCK.locked()
 
-    real_mutate = registry._mutate
+    real_mutate = registry._mutate_billing
 
     def marked_mutate(*args, **kwargs):
         mutation_attempted.set()
@@ -113,7 +113,7 @@ def test_cap_change_cannot_publish_between_cap_read_and_reservation(
         mutation_published.set()
         return result
 
-    monkeypatch.setattr(registry, "_mutate", marked_mutate)
+    monkeypatch.setattr(registry, "_mutate_billing", marked_mutate)
 
     def lower_cap() -> None:
         try:

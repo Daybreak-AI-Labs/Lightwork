@@ -68,6 +68,9 @@ out/
 # Rust
 target/
 Cargo.lock
+!apps/desktop/src-tauri/Cargo.lock
+!apps/installer-desktop/src-tauri/Cargo.lock
+!rust/Cargo.lock
 **/*.rs.bk
 
 # Editors / OS
@@ -93,6 +96,7 @@ Thumbs.db
 *.log
 .maverick-workspace/
 /site/
+/.public-docs/
 
 # generated security-benchmark run artifact (RESULTS.md is the checked-in record)
 benchmarks/security/results.jsonl

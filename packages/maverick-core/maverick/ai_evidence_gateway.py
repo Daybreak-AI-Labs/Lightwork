@@ -12,6 +12,7 @@ compliance verdict.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -20,16 +21,20 @@ import os
 import re
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from .governed_records import GovernedRecordStore
+from .governed_records import (
+    GovernedRecordCapacityError,
+    GovernedRecordStore,
+)
 from .privacy_ops import RecordConflict
 
 POLICY_SCHEMA = "lightwork.ai-evidence-policy.v1"
+POLICY_MODE_SCHEMA = "lightwork.ai-evidence-policy-mode.v1"
 RECEIPT_SCHEMA = "lightwork.ai-interaction-receipt.v1"
 CONVERSATION_SCHEMA = "lightwork.ai-evidence-conversation.v1"
 REGULATORY_IMPACT_SCHEMA = "lightwork.ai-regulatory-impact.v1"
@@ -125,6 +130,21 @@ _IMPACTS = GovernedRecordStore(
     "AII",
     "ai_regulatory_impact",
 )
+_POLICY_SNAPSHOTS = GovernedRecordStore(
+    "ai_evidence_policy_snapshots",
+    "AIS",
+    "ai_evidence_policy_snapshot",
+)
+_POLICY_MODES = GovernedRecordStore(
+    "ai_evidence_policy_modes",
+    "AIM",
+    "ai_evidence_policy_mode",
+)
+_PACKET_REPLAYS = GovernedRecordStore(
+    "ai_evidence_packet_replays",
+    "AIX",
+    "ai_evidence_packet_replay",
+)
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off", ""})
@@ -190,8 +210,20 @@ _TRANSPARENCY_FIELDS = frozenset(
     }
 )
 _IMPACT_DECISIONS = frozenset({"accepted", "dismissed"})
+_IMPACT_STATUSES = frozenset(
+    {"pending_review", "accepted_refreshing", "accepted", "dismissed"}
+)
 _MAX_POLICIES = 1_000
-_MAX_RECEIPTS = 10_000
+# Total signed receipt retention is a controlled fail-closed bound.  Individual
+# files and API reads use much smaller bounds; the segmented journal and cursor
+# index make the larger tenant lifetime safe to operate.
+_MAX_RECEIPTS = 1_000_000
+_MAX_PACKETS = 100_000
+_MAX_RECEIPT_LIST = 10_000
+_DEFAULT_RECEIPT_SEGMENT_ROWS = 4_096
+_DEFAULT_RECEIPT_SEGMENT_BYTES = 64 * 1024 * 1024
+_DEFAULT_PACKET_SEGMENT_ROWS = 4_096
+_DEFAULT_PACKET_SEGMENT_BYTES = 64 * 1024 * 1024
 _MAX_IMPACTS = 5_000
 _MAX_POLICY_HISTORY = 256
 _MAX_CITATIONS = 64
@@ -200,7 +232,11 @@ _MAX_JSON_BYTES = 512 * 1024
 _MAX_PACKET_POLICIES = 100
 _MAX_PACKET_RECEIPTS = 100
 _MAX_PACKET_IMPACTS = 100
+_MAX_RECEIPT_SNAPSHOT_ATTEMPTS = 3
 _DELIVERY_LOCK = threading.RLock()
+_POLICY_MUTATION_LOCK = threading.RLock()
+_IMPACT_MUTATION_LOCK = threading.RLock()
+_PACKET_ISSUE_LOCK = threading.RLock()
 
 
 class EvidenceGatewayError(RuntimeError):
@@ -213,6 +249,10 @@ class EvidenceGatewayDisabled(EvidenceGatewayError):
 
 class EvidenceGatewayStateError(EvidenceGatewayError):
     """Persisted evidence state cannot satisfy the gateway contract."""
+
+
+class EvidenceGatewaySnapshotIndeterminate(EvidenceGatewayStateError):
+    """A stable assurance snapshot could not be observed after bounded retries."""
 
 
 class UnsupportedMediaMarking(EvidenceGatewayError):
@@ -365,6 +405,112 @@ def _list_limit(value: object, maximum: int) -> int:
     if value < 1 or value > maximum:
         raise ValueError(f"limit must be between 1 and {maximum}")
     return value
+
+
+def _storage_integer(
+    *,
+    environment: str,
+    config_key: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """Resolve one advanced receipt-storage limit without a silent fallback."""
+
+    raw: object | None = os.environ.get(environment)
+    if raw is None:
+        try:
+            from .config import load_global_config
+
+            config = load_global_config()
+            section = (
+                config.get("evidence_gateway")
+                if isinstance(config, Mapping)
+                else None
+            )
+            if isinstance(section, Mapping):
+                raw = section.get(config_key)
+        except Exception as exc:
+            raise EvidenceGatewayStateError(
+                "AI evidence receipt storage configuration is unavailable"
+            ) from exc
+    if raw is None:
+        return default
+    if isinstance(raw, bool):
+        raise EvidenceGatewayStateError(
+            f"{config_key} must be an integer between {minimum} and {maximum}"
+        )
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise EvidenceGatewayStateError(
+            f"{config_key} must be an integer between {minimum} and {maximum}"
+        ) from exc
+    if value < minimum or value > maximum:
+        raise EvidenceGatewayStateError(
+            f"{config_key} must be an integer between {minimum} and {maximum}"
+        )
+    return value
+
+
+def _receipt_segment_rows() -> int:
+    return _storage_integer(
+        environment="MAVERICK_EVIDENCE_RECEIPT_SEGMENT_ROWS",
+        config_key="receipt_segment_rows",
+        default=_DEFAULT_RECEIPT_SEGMENT_ROWS,
+        minimum=1,
+        maximum=1_000_000,
+    )
+
+
+def _receipt_capacity() -> int:
+    return _storage_integer(
+        environment="MAVERICK_EVIDENCE_RECEIPT_MAX_TOTAL",
+        config_key="receipt_max_total",
+        default=_MAX_RECEIPTS,
+        minimum=1,
+        maximum=100_000_000,
+    )
+
+
+def _receipt_segment_bytes() -> int:
+    return _storage_integer(
+        environment="MAVERICK_EVIDENCE_RECEIPT_SEGMENT_BYTES",
+        config_key="receipt_segment_bytes",
+        default=_DEFAULT_RECEIPT_SEGMENT_BYTES,
+        minimum=1024 * 1024,
+        maximum=1024 * 1024 * 1024,
+    )
+
+
+def _packet_segment_rows() -> int:
+    return _storage_integer(
+        environment="MAVERICK_EVIDENCE_PACKET_SEGMENT_ROWS",
+        config_key="packet_segment_rows",
+        default=_DEFAULT_PACKET_SEGMENT_ROWS,
+        minimum=1,
+        maximum=1_000_000,
+    )
+
+
+def _packet_capacity() -> int:
+    return _storage_integer(
+        environment="MAVERICK_EVIDENCE_PACKET_MAX_TOTAL",
+        config_key="packet_max_total",
+        default=_MAX_PACKETS,
+        minimum=1,
+        maximum=100_000_000,
+    )
+
+
+def _packet_segment_bytes() -> int:
+    return _storage_integer(
+        environment="MAVERICK_EVIDENCE_PACKET_SEGMENT_BYTES",
+        config_key="packet_segment_bytes",
+        default=_DEFAULT_PACKET_SEGMENT_BYTES,
+        minimum=1024 * 1024,
+        maximum=1024 * 1024 * 1024,
+    )
 
 
 def enabled() -> bool:
@@ -694,6 +840,161 @@ def _policy_record(policy_id: str) -> dict[str, Any] | None:
     return _POLICIES.get(_stable_id("AIP", token))
 
 
+def _policy_transaction_target() -> Path:
+    from .paths import data_dir
+
+    _active_tenant()
+    return data_dir("ai_evidence_gateway", "policy-mutations.transaction")
+
+
+def _impact_transaction_target() -> Path:
+    from .paths import data_dir
+
+    _active_tenant()
+    return data_dir(
+        "ai_evidence_gateway",
+        "regulatory-impact-mutations.transaction",
+    )
+
+
+def _claim_policy_tenant_mode(
+    *,
+    synthetic: bool,
+    actor: str,
+) -> None:
+    """Permanently separate synthetic-demo and production policy authorities."""
+
+    tenant = _active_tenant()
+    requested = "synthetic" if synthetic else "production"
+    record_id = _stable_id("AIM", "tenant-policy-mode")
+
+    def validated_mode(record: Mapping[str, Any]) -> str:
+        mode = record.get("mode")
+        if (
+            record.get("id") != record_id
+            or record.get("schema") != POLICY_MODE_SCHEMA
+            or record.get("status") != "active"
+            or record.get("tenant_id") != tenant
+            or mode not in {"production", "synthetic"}
+        ):
+            raise EvidenceGatewayStateError(
+                "AI evidence policy tenant mode failed validation"
+            )
+        return str(mode)
+
+    existing = _POLICY_MODES.get(record_id)
+    if existing is None:
+        # Upgrade an existing tenant conservatively. A historically mixed
+        # namespace is refused; otherwise the current policy set determines
+        # the permanent mode before a new mutation can proceed.
+        legacy_rows = _POLICIES.list(limit=_MAX_POLICIES + 1)
+        if len(legacy_rows) > _MAX_POLICIES:
+            raise EvidenceGatewayStateError(
+                "AI evidence policy namespace is oversized"
+            )
+        legacy_modes = {
+            (
+                "synthetic"
+                if (
+                    isinstance(policy.get("metadata"), Mapping)
+                    and (
+                        policy["metadata"].get("demo") is True
+                        or policy["metadata"].get("synthetic") is True
+                    )
+                )
+                else "production"
+            )
+            for policy in (_policy_view(row) for row in legacy_rows)
+        }
+        if len(legacy_modes) > 1:
+            raise EvidenceGatewayStateError(
+                "AI evidence policy tenant already mixes synthetic and "
+                "production authority; provision separate tenants"
+            )
+        inherited = next(iter(legacy_modes), requested)
+        try:
+            existing = _POLICY_MODES.create(
+                {
+                    "id": record_id,
+                    "schema": POLICY_MODE_SCHEMA,
+                    "status": "active",
+                    "tenant_id": tenant,
+                    "mode": inherited,
+                },
+                action="policy_tenant_mode_claimed",
+                actor=actor,
+            )
+        except RecordConflict:
+            existing = _POLICY_MODES.get(record_id)
+            if existing is None:
+                raise EvidenceGatewayStateError(
+                    "AI evidence policy tenant mode could not be recovered"
+                ) from None
+    actual = validated_mode(existing)
+    if actual != requested:
+        raise EvidenceGatewayStateError(
+            "synthetic demo and production AI evidence policies require "
+            "separate tenant namespaces"
+        )
+
+
+def _archive_policy_snapshot(
+    snapshot: Mapping[str, Any],
+    *,
+    actor: str,
+) -> None:
+    """Move one immutable policy snapshot out of the bounded hot document."""
+
+    validated = _validated_snapshot(snapshot)
+    policy_id = str(validated["policy_id"])
+    policy_sha = str(validated["policy_sha256"])
+    record_id = _stable_id("AIS", policy_id, policy_sha)
+    body = {
+        "id": record_id,
+        "schema": "lightwork.ai-evidence-policy-snapshot-archive.v1",
+        "status": "archived",
+        "policy_id": policy_id,
+        "policy_sha256": policy_sha,
+        "snapshot": validated,
+    }
+    existing = _POLICY_SNAPSHOTS.get(record_id)
+    if existing is not None:
+        if (
+            existing.get("schema") != body["schema"]
+            or existing.get("status") != "archived"
+            or existing.get("policy_id") != policy_id
+            or existing.get("policy_sha256") != policy_sha
+            or not hmac.compare_digest(
+                _canonical_json(existing.get("snapshot")),
+                _canonical_json(validated),
+            )
+        ):
+            raise EvidenceGatewayStateError(
+                "archived AI evidence policy snapshot diverges from authority"
+            )
+        return
+    try:
+        _POLICY_SNAPSHOTS.create(
+            body,
+            action="policy_snapshot_archived",
+            actor=actor,
+        )
+    except RecordConflict:
+        # Another process may have archived the same immutable snapshot first.
+        recovered = _POLICY_SNAPSHOTS.get(record_id)
+        if (
+            recovered is None
+            or recovered.get("policy_sha256") != policy_sha
+            or not hmac.compare_digest(
+                _canonical_json(recovered.get("snapshot")),
+                _canonical_json(validated),
+            )
+        ):
+            raise EvidenceGatewayStateError(
+                "archived AI evidence policy snapshot could not be recovered"
+            ) from None
+
+
 def upsert_policy(
     policy_id: str = "default",
     *,
@@ -713,6 +1014,51 @@ def upsert_policy(
 ) -> dict[str, Any]:
     """Create or CAS-update an immutable-in-history policy snapshot."""
 
+    from .file_lock import cross_process_lock
+
+    with _POLICY_MUTATION_LOCK:
+        with cross_process_lock(_policy_transaction_target(), strict=True):
+            return _upsert_policy_locked(
+                policy_id,
+                actor=actor,
+                expected_revision=expected_revision,
+                disclosure_text=disclosure_text,
+                require_interaction_disclosure=(
+                    require_interaction_disclosure
+                ),
+                require_machine_readable_marking=(
+                    require_machine_readable_marking
+                ),
+                require_visible_marking=require_visible_marking,
+                supported_modalities=supported_modalities,
+                machine_marker=machine_marker,
+                visible_marker=visible_marker,
+                model_sha256=model_sha256,
+                context_sha256=context_sha256,
+                regulatory_bindings=regulatory_bindings,
+                metadata=metadata,
+            )
+
+
+def _upsert_policy_locked(
+    policy_id: str = "default",
+    *,
+    actor: str,
+    expected_revision: int | None = None,
+    disclosure_text: str = DEFAULT_DISCLOSURE_TEXT,
+    require_interaction_disclosure: bool = True,
+    require_machine_readable_marking: bool = True,
+    require_visible_marking: bool = False,
+    supported_modalities: Sequence[str] = ("text",),
+    machine_marker: str = DEFAULT_MACHINE_MARKER,
+    visible_marker: str = DEFAULT_VISIBLE_MARKER,
+    model_sha256: str = "",
+    context_sha256: str = "",
+    regulatory_bindings: Sequence[Mapping[str, Any]] | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Policy mutation after tenant-wide serialization has been acquired."""
+
     _require_enabled()
     _active_tenant()
     token = _token(policy_id, "policy_id")
@@ -729,6 +1075,10 @@ def upsert_policy(
     model_digest = _digest(model_sha256, "model_sha256", optional=True)
     context_digest = _digest(context_sha256, "context_sha256", optional=True)
     safe_metadata = _safe_metadata(metadata)
+    synthetic_mode = (
+        safe_metadata.get("demo") is True
+        or safe_metadata.get("synthetic") is True
+    )
     record_id = _stable_id("AIP", token)
     existing = _POLICIES.get(record_id)
     # Regulatory bindings are written only by the cited, human-reviewed
@@ -766,22 +1116,48 @@ def upsert_policy(
     if existing is None:
         if expected_revision not in (None, 0):
             raise RecordConflict("AI evidence policy does not exist at that revision")
-        created = _POLICIES.create(
-            {
-                "id": record_id,
-                "schema": POLICY_SCHEMA,
-                "policy_id": token,
-                "status": "active",
-                "current": snapshot,
-                "history": [],
-            },
-            action="policy_created",
+        if len(_POLICIES.list(limit=_MAX_POLICIES)) >= _MAX_POLICIES:
+            raise EvidenceGatewayStateError(
+                "AI evidence policy capacity has been reached; archive or "
+                "provision a new governed tenant namespace before creating "
+                "another policy"
+            )
+        # Claim only after every deterministic rejection above. A malformed or
+        # stale request must not permanently choose this tenant's posture.
+        _claim_policy_tenant_mode(
+            synthetic=synthetic_mode,
             actor=operator,
         )
+        try:
+            created = _POLICIES.create(
+                {
+                    "id": record_id,
+                    "schema": POLICY_SCHEMA,
+                    "policy_id": token,
+                    "status": "active",
+                    "current": snapshot,
+                    "history": [],
+                },
+                action="policy_created",
+                actor=operator,
+                max_records=_MAX_POLICIES,
+            )
+        except GovernedRecordCapacityError as exc:
+            raise EvidenceGatewayStateError(
+                "AI evidence policy capacity has been reached; archive or "
+                "provision a new governed tenant namespace before creating "
+                "another policy"
+            ) from exc
         return _policy_view(created)
     current = existing.get("current")
     if not isinstance(current, Mapping):
         raise EvidenceGatewayStateError("AI evidence policy is malformed")
+    # An existing valid policy is itself durable evidence of tenant posture, so
+    # a recovered legacy mode claim cannot strand an otherwise empty tenant.
+    _claim_policy_tenant_mode(
+        synthetic=synthetic_mode,
+        actor=operator,
+    )
     if hmac.compare_digest(
         str(current.get("policy_sha256") or ""),
         snapshot["policy_sha256"],
@@ -794,10 +1170,12 @@ def upsert_policy(
     if expected_revision != existing["revision"]:
         raise RecordConflict("AI evidence policy changed since it was reviewed")
     history = existing.get("history")
-    if not isinstance(history, list) or len(history) >= _MAX_POLICY_HISTORY:
+    if not isinstance(history, list):
         raise EvidenceGatewayStateError(
-            "AI evidence policy snapshot history reached its safety limit"
+            "AI evidence policy snapshot history is malformed"
         )
+    if len(history) >= _MAX_POLICY_HISTORY:
+        _archive_policy_snapshot(history[0], actor=operator)
 
     def mutate(row: dict[str, Any]) -> None:
         row_history = row.get("history")
@@ -805,9 +1183,7 @@ def upsert_policy(
         if not isinstance(row_history, list) or not isinstance(row_current, dict):
             raise EvidenceGatewayStateError("AI evidence policy is malformed")
         if len(row_history) >= _MAX_POLICY_HISTORY:
-            raise EvidenceGatewayStateError(
-                "AI evidence policy snapshot history reached its safety limit"
-            )
+            row_history.pop(0)
         row_history.append(dict(row_current))
         row["current"] = snapshot
         row["status"] = "active"
@@ -862,6 +1238,31 @@ def _snapshot_for_binding(
         validated = _validated_snapshot(snapshot)
         claimed = str(validated.get("policy_sha256") or "")
         if hmac.compare_digest(claimed, policy_sha256):
+            return validated
+    policy_id = record.get("policy_id")
+    if isinstance(policy_id, str):
+        archived = _POLICY_SNAPSHOTS.get(
+            _stable_id("AIS", policy_id, policy_sha256)
+        )
+        if archived is not None:
+            snapshot = archived.get("snapshot")
+            validated = _validated_snapshot(snapshot)
+            if (
+                archived.get("schema")
+                != "lightwork.ai-evidence-policy-snapshot-archive.v1"
+                or archived.get("status") != "archived"
+                or archived.get("policy_id") != policy_id
+                or archived.get("policy_sha256") != policy_sha256
+                or validated.get("policy_id") != policy_id
+                or not hmac.compare_digest(
+                    str(validated.get("policy_sha256") or ""),
+                    policy_sha256,
+                )
+            ):
+                raise EvidenceGatewayStateError(
+                    "archived AI evidence policy snapshot failed integrity "
+                    "validation"
+                )
             return validated
     return None
 
@@ -1178,6 +1579,30 @@ def _receipt_path() -> Path:
     return data_dir("ai_evidence_gateway", "interaction_receipts.ndjson")
 
 
+def _receipt_ledger(*, max_receipts: int | None = None):
+    """Return the tenant-bound segmented receipt authority.
+
+    The object is intentionally cheap and stateless.  Its authenticated state
+    and SQLite index live beside the legacy ledger, so independent workers
+    converge under the same cross-process transaction lock.
+    """
+
+    from .ai_evidence_ledger import SegmentedReceiptLedger
+
+    tenant = _active_tenant()
+    return SegmentedReceiptLedger(
+        _receipt_path(),
+        tenant_id=tenant,
+        segment_rows=_receipt_segment_rows(),
+        segment_bytes=_receipt_segment_bytes(),
+        max_receipts=(
+            _receipt_capacity()
+            if max_receipts is None
+            else max_receipts
+        ),
+    )
+
+
 def _packet_path() -> Path:
     from .paths import data_dir
 
@@ -1185,7 +1610,46 @@ def _packet_path() -> Path:
     return data_dir("ai_evidence_gateway", "assurance_packets.ndjson")
 
 
+def _packet_ledger(*, max_packets: int | None = None):
+    """Return the tenant-bound segmented assurance-packet authority."""
+
+    from .ai_evidence_ledger import SegmentedReceiptLedger
+
+    tenant = _active_tenant()
+    return SegmentedReceiptLedger(
+        _packet_path(),
+        tenant_id=tenant,
+        identity_key="packet_id",
+        payload_key="packet_sha256",
+        segment_rows=_packet_segment_rows(),
+        segment_bytes=_packet_segment_bytes(),
+        max_receipts=(
+            _packet_capacity()
+            if max_packets is None
+            else max_packets
+        ),
+    )
+
+
 def _signed_ledger_rows(path: Path) -> list[dict[str, Any]]:
+    if path == _receipt_path():
+        try:
+            return _receipt_ledger().rows()
+        except Exception as exc:
+            from .ai_evidence_ledger import SegmentedLedgerError
+
+            if isinstance(exc, SegmentedLedgerError):
+                raise EvidenceGatewayStateError(str(exc)) from exc
+            raise
+    if path == _packet_path():
+        try:
+            return _packet_ledger().rows()
+        except Exception as exc:
+            from .ai_evidence_ledger import SegmentedLedgerError
+
+            if isinstance(exc, SegmentedLedgerError):
+                raise EvidenceGatewayStateError(str(exc)) from exc
+            raise
     try:
         raw_lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
@@ -1209,6 +1673,26 @@ def _signed_ledger_rows(path: Path) -> list[dict[str, Any]]:
 
 
 def _signed_rows(path: Path, identity_key: str, identity: str) -> list[dict[str, Any]]:
+    if path == _receipt_path() and identity_key == "receipt_id":
+        try:
+            row = _receipt_ledger().find(identity)
+        except Exception as exc:
+            from .ai_evidence_ledger import SegmentedLedgerError
+
+            if isinstance(exc, SegmentedLedgerError):
+                raise EvidenceGatewayStateError(str(exc)) from exc
+            raise
+        return [] if row is None else [row]
+    if path == _packet_path() and identity_key == "packet_id":
+        try:
+            row = _packet_ledger().find(identity)
+        except Exception as exc:
+            from .ai_evidence_ledger import SegmentedLedgerError
+
+            if isinstance(exc, SegmentedLedgerError):
+                raise EvidenceGatewayStateError(str(exc)) from exc
+            raise
+        return [] if row is None else [row]
     return [
         row
         for row in _signed_ledger_rows(path)
@@ -1221,24 +1705,24 @@ def _identity_transaction_target(path: Path) -> Path:
 
 
 def _assert_receipt_admission_capacity(receipt_id: str) -> None:
-    """Reject a new identity before reserving conversation state at the v1 cap."""
+    """Reject a new identity before reserving conversation state at the cap."""
 
-    from .file_lock import cross_process_lock
+    try:
+        ledger = _receipt_ledger()
+        existing = ledger.find(receipt_id)
+        state = ledger.state()
+    except Exception as exc:
+        from .ai_evidence_ledger import SegmentedLedgerError
 
-    path = _receipt_path()
-    with cross_process_lock(_identity_transaction_target(path), strict=True):
-        rows = _signed_ledger_rows(path)
-        existing = [row for row in rows if row.get("receipt_id") == receipt_id]
-        if len(existing) > 1:
-            raise EvidenceGatewayStateError(
-                "signed evidence identity is duplicated"
-            )
-        if not existing and len(rows) >= _MAX_RECEIPTS:
-            raise EvidenceGatewayStateError(
-                "AI evidence receipt capacity has been reached; "
-                "v1 refuses further delivery until evidence is exported and "
-                "a new governed tenant evidence namespace is provisioned"
-            )
+        if isinstance(exc, SegmentedLedgerError):
+            raise EvidenceGatewayStateError(str(exc)) from exc
+        raise
+    if existing is None and state.total_receipts >= ledger.max_receipts:
+        raise EvidenceGatewayStateError(
+            "AI evidence receipt capacity has been reached; delivery is "
+            "withheld until the configured tenant evidence capacity is "
+            "increased or a new governed namespace is provisioned"
+        )
 
 
 def _sign_event(
@@ -1249,6 +1733,23 @@ def _sign_event(
     identity: str,
     max_rows: int | None = None,
 ) -> tuple[dict[str, Any], str]:
+    segmented_ledger = None
+    if path == _receipt_path() and identity_key == "receipt_id":
+        segmented_ledger = _receipt_ledger(max_receipts=max_rows)
+    elif path == _packet_path() and identity_key == "packet_id":
+        segmented_ledger = _packet_ledger(max_packets=max_rows)
+    if segmented_ledger is not None:
+        try:
+            return segmented_ledger.append(
+                event,
+                identity=identity,
+            )
+        except Exception as exc:
+            from .ai_evidence_ledger import SegmentedLedgerError
+
+            if isinstance(exc, SegmentedLedgerError):
+                raise EvidenceGatewayStateError(str(exc)) from exc
+            raise
     from .audit.signing import AuditSigner
     from .file_lock import cross_process_lock
 
@@ -1570,7 +2071,63 @@ def _reproduce_delivery(
     return signed, delivered
 
 
-def deliver_text(  # noqa: C901 - one linear release transaction is auditable
+def deliver_text(
+    generated_text: str,
+    *,
+    input_text: str,
+    conversation_id: str,
+    idempotency_key: str,
+    actor: str = "gateway",
+    policy_id: str = "default",
+    model_sha256: str = "",
+    context_sha256: str = "",
+    modality: str = "text",
+    human_interaction: bool = True,
+    synthetic_content: bool = True,
+    deepfake: bool = False,
+    public_interest_text: bool = False,
+    editorial_exception: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Atomically render, receipt, and govern one human-facing AI output.
+
+    The tenant identity transaction spans the signed ledger append, governed
+    receipt persistence, and conversation advancement.  Assurance readers use
+    the same lock only to capture short start/end state tokens, never while
+    scanning historical evidence.
+    """
+
+    _require_enabled()
+    from .file_lock import cross_process_lock
+
+    receipt_path = _receipt_path()
+    # Windows mandatory file locks reject a second thread in the same process
+    # with EDEADLK instead of waiting.  Serialize local contenders before
+    # acquiring the cross-process transaction; the inner use is an RLock and
+    # remains re-entrant for the existing linear delivery implementation.
+    with _DELIVERY_LOCK:
+        with cross_process_lock(
+            _identity_transaction_target(receipt_path),
+            strict=True,
+        ):
+            return _deliver_text_locked(
+                generated_text,
+                input_text=input_text,
+                conversation_id=conversation_id,
+                idempotency_key=idempotency_key,
+                actor=actor,
+                policy_id=policy_id,
+                model_sha256=model_sha256,
+                context_sha256=context_sha256,
+                modality=modality,
+                human_interaction=human_interaction,
+                synthetic_content=synthetic_content,
+                deepfake=deepfake,
+                public_interest_text=public_interest_text,
+                editorial_exception=editorial_exception,
+            )
+
+
+def _deliver_text_locked(  # noqa: C901 - linear release transaction is auditable
     generated_text: str,
     *,
     input_text: str,
@@ -1675,18 +2232,12 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
             }
 
         if existing is None:
-            from .file_lock import cross_process_lock
-
             receipt_path = _receipt_path()
-            identity_target = receipt_path.with_name(
-                f"{receipt_path.name}.identity-transaction"
+            recovered_rows = _signed_rows(
+                receipt_path,
+                "receipt_id",
+                receipt_id,
             )
-            with cross_process_lock(identity_target, strict=True):
-                recovered_rows = _signed_rows(
-                    receipt_path,
-                    "receipt_id",
-                    receipt_id,
-                )
             if len(recovered_rows) > 1:
                 raise EvidenceGatewayStateError(
                     "signed evidence identity is duplicated"
@@ -1827,7 +2378,6 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
             path=_receipt_path(),
             identity_key="receipt_id",
             identity=receipt_id,
-            max_rows=_MAX_RECEIPTS,
         )
         if existing is None:
             try:
@@ -1849,7 +2399,7 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
                         "authoritative interaction receipt is unavailable "
                         "after a concurrent issue"
                     ) from None
-                return deliver_text(
+                return _deliver_text_locked(
                     generated_text,
                     input_text=input_text,
                     conversation_id=conversation,
@@ -1888,7 +2438,7 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
                         "authoritative interaction receipt is unavailable "
                         "after a concurrent issue"
                     ) from None
-                return deliver_text(
+                return _deliver_text_locked(
                     generated_text,
                     input_text=input_text,
                     conversation_id=conversation,
@@ -1923,38 +2473,69 @@ def deliver_text(  # noqa: C901 - one linear release transaction is auditable
         }
 
 
-def list_interaction_receipts(*, limit: int = 100) -> list[dict[str, Any]]:
-    """List hash-only interaction receipts, newest first."""
+def list_interaction_receipts_page(
+    *,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> dict[str, Any]:
+    """Return one stable cursor page of hash-only receipts, newest first."""
 
     _require_enabled()
     tenant = _active_tenant()
-    bounded = _list_limit(limit, _MAX_RECEIPTS)
+    bounded = _list_limit(limit, _MAX_RECEIPT_LIST)
     trust = trusted_public_keys()
     rows: list[dict[str, Any]] = []
-    scan_limit = bounded + 1 if bounded == _MAX_RECEIPTS else bounded
-    records = _RECEIPTS.list(limit=scan_limit)
-    if len(records) > _MAX_RECEIPTS:
-        raise EvidenceGatewayStateError(
-            "AI evidence receipt namespace exceeds the safety limit"
-        )
-    for record in records:
-        if record.get("status") != "issued":
-            continue
-        view = _receipt_view(record)
-        view["signature_valid"] = verify_interaction_receipt(
-            view,
-            trusted_public_keys=trust,
-            expected_tenant_id=tenant,
-        )
-        rows.append(view)
-    return sorted(
-        rows,
-        key=lambda row: (
-            float(row.get("created_at") or 0.0),
-            str(row.get("receipt_id") or ""),
-        ),
-        reverse=True,
-    )
+    missing_governed = 0
+    try:
+        ledger = _receipt_ledger()
+        page = ledger.page(limit=bounded, cursor=cursor)
+        for entry in page.entries:
+            record = _RECEIPTS.get(entry.identity)
+            if record is None or record.get("status") != "issued":
+                # A signer append deliberately precedes governed-store commit.
+                # Expose the incomplete window without hiding it; delivery
+                # retry can recover the authoritative record from this row.
+                missing_governed += 1
+                continue
+            signed = record.get("signed_receipt")
+            if (
+                not isinstance(signed, Mapping)
+                or signed.get("hash") != entry.row_hash
+                or signed.get("receipt_payload_sha256")
+                != entry.payload_sha256
+            ):
+                raise EvidenceGatewayStateError(
+                    "governed receipt record diverges from its signed ledger row"
+                )
+            view = _receipt_view(record)
+            view["ledger_ordinal"] = entry.ordinal
+            view["signature_valid"] = verify_interaction_receipt(
+                view,
+                trusted_public_keys=trust,
+                expected_tenant_id=tenant,
+            )
+            rows.append(view)
+    except EvidenceGatewayStateError:
+        raise
+    except Exception as exc:
+        from .ai_evidence_ledger import SegmentedLedgerError
+
+        if isinstance(exc, SegmentedLedgerError):
+            raise EvidenceGatewayStateError(str(exc)) from exc
+        raise
+    return {
+        "items": rows,
+        "next_cursor": page.next_cursor,
+        "snapshot_total": page.snapshot_total,
+        "count": len(rows),
+        "missing_governed_count": missing_governed,
+    }
+
+
+def list_interaction_receipts(*, limit: int = 100) -> list[dict[str, Any]]:
+    """List one bounded first page of hash-only receipts, newest first."""
+
+    return list_interaction_receipts_page(limit=limit)["items"]
 
 
 def get_interaction_receipt(receipt_id: str) -> dict[str, Any] | None:
@@ -1966,8 +2547,37 @@ def get_interaction_receipt(receipt_id: str) -> dict[str, Any] | None:
     if not _RECORD_ID_RE.fullmatch(value) or not value.startswith("AIR-"):
         raise ValueError("receipt_id is invalid")
     record = _RECEIPTS.get(value)
+    try:
+        signed_row = _receipt_ledger().find(value)
+    except Exception as exc:
+        from .ai_evidence_ledger import SegmentedLedgerError
+
+        if isinstance(exc, SegmentedLedgerError):
+            raise EvidenceGatewayStateError(str(exc)) from exc
+        raise
     if record is None or record.get("status") != "issued":
+        if signed_row is not None:
+            raise EvidenceGatewayStateError(
+                "signed receipt is missing its governed authority record"
+            )
         return None
+    signed = record.get("signed_receipt")
+    if not isinstance(signed, Mapping) or signed_row is None:
+        raise EvidenceGatewayStateError(
+            "governed receipt is missing its signed ledger authority"
+        )
+    if (
+        signed.get("hash") != signed_row.get("hash")
+        or signed.get("receipt_payload_sha256")
+        != signed_row.get("receipt_payload_sha256")
+        or not hmac.compare_digest(
+            _canonical_json(dict(signed)),
+            _canonical_json(signed_row),
+        )
+    ):
+        raise EvidenceGatewayStateError(
+            "governed receipt diverges from its signed ledger authority"
+        )
     view = _receipt_view(record)
     view["signature_valid"] = verify_interaction_receipt(
         view,
@@ -2353,31 +2963,68 @@ def record_regulatory_impact(
         "match_reasons": reasons,
     }
     body["impact_sha256"] = _sha256(body)
-    existing = _IMPACTS.get(record_id)
-    if existing is not None:
-        _validated_impact_view(existing)
-        if not hmac.compare_digest(
-            str(existing.get("impact_sha256") or ""),
-            body["impact_sha256"],
-        ):
-            raise RecordConflict(
-                "regulatory impact identity was reused with different evidence"
-            )
-        return _validated_impact_view(existing)
-    saved = _IMPACTS.create(
-        {
-            "id": record_id,
-            **body,
-            "status": "pending_review",
-            "review": None,
-            "policy_refreshes": [],
-            "legal_certification": False,
-            "compliance_verdict": "not_provided",
-            "notice": NON_CERTIFICATION_NOTICE,
-        },
-        action="regulatory_impact_recorded",
-        actor=operator,
-    )
+    from .file_lock import cross_process_lock
+
+    with _IMPACT_MUTATION_LOCK:
+        with cross_process_lock(_impact_transaction_target(), strict=True):
+            existing = _IMPACTS.get(record_id)
+            if existing is not None:
+                _validated_impact_view(existing)
+                if not hmac.compare_digest(
+                    str(existing.get("impact_sha256") or ""),
+                    body["impact_sha256"],
+                ):
+                    raise RecordConflict(
+                        "regulatory impact identity was reused with different "
+                        "evidence"
+                    )
+                return _validated_impact_view(existing)
+            if len(_IMPACTS.list(limit=_MAX_IMPACTS)) >= _MAX_IMPACTS:
+                raise EvidenceGatewayStateError(
+                    "AI regulatory impact capacity has been reached; review "
+                    "retention or provision a new governed tenant namespace "
+                    "before ingesting another impact"
+                )
+            try:
+                saved = _IMPACTS.create(
+                    {
+                        "id": record_id,
+                        **body,
+                        "status": "pending_review",
+                        "review": None,
+                        "policy_refreshes": [],
+                        "legal_certification": False,
+                        "compliance_verdict": "not_provided",
+                        "notice": NON_CERTIFICATION_NOTICE,
+                    },
+                    action="regulatory_impact_recorded",
+                    actor=operator,
+                    max_records=_MAX_IMPACTS,
+                )
+            except GovernedRecordCapacityError as exc:
+                raise EvidenceGatewayStateError(
+                    "AI regulatory impact capacity has been reached; review "
+                    "retention or provision a new governed tenant namespace "
+                    "before ingesting another impact"
+                ) from exc
+            except RecordConflict:
+                # A shared-backend replica may have committed the same
+                # deterministic impact identity after our initial read. Exact
+                # content is an idempotent recovery; divergent evidence keeps
+                # the conflict authoritative.
+                recovered = _IMPACTS.get(record_id)
+                if recovered is None:
+                    raise
+                validated = _validated_impact_view(recovered)
+                if not hmac.compare_digest(
+                    str(recovered.get("impact_sha256") or ""),
+                    body["impact_sha256"],
+                ):
+                    raise RecordConflict(
+                        "regulatory impact identity was reused with different "
+                        "evidence"
+                    ) from None
+                return validated
     return _validated_impact_view(saved)
 
 
@@ -2504,29 +3151,221 @@ def _validated_impact_view(record: Mapping[str, Any]) -> dict[str, Any]:
         ) from exc
 
 
-def list_regulatory_impacts(*, limit: int = 100) -> list[dict[str, Any]]:
-    """List cited regulatory impacts, newest first."""
+def get_regulatory_impact(impact_id: str) -> dict[str, Any] | None:
+    """Return one tenant-bound cited impact by its governed identity."""
 
     _require_enabled()
     _active_tenant()
-    bounded = _list_limit(limit, _MAX_IMPACTS)
-    scan_limit = bounded + 1 if bounded == _MAX_IMPACTS else bounded
-    rows = _IMPACTS.list(limit=scan_limit)
+    record_id = _required_text(impact_id, "impact_id", 64)
+    if not _RECORD_ID_RE.fullmatch(record_id) or not record_id.startswith("AII-"):
+        raise ValueError("impact_id is invalid")
+    record = _IMPACTS.get(record_id)
+    return None if record is None else _validated_impact_view(record)
+
+
+def _impact_cursor(body: Mapping[str, Any]) -> str:
+    envelope = {"body": dict(body), "sha256": _sha256(body)}
+    return base64.urlsafe_b64encode(
+        _canonical_json(envelope).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+
+
+def _decode_impact_cursor(value: str) -> dict[str, Any]:
+    try:
+        raw = str(value)
+        if len(raw) > 2_048:
+            raise ValueError("cursor is too large")
+        raw += "=" * (-len(raw) % 4)
+        envelope = json.loads(
+            base64.b64decode(
+                raw.encode("ascii"),
+                altchars=b"-_",
+                validate=True,
+            ).decode("utf-8")
+        )
+        body = envelope["body"]
+        expected = {
+            "v",
+            "tenant",
+            "status",
+            "pending_first",
+            "boundary_created_at",
+            "boundary_id",
+            "snapshot_sha256",
+            "offset",
+        }
+        if (
+            not isinstance(envelope, dict)
+            or not isinstance(body, dict)
+            or set(envelope) != {"body", "sha256"}
+            or set(body) != expected
+            or envelope["sha256"] != _sha256(body)
+            or body["v"] != 1
+            or not isinstance(body["tenant"], str)
+            or not isinstance(body["status"], str)
+            or not isinstance(body["pending_first"], bool)
+            or isinstance(body["boundary_created_at"], bool)
+            or not isinstance(body["boundary_created_at"], (int, float))
+            or not math.isfinite(float(body["boundary_created_at"]))
+            or not isinstance(body["boundary_id"], str)
+            or not isinstance(body["snapshot_sha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}", body["snapshot_sha256"])
+            or isinstance(body["offset"], bool)
+            or not isinstance(body["offset"], int)
+            or body["offset"] < 1
+        ):
+            raise ValueError("invalid cursor")
+        return body
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ValueError("regulatory impact cursor is invalid") from exc
+
+
+def list_regulatory_impacts_page(
+    *,
+    limit: int = 100,
+    cursor: str | None = None,
+    status: str | None = None,
+    pending_first: bool = True,
+) -> dict[str, Any]:
+    """Page all cited impacts with a tenant-bound, append-stable cursor."""
+
+    _require_enabled()
+    tenant = _active_tenant()
+    bounded = _list_limit(limit, 500)
+    if not isinstance(pending_first, bool):
+        raise ValueError("pending_first must be a boolean")
+    status_filter = "" if status is None else _token(status, "status").lower()
+    if status_filter and status_filter not in _IMPACT_STATUSES:
+        raise ValueError("status is invalid")
+    rows = _IMPACTS.list(limit=_MAX_IMPACTS + 1)
     if len(rows) > _MAX_IMPACTS:
         raise EvidenceGatewayStateError(
             "AI regulatory impact namespace exceeds the safety limit"
         )
-    return sorted(
-        (
-            _validated_impact_view(row)
-            for row in rows
-        ),
-        key=lambda row: (
+    validated = [_validated_impact_view(row) for row in rows]
+    if cursor is None:
+        boundary_created_at, boundary_id = max(
+            (
+                (float(row.get("created_at") or 0.0), str(row["id"]))
+                for row in validated
+            ),
+            default=(0.0, ""),
+        )
+        offset = 0
+        expected_snapshot = ""
+    else:
+        decoded = _decode_impact_cursor(cursor)
+        if (
+            decoded["tenant"] != tenant
+            or decoded["status"] != status_filter
+            or decoded["pending_first"] is not pending_first
+        ):
+            raise ValueError(
+                "regulatory impact cursor does not match this tenant or filter"
+            )
+        boundary_created_at = float(decoded["boundary_created_at"])
+        boundary_id = str(decoded["boundary_id"])
+        offset = int(decoded["offset"])
+        expected_snapshot = str(decoded["snapshot_sha256"])
+    snapshot_rows = [
+        row
+        for row in validated
+        if (
             float(row.get("created_at") or 0.0),
+            str(row["id"]),
+        )
+        <= (boundary_created_at, boundary_id)
+        and (not status_filter or row.get("status") == status_filter)
+    ]
+    attention = {
+        "pending_review": 0,
+        "accepted_refreshing": 1,
+        "accepted": 2,
+        "dismissed": 2,
+    }
+    ordered = sorted(
+        snapshot_rows,
+        key=lambda row: (
+            attention.get(str(row.get("status")), 3) if pending_first else 0,
+            -float(row.get("created_at") or 0.0),
             str(row.get("id") or ""),
         ),
-        reverse=True,
     )
+    snapshot_sha = _sha256(
+        [
+            {
+                "id": row["id"],
+                "revision": row.get("revision"),
+                "status": row.get("status"),
+                "updated_at": row.get("updated_at"),
+            }
+            for row in ordered
+        ]
+    )
+    if expected_snapshot and not hmac.compare_digest(
+        expected_snapshot,
+        snapshot_sha,
+    ):
+        raise EvidenceGatewayStateError(
+            "regulatory impact page changed after the cursor was issued; "
+            "restart pagination"
+        )
+    items = ordered[offset : offset + bounded]
+    next_offset = offset + len(items)
+    next_cursor = (
+        _impact_cursor(
+            {
+                "v": 1,
+                "tenant": tenant,
+                "status": status_filter,
+                "pending_first": pending_first,
+                "boundary_created_at": boundary_created_at,
+                "boundary_id": boundary_id,
+                "snapshot_sha256": snapshot_sha,
+                "offset": next_offset,
+            }
+        )
+        if next_offset < len(ordered)
+        else None
+    )
+    return {
+        "items": items,
+        "next_cursor": next_cursor,
+        "snapshot_total": len(ordered),
+        "count": len(items),
+        "status": status_filter or None,
+        "pending_first": pending_first,
+    }
+
+
+def list_regulatory_impacts(*, limit: int = 100) -> list[dict[str, Any]]:
+    """Compatibility first page, with action-needed impacts first."""
+
+    bounded = _list_limit(limit, _MAX_IMPACTS)
+    if bounded > 500:
+        # Internal complete-collection callers require all 5,000 records.
+        _require_enabled()
+        _active_tenant()
+        rows = _IMPACTS.list(limit=_MAX_IMPACTS + 1)
+        if len(rows) > _MAX_IMPACTS:
+            raise EvidenceGatewayStateError(
+                "AI regulatory impact namespace exceeds the safety limit"
+            )
+        return sorted(
+            (_validated_impact_view(row) for row in rows),
+            key=lambda row: (
+                float(row.get("created_at") or 0.0),
+                str(row.get("id") or ""),
+            ),
+            reverse=True,
+        )[:bounded]
+    return list_regulatory_impacts_page(limit=bounded)["items"]
 
 
 def _bind_impact_to_policy(
@@ -2593,11 +3432,12 @@ def _bind_impact_to_policy(
         if (
             not isinstance(history, list)
             or not isinstance(current_snapshot, Mapping)
-            or len(history) >= _MAX_POLICY_HISTORY
         ):
             raise EvidenceGatewayStateError(
-                "AI evidence policy snapshot history reached its safety limit"
+                "AI evidence policy snapshot history is malformed"
             )
+        if len(history) >= _MAX_POLICY_HISTORY:
+            _archive_policy_snapshot(history[0], actor=operator)
         next_revision = int(policy["revision"]) + 1
         snapshot = _build_snapshot(
             policy_id=token,
@@ -2620,11 +3460,12 @@ def _bind_impact_to_policy(
             if (
                 not isinstance(row_history, list)
                 or not isinstance(row_current, dict)
-                or len(row_history) >= _MAX_POLICY_HISTORY
             ):
                 raise EvidenceGatewayStateError(
-                    "AI evidence policy snapshot history reached its safety limit"
+                    "AI evidence policy snapshot history is malformed"
                 )
+            if len(row_history) >= _MAX_POLICY_HISTORY:
+                row_history.pop(0)
             row_history.append(dict(row_current))
             row["current"] = published_snapshot
             row["status"] = "active"
@@ -2645,7 +3486,119 @@ def _bind_impact_to_policy(
     raise EvidenceGatewayStateError("policy refresh contention exceeded")
 
 
-def review_regulatory_impact(  # noqa: C901 - explicit CAS state machine
+def _preflight_impact_acceptance(
+    impact: Mapping[str, Any],
+    *,
+    actor: str,
+) -> None:
+    """Prove every dependent policy can refresh before claiming acceptance."""
+
+    impact_id = _required_text(impact.get("id"), "impact id", 64)
+    binding = {
+        "impact_id": impact_id,
+        "impact_sha256": _digest(
+            impact.get("impact_sha256"),
+            "impact_sha256",
+        ),
+        "citations_sha256": _digest(
+            impact.get("citations_sha256"),
+            "citations_sha256",
+        ),
+    }
+    affected = impact.get("affected_policy_ids")
+    if (
+        not isinstance(affected, list)
+        or len(affected) > _MAX_AFFECTED
+        or any(not isinstance(value, str) for value in affected)
+    ):
+        raise EvidenceGatewayStateError(
+            "regulatory impact affected-policy authority is invalid"
+        )
+    reservations: dict[str, set[str]] = {
+        policy_id: set() for policy_id in affected
+    }
+    rows = _IMPACTS.list(limit=_MAX_IMPACTS + 1)
+    if len(rows) > _MAX_IMPACTS:
+        raise EvidenceGatewayStateError(
+            "AI regulatory impact namespace exceeds the safety limit"
+        )
+    for row in rows:
+        candidate = _validated_impact_view(row)
+        if candidate.get("status") != "accepted_refreshing":
+            continue
+        candidate_id = str(candidate["id"])
+        for policy_id in candidate.get("affected_policy_ids", []):
+            if policy_id in reservations:
+                reservations[policy_id].add(candidate_id)
+    for policy_id in affected:
+        record = _policy_record(policy_id)
+        if record is None:
+            raise EvidenceGatewayStateError(
+                f"affected policy {policy_id!r} is missing; acceptance was "
+                "not claimed"
+            )
+        policy = _policy_view(record)
+        current = list(policy["regulatory_bindings"])
+        existing = next(
+            (
+                item
+                for item in current
+                if item.get("impact_id") == impact_id
+            ),
+            None,
+        )
+        if existing is not None:
+            if existing != binding:
+                raise EvidenceGatewayStateError(
+                    "policy has a conflicting regulatory impact binding"
+                )
+            continue
+        projected_ids = {
+            str(item["impact_id"]) for item in current
+        }
+        projected_ids.update(reservations[policy_id])
+        projected_ids.add(impact_id)
+        if len(projected_ids) > _MAX_AFFECTED:
+            raise EvidenceGatewayStateError(
+                "AI evidence policy regulatory bindings reached their safety "
+                "limit; acceptance was not claimed"
+            )
+        history = record.get("history")
+        if not isinstance(history, list):
+            raise EvidenceGatewayStateError(
+                "AI evidence policy snapshot history is malformed; "
+                "acceptance was not claimed"
+            )
+        if len(history) >= _MAX_POLICY_HISTORY:
+            # Rollover is durable and idempotent. The oldest snapshot remains
+            # discoverable for historical receipt verification.
+            _archive_policy_snapshot(history[0], actor=actor)
+
+
+def review_regulatory_impact(
+    impact_id: str,
+    *,
+    decision: str,
+    reviewer: str,
+    rationale: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """Serialize the multi-policy review transition for this tenant."""
+
+    from .file_lock import cross_process_lock
+
+    with _POLICY_MUTATION_LOCK:
+        with cross_process_lock(_policy_transaction_target(), strict=True):
+            return _review_regulatory_impact_locked(
+                impact_id,
+                decision=decision,
+                reviewer=reviewer,
+                rationale=rationale,
+                expected_revision=expected_revision,
+            )
+
+
+def _review_regulatory_impact_locked(  # noqa: C901
     impact_id: str,
     *,
     decision: str,
@@ -2701,6 +3654,7 @@ def review_regulatory_impact(  # noqa: C901 - explicit CAS state machine
             raise RecordConflict(
                 "regulatory impact changed since acceptance was claimed"
             )
+        _preflight_impact_acceptance(current, actor=operator)
         claimed = current
     else:
         if status != "pending_review":
@@ -2736,6 +3690,8 @@ def review_regulatory_impact(  # noqa: C901 - explicit CAS state machine
             if dismissed is None:
                 raise EvidenceGatewayStateError("regulatory impact disappeared")
             return _public(dismissed)
+
+        _preflight_impact_acceptance(current, actor=operator)
 
         def claim_acceptance(row: dict[str, Any]) -> None:
             if row.get("status") != "pending_review":
@@ -2831,6 +3787,219 @@ def _receipt_verification_counts(
     return verified, unverified
 
 
+def _governed_receipt_count() -> int:
+    """Count the complete governed namespace through its rotating cursor seam."""
+
+    first_identity = ""
+    cursor = ""
+    count = 0
+    while True:
+        batch = list(
+            _RECEIPTS.iter_record_ids(
+                start_after=cursor,
+                limit=10_000,
+            )
+        )
+        if not batch:
+            return count
+        for next_cursor, identity in batch:
+            if not first_identity:
+                first_identity = identity
+            elif identity == first_identity:
+                return count
+            count += 1
+            cursor = next_cursor
+        if len(batch) < 10_000:
+            return count
+
+
+def _receipt_assurance_snapshot_once(
+    *,
+    ledger: Any,
+    state: Any,
+    include_limit: int,
+    trust: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Build one view for a caller-pinned signed ledger state."""
+
+    tenant = _active_tenant()
+    registry = trusted_public_keys() if trust is None else trust
+    physical_valid, physical_error = ledger.verify_integrity(
+        snapshot_state=state,
+    )
+    digest = hashlib.sha256()
+    included: list[dict[str, Any]] = []
+    total = 0
+    current = 0
+    verified = 0
+    missing_governed = 0
+    governed_binding_valid = True
+    conversation_valid = True
+    conversations: dict[str, list[object]] = {}
+    for entry in ledger.iter_entries(
+        descending=True,
+        snapshot_total=state.total_receipts,
+        validate_rows=False,
+    ):
+        record = _RECEIPTS.get(entry.identity)
+        if record is None or record.get("status") != "issued":
+            missing_governed += 1
+            continue
+        signed = record.get("signed_receipt")
+        if not isinstance(signed, Mapping):
+            raise EvidenceGatewayStateError(
+                "governed receipt record has no signed evidence"
+            )
+        if (
+            signed.get("hash") != entry.row_hash
+            or signed.get("receipt_payload_sha256") != entry.payload_sha256
+        ):
+            governed_binding_valid = False
+        view = _receipt_view(record)
+        view["ledger_ordinal"] = entry.ordinal
+        signature_valid = verify_interaction_receipt(
+            view,
+            trusted_public_keys=registry,
+            expected_tenant_id=tenant,
+        )
+        view["signature_valid"] = signature_valid
+        total += 1
+        current += view["assurance"]["status"] == "current"
+        verified += signature_valid
+        encoded = _canonical_json(view).encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+        if len(included) < include_limit:
+            included.append(view)
+        conversation = signed.get("conversation_sha256")
+        sequence = signed.get("sequence")
+        row_hash = signed.get("hash")
+        parent = signed.get("parent_receipt_hash")
+        if (
+            not isinstance(conversation, str)
+            or isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+            or sequence < 1
+            or not isinstance(row_hash, str)
+            or not isinstance(parent, str)
+        ):
+            conversation_valid = False
+            continue
+        chain = conversations.get(conversation)
+        if chain is None:
+            authority = _CONVERSATIONS.get(_stable_id("AIC", conversation))
+            if (
+                authority is None
+                or authority.get("schema") != CONVERSATION_SCHEMA
+                or authority.get("pending") is not None
+                or isinstance(authority.get("next_sequence"), bool)
+                or not isinstance(authority.get("next_sequence"), int)
+                or int(authority["next_sequence"]) < 2
+                or not isinstance(authority.get("last_receipt_hash"), str)
+            ):
+                conversation_valid = False
+                continue
+            chain = [
+                int(authority["next_sequence"]) - 1,
+                str(authority["last_receipt_hash"]),
+            ]
+            conversations[conversation] = chain
+        if sequence != chain[0] or row_hash != chain[1]:
+            conversation_valid = False
+        chain[0] = int(chain[0]) - 1
+        chain[1] = parent
+    if any(
+        int(chain[0]) != 0 or str(chain[1]) != ""
+        for chain in conversations.values()
+    ):
+        conversation_valid = False
+    governed_count = _governed_receipt_count()
+    extra_governed = max(0, governed_count - total)
+    exact_reconciliation = (
+        missing_governed == 0
+        and extra_governed == 0
+        and total == state.total_receipts
+        and governed_binding_valid
+    )
+    return {
+        "total": total,
+        "current": current,
+        "stale": total - current,
+        "verified": verified,
+        "unverified": total - verified,
+        "included": included,
+        "source_digest_sha256": digest.hexdigest(),
+        "conversation_chains_valid": (
+            conversation_valid and exact_reconciliation
+        ),
+        "ledger_chain_valid": physical_valid and exact_reconciliation,
+        "ledger_error": physical_error,
+        "ledger_total": state.total_receipts,
+        "missing_governed": missing_governed,
+        "extra_governed": extra_governed,
+        "snapshot_state_hash": state.state_hash,
+    }
+
+
+def _capture_receipt_state(ledger: Any) -> Any:
+    """Capture the signed receipt commit token between complete deliveries."""
+
+    from .file_lock import cross_process_lock
+
+    with _DELIVERY_LOCK:
+        with cross_process_lock(
+            _identity_transaction_target(_receipt_path()),
+            strict=True,
+        ):
+            return ledger.state()
+
+
+def _receipt_assurance_snapshot(
+    *,
+    include_limit: int,
+    trust: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return a stable complete view, retrying benign concurrent delivery.
+
+    Expensive ledger, governed-record, signature, conversation, and count work
+    runs without the append or delivery transaction locks.  Each accepted view
+    is bracketed by the same signed ledger state hash while the tenant delivery
+    transaction is quiescent.  A delivery that overlaps either stage therefore
+    causes a bounded retry, never a false red result or stale false-ready result.
+    """
+
+    from .ai_evidence_ledger import SegmentedLedgerError
+
+    try:
+        ledger = _receipt_ledger()
+        for _attempt in range(_MAX_RECEIPT_SNAPSHOT_ATTEMPTS):
+            start = _capture_receipt_state(ledger)
+            failure: Exception | None = None
+            snapshot: dict[str, Any] | None = None
+            try:
+                snapshot = _receipt_assurance_snapshot_once(
+                    ledger=ledger,
+                    state=start,
+                    include_limit=include_limit,
+                    trust=trust,
+                )
+            except Exception as exc:
+                failure = exc
+            end = _capture_receipt_state(ledger)
+            if not hmac.compare_digest(start.state_hash, end.state_hash):
+                continue
+            if failure is not None:
+                raise failure
+            assert snapshot is not None
+            return snapshot
+    except SegmentedLedgerError as exc:
+        raise EvidenceGatewayStateError(str(exc)) from exc
+    raise EvidenceGatewaySnapshotIndeterminate(
+        "AI evidence receipts changed during every bounded assurance "
+        "snapshot; retry when ingestion is quiescent"
+    )
+
+
 def _conversation_chains_valid(
     receipts: Sequence[Mapping[str, Any]],
 ) -> bool:
@@ -2864,17 +4033,16 @@ def _conversation_chains_valid(
 
 
 def _receipt_ledger_chain_valid(receipts: Sequence[Mapping[str, Any]]) -> bool:
-    from .audit.signing import verify_chain
-
-    path = _receipt_path()
     try:
-        ledger_rows = _signed_ledger_rows(path)
-    except EvidenceGatewayStateError:
+        ledger = _receipt_ledger()
+        valid, _detail = ledger.verify_integrity()
+        if not valid:
+            return False
+        ledger_rows = ledger.rows()
+    except Exception:
         return False
     if not receipts and not ledger_rows:
         return True
-    if verify_chain(path):
-        return False
 
     def identity(row: Mapping[str, Any]) -> tuple[str, str] | None:
         if (
@@ -2935,7 +4103,10 @@ def _policy_readiness_gaps(
         gaps.append("unbound_policy_contexts")
     if any(
         isinstance(policy.get("metadata"), Mapping)
-        and policy["metadata"].get("demo") is True
+        and (
+            policy["metadata"].get("demo") is True
+            or policy["metadata"].get("synthetic") is True
+        )
         for policy in policies
     ):
         gaps.append("synthetic_demo_data_present")
@@ -2948,18 +4119,22 @@ def summary() -> dict[str, Any]:
     _require_enabled()
     tenant = _active_tenant()
     policies = list_policies()
-    receipts = list_interaction_receipts(limit=_MAX_RECEIPTS)
     impacts = list_regulatory_impacts(limit=_MAX_IMPACTS)
-    verified_receipts, unverified_receipts = _receipt_verification_counts(
-        receipts,
-        trusted_public_keys(),
+    receipt_snapshot = _receipt_assurance_snapshot(
+        include_limit=0,
+        trust=trusted_public_keys(),
     )
-    conversation_chains_valid = _conversation_chains_valid(receipts)
-    receipt_ledger_chain_valid = _receipt_ledger_chain_valid(receipts)
-    current_receipts = sum(
-        row["assurance"]["status"] == "current" for row in receipts
+    receipt_count = int(receipt_snapshot["total"])
+    verified_receipts = int(receipt_snapshot["verified"])
+    unverified_receipts = int(receipt_snapshot["unverified"])
+    conversation_chains_valid = bool(
+        receipt_snapshot["conversation_chains_valid"]
     )
-    stale_receipts = len(receipts) - current_receipts
+    receipt_ledger_chain_valid = bool(
+        receipt_snapshot["ledger_chain_valid"]
+    )
+    current_receipts = int(receipt_snapshot["current"])
+    stale_receipts = int(receipt_snapshot["stale"])
     impact_counts = {
         status: sum(row.get("status") == status for row in impacts)
         for status in (
@@ -2973,7 +4148,7 @@ def summary() -> dict[str, Any]:
     if not policies:
         gaps.append("no_current_policy")
     gaps.extend(_policy_readiness_gaps(policies))
-    if not receipts:
+    if not receipt_count:
         gaps.append("no_interaction_receipts")
     if stale_receipts:
         gaps.append("stale_interaction_receipts")
@@ -2992,7 +4167,7 @@ def summary() -> dict[str, Any]:
         "enabled": True,
         "tenant_id": tenant,
         "current_policy_count": len(policies),
-        "interaction_receipt_count": len(receipts),
+        "interaction_receipt_count": receipt_count,
         "current_interaction_receipt_count": current_receipts,
         "stale_interaction_receipt_count": stale_receipts,
         "verified_interaction_receipt_count": verified_receipts,
@@ -3005,13 +4180,19 @@ def summary() -> dict[str, Any]:
         "dismissed_regulatory_impact_count": impact_counts["dismissed"],
         "policies": {"current": len(policies)},
         "interaction_receipts": {
-            "total": len(receipts),
+            "total": receipt_count,
             "current": current_receipts,
             "stale": stale_receipts,
             "verified": verified_receipts,
             "unverified": unverified_receipts,
             "conversation_chains_valid": conversation_chains_valid,
             "ledger_chain_valid": receipt_ledger_chain_valid,
+            "ledger_total": receipt_snapshot["ledger_total"],
+            "missing_governed": receipt_snapshot["missing_governed"],
+            "extra_governed": receipt_snapshot["extra_governed"],
+            "snapshot_state_hash": receipt_snapshot[
+                "snapshot_state_hash"
+            ],
         },
         "regulatory_impacts": {
             "total": len(impacts),
@@ -3096,6 +4277,9 @@ def render_assurance_packet(
     profile: str = "combined",
     actor: str = "gateway",
     packet_id: str | None = None,
+    _before_attestation: (
+        Callable[[dict[str, Any], str], None] | None
+    ) = None,
 ) -> dict[str, Any]:
     """Render and sign a composite, non-certifying assurance packet."""
 
@@ -3116,16 +4300,22 @@ def render_assurance_packet(
     )
     signed_packet_id = _stable_id("AIP", "packet", logical_packet_id)
     policies = list_policies()
-    receipts = list_interaction_receipts(limit=_MAX_RECEIPTS)
     impacts = list_regulatory_impacts(limit=_MAX_IMPACTS)
     trust = trusted_public_keys()
-    source_verified, source_unverified = _receipt_verification_counts(
-        receipts,
-        trust,
+    receipt_snapshot = _receipt_assurance_snapshot(
+        include_limit=_MAX_PACKET_RECEIPTS,
+        trust=trust,
     )
-    source_conversation_chains_valid = _conversation_chains_valid(receipts)
-    receipt_ledger_chain_valid = _receipt_ledger_chain_valid(receipts)
-    stale = sum(row["assurance"]["status"] == "stale" for row in receipts)
+    receipts = list(receipt_snapshot["included"])
+    source_verified = int(receipt_snapshot["verified"])
+    source_unverified = int(receipt_snapshot["unverified"])
+    source_conversation_chains_valid = bool(
+        receipt_snapshot["conversation_chains_valid"]
+    )
+    receipt_ledger_chain_valid = bool(
+        receipt_snapshot["ledger_chain_valid"]
+    )
+    stale = int(receipt_snapshot["stale"])
     pending = sum(row.get("status") == "pending_review" for row in impacts)
     refreshing = sum(
         row.get("status") == "accepted_refreshing" for row in impacts
@@ -3134,7 +4324,7 @@ def render_assurance_packet(
     if not policies:
         gaps.append("no_current_policy")
     gaps.extend(_policy_readiness_gaps(policies))
-    if not receipts:
+    if not receipt_snapshot["total"]:
         gaps.append("no_interaction_receipts")
     if stale:
         gaps.append("stale_interaction_receipts")
@@ -3152,9 +4342,8 @@ def render_assurance_packet(
         key: dict(FRAMEWORK_SOURCES[key])
         for key in _PROFILE_SOURCES[profile_name]
     }
-    source_collections: dict[str, list[dict[str, Any]]] = {
+    materialized_source_collections: dict[str, list[dict[str, Any]]] = {
         "policies": policies,
-        "interaction_receipts": receipts,
         "regulatory_impacts": impacts,
     }
     included: dict[str, list[dict[str, Any]]] = {
@@ -3163,12 +4352,17 @@ def render_assurance_packet(
         "regulatory_impacts": impacts[:_MAX_PACKET_IMPACTS],
     }
     source_counts = {
-        key: len(rows) for key, rows in source_collections.items()
+        "policies": len(policies),
+        "interaction_receipts": int(receipt_snapshot["total"]),
+        "regulatory_impacts": len(impacts),
     }
-    source_digests = {
+    source_digests: dict[str, str] = {
         key: _streaming_collection_digest(rows)
-        for key, rows in source_collections.items()
+        for key, rows in materialized_source_collections.items()
     }
+    source_digests["interaction_receipts"] = str(
+        receipt_snapshot["source_digest_sha256"]
+    )
 
     def packet_body() -> dict[str, Any]:
         included_counts = {
@@ -3204,7 +4398,7 @@ def render_assurance_packet(
             "evidence_window": {
                 "ordering": {
                     "policies": "policy_id_ascending",
-                    "interaction_receipts": "created_at_descending",
+                    "interaction_receipts": "ledger_ordinal_descending",
                     "regulatory_impacts": "created_at_descending",
                 },
                 "source_counts": source_counts,
@@ -3228,6 +4422,16 @@ def render_assurance_packet(
                     source_conversation_chains_valid
                 ),
                 "receipt_ledger_chain_valid": receipt_ledger_chain_valid,
+                "receipt_ledger_state_hash": receipt_snapshot[
+                    "snapshot_state_hash"
+                ],
+                "receipt_ledger_total": receipt_snapshot["ledger_total"],
+                "receipt_ledger_missing_governed": receipt_snapshot[
+                    "missing_governed"
+                ],
+                "receipt_ledger_extra_governed": receipt_snapshot[
+                    "extra_governed"
+                ],
                 "trusted_key_ids": sorted(trust),
             },
             "readiness": {
@@ -3262,58 +4466,342 @@ def render_assurance_packet(
         _size, largest_key = max(candidates)
         included[largest_key].pop()
         body = packet_body()
+    # Complete the expensive re-scan without the delivery transaction lock.
+    # Its own start/end protocol refuses both half-commits and stale views.
+    rechecked_receipts = _receipt_assurance_snapshot(
+        include_limit=0,
+        trust=trust,
+    )
+    rechecked_collections = {
+        "policies": list_policies(),
+        "regulatory_impacts": list_regulatory_impacts(
+            limit=_MAX_IMPACTS
+        ),
+    }
+    changed = (
+        any(
+            len(rechecked_collections[key]) != source_counts[key]
+            or not hmac.compare_digest(
+                _streaming_collection_digest(
+                    rechecked_collections[key]
+                ),
+                source_digests[key],
+            )
+            for key in rechecked_collections
+        )
+        or int(rechecked_receipts["total"])
+        != source_counts["interaction_receipts"]
+        or not hmac.compare_digest(
+            str(rechecked_receipts["source_digest_sha256"]),
+            source_digests["interaction_receipts"],
+        )
+        or rechecked_receipts["snapshot_state_hash"]
+        != receipt_snapshot["snapshot_state_hash"]
+    )
+    if (
+        changed
+        or rechecked_receipts["ledger_chain_valid"]
+        is not receipt_ledger_chain_valid
+    ):
+        raise EvidenceGatewayStateError(
+            "evidence records or receipt ledger changed during packet "
+            "snapshot; retry export"
+        )
+
     from .file_lock import cross_process_lock
 
     receipt_path = _receipt_path()
-    with cross_process_lock(
-        _identity_transaction_target(receipt_path),
-        strict=True,
-    ):
-        # The receipt ledger append precedes governed-store persistence. Hold
-        # the same transaction lock as delivery while reconciling the final
-        # snapshot and signing its attestation. A half-committed receipt then
-        # makes export retry instead of producing a ready-but-incomplete packet.
-        rechecked_collections = {
-            "policies": list_policies(),
-            "interaction_receipts": list_interaction_receipts(
-                limit=_MAX_RECEIPTS
-            ),
-            "regulatory_impacts": list_regulatory_impacts(
-                limit=_MAX_IMPACTS
-            ),
-        }
-        rechecked_ledger_chain_valid = _receipt_ledger_chain_valid(
-            rechecked_collections["interaction_receipts"]
-        )
-        changed = any(
-            len(rechecked_collections[key]) != source_counts[key]
-            or not hmac.compare_digest(
-                _streaming_collection_digest(rechecked_collections[key]),
-                source_digests[key],
-            )
-            for key in source_counts
-        )
-        if (
-            changed
-            or rechecked_ledger_chain_valid
-            is not receipt_ledger_chain_valid
+    with _DELIVERY_LOCK:
+        with cross_process_lock(
+            _identity_transaction_target(receipt_path),
+            strict=True,
         ):
-            raise EvidenceGatewayStateError(
-                "evidence records or receipt ledger changed during packet "
-                "snapshot; retry export"
+            # Keep the final signed-state comparison and attestation adjacent.
+            # A new delivery cannot begin between them, while the historical
+            # scan above never blocks ingestion.
+            final_state = _receipt_ledger().state()
+            if not hmac.compare_digest(
+                final_state.state_hash,
+                str(rechecked_receipts["snapshot_state_hash"]),
+            ):
+                raise EvidenceGatewayStateError(
+                    "evidence records or receipt ledger changed during packet "
+                    "snapshot; retry export"
+                )
+            digest = _sha256(body)
+            if _before_attestation is not None:
+                # Idempotent HTTP issuance checkpoints the exact unsigned
+                # packet before its append-only attestation. A process crash
+                # after signing can then recover the identical content rather
+                # than re-rendering a different timestamp or evidence window.
+                _before_attestation(_public(body), digest)
+            attestation = _attestation(
+                packet_id=signed_packet_id,
+                packet_sha256=digest,
+                actor=operator,
+                generated_at=generated_at,
             )
-        digest = _sha256(body)
-        attestation = _attestation(
-            packet_id=signed_packet_id,
-            packet_sha256=digest,
-            actor=operator,
-            generated_at=generated_at,
-        )
     return {
         **body,
         "packet_sha256": digest,
         "attestation": attestation,
     }
+
+
+def issue_assurance_packet(  # noqa: C901 - explicit crash-recovery state machine
+    *,
+    profile: str = "combined",
+    actor: str = "gateway",
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Issue once and replay the exact signed packet for an HTTP request key."""
+
+    _require_enabled()
+    tenant = _active_tenant()
+    profile_name = _token(profile, "profile").lower()
+    if profile_name not in _PROFILE_SOURCES:
+        raise ValueError(
+            "profile must be article50_gpai, nist_ai_rmf, "
+            "federal_vendor, or combined"
+        )
+    operator = _required_text(actor, "actor", 256)
+    request_key = _required_text(
+        idempotency_key,
+        "idempotency_key",
+        1_024,
+    )
+    actor_sha = _sha256(operator.encode("utf-8"))
+    idempotency_sha = _sha256(request_key.encode("utf-8"))
+    replay_id = _stable_id(
+        "AIX",
+        tenant,
+        actor_sha,
+        profile_name,
+        idempotency_sha,
+    )
+    signed_packet_id = _stable_id("AIP", "packet", replay_id)
+
+    def validate_request_record(
+        record: Mapping[str, Any],
+        *,
+        status: str,
+    ) -> None:
+        if (
+            record.get("schema")
+            != "lightwork.ai-evidence-packet-replay.v1"
+            or record.get("id") != replay_id
+            or record.get("status") != status
+            or record.get("tenant_id") != tenant
+            or record.get("actor_sha256") != actor_sha
+            or record.get("profile") != profile_name
+            or record.get("idempotency_sha256") != idempotency_sha
+        ):
+            raise EvidenceGatewayStateError(
+                "assurance packet replay authority failed validation"
+            )
+
+    def replay(record: Mapping[str, Any]) -> dict[str, Any]:
+        validate_request_record(record, status="issued")
+        packet = record.get("packet")
+        if (
+            not isinstance(packet, Mapping)
+            or record.get("packet_sha256") != packet.get("packet_sha256")
+            or not verify_assurance_packet(
+                packet,
+                expected_tenant_id=tenant,
+            )
+        ):
+            raise EvidenceGatewayStateError(
+                "assurance packet replay authority failed validation"
+            )
+        return {
+            "packet": _public(packet),
+            "idempotent_replay": True,
+        }
+
+    def prepared_packet(record: Mapping[str, Any]) -> dict[str, Any]:
+        """Sign or idempotently recover one exact durable packet checkpoint."""
+
+        validate_request_record(record, status="prepared")
+        raw_body = record.get("packet_body")
+        digest = record.get("packet_sha256")
+        if not isinstance(raw_body, Mapping) or not isinstance(digest, str):
+            raise EvidenceGatewayStateError(
+                "assurance packet checkpoint failed validation"
+            )
+        body = _public(raw_body)
+        generated_at = body.get("generated_at")
+        if (
+            body.get("schema") != ASSURANCE_PACKET_SCHEMA
+            or body.get("packet_id") != signed_packet_id
+            or body.get("tenant_id") != tenant
+            or body.get("profile") != profile_name
+            or body.get("generated_by_sha256") != actor_sha
+            or body.get("stores_raw_interaction_content") is not False
+            or body.get("legal_certification") is not False
+            or body.get("compliance_verdict") != "not_provided"
+            or body.get("notice") != NON_CERTIFICATION_NOTICE
+            or not isinstance(generated_at, (int, float))
+            or isinstance(generated_at, bool)
+            or not math.isfinite(float(generated_at))
+            or float(generated_at) <= 0
+            or not hmac.compare_digest(digest, _sha256(body))
+        ):
+            raise EvidenceGatewayStateError(
+                "assurance packet checkpoint failed validation"
+            )
+        attestation = _attestation(
+            packet_id=signed_packet_id,
+            packet_sha256=digest,
+            actor=operator,
+            generated_at=float(generated_at),
+        )
+        packet = {
+            **body,
+            "packet_sha256": digest,
+            "attestation": attestation,
+        }
+        if not verify_assurance_packet(packet, expected_tenant_id=tenant):
+            raise EvidenceGatewayStateError(
+                "recovered assurance packet failed signature validation"
+            )
+        return packet
+
+    def complete_prepared(
+        record: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """CAS a prepared packet to issued, recovering cross-worker races."""
+
+        current = dict(record)
+        for _attempt in range(4):
+            if current.get("status") == "issued":
+                return replay(current)
+            packet = prepared_packet(current)
+            revision = current.get("revision")
+            if (
+                not isinstance(revision, int)
+                or isinstance(revision, bool)
+                or revision < 1
+            ):
+                raise EvidenceGatewayStateError(
+                    "assurance packet checkpoint revision is invalid"
+                )
+
+            def issue(
+                prepared: dict[str, Any],
+                issued_packet: dict[str, Any] = packet,
+            ) -> None:
+                validate_request_record(prepared, status="prepared")
+                if (
+                    prepared.get("packet_sha256")
+                    != issued_packet["packet_sha256"]
+                    or prepared.get("packet_body")
+                    != {
+                        key: value
+                        for key, value in issued_packet.items()
+                        if key not in {"packet_sha256", "attestation"}
+                    }
+                ):
+                    raise EvidenceGatewayStateError(
+                        "assurance packet checkpoint changed before commit"
+                    )
+                prepared.pop("packet_body", None)
+                prepared["packet"] = issued_packet
+                prepared["status"] = "issued"
+
+            try:
+                saved = _PACKET_REPLAYS.update(
+                    replay_id,
+                    issue,
+                    expected_revision=revision,
+                    action="assurance_packet_issued",
+                    actor=operator,
+                )
+            except RecordConflict:
+                recovered = _PACKET_REPLAYS.get(replay_id)
+                if recovered is None:
+                    raise EvidenceGatewayStateError(
+                        "assurance packet replay authority could not be "
+                        "recovered"
+                    ) from None
+                current = recovered
+                continue
+            if saved is None:
+                raise EvidenceGatewayStateError(
+                    "assurance packet replay authority disappeared during commit"
+                )
+            return {
+                "packet": _public(packet),
+                "idempotent_replay": False,
+            }
+        raise EvidenceGatewayStateError(
+            "assurance packet replay authority remained contended"
+        )
+
+    from .file_lock import cross_process_lock
+
+    with _PACKET_ISSUE_LOCK:
+        with cross_process_lock(
+            _identity_transaction_target(_packet_path()).with_name(
+                "assurance-packet-requests.transaction"
+            ),
+            strict=True,
+        ):
+            existing = _PACKET_REPLAYS.get(replay_id)
+            if existing is not None:
+                return (
+                    replay(existing)
+                    if existing.get("status") == "issued"
+                    else complete_prepared(existing)
+                )
+
+            checkpoint: dict[str, dict[str, Any]] = {}
+
+            def prepare(
+                packet_body: dict[str, Any],
+                packet_sha256: str,
+            ) -> None:
+                checkpoint["record"] = _PACKET_REPLAYS.create(
+                    {
+                        "id": replay_id,
+                        "schema": "lightwork.ai-evidence-packet-replay.v1",
+                        "status": "prepared",
+                        "tenant_id": tenant,
+                        "actor_sha256": actor_sha,
+                        "profile": profile_name,
+                        "idempotency_sha256": idempotency_sha,
+                        "packet_sha256": packet_sha256,
+                        "packet_body": packet_body,
+                    },
+                    action="assurance_packet_prepared",
+                    actor=operator,
+                )
+
+            try:
+                render_assurance_packet(
+                    profile=profile_name,
+                    actor=operator,
+                    packet_id=replay_id,
+                    _before_attestation=prepare,
+                )
+            except RecordConflict:
+                recovered = _PACKET_REPLAYS.get(replay_id)
+                if recovered is None:
+                    raise EvidenceGatewayStateError(
+                        "assurance packet replay authority could not be "
+                        "recovered"
+                    ) from None
+                return (
+                    replay(recovered)
+                    if recovered.get("status") == "issued"
+                    else complete_prepared(recovered)
+                )
+            prepared = checkpoint.get("record")
+            if prepared is None:
+                raise EvidenceGatewayStateError(
+                    "assurance packet was signed without a durable checkpoint"
+                )
+            return complete_prepared(prepared)
 
 
 def verify_assurance_packet(  # noqa: C901 - explicit offline verifier
@@ -3490,6 +4978,44 @@ def verify_assurance_packet(  # noqa: C901 - explicit offline verifier
             )
         ):
             return False
+        ledger_fields = {
+            "receipt_ledger_state_hash",
+            "receipt_ledger_total",
+            "receipt_ledger_missing_governed",
+            "receipt_ledger_extra_governed",
+        }
+        present_ledger_fields = ledger_fields.intersection(verification)
+        if present_ledger_fields and present_ledger_fields != ledger_fields:
+            return False
+        if present_ledger_fields:
+            ledger_total = verification["receipt_ledger_total"]
+            ledger_missing = verification[
+                "receipt_ledger_missing_governed"
+            ]
+            ledger_extra = verification["receipt_ledger_extra_governed"]
+            if (
+                isinstance(ledger_total, bool)
+                or not isinstance(ledger_total, int)
+                or ledger_total < 0
+                or isinstance(ledger_missing, bool)
+                or not isinstance(ledger_missing, int)
+                or ledger_missing < 0
+                or isinstance(ledger_extra, bool)
+                or not isinstance(ledger_extra, int)
+                or ledger_extra < 0
+                or ledger_total != source_receipt_count + ledger_missing
+            ):
+                return False
+            _digest(
+                verification["receipt_ledger_state_hash"],
+                "receipt ledger state hash",
+            )
+            if verification["receipt_ledger_chain_valid"] and (
+                ledger_total != source_receipt_count
+                or ledger_missing
+                or ledger_extra
+            ):
+                return False
         embedded_chains_valid = _conversation_chains_valid(
             interaction_receipts
         )
@@ -3535,7 +5061,10 @@ def seed_demo(*, actor: str = "demo") -> dict[str, Any]:
     policy_id = "evidence-ready-demo"
     demo_impact_id = _stable_id("AII", "evidence-ready-demo-impact-v1")
     existing_policies = list_policies()
-    existing_receipts = list_interaction_receipts(limit=_MAX_RECEIPTS)
+    # A demo tenant may contain only the single deterministic demo receipt.
+    # A bounded first page is therefore sufficient and avoids a tenant-wide
+    # materialization even if an operator calls this on the wrong namespace.
+    existing_receipts = list_interaction_receipts(limit=2)
     existing_impacts = list_regulatory_impacts(limit=_MAX_IMPACTS)
     if (
         any(policy.get("policy_id") != policy_id for policy in existing_policies)
@@ -3640,6 +5169,7 @@ __all__ = [
     "DEFAULT_VISIBLE_MARKER",
     "EvidenceGatewayDisabled",
     "EvidenceGatewayError",
+    "EvidenceGatewaySnapshotIndeterminate",
     "EvidenceGatewayStateError",
     "FRAMEWORK_SOURCES",
     "NON_CERTIFICATION_NOTICE",
@@ -3651,9 +5181,13 @@ __all__ = [
     "enabled",
     "get_interaction_receipt",
     "get_policy",
+    "get_regulatory_impact",
+    "issue_assurance_packet",
     "list_interaction_receipts",
+    "list_interaction_receipts_page",
     "list_policies",
     "list_regulatory_impacts",
+    "list_regulatory_impacts_page",
     "record_regulatory_impact",
     "render_assurance_packet",
     "review_regulatory_impact",

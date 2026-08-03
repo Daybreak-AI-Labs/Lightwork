@@ -8,6 +8,7 @@ patching the source attribute is what it sees).
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 
 import maverick.capability as capability
@@ -472,10 +473,10 @@ def test_audit_chain_ok_after_a_signed_write():
     assert ev["audit_signing_key"]["present"] is True
 
 
-def test_signing_key_offhost_injected_marker_counts_as_present(monkeypatch):
+def test_signing_key_offhost_marker_is_not_current_signing_capability(monkeypatch):
     """Off-host (KMS) key custody leaves a ``.injected`` marker + ``.pub`` and NO
-    local ``.key``. The probe must still report the anchor present — else the most
-    secure (enterprise-required) custody fails the SOC 2 gate."""
+    local ``.key``. It remains a verification anchor, but a restarted process
+    without reinjected private material must fail the signing-capability gate."""
     monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY", raising=False)
     monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", raising=False)
     from maverick.audit import signing
@@ -486,10 +487,12 @@ def test_signing_key_offhost_injected_marker_counts_as_present(monkeypatch):
     (key_dir / "abc123.pub").write_bytes(b"\x00" * 32)
 
     sk = soc2.collect_soc2_evidence()["audit_signing_key"]
-    assert sk["status"] == soc2.STATUS_ENABLED
-    assert sk["present"] is True
-    assert sk["offhost_key"] is True
+    assert sk["status"] == soc2.STATUS_ABSENT
+    assert sk["present"] is False
+    assert sk["offhost_key"] is False
     assert sk["key_count"] == 0  # no local private .key on disk
+    assert sk["historical_injected_key_count"] == 1
+    assert sk["verification_anchor_present"] is True
 
 
 def test_signing_key_offhost_env_counts_as_present(monkeypatch):
@@ -499,6 +502,23 @@ def test_signing_key_offhost_env_counts_as_present(monkeypatch):
     sk = soc2.collect_soc2_evidence()["audit_signing_key"]
     assert sk["status"] == soc2.STATUS_ENABLED
     assert sk["offhost_key"] is True
+    assert sk["verification_anchor_present"] is True
+    assert "MAVERICK_AUDIT_SIGNING_KEY" not in os.environ
+
+
+def test_signing_key_malformed_env_is_configured_but_not_usable(monkeypatch):
+    """A nonempty setting is not evidence that this process can sign."""
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", "not-an-ed25519-key")
+    monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", raising=False)
+
+    sk = soc2.collect_soc2_evidence()["audit_signing_key"]
+
+    assert sk["status"] == soc2.STATUS_ABSENT
+    assert sk["present"] is False
+    assert sk["raw_key_configured"] is True
+    assert sk["raw_key_usable"] is False
+    assert sk["offhost_key"] is False
+    assert "MAVERICK_AUDIT_SIGNING_KEY" not in os.environ
 
 
 def test_signing_key_absent_when_no_anchor_anywhere(monkeypatch):
@@ -509,3 +529,4 @@ def test_signing_key_absent_when_no_anchor_anywhere(monkeypatch):
     assert sk["status"] == soc2.STATUS_ABSENT
     assert sk["present"] is False
     assert sk["offhost_key"] is False
+    assert sk["verification_anchor_present"] is False

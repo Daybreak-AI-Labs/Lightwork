@@ -11,12 +11,13 @@ repo; **in progress** items are named, not implied.
 
 ## Posture in one paragraph
 
-Lightwork is a governed, self-hostable AI agent runtime designed to run on
-private/regulated data without that data leaving the customer boundary
-(Enterprise mode: egress lock, fail-closed consent, capability scoping,
-encryption at rest — see [security-overview.md](security-overview.md)). Safety
-is defense-in-depth (detection + action-layer containment), measured and
-reproducible ([shield benchmark](../security/shield-benchmark.md)). Evidence is
+Lightwork is a governed, self-hostable AI agent runtime designed for
+private/regulated data. Enterprise mode provides application-layer egress
+controls, fail-closed consent, capability scoping, and encryption at rest; a
+hard no-egress boundary additionally requires sandbox and host/OS/VPC policy
+(see [security-overview.md](security-overview.md)). Safety is defense-in-depth
+(detection + action-layer containment), measured and reproducible
+([shield benchmark](../security/shield-benchmark.md)). Evidence is
 tamper-evident (Ed25519 hash-chained audit). The product is proprietary,
 commercially licensed software ([LICENSE](../../LICENSE)). SOC 2 Type II and a
 third-party penetration test are in progress; the code controls those reports
@@ -26,7 +27,7 @@ rely on are in place and verifiable now.
 
 | Area | What reviewers ask | Artifact | Verify |
 |---|---|---|---|
-| **Data handling / residency** | Can our data reach a third party? | Enterprise data-boundary guarantee — [security-overview.md](security-overview.md#the-data-boundary-guarantee-enterprise-mode) | `maverick enterprise verify` (exercises the egress lock + at-rest sealing) |
+| **Data handling / residency** | Can our data reach a third party? | Application egress controls and required deployment boundary — [security-overview.md](security-overview.md#application-egress-controls-enterprise-mode) | `maverick enterprise verify` (application controls) + independent sandbox/OS/VPC egress verification |
 | **Encryption at rest** | Are sensitive stores encrypted? | [encryption.md](../encryption.md) (AES-256-GCM) | `maverick enterprise verify`; `maverick encryption migrate` |
 | **Access control** | AuthN/Z, least privilege, tenancy? | [security-overview.md §Identity & access](security-overview.md#identity--access) (OIDC, RBAC, attenuating capabilities, per-tenant) | capability + OIDC + tenancy test suites (see [audit-readiness.md](../security/audit-readiness.md#5-security-test-suites-by-area)) |
 | **Audit & evidence** | Tamper-evident, exportable logs? | [security-overview.md §Audit](security-overview.md#audit--evidence) | `maverick audit verify` (validates the hash chain); `maverick audit export` |

@@ -47,7 +47,11 @@ fn dashboard_listening() -> bool {
 /// then fall back to the bare name (which still works when launched from a
 /// shell that has it on PATH).
 fn maverick_bin() -> OsString {
-    let exe = if cfg!(windows) { "maverick.exe" } else { "maverick" };
+    let exe = if cfg!(windows) {
+        "maverick.exe"
+    } else {
+        "maverick"
+    };
 
     if let Some(explicit) = std::env::var_os("MAVERICK_BIN") {
         return explicit;

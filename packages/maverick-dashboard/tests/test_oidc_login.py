@@ -14,6 +14,8 @@ happy path sets the session + redirects to a safe ``return_to``; state-mismatch
 """
 from __future__ import annotations
 
+import subprocess
+import sys
 from urllib.parse import parse_qs, urlparse
 
 import maverick_dashboard.oidc_login as ol
@@ -28,6 +30,21 @@ TOKEN_ENDPOINT = "https://idp.example.com/token"
 SESSION_SECRET = "unit-test-session-secret"  # pragma: allowlist secret
 CLIENT_ID = "test-client-id"
 ISSUER = "https://idp.example.com"
+
+
+def test_module_import_does_not_eagerly_load_httpx():
+    code = (
+        "import sys\n"
+        "import maverick_dashboard.oidc_login\n"
+        "print('httpx' in sys.modules)\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.stdout.strip() == "False"
 
 
 @pytest.fixture

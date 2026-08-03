@@ -1,8 +1,13 @@
 """Lightwork: recursive multi-agent swarm for long-horizon work."""
 
 import os
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _distribution_version
 
-__version__ = "0.1.7"
+try:
+    __version__ = _distribution_version("maverick-agent")
+except PackageNotFoundError:  # source tree without installed metadata
+    __version__ = "0.1.7"
 
 _LIGHTWORK_PREFIX = "LIGHTWORK_"
 _MAVERICK_PREFIX = "MAVERICK_"

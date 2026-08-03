@@ -39,7 +39,6 @@ from starlette.responses import (
 )
 
 from ._shared import (
-    _any_provider_key_set,
     _get_sse_semaphore,
     _world,
     require_provider_or_400,
@@ -485,8 +484,32 @@ async def remove_user_suites(request: Request, principal: str) -> Response:
     return Response(status_code=204)
 
 
-@router.post("/goals", response_model=GoalOut, status_code=201)
-async def create_goal(request: Request, payload: GoalIn, bg: BackgroundTasks) -> GoalOut:
+@router.post(
+    "/goals",
+    response_model=GoalOut,
+    status_code=201,
+    responses={
+        201: {
+            "description": "Goal accepted, or the original goal replayed",
+            "headers": {
+                "Location": {"schema": {"type": "string"}},
+                "Idempotency-Replayed": {"schema": {"type": "boolean"}},
+            },
+        },
+        503: {
+            "description": "Idempotency state is temporarily indeterminate",
+            "headers": {
+                "Retry-After": {"schema": {"type": "integer"}},
+            },
+        },
+    },
+)
+async def create_goal(
+    request: Request,
+    payload: GoalIn,
+    bg: BackgroundTasks,
+    response: Response,
+) -> GoalOut:
     require_permission(request, "operate")
     require_provider_or_400()
     # Shared sliding-window cap across /chat/send + this route, so a
@@ -543,6 +566,8 @@ async def create_goal(request: Request, payload: GoalIn, bg: BackgroundTasks) ->
         if prior is not None:
             g0 = w.get_goal(prior)
             if g0 is not None:
+                response.headers["Location"] = f"/api/v1/goals/{g0.id}"
+                response.headers["Idempotency-Replayed"] = "true"
                 return _to_goal_out(g0)  # replay: original goal, no new run
     goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
     if domain:
@@ -551,10 +576,47 @@ async def create_goal(request: Request, payload: GoalIn, bg: BackgroundTasks) ->
         _IDEMPOTENCY_CHANNEL, idem_ext, goal_id=goal_id
     ):
         # Lost a concurrent race on the same key: return the winner's goal and do
-        # NOT dispatch a run for this (now-orphaned, never-run) goal row.
+        # NOT dispatch a run for this never-run goal row. Mark the loser
+        # terminal so it cannot remain a permanently-pending ghost in the
+        # operator worklist.
         prior = w.lookup_processed_message(_IDEMPOTENCY_CHANNEL, idem_ext)
         g0 = w.get_goal(prior) if prior is not None else None
-        return _to_goal_out(g0 or w.get_goal(goal_id))
+        if g0 is not None:
+            try:
+                w.set_goal_status(
+                    goal_id,
+                    "cancelled",
+                    result="superseded by a concurrent idempotent request",
+                )
+            except Exception:
+                log.warning(
+                    "could not mark idempotency-race loser goal #%s cancelled",
+                    goal_id,
+                    exc_info=True,
+                )
+            response.headers["Location"] = f"/api/v1/goals/{g0.id}"
+            response.headers["Idempotency-Replayed"] = "true"
+            return _to_goal_out(g0)
+        # A claim without its referenced goal is indeterminate shared-store
+        # state. Never return the newly-created goal as accepted: it was not
+        # dispatched, and doing so leaves the client polling forever.
+        try:
+            w.set_goal_status(
+                goal_id,
+                "blocked",
+                result="idempotency claim is temporarily indeterminate",
+            )
+        except Exception:
+            log.warning(
+                "could not mark indeterminate idempotency goal #%s blocked",
+                goal_id,
+                exc_info=True,
+            )
+        raise HTTPException(
+            status_code=503,
+            detail="idempotency claim is temporarily indeterminate; retry shortly",
+            headers={"Retry-After": "1"},
+        )
     from maverick.runner import run_goal_in_background_async
     # Enforce server-side execution caps even when callers request larger values.
     max_dollars = min(payload.max_dollars, DEFAULT_MAX_DOLLARS)
@@ -578,12 +640,29 @@ async def create_goal(request: Request, payload: GoalIn, bg: BackgroundTasks) ->
     g = w.get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=500, detail="goal vanished after create")
+    response.headers["Location"] = f"/api/v1/goals/{goal_id}"
+    response.headers["Idempotency-Replayed"] = "false"
     return _to_goal_out(g)
 
 
-@router.get("/goals", response_model=list[GoalOut])
+@router.get(
+    "/goals",
+    response_model=list[GoalOut],
+    responses={
+        200: {
+            "description": "A page of goals, newest first",
+            "headers": {
+                "Pagination-Limit": {"schema": {"type": "integer"}},
+                "Pagination-Offset": {"schema": {"type": "integer"}},
+                "Pagination-Has-More": {"schema": {"type": "boolean"}},
+                "Pagination-Next-Offset": {"schema": {"type": "integer"}},
+            },
+        },
+    },
+)
 async def list_goals(
     request: Request,
+    response: Response,
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
@@ -602,8 +681,15 @@ async def list_goals(
     offset = max(0, int(offset or 0))
     goals = w.list_goals(
         status=status, owner=goal_owner_filter(request),
-        limit=limit, offset=offset, order="desc",
+        limit=limit + 1, offset=offset, order="desc",
     )
+    has_more = len(goals) > limit
+    goals = goals[:limit]
+    response.headers["Pagination-Limit"] = str(limit)
+    response.headers["Pagination-Offset"] = str(offset)
+    response.headers["Pagination-Has-More"] = str(has_more).lower()
+    if has_more:
+        response.headers["Pagination-Next-Offset"] = str(offset + limit)
     return [_to_goal_out(g) for g in goals]
 
 
@@ -3702,7 +3788,7 @@ async def draft_flow_endpoint(request: Request, payload: FlowDraftIn) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick_dashboard._shared import require_provider_or_400
-    require_provider_or_400()
+    require_provider_or_400(role="orchestrator")
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request, source="flow-authoring")
     from maverick.flow.draft import draft_flow
@@ -3735,7 +3821,7 @@ async def flow_chat_endpoint(request: Request, payload: FlowChatIn) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick_dashboard._shared import require_provider_or_400
-    require_provider_or_400()
+    require_provider_or_400(role="orchestrator")
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request, source="flow-authoring")
     from maverick.flow import Flow
@@ -5246,10 +5332,38 @@ async def remove_generated_tool(request: Request, name: str) -> None:
     """
     require_permission(request, "admin")
     target = _resolve_generated_tool(name)
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail="no such generated tool")
+    from maverick import self_learning
+    from maverick.audit import AuditRefused
+    from maverick.safety.consent import ConsentLedgerError
+
     try:
-        target.unlink()
+        await run_in_threadpool(
+            self_learning.delete_generated_tool,
+            target.stem,
+            actor=caller_principal(request) or "local",
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="invalid generated-tool name",
+        ) from None
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail="no such generated tool",
+        ) from None
+    except (
+        AuditRefused,
+        ConsentLedgerError,
+        self_learning.GeneratedToolRemovalError,
+    ):
+        # The source stays present when its durable authority/audit tombstone
+        # cannot be committed. Do not turn an evidence failure into an
+        # unaudited deletion.
+        raise HTTPException(
+            status_code=503,
+            detail="could not durably revoke generated-tool authority",
+        ) from None
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"could not remove: {e}") from e
 
@@ -7127,13 +7241,19 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
     from maverick.jd_hiring import draft_from_jd
 
     llm = None
+    llm_model = None
     budget = None
-    from maverick.config import any_provider_configured
-    if any_provider_configured():
+    from maverick.config import load_config
+    from maverick.operator_preflight import _role_configuration_missing
+
+    _, missing = _role_configuration_missing("writer", load_config())
+    if not missing:
         try:
             from maverick.budget import Budget
-            from maverick.llm import LLM
-            llm = LLM()
+            from maverick.llm import LLM, model_for_role
+
+            llm_model = model_for_role("writer")
+            llm = LLM(model=llm_model)
             # A draft is one bounded completion; cap it like workflow drafting
             # so the endpoint can't be spammed into a cost amplifier.
             budget = Budget(max_dollars=0.50)
@@ -7143,7 +7263,8 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
     try:
         profile = await run_in_threadpool(
             lambda: draft_from_jd(payload.role_title, payload.jd_text,
-                                  industry=payload.industry, llm=llm, budget=budget))
+                                  industry=payload.industry, llm=llm,
+                                  model=llm_model, budget=budget))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -7509,31 +7630,161 @@ def _supervisor(request: Request) -> str:
     return caller_principal(request) or "operator"
 
 
-def _audit_approval_decision(approval_id: int, status: str, decided_by: str) -> None:
-    """Anchor a human approve/deny in the signed audit chain (audit H28).
+def _deliver_approval_audit_event(world, event) -> bool:
+    """Deliver exactly one queued vote and persist its delivery marker."""
+    if event.delivered_at is not None:
+        return True
 
-    The decision's integrity must not rest on the mutable `approvals` row alone;
-    record it in the tamper-evident Ed25519 chain. Best-effort: an audit-write
-    failure never blocks the oversight decision that already committed."""
+    from maverick.audit import AuditRefused, EventKind, audit_event
+
     try:
-        from maverick.audit import EventKind, record
-        record(EventKind.APPROVAL_DECISION, approval_id=int(approval_id),
-               status=status, decided_by=decided_by or "")
-    except Exception:  # pragma: no cover - audit failure must not break the decision
-        pass
+        written = audit_event(
+            EventKind.APPROVAL_DECISION,
+            approval_event_id=event.event_id,
+            approval_id=int(event.approval_id),
+            status=event.status,
+            decided_by=event.decided_by,
+            occurred_at=float(event.created_at),
+        )
+    except AuditRefused as exc:
+        # This is not refusal swallowing: no approval becomes effective. The
+        # exact event remains in the durable outbox for a policy/key repair and
+        # idempotent retry.
+        log.error(
+            "approval audit refused; decision remains non-effective "
+            "(event_id=%s): %s",
+            event.event_id,
+            exc,
+        )
+        return False
+    if not written:
+        log.error(
+            "approval audit write failed; decision remains non-effective "
+            "(event_id=%s)",
+            event.event_id,
+        )
+        return False
+
+    try:
+        return bool(world.mark_approval_audit_delivered(event.event_id))
+    # The signed append may have succeeded while the delivery-marker commit
+    # acknowledgement failed. Reconcile instead of returning an error that
+    # invites an unsafe, differently-keyed retry.
+    # failure-policy: fail_soft_with_audit
+    except Exception:
+        log.exception(
+            "approval audit was written but delivery finalization failed "
+            "(event_id=%s)",
+            event.event_id,
+        )
+        try:
+            reconciled = world.get_approval_audit_event(event.event_id)
+        except Exception:
+            return False
+        return bool(reconciled and reconciled.delivered_at is not None)
 
 
-def _record_vote_or_raise(world, approval_id: int, status: str, who: str) -> None:
+def _audit_approval_decision(world, event) -> bool:
+    """Deliver an approval's queued votes in durable occurrence order.
+
+    The world-model outbox is the authority seam: an audit refusal leaves every
+    later vote durable but non-effective. A retry uses stable event ids and
+    resumes at the oldest undelivered row, so a quorum-reaching vote cannot
+    overtake an earlier sign-off in the signed chain.
+    """
+    try:
+        pending = world.pending_approval_audit_events(
+            approval_id=event.approval_id,
+            limit=1000,
+        )
+    # The vote/outbox commit already succeeded. A read failure here is an
+    # explicit audit-pending response, not a 500 that falsely invites a new
+    # decision.
+    # failure-policy: fail_soft_with_audit
+    except Exception:
+        log.exception(
+            "approval audit outbox could not be read (event_id=%s)",
+            event.event_id,
+        )
+        return False
+    for queued in pending:
+        if not _deliver_approval_audit_event(world, queued):
+            return False
+    try:
+        current = world.get_approval_audit_event(event.event_id)
+    except Exception:
+        return False
+    return bool(current and current.delivered_at is not None)
+
+
+def _record_vote_or_raise(world, approval_id: int, status: str, who: str):
     """Apply one approver's vote, mapping rejection to the right HTTP error.
 
     Under N-of-M dual control a vote can be refused for segregation-of-duties
     reasons (the requester can't self-approve, or an approver identity is needed)
     -- distinguish that (403) from an unknown/already-decided approval (404)."""
-    if world.decide_approval(approval_id, status, decided_by=who):
-        return
+    event_id = world.approval_audit_event_id(approval_id, status, who)
+    try:
+        event = world.decide_approval_audited(
+            approval_id,
+            status,
+            decided_by=who,
+        )
+    except Exception as decision_error:
+        # A commit acknowledgement can be lost after both the vote and outbox
+        # row are durable. The stable id lets us prove that outcome before
+        # deciding whether this request failed.
+        try:
+            event = world.get_approval_audit_event(event_id)
+        except Exception as reconcile_error:
+            log.exception(
+                "approval decision outcome is uncertain (event_id=%s)",
+                event_id,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "decision": "outcome_uncertain",
+                    "decision_id": event_id,
+                    "retry_safe": True,
+                },
+                headers={
+                    "Retry-After": "1",
+                    "X-Lightwork-Decision-Id": event_id,
+                    "X-Lightwork-Approval-State": "uncertain",
+                },
+            ) from reconcile_error
+        if event is not None and not event.matches(approval_id, status, who):
+            log.critical(
+                "approval outbox identity mismatch during commit reconciliation "
+                "(event_id=%s)",
+                event_id,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "decision": "outbox_integrity_error",
+                    "decision_id": event_id,
+                    "retry_safe": False,
+                },
+                headers={
+                    "X-Lightwork-Decision-Id": event_id,
+                    "X-Lightwork-Approval-State": "integrity_error",
+                },
+            ) from decision_error
+        if event is None:
+            raise decision_error
+    if event is not None:
+        return event
+
     st = world.approval_state(approval_id)
     if st is None or st.get("status") != "pending":
         raise HTTPException(status_code=404, detail="no such pending approval")
+    if world.approval_has_pending_finalization(approval_id):
+        raise HTTPException(
+            status_code=409,
+            detail="a final decision is accepted and awaiting signed audit delivery",
+        )
     raise HTTPException(
         status_code=403,
         detail="vote not accepted: the requester can't approve their own request "
@@ -7542,24 +7793,113 @@ def _record_vote_or_raise(world, approval_id: int, status: str, who: str) -> Non
     )
 
 
-@router.post("/approvals/{approval_id}/approve", status_code=204)
-async def approve_approval(request: Request, approval_id: int) -> None:
+def _approval_decision_response(world, event, audit_delivered: bool) -> Response:
+    """Make pending-vs-effective state explicit at the HTTP boundary."""
+    try:
+        state = world.approval_state(event.approval_id) or {}
+    # The decision/outbox transaction has already committed. A diagnostic read
+    # failure must not turn that into a misleading 500/retry; fall back to the
+    # conservative state derivable from the delivery result.
+    # failure-policy: fail_soft_with_audit
+    except Exception:
+        log.exception(
+            "approval state read failed after accepted decision (event_id=%s)",
+            event.event_id,
+        )
+        state = {}
+    fallback_status = (
+        event.final_status
+        if audit_delivered and event.final_status is not None
+        else "pending"
+    )
+    approval_status = str(state.get("status") or fallback_status)
+    common_headers = {
+        "X-Lightwork-Decision-Id": event.event_id,
+        "X-Lightwork-Approval-Audit": (
+            "delivered" if audit_delivered else "pending"
+        ),
+        "X-Lightwork-Approval-State": approval_status,
+    }
+    if audit_delivered:
+        return Response(status_code=204, headers=common_headers)
+    return JSONResponse(
+        status_code=202,
+        content={
+            "decision": "accepted",
+            "decision_id": event.event_id,
+            "audit": "pending",
+            "approval_status": approval_status,
+            "effective": False,
+            "retry_safe": True,
+        },
+        headers={"Retry-After": "1", **common_headers},
+    )
+
+
+@router.post(
+    "/approvals/{approval_id}/approve",
+    status_code=204,
+    responses={
+        202: {
+            "description": (
+                "Vote accepted durably; approval remains non-effective while "
+                "signed audit delivery is pending"
+            ),
+        },
+        409: {"description": "A competing final vote is awaiting audit delivery"},
+        503: {
+            "description": (
+                "Database commit outcome could not be reconciled; retrying the "
+                "returned decision id is safe"
+            ),
+        },
+    },
+)
+async def approve_approval(request: Request, approval_id: int) -> Response:
     """Record an approval vote; once the required quorum of distinct approvers is
     met the polling consent path proceeds (N-of-M dual control)."""
     require_permission(request, "operate")
     who = _supervisor(request)
-    _record_vote_or_raise(_world(), approval_id, "approved", who)
-    _audit_approval_decision(approval_id, "approved", who)
+    world = _world()
+    event = _record_vote_or_raise(world, approval_id, "approved", who)
+    return _approval_decision_response(
+        world,
+        event,
+        _audit_approval_decision(world, event),
+    )
 
 
-@router.post("/approvals/{approval_id}/deny", status_code=204)
-async def deny_approval(request: Request, approval_id: int) -> None:
+@router.post(
+    "/approvals/{approval_id}/deny",
+    status_code=204,
+    responses={
+        202: {
+            "description": (
+                "Vote accepted durably; denial remains non-effective while "
+                "signed audit delivery is pending"
+            ),
+        },
+        409: {"description": "A competing final vote is awaiting audit delivery"},
+        503: {
+            "description": (
+                "Database commit outcome could not be reconciled; retrying the "
+                "returned decision id is safe"
+            ),
+        },
+    },
+)
+async def deny_approval(request: Request, approval_id: int) -> Response:
     """Deny a parked action (a single deny rejects it); the polling consent path
     then refuses it."""
     require_permission(request, "operate")
     who = _supervisor(request)
-    _record_vote_or_raise(_world(), approval_id, "denied", who)
-    _audit_approval_decision(approval_id, "denied", who)
+    world = _world()
+    event = _record_vote_or_raise(world, approval_id, "denied", who)
+    return _approval_decision_response(
+        world,
+        event,
+        _audit_approval_decision(world, event),
+    )
 
 
 @router.get("/approvals/{approval_id}/state")
@@ -7723,13 +8063,6 @@ async def run_fleet_agent(
     # read-only viewer is 403'd up front (owner-scoping alone is not authz: a
     # viewer can own a fleet yet must never run one).
     require_permission(request, "operate")
-    if not _any_provider_key_set():
-        raise HTTPException(
-            status_code=400,
-            detail=("No AI provider is connected yet — an administrator needs "
-                    "to add a provider key before agents can run "
-                    "(run 'maverick init')."),
-        )
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request)
 
@@ -7767,6 +8100,11 @@ async def run_fleet_agent(
         raise HTTPException(
             status_code=403,
             detail="insufficient department access for this action") from exc
+    # Provider readiness is an operational precondition, not authorization.
+    # Keep it behind owner and department gates so an incomplete deployment
+    # cannot mask their 404/403 responses or disclose configuration state to a
+    # caller who is not allowed to dispatch this agent.
+    require_provider_or_400()
     # Running an agent under the oversight control plane is the paid (Gold)
     # "fleet governance" capability. Fail-open: a no-op unless license enforcement
     # is on and the license lacks it. Checked after existence (404) so a missing
@@ -8445,17 +8783,7 @@ def _extract_binary_doc_text(raw: bytes, filename: str) -> str | None:
 
 
 def _require_provider_for_drafting() -> None:
-    if not _any_provider_key_set():
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "No AI provider is connected yet — drafting a workflow needs "
-                "one, and an administrator can set it up (run 'maverick init', "
-                "export a provider key such as ANTHROPIC_API_KEY / "
-                "OPENAI_API_KEY / GEMINI_API_KEY, or set [providers.<name>] "
-                "in the server configuration)."
-            ),
-        )
+    require_provider_or_400(role="orchestrator")
 
 
 def _drafter_for(form: str):

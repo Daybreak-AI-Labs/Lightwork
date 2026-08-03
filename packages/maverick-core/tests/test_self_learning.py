@@ -9,6 +9,7 @@ generated-tool validation/loading, and the
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shlex
 import subprocess
@@ -990,6 +991,125 @@ class TestGeneratedTools:
         assert any(t.name == "greet_gen" for t in loaded)
         loaded_tool = next(t for t in loaded if t.name == "greet_gen")
         assert loaded_tool.fn({"who": "Grace"}) == "hi Grace"
+
+    def test_delete_revokes_live_and_persisted_authority(
+        self, monkeypatch,
+    ):
+        from maverick.safety import consent
+
+        # Registration is setup for this deletion test, not the behavior under
+        # test. Make its high-risk consent explicit under secure-by-default.
+        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+        source = good_tool_source("delete_me")
+        sandbox = SecureSandbox()
+        live = self_learning.write_generated_tool(
+            "delete_me",
+            source,
+            sandbox=sandbox,
+        )
+        digest = hashlib.sha256(source.strip().encode("utf-8")).hexdigest()
+        scope = f"shared:delete_me:{digest}"
+        assert consent._check_ledger("register-generated-tool", scope)
+
+        events = []
+        monkeypatch.setattr(
+            "maverick.audit.audit_event",
+            lambda kind, **payload: events.append((kind, payload)) or True,
+        )
+        report = self_learning.delete_generated_tool(
+            "delete_me",
+            actor="user:admin",
+        )
+
+        assert report == {
+            "name": "delete_me",
+            "tenant": "shared",
+            "source_sha256": digest,
+            "consent_revoked": True,
+        }
+        assert not (self_learning.GENERATED_TOOLS_DIR / "delete_me.py").exists()
+        assert not consent._check_ledger("register-generated-tool", scope)
+        assert "consent is missing or revoked" in live.fn({})
+        assert events[-1][1] == {
+            "agent": "self_learning",
+            "operation": "generated_tool_authority_revoked",
+            "name": "delete_me",
+            "tenant": "shared",
+            "source_sha256": digest,
+            "consent_revoked": True,
+            "actor": "user:admin",
+        }
+
+        # Restoring identical bytes outside the governed writer cannot silently
+        # resurrect the tool: discovery requires the now-revoked exact digest.
+        target = self_learning.GENERATED_TOOLS_DIR / "delete_me.py"
+        target.write_text(source.strip(), encoding="utf-8")
+        assert "delete_me" not in self_learning.generated_tool_names()
+
+    def test_delete_requires_durable_audit_before_unlink(
+        self, monkeypatch,
+    ):
+        from maverick.safety import consent
+
+        # Registration is setup for this deletion test, not the behavior under
+        # test. Make its high-risk consent explicit under secure-by-default.
+        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+        source = good_tool_source("audit_fail")
+        self_learning.write_generated_tool(
+            "audit_fail",
+            source,
+            sandbox=SecureSandbox(),
+        )
+        monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: False)
+
+        with pytest.raises(
+            self_learning.GeneratedToolRemovalError,
+            match="audit log",
+        ):
+            self_learning.delete_generated_tool("audit_fail")
+
+        target = self_learning.GENERATED_TOOLS_DIR / "audit_fail.py"
+        assert target.exists()
+        # Even though unlink was refused, the live code is already safe: its
+        # digest grant was durably revoked before the failed audit boundary.
+        assert self_learning.load_generated_tools(sandbox=SecureSandbox()) == []
+        record_count = len(
+            consent.consent_ledger_path().read_text(
+                encoding="utf-8",
+            ).splitlines()
+        )
+        with pytest.raises(self_learning.GeneratedToolRemovalError):
+            self_learning.delete_generated_tool("audit_fail")
+        assert len(
+            consent.consent_ledger_path().read_text(
+                encoding="utf-8",
+            ).splitlines()
+        ) == record_count
+
+    def test_delete_writes_revocation_tombstone_without_prior_grant(
+        self, monkeypatch,
+    ):
+        from maverick.safety import consent
+
+        source = good_tool_source("orphan_tool").strip()
+        target = self_learning.GENERATED_TOOLS_DIR / "orphan_tool.py"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(source, encoding="utf-8")
+        monkeypatch.setattr("maverick.audit.audit_event", lambda *a, **k: True)
+
+        report = self_learning.delete_generated_tool("orphan_tool")
+
+        assert report["consent_revoked"] is False
+        records = [
+            json.loads(line)
+            for line in consent.consent_ledger_path().read_text(
+                encoding="utf-8",
+            ).splitlines()
+        ]
+        assert records[-1]["op"] == "revoke"
+        assert records[-1]["scope"].endswith(
+            f":orphan_tool:{report['source_sha256']}"
+        )
 
     def test_halt_at_generated_tool_write_boundary_leaves_no_source(
         self, monkeypatch,

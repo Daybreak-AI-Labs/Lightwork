@@ -308,6 +308,32 @@ def test_enforced_via_config(monkeypatch):
     assert capability_enforced() is True
 
 
+def test_enforcement_policy_load_error_fails_closed(monkeypatch):
+    monkeypatch.delenv("MAVERICK_ENFORCE_CAPABILITIES", raising=False)
+    monkeypatch.setattr("maverick.enterprise.enterprise_enabled", lambda: False)
+
+    def _boom():
+        raise RuntimeError("config unavailable")
+
+    monkeypatch.setattr("maverick.config.load_config", _boom)
+    assert capability_enforced() is True
+
+
+@pytest.mark.parametrize("value", ["sometimes", "2", "enabled"])
+def test_invalid_enforcement_env_fails_closed(monkeypatch, value):
+    monkeypatch.setenv("MAVERICK_ENFORCE_CAPABILITIES", value)
+    assert capability_enforced() is True
+
+
+def test_malformed_capability_section_fails_closed(monkeypatch):
+    monkeypatch.delenv("MAVERICK_ENFORCE_CAPABILITIES", raising=False)
+    monkeypatch.setattr("maverick.enterprise.enterprise_enabled", lambda: False)
+    monkeypatch.setattr(
+        "maverick.config.load_config", lambda: {"capabilities": ["not", "a", "table"]},
+    )
+    assert capability_enforced() is True
+
+
 def test_from_config_reuses_acl(monkeypatch):
     monkeypatch.setattr(
         "maverick.config.load_config",
@@ -513,13 +539,26 @@ def test_role_max_risk_only_tightens(monkeypatch):
     assert cap.max_risk == "low"
 
 
-def test_unknown_role_is_noop(monkeypatch):
+def test_unknown_assigned_role_is_rejected(monkeypatch):
+    from maverick.capability import UnknownRoleError
+
     _cfg(monkeypatch, {
         "role_assignments": {"user:alice": "ghost"},  # no [roles.ghost] defined
         "roles": {"analyst": {"allow_tools": ["read_file"]}},
     })
-    cap = capability_from_config("user:alice")
-    assert cap.permits("shell") is True  # unchanged: all-permissive base
+    with pytest.raises(UnknownRoleError, match="undefined RBAC role"):
+        capability_from_config("user:alice")
+
+
+def test_malformed_explicit_assignment_does_not_fall_back_to_default(monkeypatch):
+    from maverick.capability import UnknownRoleError
+
+    _cfg(monkeypatch, {
+        "role_assignments": {"user:alice": "", "default": "readonly"},
+        "roles": {"readonly": {"allow_tools": ["read_file"]}},
+    })
+    with pytest.raises(UnknownRoleError, match="invalid RBAC role assignment"):
+        capability_from_config("user:alice")
 
 
 def test_no_role_assignment_is_noop(monkeypatch):
@@ -543,3 +582,35 @@ def test_capability_from_config_fails_closed_on_resolver_error(monkeypatch):
     assert cap.permits("read_file") is False
     assert cap.permits("shell") is False
     assert cap.permits("web_search") is False
+    assert cap.permits("spawn_subagent") is False
+    assert cap.permits_path("/tmp/anything") is False
+    assert cap.permits_host("example.com") is False
+
+
+def test_root_mint_failure_installs_deny_all_grant(monkeypatch):
+    from types import SimpleNamespace
+
+    from maverick.agent import Agent
+
+    ctx = SimpleNamespace(
+        capability=None,
+        channel="slack",
+        user_id="slack:UALICE",
+    )
+    agent = Agent.__new__(Agent)
+    agent.ctx = ctx
+    agent.depth = 0
+    monkeypatch.setattr("maverick.capability.capability_enforced", lambda: True)
+
+    def _boom(**_kwargs):
+        raise RuntimeError("root mint failed")
+
+    monkeypatch.setattr("maverick.capability.capability_from_config", _boom)
+    cap = agent._resolve_capability(None)
+
+    assert cap.principal == "user:slack:UALICE"
+    assert cap.permits("read_file") is False
+    assert cap.permits("spawn_subagent") is False
+    assert cap.permits_path("/tmp/anything") is False
+    assert cap.permits_host("example.com") is False
+    assert ctx.capability is cap

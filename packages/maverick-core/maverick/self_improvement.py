@@ -179,6 +179,12 @@ class Candidate:
     # change that can't be rolled back is never promoted.
     rollback: Any = None
     provenance: dict = field(default_factory=dict)
+    # Event-specific fields for the durable promotion audit receipt.  Artifact
+    # owners can attach diagnostic evidence (for example the self-harness line
+    # and held-out score) without teaching the generic ledger about that
+    # producer.  The controller supplies and pins event identity, decision,
+    # candidate, rung, and occurrence time.
+    audit_payload: dict[str, Any] = field(default_factory=dict)
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
 
 
@@ -250,6 +256,9 @@ class PromotionRecord:
     samples: int | None = None
     effect_ci_low: float | None = None
     provenance: dict[str, Any] = field(default_factory=dict)
+    # Bounded producer-specific evidence copied into the durable audit outbox
+    # when the promotion journal commits.  Omitted for legacy receipts.
+    audit_payload: dict[str, Any] = field(default_factory=dict)
     # How the capability non-escalation gate judged THIS promotion, so the claim
     # "self-improvement never widened its authority" is checkable from the
     # ledger file rather than taken on the issuer's word. One of
@@ -280,6 +289,8 @@ class PromotionRecord:
             data["effect_ci_low"] = self.effect_ci_low
         if self.provenance:
             data["provenance"] = self.provenance
+        if self.audit_payload:
+            data["audit_payload"] = self.audit_payload
         if self.model_risk_payload_sha256 is not None:
             data["model_risk_payload_sha256"] = self.model_risk_payload_sha256
         if self.capability_evidence is not None:
@@ -431,6 +442,21 @@ def _receipt_provenance(value: Any) -> dict[str, Any]:
     return parsed
 
 
+def _receipt_audit_payload(value: Any) -> dict[str, Any]:
+    """Return a bounded canonical JSON object for an audit-outbox receipt."""
+    if not isinstance(value, dict):
+        raise ValueError("promotion audit payload must be an object")
+    if any(not isinstance(key, str) for key in value):
+        raise ValueError("promotion audit payload keys must be strings")
+    canonical = _canonical_json(value)
+    if len(canonical.encode("utf-8")) > 32_768:
+        raise ValueError("promotion audit payload exceeds 32768 bytes")
+    parsed = json.loads(canonical)
+    if not isinstance(parsed, dict):  # pragma: no cover - guarded above
+        raise ValueError("promotion audit payload must be an object")
+    return parsed
+
+
 def _capability_assessment(cand: Candidate) -> tuple[bool | None, str, int | None]:
     """Judge authority widening AND record *how* it was judged.
 
@@ -509,12 +535,17 @@ def _default_frozen_fn() -> bool:
         raise
 
 
-def _default_audit_fn(**payload: Any) -> None:
-    try:
-        from .audit import EventKind, record
-        record(EventKind.LEARNING_UPDATE, agent="self_improvement", **payload)
-    except Exception:  # pragma: no cover -- audit is best-effort, never blocks
-        log.debug("self-improvement audit failed", exc_info=True)
+def _default_audit_fn(**payload: Any) -> bool:
+    """Deliver one audit receipt while preserving explicit refusal semantics."""
+    from .audit import EventKind, audit_event
+
+    event_payload = dict(payload)
+    agent = str(event_payload.pop("_audit_agent", "self_improvement"))
+    return audit_event(
+        EventKind.LEARNING_UPDATE,
+        agent=agent,
+        **event_payload,
+    )
 
 
 @dataclass
@@ -524,7 +555,7 @@ class SelfImprovementController:
     min_improvement: float = 0.0
     max_auto_rung: str = "policy"
     frozen_fn: Callable[[], bool] = _default_frozen_fn
-    audit_fn: Callable[..., None] = _default_audit_fn
+    audit_fn: Callable[..., bool | None] = _default_audit_fn
     ledger: PromotionLedger | None = None
     now: Callable[[], float] = time.time
     # Optional request-scoped verifier for deployments whose approval trust
@@ -819,13 +850,31 @@ class SelfImprovementController:
                        gates[0].reason if gates else "rejected")
 
     def _audit(self, **payload: Any) -> None:
-        """Keep best-effort telemetry outside the promotion transaction."""
+        """Emit non-authoritative telemetry outside the promotion transaction.
+
+        Successful promotion and rollback decisions do not use this seam: their
+        audit receipts are committed atomically in the promotion journal and
+        drained by :meth:`_flush_audit_outbox`.
+        """
         try:
             self.audit_fn(**payload)
         except Exception:
-            # In particular, an audit sink failure after the journal fsync must
-            # not make a caller revert a transition that is already committed.
             log.warning("self-improvement audit sink failed", exc_info=True)
+
+    def _flush_audit_outbox(self) -> None:
+        """Attempt bounded delivery without inverting a committed transition."""
+        if self.ledger is None:
+            return
+        try:
+            self.ledger.flush_audit_outbox(self.audit_fn)
+        except Exception:
+            # The receipt remains in the authoritative journal.  Returning an
+            # error after the artifact and COMMIT are live would invite an
+            # unsafe retry; a later controller touch drains the same event id.
+            log.warning(
+                "self-improvement durable audit delivery is pending",
+                exc_info=True,
+            )
 
     # -- privileged writes (promote / rollback) --------------------------
 
@@ -853,6 +902,7 @@ class SelfImprovementController:
             samples=cand.samples,
             effect_ci_low=cand.effect_ci_low,
             provenance=_receipt_provenance(cand.provenance),
+            audit_payload=_receipt_audit_payload(cand.audit_payload),
             capability_evidence=verdict.capability_evidence,
             capability_probe_tools=verdict.capability_probe_tools,
         )
@@ -943,6 +993,7 @@ class SelfImprovementController:
                 rung=cand.rung, candidate=cand.id, reason=failed.blocking_reason)
             return PromotionPreparation(failed)
         if transaction.state == "committed":
+            self._flush_audit_outbox()
             return PromotionPreparation(verdict, transaction)
         self._audit(
             content="self_improvement_prepared", decision="prepare",
@@ -1100,16 +1151,7 @@ class SelfImprovementController:
                 candidate=preparation.verdict.candidate_id,
                 transaction=transaction.id)
             return failed
-        if not was_committed:
-            self._audit(
-                content="self_improvement_promoted", decision="promote",
-                rung=preparation.verdict.rung,
-                candidate=preparation.verdict.candidate_id,
-                transaction=transaction.id, artifact=artifact.identity,
-                artifact_sha256=artifact.sha256,
-                samples=transaction.record.samples,
-                effect_ci_low=transaction.record.effect_ci_low,
-                provenance=transaction.record.provenance)
+        self._flush_audit_outbox()
         return preparation.verdict
 
     def abort_prepared(
@@ -1206,6 +1248,7 @@ class SelfImprovementController:
                     samples=tx.record.samples,
                     effect_ci_low=tx.record.effect_ci_low,
                     provenance=tx.record.provenance)
+        self._flush_audit_outbox()
         return recovered
 
     def promote(self, cand: Candidate) -> Verdict:
@@ -1276,11 +1319,7 @@ class SelfImprovementController:
             self._audit(content="self_improvement_rejected", decision="reject",
                         rung=cand.rung, candidate=cand.id, reason=failure.reason)
             return failed
-        self._audit(content="self_improvement_promoted", decision="promote",
-                    rung=cand.rung, candidate=cand.id,
-                    improvement=round(cand.candidate_score - cand.baseline_score, 6),
-                    approver=verdict.approver_id, samples=rec.samples,
-                    effect_ci_low=rec.effect_ci_low, provenance=rec.provenance)
+        self._flush_audit_outbox()
         return verdict
 
     def rollback(self, record_id: str, *, undo: Callable[[], None] | None = None) -> bool:
@@ -1310,8 +1349,7 @@ class SelfImprovementController:
             log.warning("self-improvement rollback receipt commit failed for %s",
                         record_id, exc_info=True)
             return False
-        self._audit(content="self_improvement_rolled_back", decision="rollback",
-                    rung=rec.rung, candidate=record_id)
+        self._flush_audit_outbox()
         return True
 
 
@@ -1510,6 +1548,7 @@ def _record_from_dict(raw: Any) -> PromotionRecord:
             samples=samples,
             effect_ci_low=effect_ci_low,
             provenance=_receipt_provenance(raw.get("provenance", {})),
+            audit_payload=_receipt_audit_payload(raw.get("audit_payload", {})),
             capability_evidence=capability_evidence,
             capability_probe_tools=capability_probe_tools,
         )
@@ -1600,6 +1639,95 @@ def _records_match(left: Mapping[str, PromotionRecord],
     }
 
 
+def _promotion_audit_envelope(
+    record: PromotionRecord,
+    *,
+    decision: str,
+    occurred_at: float,
+    transaction_id: str | None = None,
+    artifact: ArtifactRevision | None = None,
+) -> dict[str, Any]:
+    """Build one stable, bounded outbox receipt for a journal transition."""
+    at = _event_time(occurred_at, "audit")
+    identity = {
+        "decision": decision,
+        "record": record.to_dict(),
+        "transaction": transaction_id,
+        "artifact": artifact.to_dict() if artifact is not None else None,
+    }
+    event_id = "self-improvement-" + hashlib.sha256(
+        _canonical_json(identity).encode("utf-8")
+    ).hexdigest()
+    custom = record.audit_payload if decision == "promote" else {}
+    payload = _receipt_audit_payload({
+        **custom,
+        "event_id": event_id,
+        "occurred_at": at,
+        "content": (
+            "self_improvement_promoted"
+            if decision == "promote"
+            else "self_improvement_rolled_back"
+        ),
+        "decision": decision,
+        "rung": record.rung,
+        "candidate": record.id,
+        "transaction": transaction_id,
+        "artifact": artifact.identity if artifact is not None else None,
+        "artifact_sha256": artifact.sha256 if artifact is not None else None,
+        "improvement": round(
+            record.candidate_score - record.baseline_score,
+            6,
+        ),
+        "approver": record.approver_id,
+        "samples": record.samples,
+        "effect_ci_low": record.effect_ci_low,
+        "provenance": record.provenance,
+    })
+    return {"event_id": event_id, "queued_at": at, "payload": payload}
+
+
+def _audit_envelope_from_dict(raw: Any) -> dict[str, Any]:
+    """Validate an audit receipt replayed from the authoritative journal."""
+    if not isinstance(raw, dict) or set(raw) != {
+        "event_id", "queued_at", "payload",
+    }:
+        raise PromotionLedgerError(
+            "promotion ledger contains an invalid audit outbox receipt"
+        )
+    event_id = raw.get("event_id")
+    if (
+        not isinstance(event_id, str)
+        or not event_id
+        or len(event_id) > 256
+        or any(ord(ch) < 32 for ch in event_id)
+    ):
+        raise PromotionLedgerError(
+            "promotion ledger contains an invalid audit event id"
+        )
+    queued_at = _event_time(raw.get("queued_at"), "audit")
+    try:
+        payload = _receipt_audit_payload(raw.get("payload"))
+    except (TypeError, ValueError) as exc:
+        raise PromotionLedgerError(
+            "promotion ledger contains an invalid audit payload"
+        ) from exc
+    if payload.get("event_id") != event_id:
+        raise PromotionLedgerError(
+            "promotion ledger audit payload is not bound to its event id"
+        )
+    try:
+        payload_at = _event_time(payload.get("occurred_at"), "audit occurrence")
+    except PromotionLedgerError as exc:
+        raise PromotionLedgerError(
+            "promotion ledger audit payload has an invalid occurrence time"
+        ) from exc
+    if payload_at != queued_at:
+        raise PromotionLedgerError(
+            "promotion ledger audit payload time does not match its receipt"
+        )
+    return {"event_id": event_id, "queued_at": queued_at, "payload": payload}
+
+
 @dataclass
 class PromotionLedger:
     """Durable promotion receipts with a JSON compatibility projection.
@@ -1615,6 +1743,10 @@ class PromotionLedger:
     max_records: int = 1000
     _records: dict[str, PromotionRecord] = field(default_factory=dict)
     _transactions: dict[str, PromotionTransaction] = field(default_factory=dict)
+    _audit_pending: dict[str, dict[str, Any]] = field(
+        default_factory=dict,
+        repr=False,
+    )
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     def __post_init__(self) -> None:
@@ -1654,12 +1786,29 @@ class PromotionLedger:
                 if self.path is not None:
                     if not has_journal:
                         head = self._migrate_legacy_locked(records)
-                    event = self._event("promote", head, record=rec)
+                    audit_receipt = _promotion_audit_envelope(
+                        rec,
+                        decision="promote",
+                        occurred_at=rec.promoted_at,
+                    )
+                    event = self._event(
+                        "promote",
+                        head,
+                        record=rec,
+                        audit=audit_receipt,
+                    )
                     self._append_events_locked((event,))
                     records[rec.id] = rec
+                    self._audit_pending[audit_receipt["event_id"]] = audit_receipt
                     self._sync_projection_after_journal_locked(records)
                 else:
                     records[rec.id] = rec
+                    audit_receipt = _promotion_audit_envelope(
+                        rec,
+                        decision="promote",
+                        occurred_at=rec.promoted_at,
+                    )
+                    self._audit_pending[audit_receipt["event_id"]] = audit_receipt
                 self._records = records
                 self._transactions = transactions
         except PromotionLedgerError:
@@ -1687,6 +1836,22 @@ class PromotionLedger:
         if (before.identity != after.identity or before.sha256 == after.sha256
                 or before.version == after.version):
             raise PromotionLedgerError("promotion transaction artifact transition is invalid")
+        # Reserve a receipt that COMMIT can actually enqueue before the caller
+        # is allowed to install the external artifact.  Without this preflight,
+        # a combined provenance + producer payload that exceeds the outbox cap
+        # would fail only after the runtime artifact was already live.
+        try:
+            _promotion_audit_envelope(
+                rec,
+                decision="promote",
+                occurred_at=prepared_at,
+                transaction_id=tx_id,
+                artifact=after,
+            )
+        except (PromotionLedgerError, TypeError, ValueError) as exc:
+            raise PromotionLedgerError(
+                "promotion audit receipt cannot be reserved"
+            ) from exc
         intent = PromotionTransaction(
             id=tx_id, record=rec, before=before, after=after,
             prepared_at=_event_time(prepared_at, "prepare"),
@@ -1760,10 +1925,28 @@ class PromotionLedger:
                 if self.path is not None:
                     if not has_journal:  # pragma: no cover - prepare always creates it
                         head = self._migrate_legacy_locked(records)
+                    audit_receipt = _promotion_audit_envelope(
+                        committed,
+                        decision="promote",
+                        occurred_at=committed_at,
+                        transaction_id=transaction_id,
+                        artifact=artifact,
+                    )
                     event = self._event(
                         "commit", head, transaction_id=transaction_id,
-                        artifact=artifact, committed_at=committed_at)
+                        artifact=artifact, committed_at=committed_at,
+                        audit=audit_receipt)
                     self._append_events_locked((event,))
+                    self._audit_pending[audit_receipt["event_id"]] = audit_receipt
+                else:
+                    audit_receipt = _promotion_audit_envelope(
+                        committed,
+                        decision="promote",
+                        occurred_at=committed_at,
+                        transaction_id=transaction_id,
+                        artifact=artifact,
+                    )
+                    self._audit_pending[audit_receipt["event_id"]] = audit_receipt
                 records[committed.id] = committed
                 transactions[transaction_id] = replace(
                     tx, state="committed", resolved_at=committed_at,
@@ -1995,6 +2178,91 @@ class PromotionLedger:
         except (OSError, TypeError, ValueError, UnicodeError) as exc:
             raise PromotionLedgerError("could not persist promotion recovery conflict") from exc
 
+    def pending_audit_count(self) -> int:
+        """Return durable promotion/rollback events awaiting signed delivery."""
+        with self._locked():
+            records, transactions, _, _ = self._full_state_locked()
+            self._records = records
+            self._transactions = transactions
+            return len(self._audit_pending)
+
+    def flush_audit_outbox(
+        self,
+        recorder: Callable[..., bool | None],
+        *,
+        limit: int = 32,
+    ) -> int:
+        """Deliver a bounded at-least-once window of committed audit receipts.
+
+        The state transition and receipt are one hash-chained journal event.
+        Delivery acknowledgement is a later journal event.  A process death
+        after the sink accepts a row but before acknowledgement therefore
+        retries the same stable ``event_id`` instead of losing the audit.
+        """
+        if not callable(recorder):
+            raise TypeError("audit recorder must be callable")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+            raise ValueError("audit delivery limit must be between 1 and 500")
+        with self._locked():
+            records, transactions, _, _ = self._full_state_locked()
+            self._records = records
+            self._transactions = transactions
+            pending = sorted(
+                self._audit_pending.values(),
+                key=lambda item: (item["queued_at"], item["event_id"]),
+            )[:limit]
+
+        delivered = 0
+        for receipt in pending:
+            try:
+                accepted = recorder(**dict(receipt["payload"]))
+            except Exception as exc:
+                log.warning(
+                    "self-improvement audit event %s remains pending (%s)",
+                    receipt["event_id"],
+                    type(exc).__name__,
+                )
+                break
+            if accepted is False:
+                log.warning(
+                    "self-improvement audit event %s remains pending "
+                    "(sink did not accept it)",
+                    receipt["event_id"],
+                )
+                break
+            if self._acknowledge_audit(receipt):
+                delivered += 1
+        return delivered
+
+    def _acknowledge_audit(self, receipt: Mapping[str, Any]) -> bool:
+        event_id = str(receipt.get("event_id") or "")
+        with self._locked():
+            records, transactions, head, has_journal = self._full_state_locked()
+            self._records = records
+            self._transactions = transactions
+            current = self._audit_pending.get(event_id)
+            if current is None:
+                # A concurrent drainer already acknowledged the same stable id.
+                return False
+            if current != receipt:
+                raise PromotionLedgerError(
+                    "audit acknowledgement does not match the pending receipt"
+                )
+            if self.path is not None:
+                if not has_journal:
+                    raise PromotionLedgerError(
+                        "cannot acknowledge an audit without its authoritative journal"
+                    )
+                event = self._event(
+                    "audit_ack",
+                    head,
+                    audit_event_id=event_id,
+                    delivered_at=time.time(),
+                )
+                self._append_events_locked((event,))
+            self._audit_pending.pop(event_id)
+            return True
+
     def get(self, record_id: str) -> PromotionRecord | None:
         with self._locked():
             records, transactions, _, _ = self._full_state_locked()
@@ -2015,13 +2283,25 @@ class PromotionLedger:
                 if self.path is not None:
                     if not has_journal:
                         head = self._migrate_legacy_locked(records)
+                    audit_receipt = _promotion_audit_envelope(
+                        updated,
+                        decision="rollback",
+                        occurred_at=at,
+                    )
                     event = self._event("rollback", head, record_id=record_id,
-                                        rolled_back_at=at)
+                                        rolled_back_at=at, audit=audit_receipt)
                     self._append_events_locked((event,))
+                    self._audit_pending[audit_receipt["event_id"]] = audit_receipt
                     records[record_id] = updated
                     self._sync_projection_after_journal_locked(records)
                 else:
                     records[record_id] = updated
+                    audit_receipt = _promotion_audit_envelope(
+                        updated,
+                        decision="rollback",
+                        occurred_at=at,
+                    )
+                    self._audit_pending[audit_receipt["event_id"]] = audit_receipt
                 self._records = records
                 self._transactions = transactions
                 return True
@@ -2078,7 +2358,9 @@ class PromotionLedger:
                 self._sync_projection_after_journal_locked(records)
             return records, transactions, head, True
         if projection.exists():
+            self._audit_pending = {}
             return self._read_projection_locked(), {}, None, False
+        self._audit_pending = {}
         return {}, {}, None, False
 
     def _read_projection_locked(self) -> dict[str, PromotionRecord]:
@@ -2114,6 +2396,8 @@ class PromotionLedger:
 
         records: dict[str, PromotionRecord] = {}
         transactions: dict[str, PromotionTransaction] = {}
+        pending_audits: dict[str, dict[str, Any]] = {}
+        seen_audits: set[str] = set()
         previous: str | None = None
         for line_number, line in enumerate(text.splitlines(), start=1):
             if not line:
@@ -2140,6 +2424,23 @@ class PromotionLedger:
                 raise PromotionLedgerError(
                     f"promotion ledger journal event {line_number} broke the hash chain")
 
+            event_kind = event.get("event")
+            if event_kind == "audit_ack":
+                event_id = event.get("audit_event_id")
+                _event_time(event.get("delivered_at"), "audit delivery")
+                if (
+                    not isinstance(event_id, str)
+                    or event_id not in pending_audits
+                    or "audit" in event
+                ):
+                    raise PromotionLedgerError(
+                        f"promotion ledger journal event {line_number} "
+                        "has an invalid audit acknowledgement"
+                    )
+                pending_audits.pop(event_id)
+                previous = claimed
+                continue
+
             handler = {
                 "promote": self._replay_promote,
                 "prepare": self._replay_prepare,
@@ -2147,12 +2448,24 @@ class PromotionLedger:
                 "abort": self._replay_abort,
                 "recovery_conflict": self._replay_recovery_conflict,
                 "rollback": self._replay_rollback,
-            }.get(event.get("event"))
+            }.get(event_kind)
             if handler is None:
                 raise PromotionLedgerError(
                     f"promotion ledger journal event {line_number} has an unknown type")
             handler(event, records, transactions, line_number)
+            raw_audit = event.get("audit")
+            if raw_audit is not None:
+                audit_receipt = _audit_envelope_from_dict(raw_audit)
+                audit_event_id = audit_receipt["event_id"]
+                if audit_event_id in seen_audits:
+                    raise PromotionLedgerError(
+                        f"promotion ledger journal event {line_number} "
+                        "reused an audit event id"
+                    )
+                seen_audits.add(audit_event_id)
+                pending_audits[audit_event_id] = audit_receipt
             previous = claimed
+        self._audit_pending = pending_audits
         return records, transactions, previous
 
     @staticmethod

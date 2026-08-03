@@ -6,6 +6,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
+from ..audit.errors import AuditRefused
 from .models import IngestionBatch, QueryRequest, TelemetryEvent, parse_timestamp
 
 RawRow = Mapping[str, Any] | str
@@ -334,12 +335,16 @@ class ConnectorRegistry:
         if self._audit_recorder is not None:
             try:
                 return bool(self._audit_recorder("env_hunt_ingestion", payload))
+            except AuditRefused:
+                raise
             except Exception:  # failure-policy: visible_degradation
                 return False
         try:
             from ..audit import record
 
             return bool(record("env_hunt_ingestion", **payload))
+        except AuditRefused:
+            raise
         except Exception:  # failure-policy: visible_degradation
             return False
 

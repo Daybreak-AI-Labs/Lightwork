@@ -419,5 +419,7 @@ def test_cosign_signing_in_publish_workflow():
     assert "sigstore/cosign-installer" in body
     assert "cosign sign-blob" in body
     assert "id-token: write" in body
-    # The sign job is gated on tag pushes.
-    assert "refs/tags/v" in body
+    # The sign job is gated on the successful upstream Release tag run.
+    assert 'workflows: ["Release"]' in body
+    assert "github.event.workflow_run.conclusion == 'success'" in body
+    assert "startsWith(github.event.workflow_run.head_branch, 'v')" in body

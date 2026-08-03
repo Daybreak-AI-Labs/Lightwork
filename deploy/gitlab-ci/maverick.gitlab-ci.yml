@@ -36,8 +36,9 @@
     # Hard USD spend cap. A runaway goal stops rather than running up a
     # bill. Wired into [budget] max_dollars in the generated config below.
     MAVERICK_MAX_DOLLARS: "1.0"
-    # Shell sandbox backend. A CI job is already an ephemeral VM, so
-    # `local` is the default; it is scoped to the checkout ($CI_PROJECT_DIR).
+    # Shell backend. `local` starts in $CI_PROJECT_DIR but does not isolate the
+    # host filesystem or network. Keep it only on a trusted disposable/isolated
+    # runner; use docker/podman plus runner controls where available.
     MAVERICK_SANDBOX: "local"
     # Defaults for the knobs a downstream job may override.
     MAVERICK_PYTHON_VERSION: "3.12"
@@ -73,13 +74,10 @@
           echo "Lightwork source contains local or untracked changes; refusing to install unreviewed content." >&2
           exit 1
         fi
-        python -m pip install \
-          "$source_root/packages/maverick-core[all]" \
-          "$source_root/packages/maverick-shield" \
-          "$source_root/packages/maverick-channels" \
-          "$source_root/packages/maverick-dashboard" \
-          "$source_root/packages/maverick-mcp" \
-          "$source_root/apps/installer-cli"
+        python "$source_root/scripts/install_release_cohort.py" \
+          --source-root "$source_root" \
+          --target-python python \
+          --core-extra release-runtime
       elif [ -n "$MAVERICK_PACKAGE_INDEX_URL" ]; then
         if [[ ! "$MAVERICK_VERSION" =~ ^[0-9]+([.][0-9]+){2}([.a-zA-Z0-9+-]*)?$ ]]; then
           echo "MAVERICK_VERSION must be an exact version in trusted-index mode." >&2
@@ -104,7 +102,16 @@
         # extra-index-url that could silently re-enable public fallback.
         python -m pip --isolated install --no-cache-dir \
           --index-url "$MAVERICK_PACKAGE_INDEX_URL" \
-          "maverick-agent==${MAVERICK_VERSION}"
+          "maverick-agent[release-runtime]==${MAVERICK_VERSION}" \
+          "maverick-shield==${MAVERICK_VERSION}" \
+          "maverick-channels==${MAVERICK_VERSION}" \
+          "maverick-evolve==${MAVERICK_VERSION}" \
+          "maverick-dashboard==${MAVERICK_VERSION}" \
+          "maverick-mcp-server==${MAVERICK_VERSION}" \
+          "maverick-knowledge==${MAVERICK_VERSION}" \
+          "maverick-installer==${MAVERICK_VERSION}"
+        python -m pip check
+        python -c "import maverick, maverick_shield, maverick_channels, maverick_evolve, maverick_dashboard, maverick_mcp, maverick_knowledge, maverick_installer"
       else
         echo "No trusted Lightwork install source configured. Set MAVERICK_SOURCE_DIR + MAVERICK_SOURCE_REF or MAVERICK_PACKAGE_INDEX_URL + MAVERICK_VERSION." >&2
         exit 1

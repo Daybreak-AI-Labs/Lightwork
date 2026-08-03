@@ -6,7 +6,7 @@
 
 > Lightwork — by **Daybreak Labs**.
 
-[![CI](https://github.com/Day-AI-Labs/Lightwork/actions/workflows/ci.yml/badge.svg)](https://github.com/Day-AI-Labs/Lightwork/actions/workflows/ci.yml)
+[![CI](https://github.com/Daybreak-AI-Labs/Lightwork/actions/workflows/ci.yml/badge.svg)](https://github.com/Daybreak-AI-Labs/Lightwork/actions/workflows/ci.yml)
 [![License: Proprietary](https://img.shields.io/badge/license-Proprietary-red.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org)
 
@@ -27,10 +27,10 @@ Hand Lightwork a goal. Its orchestrator decomposes it, spawns specialist sub-age
 - 🧠 **Long-horizon multi-agent depth.** A recursive orchestrator spawns specialist sub-agents that work for hours under hard dollar / wall-clock / tool-call caps — frontier-agent depth, on the models *you* choose, with the governance and learning layers no coding-agent runtime ships.
 - 🔀 **Visual workflow automation that learns (better than Power Automate).** A deterministic flow engine — branch / switch / foreach / while / parallel / approval / delay / scope (try-catch) / sub-flow / setvar — where any step is *either* a fixed tool call *or* a full agentic goal, drawn on a visual designer or drafted from plain English by a chat copilot. Fires from cron (timezone/DST-aware), webhook, email, form, file, RSS, or polled/OAuth'd sources; pauses for human approval; retries with backoff; caps spend and concurrency; pulls credentials with `{{secret('NAME')}}` from the sealed vault; and takes typed, validated manual-run inputs. The differentiator: a **self-rewrite loop** grounds each node's real outcomes and *hardens* a reliably-succeeding agent step into a cheap deterministic action (inferring the very tool it kept calling) — or *softens* a flaky fixed step back to an agent — with measured before/after impact, versioned rollback, and auto-revert. OFF by default (`[flows] enable`).
 
-> **Proprietary software — not open source.** Lightwork is enterprise software; use, redistribution, and derivative works require a license. [Contact us](https://github.com/Day-AI-Labs/Lightwork) for evaluation or commercial access. See [`LICENSE`](./LICENSE) and [`TRADEMARK.md`](./TRADEMARK.md).
+> **Proprietary software — not open source.** Lightwork is enterprise software; use, redistribution, and derivative works require a license. [Contact us](https://github.com/Daybreak-AI-Labs/Lightwork) for evaluation or commercial access. See [`LICENSE`](./LICENSE) and [`TRADEMARK.md`](./TRADEMARK.md).
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork && cd Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork && cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
 pip install -e ./packages/maverick-core   # kernel (with deps)
 pip install -e ./apps/installer-cli       # + the setup wizard
@@ -38,42 +38,56 @@ lightwork init                        # four questions, safe defaults
 lightwork start "Build a CLI that emails me a digest of today's top Hacker News stories — research the API, write it, and verify it runs"
 ```
 
-> A one-line `pipx install 'maverick-agent[installer]'` is **coming with the first tagged release** — the eight packages aren't on the public PyPI index yet (see [Status](#status)). Until then, use the source install above, the [one-line bootstrap or double-click installer](#install).
-
-Prefer no terminal? Grab the [**double-click desktop installer**](#install). New here? See [`docs/getting-started.md`](./docs/getting-started.md).
+> A one-line `pipx install 'maverick-agent[installer]'` is planned after the
+> complete eight-package cohort is published. Until the package or an
+> asset-bearing GitHub Release exists, use a reviewed source commit as shown
+> above. The [Releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases)
+> is the authoritative source for downloadable artifacts.
 
 ## Status
 
-Alpha, but **installable today**: the one-line installers work on Windows/macOS/Linux, a native double-click installer builds for all three, and you can install from source. (PyPI publishing is wired via OIDC trusted-publishing and ships on the first tagged release — the eight packages are not on the public index yet.) See [`docs/getting-started.md`](./docs/getting-started.md) for the full flow.
+Alpha and installable from a reviewed source commit today. Release automation
+builds an eight-package Python cohort, container, single-file binaries, four
+standalone source archives, and evidence artifacts. A downloadable artifact is
+available to users only after it appears on the
+[GitHub Releases page](https://github.com/Daybreak-AI-Labs/Lightwork/releases).
+PyPI publishing remains disabled until all eight namespaces and trusted
+publishers are verified. See [`docs/getting-started.md`](./docs/getting-started.md).
 
 ## What works today vs. planned
 
 | Component | v0.1 (today) | Planned (v0.2+) |
 |---|---|---|
-| Install | **Native installer (`.exe` / `.dmg` / `.AppImage`)**, one-line bootstrap (`install.ps1` / `install.sh`), or from source | pipx (`maverick-agent`, on first PyPI release), code-signed bundles + auto-update |
-| GUI | Native installer app + local web dashboard (`lightwork dashboard`) + chat at `/chat` | Native Tauri shell for the agent itself + iOS/Android |
+| Install | Reviewed source commit; bootstrap/native assets when present on a GitHub Release | pipx after the complete cohort is published; code-signed bundles + auto-update |
+| GUI | Local web dashboard (`lightwork dashboard`) + chat at `/chat`; authenticated source-bootstrap shell is an internal engineering artifact | Self-contained, signed native installer + iOS/Android |
 | Sandbox | Local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, SSH, Modal | Firecracker microVM (scaffold — exec path does not yet mount the workspace), Daytona |
 | AI providers | Anthropic (full), OpenAI, OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM (per-role routable) | Cohere |
 | Channels | All 17 wired — Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon, Voice, IRC, Threads, RCS, Glasses; WhatsApp (Cloud API + Twilio)/SMS (need Twilio), iMessage (macOS-only) | Push notifications |
 | Safety | Shield wired at 3 chokepoints; agent-shield SDK if installed, else a built-in rule set | Agent-shield full ~115 patterns |
-| Distribution | **Native installers on Releases**, GHCR image, PyInstaller binaries, source installs | PyPI (8 packages; publish wired via OIDC, pending first tag); code signing; Homebrew tap |
-| Tests | 2000+ tests, ruff + pytest on Py 3.10/3.11/3.12 | Integration suite + benchmark RESULTS.md |
+| Distribution | Release workflow for GHCR image, binaries, four signed source archives, checksums, and SBOMs; reviewed source install works today | PyPI (8-package lockstep cohort, gated pending namespace verification); self-contained code-signed installer; Homebrew tap |
+| Tests | Ruff, security gates, posture ratchet, and pytest on Python 3.10/3.11/3.12 | Broader deployment and browser journey coverage |
 
 **Full list of shipped features → [`docs/FEATURES.md`](./docs/FEATURES.md).** The forward backlog (what isn't built yet) lives in [`docs/ROADMAP.md`](./docs/ROADMAP.md).
 
 ## Install
 
-### Download the app — no terminal needed (easiest)
+### Download a published single-file binary
 
-Grab the installer for your OS from the **[latest release ›](https://github.com/Day-AI-Labs/Lightwork/releases/latest)**, double-click it, then press **Install Lightwork**:
+Check the **[Releases page ›](https://github.com/Daybreak-AI-Labs/Lightwork/releases)**.
+Use this route only when a release includes the binary for your operating
+system; a tag alone is not a downloadable build:
 
 | OS | File on the release |
 |---|---|
-| **Windows** | `Lightwork_*_x64-setup.exe` |
-| **macOS** | `Lightwork_*_aarch64.dmg` |
-| **Linux** | `Lightwork_*_amd64.AppImage` |
+| **Windows** | `maverick-windows-x86_64.exe` |
+| **macOS** | `maverick-macos-arm64` |
+| **Linux** | `maverick-linux-x86_64` |
 
-It's unsigned for now, so the first launch shows an "unknown developer" prompt — on Windows click **More info → Run anyway**; on macOS right-click the app → **Open**. The app installs Python and Lightwork for you, then you're set.
+Verify the release tag, checksums, and attached Sigstore material before
+running a binary. The separate Tauri workflow currently produces an unsigned
+authenticated source-bootstrap artifact for authorized repository users. It
+clones readable source from a pinned private commit and is not advertised as a
+self-contained product installer.
 
 ### Terminal install with pipx (coming with the first tagged release)
 
@@ -100,7 +114,7 @@ pipx inject maverick-agent ./apps/installer-cli
 ### From source
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 pip install -e ./packages/maverick-core
 pip install -e ./apps/installer-cli
@@ -109,6 +123,8 @@ pip install -e ./packages/maverick-shield
 pip install -e ./packages/maverick-channels
 pip install -e ./packages/maverick-dashboard
 pip install -e ./packages/maverick-mcp
+pip install -e ./packages/maverick-evolve
+pip install -e ./packages/maverick-knowledge
 
 lightwork init                           # interactive wizard
 lightwork start "Plan a 2-week trip"      # one-shot goal
@@ -175,7 +191,8 @@ packages/
                        can also CONSUME external MCP servers as its own tools.
 apps/
   installer-cli/       Interactive Python TUI wizard (`lightwork init`)
-  installer-desktop/   Tauri-based GUI installer (built; unsigned -- code signing in v0.2)
+  installer-desktop/   Tauri authenticated source-bootstrap engineering shell;
+                       not a self-contained product installer
 deploy/
   docker/ vps/ desktop/  Dockerfile, install.sh, systemd unit, Caddyfile
 docs/
@@ -214,7 +231,7 @@ Run the swarm inside any repo's GitHub Actions — on a PR, a schedule, or on
 demand — under a hard spend cap:
 
 ```yaml
-- uses: Day-AI-Labs/Lightwork/deploy/github-action@<reviewed-full-40-character-commit-sha>
+- uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<reviewed-full-40-character-commit-sha>
   with:
     goal: "Summarize this PR and flag anything risky."
     max-dollars: "0.50"
@@ -238,4 +255,4 @@ See [docs/github-action.md](./docs/github-action.md).
 
 Proprietary — commercially licensed. Use, redistribution, and derivative works
 require a license. See [`LICENSE`](./LICENSE) and [`TRADEMARK.md`](./TRADEMARK.md);
-[contact us](https://github.com/Day-AI-Labs/Lightwork) for access.
+[contact us](https://github.com/Daybreak-AI-Labs/Lightwork) for access.

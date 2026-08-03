@@ -135,6 +135,18 @@ def test_wizard_model_ids_have_pricing():
     )
 
 
+def test_xai_wizard_prefers_current_exactly_priced_models():
+    offered = models.PROVIDERS["xai"]["models"]
+
+    assert [model["id"] for model in offered[:3]] == [
+        "grok-4.5",
+        "grok-build-0.1",
+        "grok-4.3",
+    ]
+    legacy = next(model for model in offered if model["id"] == "grok-code-fast")
+    assert "estimate-only" in legacy["notes"]
+
+
 def test_paid_dynamic_hosted_placeholders_fail_closed():
     """Azure/Bedrock placeholders must not use fallback budget pricing."""
     try:

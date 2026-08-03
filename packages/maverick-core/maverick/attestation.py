@@ -359,15 +359,17 @@ def export(out_path: Path | str, *, audit_dir: Path | str | None = None,
     bundle = sign(build(audit_dir=audit_dir, since=since, now=now))
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    from .audit import EventKind, audit_event
+
+    # A strict audit refusal must happen before the artifact is published.
+    # Ordinary writer outages remain fail-soft through audit_event.
+    audit_event(
+        EventKind.LEARNING_UPDATE, agent="attestation",
+        attestation="export", days=len(bundle["commitments"]["audit_days"]),
+        key_id=bundle["signature"]["key_id"],
+    )
     from .file_lock import atomic_write_text
     atomic_write_text(out, json.dumps(bundle, indent=2, default=str), mode=0o600)
-    try:
-        from .audit import EventKind, record
-        record(EventKind.LEARNING_UPDATE, agent="attestation",
-               attestation="export", days=len(bundle["commitments"]["audit_days"]),
-               key_id=bundle["signature"]["key_id"])
-    except Exception:  # pragma: no cover -- audit is best-effort
-        pass
     return out
 
 

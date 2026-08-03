@@ -45,12 +45,13 @@ from benchmarks.security import detector_score, corpus
 leaks = detector_score.train_overlap(prompts)          # drop trained-on phrases
 held = [p for p in prompts if p not in set(leaks)]
 # score `held` (positives) + corpus benign (negatives) across BACKENDS,
-# including the full SDK: `pip install agent-shield` then add it as a backend.
+# Include the full SDK only from its authorized private distribution/source;
+# it is not available from public PyPI. Then add it as a distinct backend.
 ```
 
-Install the full SDK so the `agent_shield_sdk` backend is no longer
-UNAVAILABLE — that's the backend the `0.988` claim refers to, and the only one
-that can substantiate it.
+If an authorized full-SDK build is available, record its immutable source and
+add `agent_shield_sdk` as a distinct backend. Do not attribute an old SDK score
+to the built-in rules or fetch an unverified public namesake package.
 
 ## B. End-to-end ASR reduction (needs ANTHROPIC_API_KEY + budget)
 

@@ -301,6 +301,14 @@ class _Ctx:
         raise PermissionError(details)
 
 
+def _without_grpc_runtime(monkeypatch, server):
+    codes = SimpleNamespace(
+        UNAVAILABLE="UNAVAILABLE",
+        PERMISSION_DENIED="PERMISSION_DENIED",
+    )
+    monkeypatch.setattr(server, "_grpc_code", lambda: codes)
+
+
 def test_grpc_trust_capability_denies_unregistered(monkeypatch):
     pytest.importorskip("grpc")
     from maverick.grpc_api import server
@@ -326,15 +334,60 @@ def test_grpc_trust_capability_noop_when_disengaged(monkeypatch):
 
 
 def test_grpc_trust_capability_load_error_fails_closed(monkeypatch):
-    pytest.importorskip("grpc")
     from maverick import agent_trust
     from maverick.grpc_api import server
+    _without_grpc_runtime(monkeypatch, server)
 
     def _broken_state():
         raise OSError("trust registry unreadable")
 
     monkeypatch.setattr(agent_trust, "load_trust_state", _broken_state)
     with pytest.raises(PermissionError, match="policy unavailable"):
+        server._trust_capability(_Ctx(), None)
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        (None, {}),
+        (False, []),
+        ("false", {}),
+    ],
+)
+def test_grpc_trust_capability_malformed_state_fails_closed(monkeypatch, state):
+    from maverick.grpc_api import server
+    _without_grpc_runtime(monkeypatch, server)
+
+    monkeypatch.setattr(agent_trust, "load_trust_state", lambda: state)
+    with pytest.raises(PermissionError, match="policy unavailable"):
+        server._trust_capability(_Ctx(), None)
+
+
+def test_grpc_trust_capability_decision_error_fails_closed(monkeypatch):
+    from maverick.grpc_api import server
+    _without_grpc_runtime(monkeypatch, server)
+
+    _patch(monkeypatch, {})
+
+    def _broken_decision(*args, **kwargs):
+        raise RuntimeError("decision engine unavailable")
+
+    monkeypatch.setattr(agent_trust, "decide_inbound", _broken_decision)
+    with pytest.raises(PermissionError, match="policy unavailable"):
+        server._trust_capability(_Ctx(), None)
+
+
+def test_grpc_denial_survives_audit_sink_failure(monkeypatch):
+    from maverick.grpc_api import server
+    _without_grpc_runtime(monkeypatch, server)
+
+    _patch(monkeypatch, {})
+
+    def _broken_audit(*args, **kwargs):
+        raise OSError("audit sink unavailable")
+
+    monkeypatch.setattr(agent_trust, "record_denied", _broken_audit)
+    with pytest.raises(PermissionError, match="not in the trust registry"):
         server._trust_capability(_Ctx(), None)
 
 

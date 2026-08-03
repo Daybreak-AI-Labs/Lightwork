@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 # When adding a new config section, add it here or migrate will lint it.
 KNOWN_SECTIONS = frozenset({
     "a2a", "adaptive_compute", "agent", "agent_factory", "agent_trust",
-    "analytics", "approval", "assessments",
+    "analytics", "approval", "assessments", "automation_import",
     "approval_delegation", "attachments", "audit", "auth", "autonomy",
     "deployment",
     "benchmark", "billing", "budget", "cache", "calendar", "calibration",

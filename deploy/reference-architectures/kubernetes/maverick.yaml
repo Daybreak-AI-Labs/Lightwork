@@ -5,7 +5,7 @@
 #
 #   kubectl apply -f deploy/reference-architectures/kubernetes/maverick.yaml
 #
-# Replace REGISTRY/maverick:0.1.6 with your built image at an immutable tag or
+# Replace REGISTRY/maverick:0.1.7 with your built image at an immutable tag or
 # @sha256 digest (see deploy/docker/Dockerfile) and create the maverick-secrets
 # Secret first. The dashboard binds 0.0.0.0 here, so a bearer token is REQUIRED
 # (without it the non-loopback bind is refused / only loopback peers are trusted):
@@ -61,7 +61,7 @@ spec:
       containers:
         - name: maverick
           # Pin to an immutable version tag (or @sha256 digest); never :latest in prod.
-          image: REGISTRY/maverick:0.1.6
+          image: REGISTRY/maverick:0.1.7
           args: ["dashboard", "--host", "0.0.0.0", "--port", "8765"]
           lifecycle:
             preStop:

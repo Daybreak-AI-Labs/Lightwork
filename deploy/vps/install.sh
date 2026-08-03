@@ -4,13 +4,13 @@
 # Usage (the script URL and checkout must use the same reviewed commit):
 #   LIGHTWORK_REF=<lowercase-full-40-character-commit-sha>
 #   curl -fsSLo /tmp/lightwork-install.sh \
-#     "https://raw.githubusercontent.com/Day-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
+#     "https://raw.githubusercontent.com/Daybreak-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
 #   sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
 #
 # What it does:
 #   1. Installs Python 3.12, pipx, git
-#   2. Installs maverick (core + shield + channels + dashboard + mcp + installer)
-#      into one pipx venv
+#   2. Installs the complete eight-package Lightwork release cohort into one
+#      pipx venv
 #   3. Runs `maverick init` interactively
 #   4. Drops a systemd unit so maverick serve runs at boot
 #   5. Optionally configures Caddy for HTTPS (see Caddyfile next to this script)
@@ -98,7 +98,7 @@ install_maverick() {
   install -d -m 0755 /opt
   STAGED_SOURCE="$(mktemp -d /opt/maverick.stage.XXXXXX)"
   git clone --no-checkout --filter=blob:none \
-    https://github.com/Day-AI-Labs/Lightwork "$STAGED_SOURCE"
+    https://github.com/Daybreak-AI-Labs/Lightwork "$STAGED_SOURCE"
   git -C "$STAGED_SOURCE" fetch --depth 1 origin "$MAVERICK_REF"
   git -C "$STAGED_SOURCE" -c advice.detachedHead=false checkout --detach FETCH_HEAD
   actual_ref="$(git -C "$STAGED_SOURCE" rev-parse HEAD)"
@@ -118,18 +118,23 @@ install_maverick() {
   rm -rf -- /opt/maverick
   mv -- "$STAGED_SOURCE" /opt/maverick
   STAGED_SOURCE=""
-  # pipx names the venv after the distribution Name, which is
-  # `maverick-agent` (packages/maverick-core/pyproject.toml), NOT the
-  # `maverick` console-script. Every inject must target `maverick-agent`
-  # or pipx errors with "Package maverick is not installed". (The desktop
-  # install scripts already use the correct name.)
+  # pipx names the venv after the core distribution (`maverick-agent`). Create
+  # that environment without resolving a partial graph, then let the shared
+  # manifest-driven helper install all eight packages in one constrained
+  # transaction and verify their imports.
   run_as_user pipx ensurepath || true
-  run_as_user pipx install /opt/maverick/packages/maverick-core --force
-  run_as_user pipx inject maverick-agent /opt/maverick/packages/maverick-shield
-  run_as_user pipx inject maverick-agent /opt/maverick/packages/maverick-channels
-  run_as_user pipx inject maverick-agent /opt/maverick/packages/maverick-dashboard
-  run_as_user pipx inject maverick-agent /opt/maverick/packages/maverick-mcp
-  run_as_user pipx inject maverick-agent /opt/maverick/apps/installer-cli
+  run_as_user pipx install --force --pip-args=--no-deps \
+    /opt/maverick/packages/maverick-core
+  venvs="$(run_as_user pipx environment --value PIPX_LOCAL_VENVS)"
+  target_python="$venvs/maverick-agent/bin/python"
+  [[ -x "$target_python" ]] || {
+    echo "pipx created no maverick-agent environment at $target_python" >&2
+    exit 1
+  }
+  run_as_user python3 /opt/maverick/scripts/install_release_cohort.py \
+    --source-root /opt/maverick \
+    --target-python "$target_python" \
+    --core-extra release-runtime
 }
 
 run_wizard() {

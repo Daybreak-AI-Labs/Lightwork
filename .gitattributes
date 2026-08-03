@@ -16,6 +16,7 @@
 # `python benchmarks/eval_governance_frontier.py --verify-tracked-artifacts`.
 # If that fails, re-measure with a plain `python
 # benchmarks/eval_governance_frontier.py` from a clean tree; do not hand-edit.
-/benchmarks/results/governance-frontier-v1/measured-manifest.json -merge
-/benchmarks/results/governance-frontier-v1/trusted-publisher.pub -merge
-/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md -merge
+/benchmarks/results/governance-frontier-v1/measured-manifest.json text eol=lf -merge
+/benchmarks/results/governance-frontier-v1/trusted-publisher.pub text eol=lf -merge
+/benchmarks/results/governance-frontier-v1/verify_manifest.py text eol=lf
+/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md text eol=lf -merge

@@ -14,7 +14,11 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     for env in ("OPENAI_API_KEY", "GROQ_API_KEY", "MAVERICK_WHISPER_CPP",
                 "MAVERICK_WHISPER_CPP_MODEL", "MAVERICK_WHISPER_MODEL",
-                "MAVERICK_VOICE_STT_BACKEND"):
+                "MAVERICK_VOICE_STT_BACKEND",
+                "MAVERICK_WHISPER_OPENAI_MODEL",
+                "MAVERICK_WHISPER_GROQ_MODEL",
+                "MAVERICK_TTS_OPENAI_MODEL",
+                "MAVERICK_TTS_ELEVENLABS_MODEL"):
         monkeypatch.delenv(env, raising=False)
     # Auto-fetch is default-ON in production; pinned off here so no unit test
     # can wander into a real ~150 MB model download.
@@ -35,6 +39,28 @@ def _fake_model(monkeypatch, tmp_path) -> Path:
     m.write_bytes(b"weights")
     monkeypatch.setenv("MAVERICK_WHISPER_CPP_MODEL", str(m))
     return m
+
+
+def test_hosted_voice_model_ids_are_operator_configurable(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    choices = {
+        "MAVERICK_WHISPER_OPENAI_MODEL": "custom-openai-stt",
+        "MAVERICK_WHISPER_GROQ_MODEL": "custom-groq-stt",
+        "MAVERICK_TTS_OPENAI_MODEL": "custom-openai-tts",
+        "MAVERICK_TTS_ELEVENLABS_MODEL": "custom-eleven-tts",
+    }
+    for environment, expected in choices.items():
+        monkeypatch.setenv(environment, expected)
+        assert voice_mod._hosted_model(environment, "fallback") == expected
+
+
+def test_invalid_hosted_voice_model_id_uses_safe_default(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_TTS_OPENAI_MODEL", "bad\nmodel")
+    assert (
+        voice_mod._hosted_model("MAVERICK_TTS_OPENAI_MODEL", "tts-1")
+        == "tts-1"
+    )
 
 
 # ---- _find_whisper_cpp -------------------------------------------------------

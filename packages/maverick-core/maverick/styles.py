@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 
+from .runtime_overrides import RuntimeOverridesSecurityError
+
 log = logging.getLogger(__name__)
 
 # Output-format styles, framed like Claude's Normal/Concise/Explanatory/Formal.
@@ -41,6 +43,8 @@ def active_style_name() -> str:
     try:
         from .runtime_overrides import style_override
         return (style_override() or "").strip()
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception:  # pragma: no cover -- overlay read never blocks a run
         return ""
 

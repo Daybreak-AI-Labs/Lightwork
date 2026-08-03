@@ -6,13 +6,16 @@ dist/
 # Rust / Tauri
 src-tauri/target/
 
-# Generated icon variants. Only the source icon.png is committed;
-# `pnpm tauri icon src-tauri/icons/icon.png` regenerates everything else
-# (PNGs, .icns, .ico, Square*/StoreLogo, plus android/ and ios/ sets) at
-# build time. Ignore the whole dir except the source, so new generator
-# outputs never dirty the tree or get committed as binary blobs.
+# Bundle icons are committed build inputs. Regenerate them intentionally during
+# development, review the binary diff, and commit exactly the five variants
+# referenced by tauri.conf.json. Mobile/store variants remain ignored.
 src-tauri/icons/*
 !src-tauri/icons/icon.png
+!src-tauri/icons/32x32.png
+!src-tauri/icons/128x128.png
+!src-tauri/icons/128x128@2x.png
+!src-tauri/icons/icon.icns
+!src-tauri/icons/icon.ico
 
 # Tauri build metadata
 src-tauri/gen/

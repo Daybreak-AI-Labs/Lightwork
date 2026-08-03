@@ -5,7 +5,7 @@ role capability + its own audit principal (``agent:<fleet>.<agent>``),
 mirroring ``maverick fleet run`` -- so the oversight control plane governs the
 work. Owner-scoped; mutating POST carries a same-origin Origin (CSRF contract).
 
-Hermetic: OIDC off, HOME/MAVERICK_HOME + DEFAULT_DB isolated, the provider-key
+Hermetic: OIDC off, HOME/MAVERICK_HOME + DEFAULT_DB isolated, the route-readiness
 gate and rate limiter stubbed, and run_goal_in_thread replaced with a capturing
 stub so no real goal runs.
 """
@@ -27,7 +27,7 @@ def _isolate(monkeypatch, tmp_path):
     from maverick import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     import maverick_dashboard.api as api
-    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    monkeypatch.setattr(api, "require_provider_or_400", lambda **kwargs: None)
     import maverick_dashboard.app as dash_app
     monkeypatch.setattr(dash_app, "check_goal_rate_limit", lambda request: None)
 

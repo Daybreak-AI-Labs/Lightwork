@@ -72,6 +72,24 @@ def test_scrub_env_strips_secret_shaped_vars():
     assert out["PLAIN_SETTING"] == "keep"
 
 
+def test_scrub_env_strips_github_cross_step_command_files():
+    """Model-driven shells must not mutate later trusted Actions steps."""
+    from maverick.sandbox.local import scrub_env
+
+    src = {
+        "GITHUB_ENV": "/runner/_temp/set_env",
+        "GITHUB_OUTPUT": "/runner/_temp/set_output",
+        "GITHUB_PATH": "/runner/_temp/add_path",
+        "GITHUB_STATE": "/runner/_temp/save_state",
+        "GITHUB_STEP_SUMMARY": "/runner/_temp/summary",
+        # Environment names are case-insensitive on Windows.
+        "github_path": r"C:\runner\_temp\add_path",
+        "GITHUB_WORKSPACE": "/work/repo",
+    }
+    out = scrub_env(src)
+    assert set(out) == {"GITHUB_WORKSPACE"}
+
+
 def test_scrub_env_keeps_git_config_injection_consistent():
     """A partially-scrubbed GIT_CONFIG_COUNT/KEY_*/VALUE_* family aborts every
     git command with exit 128 ("missing config key GIT_CONFIG_KEY_0").

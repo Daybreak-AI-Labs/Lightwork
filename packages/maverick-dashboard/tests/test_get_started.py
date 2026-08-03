@@ -29,6 +29,11 @@ def test_fresh_workspace_nothing_done(monkeypatch, tmp_path):
     t = _client().get("/start").text
     assert "Connect a model provider" in t and "Build a workflow or agent" in t
     assert "0 of 3 done" in t and 'role="progressbar"' in t
+    assert "Offline install preflight" in t
+    assert "maverick preflight --json" in t
+    assert "SYNTHETIC DEMO DATA" in t
+    assert "Every generated record stays labeled synthetic" in t
+    assert "production assurance" in t
 
 
 def test_checklist_reflects_progress(monkeypatch, tmp_path):
@@ -48,3 +53,48 @@ def test_get_started_reachable(monkeypatch, tmp_path):
     r = _client().get("/start")
     assert r.status_code == 200
     assert 'page-title">Get started' in r.text
+
+
+def test_runtime_completion_is_gated_separately_from_assurance(monkeypatch):
+    from maverick import config, operator_preflight
+    from maverick_dashboard import onboarding_state
+
+    class Report:
+        def __init__(self, ready):
+            self.ready = ready
+
+        def to_dict(self):
+            return {
+                "ready": self.ready,
+                "checks": [],
+                "next_action": "none",
+            }
+
+    class World:
+        @staticmethod
+        def list_goals(limit=1):
+            return [{"id": 1}][:limit]
+
+    monkeypatch.setattr(config, "any_provider_configured", lambda: True)
+    monkeypatch.setattr(onboarding_state, "_has_user_template", lambda: True)
+    monkeypatch.setattr(onboarding_state, "_has_user_agent", lambda: False)
+    monkeypatch.setattr(onboarding_state, "_has_automation", lambda: False)
+    monkeypatch.setattr(
+        operator_preflight,
+        "collect",
+        lambda profile: Report(profile == "run"),
+    )
+
+    state = onboarding_state.build(World())
+    assert state["runtime_ready"] is True
+    assert state["assurance_ready"] is False
+    assert state["runtime_all_set"] is True
+
+    monkeypatch.setattr(
+        operator_preflight,
+        "collect",
+        lambda _profile: Report(False),
+    )
+    blocked = onboarding_state.build(World())
+    assert blocked["done_count"] == blocked["total"]
+    assert blocked["runtime_all_set"] is False

@@ -51,6 +51,23 @@ def test_erase_succeeds_and_removes_facts(tmp_path, monkeypatch):
     wm.close()
 
 
+def test_reupsert_tracks_latest_source_episode(tmp_path):
+    wm = WorldModel(tmp_path / "source.db")
+    first_goal = wm.create_goal("first")
+    second_goal = wm.create_goal("second")
+    first_episode = wm.start_episode(first_goal)
+    second_episode = wm.start_episode(second_goal)
+
+    wm.upsert_fact("owner", "first", episode_id=first_episode)
+    wm.upsert_fact("owner", "second", episode_id=second_episode)
+
+    row = wm.conn.execute(
+        "SELECT source_episode_id FROM facts WHERE key = ?", ("owner",)
+    ).fetchone()
+    assert row[0] == second_episode
+    wm.close()
+
+
 def test_erase_clears_llm_cache(tmp_path, monkeypatch):
     os.environ.pop("MAVERICK_DB", None)
     import maverick.audit as audit_mod

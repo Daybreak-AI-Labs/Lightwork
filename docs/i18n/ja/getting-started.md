@@ -7,7 +7,7 @@
 ターミナルからの最も安全なインストール方法は、リモートのブートストラップスクリプトを実行するのではなく、公開済みパッケージを pipx でインストールすることです。
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
 python -m pip install -e ./packages/maverick-core
@@ -22,7 +22,7 @@ PyPI のパッケージ名は `maverick-agent` です（`maverick` という名�
 開発中にソースから使う場合:
 
 ```bash
-git clone https://github.com/Day-AI-Labs/maverick
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd maverick
 pip install -e ./packages/maverick-core
 pip install -e ./apps/installer-cli

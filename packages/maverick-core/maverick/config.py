@@ -22,7 +22,7 @@ Schema overview::
 
     [budget]
     max_dollars = 5.0
-    strict_pricing = false  # true => refuse to bill an unpriced model (billing-grade)
+    strict_pricing = true  # false => explicit legacy estimate-only accounting
 
     [safety]
     profile = "balanced"
@@ -467,11 +467,21 @@ def load_config(path: Path | None = None) -> dict:
     return cfg
 
 
-def get_role_model(role: str) -> str | None:
+def get_role_model(
+    role: str,
+    *,
+    config: dict[str, Any] | None = None,
+) -> str | None:
     """Return the model spec ("provider:model-id") for a role, or None.
 
     A per-tenant override (the dashboard roles editor, persisted to roles.toml)
-    wins over the global [models] config; absent one, the config value is used."""
+    wins over the global [models] config; absent one, the config value is used.
+
+    ``config`` lets deterministic callers reuse an already-admitted snapshot
+    instead of loading configuration twice.  The role override is still read
+    through the same authority path, so offline preflight and live execution
+    cannot disagree about a tenant's ``roles.toml`` selection.
+    """
     try:
         from .role_edit import override_model
         ov = override_model(role)
@@ -479,7 +489,7 @@ def get_role_model(role: str) -> str | None:
             return ov
     except Exception:  # role layer is optional; never block model resolution
         pass
-    cfg = load_config()
+    cfg = load_config() if config is None else config
     spec = cfg.get("models", {}).get(role)
     return spec if isinstance(spec, str) and spec else None
 
@@ -489,10 +499,10 @@ def get_provider_config(provider: str) -> dict:
     return cfg.get("providers", {}).get(provider, {})
 
 
-# Well-known credential env vars, one per hosted provider.
-# Canonical provider -> credential env var(s) map. Single source of truth for
-# both "which env var holds a provider's key" (llm._provider_api_key) and the
-# flat "is any provider configured?" check below. Aliases (GROK/GOOGLE) included.
+# Canonical provider -> API-key env var(s). These values are safe to pass as
+# the provider client's ``api_key`` argument; non-key credentials (for example
+# Azure's pre-fetched Entra token) belong in PROVIDER_CREDENTIAL_ENV_MAP below.
+# Aliases (GROK/GOOGLE) are included.
 PROVIDER_KEY_ENV_MAP: dict[str, tuple[str, ...]] = {
     "anthropic": ("ANTHROPIC_API_KEY",),
     "openai": ("OPENAI_API_KEY",),
@@ -501,6 +511,11 @@ PROVIDER_KEY_ENV_MAP: dict[str, tuple[str, ...]] = {
     "moonshot": ("MOONSHOT_API_KEY",),
     "deepseek": ("DEEPSEEK_API_KEY",),
     "xai": ("XAI_API_KEY", "GROK_API_KEY"),
+    "tgi": ("TGI_API_KEY",),
+    "vllm": ("VLLM_API_KEY",),
+    "azure": ("AZURE_OPENAI_API_KEY",),
+    "bedrock": ("BEDROCK_API_KEY",),
+    "openai_compatible": ("OPENAI_COMPATIBLE_API_KEY",),
     # ChatGPT/Codex access token for the codex_cli provider. Consumed by
     # `codex login --with-access-token` (fed on STDIN, never argv/logs).
     "codex_cli": ("CODEX_ACCESS_TOKEN",),
@@ -510,12 +525,88 @@ PROVIDER_KEY_ENV_VARS = tuple(
     dict.fromkeys(v for vs in PROVIDER_KEY_ENV_MAP.values() for v in vs)
 )
 
+# Every environment credential that can authenticate a provider, including
+# credentials that are deliberately not API keys. Security boundaries such as
+# the GitHub Action output sanitizer and the "is anything configured?" probe
+# use this broader map; client construction continues to use the key-only map.
+PROVIDER_CREDENTIAL_ENV_MAP: dict[str, tuple[str, ...]] = {
+    **PROVIDER_KEY_ENV_MAP,
+    "azure": (*PROVIDER_KEY_ENV_MAP["azure"], "AZURE_OPENAI_AD_TOKEN"),
+}
+PROVIDER_CREDENTIAL_ENV_VARS = tuple(
+    dict.fromkeys(v for vs in PROVIDER_CREDENTIAL_ENV_MAP.values() for v in vs)
+)
+
 # Self-hosted endpoints configured by env var (the mechanism each provider's
 # docstring documents). Ollama has no env var: its only custom-URL surface is
 # ``[providers.ollama] base_url`` in config, covered below.
 PROVIDER_BASE_URL_ENV_VARS = (
     "VLLM_BASE_URL", "TGI_BASE_URL", "OPENAI_COMPATIBLE_BASE_URL",
 )
+
+
+def azure_provider_configuration_missing(
+    provider_config: dict[str, Any] | None = None,
+) -> tuple[str, ...]:
+    """Return Azure OpenAI's missing non-network prerequisites.
+
+    Keep this in the configuration layer because both the generic
+    ``any_provider_configured`` gate and the route-specific operator preflight
+    need the exact same answer.  In particular, a bare Entra token is not a
+    runnable Azure route, while managed identity needs no literal secret when
+    Entra authentication is selected explicitly.
+
+    Authentication resolution mirrors ``LLM._provider_client_config`` and
+    ``providers.azure_openai_provider._azure_auth``: a non-empty
+    ``[providers.azure].auth_mode`` overrides ``AZURE_OPENAI_AUTH``, a
+    configured API key overrides the environment key, and ambiguous or unknown
+    authentication selections fail closed.
+    """
+    table = provider_config if isinstance(provider_config, dict) else {}
+
+    def present(value: object) -> bool:
+        return isinstance(value, str) and bool(value.strip())
+
+    def normalized_secret(value: object) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        return str(value).strip() if value else ""
+
+    endpoint = present(table.get("base_url")) or present(
+        os.environ.get("AZURE_OPENAI_ENDPOINT")
+    )
+    key = normalized_secret(table.get("api_key"))
+    if not key:
+        key = os.environ.get("AZURE_OPENAI_API_KEY", "").strip()
+    ad_token = os.environ.get("AZURE_OPENAI_AD_TOKEN", "").strip()
+
+    configured_auth_mode = table.get("auth_mode")
+    auth_mode = (
+        configured_auth_mode.strip().lower()
+        if isinstance(configured_auth_mode, str) and configured_auth_mode.strip()
+        else os.environ.get("AZURE_OPENAI_AUTH", "").strip().lower()
+    )
+    if auth_mode not in {"", "api_key", "entra_id"} or (key and ad_token):
+        authentication = False
+    elif auth_mode == "api_key":
+        authentication = bool(key)
+    elif auth_mode == "entra_id":
+        # A static token is optional: without one the runtime intentionally
+        # constructs DefaultAzureCredential after the SDK preflight.
+        authentication = not key
+    else:
+        authentication = bool(key) ^ bool(ad_token)
+
+    deployment = present(os.environ.get("AZURE_OPENAI_DEPLOYMENT"))
+    return tuple(
+        item
+        for item, configured in (
+            ("endpoint", endpoint),
+            ("authentication", authentication),
+            ("deployment", deployment),
+        )
+        if not configured
+    )
 
 
 def any_provider_configured() -> bool:
@@ -527,6 +618,7 @@ def any_provider_configured() -> bool:
       3. a ``[providers.<name>]`` config table carrying a non-empty
          ``api_key`` or ``base_url`` (``${VAR}`` interpolates to "" when
          unset, so an empty interpolation does not count).
+      4. an existing Codex CLI login at ``$CODEX_HOME/auth.json``.
 
     Found by running the platform as a user: the CLI preflight, the LLM
     clients, and the dashboard each implemented a different subset, so a
@@ -538,11 +630,34 @@ def any_provider_configured() -> bool:
     # below see installer-collected keys even when config.toml carries no
     # [providers] table.
     providers = load_config().get("providers") or {}
-    if any(os.environ.get(v) for v in PROVIDER_KEY_ENV_VARS):
+    # Azure is the exception to the useful "a credential is enough" shortcut:
+    # its dedicated client also requires an endpoint and deployment, and
+    # DefaultAzureCredential can be intentionally selected without a literal
+    # secret.  Do not let a lone token unblock the CLI or reject a complete
+    # managed-identity route.
+    non_azure_credentials = (
+        name
+        for provider, names in PROVIDER_CREDENTIAL_ENV_MAP.items()
+        if provider != "azure"
+        for name in names
+    )
+    if any(os.environ.get(v) for v in non_azure_credentials):
         return True
     if any(os.environ.get(v) for v in PROVIDER_BASE_URL_ENV_VARS):
         return True
-    for pcfg in providers.values():
+    try:
+        from .providers.codex_cli_provider import _auth_file_present
+
+        if _auth_file_present():
+            return True
+    except Exception:  # pragma: no cover -- optional provider must not break probe
+        pass
+    azure_table = providers.get("azure") if isinstance(providers, dict) else None
+    if not azure_provider_configuration_missing(azure_table):
+        return True
+    for provider, pcfg in providers.items():
+        if provider == "azure":
+            continue
         if not isinstance(pcfg, dict):
             continue
         if str(pcfg.get("api_key", "")).strip() or str(pcfg.get("base_url", "")).strip():
@@ -723,8 +838,8 @@ def get_automation_import() -> dict:
     """
     cfg = load_config().get("automation_import", {})
     return {
-        "enable": bool(cfg.get("enable", False)),
-        "create_schedules": bool(cfg.get("create_schedules", False)),
+        "enable": _strict_config_bool(cfg, "enable", False),
+        "create_schedules": _strict_config_bool(cfg, "create_schedules", False),
     }
 
 

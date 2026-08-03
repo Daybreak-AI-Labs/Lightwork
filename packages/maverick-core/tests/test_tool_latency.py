@@ -32,6 +32,17 @@ def test_report_sorted_by_p95_desc():
 
 def test_ring_buffer_is_bounded():
     tool_latency.reset()
+
+
+def test_distinct_tool_series_are_bounded(monkeypatch):
+    tool_latency.reset()
+    monkeypatch.setattr(tool_latency, "_MAX_TOOLS", 4)
+    for index in range(20):
+        tool_latency.record(f"generated-{index}", index)
+    rows = {row["tool"]: row for row in tool_latency.report()}
+    assert len(rows) == 4
+    assert rows[tool_latency._OVERFLOW_TOOL]["count"] == 17
+    tool_latency.reset()
     for i in range(tool_latency._MAX_SAMPLES + 500):
         tool_latency.record("flood", i)
     rep = {r["tool"]: r for r in tool_latency.report()}

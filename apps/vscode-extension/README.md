@@ -1,6 +1,6 @@
 # Lightwork for VS Code
 
-Sidebar + commands for the [Lightwork](https://github.com/Day-AI-Labs/Lightwork)
+Sidebar + commands for the [Lightwork](https://github.com/Daybreak-AI-Labs/Lightwork)
 agent framework, accessible from inside VS Code.
 
 This is an MVP (v0.1):

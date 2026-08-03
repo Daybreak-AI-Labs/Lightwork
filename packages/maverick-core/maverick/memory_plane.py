@@ -360,16 +360,18 @@ def export(out_path: Path | str, world: Any = None, *,
     bundle = sign(build(world, now=now))
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    from .audit import EventKind, audit_event
+
+    # Do not publish a governed export after the configured audit guarantee
+    # explicitly refuses to record it.
+    audit_event(
+        EventKind.LEARNING_UPDATE, agent="memory_plane",
+        attestation="export",
+        vendors=len(bundle["claims"]["cross_vendor"].get("vendors") or []),
+        key_id=bundle["signature"]["key_id"],
+    )
     from .file_lock import atomic_write_text
     atomic_write_text(out, json.dumps(bundle, indent=2, default=str), mode=0o600)
-    try:
-        from .audit import EventKind, record
-        record(EventKind.LEARNING_UPDATE, agent="memory_plane",
-               attestation="export",
-               vendors=len(bundle["claims"]["cross_vendor"].get("vendors") or []),
-               key_id=bundle["signature"]["key_id"])
-    except Exception:  # pragma: no cover -- audit is best-effort
-        pass
     return out
 
 

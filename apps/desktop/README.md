@@ -94,7 +94,24 @@ Bundle targets (`src-tauri/tauri.conf.json`):
 
 ## Status
 
-Ships **unsigned** bundles — same posture as `apps/installer-desktop`: unsigned
-bundles trip SmartScreen (Windows) and Gatekeeper (macOS) until code-signing
-certs exist. On macOS, right-click → **Open**; on Windows, **More info → Run
-anyway**.
+This dashboard shell is distinct from `apps/installer-desktop`: this app opens
+an already-installed Lightwork dashboard, while `installer-desktop` performs
+the authenticated source installation. It is not currently selected by
+`.github/workflows/desktop.yml` and is not attached to product releases, so
+treat it as an unshipped engineering prototype rather than a supported
+installer.
+
+The current Tauri 2.11 dependency graph uses Wry's GTK3 backend on Linux. OSV
+Scanner 2.3.8 therefore reports one medium-severity `glib` soundness advisory
+and sixteen unmaintained-crate advisories in `Cargo.lock`. `cargo update`
+cannot resolve them: current Tauri constrains the Linux bindings to GTK
+0.18/GLib 0.18, while the `glib` fix begins at 0.20, and most of the remaining
+advisories have no fixed release. The GLib/GTK-family findings are Linux-only.
+Five additional `unic-*` maintenance advisories arrive through Tauri's
+cross-platform `urlpattern` dependency; they describe abandoned crates rather
+than known exploitable defects and also have no fixed versions. Do not suppress
+the findings globally; keep Linux artifacts engineering-only and re-evaluate
+the graph when Tauri/Wry moves to maintained dependencies.
+
+Any locally produced bundles are **unsigned**, so SmartScreen (Windows) and
+Gatekeeper (macOS) will warn until code-signing certificates exist.

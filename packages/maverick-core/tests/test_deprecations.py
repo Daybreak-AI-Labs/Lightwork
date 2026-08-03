@@ -49,6 +49,12 @@ def test_vtuple_parses_loose_versions():
     assert dep._vtuple("") == (0,)
 
 
+def test_current_version_reuses_package_version():
+    import maverick
+
+    assert dep.current_version() == maverick.__version__
+
+
 def test_check_config_reports_config_kind(monkeypatch):
     fake = dep.Deprecation(
         name="x.old_knob", kind="config", target="[tools] old_knob",

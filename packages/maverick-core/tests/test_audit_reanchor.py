@@ -28,9 +28,8 @@ pytestmark = pytest.mark.skipif(not _have_crypto(), reason="cryptography not ins
 def _isolate_keys(monkeypatch, tmp_path):
     """Point the audit signing key dir at the tmp tree.
 
-    signing.KEY_DIR is resolved at import time (a known wider issue), so the
-    autouse HOME fixture doesn't cover it -- patch it here so the test never
-    touches the developer's real ~/.maverick/audit/keys.
+    Patch the compatibility hook explicitly so the test never touches the
+    active tenant's real audit-key directory.
     """
     from maverick.audit import signing
 

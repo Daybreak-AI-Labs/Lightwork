@@ -114,6 +114,7 @@ class EventKind:
     TOOL_RESULT     = "tool_result"
     SHIELD_BLOCK    = "shield_block"
     CAPABILITY_DENIED = "capability_denied"
+    SANDBOX_DENIED = "sandbox_denied"
     # Per-call token exchange (zero-trust): one row per minted, single-tool,
     # short-lived capability token, so the Operating Record shows the scoped
     # credential each tool call actually ran under -- not just the run-long grant.
@@ -139,12 +140,11 @@ class EventKind:
     # not a silent edit. payload: tenant, field ("plan"|"quota"), old, new.
     TENANT_PLAN_CHANGED = "tenant_plan_changed"
     TENANT_QUOTA_CHANGED = "tenant_quota_changed"
-    # A user's dashboard access changed: privilege role (global or per-tenant)
-    # or department (suite) grant. One row per change so who-granted-whom-what
-    # -when is provable, not a silent JSON edit. payload: actor (the admin
-    # principal, "local" in auth-off mode), principal (the target), field
-    # ("role"|"tenant_role"|"suites"), tenant ("" unless tenant_role),
-    # old, new (role strings, suite lists, or None for absent).
+    # A user's dashboard access changed: privilege role (global or per-tenant),
+    # department (suite) grant, or one atomic SCIM group-authority mutation.
+    # One row per change makes who-granted-whom-what-when provable instead of a
+    # silent JSON edit. SCIM batch rows carry a stable scim_group_event_id,
+    # old/new names, and complete member-set deltas or bounded commitments.
     ACCESS_GRANT_CHANGED = "access_grant_changed"
     FEDERATION_DELEGATE = "federation_delegate"
     # Agent Trust Plane: an external agent was refused an inbound action or an
@@ -198,7 +198,9 @@ class EventKind:
     # Human-oversight decision on a parked approval (approve/deny). Anchors the
     # who-decided-what in the signed chain so the integrity of the decision does
     # not rest on the mutable world-model `approvals` row alone (audit H28).
-    # payload: approval_id:int, status:str (approved|denied), decided_by:str.
+    # payload: approval_event_id:str (stable transactional-outbox identity),
+    # approval_id:int, status:str (approved|denied), decided_by:str,
+    # occurred_at:float (when the vote and outbox row committed).
     APPROVAL_DECISION = "approval_decision"
     # Earned Autonomy (maverick.earned_autonomy): a consequence card pinned a
     # prediction for a high-stakes action BEFORE it ran, so predicted-vs-actual

@@ -12,6 +12,8 @@ import pytest
 from maverick.audit import signing
 from maverick.file_lock import private_path_is_restricted
 
+pytestmark = pytest.mark.usefixtures("local_audit_key_custody")
+
 
 @pytest.fixture(autouse=True)
 def _temp_keys(tmp_path, monkeypatch):

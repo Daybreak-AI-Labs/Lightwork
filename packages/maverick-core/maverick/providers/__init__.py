@@ -11,6 +11,8 @@ DeepSeek/xAI clients translate the format on the fly.
 """
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from typing import Any
 
 # Each entry: (canonical name, list of accepted aliases).
@@ -50,6 +52,7 @@ def _canonical(name: str) -> str:
 def get_provider_client(
     name: str, api_key: str | None = None, base_url: str | None = None,
     default_headers: dict | None = None,
+    environment: Mapping[str, str] | None = None,
 ) -> Any:
     """Lazy-import and instantiate the named provider client.
 
@@ -103,7 +106,12 @@ def get_provider_client(
         return VLLMClient(api_key=api_key, base_url=base_url)
     if canon == "azure":
         from .azure_openai_provider import AzureOpenAIClient
-        return AzureOpenAIClient(api_key=api_key, base_url=base_url)
+        return AzureOpenAIClient(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers=default_headers,
+            environment=environment,
+        )
     if canon == "bedrock":
         from .bedrock_provider import BedrockClient
         return BedrockClient(api_key=api_key, base_url=base_url)
@@ -181,6 +189,31 @@ def missing_sdks(model_specs) -> list[str]:
                     "codex_cli provider). Run: npm install -g @openai/codex"
                 )
             continue
+        # A pre-fetched AD token needs only the OpenAI SDK. The documented
+        # DefaultAzureCredential path also needs azure-identity; report that
+        # before starting a goal instead of failing on the first model call.
+        if (
+            provider == "azure"
+            and os.environ.get("AZURE_OPENAI_AUTH", "").strip().lower()
+            == "entra_id"
+            and not os.environ.get("AZURE_OPENAI_AD_TOKEN", "").strip()
+            and "azure.identity" not in seen
+        ):
+            seen.add("azure.identity")
+            try:
+                identity_present = (
+                    importlib.util.find_spec("azure.identity") is not None
+                )
+            except ModuleNotFoundError:
+                identity_present = False
+            except Exception:
+                identity_present = True
+            if not identity_present:
+                msgs.append(
+                    "Azure Identity SDK not installed. From the reviewed "
+                    "checkout run: python -m pip install -e "
+                    "'./packages/maverick-core[azure]'"
+                )
         mod = _SDK_MODULE.get(provider)
         if mod is None or mod in seen:
             continue
@@ -194,4 +227,29 @@ def missing_sdks(model_specs) -> list[str]:
     return msgs
 
 
-__all__ = ["get_provider_client", "missing_sdks", "KNOWN_PROVIDERS"]
+def verify_release_runtime() -> None:
+    """Prove the two SDK families shipped in full release artifacts import.
+
+    Client construction is deliberately pointed at a loopback discard endpoint
+    and makes no request. The OpenAI SDK backs OpenAI, OpenRouter, Ollama,
+    Gemini, DeepSeek, xAI, Moonshot, TGI, vLLM, Azure token/key auth, Bedrock's
+    compatible endpoint, and the generic OpenAI-compatible provider.
+    """
+    missing = missing_sdks(("anthropic:release-smoke", "openai:release-smoke"))
+    if missing:
+        raise RuntimeError("; ".join(missing))
+    client = get_provider_client(
+        "openai",
+        api_key="release-smoke-not-a-real-key",  # pragma: allowlist secret
+        base_url="http://127.0.0.1:9/v1",
+    )
+    if client is None:  # pragma: no cover - defensive contract
+        raise RuntimeError("OpenAI-compatible provider client was not constructed")
+
+
+__all__ = [
+    "get_provider_client",
+    "missing_sdks",
+    "verify_release_runtime",
+    "KNOWN_PROVIDERS",
+]

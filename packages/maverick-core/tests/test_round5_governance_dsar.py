@@ -113,8 +113,11 @@ def test_verify_erasure_indeterminate_without_channel():
     assert rep["clean"] is False
 
 
-def test_verify_erasure_clean_with_concrete_channel_and_no_data():
-    # A concrete channel + genuinely no data is a real, definitive clean.
+def test_verify_erasure_needs_pre_delete_receipt_even_with_concrete_channel():
+    # A channel resolves direct subject stores, but cannot reconstruct goal IDs
+    # after their attributing turns are gone. A bare scan therefore cannot
+    # certify the complete goal graph.
     rep = erasure_verify.verify_erasure("nobody", channel="telegram")
-    assert not rep.get("indeterminate")
-    assert rep["clean"] is True
+    assert rep.get("indeterminate") is True
+    assert rep["clean"] is False
+    assert "erasure_receipt" in rep["errors"]

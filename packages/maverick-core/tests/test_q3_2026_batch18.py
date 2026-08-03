@@ -87,6 +87,36 @@ def test_write_allowed_when_read_only_false(tmp_path):
     c.close()
 
 
+def test_write_mode_authorizer_blocks_attach_outside_workspace(tmp_path):
+    db = _mkdb(tmp_path)
+    outside = tmp_path.parent / "outside-write-attach.db"
+    outside.unlink(missing_ok=True)
+
+    out = sql_query().fn({
+        "database": str(db),
+        "query": f"ATTACH DATABASE '{outside}' AS escaped",
+        "read_only": False,
+    })
+
+    assert out.startswith("ERROR")
+    assert not outside.exists()
+
+
+def test_write_mode_authorizer_blocks_vacuum_into_outside_workspace(tmp_path):
+    db = _mkdb(tmp_path)
+    outside = tmp_path.parent / "outside-write-vacuum.db"
+    outside.unlink(missing_ok=True)
+
+    out = sql_query().fn({
+        "database": str(db),
+        "query": f"VACUUM INTO '{outside}'",
+        "read_only": False,
+    })
+
+    assert out.startswith("ERROR")
+    assert not outside.exists()
+
+
 def test_write_with_returning_is_committed(tmp_path):
     # A write with a RETURNING clause produces a cursor description, so it takes
     # the row-formatting path -- it must still be committed, or sqlite rolls the

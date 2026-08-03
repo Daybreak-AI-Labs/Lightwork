@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from ..audit.errors import AuditRefused
 from ..platform_hunt.models import Finding, canonical_digest
 from .correlation import correlate
 from .models import TelemetryEvent
@@ -51,12 +52,16 @@ def _record(recorder: AuditRecorder | None, finding: Finding) -> bool:
     if recorder is not None:
         try:
             return bool(recorder("env_hunt_detection", payload))
+        except AuditRefused:
+            raise
         except Exception:  # failure-policy: visible_degradation
             return False
     try:
         from ..audit import record
 
         return bool(record("env_hunt_detection", **payload))
+    except AuditRefused:
+        raise
     except Exception:  # failure-policy: visible_degradation
         return False
 

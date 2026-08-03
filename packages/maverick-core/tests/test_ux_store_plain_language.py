@@ -136,7 +136,9 @@ def test_explain_dict_events_and_result():
 
 # ---- run gallery ----
 
-def test_gallery_add_list_remove(tmp_path):
+def test_gallery_add_list_remove(tmp_path, monkeypatch):
+    # Windows can return the same timestamp for several immediate writes.
+    monkeypatch.setattr("maverick.ux_store.time.time", lambda: 1_000.0)
     s = _store(tmp_path)
     s.gallery_add(7, blurb="great demo of the refund flow", curator="alice")
     s.gallery_add(9)

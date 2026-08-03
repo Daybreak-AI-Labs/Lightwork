@@ -16,7 +16,16 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { strict as assert } from "node:assert";
 
-const transport = new StdioClientTransport({ command: "maverick", args: ["mcp"] });
+import { selectLightworkMcpEnvironment } from "./environment.js";
+
+// Do not hand the MCP child the ambient process environment. The pure helper
+// forwards Lightwork's namespace plus an exact provider/runtime allowlist.
+const serverEnv = selectLightworkMcpEnvironment(process.env);
+const transport = new StdioClientTransport({
+  command: "maverick",
+  args: ["mcp"],
+  env: serverEnv,
+});
 const client = new Client(
   { name: "maverick-ts-example", version: "0.1.0" },
   { capabilities: {} },
@@ -43,12 +52,18 @@ try {
   // Every Lightwork tool also returns structuredContent: typed JSON matching the
   // tool's outputSchema, so a typed client reads parsed fields instead of
   // re-parsing the human-readable text block. facts_get -> { facts: {...} }.
-  assert.ok(res.structuredContent, "maverick_facts_get returned no structuredContent");
+  const structured = res.structuredContent;
+  assert.ok(structured, "maverick_facts_get returned no structuredContent");
   assert.ok(
-    "facts" in res.structuredContent,
+    typeof structured === "object" &&
+      structured !== null &&
+      "facts" in structured,
     "structuredContent is missing the 'facts' key",
   );
-  console.log("maverick_facts_get structuredContent OK:", JSON.stringify(res.structuredContent));
+  console.log(
+    "maverick_facts_get structuredContent OK:",
+    JSON.stringify(structured),
+  );
 } finally {
   await client.close();
 }

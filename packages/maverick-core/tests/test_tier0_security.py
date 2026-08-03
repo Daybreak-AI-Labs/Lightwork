@@ -333,6 +333,18 @@ def test_reclaim_orphan_goals(tmp_path):
     assert wm.get_goal(c).status == "blocked"
 
 
+def test_reclaim_includes_goal_exactly_at_cutoff(tmp_path, monkeypatch):
+    import maverick.world_model as world_model
+
+    monkeypatch.setattr(world_model.time, "time", lambda: 1_000.0)
+    wm = world_model.WorldModel(tmp_path / "equal-cutoff.db")
+    goal_id = wm.create_goal("equal-cutoff", "")
+    wm.set_goal_status(goal_id, "active")
+
+    assert wm.reclaim_orphan_goals(max_age_seconds=0) == 1
+    assert wm.get_goal(goal_id).status == "blocked"
+
+
 def test_reclaim_orphan_goals_skips_recent(tmp_path):
     """Default max_age_seconds=60 protects goals from a sibling process."""
     from maverick.world_model import WorldModel

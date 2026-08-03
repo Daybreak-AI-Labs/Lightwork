@@ -12,6 +12,7 @@ import pytest
 from maverick import governed_records
 from maverick.governed_records import (
     GovernedRecordBackendError,
+    GovernedRecordCapacityError,
     GovernedRecordStore,
     PostgresGovernedRecordBackend,
 )
@@ -253,6 +254,15 @@ class _MemoryCursor:
         )):
             self.rowcount = 1
             return
+        if sql.startswith("SELECT COUNT(*) FROM governed_records"):
+            tenant, namespace = str(values[0]), str(values[1])
+            count = sum(
+                row_tenant == tenant and row_namespace == namespace
+                for row_tenant, row_namespace, _record_id in self.database.rows
+            )
+            self.result = [(count,)]
+            self.rowcount = 1
+            return
         if sql.startswith("SELECT revision, record_json"):
             key = (str(values[0]), str(values[1]), str(values[2]))
             row = self.database.rows.get(key)
@@ -411,6 +421,32 @@ def test_create_update_and_stale_cas_are_audited(monkeypatch):
             action="stale_update",
             actor="mallory@example.com",
         )
+
+
+def test_local_bounded_create_refuses_before_namespace_oversize(monkeypatch):
+    import maverick.audit as audit
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: True)
+    store = GovernedRecordStore("test_capacity", "TCP", "test_record")
+    first = store.create(
+        {"id": "TCP-first", "status": "open"},
+        action="create",
+        actor="operator",
+        max_records=1,
+    )
+
+    with pytest.raises(
+        GovernedRecordCapacityError,
+        match="capacity has been reached",
+    ):
+        store.create(
+            {"id": "TCP-second", "status": "open"},
+            action="create",
+            actor="operator",
+            max_records=1,
+        )
+    assert [row["id"] for row in store.list()] == [first["id"]]
 
 
 def test_public_record_id_scan_is_bounded_and_cursor_rotates(monkeypatch):
@@ -718,6 +754,54 @@ def test_postgres_list_limit_is_applied_in_sql(monkeypatch):
         and params[-1] == 1
         for sql, params in database.sql
     )
+
+
+def test_postgres_bounded_create_is_tenant_transactional(monkeypatch):
+    import maverick.audit as audit
+
+    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: True)
+    store, _backend, database = _postgres_store(
+        "test_capacity",
+        "TCP",
+    )
+    with tenant_scope(tenant="alpha"):
+        store.create(
+            {"id": "TCP-first", "status": "open"},
+            action="create",
+            actor="operator",
+            max_records=1,
+        )
+        with pytest.raises(
+            GovernedRecordCapacityError,
+            match="capacity has been reached",
+        ):
+            store.create(
+                {"id": "TCP-second", "status": "open"},
+                action="create",
+                actor="operator",
+                max_records=1,
+            )
+    with tenant_scope(tenant="beta"):
+        store.create(
+            {"id": "TCP-beta", "status": "open"},
+            action="create",
+            actor="operator",
+            max_records=1,
+        )
+
+    capacity_sql = [
+        sql
+        for sql, _params in database.sql
+        if sql.startswith("SELECT pg_advisory_xact_lock(")
+        or sql.startswith("SELECT COUNT(*) FROM governed_records")
+    ]
+    assert capacity_sql.count("SELECT COUNT(*) FROM governed_records "
+                              "WHERE tenant_id=%s AND namespace=%s") == 3
+    assert sum(
+        sql.startswith("SELECT pg_advisory_xact_lock(")
+        for sql in capacity_sql
+    ) == 3
+    assert len(database.rows) == 2
 
 
 def test_shared_record_refuses_legacy_tenant_envelope(monkeypatch):

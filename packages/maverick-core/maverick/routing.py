@@ -93,10 +93,33 @@ def pick(signal: RouteSignal) -> str:
 
 def cascade_enabled() -> bool:
     """Single source of truth for whether cascaded routing is active."""
-    if os.environ.get("MAVERICK_CASCADE_ROUTING", "").lower() in ("1", "true", "yes"):
-        return True
+    from .config import env_flag
+
+    env_name = "MAVERICK_CASCADE_ROUTING"
+    env = env_flag(env_name)
+    if env is not None:
+        return env
+    if os.environ.get(env_name, "").strip():
+        log.warning(
+            "routing: %s must be one of 1/0, true/false, yes/no, or on/off; "
+            "disabling the cascade",
+            env_name,
+        )
+        return False
     try:
         from .config import load_config
-        return bool(load_config().get("models", {}).get("cascade", False))
-    except Exception:
+        value = load_config().get("models", {}).get("cascade", False)
+        if not isinstance(value, bool):
+            log.warning(
+                "routing: models.cascade must be true or false, got %s; "
+                "disabling the cascade",
+                type(value).__name__,
+            )
+            return False
+        return value
+    except Exception as exc:
+        log.warning(
+            "routing: could not read models.cascade (%s); disabling the cascade",
+            exc,
+        )
         return False

@@ -19,6 +19,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any
 
+from .runtime_overrides import RuntimeOverridesSecurityError
 from .safety.remote_scan import scan_remote_content
 from .safety.secret_detector import redact as _redact_secrets
 
@@ -1178,6 +1179,8 @@ def load_mcp_specs_from_config() -> list[MCPServerSpec]:
         from .runtime_overrides import mcp_overlay
         for name, spec in mcp_overlay().items():
             servers.setdefault(name, spec)
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception:  # pragma: no cover -- overlay never breaks MCP loading
         pass
     out: list[MCPServerSpec] = []

@@ -104,6 +104,22 @@ def _declares_workdir(backend: Any) -> bool:
     return False
 
 
+def _sandbox_entry_points() -> list[Any]:
+    from importlib import metadata
+
+    eps = metadata.entry_points()
+    return list(
+        eps.select(group="maverick.sandboxes")
+        if hasattr(eps, "select")
+        else eps.get("maverick.sandboxes", [])
+    )
+
+
+def installed_entry_point_names() -> tuple[str, ...]:
+    """Installed third-party sandbox names without loading vendor code."""
+    return tuple(sorted({str(ep.name) for ep in _sandbox_entry_points()}))
+
+
 def load_entry_point_backend(name: str, *, workdir, timeout: float,
                              options: dict | None = None) -> Any:
     """Resolve + instantiate a third-party backend from ``maverick.sandboxes``.
@@ -113,11 +129,7 @@ def load_entry_point_backend(name: str, *, workdir, timeout: float,
     operator explicitly selected must never silently degrade to something
     else (least of all unsandboxed local exec).
     """
-    from importlib import metadata
-
-    eps = metadata.entry_points()
-    group = (eps.select(group="maverick.sandboxes")
-             if hasattr(eps, "select") else eps.get("maverick.sandboxes", []))
+    group = _sandbox_entry_points()
     matches = [ep for ep in group if ep.name == name]
     if not matches:
         available = sorted(ep.name for ep in group)
@@ -137,5 +149,11 @@ def load_entry_point_backend(name: str, *, workdir, timeout: float,
     return backend
 
 
-__all__ = ["SDK_VERSION", "SandboxV2", "capabilities", "conformance",
-           "load_entry_point_backend"]
+__all__ = [
+    "SDK_VERSION",
+    "SandboxV2",
+    "capabilities",
+    "conformance",
+    "installed_entry_point_names",
+    "load_entry_point_backend",
+]

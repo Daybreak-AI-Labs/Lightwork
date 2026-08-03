@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from typing import Any, Protocol, runtime_checkable
 
+from ..audit.errors import AuditRefused
 from ..platform_hunt.models import EvidenceRef, Finding, canonical_digest, deterministic_id
 from .models import TelemetryEvent
 
@@ -168,6 +169,8 @@ def enrich(
                     from ..audit import record
 
                     audited = bool(record("env_hunt_enrichment", **payload))
+            except AuditRefused:
+                raise
             except Exception:  # failure-policy: fail_closed
                 audited = False
             if not audited:

@@ -160,6 +160,7 @@ def _process_file(
     user_id: str,
     *,
     delete: bool,
+    strict: bool = False,
 ) -> tuple[int, int]:
     """Walk a single audit-log file. Returns (matched, written)."""
     if not path.exists() or path.is_dir():
@@ -172,7 +173,13 @@ def _process_file(
     # writer. This is the same sidecar-keyed lock AuditSigner.write takes, and
     # it must cover the re-anchor too -- that is a second whole-file rewrite.
     with cross_process_lock(path):
-        return _process_file_locked(path, channel, user_id, delete=delete)
+        return _process_file_locked(
+            path,
+            channel,
+            user_id,
+            delete=delete,
+            strict=strict,
+        )
 
 
 def _process_file_locked(
@@ -181,6 +188,7 @@ def _process_file_locked(
     user_id: str,
     *,
     delete: bool,
+    strict: bool = False,
 ) -> tuple[int, int]:
     """``_process_file`` body, with the file's rewrite lock already held."""
     try:
@@ -189,6 +197,8 @@ def _process_file_locked(
         raw = atomic_read_bytes(path)
     except OSError as e:
         log.warning("audit erase: %s: %s", path, e)
+        if strict:
+            raise
         return 0, 0
     # A closed day-file may be at-rest *sealed* (#1015). Read its NDJSON via the
     # transparent decryptor (reading raw bytes as UTF-8 would crash on the
@@ -213,6 +223,10 @@ def _process_file_locked(
     # erase mutation. Re-anchoring after the rewrite may only bless changes we
     # just made to a previously clean chain, never unrelated old tampering.
     if any_signed and not _verify_signed_chain(path, rows):
+        if strict:
+            raise RuntimeError(
+                "signed audit chain failed pre-erasure integrity verification"
+            )
         return 0, len(rows)
 
     parts, written = _build_parts(rows, channel, user_id, delete=delete)
@@ -237,8 +251,12 @@ def _process_file_locked(
             # failure-policy: fail_soft_with_audit
             except Exception as e:  # pragma: no cover - defensive/crypto missing
                 log.warning("audit erase: could not reanchor %s after rewrite: %s", path, e)
+                if strict:
+                    raise
     except OSError as e:
         log.warning("audit erase: %s: %s", path, e)
+        if strict:
+            raise
         return 0, 0
     return matched, written
 
@@ -248,8 +266,14 @@ def scrub_user(
     user_id: str,
     *,
     audit_dir: Path | None = None,
+    strict: bool = False,
 ) -> tuple[int, int]:
-    """Replace matching events with tombstones. Returns (matched, scanned)."""
+    """Replace matching events with tombstones. Returns (matched, scanned).
+
+    ``strict=True`` is reserved for the legal-erasure workflow: unreadable,
+    unwritable, integrity-invalid, or unreanchorable segments raise instead of
+    being indistinguishable from an observed zero.
+    """
     if audit_dir is None:
         # Resolve the SAME (home + active-tenant) audit dir the writer lands
         # events in. The old frozen ~/.maverick/audit default silently skipped
@@ -263,7 +287,13 @@ def scrub_user(
     if not audit_dir.exists():
         return 0, 0
     for path in sorted(audit_dir.glob("*.ndjson")):
-        m, w = _process_file(path, channel, user_id, delete=False)
+        m, w = _process_file(
+            path,
+            channel,
+            user_id,
+            delete=False,
+            strict=strict,
+        )
         total_matched += m
         total_scanned += w
     if total_matched:

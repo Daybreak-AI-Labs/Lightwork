@@ -6,6 +6,9 @@ testable without a live model.
 """
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _distribution_version
+
 from . import config_space
 from .agent_adapter import evolve_live, make_agent_factory
 from .archive import Archive, Candidate
@@ -29,6 +32,11 @@ from .runner import (
     strict_calibration_ready,
 )
 from .search import evolve
+
+try:
+    __version__ = _distribution_version("maverick-evolve")
+except PackageNotFoundError:  # source tree without installed metadata
+    __version__ = "0.1.7"
 
 __all__ = [
     "EvalCase",

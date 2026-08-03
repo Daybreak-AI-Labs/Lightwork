@@ -3034,6 +3034,18 @@ def _gate_and_apply(  # noqa: C901 - durable promotion transaction boundary
             rollback=rollback,
             provenance={"source": "self_harness", "signature": proposal.signature,
                         "hypothesis": proposal.hypothesis or None},
+            audit_payload={
+                "_audit_agent": "self_harness",
+                "model_id": proposal.model_id,
+                "line": proposal.addendum_line,
+                "phase": "apply",
+                "signature": proposal.signature,
+                "rationale": proposal.rationale,
+                "hypothesis": proposal.hypothesis or None,
+                "held_out_delta": round(vr.held_out_delta, 4),
+                "held_in_samples": vr.held_in_samples,
+                "held_out_samples": vr.held_out_samples,
+            },
         )
         # Close the validation-to-apply race: a HALT that lands while the
         # evaluator or authorization receipt is running must refuse the
@@ -3101,25 +3113,6 @@ def _gate_and_apply(  # noqa: C901 - durable promotion transaction boundary
         else:
             return False, "promotion transaction is not applicable"
 
-    try:
-        from .audit import EventKind, record
-        # Record the DIAGNOSTIC PROVENANCE alongside the line: which weakness it
-        # targets (signature/rationale) and the unseen-split evidence that
-        # promoted it (held-out delta over N samples). A reversible, signed
-        # learning audit should answer "why was this learned?", not just "what"
-        # -- the provenance a compliance review / rollback decision needs
-        # (arXiv 2508.07407's evaluation-and-safety requirement).
-        record(EventKind.LEARNING_UPDATE, agent="self_harness",
-               model_id=proposal.model_id, rung="prompt",
-               line=proposal.addendum_line, phase="apply",
-               signature=proposal.signature, rationale=proposal.rationale,
-               hypothesis=proposal.hypothesis or None,
-               held_out_delta=round(vr.held_out_delta, 4), samples=vr.samples,
-               held_in_samples=vr.held_in_samples,
-               held_out_samples=vr.held_out_samples,
-               effect_ci_low=vr.effect_ci_low)
-    except Exception:  # pragma: no cover -- audit best-effort
-        pass
     return True, "promoted"
 
 

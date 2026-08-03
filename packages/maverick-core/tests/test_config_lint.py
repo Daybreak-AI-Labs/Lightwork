@@ -94,6 +94,20 @@ def test_high_authority_self_learning_keys_must_be_bool():
     }
 
 
+def test_runtime_routing_and_import_flags_must_be_bool():
+    findings = lint_config({
+        "automation_import": {"enable": "false", "create_schedules": 1},
+        "models": {"cascade": "yes"},
+        "routing": {"cost_aware": []},
+    })
+    assert {f"{f.section}.{f.key}" for f in findings if f.severity == "error"} == {
+        "automation_import.enable",
+        "automation_import.create_schedules",
+        "models.cascade",
+        "routing.cost_aware",
+    }
+
+
 def test_model_improvement_config_lints_clean():
     findings = lint_config({"model_improvement": {
         "enable": True,

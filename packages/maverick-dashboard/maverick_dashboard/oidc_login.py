@@ -45,7 +45,6 @@ import secrets
 import time
 from urllib.parse import urlencode, urlparse
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from maverick.oidc import (
@@ -258,6 +257,11 @@ async def _exchange_code_for_tokens(
     token_endpoint: str, *, cfg, code: str, code_verifier: str
 ) -> dict:
     """Exchange an authorization code without blocking the event loop."""
+    # Keep the outbound HTTP stack off the dashboard's default import path.
+    # OIDC login is optional, and importing the route must remain side-effect
+    # free when the feature is disabled.
+    import httpx
+
     async with httpx.AsyncClient(timeout=10.0) as client:
         token_resp = await client.post(
             token_endpoint,

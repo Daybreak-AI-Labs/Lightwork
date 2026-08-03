@@ -1,23 +1,27 @@
-# maverick-installer-msi
+# maverick-installer-msi (engineering bootstrap)
 
-WiX Toolset v4 authoring for a Windows MSI that installs the **maverick CLI**
-per user: a `maverick.cmd` launcher on the user PATH plus the
-`maverick-agent` wheel, bootstrapped into the per-user site-packages on
-first run.
+WiX Toolset v4 authoring for an **engineering-only** Windows bootstrap. It
+installs a `maverick.cmd` launcher on the per-user PATH plus one
+`maverick-agent` wheel, then asks pip to resolve that wheel's dependencies from
+live PyPI on first launch.
+
+This is not a complete Lightwork platform installer. It omits the other seven
+packages in `release-cohort.toml`, does not bundle Python or a dependency
+wheelhouse, is not offline-capable, and is not a customer release artifact.
 
 ## What's in the package
 
 | Piece | What it does |
 |---|---|
 | `Package.wxs` | WiX v4 product/package definition: per-user scope, stable `UpgradeCode`, `MajorUpgrade` rule, PATH environment component |
-| `maverick.cmd` | Launcher installed to `%LOCALAPPDATA%\Programs\Lightwork\bin`. Resolves the pip console script; on first run pip-installs the bundled wheel (`--user`) |
+| `maverick.cmd` + `maverick_bootstrap.py` | Launcher installed to `%LOCALAPPDATA%\Programs\Maverick\bin`. Installs the bundled core wheel (`--user`) on first run and whenever its installed version differs from the MSI cohort; pip resolves dependencies from live PyPI |
 | `build.ps1` | `wix build` invocation; takes the wheel path and version |
 | `test_wxs.py` | Static contract test (XML well-formed, UpgradeCode pinned, perUser scope, no hardcoded user paths) |
 
 Design notes:
 
 - **Per-user by default** (`Scope="perUser"`): no UAC, installs under
-  `%LOCALAPPDATA%\Programs\Lightwork`, and the PATH component edits the *user*
+  `%LOCALAPPDATA%\Programs\Maverick`, and the PATH component edits the *user*
   PATH only (`System="no"`).
 - **`UpgradeCode` is a constant** (`9E2B7C41-6A8D-4F3B-8E5A-2C90D17B4F6E`).
   Never change it: `MajorUpgrade` uses it to find and replace older versions.
@@ -27,11 +31,18 @@ Design notes:
   so `maverick.cmd` runs `python -c "from maverick.cli import main; main()"`
   (the same target as the `maverick` console script in
   `packages/maverick-core/pyproject.toml`).
-- **Python is a prerequisite, not bundled.** The MSI is ~a few hundred KB +
-  the wheel; it does not embed a Python runtime. `maverick.cmd` prints an
-  actionable error if Python 3.10+ is missing. Users who want a
-  zero-prerequisite installer should use the Tauri GUI installer
-  (`apps/installer-desktop`), whose bootstrap installs Python itself.
+- **The wheel keeps its PEP 427 filename.** The MSI preserves the built
+  `maverick_agent-<version>-<python>-<abi>-<platform>.whl` basename because pip
+  rejects a renamed `maverick_agent.whl` before reading it. The launcher reads
+  the MSI ProductVersion and skips bootstrap only when
+  `importlib.metadata.version("maverick-agent")` matches it exactly; upgrades
+  therefore cannot silently continue running an older user-site package.
+- **Python and network access are prerequisites, not bundled capabilities.**
+  The MSI does not embed a Python runtime, a locked dependency wheelhouse, or
+  the full eight-package release cohort. `maverick.cmd` prints an actionable
+  error if Python 3.10+ is missing; pip otherwise resolves runtime dependencies
+  from live PyPI without a shipped constraints file. There is currently no
+  supported offline/customer MSI.
 
 ## Building
 
@@ -42,23 +53,29 @@ dotnet tool install --global wix
 python -m pip install build
 python -m build --wheel packages/maverick-core
 cd apps\installer-msi
-.\build.ps1 -Wheel ..\..\packages\maverick-core\dist\maverick_agent-0.1.6-py3-none-any.whl
+.\build.ps1 -Wheel ..\..\packages\maverick-core\dist\maverick_agent-0.1.7-py3-none-any.whl
 ```
 
-There is also a manual-dispatch CI workflow
-(`.github/workflows/build-msi.yml`) that builds the wheel and the MSI on
-`windows-latest` and uploads the artifact.
+There is also a manual-dispatch engineering workflow
+(`.github/workflows/build-msi.yml`) that builds the core wheel and bootstrap
+MSI on `windows-2022`. Its artifact name and metadata identify it as an
+unsigned engineering bootstrap requiring live PyPI.
 
 ## Status — honest
 
+- **Engineering-only:** this bootstrap is deliberately excluded from release
+  completeness claims. A complete Windows delivery must install an offline
+  artifact containing the whole release cohort without running pip against
+  live package indexes.
+- The staged wheel filename and first-install/upgrade bootstrap have an offline
+  `--no-deps --no-index` filename smoke test. That test validates only wheel
+  staging; it does not make the real first-launch dependency install offline.
 - The `.wxs`, launcher, and build script were authored and statically
   validated (`test_wxs.py`) in a Linux environment. **No MSI was built or
   installed here** — that requires WiX v4 on a Windows host. Treat the first
   `build.ps1` run as a release candidate to smoke-test.
-- The produced MSI ships **UNSIGNED** — exactly the same posture as the
-  Tauri desktop installer (`apps/installer-desktop`): SmartScreen shows an
-  "unknown publisher" warning users must click through until a Windows
-  code-signing certificate exists.
+- The produced MSI ships **UNSIGNED**. SmartScreen can show an "unknown
+  publisher" warning until an Authenticode signing path exists.
 
 ## Testing
 

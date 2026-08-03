@@ -109,7 +109,10 @@ def test_complete_skips_failover_when_no_chain(monkeypatch):
     monkeypatch.setattr(LLM, "_get_client",
                         lambda self, provider: type("C", (), {"complete": lambda *a, **k: sentinel})())
     monkeypatch.setattr("maverick.llm._run_preflight", lambda *a, **k: None)
-    out = LLM(model="anthropic:claude-x").complete("sys", [{"role": "user", "content": "hi"}])
+    out = LLM(model="anthropic:claude-sonnet-4-6").complete(
+        "sys",
+        [{"role": "user", "content": "hi"}],
+    )
     assert out is sentinel
 
 
@@ -128,7 +131,11 @@ def test_complete_async_routes_through_afailover_when_chain_set(monkeypatch):
 def test_llm_failover_does_not_retry_budget_exceeded(monkeypatch):
     from maverick.budget import BudgetExceeded
 
-    monkeypatch.setattr(pf, "fallback_models", lambda primary: ["openai:m2"])
+    monkeypatch.setattr(
+        pf,
+        "fallback_models",
+        lambda primary: ["openai:gpt-5.4"],
+    )
     monkeypatch.setattr("maverick.llm._run_preflight", lambda *a, **k: None)
     calls = []
 
@@ -145,14 +152,21 @@ def test_llm_failover_does_not_retry_budget_exceeded(monkeypatch):
     monkeypatch.setattr(LLM, "_get_client", lambda self, provider: _Client(provider))
 
     with pytest.raises(BudgetExceeded, match="input tokens"):
-        LLM(model="anthropic:m1").complete("sys", [{"role": "user", "content": "hi"}])
+        LLM(model="anthropic:claude-sonnet-4-6").complete(
+            "sys",
+            [{"role": "user", "content": "hi"}],
+        )
     assert calls == ["anthropic"]
 
 
 def test_llm_failover_does_not_retry_budget_exceeded_async(monkeypatch):
     from maverick.budget import Budget, BudgetExceeded
 
-    monkeypatch.setattr(pf, "fallback_models", lambda primary: ["openai:m2"])
+    monkeypatch.setattr(
+        pf,
+        "fallback_models",
+        lambda primary: ["openai:gpt-5.4"],
+    )
     monkeypatch.setattr("maverick.llm._run_preflight", lambda *a, **k: None)
     calls = []
 
@@ -169,9 +183,13 @@ def test_llm_failover_does_not_retry_budget_exceeded_async(monkeypatch):
     monkeypatch.setattr(LLM, "_get_client", lambda self, provider: _Client(provider))
 
     with pytest.raises(BudgetExceeded, match="input tokens"):
-        asyncio.run(LLM(model="anthropic:m1").complete_async(
-            "sys", [{"role": "user", "content": "hi"}], budget=Budget(max_dollars=100.0),
-        ))
+        asyncio.run(
+            LLM(model="anthropic:claude-sonnet-4-6").complete_async(
+                "sys",
+                [{"role": "user", "content": "hi"}],
+                budget=Budget(max_dollars=100.0),
+            )
+        )
     assert calls == ["anthropic"]
 
 
@@ -189,7 +207,11 @@ def test_open_breaker_short_circuits_dispatch_and_fails_over(monkeypatch):
     br.record_failure()
     assert br.state is cb.CircuitState.OPEN
 
-    monkeypatch.setattr(pf, "fallback_models", lambda primary: ["openai:m2"])
+    monkeypatch.setattr(
+        pf,
+        "fallback_models",
+        lambda primary: ["openai:gpt-5.4"],
+    )
     monkeypatch.setattr("maverick.llm._run_preflight", lambda *a, **k: None)
     calls = []
 
@@ -203,7 +225,7 @@ def test_open_breaker_short_circuits_dispatch_and_fails_over(monkeypatch):
 
     monkeypatch.setattr(LLM, "_get_client", lambda self, provider: _Client(provider))
     try:
-        out = LLM(model="anthropic:m1").complete(
+        out = LLM(model="anthropic:claude-sonnet-4-6").complete(
             "sys", [{"role": "user", "content": "hi"}])
         # anthropic's client was NEVER invoked (breaker OPEN); failover reached
         # openai, whose breaker is CLOSED.
@@ -258,7 +280,7 @@ def test_breaker_internal_error_does_not_block_healthy_call(monkeypatch):
             return "healthy"
 
     monkeypatch.setattr(LLM, "_get_client", lambda self, provider: _Client())
-    out = LLM(model="anthropic:m1").complete(
+    out = LLM(model="anthropic:claude-sonnet-4-6").complete(
         "sys", [{"role": "user", "content": "hi"}])
     assert out == "healthy"
     assert calls == ["dispatched"]  # breaker error failed OPEN -> call proceeded

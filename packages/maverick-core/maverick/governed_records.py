@@ -131,8 +131,20 @@ def _list_limit(value: object) -> int:
     return value
 
 
+def _capacity_limit(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("record capacity must be an integer")
+    if value < 1:
+        raise ValueError("record capacity must be positive")
+    return value
+
+
 class GovernedRecordBackendError(RuntimeError):
     """A governed-record backend cannot preserve its persistence contract."""
+
+
+class GovernedRecordCapacityError(GovernedRecordBackendError):
+    """A bounded governed namespace has no admission slot for a new identity."""
 
 
 class _GovernedRecordValidationError(ValueError):
@@ -155,6 +167,7 @@ class GovernedRecordBackend(Protocol):
         *,
         expected_revision: int | None = None,
         fence: GovernedMutationFence | None = None,
+        max_records: int | None = None,
     ) -> dict[str, Any]: ...
 
     def load(self, record_id: str) -> dict[str, Any] | None: ...
@@ -216,12 +229,40 @@ class LocalGovernedRecordBackend:
         *,
         expected_revision: int | None = None,
         fence: GovernedMutationFence | None = None,
+        max_records: int | None = None,
     ) -> dict[str, Any]:
         if fence is not None:
             raise GovernedRecordBackendError(
                 "transactional mutation fences require a shared backend"
             )
-        return self._store.save(record, expected_revision=expected_revision)
+        if max_records is None:
+            return self._store.save(
+                record,
+                expected_revision=expected_revision,
+            )
+        maximum = _capacity_limit(max_records)
+        from .file_lock import cross_process_lock, ensure_private_directory
+
+        record_dir = self._store._dir()
+        ensure_private_directory(record_dir)
+        # All bounded creates for this local namespace take the same admission
+        # lock. The capacity check and per-record atomic create therefore form
+        # one cross-process critical section without changing legacy updates.
+        admission_target = record_dir / ".namespace-admission"
+        with cross_process_lock(admission_target, strict=True):
+            record_id = _valid_record_id(record.get("id"), self._store.prefix)
+            existing = self._store.load(record_id)
+            if (
+                existing is None
+                and len(self._store.list_bounded(limit=maximum)) >= maximum
+            ):
+                raise GovernedRecordCapacityError(
+                    "governed record namespace capacity has been reached"
+                )
+            return self._store.save(
+                record,
+                expected_revision=expected_revision,
+            )
 
     def load(self, record_id: str) -> dict[str, Any] | None:
         return self._store.load(record_id)
@@ -1037,13 +1078,35 @@ class PostgresGovernedRecordBackend:
         *,
         expected_revision: int | None = None,
         fence: GovernedMutationFence | None = None,
+        max_records: int | None = None,
     ) -> dict[str, Any]:
         record_id = _valid_record_id(record.get("id"), self.prefix)
         expected = _expected_revision(expected_revision)
+        maximum = (
+            None
+            if max_records is None
+            else _capacity_limit(max_records)
+        )
         tenant = self._tenant_key()
         with self._operation("save"):
             with self._transaction(tenant) as cur:
                 self._enforce_mutation_fence(cur, tenant, record_id, fence)
+                if maximum is not None:
+                    lock_material = (
+                        f"governed-record-capacity\0{tenant}\0{self.namespace}"
+                    ).encode()
+                    lock_key = int.from_bytes(
+                        hashlib.sha256(lock_material).digest()[:8],
+                        byteorder="big",
+                        signed=True,
+                    )
+                    # Serialize capacity admission across every replica that
+                    # writes this tenant namespace. The count and distinct-ID
+                    # insert remain in this same transaction.
+                    cur.execute(
+                        "SELECT pg_advisory_xact_lock(%s)",
+                        (lock_key,),
+                    )
                 row = self._select_for_update(cur, tenant, record_id)
                 previous = (
                     _row_record(
@@ -1055,6 +1118,27 @@ class PostgresGovernedRecordBackend:
                     if row is not None
                     else None
                 )
+                if previous is None and maximum is not None:
+                    cur.execute(
+                        "SELECT COUNT(*) FROM governed_records "
+                        "WHERE tenant_id=%s AND namespace=%s",
+                        (tenant, self.namespace),
+                    )
+                    count_row = self._row(cur)
+                    if (
+                        not isinstance(count_row, (tuple, list))
+                        or len(count_row) != 1
+                        or isinstance(count_row[0], bool)
+                        or not isinstance(count_row[0], int)
+                        or count_row[0] < 0
+                    ):
+                        raise GovernedRecordBackendError(
+                            "shared governed-record capacity count is invalid"
+                        )
+                    if count_row[0] >= maximum:
+                        raise GovernedRecordCapacityError(
+                            "governed record namespace capacity has been reached"
+                        )
                 current_revision = _RecordStore._revision(previous)
                 if expected is not None and current_revision != expected:
                     raise RecordConflict(
@@ -1749,6 +1833,7 @@ class GovernedRecordStore:
         action: str,
         actor: str,
         fence: GovernedMutationFence | None = None,
+        max_records: int | None = None,
     ) -> dict[str, Any]:
         actor_name = _required(actor, "actor", 4096)
         action_name = _required(action, "action", 64)
@@ -1763,12 +1848,33 @@ class GovernedRecordStore:
         value["created_at"] = now
         value["updated_at"] = now
         _queue_audit(value, action_name, actor_name)
-        backend = self._backend()
-        saved = (
-            backend.save(value, expected_revision=0)
-            if fence is None
-            else backend.save(value, expected_revision=0, fence=fence)
+        maximum = (
+            None
+            if max_records is None
+            else _capacity_limit(max_records)
         )
+        backend = self._backend()
+        if fence is None and maximum is None:
+            saved = backend.save(value, expected_revision=0)
+        elif fence is not None and maximum is None:
+            saved = backend.save(
+                value,
+                expected_revision=0,
+                fence=fence,
+            )
+        elif fence is None:
+            saved = backend.save(
+                value,
+                expected_revision=0,
+                max_records=maximum,
+            )
+        else:
+            saved = backend.save(
+                value,
+                expected_revision=0,
+                fence=fence,
+                max_records=maximum,
+            )
         return self._flush(
             saved,
             backend=backend,
@@ -1863,6 +1969,7 @@ __all__ = [
     "configured_governed_records_backend",
     "GovernedRecordBackend",
     "GovernedRecordBackendError",
+    "GovernedRecordCapacityError",
     "GovernedMutationFence",
     "GovernedRecordStore",
     "LocalGovernedRecordBackend",

@@ -1989,7 +1989,10 @@ def test_draft_endpoint_returns_a_flow(monkeypatch, tmp_path):
     # bypass the provider-key guard + the real LLM
     import maverick.flow.draft as draft_mod
     from maverick.flow.ir import single_agent_flow
-    monkeypatch.setattr("maverick_dashboard._shared.require_provider_or_400", lambda: None)
+    monkeypatch.setattr(
+        "maverick_dashboard._shared.require_provider_or_400",
+        lambda **_kwargs: None,
+    )
     monkeypatch.setattr(draft_mod, "draft_flow",
                         lambda desc, **k: (single_agent_flow(k.get("flow_id", ""), "Drafted", desc), ["note"]))
     r = _client().post("/api/v1/flows/draft", json={"description": "email me on new leads"})
@@ -2006,7 +2009,10 @@ def test_draft_endpoint_ranks_full_live_catalog_and_passes_contracts(monkeypatch
     from maverick_dashboard import api as api_mod
     from maverick_dashboard import app as app_mod
 
-    monkeypatch.setattr("maverick_dashboard._shared.require_provider_or_400", lambda: None)
+    monkeypatch.setattr(
+        "maverick_dashboard._shared.require_provider_or_400",
+        lambda **_kwargs: None,
+    )
     monkeypatch.setattr(api_mod, "_TOOL_INDEX_CACHE", [
         {"name": "slack_bot", "description": "Post a team message",
          "params": ["channel", "text"], "category": "Communication"},
@@ -2134,7 +2140,10 @@ def test_chat_endpoint_returns_reply_and_patched_flow(monkeypatch, tmp_path):
     import maverick.flow.chat as chat_mod
     from maverick.flow.chat import FlowChatResult
     from maverick.flow.ir import Flow
-    monkeypatch.setattr("maverick_dashboard._shared.require_provider_or_400", lambda: None)
+    monkeypatch.setattr(
+        "maverick_dashboard._shared.require_provider_or_400",
+        lambda **_kwargs: None,
+    )
     seen = {}
 
     def fake_chat(message, *, flow=None, history=(), run=None, **k):
@@ -2161,7 +2170,10 @@ def test_chat_endpoint_ranks_new_tools_and_keeps_live_existing_binding(monkeypat
     from maverick_dashboard import api as api_mod
     from maverick_dashboard import app as app_mod
 
-    monkeypatch.setattr("maverick_dashboard._shared.require_provider_or_400", lambda: None)
+    monkeypatch.setattr(
+        "maverick_dashboard._shared.require_provider_or_400",
+        lambda **_kwargs: None,
+    )
     monkeypatch.setattr(api_mod, "_TOOL_INDEX_CACHE", [
         {"name": "notify", "description": "Send a notification",
          "params": ["m"], "category": "Communication"},
@@ -2206,7 +2218,10 @@ def test_chat_grounds_in_an_owned_run(monkeypatch, tmp_path):
     import maverick.flow.chat as chat_mod
     from maverick.flow import store
     from maverick.flow.chat import FlowChatResult
-    monkeypatch.setattr("maverick_dashboard._shared.require_provider_or_400", lambda: None)
+    monkeypatch.setattr(
+        "maverick_dashboard._shared.require_provider_or_400",
+        lambda **_kwargs: None,
+    )
     store.save_run(store.FlowRun(run_id="rf", flow_id="demo", status="failed",
                                  cursor="b", error="node 'b': boom"))
     seen = {}

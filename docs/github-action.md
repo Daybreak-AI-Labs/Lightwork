@@ -20,7 +20,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: Day-AI-Labs/Lightwork/deploy/github-action@<reviewed-full-40-character-commit-sha>
+      - uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<reviewed-full-40-character-commit-sha>
         with:
           goal: ${{ inputs.goal }}
           max-dollars: "0.50"

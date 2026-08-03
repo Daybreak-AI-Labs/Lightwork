@@ -142,7 +142,7 @@ def test_the_token_starts_at_one_on_a_fresh_root(tmp_path) -> None:
 def test_the_holder_record_is_readable_by_another_process(tmp_path) -> None:
     """The refusal message is only useful if the record is parseable."""
     held = lease.acquire()
-    data = json.loads(lease.lock_path().read_text(encoding="utf-8"))
+    data = json.loads(lease.holder_path().read_text(encoding="utf-8"))
     assert data["pid"] == os.getpid()
     assert data["fencing_token"] == held.fencing_token
     assert data["role"] == "control-plane"
@@ -206,8 +206,19 @@ def test_posture_distinguishes_owned_from_unknown(tmp_path) -> None:
 
 def test_posture_never_raises_on_a_corrupt_record(tmp_path) -> None:
     """/metrics and /readyz are reached when things are already wrong."""
-    lease.lock_path().write_text("{not json", encoding="utf-8")
+    lease.holder_path().write_text("{not json", encoding="utf-8")
     assert lease.posture()["state"] == "unknown"
+
+
+def test_acquire_refuses_to_reset_a_corrupt_fencing_record(tmp_path) -> None:
+    """Corruption cannot silently turn a mature deployment back into token 1."""
+    record = lease.holder_path()
+    record.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(lease.LeaseUnavailable, match="fencing token cannot be proven"):
+        lease.acquire()
+
+    assert record.read_text(encoding="utf-8") == "{not json"
 
 
 def test_acquire_is_idempotent_within_a_process(tmp_path) -> None:
@@ -225,12 +236,21 @@ def test_a_filesystem_without_locking_refuses_to_start(tmp_path, monkeypatch) ->
     mean shipping the exact corruption this module exists to prevent, while
     reporting single-writer safety on /readyz.
     """
-    import fcntl
-
     def _enolck(fd, op):
         raise OSError(38, "Function not implemented")
 
-    monkeypatch.setattr(fcntl, "flock", _enolck)
+    if os.name == "nt":
+        import msvcrt
+
+        monkeypatch.setattr(
+            msvcrt,
+            "locking",
+            lambda fd, mode, n: _enolck(fd, mode),
+        )
+    else:
+        import fcntl
+
+        monkeypatch.setattr(fcntl, "flock", _enolck)
     with pytest.raises(lease.LeaseUnavailable) as exc:
         lease.acquire()
     assert "cannot provide advisory locking" in str(exc.value)
@@ -247,12 +267,21 @@ def test_a_contended_lock_is_not_mistaken_for_a_broken_filesystem(
     two would turn every second replica into a filesystem bug report.
     """
     import errno as _errno
-    import fcntl
 
-    def _eagain(fd, op):
-        raise OSError(_errno.EAGAIN, "Resource temporarily unavailable")
+    if os.name == "nt":
+        import msvcrt
 
-    monkeypatch.setattr(fcntl, "flock", _eagain)
+        def _contended(fd, mode, n):
+            raise OSError(_errno.EACCES, "Permission denied")
+
+        monkeypatch.setattr(msvcrt, "locking", _contended)
+    else:
+        import fcntl
+
+        def _contended(fd, op):
+            raise OSError(_errno.EAGAIN, "Resource temporarily unavailable")
+
+        monkeypatch.setattr(fcntl, "flock", _contended)
     with pytest.raises(lease.ControlPlaneBusy):
         lease.acquire()
 

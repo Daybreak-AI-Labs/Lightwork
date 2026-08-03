@@ -26,7 +26,13 @@ from maverick.world_model import WorldModel
 
 @pytest.fixture(autouse=True)
 def _clear_quota_env(monkeypatch):
-    """Start each test with no quota config leaking in from the environment."""
+    """Start each test with no quota config leaking in from the environment.
+
+    These tests deliberately meter the synthetic ``fake:test`` model.  It has
+    no vendor rate-card evidence, so opt this test-only gateway into the
+    product's explicit estimate-only compatibility mode.  Production billing
+    remains strict by default and is covered by the pricing-provider suite.
+    """
     for env in (
         "MAVERICK_QUOTA_ENFORCE",
         "MAVERICK_QUOTA_MAX_DOLLARS_PER_DAY",
@@ -34,6 +40,7 @@ def _clear_quota_env(monkeypatch):
         "MAVERICK_TENANT",
     ):
         monkeypatch.delenv(env, raising=False)
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "false")
 
 
 def _final_script(make_llm_response):

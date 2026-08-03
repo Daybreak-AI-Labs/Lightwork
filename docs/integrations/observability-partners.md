@@ -7,7 +7,7 @@ surfaces that already ship: the OpenRouter provider in the 12-provider router
 providers. Everything here is self-serve configuration — see the
 [partnership status](#partnership-status) note at the end.
 
-Substrate, per [`FEATURES.md`](../FEATURES.md):
+Substrate, per the [platform overview](../index.md):
 
 - **OpenTelemetry traces, Prometheus `/metrics`, Sentry** — all opt-in,
   off by default (`observability.py`).
@@ -151,5 +151,5 @@ These are **self-serve integration paths** built on generic protocols — an
 OpenRouter provider client, OTLP trace export, and OpenAI-compatible
 `base_url` overrides. No formal partnership, co-marketing arrangement, or
 endorsement with LangSmith, Helicone, OpenRouter, or any other vendor is
-implied; establishing those is maintainer/business work tracked on the
-[roadmap](../ROADMAP.md), not an engineering artifact in this repo.
+implied; establishing those is maintainer/business work tracked in product
+planning, not an engineering artifact in this repo.

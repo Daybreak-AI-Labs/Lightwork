@@ -407,6 +407,118 @@ def test_tracked_validator_accepts_exact_snapshot_after_squash_or_shallow_clone(
     assert "measured source commit is not a full Git SHA-1" in errors
 
 
+def test_control_source_snapshot_ignores_untracked_generated_python(
+    monkeypatch, tmp_path
+):
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
+    control_root = tmp_path / "controls"
+    control_root.mkdir()
+    tracked = control_root / "tracked.py"
+    tracked.write_text("VALUE = 1\n", encoding="utf-8")
+    ignored = control_root / "generated_pb2.py"
+    ignored.write_text("VALUE = 2\n", encoding="utf-8")
+    metadata = tmp_path / "pyproject.toml"
+    metadata.write_text("[tool.example]\n", encoding="utf-8")
+
+    monkeypatch.setattr(frontier, "ROOT", tmp_path)
+    monkeypatch.setattr(frontier, "CONTROL_SOURCE_ROOTS", ("controls",))
+    monkeypatch.setattr(
+        frontier, "CONTROL_SOURCE_METADATA", ("pyproject.toml",)
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", "controls/tracked.py", "pyproject.toml"],
+        check=True,
+    )
+
+    def control_snapshot():
+        return {
+            path: frontier._sha256(tmp_path / path)
+            for path in frontier._control_source_paths()
+        }
+
+    before = control_snapshot()
+    ignored.write_text("VALUE = 'host-local drift'\n", encoding="utf-8")
+    after = control_snapshot()
+
+    assert frontier._control_source_paths() == (
+        "controls/tracked.py",
+        "pyproject.toml",
+    )
+    assert before == after
+
+
+def test_control_source_snapshot_does_not_borrow_unrelated_parent_git(
+    monkeypatch, tmp_path
+):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    subprocess.run(["git", "init", "--quiet", str(parent)], check=True)
+    archive = parent / "archive"
+    controls = archive / "controls"
+    controls.mkdir(parents=True)
+    (controls / "tracked.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (controls / "generated.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (archive / "pyproject.toml").write_text("[tool.example]\n", encoding="utf-8")
+
+    monkeypatch.setattr(frontier, "ROOT", archive)
+    monkeypatch.setattr(frontier, "CONTROL_SOURCE_ROOTS", ("controls",))
+    monkeypatch.setattr(
+        frontier, "CONTROL_SOURCE_METADATA", ("pyproject.toml",)
+    )
+
+    assert frontier._git_repository_root() is None
+    assert frontier._control_source_paths() == (
+        "controls/generated.py",
+        "controls/tracked.py",
+        "pyproject.toml",
+    )
+    assert frontier._git_metadata() == {
+        "commit": "",
+        "dirty": False,
+        "branch": "",
+    }
+
+
+def test_control_source_snapshot_fails_closed_on_git_index_error(
+    monkeypatch, tmp_path
+):
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
+    controls = tmp_path / "controls"
+    controls.mkdir()
+    (controls / "tracked.py").write_text("VALUE = 1\n", encoding="utf-8")
+
+    monkeypatch.setattr(frontier, "ROOT", tmp_path)
+    monkeypatch.setattr(frontier, "CONTROL_SOURCE_ROOTS", ("controls",))
+    monkeypatch.setattr(frontier, "CONTROL_SOURCE_METADATA", ())
+    real_run = subprocess.run
+
+    def fail_ls_files(args, **kwargs):
+        if args[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args, 1, stdout=b"", stderr=b"")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(frontier.subprocess, "run", fail_ls_files)
+
+    with pytest.raises(RuntimeError, match="git ls-files failed"):
+        frontier._control_source_paths()
+
+
+def test_git_metadata_fails_closed_on_status_error(monkeypatch, tmp_path):
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
+    monkeypatch.setattr(frontier, "ROOT", tmp_path)
+    real_run = subprocess.run
+
+    def fail_status(args, **kwargs):
+        if args[:3] == ["git", "status", "--porcelain"]:
+            raise subprocess.CalledProcessError(1, args)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(frontier.subprocess, "run", fail_status)
+
+    with pytest.raises(RuntimeError, match="git status --porcelain failed"):
+        frontier._git_metadata()
+
+
 def test_tracked_validator_requires_snapshot_policy(
     manifest, trusted_pubkey, monkeypatch, tmp_path
 ):

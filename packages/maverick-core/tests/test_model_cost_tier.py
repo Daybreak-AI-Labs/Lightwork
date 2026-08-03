@@ -11,7 +11,7 @@ def test_bands_track_the_real_price_table():
     assert mct.band_for("claude-opus-4-8-fast") == "very_high"
     assert mct.band_for("claude-sonnet-4-6") == "high"
     assert mct.band_for("claude-haiku-4-5") == "medium"
-    assert mct.band_for("deepseek-chat") == "low"
+    assert mct.band_for("deepseek-v4-flash") == "low"
 
 
 def test_provider_prefix_and_unknown_model():

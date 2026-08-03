@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=83.0.0"]
+requires = ["setuptools==83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -14,13 +14,12 @@ name = "maverick-agent"
 version = "0.1.7"
 description = "Recursive multi-agent swarm for long-horizon work"
 requires-python = ">=3.10"
-license = { text = "LicenseRef-Proprietary" }
+license = "LicenseRef-Proprietary"
 authors = [{ name = "cdayAI" }]
 readme = "README.md"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -39,10 +38,15 @@ dependencies = [
     "cryptography>=48.0.1",
     "idna>=3.15",
     "tomli>=2.0; python_version<'3.11'",
+    # zoneinfo has no bundled database on Windows and minimal Linux images may
+    # omit the system database. Finance off-hours rules require IANA zones.
+    "tzdata>=2026.3",
 ]
 
 [project.optional-dependencies]
 openai     = ["openai>=1.30"]
+release-runtime = ["openai>=1.30"]
+azure      = ["openai>=1.30", "azure-identity>=1.25.3,<2"]
 openrouter = ["openai>=1.30"]
 ollama     = ["openai>=1.30"]
 moonshot   = ["openai>=1.30"]
@@ -54,7 +58,7 @@ vllm       = ["openai>=1.30"]
 chroma     = ["chromadb>=0.4"]
 qdrant     = ["qdrant-client>=1.6", "fastembed>=0.3"]
 weaviate   = ["weaviate-client>=4.5"]
-postgres   = ["psycopg[binary]>=3.1"]
+postgres   = ["psycopg[binary,pool]>=3.1"]
 saml       = ["pysaml2>=7.3"]
 grpc       = ["grpcio>=1.60", "grpcio-tools>=1.60"]
 queue      = ["arq>=0.25"]
@@ -79,7 +83,7 @@ gemini-session  = ["httpx>=0.27"]
 capture         = ["playwright>=1.40"]
 browser         = ["playwright>=1.40", "lxml>=5.0"]
 computer-use    = ["pillow>=12.3.0", "mss>=9.0", "pyautogui>=0.9.54"]
-pdf             = ["pdfplumber>=0.10", "pypdf>=6.13.3"]
+pdf             = ["pdfplumber>=0.10", "pypdf>=6.14.2"]
 clipboard       = ["pyperclip>=1.8"]
 voice           = ["faster-whisper>=1.0"]
 # CLAP zero-shot audio understanding (tools/audio_understanding.py,
@@ -107,11 +111,13 @@ observability   = [
     "prometheus-client>=0.20",
 ]
 sentry          = ["sentry-sdk>=2.0"]
-shield          = ["maverick-shield"]
+shield          = ["maverick-shield>=0.1.7"]
 installer  = ["maverick-installer>=0.1.7"]
-channels   = ["maverick-channels"]
+channels   = ["maverick-channels>=0.1.7"]
+evolve     = ["maverick-evolve>=0.1.7"]
 dashboard  = ["maverick-dashboard>=0.1.7"]
-mcp        = ["maverick-mcp-server"]
+mcp        = ["maverick-mcp-server>=0.1.7"]
+knowledge  = ["maverick-knowledge>=0.1.7"]
 embeddings = ["fastembed>=0.3"]
 # Full dev/test bootstrap. Beyond the test runner + linter, this bundles the
 # cross-package runtime deps the suite imports -- the sibling packages are
@@ -140,11 +146,13 @@ dev        = [
 all        = [
     "openai>=1.30",
     "fastembed>=0.3",
-    "maverick-shield",
+    "maverick-shield>=0.1.7",
     "maverick-installer>=0.1.7",
-    "maverick-channels",
+    "maverick-channels>=0.1.7",
+    "maverick-evolve>=0.1.7",
     "maverick-dashboard>=0.1.7",
-    "maverick-mcp-server",
+    "maverick-mcp-server>=0.1.7",
+    "maverick-knowledge>=0.1.7",
 ]
 
 [project.scripts]
@@ -152,11 +160,11 @@ maverick = "maverick.cli:main"
 lightwork = "maverick.cli:main"
 
 [project.urls]
-Homepage      = "https://github.com/Day-AI-Labs/maverick"
-Repository    = "https://github.com/Day-AI-Labs/maverick"
-Issues        = "https://github.com/Day-AI-Labs/maverick/issues"
-Changelog     = "https://github.com/Day-AI-Labs/maverick/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/Day-AI-Labs/maverick/tree/main/docs"
+Homepage      = "https://github.com/Daybreak-AI-Labs/Lightwork"
+Repository    = "https://github.com/Daybreak-AI-Labs/Lightwork"
+Issues        = "https://github.com/Daybreak-AI-Labs/Lightwork/issues"
+Changelog     = "https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/Daybreak-AI-Labs/Lightwork/tree/main/docs"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -168,6 +176,6 @@ include = ["maverick*"]
 "maverick.grpc_api" = ["*.proto"]
 # Ship the domain packs and the first-party skills library as package data so
 # they are present in a built wheel, not only an editable/source checkout.
-"maverick" = ["domains/*.toml", "skills_builtin/*.md"]
+"maverick" = ["data/*.json", "domains/*.toml", "skills_builtin/*.md"]
 "maverick.env_hunt" = ["rules/*.yml"]
 "maverick.training" = ["environment_packs/*.ndjson", "environment_packs/*.json", "specialist_models.v1.json"]

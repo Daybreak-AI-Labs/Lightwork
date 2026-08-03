@@ -7,6 +7,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **AI Evidence-Ready Gateway and operator cockpit** — governed evidence intake,
+  review queues, readiness/health visibility, and first-run guidance now share
+  one operator-facing workflow with durable audit checkpoints.
+- **Governance Frontier benchmark publication** — the public report now ships
+  beside its exact measured manifest, separately trusted Ed25519 publisher key,
+  and a standalone verifier with tamper/ambiguity rejection.
+- **Lockstep release-cohort delivery** — all eight Python distributions are
+  validated and resolved together from one manifest across frozen binaries,
+  containers, installers, CI integrations, and SBOM generation; release-runtime
+  provider support and constrained dependency versions are checked before
+  artifacts are published.
 - **DPO preference-pair mining from real runs** — the offline DPO fine-tune
   (`maverick.training.rlaif`) now has two objective sources of a quality
   gradient, both built from donated run records (no hand-labels): a
@@ -322,7 +333,7 @@ The launch-hardening pass that landed just after the 0.1.3 tag was cut.
   orchestrator E2E test, channel adapter smoke tests, /chat/goal
   user-friendly labels, multi-line REPL.
 
-## [Unreleased] -- v0.1.0-alpha
+## [0.1.0-alpha]
 
 First public release. Lightwork combines [Lightwork Agent](https://github.com/cdayAI/research/tree/main/maverick) (recursive multi-agent swarm)
 and [Agent Shield](https://github.com/cdayAI/agent-shield) (safety detection)

@@ -137,6 +137,40 @@ def test_group_patch_member_sync(client):
     assert r.status_code == 400
 
 
+def test_group_patch_blank_no_path_name_is_scim_400_and_preserves_group(client):
+    from maverick_dashboard import scim
+
+    gid = _mk_group(client, "Keep This Name")
+    before = scim._groups_path().read_bytes()
+    response = client.patch(
+        f"/scim/v2/Groups/{gid}",
+        json={
+            "schemas": [_PATCH_SCHEMA],
+            "Operations": [
+                {
+                    "op": "replace",
+                    "value": {"displayName": "   "},
+                }
+            ],
+        },
+        headers=_auth(),
+    )
+
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("application/scim+json")
+    assert response.json() == {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
+        "detail": "displayName is required",
+        "status": "400",
+        "scimType": "invalidValue",
+    }
+    assert scim._groups_path().read_bytes() == before
+    assert not scim._group_audit_outbox_path().exists()
+    stored = client.get(f"/scim/v2/Groups/{gid}", headers=_auth())
+    assert stored.status_code == 200
+    assert stored.json()["displayName"] == "Keep This Name"
+
+
 def test_groups_require_bearer(client):
     assert _client().get("/scim/v2/Groups").status_code == 401
     r = _client().get("/scim/v2/Groups",
@@ -455,10 +489,327 @@ def test_group_membership_changes_are_audited(client, monkeypatch, tmp_path):
     for f in sorted((tmp_path / "audit").glob("*.ndjson")):
         rows += [_json.loads(x) for x in f.read_text().splitlines() if x.strip()]
     access = [r for r in rows if r.get("kind") == "access_grant_changed"]
-    # create(add a) + patch(add b) + delete(remove a, b) = 4 membership rows.
-    assert len(access) == 4
-    assert all(r["field"] == "group_membership" and r["actor"] == "scim"
-               for r in access)
+    # One atomic row per mutation, not one independently-acknowledged row per
+    # member. A multi-member delete therefore cannot leave a partial audit
+    # claim if the mutation itself is refused or retried.
+    assert len(access) == 3
+    assert [row["operation"] for row in access] == ["create", "patch", "delete"]
+    assert all(
+        row["field"] == "scim_group_authority"
+        and row["actor"] == "scim"
+        and row["scope"] == "deployment"
+        and row["tenant"] == ""
+        and row["group_id"] == gid
+        and row["scim_group_event_id"].startswith("scim-group-")
+        for row in access
+    )
+    assert len({row["scim_group_event_id"] for row in access}) == 3
+    create, patch, delete = access
+    assert create["old_name"] is None
+    assert create["new_name"] == "Team"
+    assert create["added_members"] == [a]
+    assert create["added_count"] == 1
+    assert create["removed_members"] == []
+    assert patch["old_name"] == patch["new_name"] == "Team"
+    assert patch["added_members"] == [b]
+    assert patch["new_members"] == sorted([a, b])
+    assert delete["old_name"] == "Team"
+    assert delete["new_name"] is None
+    assert delete["removed_members"] == sorted([a, b])
+    assert delete["removed_count"] == 2
+    assert all(
+        len(row[f"{label}_members_sha256"]) == 64
+        for row in access
+        for label in ("added", "removed", "old", "new")
+    )
+
+
+@pytest.mark.parametrize("failure_mode", ["false", "refused"])
+def test_group_audit_failure_returns_scim_503_without_effective_access(
+    client,
+    monkeypatch,
+    failure_mode,
+):
+    import maverick.audit as audit
+    from maverick_dashboard import scim, scim_groups
+
+    uid = _mk_user(client, "atomic@x.com", external_id="oid-atomic")
+    _map_groups(
+        monkeypatch,
+        roles={"Finance Admins": "operator"},
+        suites={"Finance Admins": ["finance"]},
+    )
+    attempted = []
+
+    def reject(kind, **payload):
+        attempted.append((kind, payload))
+        if failure_mode == "refused":
+            raise audit.AuditRefused("strict audit custody refused the append")
+        return False
+
+    monkeypatch.setattr(audit, "audit_event", reject)
+    response = client.post(
+        "/scim/v2/Groups",
+        json={
+            "schemas": [_GROUP_SCHEMA],
+            "displayName": "Finance Admins",
+            "members": [{"value": uid}],
+        },
+        headers=_auth(),
+    )
+
+    assert response.status_code == 503
+    assert response.headers["content-type"].startswith("application/scim+json")
+    assert response.json()["status"] == "503"
+    assert scim._load_groups() == {}
+    assert scim._group_audit_outbox_path().is_file()
+    assert scim_groups.group_names_for_principal("user:oid-atomic") == frozenset()
+    assert scim_groups.role_for_principal("user:oid-atomic") is None
+    assert scim_groups.suites_for_principal("user:oid-atomic") is None
+    assert len(attempted) == 1
+    _, payload = attempted[0]
+    assert payload["_global"] is True
+    assert payload["operation"] == "create"
+    assert payload["new_name"] == "Finance Admins"
+    assert payload["new_members"] == [uid]
+
+
+def test_group_audit_post_append_ambiguity_retries_exactly_once(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    import maverick.audit as audit
+    import maverick.audit.writer as writer
+    from maverick_dashboard import scim
+
+    log = writer.AuditLog(audit_dir=tmp_path / "atomic-audit", sign=False)
+    monkeypatch.setattr(writer, "_default", log)
+    monkeypatch.setattr(writer, "_defaults", {})
+    real_audit_event = audit.audit_event
+    deliveries = 0
+
+    def append_then_lose_ack(kind, **payload):
+        nonlocal deliveries
+        deliveries += 1
+        result = real_audit_event(kind, **payload)
+        if deliveries == 1:
+            raise RuntimeError("simulated acknowledgement loss after append")
+        return result
+
+    monkeypatch.setattr(audit, "audit_event", append_then_lose_ack)
+    response = client.post(
+        "/scim/v2/Groups",
+        json={"schemas": [_GROUP_SCHEMA], "displayName": "Recovery Team"},
+        headers=_auth(),
+    )
+    assert response.status_code == 503
+    assert scim._load_groups() == {}
+    assert scim._group_audit_outbox_path().is_file()
+
+    files = list((tmp_path / "atomic-audit").glob("*.ndjson"))
+    assert len(files) == 1
+    first_rows = [
+        json.loads(line)
+        for line in files[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(first_rows) == 1
+    event_id = first_rows[0]["scim_group_event_id"]
+
+    monkeypatch.setattr(audit, "audit_event", real_audit_event)
+    with scim._locked_groups():
+        assert scim._flush_group_audit_outbox() is True
+
+    committed = scim._load_groups()
+    assert len(committed) == 1
+    assert next(iter(committed.values()))["displayName"] == "Recovery Team"
+    assert not scim._group_audit_outbox_path().exists()
+    final_rows = [
+        json.loads(line)
+        for line in files[0].read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(final_rows) == 1
+    assert final_rows[0]["scim_group_event_id"] == event_id
+
+
+def test_mapped_group_rename_is_audit_gated_in_both_directions(
+    client,
+    monkeypatch,
+):
+    import maverick.audit as audit
+    from maverick_dashboard import scim, scim_groups
+
+    uid = _mk_user(client, "rename@x.com", external_id="oid-rename")
+    gid = _mk_group(client, "Unmapped", [uid])
+    _map_groups(
+        monkeypatch,
+        roles={"Privileged": "operator"},
+        suites={"Privileged": ["finance"]},
+    )
+    attempted = []
+
+    def reject(kind, **payload):
+        attempted.append((kind, payload))
+        return False
+
+    monkeypatch.setattr(audit, "audit_event", reject)
+    into = client.patch(
+        f"/scim/v2/Groups/{gid}",
+        json={
+            "schemas": [_PATCH_SCHEMA],
+            "Operations": [
+                {"op": "replace", "path": "displayName", "value": "Privileged"}
+            ],
+        },
+        headers=_auth(),
+    )
+    assert into.status_code == 503
+    assert scim_groups.group_names_for_principal("user:oid-rename") == frozenset(
+        {"Unmapped"}
+    )
+    assert scim_groups.role_for_principal("user:oid-rename") is None
+    assert scim_groups.suites_for_principal("user:oid-rename") is None
+    assert attempted[-1][1]["old_name"] == "Unmapped"
+    assert attempted[-1][1]["new_name"] == "Privileged"
+    assert attempted[-1][1]["added_members"] == []
+    assert attempted[-1][1]["removed_members"] == []
+
+    acknowledged = []
+
+    def accept(kind, **payload):
+        acknowledged.append((kind, payload))
+        return True
+
+    monkeypatch.setattr(audit, "audit_event", accept)
+    with scim._locked_groups():
+        assert scim._flush_group_audit_outbox() is True
+    assert scim_groups.role_for_principal("user:oid-rename") == "operator"
+    assert scim_groups.suites_for_principal("user:oid-rename") == frozenset(
+        {"finance"}
+    )
+
+    monkeypatch.setattr(audit, "audit_event", reject)
+    out_of = client.patch(
+        f"/scim/v2/Groups/{gid}",
+        json={
+            "schemas": [_PATCH_SCHEMA],
+            "Operations": [
+                {"op": "replace", "path": "displayName", "value": "Unmapped"}
+            ],
+        },
+        headers=_auth(),
+    )
+    assert out_of.status_code == 503
+    assert scim_groups.role_for_principal("user:oid-rename") == "operator"
+    assert scim_groups.suites_for_principal("user:oid-rename") == frozenset(
+        {"finance"}
+    )
+    assert attempted[-1][1]["old_name"] == "Privileged"
+    assert attempted[-1][1]["new_name"] == "Unmapped"
+
+    monkeypatch.setattr(audit, "audit_event", accept)
+    with scim._locked_groups():
+        assert scim._flush_group_audit_outbox() is True
+    assert scim_groups.group_names_for_principal("user:oid-rename") == frozenset(
+        {"Unmapped"}
+    )
+    assert scim_groups.role_for_principal("user:oid-rename") is None
+    assert scim_groups.suites_for_principal("user:oid-rename") is None
+    assert [payload["operation"] for _, payload in acknowledged] == [
+        "patch",
+        "patch",
+    ]
+
+
+def test_group_replace_audits_complete_authority_delta(client, monkeypatch):
+    import maverick.audit as audit
+
+    a = _mk_user(client, "replace-a@x.com")
+    b = _mk_user(client, "replace-b@x.com")
+    gid = _mk_group(client, "Before", [a])
+    events = []
+
+    def accept(kind, **payload):
+        events.append((kind, payload))
+        return True
+
+    monkeypatch.setattr(audit, "audit_event", accept)
+    response = client.put(
+        f"/scim/v2/Groups/{gid}",
+        json={
+            "schemas": [_GROUP_SCHEMA],
+            "displayName": "After",
+            "members": [{"value": b}],
+        },
+        headers=_auth(),
+    )
+    assert response.status_code == 200
+    assert len(events) == 1
+    _, payload = events[0]
+    assert payload["operation"] == "replace"
+    assert payload["old_name"] == "Before"
+    assert payload["new_name"] == "After"
+    assert payload["old_members"] == [a]
+    assert payload["new_members"] == [b]
+    assert payload["added_members"] == [b]
+    assert payload["removed_members"] == [a]
+
+
+def test_large_group_audit_uses_bounded_privacy_commitments():
+    from maverick_dashboard import scim
+
+    members = [f"{index:032x}" for index in range(129)]
+    payload = scim._group_audit_payload(
+        event_id=f"scim-group-{'0' * 32}",
+        operation="create",
+        group_id="f" * 32,
+        occurred_at=1.0,
+        old_authority=None,
+        new_authority={"displayName": "Large Group", "members": members},
+    )
+    assert payload["new_count"] == 129
+    assert payload["added_count"] == 129
+    assert payload["new_members"] is None
+    assert payload["added_members"] is None
+    assert len(payload["new_members_sha256"]) == 64
+    assert len(payload["added_members_sha256"]) == 64
+    assert len(json.dumps(payload, sort_keys=True)) < 2_000
+
+
+def test_group_audit_forces_deployment_scope_inside_tenant(
+    monkeypatch,
+    tmp_path,
+):
+    import maverick.audit.writer as writer
+    from maverick.paths import tenant_scope
+    from maverick_dashboard import scim
+
+    root_audit = tmp_path / "audit"
+    monkeypatch.setattr(writer, "_default", writer.AuditLog(root_audit, sign=False))
+    monkeypatch.setattr(writer, "_defaults", {})
+    event = scim._group_audit_payload(
+        event_id=f"scim-group-{'1' * 32}",
+        operation="create",
+        group_id="a" * 32,
+        occurred_at=1.0,
+        old_authority=None,
+        new_authority={"displayName": "Global Group", "members": []},
+    )
+    with tenant_scope(tenant="tenant-a"):
+        assert scim._emit_group_audit_event(event) is True
+
+    rows = [
+        json.loads(line)
+        for path in root_audit.glob("*.ndjson")
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(rows) == 1
+    assert rows[0]["tenant"] == ""
+    assert rows[0]["scope"] == "deployment"
+    assert not (tmp_path / "tenants" / "tenant-a" / "audit").exists()
 
 
 def test_string_group_suites_is_one_suite_not_unrestricted(client, monkeypatch):

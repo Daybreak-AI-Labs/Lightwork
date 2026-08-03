@@ -999,8 +999,8 @@ def base_registry(
     reg.register(diagnose())
     reg.register(differential_privacy())
     if enable_mobile_tools:
-        reg.register(android())
-        reg.register(ios_sim())
+        reg.register(android(sandbox))
+        reg.register(ios_sim(sandbox))
     reg.register(spend_report())
     reg.register(budget_status(budget=budget))
     reg.register(test_impact())
@@ -1448,11 +1448,17 @@ def _register_optional_tools(
 
 def _apply_tool_acl(reg: ToolRegistry, *, channel: str | None, user_id: str | None) -> None:
     # Apply allow/deny lists from ~/.maverick/config.toml [security].
-    # Fail-soft: any error here is logged and the registry is left
-    # untouched.
+    # Operational discovery errors remain fail-soft, but an unreadable
+    # operator policy must stop registry construction. Swallowing that
+    # security error would leave every tool registered after a deny-list
+    # became corrupt.
+    from ..runtime_overrides import RuntimeOverridesSecurityError
+
     try:
         from ..safety.tool_acl import apply_to_registry
         apply_to_registry(reg, channel=channel, user_id=user_id)
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception as e:  # pragma: no cover
         import logging as _logging
         _logging.getLogger(__name__).warning("tool_acl: %s", e)

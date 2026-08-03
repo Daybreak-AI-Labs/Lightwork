@@ -24,6 +24,7 @@ per-user hand assignment.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import hmac
 import json
@@ -128,6 +129,10 @@ _MAX_RECORDS = 100_000
 _MAX_ID_CHARS = 1024
 _MAX_TEXT_CHARS = 16_384
 _MAX_TIMESTAMP = 253_402_300_799.0  # 9999-12-31T23:59:59Z
+_GROUP_AUDIT_OUTBOX_SCHEMA = "lightwork.scim-group-audit-outbox.v1"
+_GROUP_AUDIT_INLINE_MEMBER_LIMIT = 128
+_GROUP_AUDIT_OUTBOX_MAX_CHARS = (_MAX_STORE_CHARS * 3) + (256 * 1024)
+_GROUP_AUDIT_OPERATIONS = frozenset({"create", "replace", "patch", "delete"})
 _USER_FIELDS = frozenset({
     "id", "userName", "externalId", "displayName", "givenName",
     "familyName", "email", "active", "created_at", "updated_at",
@@ -144,6 +149,15 @@ class ScimStoreError(RuntimeError):
     A file that exists but is unreadable, malformed, or schema-invalid must
     never be interpreted as empty: doing so can discard deprovisioning state or
     let group-derived authorization fall through to permissive defaults.
+    """
+
+
+class ScimAuditPendingError(ScimStoreError):
+    """A SCIM access mutation is durable but not yet audit-acknowledged.
+
+    The active group store remains at the prior revision. The caller receives
+    503 and may retry; the stable outbox identity makes a retry safe even when
+    the first append succeeded but its acknowledgement was lost.
     """
 
 
@@ -173,7 +187,12 @@ def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _read_store(path: Path, kind: str) -> dict | None:
+def _read_store(
+    path: Path,
+    kind: str,
+    *,
+    max_chars: int = _MAX_STORE_CHARS,
+) -> dict | None:
     """Read strict JSON, distinguishing a missing store from a damaged one."""
     try:
         ensure_private_directory(maverick_home())
@@ -183,7 +202,7 @@ def _read_store(path: Path, kind: str) -> dict | None:
         return None
     except OSError as e:
         raise ScimStoreError(f"SCIM {kind} store unreadable: {e}") from e
-    if len(raw) > _MAX_STORE_CHARS:
+    if len(raw) > max_chars:
         raise ScimStoreError(f"SCIM {kind} store exceeds the size limit")
     try:
         decoded = json.loads(
@@ -836,7 +855,7 @@ def _load_groups() -> dict[str, dict]:
     return {} if raw is None else _validated_groups(raw)
 
 
-def _save_groups(groups: dict[str, dict]) -> None:
+def _group_store_payload(groups: dict[str, dict]) -> dict[str, list[dict]]:
     if not isinstance(groups, dict) or any(not isinstance(k, str) for k in groups):
         raise ScimStoreError("SCIM groups must be an object keyed by id")
     payload = {"groups": [groups[k] for k in sorted(groups)]}
@@ -845,8 +864,418 @@ def _save_groups(groups: dict[str, dict]) -> None:
         validated[k].get("id") != k for k in groups
     ):
         raise ScimStoreError("SCIM group store keys do not match record ids")
+    return payload
+
+
+def _save_groups(groups: dict[str, dict]) -> None:
+    payload = _group_store_payload(groups)
     ensure_private_directory(maverick_home())
     atomic_write_text(_groups_path(), json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _group_state_digest(groups: dict[str, dict]) -> str:
+    payload = _group_store_payload(groups)
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _group_audit_outbox_path() -> Path:
+    """Deployment-global SCIM authority outbox.
+
+    The group store itself is deployment-global because one SCIM IdP provisions
+    the tenant roster. Keeping the outbox beside it prevents an ambient tenant
+    context from splitting one mutation across tenant audit namespaces.
+    """
+    return maverick_home() / "scim_groups.audit-outbox.json"
+
+
+def _authority_snapshot(record: dict | None) -> dict | None:
+    if record is None:
+        return None
+    return {
+        "displayName": str(record.get("displayName") or ""),
+        "members": sorted(set(record.get("members") or [])),
+    }
+
+
+def _validated_authority_snapshot(value: object, label: str) -> dict | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"displayName", "members"}:
+        raise ScimStoreError(f"SCIM group audit outbox has invalid {label} snapshot")
+    display_name = value.get("displayName")
+    members = value.get("members")
+    if (
+        not isinstance(display_name, str)
+        or not display_name
+        or display_name != display_name.strip()
+        or len(display_name) > _MAX_TEXT_CHARS
+        or not isinstance(members, list)
+        or len(members) > _MAX_RECORDS
+    ):
+        raise ScimStoreError(f"SCIM group audit outbox has invalid {label} snapshot")
+    if any(
+        not isinstance(member, str)
+        or len(member) != 32
+        or any(char not in "0123456789abcdef" for char in member)
+        for member in members
+    ):
+        raise ScimStoreError(
+            f"SCIM group audit outbox has invalid {label} member identity"
+        )
+    if members != sorted(members) or len(set(members)) != len(members):
+        raise ScimStoreError(f"SCIM group audit outbox has invalid {label} snapshot")
+    return {"displayName": display_name, "members": list(members)}
+
+
+def _member_set_commitment(
+    event_id: str,
+    label: str,
+    members: list[str],
+) -> str:
+    canonical = json.dumps(
+        {
+            "schema": "lightwork.scim-group-member-set.v1",
+            "event_id": event_id,
+            "label": label,
+            "members": members,
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _member_set_payload(
+    event_id: str,
+    label: str,
+    members: set[str],
+) -> dict[str, object]:
+    ordered = sorted(members)
+    inline = (
+        ordered
+        if len(ordered) <= _GROUP_AUDIT_INLINE_MEMBER_LIMIT
+        else None
+    )
+    return {
+        f"{label}_count": len(ordered),
+        f"{label}_members": inline,
+        f"{label}_members_sha256": _member_set_commitment(
+            event_id,
+            label,
+            ordered,
+        ),
+    }
+
+
+def _group_audit_payload(
+    *,
+    event_id: str,
+    operation: str,
+    group_id: str,
+    occurred_at: float,
+    old_authority: dict | None,
+    new_authority: dict | None,
+) -> dict[str, object]:
+    old_members = set((old_authority or {}).get("members") or [])
+    new_members = set((new_authority or {}).get("members") or [])
+    added = new_members - old_members
+    removed = old_members - new_members
+    payload: dict[str, object] = {
+        "scim_group_event_id": event_id,
+        "occurred_at": occurred_at,
+        "actor": "scim",
+        "principal": f"scim-group:{group_id}",
+        "field": "scim_group_authority",
+        "tenant": "",
+        "scope": "deployment",
+        "operation": operation,
+        "group_id": group_id,
+        "old_name": (old_authority or {}).get("displayName"),
+        "new_name": (new_authority or {}).get("displayName"),
+    }
+    payload.update(_member_set_payload(event_id, "added", added))
+    payload.update(_member_set_payload(event_id, "removed", removed))
+    payload.update(_member_set_payload(event_id, "old", old_members))
+    payload.update(_member_set_payload(event_id, "new", new_members))
+    return payload
+
+
+def _group_audit_outbox_record(
+    prior: dict[str, dict],
+    target: dict[str, dict],
+    *,
+    operation: str,
+    group_id: str,
+) -> dict[str, object]:
+    if operation not in _GROUP_AUDIT_OPERATIONS:
+        raise ScimStoreError("unsupported SCIM group audit operation")
+    old_authority = _authority_snapshot(prior.get(group_id))
+    new_authority = _authority_snapshot(target.get(group_id))
+    if (
+        (operation == "create" and (old_authority is not None or new_authority is None))
+        or (operation == "delete" and (old_authority is None or new_authority is not None))
+        or (
+            operation in {"replace", "patch"}
+            and (old_authority is None or new_authority is None)
+        )
+    ):
+        raise ScimStoreError("SCIM group audit operation does not match its state")
+    event_id = f"scim-group-{uuid.uuid4().hex}"
+    occurred_at = time.time()
+    event = _group_audit_payload(
+        event_id=event_id,
+        operation=operation,
+        group_id=group_id,
+        occurred_at=occurred_at,
+        old_authority=old_authority,
+        new_authority=new_authority,
+    )
+    return {
+        "schema": _GROUP_AUDIT_OUTBOX_SCHEMA,
+        "event_id": event_id,
+        "operation": operation,
+        "occurred_at": occurred_at,
+        "prior_sha256": _group_state_digest(prior),
+        "target_sha256": _group_state_digest(target),
+        "old_authority": old_authority,
+        "new_authority": new_authority,
+        "event": event,
+        "target": _group_store_payload(target),
+    }
+
+
+def _validated_group_audit_outbox(
+    raw: dict,
+    current: dict[str, dict],
+) -> tuple[dict[str, object], dict[str, dict]]:
+    fields = {
+        "schema",
+        "event_id",
+        "operation",
+        "occurred_at",
+        "prior_sha256",
+        "target_sha256",
+        "old_authority",
+        "new_authority",
+        "event",
+        "target",
+    }
+    if set(raw) != fields or raw.get("schema") != _GROUP_AUDIT_OUTBOX_SCHEMA:
+        raise ScimStoreError("SCIM group audit outbox has an invalid schema")
+    event_id = raw.get("event_id")
+    operation = raw.get("operation")
+    occurred_at = raw.get("occurred_at")
+    prior_sha256 = raw.get("prior_sha256")
+    target_sha256 = raw.get("target_sha256")
+    if (
+        not isinstance(event_id, str)
+        or not event_id.startswith("scim-group-")
+        or len(event_id) != 43
+        or any(char not in "0123456789abcdef" for char in event_id[11:])
+        or operation not in _GROUP_AUDIT_OPERATIONS
+        or isinstance(occurred_at, bool)
+        or not isinstance(occurred_at, (int, float))
+        or not math.isfinite(occurred_at)
+        or not 0 <= occurred_at <= _MAX_TIMESTAMP
+        or not isinstance(prior_sha256, str)
+        or len(prior_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in prior_sha256)
+        or not isinstance(target_sha256, str)
+        or len(target_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in target_sha256)
+    ):
+        raise ScimStoreError("SCIM group audit outbox metadata is invalid")
+    target_raw = raw.get("target")
+    if not isinstance(target_raw, dict):
+        raise ScimStoreError("SCIM group audit outbox target is invalid")
+    target = _validated_groups(target_raw)
+    if _group_state_digest(target) != target_sha256:
+        raise ScimStoreError("SCIM group audit outbox target digest is invalid")
+
+    event = raw.get("event")
+    if not isinstance(event, dict):
+        raise ScimStoreError("SCIM group audit outbox event is invalid")
+    group_id = event.get("group_id")
+    if (
+        not isinstance(group_id, str)
+        or len(group_id) != 32
+        or any(char not in "0123456789abcdef" for char in group_id)
+    ):
+        raise ScimStoreError("SCIM group audit outbox group identity is invalid")
+    old_authority = _validated_authority_snapshot(
+        raw.get("old_authority"),
+        "old",
+    )
+    new_authority = _validated_authority_snapshot(
+        raw.get("new_authority"),
+        "new",
+    )
+    if (
+        (operation == "create" and (old_authority is not None or new_authority is None))
+        or (operation == "delete" and (old_authority is None or new_authority is not None))
+        or (
+            operation in {"replace", "patch"}
+            and (old_authority is None or new_authority is None)
+        )
+    ):
+        raise ScimStoreError(
+            "SCIM group audit operation does not match its authority snapshots"
+        )
+    expected_event = _group_audit_payload(
+        event_id=event_id,
+        operation=str(operation),
+        group_id=group_id,
+        occurred_at=float(occurred_at),
+        old_authority=old_authority,
+        new_authority=new_authority,
+    )
+    if event != expected_event:
+        raise ScimStoreError("SCIM group audit outbox event does not match its state")
+    if _authority_snapshot(target.get(group_id)) != new_authority:
+        raise ScimStoreError("SCIM group audit outbox target group is inconsistent")
+
+    current_sha256 = _group_state_digest(current)
+    if current_sha256 not in {prior_sha256, target_sha256}:
+        raise ScimStoreError(
+            "SCIM group state diverged from its pending audit transaction"
+        )
+    if current_sha256 == prior_sha256:
+        if _authority_snapshot(current.get(group_id)) != old_authority:
+            raise ScimStoreError("SCIM group audit outbox prior group is inconsistent")
+        changed = {
+            candidate
+            for candidate in set(current) | set(target)
+            if current.get(candidate) != target.get(candidate)
+        }
+        if changed != {group_id}:
+            raise ScimStoreError(
+                "SCIM group audit outbox changes more than one group"
+            )
+    normalized = dict(raw)
+    normalized["occurred_at"] = float(occurred_at)
+    normalized["old_authority"] = old_authority
+    normalized["new_authority"] = new_authority
+    normalized["event"] = expected_event
+    return normalized, target
+
+
+def _load_group_audit_outbox(
+    current: dict[str, dict],
+) -> tuple[dict[str, object], dict[str, dict]] | None:
+    raw = _read_store(
+        _group_audit_outbox_path(),
+        "group audit outbox",
+        max_chars=_GROUP_AUDIT_OUTBOX_MAX_CHARS,
+    )
+    if raw is None:
+        return None
+    return _validated_group_audit_outbox(raw, current)
+
+
+def _emit_group_audit_event(event: dict[str, object]) -> bool:
+    """Deliver one deployment-global, append-once SCIM authority event."""
+    from maverick.audit import EventKind, audit_event
+
+    return audit_event(
+        EventKind.ACCESS_GRANT_CHANGED,
+        agent="scim",
+        _global=True,
+        **event,
+    )
+
+
+def _flush_group_audit_outbox() -> bool:
+    """Acknowledge then publish one staged SCIM group mutation.
+
+    The active group file remains unchanged until the append-once event returns
+    True. The outbox survives every uncertain outcome, so a retry converges
+    safely whether the first append failed, was refused, or succeeded just
+    before the process lost its acknowledgement.
+    """
+    current = _load_groups()
+    loaded = _load_group_audit_outbox(current)
+    if loaded is None:
+        return True
+    pending, target = loaded
+    try:
+        acknowledged = _emit_group_audit_event(dict(pending["event"]))
+    except Exception as exc:
+        raise ScimAuditPendingError(
+            "SCIM group access audit is pending; mutation was not published"
+        ) from exc
+    if acknowledged is not True:
+        raise ScimAuditPendingError(
+            "SCIM group access audit was not acknowledged; mutation was not published"
+        )
+
+    target_sha256 = str(pending["target_sha256"])
+    if _group_state_digest(current) != target_sha256:
+        try:
+            _save_groups(target)
+        except Exception as exc:
+            try:
+                published = _group_state_digest(_load_groups()) == target_sha256
+            except Exception:
+                published = False
+            if not published:
+                raise ScimAuditPendingError(
+                    "SCIM group access audit was acknowledged; publication is pending"
+                ) from exc
+    if _group_state_digest(_load_groups()) != target_sha256:
+        raise ScimAuditPendingError(
+            "SCIM group access audit was acknowledged; publication is unverified"
+        )
+    try:
+        _group_audit_outbox_path().unlink(missing_ok=True)
+    except OSError as exc:
+        # State is effective only after acknowledgement, but keep the 503
+        # ambiguity explicit until the durable retry marker can be retired.
+        raise ScimAuditPendingError(
+            "SCIM group mutation committed; audit cleanup is pending"
+        ) from exc
+    return True
+
+
+def _save_groups_with_audit(
+    groups: dict[str, dict],
+    prior: dict[str, dict],
+    *,
+    operation: str,
+    group_id: str,
+) -> None:
+    """Stage one group revision, append one batch event, then publish it."""
+    if _group_audit_outbox_path().exists():
+        raise ScimAuditPendingError(
+            "a prior SCIM group audit transaction requires recovery"
+        )
+    pending = _group_audit_outbox_record(
+        prior,
+        groups,
+        operation=operation,
+        group_id=group_id,
+    )
+    # Validate the exact persisted form before it becomes the recovery
+    # authority. This also proves the event and target bind to the prior state.
+    _validated_group_audit_outbox(pending, prior)
+    atomic_write_text(
+        _group_audit_outbox_path(),
+        json.dumps(pending, indent=2, sort_keys=True),
+    )
+    _flush_group_audit_outbox()
+
+
+def _load_effective_groups() -> dict[str, dict]:
+    """Load the published authorization state and validate any retry marker."""
+    groups = _load_groups()
+    _load_group_audit_outbox(groups)
+    return groups
 
 
 def _group_name_taken(groups: dict[str, dict], name: str, exclude_gid: str) -> bool:
@@ -859,27 +1288,6 @@ def _group_name_taken(groups: dict[str, dict], name: str, exclude_gid: str) -> b
     folded = (name or "").strip().casefold()
     return any(gid != exclude_gid and g.get("displayName", "").casefold() == folded
                for gid, g in groups.items())
-
-
-def _audit_group_membership(group_name: str, added, removed) -> None:
-    """One tamper-evident row per membership delta, so an IdP-driven access
-    change (add/remove a user from a mapped group) is provable, not a silent
-    JSON edit — mirroring the rbac / suite-grant mutators. Fail-soft: an audit
-    error never blocks the SCIM sync."""
-    if not added and not removed:
-        return
-    try:
-        from maverick.audit import EventKind, record
-        for uid in sorted(added):
-            record(EventKind.ACCESS_GRANT_CHANGED, agent="scim", actor="scim",
-                   principal=str(uid), field="group_membership", tenant="",
-                   old=None, new=group_name)
-        for uid in sorted(removed):
-            record(EventKind.ACCESS_GRANT_CHANGED, agent="scim", actor="scim",
-                   principal=str(uid), field="group_membership", tenant="",
-                   old=group_name, new=None)
-    except Exception:  # pragma: no cover -- audit must never break SCIM sync
-        pass
 
 
 def _member_ids(value) -> list[str]:
@@ -930,7 +1338,7 @@ def _to_scim_group(rec: dict) -> dict:
 async def list_groups(request: Request):
     if (err := _authorize(request)) is not None:
         return err
-    groups = _load_groups()
+    groups = _load_effective_groups()
     resources = [_to_scim_group(g) for g in (groups[k] for k in sorted(groups))]
     flt = request.query_params.get("filter", "").strip()
     if flt:
@@ -960,14 +1368,26 @@ async def create_group(request: Request):
         return _scim_error(400, "displayName is required", scim_type="invalidValue")
     gid = uuid.uuid4().hex
     rec = _group_from_resource(resource, gid=gid)
-    with _locked_groups():
-        groups = _load_groups()
-        if _group_name_taken(groups, display, gid):
-            return _scim_error(409, f"group {display!r} already exists",
-                               scim_type="uniqueness")
-        groups[gid] = rec
-        _save_groups(groups)
-    _audit_group_membership(display, added=set(rec["members"]), removed=set())
+    try:
+        with _locked_groups():
+            _flush_group_audit_outbox()
+            groups = _load_groups()
+            if _group_name_taken(groups, display, gid):
+                return _scim_error(409, f"group {display!r} already exists",
+                                   scim_type="uniqueness")
+            prior = copy.deepcopy(groups)
+            groups[gid] = rec
+            _save_groups_with_audit(
+                groups,
+                prior,
+                operation="create",
+                group_id=gid,
+            )
+    except ScimAuditPendingError:
+        return _scim_error(
+            503,
+            "group access audit was not acknowledged; mutation is pending",
+        )
     return JSONResponse(_to_scim_group(rec), status_code=201,
                         media_type="application/scim+json")
 
@@ -976,7 +1396,7 @@ async def create_group(request: Request):
 async def get_group(gid: str, request: Request):
     if (err := _authorize(request)) is not None:
         return err
-    rec = _load_groups().get(gid)
+    rec = _load_effective_groups().get(gid)
     if rec is None:
         return _scim_error(404, f"group {gid} not found")
     return JSONResponse(_to_scim_group(rec), media_type="application/scim+json")
@@ -987,26 +1407,35 @@ async def replace_group(gid: str, request: Request):
     if (err := _authorize(request)) is not None:
         return err
     resource = await _json_body(request)
-    with _locked_groups():
-        groups = _load_groups()
-        existing = groups.get(gid)
-        if existing is None:
-            return _scim_error(404, f"group {gid} not found")
-        rec = _group_from_resource(resource, gid=gid,
-                                   created=existing.get("created_at"))
-        if not rec["displayName"]:
-            rec["displayName"] = existing.get("displayName", "")
-        # Rename must honor the same case-insensitive uniqueness as create, or
-        # two groups share the mapping key.
-        if _group_name_taken(groups, rec["displayName"], gid):
-            return _scim_error(409, f"group {rec['displayName']!r} already exists",
-                               scim_type="uniqueness")
-        old_members = set(existing.get("members", []))
-        new_members = set(rec["members"])
-        groups[gid] = rec
-        _save_groups(groups)
-    _audit_group_membership(rec["displayName"], added=new_members - old_members,
-                            removed=old_members - new_members)
+    try:
+        with _locked_groups():
+            _flush_group_audit_outbox()
+            groups = _load_groups()
+            existing = groups.get(gid)
+            if existing is None:
+                return _scim_error(404, f"group {gid} not found")
+            rec = _group_from_resource(resource, gid=gid,
+                                       created=existing.get("created_at"))
+            if not rec["displayName"]:
+                rec["displayName"] = existing.get("displayName", "")
+            # Rename must honor the same case-insensitive uniqueness as create, or
+            # two groups share the mapping key.
+            if _group_name_taken(groups, rec["displayName"], gid):
+                return _scim_error(409, f"group {rec['displayName']!r} already exists",
+                                   scim_type="uniqueness")
+            prior = copy.deepcopy(groups)
+            groups[gid] = rec
+            _save_groups_with_audit(
+                groups,
+                prior,
+                operation="replace",
+                group_id=gid,
+            )
+    except ScimAuditPendingError:
+        return _scim_error(
+            503,
+            "group access audit was not acknowledged; mutation is pending",
+        )
     return JSONResponse(_to_scim_group(rec), media_type="application/scim+json")
 
 
@@ -1015,27 +1444,43 @@ async def patch_group(gid: str, request: Request):
     if (err := _authorize(request)) is not None:
         return err
     body = await _json_body(request)
-    with _locked_groups():
-        groups = _load_groups()
-        rec = groups.get(gid)
-        if rec is None:
-            return _scim_error(404, f"group {gid} not found")
-        old_members = set(rec.get("members", []))
-        old_name = rec.get("displayName", "")
-        if _apply_group_patch(rec, body) is None:
-            return _scim_error(400, "unsupported PATCH operation",
-                               scim_type="invalidValue")
-        if (rec.get("displayName", "") != old_name
-                and _group_name_taken(groups, rec.get("displayName", ""), gid)):
-            return _scim_error(409, f"group {rec['displayName']!r} already exists",
-                               scim_type="uniqueness")
-        rec["updated_at"] = time.time()
-        new_members = set(rec.get("members", []))
-        groups[gid] = rec
-        _save_groups(groups)
-    _audit_group_membership(rec.get("displayName", ""),
-                            added=new_members - old_members,
-                            removed=old_members - new_members)
+    try:
+        with _locked_groups():
+            _flush_group_audit_outbox()
+            groups = _load_groups()
+            rec = groups.get(gid)
+            if rec is None:
+                return _scim_error(404, f"group {gid} not found")
+            prior = copy.deepcopy(groups)
+            old_name = rec.get("displayName", "")
+            if _apply_group_patch(rec, body) is None:
+                return _scim_error(400, "unsupported PATCH operation",
+                                   scim_type="invalidValue")
+            if not isinstance(rec.get("displayName"), str) or not rec[
+                "displayName"
+            ].strip():
+                return _scim_error(
+                    400,
+                    "displayName is required",
+                    scim_type="invalidValue",
+                )
+            if (rec.get("displayName", "") != old_name
+                    and _group_name_taken(groups, rec.get("displayName", ""), gid)):
+                return _scim_error(409, f"group {rec['displayName']!r} already exists",
+                                   scim_type="uniqueness")
+            rec["updated_at"] = time.time()
+            groups[gid] = rec
+            _save_groups_with_audit(
+                groups,
+                prior,
+                operation="patch",
+                group_id=gid,
+            )
+    except ScimAuditPendingError:
+        return _scim_error(
+            503,
+            "group access audit was not acknowledged; mutation is pending",
+        )
     return JSONResponse(_to_scim_group(rec), media_type="application/scim+json")
 
 
@@ -1043,16 +1488,27 @@ async def patch_group(gid: str, request: Request):
 async def delete_group(gid: str, request: Request):
     if (err := _authorize(request)) is not None:
         return err
-    with _locked_groups():
-        groups = _load_groups()
-        rec = groups.get(gid)
-        if rec is None:
-            return _scim_error(404, f"group {gid} not found")
-        del groups[gid]
-        _save_groups(groups)
-    # Deleting a mapped group revokes its members' group-derived access.
-    _audit_group_membership(rec.get("displayName", ""), added=set(),
-                            removed=set(rec.get("members", [])))
+    try:
+        with _locked_groups():
+            _flush_group_audit_outbox()
+            groups = _load_groups()
+            rec = groups.get(gid)
+            if rec is None:
+                return _scim_error(404, f"group {gid} not found")
+            prior = copy.deepcopy(groups)
+            del groups[gid]
+            # Deleting a mapped group revokes its members' group-derived access.
+            _save_groups_with_audit(
+                groups,
+                prior,
+                operation="delete",
+                group_id=gid,
+            )
+    except ScimAuditPendingError:
+        return _scim_error(
+            503,
+            "group access audit was not acknowledged; mutation is pending",
+        )
     return JSONResponse(None, status_code=204)
 
 

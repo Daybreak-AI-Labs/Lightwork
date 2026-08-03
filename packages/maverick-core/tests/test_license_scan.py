@@ -67,6 +67,59 @@ def test_scan_reads_license_field_and_classifiers():
     assert by_name["trove-pkg"]["category"] == "strong-copyleft"
 
 
+def test_scan_prefers_pep639_expression_over_conflicting_legacy_metadata():
+    dists = [
+        _Dist(_Meta({
+            "Name": "modern-pkg",
+            "Version": "1.0",
+            "License-Expression": "MIT",
+            "License": "GNU General Public License v3",
+        }, classifiers=[
+            "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+        ])),
+    ]
+
+    [scanned] = scan_distributions(dists)
+
+    assert scanned["license"] == "MIT"
+    assert scanned["category"] == "permissive"
+
+
+def test_scan_prefers_classifier_over_bundled_legacy_license_notices():
+    numpy_like_license = """
+    Copyright NumPy Developers. Redistribution permitted under BSD-3-Clause.
+
+    Bundled GCC runtime notice:
+    GNU General Public License v3 with GCC Runtime Library Exception.
+    """
+    dists = [
+        _Dist(_Meta({
+            "Name": "numpy-like-pkg",
+            "Version": "2.2.6",
+            "License": numpy_like_license,
+        }, classifiers=["License :: OSI Approved :: BSD License"])),
+    ]
+
+    [scanned] = scan_distributions(dists)
+
+    assert scanned["license"] == "BSD License"
+    assert scanned["category"] == "permissive"
+
+
+def test_scan_uses_legacy_license_when_no_structured_declaration_exists():
+    dists = [
+        _Dist(_Meta({
+            "Name": "legacy-gpl-pkg",
+            "Version": "1.0",
+            "License": "GNU General Public License v3",
+        })),
+    ]
+
+    [scanned] = scan_distributions(dists)
+
+    assert scanned["category"] == "strong-copyleft"
+
+
 def test_policy_check_flags_strong_copyleft_by_default():
     scanned = [
         {"name": "ok", "version": "1", "license": "MIT", "category": "permissive"},

@@ -83,10 +83,13 @@ def test_build_from_config_closes_world_and_sandbox_on_startup_failure(
         lambda: {"sandbox": {"workdir": str(tmp_path)}, "channels": {}},
     )
     monkeypatch.setattr(server_mod, "open_world", lambda: world)
-    monkeypatch.setattr(server_mod, "LLM", lambda: object())
+    monkeypatch.setattr(server_mod, "LLM", lambda **_kwargs: object())
     monkeypatch.setattr(server_mod, "build_sandbox", lambda **_kw: sandbox)
     monkeypatch.setattr(server_mod, "_WIRES", {})
-    monkeypatch.setattr("maverick.config.any_provider_configured", lambda: True)
+    monkeypatch.setattr(
+        "maverick.operator_preflight._routed_configuration_missing",
+        lambda _config: {},
+    )
     monkeypatch.setattr(
         "maverick.config.get_sandbox",
         lambda: {"workdir": str(tmp_path)},

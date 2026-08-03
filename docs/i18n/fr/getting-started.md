@@ -7,7 +7,7 @@
 La méthode la plus sûre en terminal consiste à installer le paquet publié avec pipx, plutôt qu'à exécuter un script d'amorçage distant :
 
 ```bash
-git clone https://github.com/Day-AI-Labs/Lightwork
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd Lightwork
 git checkout --detach <reviewed-full-40-character-commit-sha>
 python -m pip install -e ./packages/maverick-core
@@ -22,7 +22,7 @@ Le paquet PyPI s'appelle `maverick-agent` (le nom `maverick` est squatté). L'ex
 Depuis les sources, pendant le développement :
 
 ```bash
-git clone https://github.com/Day-AI-Labs/maverick
+git clone https://github.com/Daybreak-AI-Labs/Lightwork
 cd maverick
 pip install -e ./packages/maverick-core
 pip install -e ./apps/installer-cli

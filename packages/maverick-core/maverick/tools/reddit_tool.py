@@ -38,7 +38,7 @@ _RD_SCHEMA: dict[str, Any] = {
 
 def _ua() -> str:
     return os.environ.get("REDDIT_USER_AGENT",
-                          "maverick-agent/0.1 (https://github.com/Day-AI-Labs/Lightwork)")
+                          "maverick-agent/0.1 (https://github.com/Daybreak-AI-Labs/Lightwork)")
 
 
 def _get(url: str, params: dict | None = None) -> tuple[int, Any]:

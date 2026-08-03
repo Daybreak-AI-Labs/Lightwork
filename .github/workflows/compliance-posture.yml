@@ -40,6 +40,8 @@ on:
       - "packages/maverick-core/maverick/paths.py"
       - "packages/maverick-core/maverick/deployment.py"
       - "docs/compliance/deployment/compliant-config.toml"
+      - "requirements/ci.txt"
+      - "scripts/verify_constraint_closure.py"
       - ".github/workflows/compliance-posture.yml"
   push:
     branches: [main]
@@ -54,46 +56,61 @@ on:
       - "packages/maverick-core/maverick/paths.py"
       - "packages/maverick-core/maverick/deployment.py"
       - "docs/compliance/deployment/compliant-config.toml"
+      - "requirements/ci.txt"
+      - "scripts/verify_constraint_closure.py"
       - ".github/workflows/compliance-posture.yml"
 
 permissions:
   contents: read
 
+env:
+  PIP_CONSTRAINT: ${{ github.workspace }}/requirements/ci.txt
+
+concurrency:
+  group: compliance-posture-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   posture:
     # Keep this PR-triggered regression gate on GitHub-hosted runners only; do
     # not retarget it to production or privileged self-hosted runners.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
       - name: Install maverick-core (with audit-signing crypto)
         # The soc2 collector + CLI live entirely in maverick-core; no sibling
         # packages are needed to evaluate posture. The [audit-signing] extra
         # pulls `cryptography` so the signed audit chain is real -- without it the
         # chain writes UNSIGNED (audit_log: no_crypto) and the gate fails, which
         # is exactly what a compliant deployment must avoid.
-        run: pip install -e './packages/maverick-core[audit-signing]'
+        run: |
+          python -I -m pip install --upgrade \
+            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'packaging==26.2'
+          python -I -m pip install -e './packages/maverick-core[audit-signing]'
+          python -I -m pip check
+          python -I scripts/verify_constraint_closure.py
       - name: Apply the hardened compliant config
         run: |
           mkdir -p ~/.maverick
           cp docs/compliance/deployment/compliant-config.toml ~/.maverick/config.toml
-      - name: Initialize the signed audit chain (ephemeral off-host key)
+      - name: Initialize and enforce posture with an ephemeral off-host key
         # Enterprise mode REQUIRES an off-host signing key (no local-disk key).
         # Generate a throwaway one, inject it via the env var a real deployment
-        # would source from KMS, and write one signed event so the chain is
-        # non-empty. The key lives only in this step's shell; the gate step below
-        # verifies via the on-disk public key + `.injected` marker, no private key.
+        # would source from KMS, write one signed event, and keep the same key in
+        # scope while collecting and enforcing evidence. A stale `.injected`
+        # marker cannot satisfy the current signing-capability probe.
         run: |
           export MAVERICK_AUDIT_SIGNING_KEY="$(python -c 'import os;print(os.urandom(32).hex())')"
           python -c "from maverick.audit import record, EventKind; assert record(EventKind.GOAL_START, agent='ci-posture', title='posture gate init'), 'failed to write signed audit event'"
-      - name: SOC 2 posture gate (maverick soc2 must be compliant-ready)
-        # `maverick soc2` exits non-zero unless all required controls are
-        # `enabled`, audit_log is `ok`, and a signing key is present. Capture the
-        # JSON as evidence and surface it in the job summary, then enforce.
-        run: |
+          # `maverick soc2` exits non-zero unless all required controls are
+          # enabled, the audit chain is valid, and this process can sign.
           maverick soc2 --json > soc2-evidence.json || true
           python -m json.tool soc2-evidence.json || true
           {
@@ -106,8 +123,8 @@ jobs:
           maverick soc2 > /dev/null
       - name: Upload evidence snapshot
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        continue-on-error: true
+        if: always()
         with:
           name: soc2-evidence
           path: soc2-evidence.json
-          if-no-files-found: warn
+          if-no-files-found: error

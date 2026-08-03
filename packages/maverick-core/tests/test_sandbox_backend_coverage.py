@@ -58,6 +58,57 @@ class TestHealthBackendCoverage:
         out = _health_details({"sandbox": {"backend": "frobnicator"}}, monkeypatch)
         assert "not recognized" in out
 
+    def test_gvisor_requires_registered_docker_runtime(self, monkeypatch):
+        class _Result:
+            stdout = '{"io.containerd.runc.v2": {}}'
+
+        monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr("subprocess.run", lambda *a, **k: _Result())
+        missing = _health_details(
+            {"sandbox": {"backend": "gvisor"}}, monkeypatch, run_ok=False,
+        )
+        assert "not registered" in missing
+
+        _Result.stdout = '{"runsc": {"path": "runsc"}}'
+        ready = _health_details(
+            {"sandbox": {"backend": "gvisor"}}, monkeypatch, run_ok=False,
+        )
+        assert "registration metadata validated; Docker responding" in ready
+
+        exact = _health_details(
+            {"sandbox": {"backend": "gvisor", "runtime": "run"}},
+            monkeypatch,
+            run_ok=False,
+        )
+        assert "not an approved gVisor runtime" in exact
+
+        _Result.stdout = "not-json"
+        malformed = _health_details(
+            {"sandbox": {"backend": "gvisor"}}, monkeypatch, run_ok=False,
+        )
+        assert "malformed Docker runtime metadata" in malformed
+
+    def test_modal_is_recognized_and_requires_network_acknowledgement(
+        self, monkeypatch,
+    ):
+        blocked = _health_details(
+            {"sandbox": {"backend": "modal", "allow_network": False}},
+            monkeypatch,
+        )
+        assert "execution will fail closed" in blocked
+        assert "not recognized" not in blocked
+
+    def test_external_entry_point_is_recognized(self, monkeypatch):
+        monkeypatch.setattr(
+            "maverick.sandbox.sdk.installed_entry_point_names",
+            lambda: ("vendor",),
+        )
+        ready = _health_details(
+            {"sandbox": {"backend": "ep:vendor"}}, monkeypatch,
+        )
+        assert "is installed" in ready
+        assert "not recognized" not in ready
+
 
 class TestDiagnoseBackendCoverage:
     @pytest.mark.parametrize("backend", ["devcontainer", "kubernetes"])
@@ -74,6 +125,26 @@ class TestDiagnoseBackendCoverage:
         monkeypatch.setattr("shutil.which", lambda name: None)
         monkeypatch.delenv("E2B_API_KEY", raising=False)
         assert "E2B_API_KEY unset" in "\n".join(d._check_sandbox())
+
+    def test_gvisor_missing_runtime_flagged(self, monkeypatch):
+        class _Result:
+            stdout = '{"runc": {}}'
+
+        monkeypatch.setattr(
+            config, "get_sandbox", lambda: {"backend": "gvisor"}
+        )
+        monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr("subprocess.run", lambda *a, **k: _Result())
+        assert "not registered" in "\n".join(d._check_sandbox())
+
+    def test_external_entry_point_missing_is_flagged(self, monkeypatch):
+        monkeypatch.setattr(
+            config, "get_sandbox", lambda: {"backend": "ep:missing"}
+        )
+        monkeypatch.setattr(
+            "maverick.sandbox.sdk.installed_entry_point_names", tuple
+        )
+        assert "is not installed" in "\n".join(d._check_sandbox())
 
 
 class TestE2BSandboxTeardown:
@@ -177,3 +248,24 @@ class TestContainerResourceCaps:
         )
         be = sandbox.build_sandbox()
         assert be.memory == "8g" and be.cpus == "4"
+
+    @pytest.mark.parametrize(
+        "backend",
+        ["local", "podman", "devcontainer", "kubernetes", "firecracker", "ssh"],
+    )
+    def test_read_only_paths_fail_closed_on_non_enforcing_backends(
+        self,
+        backend,
+        tmp_path,
+    ):
+        from maverick import sandbox
+
+        with pytest.raises(ValueError, match="read_only_paths requires"):
+            sandbox.build_sandbox(
+                workdir=tmp_path,
+                backend=backend,
+                sandbox_config={
+                    "backend": backend,
+                    "read_only_paths": ["evidence"],
+                },
+            )

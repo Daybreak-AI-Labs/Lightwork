@@ -56,6 +56,33 @@ def test_memory_swap_pinned_to_memory(monkeypatch, tmp_path):
     assert args[args.index("--memory-swap") + 1] == "2g"
 
 
+def test_read_only_paths_are_overlay_mounted(monkeypatch, tmp_path):
+    evidence = tmp_path / "context"
+    evidence.mkdir()
+    (evidence / "PR_DIFF.patch").write_text("trusted", encoding="utf-8")
+
+    args = _capture_run_argv(
+        monkeypatch,
+        DockerBackend,
+        "_verify_docker",
+        tmp_path,
+        read_only_paths=["context"],
+    )
+
+    expected = f"{evidence.resolve()}:/workspace/context:ro"
+    assert expected in args
+    assert args.index(expected) < args.index("python:3.12-slim")
+
+
+@pytest.mark.parametrize("configured", ["../outside", "/absolute", "missing"])
+def test_read_only_paths_fail_closed_on_unsafe_or_missing_entries(
+    monkeypatch, tmp_path, configured
+):
+    monkeypatch.setattr(DockerBackend, "_verify_docker", lambda self: None)
+    with pytest.raises(ValueError, match="read_only_paths"):
+        DockerBackend(workdir=tmp_path, read_only_paths=[configured])
+
+
 def test_timeout_cleanup_failure_surfaced(monkeypatch, tmp_path):
     """If reaping the orphaned container fails, the leak is reported in stderr
     rather than swallowed under a bare except."""
@@ -169,10 +196,29 @@ def test_runtime_field_injects_runsc(monkeypatch, tmp_path):
 
 def test_build_sandbox_gvisor_uses_runsc(monkeypatch, tmp_path):
     monkeypatch.setattr(DockerBackend, "_verify_docker", lambda self: None)
+    monkeypatch.setattr(
+        "maverick.sandbox.validate_docker_gvisor_runtime",
+        lambda runtime: str(runtime or "runsc"),
+    )
     from maverick.sandbox import build_sandbox
     sb = build_sandbox(workdir=tmp_path, backend="gvisor")
     assert isinstance(sb, DockerBackend)
     assert sb.runtime == "runsc"
+
+
+@pytest.mark.parametrize("runtime", ["runc", "not-runsc", "gvisorless-runc"])
+def test_build_sandbox_gvisor_refuses_untrusted_runtime_alias(
+    monkeypatch, tmp_path, runtime
+):
+    monkeypatch.setattr(DockerBackend, "_verify_docker", lambda self: None)
+    from maverick.sandbox import SandboxPolicyError, build_sandbox
+
+    with pytest.raises(SandboxPolicyError, match="not an approved gVisor runtime"):
+        build_sandbox(
+            workdir=tmp_path,
+            backend="gvisor",
+            sandbox_config={"runtime": runtime},
+        )
 
 
 def test_build_sandbox_docker_has_no_runtime(monkeypatch, tmp_path):

@@ -76,6 +76,7 @@ def test_sandbox_isolation_accepts_supported_backend(monkeypatch):
 
 
 @requires_crypto
+@pytest.mark.usefixtures("local_audit_key_custody")
 def test_verifier_fails_when_audit_signing_key_cannot_initialize(monkeypatch):
     from maverick.deployment import verify_deployment
     from maverick.paths import data_dir

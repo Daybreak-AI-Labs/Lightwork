@@ -72,7 +72,10 @@ def test_erase_emits_non_subject_derived_audit_event(tmp_path, monkeypatch):
     assert "u123" not in str(ev)
     assert "user_hash" not in ev
     assert isinstance(ev["erasure_id"], str)
-    assert len(ev["erasure_id"]) == 16
+    # Receipt v2 uses a full 128-bit random identifier. It remains
+    # non-subject-derived while materially reducing collision risk across a
+    # deployment-wide immutable receipt set.
+    assert len(ev["erasure_id"]) == 32
     int(ev["erasure_id"], 16)
 
 

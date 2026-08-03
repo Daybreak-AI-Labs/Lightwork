@@ -7,6 +7,7 @@ import sqlite3
 import maverick.platform_hunt as platform_hunt
 import maverick.threat_hunt as legacy_threat_hunt
 import pytest
+from maverick.audit.errors import AuditRefused
 from maverick.platform_hunt import (
     ChainIntegrityStatus,
     ContainmentProposal,
@@ -127,6 +128,18 @@ def test_platform_hunter_is_explicitly_opt_in(monkeypatch):
         lambda **_kwargs: {"operator.toml": "malformed"},
     )
     assert platform_hunt.enabled() is False
+
+
+def test_platform_hunt_never_downgrades_an_explicit_audit_refusal(
+    platform_red_team_events,
+):
+    _baseline, events = platform_red_team_events
+
+    def refuse(*_args, **_kwargs):
+        raise AuditRefused("off-host signer is required")
+
+    with pytest.raises(AuditRefused, match="off-host signer"):
+        scan(events, audit_recorder=refuse)
 
 
 def test_red_team_fixture_fires_every_platform_rule_with_exact_evidence(

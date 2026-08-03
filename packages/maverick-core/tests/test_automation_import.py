@@ -7,6 +7,11 @@ schedule. No network: ``fetch`` is not exercised here (it's the thin API layer);
 """
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+import types
+
 import pytest
 from maverick import automation_import as ai
 from maverick.automation_import import ir, n8n
@@ -219,6 +224,43 @@ class TestRegistry:
         with pytest.raises(ai.ImporterError):
             ai.get_importer("does-not-exist")
 
+    def test_connector_modules_are_loaded_only_when_selected(self):
+        code = """
+import json
+import sys
+import maverick.automation_import as ai
+prefix = "maverick.automation_import."
+platforms = {"make", "n8n", "notion", "power_automate", "uipath", "workato", "zapier"}
+before = sorted(
+    name for name in sys.modules
+    if name.startswith(prefix) and name[len(prefix):] in platforms
+)
+ai.get_importer("n8n")
+after = sorted(
+    name for name in sys.modules
+    if name.startswith(prefix) and name[len(prefix):] in platforms
+)
+print(json.dumps({"before": before, "after": after, "sources": ai.available_sources()}))
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(completed.stdout)
+        assert payload["before"] == []
+        assert payload["after"] == ["maverick.automation_import.n8n"]
+        assert set(payload["sources"]) >= {
+            "make",
+            "n8n",
+            "notion",
+            "power_automate",
+            "uipath",
+            "workato",
+            "zapier",
+        }
+
     def test_translate_all_skips_bad(self):
         out = ai.translate_all("n8n", [WEBHOOK_WORKFLOW, {"bad": 1}, CRON_WORKFLOW])
         assert [a.name for a in out] == ["New lead → Slack + CRM", "Daily digest"]
@@ -232,6 +274,101 @@ class TestEnabled:
     def test_env_override_on(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_AUTOMATION_IMPORT", "1")
         assert ai.enabled() is True
+
+    def test_config_failure_is_visible_and_fails_off(self, monkeypatch, caplog):
+        from maverick import config as config_mod
+
+        monkeypatch.delenv("MAVERICK_AUTOMATION_IMPORT", raising=False)
+        monkeypatch.setattr(
+            config_mod,
+            "get_automation_import",
+            lambda: (_ for _ in ()).throw(RuntimeError("unreadable policy")),
+        )
+        assert ai.enabled() is False
+        assert "could not read feature configuration" in caplog.text
+
+    def test_invalid_env_value_is_visible_and_fails_off(self, monkeypatch, caplog):
+        from maverick import config as config_mod
+
+        monkeypatch.setenv("MAVERICK_AUTOMATION_IMPORT", "truthy")
+        monkeypatch.setattr(
+            config_mod,
+            "get_automation_import",
+            lambda: {"enable": True},
+        )
+        assert ai.enabled() is False
+        assert "MAVERICK_AUTOMATION_IMPORT must be one of" in caplog.text
+
+
+def test_n8n_fetch_refuses_silent_truncation(monkeypatch):
+    class _Response:
+        content = b"{}"
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        @staticmethod
+        def json():
+            return {"data": [], "nextCursor": "more"}
+
+    class _Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        @staticmethod
+        def get(*_args, **_kwargs):
+            return _Response()
+
+    monkeypatch.setitem(sys.modules, "httpx", types.SimpleNamespace(Client=_Client))
+    importer = n8n.N8nImporter("https://n8n.example", "key")
+    with pytest.raises(ai.ImporterError, match="10,000 workflow"):
+        importer.fetch()
+
+
+def test_make_fetch_refuses_silent_truncation(monkeypatch):
+    class _Response:
+        content = b"{}"
+
+        def __init__(self, scenarios):
+            self._scenarios = scenarios
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+        def json(self):
+            return {"scenarios": self._scenarios}
+
+    class _Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        @staticmethod
+        def get(_url, **kwargs):
+            params = kwargs["params"]
+            if params["pg[offset]"] < 10_000:
+                return _Response([{"id": None}] * 100)
+            return _Response([{"id": "over-limit"}])
+
+    monkeypatch.setitem(sys.modules, "httpx", types.SimpleNamespace(Client=_Client))
+    from maverick.automation_import import make
+
+    importer = make.MakeImporter("https://make.example", "key")
+    with pytest.raises(ai.ImporterError, match="10,000 scenario"):
+        importer.fetch()
 
 
 class _FakeQueue:

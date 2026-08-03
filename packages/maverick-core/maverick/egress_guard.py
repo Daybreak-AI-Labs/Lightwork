@@ -1,11 +1,11 @@
 """The egress lock, enforced where requests actually leave.
 
-``enterprise.py`` sells one property: *"Sensitive data physically cannot reach
-a third-party API."* It documents the mechanism as ``enterprise_egress_denial``
-applied *"at each tool's request"*. That parenthetical was the load-bearing
-false clause. The check existed at **11** call sites; a census of production
-code found **194 direct outbound HTTP call sites across 96 modules**, of which
-**87 had no egress gate of any kind** -- including ``gmail_tool``,
+``enterprise.py`` provides an application-layer egress control. An earlier
+version documented the mechanism as ``enterprise_egress_denial`` applied *"at
+each tool's request"*. That parenthetical was the load-bearing false clause.
+The check existed at **11** call sites; a census of production code found
+**194 direct outbound HTTP call sites across 96 modules**, of which **87 had no
+egress gate of any kind** -- including ``gmail_tool``,
 ``salesforce_tool``, ``slack_bot``, ``replicate_tool`` (a second third-party
 inference API), and ``maverick_knowledge/embed.py``, which ships document text
 to an embedding vendor.
@@ -20,19 +20,19 @@ way.
 So the check moves to where requests are actually issued. 86 of those 88
 modules use ``httpx`` and one uses ``requests``; both funnel every call --
 module-level ``httpx.get``, a hand-built ``Client``, a pooled ``Session`` --
-through a single ``send`` method. Wrapping those two methods covers 87 of 88
-modules without touching a single connector, and covers connectors not yet
-written, which is the part a migration could never do.
+through a one-request network seam. Wrapping those methods covers 87 of 88
+modules without touching a single connector, covers connectors not yet
+written, and re-checks every followed redirect hop.
 
 **This does not weaken SSRF pinning.** ``tools/_ssrf`` installs a custom
-*transport*, which sits below ``send``; the guard runs first and the pinned
-transport still runs after. They compose.
+*transport*, which sits below the one-hop client method; the guard runs first
+and the pinned transport still runs after. They compose.
 
 **Default posture is unchanged.** ``egress_permitted`` returns True whenever
 enterprise mode is off, so on a default install this is one predicate per
-request and nothing else. It is not a general firewall and does not try to be:
-it enforces the enterprise/compliance boundary that is *claimed*, at the layer
-where the claim can be true.
+request and nothing else. It is not a general firewall: it is defense in depth
+for supported Python HTTP paths. A hard no-egress boundary additionally
+requires sandbox network isolation and host/OS/VPC firewall policy.
 
 **What it still does not cover**, stated because an overclaim here is the
 original defect: a tool that shells out to ``curl``, opens a raw socket, or
@@ -57,6 +57,7 @@ COVERED_LIBRARIES = ("httpx", "requests", "urllib")
 
 _installed = False
 _originals: dict[str, Any] = {}
+_compatibility: dict[str, dict[str, Any]] = {}
 
 #: Distinguishes "caller omitted timeout" from "caller passed None", which
 #: urllib treats differently (None means no timeout; omitted means the global
@@ -113,8 +114,8 @@ def _denied(url: str) -> str | None:
             host or url)
     return (
         f"enterprise mode: refusing egress to {host or url!r} -- not a local "
-        "endpoint and not in [enterprise] allowed_hosts. The data boundary "
-        "stays closed."
+        "endpoint and not in [enterprise] allowed_hosts. The application "
+        "egress boundary blocks this request."
     )
 
 
@@ -126,13 +127,8 @@ def _check(url: str) -> None:
     raise EgressBlocked(reason)
 
 
-#: Attributes a wrapping transport uses to hold the one it delegates to.
-#: ``tools/_ssrf._PinnedTransport`` uses ``_inner``.
-_INNER_ATTRS = ("_inner", "_transport", "transport", "_wrapped", "next")
-
-
-def _is_network_transport(transport: Any, depth: int = 0) -> bool:
-    """Whether a transport performs socket I/O, directly or by delegation.
+def _is_network_transport(transport: Any) -> bool:
+    """Whether a transport must pass the outbound policy check.
 
     An ASGI/WSGI/Mock transport hands the request to an in-process object: no
     socket opens, nothing crosses the host boundary, and there is nothing for
@@ -140,32 +136,43 @@ def _is_network_transport(transport: Any, depth: int = 0) -> bool:
     it refuses in-process ASGI calls under enterprise mode, which is how this
     was found (every TestClient request in the suite blocked on "testserver").
 
-    Detection is by delegation rather than by a name allowlist, because the
-    names are not knowable in advance: starlette ships ``_TestClientTransport``,
-    not httpx's ``ASGITransport``. And an allowlist of "only HTTPTransport is
-    network" would be worse than useless -- it would skip the check for
-    SSRF-pinned requests, since ``_PinnedTransport`` *wraps* a network
-    transport rather than being one. So: a transport is network if it is an
-    httpx network transport, or if it delegates to something that is.
+    The exemption is deliberately an exact-type allowlist. A custom
+    ``BaseTransport`` can open a socket, shell out, or delegate elsewhere, so
+    unknown transports -- including subclasses and wrappers around a mock --
+    are treated as network-capable. Starlette's in-process TestClient transport
+    is admitted only when its exact class object is available from the already
+    imported module; a matching class name is not enough.
 
-    Fails closed. An unresolvable or too-deeply-nested transport is treated as
-    reaching the network, and a mock handler that itself makes a real request
-    is checked when that request goes back through a guarded library.
+    A mock handler that itself makes a real request is checked when that request
+    goes back through a guarded library.
     """
     try:
         import httpx
-        if isinstance(transport, (httpx.HTTPTransport, httpx.AsyncHTTPTransport)):
-            return True
     except Exception:  # pragma: no cover - httpx absent
         return True
-    if depth >= 4:  # pragma: no cover - pathological nesting
-        return True
-    for attr in _INNER_ATTRS:
-        inner = getattr(transport, attr, None)
-        if inner is not None and (hasattr(inner, "handle_request")
-                                  or hasattr(inner, "handle_async_request")):
-            return _is_network_transport(inner, depth + 1)
-    return False
+
+    transport_type = type(transport)
+    if any(
+        transport_type is known_type
+        for known_type in (
+            getattr(httpx, "ASGITransport", None),
+            getattr(httpx, "WSGITransport", None),
+            getattr(httpx, "MockTransport", None),
+        )
+    ):
+        return False
+
+    starlette_testclient = sys.modules.get("starlette.testclient")
+    if starlette_testclient is not None:
+        test_transport = getattr(
+            starlette_testclient,
+            "_TestClientTransport",
+            None,
+        )
+        if transport_type is test_transport:
+            return False
+
+    return True
 
 
 def _reaches_the_network(client: Any, request: Any) -> bool:
@@ -177,54 +184,153 @@ def _reaches_the_network(client: Any, request: Any) -> bool:
     return _is_network_transport(transport)
 
 
-def _patch_httpx(mod: Any) -> None:
-    """Wrap httpx at ``send``.
+def _httpx_degraded_check(request: Any) -> None:
+    """Deny every HTTPX send when the per-hop guard cannot be installed.
 
-    **Known gap, stated rather than hidden: redirects.** ``Client.send``
-    resolves the whole redirect chain internally, so this sees only the first
-    URL. An allow-listed host answering 302 to a denied host is therefore NOT
-    re-checked -- measured, not theorised. ``requests`` and ``urllib`` do not
-    have this shape (both re-enter their wrapped method per hop), so the gap is
-    httpx-only.
-
-    The obvious fix -- wrapping ``_send_single_request``, which issues exactly
-    one request per hop -- was implemented, and it broke **1538 tests in CI**
-    with "Attempted to send an async request with a sync Client instance",
-    across all three Python versions. It does not reproduce locally, including
-    against CI's exact starlette pin, so the mechanism is still unexplained.
-    The ``send`` seam is the configuration that has actually been observed
-    working: same suite, same runners, 5 failures instead of 1538, and those 5
-    are fixed by the in-process transport rule below.
-
-    Shipping an unexplained catastrophic regression to close a narrower hole is
-    the wrong trade. The hole is recorded here, in ``docs``, and in a test that
-    asserts the current (weaker) behaviour, so it is a known quantity rather
-    than a surprise -- and closing it properly needs the CI failure understood
-    first, not another guess.
+    A public ``send`` wrapper cannot observe a redirect chain's later hops.
+    Therefore, when HTTPX no longer exposes the one-hop seam, enterprise and
+    compliance deployments must refuse the whole request rather than apply an
+    incomplete first-URL check. Default deployments retain their existing
+    behavior so an unsupported optional client version does not become a
+    platform-wide outage outside the asserted data boundary.
     """
-    _originals["httpx.Client.send"] = mod.Client.send
-    _originals["httpx.AsyncClient.send"] = mod.AsyncClient.send
+    try:
+        from .enterprise import enterprise_enabled
 
-    def _sync_send(self, request, **kwargs):
-        if _reaches_the_network(self, request):
-            _check(str(request.url))
-        return _originals["httpx.Client.send"](self, request, **kwargs)
+        boundary_required = enterprise_enabled()
+    except Exception:  # pragma: no cover - enterprise_enabled is fail-closed
+        boundary_required = True
+    if not boundary_required:
+        return
 
-    async def _async_send(self, request, **kwargs):
-        if _reaches_the_network(self, request):
-            _check(str(request.url))
-        return await _originals["httpx.AsyncClient.send"](self, request, **kwargs)
+    url = str(getattr(request, "url", "") or "")
+    host = url
+    try:
+        from .enterprise import _host_of
+
+        host = _host_of(url) or url
+    except Exception:  # pragma: no cover - diagnostic only
+        pass
+
+    # Record the compatibility refusal when possible. Failure to write this
+    # event never opens the data boundary; the request is refused below.
+    try:
+        from .audit import EventKind
+        from .audit.writer import audit_event
+
+        audit_event(
+            EventKind.EGRESS_BLOCKED,
+            provider="httpx-compatibility-fallback",
+            host=host or "?",
+        )
+    except Exception:  # failure-policy: best_effort
+        log.exception(
+            "egress guard: could not audit degraded HTTPX refusal for %r",
+            host or url,
+        )
+
+    from .enterprise import EgressBlocked
+
+    raise EgressBlocked(
+        "enterprise/compliance mode: installed HTTPX cannot be guarded at "
+        "every redirect hop, so all HTTPX sends are refused until a compatible "
+        "version is installed."
+    )
+
+
+def _patch_httpx_fail_closed(mod: Any, reason: str) -> bool:
+    """Install the degraded public-send boundary; return whether it succeeded."""
+    sync_method = getattr(mod.Client, "send", None)
+    async_method = getattr(mod.AsyncClient, "send", None)
+    if not callable(sync_method) or not callable(async_method):
+        _compatibility["httpx"] = {
+            "compatible": False,
+            "reason": f"{reason}; public send fallback is unavailable",
+            "seam": "_send_single_request",
+            "fail_closed_fallback": False,
+        }
+        return False
+
+    sync_key = "httpx.Client.send"
+    async_key = "httpx.AsyncClient.send"
+    _originals[sync_key] = sync_method
+    _originals[async_key] = async_method
+
+    def _sync_send(self, request, *args, **kwargs):
+        _httpx_degraded_check(request)
+        return sync_method(self, request, *args, **kwargs)
+
+    async def _async_send(self, request, *args, **kwargs):
+        _httpx_degraded_check(request)
+        return await async_method(self, request, *args, **kwargs)
 
     mod.Client.send = _sync_send
     mod.AsyncClient.send = _async_send
+    _compatibility["httpx"] = {
+        "compatible": False,
+        "reason": reason,
+        "seam": "_send_single_request",
+        "fallback_seam": "send",
+        "fail_closed_fallback": True,
+    }
+    return True
+
+
+def _patch_httpx(mod: Any) -> None:
+    """Wrap httpx at the one-network-request seam.
+
+    ``Client.send`` owns a complete redirect chain, so wrapping it checks only
+    the first URL. ``_send_single_request`` is entered once for every actual
+    network hop, after HTTPX has built the next redirect request and selected
+    its stream type. Wrapping the sync and async implementations independently
+    preserves their respective byte-stream contracts while re-evaluating live
+    policy (including the new URL's host) on every hop.
+
+    In-process ASGI/WSGI/TestClient and mock transports are still exempt through
+    :func:`_reaches_the_network`; a request that opens no socket is not egress.
+    """
+    sync_method = getattr(mod.Client, "_send_single_request", None)
+    async_method = getattr(mod.AsyncClient, "_send_single_request", None)
+    if not callable(sync_method) or not callable(async_method):
+        reason = (
+            "installed HTTPX does not expose compatible sync and async "
+            "_send_single_request seams"
+        )
+        if _patch_httpx_fail_closed(mod, reason):
+            return
+        raise RuntimeError(_compatibility["httpx"]["reason"])
+
+    async_key = "httpx.AsyncClient._send_single_request"
+    sync_key = "httpx.Client._send_single_request"
+    _originals[sync_key] = sync_method
+    _originals[async_key] = async_method
+
+    def _sync_send_single_request(self, request, *args, **kwargs):
+        if _reaches_the_network(self, request):
+            _check(str(request.url))
+        return sync_method(self, request, *args, **kwargs)
+
+    async def _async_send_single_request(self, request, *args, **kwargs):
+        if _reaches_the_network(self, request):
+            _check(str(request.url))
+        return await async_method(self, request, *args, **kwargs)
+
+    mod.Client._send_single_request = _sync_send_single_request
+    mod.AsyncClient._send_single_request = _async_send_single_request
+    _compatibility["httpx"] = {
+        "compatible": True,
+        "reason": "",
+        "seam": "_send_single_request",
+    }
 
 
 def _patch_requests(mod: Any) -> None:
-    _originals["requests.Session.send"] = mod.Session.send
+    original_send = mod.Session.send
+    _originals["requests.Session.send"] = original_send
 
     def _send(self, request, **kwargs):
         _check(str(getattr(request, "url", "")))
-        return _originals["requests.Session.send"](self, request, **kwargs)
+        return original_send(self, request, **kwargs)
 
     mod.Session.send = _send
 
@@ -235,26 +341,33 @@ def _patch_urllib(mod: Any) -> None:
     ``urlopen`` and ``build_opener().open()`` both funnel through
     ``OpenerDirector.open``, so one wrapper covers every form.
     """
-    _originals["urllib.OpenerDirector.open"] = mod.OpenerDirector.open
+    original_open = mod.OpenerDirector.open
+    _originals["urllib.OpenerDirector.open"] = original_open
 
     def _open(self, fullurl, data=None, timeout=_SENTINEL):
         # `fullurl` is a str or a Request; Request.full_url holds the target.
         url = getattr(fullurl, "full_url", None) or (
             fullurl if isinstance(fullurl, str) else "")
         _check(str(url))
-        original = _originals["urllib.OpenerDirector.open"]
         if timeout is _SENTINEL:
-            return original(self, fullurl, data)
-        return original(self, fullurl, data, timeout)
+            return original_open(self, fullurl, data)
+        return original_open(self, fullurl, data, timeout)
 
     mod.OpenerDirector.open = _open
 
 
 def _unpatch(name: str, mod: Any) -> None:
     if name == "httpx":
-        if "httpx.Client.send" in _originals:
-            mod.Client.send = _originals.pop("httpx.Client.send")
-            mod.AsyncClient.send = _originals.pop("httpx.AsyncClient.send")
+        sync_key = "httpx.Client._send_single_request"
+        async_key = "httpx.AsyncClient._send_single_request"
+        if sync_key in _originals:
+            mod.Client._send_single_request = _originals.pop(sync_key)
+            mod.AsyncClient._send_single_request = _originals.pop(async_key)
+        fallback_sync_key = "httpx.Client.send"
+        fallback_async_key = "httpx.AsyncClient.send"
+        if fallback_sync_key in _originals:
+            mod.Client.send = _originals.pop(fallback_sync_key)
+            mod.AsyncClient.send = _originals.pop(fallback_async_key)
     elif name == "requests":
         mod.Session.send = _originals.pop(
             "requests.Session.send", mod.Session.send)
@@ -314,8 +427,25 @@ class _PatchOnImport:
             try:
                 _TARGETS[_name](module)
                 _patched.add(_name)
-            except Exception:  # pragma: no cover - never break an import
+            # failure-policy: fail_closed
+            except Exception as exc:
+                # An imported-but-unwrapped client would remain usable if
+                # enterprise mode were enabled later at runtime. Readiness
+                # metadata alone cannot close that socket path, so refuse the
+                # import when no enforceable wrapper could be installed.
+                _compatibility.setdefault(
+                    _name,
+                    {
+                        "compatible": False,
+                        "reason": "egress guard installation failed",
+                        "fail_closed_fallback": False,
+                    },
+                )
                 log.exception("egress guard: could not wrap %s", _name)
+                raise RuntimeError(
+                    f"refusing to import {_name}: the process-wide egress "
+                    "boundary could not be installed"
+                ) from exc
 
         try:
             spec.loader.exec_module = exec_module
@@ -350,7 +480,7 @@ def install() -> bool:
 
 
 def uninstall() -> None:
-    """Restore the unwrapped send paths. For tests and controlled teardown."""
+    """Restore the unwrapped network paths. For tests and controlled teardown."""
     global _installed, _hook
     if not _installed:
         return
@@ -366,11 +496,39 @@ def uninstall() -> None:
             pass
         _hook = None
     _originals.clear()
+    _compatibility.clear()
     _installed = False
 
 
 def active() -> bool:
-    return _installed
+    return _installed and all(
+        status.get("compatible") is True
+        for status in _compatibility.values()
+    )
 
 
-__all__ = ["COVERED_LIBRARIES", "active", "install", "uninstall"]
+def compatibility_status() -> dict[str, Any]:
+    """Return an operator-readable snapshot of guarded-client compatibility.
+
+    HTTPX's one-hop seam is intentionally checked at runtime rather than
+    assumed from a package version. ``active`` becomes false when a loaded
+    client cannot be wrapped, giving readiness/doctor integrations a
+    fail-closed signal instead of silently claiming the boundary is installed.
+    """
+    return {
+        "installed": _installed,
+        "active": active(),
+        "clients": {
+            name: dict(status)
+            for name, status in sorted(_compatibility.items())
+        },
+    }
+
+
+__all__ = [
+    "COVERED_LIBRARIES",
+    "active",
+    "compatibility_status",
+    "install",
+    "uninstall",
+]

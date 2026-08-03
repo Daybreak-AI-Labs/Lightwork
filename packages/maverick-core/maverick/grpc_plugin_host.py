@@ -97,9 +97,16 @@ def _spec_passes_shield(name: str, description: str, schema: dict[str, Any], shi
     try:
         verdict = shield.scan_input(payload)
         return bool(verdict.allowed)
-    except Exception as e:  # pragma: no cover
-        log.warning("grpc plugin tool %r shield scan errored (fail-open): %s", name, e)
-        return True
+    except Exception as e:
+        # The plugin manifest is untrusted model-facing metadata. Once Shield
+        # is present, an unavailable scanner cannot establish that the
+        # description/schema is safe to register.
+        log.warning(
+            "grpc plugin tool %r shield scan errored; rejecting manifest: %s",
+            name,
+            e,
+        )
+        return False
 
 
 _PROTO = Path(__file__).with_name("grpc_api") / "plugin_host.proto"

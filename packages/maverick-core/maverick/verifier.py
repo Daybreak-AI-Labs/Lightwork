@@ -253,10 +253,10 @@ _DEFAULT_ALLOWED_PROVIDER_MODELS = {
     "anthropic": "anthropic:claude-sonnet-4-6",
     "openai": "openai:gpt-5.4",
     "openrouter": "openrouter:deepseek-v4-pro",
-    "deepseek": "deepseek:deepseek-reasoner",
+    "deepseek": "deepseek:deepseek-v4-pro",
     "moonshot": "moonshot:moonshot-v1-128k",
-    "xai": "xai:grok-4",
-    "gemini": "gemini:gemini-2.5-pro",
+    "xai": "xai:grok-4.5",
+    "gemini": "gemini:gemini-3.5-flash",
 }
 
 

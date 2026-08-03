@@ -4,11 +4,12 @@ Run a Lightwork agent swarm inside a GitHub workflow — on a PR, on a
 schedule, or on demand — under a **hard spend cap**. It installs
 Lightwork from the action's own pinned source checkout and runs `maverick
 start` with the inputs you give it, then writes the final answer to the job
-summary and exposes it as a step output. It never falls back to an
-unqualified public-index install of a Lightwork distribution.
+summary and exposes sanitized, bounded output as a step output. It never
+falls back to an unqualified public-index install of a Lightwork
+distribution.
 
 ```yaml
-- uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+- uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
   with:
     goal: "Summarize the changes in this PR and flag anything risky."
     max-dollars: "0.50"
@@ -17,6 +18,16 @@ unqualified public-index install of a Lightwork distribution.
 
 > Replace the placeholder with a reviewed 40-character commit SHA. Do not use
 > a mutable branch or tag for a workflow that receives provider secrets.
+>
+> The default `docker` backend is mandatory for a normal run and executes
+> model-generated shell with no network and a non-root user. The runner must
+> have a working Docker daemon. `podman` and `gvisor` are also accepted
+> container backends.
+>
+> `local` is a dangerous exception: it confines the starting directory, not the
+> host filesystem or network. It is rejected unless the workflow explicitly
+> sets both `sandbox: local` and `allow-unsafe-local: "true"`. Use that pair
+> only on a trusted disposable hosted/isolated runner.
 
 ## Inputs
 
@@ -29,7 +40,8 @@ unqualified public-index install of a Lightwork distribution.
 | `max-dollars` | `1.0` | Hard USD spend cap. The swarm refuses to exceed it. |
 | `max-wall-seconds` | — | Optional wall-clock cap. |
 | `model` | — | Override the model (e.g. `claude-sonnet-4-6`). |
-| `sandbox` | `local` | Shell sandbox backend. A CI runner is already an ephemeral VM, so `local` is the default. |
+| `sandbox` | `docker` | Shell backend. Supported values: `docker`, `podman`, `gvisor`, and `local`. Container runs are forced to no network and non-root. |
+| `allow-unsafe-local` | `false` | Required acknowledgment for `sandbox: local`. Local runs model-generated shell on the host and is for a trusted disposable/isolated runner only. |
 | `anthropic-api-key` | `""` | Exported as `ANTHROPIC_API_KEY`. For other providers, leave blank and set that provider's env var on the job. |
 | `version` | `""` | Optional expected version of the source bundled with the pinned action. A mismatch fails closed. |
 | `python-version` | `3.12` | Python to set up. |
@@ -40,8 +52,8 @@ unqualified public-index install of a Lightwork distribution.
 
 | Output | Description |
 |---|---|
-| `result` | The swarm's final answer. |
-| `result-file` | Path to a file with the full run output. |
+| `result` | Sanitized, mention-neutralized run output, bounded to 50,000 characters. |
+| `result-file` | Path to an owner-only file with the same sanitized, bounded output. |
 
 ## Examples
 
@@ -57,7 +69,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+        with:
+          persist-credentials: false
+      - uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
         with:
           template: code-review
           params: |
@@ -72,7 +86,7 @@ jobs:
 
 ```yaml
       - id: maverick
-        uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+        uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
         with:
           goal: "Review the diff on this PR and list concrete risks."
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -100,7 +114,7 @@ composite-action steps inherit it:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-      - uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
+      - uses: Daybreak-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
         with:
           goal: "..."
           model: gpt-4.1
@@ -112,6 +126,23 @@ composite-action steps inherit it:
   kernel; a runaway goal stops rather than running up a bill. Start small.
 - **Keys are secrets.** Pass provider keys via `${{ secrets.* }}`, never
   inline. The action exports the key only for the run step.
+- **Agent output is untrusted.** The action captures it in an owner-only file
+  instead of streaming it into the Actions command parser. Before output is
+  logged, summarized, or exported, configured provider, platform, and
+  connector credentials (including Azure Identity environment secrets,
+  workload-token file contents, and client certificate file contents) and
+  common token formats (including bare compact JWT/JWS credentials) are
+  redacted, GitHub mentions, and workflow-command prefixes are neutralized;
+  control characters are neutralized before matching, summary markup is escaped,
+  and text is capped at 50,000 characters. The raw capture is deleted. Recognized
+  credential environment values and credential files are
+  privately snapshotted before the swarm starts and collected again afterward,
+  so both pre-rotation and post-rotation values remain covered.
+- **Sandbox policy is isolated.** The action runs with an action-owned minimal
+  config instead of runner-level `config.toml`, dashboard, or tenant overlays,
+  so those files cannot loosen the no-network/non-root policy. Pass the model
+  with `model` and provider settings through documented environment variables;
+  installed templates and normal `MAVERICK_HOME` run state remain available.
 - **Inputs are injection-safe.** Every input is passed through the
   environment and quoted, not interpolated into the shell, so a goal or
   param containing shell metacharacters can't execute.

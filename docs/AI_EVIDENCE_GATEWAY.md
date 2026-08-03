@@ -36,6 +36,21 @@ The runtime also requires an explicit tenant binding (`MAVERICK_TENANT` or an
 authenticated client/tenant context). It refuses the legacy unbound namespace
 instead of allowing evidence from different customers to share a store.
 
+### Enforced output seam
+
+When the gateway is enabled, the orchestrator sends its final human-facing
+text through the deterministic delivery boundary before returning it. A
+refused or incomplete receipt therefore withholds the final text instead of
+quietly bypassing disclosure and evidence creation.
+
+Agent coordination still uses the verbatim in-memory blackboard. Persisted and
+live mirrors with model-derived plans, observations, findings, artifacts, or
+verification prose show a placeholder until the final evidence-ready result is
+available. Deterministic progress, capability denials, compartment actions,
+operator status, and errors remain visible after the normal secret-redaction
+pass. The same governed mirror feeds dashboard event history, SSE, WebSocket,
+gRPC, replay trace, and observation-channel consumers.
+
 ## What the gateway records
 
 For each delivered text interaction, the gateway:
@@ -67,22 +82,62 @@ mechanism. Digests of low-entropy or repeated text can reveal equality and can
 be guessed by an actor who already has candidate text. Protect the receipt
 store and signing keys accordingly.
 
-Readiness reconciles the exact `(receipt_id, hash)` set in the signed receipt
-ledger against every issued governed receipt; missing, orphaned, or duplicated
-rows fail closed even when each remaining chain is internally valid. If the
-durable signer append succeeds but governed receipt persistence is interrupted,
-an identical retry verifies and recovers the signed row against its historical
-policy snapshot before completing the conversation reservation.
+Readiness reconciles every `(receipt_id, hash)` in the signed receipt journal
+against every issued governed receipt; missing, orphaned, extra, duplicated, or
+divergent rows fail closed even when each surviving file is internally valid.
+If the durable signer append succeeds but governed receipt persistence is
+interrupted, an identical retry verifies and recovers the signed row against
+its historical policy snapshot before completing the conversation reservation.
 
-V1 has a hard operational ceiling of 10,000 receipts per tenant evidence
-namespace. The gateway withholds the next new delivery before signing rather
-than letting the cockpit or packet exporter enter an unreadable overflow state.
-Receipt rows cannot be pruned in place because exact ledger/store
-reconciliation and the signature chain would fail. Operators must export and
-verify the evidence, then provision a new governed tenant evidence namespace
-before reaching the ceiling. Automated segmented-ledger rollover and anchored
-segment manifests are required before using v1 for sustained high-volume
-production traffic.
+### Receipt storage, rollover, and recovery
+
+The journal rolls over automatically and keeps the historical
+`interaction_receipts.ndjson` as segment zero. Numbered files under
+`interaction_receipts.segments/` begin with a signed header that commits to the
+prior segment number, signed tip, receipt count, and global count. Existing
+single-file installations are indexed in place: migration does not rewrite or
+re-sign their receipt bytes.
+
+A private SQLite index maps receipt identity and global ordinal to the exact
+signed row. It accelerates idempotency checks and cursor reads but is never a
+trust root. A separately signed state snapshot commits to the physical tip,
+total, segment shape, and chained identity-index digest. Targeted reads bind an
+index result back to the signed row. Assurance verification streams all
+segments and compares every physical row, index entry, state commitment, and
+governed record before reporting the ledger clean.
+
+Crash recovery accepts only an append-only extension of the last authenticated
+state. A receipt or segment header that reached durable storage before its
+index transaction is reconciled on the next operation. A shorter ledger,
+changed prefix, missing state beside numbered segments, malformed segment,
+broken cross-segment link, or index/row mismatch is reported as integrity
+state; it is never silently rebuilt into a clean result.
+
+Advanced operators can tune the bounds in the existing table:
+
+```toml
+[evidence_gateway]
+enable = true
+receipt_segment_rows = 4096
+receipt_segment_bytes = 67108864
+receipt_max_total = 1000000
+packet_segment_rows = 4096
+packet_segment_bytes = 67108864
+packet_max_total = 100000
+```
+
+The equivalent environment variables are
+`MAVERICK_EVIDENCE_RECEIPT_SEGMENT_ROWS` and
+`MAVERICK_EVIDENCE_RECEIPT_SEGMENT_BYTES`, and
+`MAVERICK_EVIDENCE_RECEIPT_MAX_TOTAL`. Packet-ledger equivalents replace
+`RECEIPT` with `PACKET`. Segment rows must be 1–1,000,000; segment bytes must
+be 1 MiB–1 GiB; tenant capacity must be 1–100,000,000. Invalid values fail
+closed. The defaults are 4,096 rows or 64 MiB per file, whichever comes first,
+with 1,000,000 receipts and 100,000 packet attestations per tenant. Reaching a
+configured tenant capacity withholds the next new delivery or packet before
+signing; no evidence is silently dropped or pruned. Raise the governed
+capacity or provision a new tenant evidence namespace according to the
+organization's retention and evidence policy.
 
 ## Regulatory impact loop
 
@@ -92,6 +147,14 @@ and carry the retrieved content's SHA-256 digest. A separate administrator
 accepts or dismisses the impact with a rationale and the expected record
 revision. Accepting an impact updates the affected policy bindings; dismissing
 one preserves the review history without changing policy.
+
+Acceptance and ordinary policy updates share a tenant-wide mutation lock.
+Before claiming acceptance, the gateway proves every dependent policy exists
+and reserves binding capacity so an interrupted `accepted_refreshing` review
+can be retried without another review consuming its slot. The hot policy
+document retains 256 prior snapshots. At that boundary, the oldest immutable
+snapshot moves to the governed snapshot archive before the policy refresh, so
+historical receipts remain discoverable and verifiable.
 
 The gateway does not infer affected controls from a title or an uncited
 summary. Integrations should pass the explicit mappings produced or reviewed by
@@ -109,22 +172,62 @@ regulatory impacts. Policy mutation, regulatory-impact record/review, packet
 issuance, and the demo seed require global `admin`. Delivery and packet
 issuance are rate-limited.
 
+`GET .../gateway/receipts` accepts `limit` and an optional opaque `cursor`.
+Responses include `receipts`, `next_cursor`, `snapshot_total`, `count`, and
+`missing_governed_count`. A cursor remains pinned to the original append-only
+snapshot when newer receipts arrive, so page traversal neither repeats nor
+silently inserts later rows. Cursors are tenant-bound and integrity-checked;
+clients must treat their contents as opaque.
+
+`GET .../gateway/regulatory-impacts` accepts `limit` (maximum 500), an opaque
+`cursor`, optional `status`, and `pending_first` (default `true`). The response
+includes `regulatory_impacts`, `next_cursor`, `snapshot_total`, `count`,
+`status`, and `pending_first`. Pending reviews remain discoverable even when
+the tenant has more than 500 impacts. Newer appends are excluded from an
+in-progress result window; a mutation to an impact already in that window
+returns a restart-pagination error instead of mixing revisions. Use
+`GET .../gateway/regulatory-impacts/{impact_id}` for direct governed-ID lookup.
+
 Request schemas reject unknown fields and caller-supplied trust roots.
 
 Packet issuance is an explicit `POST`, because it appends a signed attestation
-to the packet ledger; a read-only `GET` does not issue evidence. The response
-returns
+to a segmented, indexed packet ledger; a read-only `GET` does not issue
+evidence. Packet issuance performs an indexed identity lookup rather than
+loading all historical attestations. The response returns
 `Content-Disposition: attachment; filename="lightwork-ai-assurance-packet.json"`
 and `Cache-Control: no-store`. Offline verifiers should use a separately
 provisioned trusted public-key registry; never trust a key merely because it is
 included beside a packet.
 
+Every packet request must include `Idempotency-Key`. The request identity is
+scoped to tenant, authenticated actor, and packet profile. Retrying the same
+request returns the exact stored JSON packet, including its original packet ID
+and generation time, without adding another signed attestation. The
+`Idempotent-Replay` response header is `false` for the first issuance and
+`true` for an exact replay.
+
 Packets contain gateway policy, receipt, and cited-impact evidence only; they
 do not silently claim to be the complete Model Risk or GRC evidence set. A
 bounded evidence-window manifest records total/included/omitted counts and
 ordered collection digests. Any omitted records make readiness false. Packet
-generation rechecks the source collections before signing and asks the caller
-to retry if they changed mid-export.
+generation streams the complete receipt collection rather than materializing a
+tenant-wide list, rechecks the source digests and signed ledger state before
+signing, and asks the caller to retry if they changed mid-export.
+
+## Read-only deployment preflight
+
+`maverick preflight --profile cockpit` checks the tenant boundary, gateway
+directory admission, signing capability, public trust registry, and initialized
+receipt and packet ledger integrity without creating directories, keys,
+indexes, locks, or signed state. Existing ledgers are verified against their
+physical rows, read-only SQLite index, signed state snapshot, and trusted
+public keys; preflight never repairs them.
+
+A fresh writable parent is reported as first-use attention, while an unwritable
+first-use parent or unsafe existing custody is a blocker. Locally generated
+restricted signing custody is explicit attention; injected or externally
+managed signing custody can satisfy the stronger deployment posture. No secret
+key value is returned by the check.
 
 ## Synthetic demo
 
@@ -138,8 +241,10 @@ gap `synthetic_demo_data_present`.
 ## Benchmark evidence
 
 The cockpit links the
-[governance benchmark report](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md) and the
-dashboard's `/benchmarks` history view. Treat benchmark results as scoped test
-evidence: they establish only the controls, fixtures, versions, and runs named
-in the report. They do not establish regulatory compliance or comparative
-model quality outside that scope.
+[published governance benchmark report](./benchmarks/governance-frontier.md),
+the
+[source-repository report](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/benchmarks/GOVERNANCE_FRONTIER_RESULTS.md),
+and the dashboard's `/benchmarks` history view. Treat benchmark results as
+scoped test evidence: they establish only the controls, fixtures, versions,
+and runs named in the report. They do not establish regulatory compliance or
+comparative model quality outside that scope.

@@ -72,11 +72,12 @@ def _vtuple(version: str) -> tuple[int, ...]:
 
 
 def current_version() -> str:
-    try:
-        from importlib.metadata import version
-        return version("maverick-agent")
-    except Exception:
-        return "0.1.7"
+    # ``maverick.__version__`` already resolves installed distribution metadata
+    # with the source-tree fallback. Reuse it instead of carrying a second
+    # fallback literal that can drift past the deprecation sunset gate.
+    from . import __version__
+
+    return __version__
 
 
 def get(name: str) -> Deprecation | None:

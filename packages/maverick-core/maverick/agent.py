@@ -16,7 +16,7 @@ import secrets as _secrets
 import time
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -254,21 +254,307 @@ _LOOP_GUARD_THRESHOLD = max(2, env_int("MAVERICK_LOOP_GUARD_THRESHOLD", 3))
 # 0 disables the nudge. Tune via MAVERICK_STEP_BUDGET_WARNING.
 _STEP_BUDGET_WARNING = max(0, env_int("MAVERICK_STEP_BUDGET_WARNING", 3))
 
-# P0 capability layer (path resource-scopes): filesystem tools whose workspace
-# paths are gated at the _run_tool chokepoint by a capability's allow_paths
-# globs. Single-path tools map to the arg carrying the path. Multi-file tools
-# are handled explicitly below. Empty allow_paths == all (the capability's
-# "empty == allow-all" convention), so this is a no-op unless capability
-# enforcement is opted in AND the active grant restricts paths.
-_FILE_TOOL_PATH_ARGS: dict[str, str] = {
-    "read_file": "path",
-    "write_file": "path",
-    "list_dir": "path",
-    "str_replace_editor": "path",
-    "ast_edit": "path",
-    "image_content_classifier": "file",
-    "wasm_run": "module",
+# P0 filesystem-resource layer. In-process tools run in the Lightwork process,
+# outside Docker's read-only bind mounts, so every workspace path they read or
+# write is described here and enforced at the common dispatch chokepoint.
+#
+# Path-level access matters: image_edit reads input_path but writes output_path;
+# wasm_run reads its module but grants write-capable preopens in dirs. A
+# tool-level "mutates" flag cannot express either safely. Conditional tools
+# declare their operation selector and complete known operation set. A new or
+# misspelled operation is treated as write-capable for every supplied path,
+# forcing this registry to be updated before a new write mode can bypass the
+# policy.
+@dataclass(frozen=True)
+class _WorkspacePathRule:
+    argument: str
+    operations: frozenset[Any] | None = None
+    mutates: bool = False
+    mutates_subtree: bool = False
+    many: bool = False
+    default: str | None = None
+    fixed_default: bool = False
+    skip_remote_references: bool = False
+
+
+@dataclass(frozen=True)
+class _FileToolPolicy:
+    paths: tuple[_WorkspacePathRule, ...]
+    operation_argument: str | None = None
+    known_operations: frozenset[Any] = frozenset()
+    unknown_operation_mutates: bool = True
+
+
+@dataclass(frozen=True)
+class _ResolvedWorkspacePath:
+    path: str
+    mutates_subtree: bool = False
+
+
+def _rule(
+    argument: str,
+    *,
+    operations: set[Any] | frozenset[Any] | None = None,
+    mutates: bool = False,
+    mutates_subtree: bool = False,
+    many: bool = False,
+    default: str | None = None,
+    fixed_default: bool = False,
+    skip_remote_references: bool = False,
+) -> _WorkspacePathRule:
+    return _WorkspacePathRule(
+        argument=argument,
+        operations=None if operations is None else frozenset(operations),
+        mutates=mutates,
+        mutates_subtree=mutates_subtree,
+        many=many,
+        default=default,
+        fixed_default=fixed_default,
+        skip_remote_references=skip_remote_references,
+    )
+
+
+_FILE_TOOL_POLICIES: dict[str, _FileToolPolicy] = {
+    "read_file": _FileToolPolicy((_rule("path"),)),
+    "write_file": _FileToolPolicy((_rule("path", mutates=True),)),
+    "list_dir": _FileToolPolicy((_rule("path", default="."),)),
+    "str_replace_editor": _FileToolPolicy(
+        (
+            _rule("path", operations={"view"}),
+            _rule(
+                "path",
+                operations={"create", "str_replace", "insert"},
+                mutates=True,
+            ),
+        ),
+        operation_argument="command",
+        known_operations=frozenset({"view", "create", "str_replace", "insert"}),
+    ),
+    "ast_edit": _FileToolPolicy((_rule("path", mutates=True),)),
+    "spreadsheet": _FileToolPolicy(
+        (
+            _rule("path", operations={"info", "read"}),
+            _rule("path", operations={"write", "set_cell"}, mutates=True),
+        ),
+        operation_argument="op",
+        known_operations=frozenset({"info", "read", "write", "set_cell"}),
+    ),
+    "sql_query": _FileToolPolicy(
+        (
+            # The runtime defaults None to read-only, then applies bool(value).
+            # Schema-valid booleans are represented precisely here; malformed
+            # direct calls are handled by the custom extractor below.
+            _rule("database", operations={None, True}),
+            _rule("database", operations={False}, mutates=True),
+        ),
+        operation_argument="read_only",
+        known_operations=frozenset({None, True, False}),
+    ),
+    "image_content_classifier": _FileToolPolicy((_rule("file"),)),
+    "ocr": _FileToolPolicy(
+        (
+            _rule("path", operations={"extract"}),
+            # extract_url materialises a bounded temporary file directly in the
+            # workspace root before sandboxed OCR, then removes it. Mutating the
+            # root directory entry must still honor a root read-only overlay.
+            _rule(
+                ".",
+                operations={"extract_url"},
+                mutates=True,
+                default=".",
+                fixed_default=True,
+            ),
+        ),
+        operation_argument="op",
+        known_operations=frozenset({"extract", "extract_url"}),
+    ),
+    "transcribe_audio": _FileToolPolicy((_rule("source"),)),
+    "wasm_run": _FileToolPolicy(
+        (
+            _rule("module", operations={"run"}),
+            _rule(
+                "dirs",
+                operations={"run"},
+                mutates=True,
+                mutates_subtree=True,
+                many=True,
+            ),
+        ),
+        operation_argument="op",
+        known_operations=frozenset({"run", "version"}),
+    ),
+    "diagram": _FileToolPolicy((_rule("out", mutates=True),)),
+    "latex": _FileToolPolicy(
+        (_rule("out", operations={"render"}, mutates=True, default="doc.pdf"),),
+        operation_argument="op",
+        known_operations=frozenset({"mathml", "render"}),
+    ),
+    "image_edit": _FileToolPolicy(
+        (
+            _rule(
+                "image",
+                operations={"inpaint", "variation", "upscale"},
+                skip_remote_references=True,
+            ),
+            _rule(
+                "mask",
+                operations={"inpaint"},
+                skip_remote_references=True,
+            ),
+            _rule("input_path", operations={"crop", "resize", "rotate"}),
+            _rule(
+                "output_path",
+                operations={"crop", "resize", "rotate"},
+                mutates=True,
+            ),
+        ),
+        operation_argument="op",
+        known_operations=frozenset(
+            {"inpaint", "variation", "upscale", "crop", "resize", "rotate"}
+        ),
+    ),
+    "speak": _FileToolPolicy((_rule("output", mutates=True),)),
+    "html_to_app": _FileToolPolicy(
+        (
+            _rule(
+                "dest",
+                operations={"scaffold"},
+                mutates=True,
+                mutates_subtree=True,
+            ),
+        ),
+        operation_argument="op",
+        known_operations=frozenset({"analyze", "scaffold"}),
+    ),
+    "workspace_snapshot": _FileToolPolicy(
+        (
+            _rule("path", operations={"snapshot"}, default="."),
+            _rule(
+                "dest",
+                operations={"restore"},
+                mutates=True,
+                mutates_subtree=True,
+            ),
+        ),
+        operation_argument="op",
+        known_operations=frozenset({"snapshot", "list", "restore"}),
+    ),
+    "android": _FileToolPolicy(
+        (
+            _rule("apk_path", operations={"install"}),
+            _rule("out_path", operations={"screenshot"}, mutates=True),
+        ),
+        operation_argument="op",
+        known_operations=frozenset(
+            {
+                "devices",
+                "shell",
+                "install",
+                "uninstall",
+                "screenshot",
+                "tap",
+                "input_text",
+                "launch",
+                "logcat",
+            }
+        ),
+    ),
+    "ios_sim": _FileToolPolicy(
+        (
+            _rule("app_path", operations={"install"}),
+            _rule("out_path", operations={"screenshot"}, mutates=True),
+        ),
+        operation_argument="op",
+        known_operations=frozenset(
+            {
+                "list_devices",
+                "boot",
+                "shutdown",
+                "install",
+                "uninstall",
+                "launch",
+                "terminate",
+                "screenshot",
+                "open_url",
+            }
+        ),
+    ),
+    # Obsidian paths are resolved against its configured vault by the custom
+    # extractor below. They cannot be treated as workdir-relative raw notes.
+    "obsidian": _FileToolPolicy(
+        (),
+        operation_argument="op",
+        known_operations=frozenset({"list", "read", "create", "append", "search"}),
+    ),
+    # Like Obsidian, memory paths are rooted by operator configuration rather
+    # than relative to workdir and need a custom extractor below.
+    "memory": _FileToolPolicy(
+        (),
+        operation_argument="command",
+        known_operations=frozenset(
+            {"view", "create", "str_replace", "insert", "delete", "rename"}
+        ),
+    ),
+    # Persistence is opt-in, but when configured the browser can checkpoint
+    # after navigation, explicit save/close, or interpreter exit. The target is
+    # operator-selected and therefore resolved by a custom extractor.
+    "browser": _FileToolPolicy(
+        (),
+        operation_argument="action",
+        known_operations=frozenset(
+            {
+                "navigate",
+                "click",
+                "type",
+                "fill_form",
+                "press",
+                "scroll",
+                "screenshot",
+                "observe",
+                "extract_text",
+                "extract_html",
+                "find_text",
+                "wait_for",
+                "go_back",
+                "go_forward",
+                "current_url",
+                "list_links",
+                "save_session",
+                "close",
+            }
+        ),
+    ),
+    "oauth_helper": _FileToolPolicy(
+        (),
+        operation_argument="op",
+        known_operations=frozenset({"authorize_url", "exchange", "refresh"}),
+    ),
 }
+
+_IN_PROCESS_WORKSPACE_WRITERS = frozenset(
+    {
+        "write_file",
+        "str_replace_editor",
+        "ast_edit",
+        "apply_patch",
+        "spreadsheet",
+        "sql_query",
+        "ocr",
+        "wasm_run",
+        "diagram",
+        "latex",
+        "image_edit",
+        "speak",
+        "html_to_app",
+        "workspace_snapshot",
+        "android",
+        "ios_sim",
+        "obsidian",
+        "memory",
+        "browser",
+        "oauth_helper",
+    }
+)
 
 # P0 capability layer (host resource-scopes): the network tools whose URL
 # argument a capability's allow_hosts globs gate at the _run_tool chokepoint,
@@ -301,15 +587,228 @@ def _workspace_relative_path(sandbox: Any, raw_path: str) -> str:
     return rel or "."
 
 
-def _capability_paths_for_tool(name: str, args: Any, sandbox: Any) -> list[str] | None:
-    """Canonicalize the workspace paths a tool call will touch.
+def _default_workspace_path(
+    name: str,
+    rule: _WorkspacePathRule,
+    args: dict[str, Any],
+    sandbox: Any,
+) -> str | None:
+    """Resolve a tool's real default destination without executing it."""
+    if name == "diagram" and rule.argument == "out":
+        return f"diagram.{str(args.get('format') or 'svg').strip().lower()}"
+    if name == "speak" and rule.argument == "output":
+        base = Path(sandbox.workdir)
+        index = 1
+        while (base / f"speech-{index}.mp3").exists():
+            index += 1
+        return f"speech-{index}.mp3"
+    return rule.default
 
-    ``None`` preserves the legacy fail-soft behavior for malformed calls whose
-    path cannot be located confidently; those continue to the tool's own
-    validation. ``list_dir`` is special because its schema defaults a missing
-    path to ``.``, and ``apply_patch`` is special because its patch can touch
-    multiple files.
+
+def _normalize_file_tool_args(
+    name: str,
+    args: dict[str, Any],
+    sandbox: Any,
+) -> dict[str, Any]:
+    """Freeze dynamic path defaults once for policy, audit, hooks, and dispatch.
+
+    ``speak`` historically searched for the next free ``speech-N.mp3`` both in
+    the path gate and again inside the tool. A file appearing between those two
+    searches could shift the actual destination onto a protected next name.
+    Supplying the admitted name explicitly makes the checked and written path
+    identical.
     """
+    if name != "speak" or args.get("output"):
+        return args
+    normalized = dict(args)
+    rule = _FILE_TOOL_POLICIES["speak"].paths[0]
+    output = _default_workspace_path(name, rule, normalized, sandbox)
+    if output:
+        normalized["output"] = output
+    return normalized
+
+
+def _one_workspace_access(
+    sandbox: Any,
+    target: str | Path,
+    *,
+    mutates_subtree: bool = False,
+) -> _ResolvedWorkspacePath:
+    return _ResolvedWorkspacePath(
+        _workspace_relative_path(sandbox, str(target)),
+        mutates_subtree=mutates_subtree,
+    )
+
+
+def _obsidian_path_accesses(
+    args: dict[str, Any],
+    sandbox: Any,
+    *,
+    mutating_only: bool,
+) -> list[_ResolvedWorkspacePath] | None:
+    """Resolve vault-relative notes to their actual workspace identity."""
+    operation = args.get("op")
+    known_operations = (
+        "list",
+        "read",
+        "create",
+        "append",
+        "search",
+    )
+    mutates = (
+        operation in ("create", "append")
+        or operation not in known_operations
+    )
+    if mutating_only and not mutates:
+        return []
+    try:
+        from .tools.obsidian import _resolve, _vault
+
+        vault = _vault().resolve()
+        if operation in ("read", "create", "append"):
+            target = _resolve(vault, args.get("note") or "")
+        else:
+            target = vault
+    except (OSError, RuntimeError, ValueError):
+        # The tool will return its own actionable validation/config error.
+        return None
+    return [
+        _one_workspace_access(
+            sandbox,
+            target,
+            mutates_subtree=mutates and operation not in ("create", "append"),
+        )
+    ]
+
+
+def _memory_path_accesses(
+    args: dict[str, Any],
+    sandbox: Any,
+    *,
+    mutating_only: bool,
+) -> list[_ResolvedWorkspacePath] | None:
+    """Resolve configured long-term-memory paths without granting its root."""
+    command = str(args.get("command") or "").strip()
+    mutating = {"create", "str_replace", "insert", "delete", "rename"}
+    if mutating_only and command not in mutating:
+        return []
+    try:
+        from .tools.memory import _memory_root, _resolve
+
+        root = _memory_root().resolve()
+        if command == "rename":
+            targets = [
+                _resolve(root, args.get("old_path") or args.get("path") or ""),
+                _resolve(root, args.get("new_path") or ""),
+            ]
+        elif command in {
+            "view",
+            "create",
+            "str_replace",
+            "insert",
+            "delete",
+        }:
+            targets = [_resolve(root, args.get("path") or "")]
+        else:
+            return []
+    except (OSError, RuntimeError, ValueError):
+        return None
+    recursive = command in {"delete", "rename"}
+    return [
+        _one_workspace_access(
+            sandbox,
+            target,
+            mutates_subtree=recursive,
+        )
+        for target in targets
+    ]
+
+
+def _sql_query_path_accesses(
+    args: dict[str, Any],
+    sandbox: Any,
+    *,
+    mutating_only: bool,
+) -> list[_ResolvedWorkspacePath] | None:
+    """Mirror sql_query's coercion and include SQLite's writable sidecars."""
+    raw = args.get("database")
+    if not isinstance(raw, str) or not raw:
+        return None
+    read_only_arg = args.get("read_only")
+    read_only = True if read_only_arg is None else bool(read_only_arg)
+    if mutating_only and read_only:
+        return []
+    path = _workspace_relative_path(sandbox, raw)
+    accesses = [_ResolvedWorkspacePath(path)]
+    if not read_only:
+        # A writable connection may create rollback/WAL coordination files
+        # beside the main DB. Protecting one of those exact evidence paths must
+        # be as effective as protecting the main database itself.
+        accesses.extend(
+            _ResolvedWorkspacePath(path + suffix)
+            for suffix in ("-journal", "-wal", "-shm")
+        )
+    return accesses
+
+
+def _browser_path_accesses(
+    args: dict[str, Any],
+    sandbox: Any,
+    *,
+    mutating_only: bool,
+) -> list[_ResolvedWorkspacePath] | None:
+    """Resolve the opt-in browser state file that any live session may save."""
+    del mutating_only  # every started persistent session may save at exit
+    if not args.get("action"):
+        return []
+    if os.environ.get("MAVERICK_BROWSER_NO_PERSIST") == "1":
+        return []
+    state = os.environ.get("MAVERICK_BROWSER_STATE", "")
+    if not state:
+        return []
+    return [_one_workspace_access(sandbox, Path(state).expanduser())]
+
+
+def _oauth_path_accesses(
+    args: dict[str, Any],
+    sandbox: Any,
+    *,
+    mutating_only: bool,
+) -> list[_ResolvedWorkspacePath] | None:
+    """Resolve the legacy plaintext OAuth sink when the sealed vault is off."""
+    if args.get("op") not in ("exchange", "refresh"):
+        return []
+    try:
+        from .oauth_vault import enabled as oauth_vault_enabled
+
+        if oauth_vault_enabled():
+            return []
+    except Exception:
+        # The tool will fail before persisting if vault policy cannot resolve.
+        return None
+    out = os.environ.get("MAVERICK_OAUTH_OUT", "").strip()
+    if not out:
+        return []
+    del mutating_only  # exchange/refresh always overwrite the configured sink
+    return [_one_workspace_access(sandbox, Path(out).expanduser())]
+
+
+def _operation_in(operation: Any, options: frozenset[Any]) -> bool:
+    """Membership that treats malformed/unhashable direct-call values as unknown."""
+    try:
+        return operation in options
+    except TypeError:
+        return False
+
+
+def _workspace_path_accesses_for_tool(
+    name: str,
+    args: Any,
+    sandbox: Any,
+    *,
+    mutating_only: bool = False,
+) -> list[_ResolvedWorkspacePath] | None:
+    """Canonical workspace identities and recursive-write semantics for a call."""
     if not isinstance(args, dict):
         return None
 
@@ -318,35 +817,128 @@ def _capability_paths_for_tool(name: str, args: Any, sandbox: Any) -> list[str] 
         if not isinstance(patch_text, str):
             return None
         from .tools.apply_patch import _files_in_patch
-        paths = _files_in_patch(patch_text)
-        return [_workspace_relative_path(sandbox, raw) for raw in paths]
 
-    path_arg = _FILE_TOOL_PATH_ARGS.get(name)
-    if path_arg is None:
+        return [
+            _one_workspace_access(sandbox, raw)
+            for raw in _files_in_patch(patch_text)
+        ]
+
+    custom = {
+        "obsidian": _obsidian_path_accesses,
+        "memory": _memory_path_accesses,
+        "sql_query": _sql_query_path_accesses,
+        "browser": _browser_path_accesses,
+        "oauth_helper": _oauth_path_accesses,
+    }.get(name)
+    if custom is not None:
+        return custom(args, sandbox, mutating_only=mutating_only)
+
+    policy = _FILE_TOOL_POLICIES.get(name)
+    if policy is None:
         return None
 
-    if name == "wasm_run":
-        if args.get("op", "run") != "run":
-            return None
-        raw_module = args.get("module")
-        if not isinstance(raw_module, str) or raw_module == "":
-            return None
-        paths = [_workspace_relative_path(sandbox, raw_module)]
-        raw_dirs = args.get("dirs") or []
-        if isinstance(raw_dirs, list):
-            paths.extend(
-                _workspace_relative_path(sandbox, raw_dir)
-                for raw_dir in raw_dirs
-                if isinstance(raw_dir, str) and raw_dir != ""
+    operation = (
+        args.get(policy.operation_argument)
+        if policy.operation_argument is not None
+        else None
+    )
+    unknown_operation = (
+        policy.operation_argument is not None
+        and not _operation_in(operation, policy.known_operations)
+    )
+    accesses: list[_ResolvedWorkspacePath] = []
+    for rule in policy.paths:
+        active = rule.operations is None or _operation_in(
+            operation,
+            rule.operations,
+        )
+        if not active and not unknown_operation:
+            continue
+        mutates = (
+            policy.unknown_operation_mutates
+            if unknown_operation and not active
+            else rule.mutates
+        )
+        if mutating_only and not mutates:
+            continue
+
+        raw: Any = None if rule.fixed_default else args.get(rule.argument)
+        if raw in (None, ""):
+            # Unknown operations do not get another operation's synthesized
+            # default. They can only be denied against paths they supplied.
+            raw = None if unknown_operation else _default_workspace_path(
+                name,
+                rule,
+                args,
+                sandbox,
             )
-        return paths
+        values = raw if rule.many and isinstance(raw, list) else [raw]
+        if rule.many and raw is not None and not isinstance(raw, list):
+            return None
+        for value in values:
+            if not isinstance(value, str) or not value:
+                continue
+            if rule.skip_remote_references:
+                scheme = urlsplit(value).scheme.lower()
+                if scheme in {"http", "https", "data"}:
+                    continue
+            accesses.append(
+                _one_workspace_access(
+                    sandbox,
+                    value,
+                    mutates_subtree=mutates and rule.mutates_subtree,
+                )
+            )
 
-    raw = args.get(path_arg, ".") if name == "list_dir" else args.get(path_arg)
-    if not isinstance(raw, str):
-        return None
-    if raw == "" and name != "list_dir":
-        return None
-    return [_workspace_relative_path(sandbox, raw)]
+    if name == "workspace_snapshot" and operation == "snapshot":
+        # Snapshot archives and their temporary sibling are writes too. The
+        # store is operator-configurable and can legitimately overlap workdir.
+        from .workspace_snapshot import store_dir
+
+        accesses.append(
+            _one_workspace_access(
+                sandbox,
+                store_dir().resolve(),
+                mutates_subtree=True,
+            )
+        )
+
+    # Preserve order for audit messages while merging duplicate input/output
+    # identities (for example an in-place image edit).
+    deduplicated: dict[str, bool] = {}
+    for access in accesses:
+        deduplicated[access.path] = (
+            deduplicated.get(access.path, False) or access.mutates_subtree
+        )
+    return [
+        _ResolvedWorkspacePath(path, mutates_subtree=recursive)
+        for path, recursive in deduplicated.items()
+    ]
+
+
+def _capability_paths_for_tool(
+    name: str,
+    args: Any,
+    sandbox: Any,
+    *,
+    mutating_only: bool = False,
+) -> list[str] | None:
+    """Canonicalize the workspace paths a tool call will touch.
+
+    ``None`` preserves the legacy fail-soft behavior for malformed calls whose
+    path cannot be located confidently; those continue to the tool's own
+    validation. When ``mutating_only`` is true, read inputs are excluded so a
+    protected evidence file remains readable while every declared destination
+    stays immutable. ``apply_patch`` is special because its diff can name
+    multiple files.
+    """
+    accesses = _workspace_path_accesses_for_tool(
+        name,
+        args,
+        sandbox,
+        mutating_only=mutating_only,
+    )
+    return None if accesses is None else [access.path for access in accesses]
 
 
 def _governance_amount(args: Any) -> float | None:
@@ -844,9 +1436,13 @@ class Agent:
         self._tool_fail_streak: dict[str, int] = {}
 
     def _resolve_capability(self, explicit):
-        """Pick this agent's capability grant. Fail-open: any error or the
-        disabled default yields ``None`` (unrestricted), so a misconfigured
-        policy can never wedge a run."""
+        """Pick this agent's capability grant.
+
+        A readable policy that leaves enforcement disabled intentionally yields
+        ``None`` (legacy unrestricted behavior). Once enforcement is enabled or
+        policy intent is uncertain, root-grant failures yield an explicit
+        deny-all grant instead of silently restoring unrestricted authority.
+        """
         if explicit is not None:
             return explicit
         inherited = getattr(self.ctx, "capability", None)
@@ -854,15 +1450,22 @@ class Agent:
             return inherited
         if self.depth != 0:
             return None
+        principal = f"user:{getattr(self.ctx, 'user_id', None) or 'local'}"
         try:
-            from .capability import capability_enforced, capability_from_config
+            from .capability import (
+                Capability,
+                capability_enforced,
+                capability_from_config,
+            )
             if not capability_enforced():
                 return None
             root = capability_from_config(
-                principal=f"user:{getattr(self.ctx, 'user_id', None) or 'local'}",
+                principal=principal,
                 channel=getattr(self.ctx, "channel", None),
                 user_id=getattr(self.ctx, "user_id", None),
             )
+            if not isinstance(root, Capability):
+                raise TypeError("capability root mint returned an invalid grant")
             # Stash on the shared context so spawned children inherit + attenuate.
             try:
                 self.ctx.capability = root
@@ -870,7 +1473,21 @@ class Agent:
                 pass
             return root
         except Exception:
-            return None
+            log.exception(
+                "capability root-grant resolution failed for %s; denying all",
+                principal,
+            )
+            # A failure importing the capability module itself should stop agent
+            # construction rather than fabricate authority. Normal mint/config
+            # failures reach this import successfully and receive deny-all.
+            from .capability import deny_all_capability
+
+            root = deny_all_capability(principal)
+            try:
+                self.ctx.capability = root
+            except Exception:
+                pass
+            return root
 
     @property
     def checkpoint_id(self) -> str:
@@ -1484,13 +2101,20 @@ class Agent:
         # gets its schema default of ".", and ``apply_patch`` checks every
         # file referenced by the unified diff. Malformed calls whose path
         # cannot be located still fall through to tool validation.
-        if cap is None or not (name in _FILE_TOOL_PATH_ARGS or name == "apply_patch"):
+        if (
+            cap is None
+            or not cap.allow_paths
+            or not (name in _FILE_TOOL_POLICIES or name == "apply_patch")
+        ):
             return None
         denied_paths: list[str] = []
         try:
             paths = _capability_paths_for_tool(name, args, self.ctx.sandbox)
-        except ValueError as e:
-            denied_paths = [str(e)]
+        except ValueError:
+            # Absolute configured paths outside workdir are not representable
+            # by a workspace-relative grant. Deny without reflecting host path
+            # metadata (usernames, home layout) into model-visible output.
+            denied_paths = ["<outside-workspace>"]
         else:
             if paths is not None:
                 denied_paths = [p for p in paths if not cap.permits_path(p)]
@@ -1508,6 +2132,66 @@ class Agent:
         return (
             f"⚠ DENIED by capability policy: principal {cap.principal!r} is "
             f"not granted path {denied!r} for tool {name!r}. "
+            "The tool was not executed."
+        )
+
+    def _read_only_path_denial(self, name: str, args: dict) -> str | None:
+        """Keep protected workspace evidence immutable across every file tool.
+
+        Docker overlays ``sandbox.read_only_paths`` as read-only bind mounts
+        for shell/code execution. File tools run in-process, so they need the
+        same check here at the common dispatch chokepoint. Directory entries
+        protect their complete subtree.
+        """
+        protected = tuple(
+            PurePosixPath(path)
+            for path in getattr(self.ctx.sandbox, "read_only_paths", ())
+        )
+        if not protected:
+            return None
+        if name not in _FILE_TOOL_POLICIES and name != "apply_patch":
+            return None
+        try:
+            accesses = _workspace_path_accesses_for_tool(
+                name,
+                args,
+                self.ctx.sandbox,
+                mutating_only=True,
+            )
+        except ValueError:
+            return None
+        if not accesses:
+            return None
+        denied = [
+            access.path
+            for access in accesses
+            if any(
+                PurePosixPath(access.path) == root
+                or root in PurePosixPath(access.path).parents
+                or (
+                    access.mutates_subtree
+                    and PurePosixPath(access.path) in root.parents
+                )
+                for root in protected
+            )
+        ]
+        if not denied:
+            return None
+        rendered = ", ".join(denied)
+        self.ctx.blackboard.post(
+            self.name,
+            "error",
+            f"tool={name} path={rendered} DENIED by sandbox read-only policy",
+        )
+        from .audit import EventKind
+        self._audit_tool_event(
+            EventKind.SANDBOX_DENIED,
+            tool=name,
+            path=rendered,
+            reason="read_only_path",
+        )
+        return (
+            f"DENIED by sandbox policy: path {rendered!r} is read-only. "
             "The tool was not executed."
         )
 
@@ -1864,6 +2548,7 @@ class Agent:
                     f"⚠ Agent sealed by compartment quarantine "
                     f"({q.reason(self.name)}). No further tools will run."
                 )
+        args = _normalize_file_tool_args(name, args, self.ctx.sandbox)
         shield = self.ctx.shield
         if shield is not None:
             verdict = shield.scan_tool_call(name, args)
@@ -1903,6 +2588,8 @@ class Agent:
             if (d := _gate(name, cap)) is not None:
                 return d
         if (d := self._capability_path_denial(name, args, cap)) is not None:
+            return d
+        if (d := self._read_only_path_denial(name, args)) is not None:
             return d
         # Operating-Twin pre-execution gates (governed rehearsal defaults on;
         # both fail open on internal errors):

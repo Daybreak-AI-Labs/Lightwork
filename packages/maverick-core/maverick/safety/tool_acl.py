@@ -42,6 +42,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 
+from ..runtime_overrides import RuntimeOverridesSecurityError
+
 log = logging.getLogger(__name__)
 
 # An allow-list that no real tool can satisfy (tool names are identifiers; the
@@ -180,11 +182,14 @@ def resolve_lists(
     layers_deny: list[set[str]] = [g_deny]
 
     # Dashboard-owned runtime overrides (one-click "disable this tool")
-    # union into the deny-list without touching config.toml. Fail-soft:
-    # a missing/broken overlay never blocks the registry.
+    # union into the deny-list without touching config.toml. An absent overlay
+    # is a valid empty policy; an existing but unreadable/invalid overlay must
+    # stop registry construction so its denials cannot disappear.
     try:
         from ..runtime_overrides import denied_tools as _overlay_denied
         layers_deny.append(_overlay_denied())
+    except RuntimeOverridesSecurityError:
+        raise
     except Exception as e:  # pragma: no cover
         log.debug("tool_acl: runtime overrides unavailable: %s", e)
 

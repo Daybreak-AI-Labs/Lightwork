@@ -340,13 +340,13 @@ def promote_skill_live(
             )
         ):
             raise RuntimeError("deployment backend returned no matching observed receipt")
-        try:
-            from .audit import EventKind, record
-            record(EventKind.LEARNING_UPDATE, agent="learning_rollout",
-                   candidate=cand, stage_fraction=fraction, phase="deploy",
-                   deployed_revision=receipt.revision)
-        except Exception:
-            pass
+        from .audit import EventKind, audit_event
+
+        audit_event(
+            EventKind.LEARNING_UPDATE, agent="learning_rollout",
+            candidate=cand, stage_fraction=fraction, phase="deploy",
+            deployed_revision=receipt.revision,
+        )
 
     def rollback(cand: str) -> RollbackReceipt:
         failures: dict[str, str] = {}

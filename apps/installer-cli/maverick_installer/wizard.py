@@ -884,15 +884,13 @@ def pick_budget() -> dict[str, Any]:
             _q_text("  Max tool calls per run", default="500"), default=500,
         ),
     }
-    # Billing-grade accounting: refuse to meter a model with no verified price
-    # instead of silently estimating it at the Sonnet fallback rate. Default off
-    # (soft internal caps); enable when the meter feeds an invoice/chargeback.
-    if _q_confirm(
+    # Billing-grade accounting is the safe default. Preserve an explicit false
+    # for legacy/custom gateways, where estimates remain provenance-labelled.
+    budget["strict_pricing"] = _q_confirm(
         "  Strict pricing? Fail closed if a model has no verified price "
-        "(billing-grade; default off estimates instead)",
-        default=False,
-    ):
-        budget["strict_pricing"] = True
+        "(recommended; choose No only for estimate-only custom gateways)",
+        default=True,
+    )
     return budget
 
 
@@ -4435,12 +4433,102 @@ def _cfg_table(header: str, mapping: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _backup_wizard_file(path: Path) -> None:
+    """Best-effort private backup of a file the wizard is about to replace."""
+
+    try:
+        if not path.exists():
+            return
+        backup = Path(f"{path}.bak")
+        temporary = Path(f"{backup}.tmp")
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        try:
+            with path.open("rb") as source, os.fdopen(fd, "wb") as destination:
+                fd = -1
+                shutil.copyfileobj(source, destination)
+            try:
+                stat = path.stat()
+                os.utime(temporary, (stat.st_atime, stat.st_mtime))
+            except OSError:
+                pass
+            try:
+                os.chmod(temporary, 0o600)
+            except OSError:
+                pass
+            os.replace(temporary, backup)
+            try:
+                os.chmod(backup, 0o600)
+            except OSError:
+                pass
+        finally:
+            if fd != -1:
+                os.close(fd)
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+    except OSError:
+        pass
+
+
+def _wizard_file_unchanged(path: Path, data: bytes) -> bool:
+    try:
+        if not path.is_file():
+            return False
+        # Text-mode writes use CRLF on Windows. Compare logical content so the
+        # same wizard answers are idempotent on every supported OS.
+        existing = path.read_bytes().replace(b"\r\n", b"\n")
+        expected = data.replace(b"\r\n", b"\n")
+        return existing == expected
+    except OSError:
+        return False
+
+
+def _tighten_wizard_file(path: Path) -> None:
+    # A true no-op re-run still repairs custody if an older install left a
+    # matching file with broad permissions.
+    try:
+        from maverick.file_lock import ensure_private_file
+
+        ensure_private_file(path, 0o600)
+    except ImportError:  # pragma: no cover -- installer normally depends on core
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+
+
+def _write_wizard_file(path: Path, body: str) -> None:
+    """Write one private wizard file, preserving a logically equivalent retry."""
+
+    if _wizard_file_unchanged(path, body.encode("utf-8")):
+        _tighten_wizard_file(path)
+        console.print(f"[green]ok[/green] unchanged {path} (chmod 600)")
+        return
+    _backup_wizard_file(path)
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as destination:
+            destination.write(body)
+    finally:
+        # If the file already existed at a wider mode, tighten it.
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    console.print(f"[green]ok[/green] wrote {path} (chmod 600)")
+
+
 def write_config(
     providers: list[str],
     role_models: dict[str, str],
     channels: dict[str, dict[str, Any]],
     safety: dict[str, Any],
-    budget: dict[str, float],
+    budget: dict[str, Any],
     sandbox: dict[str, Any],
     keys: dict[str, str],
     capabilities: dict[str, bool] | None = None,
@@ -4488,66 +4576,14 @@ def write_config(
     # Re-running the wizard truncates config.toml / .env. The loader explicitly
     # supports hand-editing, so back up any existing file first (0o600) instead
     # of silently destroying a user's manual edits.
-    def _backup(path) -> None:
-        try:
-            if os.path.exists(path):
-                bak = str(path) + ".bak"
-                tmp = bak + ".tmp"
-                try:
-                    os.unlink(tmp)
-                except FileNotFoundError:
-                    pass
-                fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                try:
-                    with open(path, "rb") as src, os.fdopen(fd, "wb") as dst:
-                        fd = -1
-                        shutil.copyfileobj(src, dst)
-                    try:
-                        st = os.stat(path)
-                        os.utime(tmp, (st.st_atime, st.st_mtime))
-                    except OSError:
-                        pass
-                    try:
-                        os.chmod(tmp, 0o600)
-                    except OSError:
-                        pass
-                    os.replace(tmp, bak)
-                    try:
-                        os.chmod(bak, 0o600)
-                    except OSError:
-                        pass
-                finally:
-                    if fd != -1:
-                        os.close(fd)
-                    try:
-                        os.unlink(tmp)
-                    except FileNotFoundError:
-                        pass
-        except OSError:
-            pass
-
     if keys:
-        _backup(ENV_FILE)
         # Atomic + perm-from-creation: previous version was
         # ``write_text(...)`` followed by ``chmod(0o600)``, which left
         # the file world-readable (0o644) for one syscall. Open with
         # ``O_CREAT | O_WRONLY | O_TRUNC`` and mode 0o600 so the file
         # never exists at any other permission.
         body = "\n".join(f"{k}={v}" for k, v in keys.items()) + "\n"
-        fd = os.open(
-            ENV_FILE,
-            os.O_CREAT | os.O_WRONLY | os.O_TRUNC,
-            0o600,
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(body)
-        finally:
-            # If the file already existed at a wider mode, tighten it.
-            try:
-                os.chmod(ENV_FILE, 0o600)
-            except OSError:
-                pass
+        _write_wizard_file(ENV_FILE, body)
 
     # [flows] can be requested by two independent wizard steps: the dedicated
     # flow-engine step (the `flows` arg) and the advanced-reasoning "Flow
@@ -4641,23 +4677,7 @@ def write_config(
     # secret-bearing in backups/log redaction. chmod 600 so multi-user hosts
     # don't leak it to other accounts.
     config_body = "\n".join(lines) + "\n"
-    _backup(CONFIG_FILE)
-    fd = os.open(
-        CONFIG_FILE,
-        os.O_CREAT | os.O_WRONLY | os.O_TRUNC,
-        0o600,
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(config_body)
-    finally:
-        try:
-            os.chmod(CONFIG_FILE, 0o600)
-        except OSError:
-            pass
-    console.print(f"[green]ok[/green] wrote {CONFIG_FILE} (chmod 600)")
-    if keys:
-        console.print(f"[green]ok[/green] wrote {ENV_FILE} (chmod 600)")
+    _write_wizard_file(CONFIG_FILE, config_body)
 
 
 def smoke_test() -> bool:

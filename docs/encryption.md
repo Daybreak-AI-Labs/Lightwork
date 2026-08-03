@@ -23,7 +23,7 @@ at_rest = false
 - env: `MAVERICK_ENCRYPT_AT_REST=0`
 - or turn off the whole secure-by-default posture with
   `MAVERICK_SECURE_DEFAULT=0` / `[security] secure_defaults = false`
-  (see [Security hardening → Secure by default](security-hardening.md#secure-by-default)).
+  (see the [security and compliance overview](enterprise/security-overview.md)).
 
 Existing installs are safe to leave on: reads are plaintext-tolerant, so rows
 written before it was enabled are returned unchanged until rewritten (run

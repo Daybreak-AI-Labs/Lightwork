@@ -36,15 +36,24 @@ inputs:
     required: false
     default: ""
   sandbox:
-    description: "Sandbox backend for model-generated shell. A CI runner is already an ephemeral VM, so `local` is the default."
+    description: >-
+      Sandbox backend for model-generated shell. Supported: docker, podman,
+      gvisor, or local. Container backends are forced to no-network/non-root.
     required: false
-    default: "local"
+    default: "docker"
+  allow-unsafe-local:
+    description: >-
+      Dangerous opt-in required with sandbox=local. Local executes
+      model-generated shell directly on the runner host and is suitable only
+      for a trusted disposable hosted/isolated runner.
+    required: false
+    default: "false"
   anthropic-api-key:
     description: "Anthropic key, exported as ANTHROPIC_API_KEY. For another provider, leave this blank and set that provider's env var on the job — it is inherited here."
     required: false
     default: ""
   version:
-    description: "Optional expected version of the Lightwork source bundled with this action (e.g. 0.1.6). The action fails if it does not match."
+    description: "Optional expected version of the Lightwork source bundled with this action (e.g. 0.1.7). The action fails if it does not match."
     required: false
     default: ""
   python-version:
@@ -62,17 +71,17 @@ inputs:
 
 outputs:
   result:
-    description: "The swarm's final answer (also written to result-file)."
+    description: "Sanitized, mention-neutralized run output (maximum 50,000 characters; also written to result-file)."
     value: ${{ steps.run.outputs.result }}
   result-file:
-    description: "Path to a file containing the full run output."
+    description: "Path to a private file containing the sanitized, bounded run output."
     value: ${{ steps.run.outputs.result-file }}
 
 runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
         python-version: ${{ inputs.python-version }}
 
@@ -107,22 +116,19 @@ runs:
         PY
           )"
           if [ "$IN_VERSION" != "$actual_version" ]; then
-            echo "::error::Requested Lightwork version '$IN_VERSION' does not match bundled source version '$actual_version'."
+            echo "::error::Requested Lightwork version does not match the bundled source version."
             exit 1
           fi
         fi
 
-        # All first-party distributions are supplied as local direct
-        # requirements in one resolver transaction. This prevents pip from
-        # satisfying maverick-* dependencies with an untrusted public-index
-        # package if a project name is unreserved or later compromised.
-        python -m pip install \
-          "$action_root/packages/maverick-core[all]" \
-          "$action_root/packages/maverick-shield" \
-          "$action_root/packages/maverick-channels" \
-          "$action_root/packages/maverick-dashboard" \
-          "$action_root/packages/maverick-mcp" \
-          "$action_root/apps/installer-cli"
+        # The shared helper reads all eight local direct requirements from
+        # release-cohort.toml, resolves them together under requirements/ci.txt,
+        # runs pip check, and imports every declared runtime module. This keeps
+        # an unreserved sibling name from falling back to the public index.
+        python "$action_root/scripts/install_release_cohort.py" \
+          --source-root "$action_root" \
+          --target-python python \
+          --core-extra release-runtime
         maverick version || maverick --help
 
     - name: Run the swarm
@@ -142,10 +148,93 @@ runs:
         IN_MAX_WALL: ${{ inputs.max-wall-seconds }}
         IN_MODEL: ${{ inputs.model }}
         IN_SANDBOX: ${{ inputs.sandbox }}
+        IN_ALLOW_UNSAFE_LOCAL: ${{ inputs.allow-unsafe-local }}
         IN_SUMMARY: ${{ inputs.step-summary }}
         IN_DRY_RUN: ${{ inputs.dry-run }}
       run: |
-        set -o pipefail
+        set -euo pipefail
+
+        case "$IN_ALLOW_UNSAFE_LOCAL" in
+          true|false) ;;
+          *)
+            echo "::error::'allow-unsafe-local' must be 'true' or 'false'."
+            exit 1
+            ;;
+        esac
+        case "$IN_SUMMARY" in
+          true|false) ;;
+          *)
+            echo "::error::'step-summary' must be 'true' or 'false'."
+            exit 1
+            ;;
+        esac
+        case "$IN_DRY_RUN" in
+          true|false) ;;
+          *)
+            echo "::error::'dry-run' must be 'true' or 'false'."
+            exit 1
+            ;;
+        esac
+        case "$IN_SANDBOX" in
+          docker|podman|gvisor|local) ;;
+          *)
+            echo "::error::'sandbox' must be docker, podman, gvisor, or local."
+            exit 1
+            ;;
+        esac
+
+        if [ "$IN_SANDBOX" = "local" ] && [ "$IN_ALLOW_UNSAFE_LOCAL" != "true" ]; then
+          echo "::error::sandbox=local executes model-generated shell on the runner host. Set allow-unsafe-local=true to acknowledge this risk."
+          exit 1
+        fi
+        if [ "$IN_SANDBOX" != "local" ] && [ "$IN_ALLOW_UNSAFE_LOCAL" = "true" ]; then
+          echo "::error::allow-unsafe-local=true is valid only with sandbox=local."
+          exit 1
+        fi
+
+        # Use a private, action-owned policy file so a caller's config,
+        # dashboard overlay, tenant overlay, or environment cannot silently
+        # enable container networking/root. MAVERICK_HOME remains unchanged so
+        # installed templates and normal run state are still available.
+        umask 077
+        private_root="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/lightwork-action.XXXXXX")"
+        raw_file="$private_root/raw.log"
+        out_file="$private_root/result.log"
+        summary_file="$private_root/summary.html"
+        secret_snapshot="$private_root/secret-files.snapshot"
+        secure_config="$private_root/config.toml"
+        cleanup_private_capture() {
+          rm -f -- \
+            "$raw_file" "$summary_file" "$secret_snapshot" "$secure_config"
+          if [ ! -e "$out_file" ]; then
+            rmdir -- "$private_root" 2>/dev/null || true
+          fi
+        }
+        trap cleanup_private_capture EXIT
+
+        if [ "$IN_SANDBOX" = "local" ]; then
+          cat > "$secure_config" <<'TOML'
+        [sandbox]
+        backend = "local"
+        require_container = false
+        allow_network = false
+        allow_root = false
+        TOML
+          export MAVERICK_REQUIRE_CONTAINER_BACKEND=0
+        else
+          cat > "$secure_config" <<'TOML'
+        [sandbox]
+        backend = "docker"
+        require_container = true
+        allow_network = false
+        allow_root = false
+        TOML
+          export MAVERICK_REQUIRE_CONTAINER_BACKEND=1
+        fi
+        export MAVERICK_CONFIG="$secure_config"
+        export MAVERICK_CONFIG_STRICT=1
+        export MAVERICK_SANDBOX_ALLOW_ROOT=0
+        unset MAVERICK_CONFIG_OVERLAY MAVERICK_TENANT
 
         # Global options go before the subcommand: `maverick --model X start ...`
         pre=()
@@ -168,7 +257,7 @@ runs:
         fi
         [ -n "$IN_MAX_DOLLARS" ] && args+=( --max-dollars "$IN_MAX_DOLLARS" )
         [ -n "$IN_MAX_WALL" ]    && args+=( --max-wall-seconds "$IN_MAX_WALL" )
-        [ -n "$IN_SANDBOX" ]     && args+=( --sandbox "$IN_SANDBOX" )
+        args+=( --sandbox "$IN_SANDBOX" )
 
         printf 'maverick'; printf ' %q' "${pre[@]}" "${args[@]}"; printf '\n'
 
@@ -177,39 +266,82 @@ runs:
           exit 0
         fi
 
-        out_file="$(mktemp)"
-        echo "result-file=$out_file" >> "$GITHUB_OUTPUT"
+        case "$IN_SANDBOX" in
+          docker|gvisor)
+            if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+              echo "::error::A running Docker daemon is required for this sandbox."
+              exit 1
+            fi
+            ;;
+          podman)
+            if ! command -v podman >/dev/null 2>&1 || ! podman info >/dev/null 2>&1; then
+              echo "::error::A running Podman service is required for this sandbox."
+              exit 1
+            fi
+            ;;
+        esac
 
-        maverick "${pre[@]}" "${args[@]}" 2>&1 | tee "$out_file"
-        status=${PIPESTATUS[0]}
+        # Snapshot bounded credential-file bytes before untrusted work starts.
+        # Sanitization later unions this owner-only pre-run snapshot with a
+        # fresh read, covering rotation or deletion while the swarm runs.
+        python -I -S "$GITHUB_ACTION_PATH/sanitize_output.py" \
+          --write-secret-file-snapshot "$secret_snapshot"
 
-        # Multiline-safe step output (heredoc form). The delimiter must be
-        # unpredictable and absent from the untrusted Lightwork output so the
-        # output cannot terminate the heredoc and inject additional outputs.
-        result_delimiter=""
-        for _ in {1..10}; do
-          if command -v uuidgen >/dev/null 2>&1; then
-            candidate="MAVERICK_EOF_$(uuidgen)"
-          elif command -v openssl >/dev/null 2>&1; then
-            candidate="MAVERICK_EOF_$(openssl rand -hex 16)"
-          else
-            candidate="MAVERICK_EOF_${RANDOM}_${RANDOM}_$$_$(date +%s%N)"
-          fi
+        # Never stream model/agent output into the Actions command parser.
+        # Capture it with owner-only permissions, sanitize it, then discard the
+        # raw file and secret snapshot before exposing a bounded copy.
+        set +e
+        maverick "${pre[@]}" "${args[@]}" >"$raw_file" 2>&1
+        status=$?
+        set -e
+        python -I -S "$GITHUB_ACTION_PATH/sanitize_output.py" \
+          --input "$raw_file" \
+          --output "$out_file" \
+          --summary "$summary_file" \
+          --secret-file-snapshot "$secret_snapshot" \
+          --max-chars 50000
+        rm -f -- "$raw_file" "$secret_snapshot"
 
-          if ! grep -Fxq -- "$candidate" "$out_file"; then
-            result_delimiter="$candidate"
-            break
-          fi
-        done
+        choose_absent_token() {
+          local prefix="$1"
+          local file="$2"
+          local candidate
+          for _ in {1..20}; do
+            if command -v uuidgen >/dev/null 2>&1; then
+              candidate="${prefix}_$(uuidgen)"
+            elif command -v openssl >/dev/null 2>&1; then
+              candidate="${prefix}_$(openssl rand -hex 16)"
+            else
+              candidate="${prefix}_${RANDOM}_${RANDOM}_$$_$(date +%s%N)"
+            fi
+            if ! grep -Fq -- "$candidate" "$file"; then
+              printf '%s' "$candidate"
+              return 0
+            fi
+          done
+          return 1
+        }
 
-        if [ -z "$result_delimiter" ]; then
+        # Disable workflow command parsing while the sanitized model text is
+        # logged. The unpredictable resume token is checked against that text.
+        if ! command_token="$(choose_absent_token MAVERICK_COMMANDS "$out_file")"; then
+          echo "::error::Unable to choose a safe Actions command token."
+          exit 1
+        fi
+        printf '::stop-commands::%s\n' "$command_token"
+        cat -- "$out_file"
+        printf '::%s::\n' "$command_token"
+
+        # Multiline-safe step output. The delimiter is unpredictable and absent
+        # from the sanitized result, so output text cannot inject new outputs.
+        if ! result_delimiter="$(choose_absent_token MAVERICK_EOF "$out_file")"; then
           echo "::error::Unable to choose a safe GitHub output delimiter."
           exit 1
         fi
-
+        printf 'result-file=%s\n' "$out_file" >> "$GITHUB_OUTPUT"
         {
           echo "result<<$result_delimiter"
-          cat "$out_file"
+          cat -- "$out_file"
           echo "$result_delimiter"
         } >> "$GITHUB_OUTPUT"
 
@@ -217,10 +349,11 @@ runs:
           {
             echo "## Lightwork run"
             echo ""
-            echo '```'
-            cat "$out_file"
-            echo '```'
+            cat -- "$summary_file"
           } >> "$GITHUB_STEP_SUMMARY"
         fi
 
+        if [ "$status" -ne 0 ]; then
+          echo "::error::The Lightwork run failed; see the sanitized output above."
+        fi
         exit "$status"

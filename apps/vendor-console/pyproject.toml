@@ -13,7 +13,7 @@ authors = [{ name = "Daybreak Labs" }]
 # license this console issues verifies with the exact code a customer runs.
 # Auth (password/TOTP/sessions) is stdlib-only — no bcrypt/pyotp/itsdangerous.
 dependencies = [
-    "maverick-agent>=0.1.6",
+    "maverick-agent>=0.1.7",
     "fastapi>=0.110",
     "uvicorn>=0.27",
     "jinja2>=3.1",

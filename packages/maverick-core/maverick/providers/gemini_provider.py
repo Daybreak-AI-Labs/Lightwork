@@ -14,10 +14,10 @@ from .openai_provider import OpenAIClient
 
 
 class GeminiClient(OpenAIClient):
-    # Match the maintained MODEL_PRICES (gemini-3.5-*). The stale 2.5-pro
-    # default was absent from MODEL_PRICES, so billing fell through to the
-    # cost_router's 2.5 row and charged ~2x the real Gemini 3.5 rate.
-    DEFAULT_MODEL = "gemini-3.5-pro"
+    # Gemini 3.5 Flash has a current, captured official price. No matching 3.5
+    # Pro row was present on that source at capture time, so Pro remains an
+    # explicitly unverified estimate rather than the strict-billing default.
+    DEFAULT_MODEL = "gemini-3.5-flash"
     # Gemini's implicit context cache discounts cached tokens ~75% (billed at
     # ~0.25x the input rate), steeper than OpenAI's 0.5x. Inheriting 0.5x would
     # over-charge cached input ~2x.
