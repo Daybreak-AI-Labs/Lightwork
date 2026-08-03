@@ -1,0 +1,104 @@
+{# Shared dashboard chart primitives — server-rendered, token-driven.
+
+   Color carries a JOB here, never decoration:
+     - status/state  -> the status classes (ok / brand / warn / danger / idle),
+       always paired with a text label in the legend or row — never color alone;
+     - magnitude     -> one sequential hue (the brand ramp), light->dark;
+   so every chart stays legible under any theme (the classes resolve to the
+   active theme's tokens) and for colorblind readers (identity is carried by
+   the adjacent text, not the hue).
+
+   Macros:
+     donut(segments, center_num, center_label, aria)
+         segments = [{label, value, cls}]; cls in ok|brand|warn|danger|idle|info.
+         Renders an SVG ring with 2px surface gaps + a text legend.
+     columns(points, max_val, aria, a_label='', b_label='')
+         points = [{label, a, b?, title}] — a time series of columns
+         (pair b for a second series; a legend renders when b_label is set).
+     bars(rows, aria='')
+         rows = [{label, value_text, pct, pct_bg?, cls?, title?, href?}] —
+         horizontal labeled bars; pct_bg draws a pale "out of" track fill
+         (e.g. completed vs total). Rows are real text — readable as-is.
+#}
+
+{% macro donut(segments, center_num, center_label, aria) %}
+  {% set total = segments | sum(attribute='value') %}
+  {% set C = 439.82 %}
+  <div class="viz-donut">
+    <svg viewBox="0 0 176 176" width="176" height="176" role="img" aria-label="{{ aria }}">
+      <circle class="viz-donut__track" cx="88" cy="88" r="70"></circle>
+      {% if total %}
+      <g transform="rotate(-90 88 88)">
+        {% set live = segments | selectattr('value') | list %}
+        {% set gap = 2.5 if live | length > 1 else 0 %}
+        {% set ns = namespace(start=0.0) %}
+        {% for s in live %}
+          {% set seglen = s.value / total * C - gap %}
+          <circle class="viz-donut__seg viz-stroke-{{ s.cls }}" cx="88" cy="88" r="70"
+                  stroke-dasharray="{{ '%.2f' | format(seglen if seglen > 1 else 1) }} {{ '%.2f' | format(C) }}"
+                  stroke-dashoffset="{{ '%.2f' | format(0 - ns.start - gap / 2) }}">
+            <title>{{ s.label }}: {{ s.value }}</title>
+          </circle>
+          {% set ns.start = ns.start + s.value / total * C %}
+        {% endfor %}
+      </g>
+      {% endif %}
+      <text x="88" y="84" text-anchor="middle" class="viz-donut__num">{{ center_num }}</text>
+      <text x="88" y="106" text-anchor="middle" class="viz-donut__sub">{{ center_label }}</text>
+    </svg>
+    <ul class="viz-legend">
+      {% for s in segments %}
+        <li class="viz-legend__item">
+          <span class="viz-dot viz-bg-{{ s.cls }}" aria-hidden="true"></span>
+          <span class="viz-legend__label">{{ s.label }}</span>
+          <span class="viz-legend__val">{{ s.value }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endmacro %}
+
+{% macro columns(points, max_val, aria, a_label='', b_label='') %}
+  <div class="viz-cols" role="img" aria-label="{{ aria }}">
+    {% for p in points %}
+      <div class="viz-cols__col" title="{{ p.title }}">
+        <div class="viz-cols__plot">
+          <div class="viz-cols__bar viz-bg-brand{{ ' viz-cols__bar--zero' if not p.a }}"
+               style="height: {{ ((p.a / max_val * 100) if max_val else 0) | round(1) }}%;"></div>
+          {% if p.b is defined %}
+          <div class="viz-cols__bar viz-bg-ok{{ ' viz-cols__bar--zero' if not p.b }}"
+               style="height: {{ ((p.b / max_val * 100) if max_val else 0) | round(1) }}%;"></div>
+          {% endif %}
+        </div>
+        <div class="viz-cols__lab">{{ p.label }}</div>
+      </div>
+    {% endfor %}
+  </div>
+  {% if b_label %}
+  <ul class="viz-legend viz-legend--row">
+    <li class="viz-legend__item"><span class="viz-dot viz-bg-brand" aria-hidden="true"></span>
+      <span class="viz-legend__label">{{ a_label }}</span></li>
+    <li class="viz-legend__item"><span class="viz-dot viz-bg-ok" aria-hidden="true"></span>
+      <span class="viz-legend__label">{{ b_label }}</span></li>
+  </ul>
+  {% endif %}
+{% endmacro %}
+
+{% macro bars(rows, aria='') %}
+  <div class="viz-bars" {% if aria %}aria-label="{{ aria }}"{% endif %}>
+    {% for r in rows %}
+      <div class="viz-bars__row" {% if r.title %}title="{{ r.title }}"{% endif %}>
+        <span class="viz-bars__label">{% if r.href %}<a href="{{ r.href }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</span>
+        <span class="viz-bars__track">
+          {% if r.pct_bg is defined %}
+          <span class="viz-bars__fill viz-bars__fill--bg{% if r.cls %} viz-bg-{{ r.cls }}{% endif %}"
+                style="width: {{ r.pct_bg | round(1) }}%;"></span>
+          {% endif %}
+          <span class="viz-bars__fill{% if r.cls %} viz-bg-{{ r.cls }}{% endif %}"
+                style="width: {{ r.pct | round(1) }}%;"></span>
+        </span>
+        <span class="viz-bars__val">{{ r.value_text }}</span>
+      </div>
+    {% endfor %}
+  </div>
+{% endmacro %}

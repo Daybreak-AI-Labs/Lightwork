@@ -216,6 +216,92 @@ def _generate_volume(rnd) -> int:
     return n
 
 
+def _seed_operating_record(rnd) -> None:
+    """Goals + run ledger behind the Overview / Spend / Workforce dashboards.
+
+    ~50 goals over the last ~120 days across eight departments — most
+    delivered with a costed episode (the same ledger Spend and Savings read),
+    a few live, blocked, or queued. Denser recently so the weekly activity
+    chart shows the program ramping. Rows are written through the real
+    WorldModel APIs, then timestamps are backdated by direct UPDATE
+    (the same trick the assessment seeding uses)."""
+    from maverick.world_model import WorldModel
+
+    w = WorldModel()
+    if w.conn.execute("SELECT COUNT(*) FROM goals").fetchone()[0]:
+        return   # a lived-in world already exists; don't stack a second one
+    vendors = ["Initech", "Globex", "Acme", "Vandelay", "Northwind",
+               "Contoso", "Umbrella", "Aperture"]
+    work = [
+        ("legal_privacy", "Vendor DPA review — {v}"),
+        ("legal_privacy", "Privacy addendum redline — {v}"),
+        ("legal_gdpr_dpo", "DSAR fulfilment — {v} data subject"),
+        ("itgrc_dpia", "DPIA refresh — {v} integration"),
+        ("itgrc_access_review", "Quarterly access review — {v} tenant"),
+        ("finance_anomaly", "Spend anomaly sweep — {v} invoices"),
+        ("finance_anomaly", "Month-end accrual check — {v}"),
+        ("sec_access_review", "Privileged access recert — {v} admins"),
+        ("sec_access_review", "Threat-surface review — {v} SSO"),
+        ("hr_accommodation_interactive", "Policy acknowledgement chase — {v} team"),
+        ("ops_asset_mgmt", "Asset register reconcile — {v} fleet"),
+        ("data_ab_experimentation", "Consent-rate analysis — {v} rollout"),
+        ("cx_accessib_content", "Notice readability pass — {v} portal"),
+        ("gtm_marketing_privacy", "Campaign consent audit — {v} list"),
+    ]
+
+    def _episode(gid, started, *, outcome, minutes, cost):
+        eid = w.start_episode(gid)
+        in_tok = int(cost * rnd.uniform(28_000, 45_000))
+        w.end_episode(
+            eid, "seeded demo run", outcome, cost_dollars=round(cost, 4),
+            input_tokens=in_tok,
+            output_tokens=int(in_tok * rnd.uniform(0.10, 0.22)),
+            tool_calls=rnd.randint(4, 38))
+        ended = started + minutes * 60
+        w.conn.execute(
+            "UPDATE episodes SET started_at = ?, ended_at = ? WHERE id = ?",
+            (started, ended, eid))
+        return ended
+
+    # Terminal states only (done / blocked): the platform's orphan-reclaim
+    # sweeps any stale 'active'/'pending' row to blocked on the next boot
+    # (world_model.reclaim_orphan_goals), so seeded "live" work would read
+    # as crashes. Live goals appear the moment real demo work runs.
+    # Oldest first, so goal ids follow time and "Recent goals" reads sanely.
+    specs = sorted((round(120 * rnd.betavariate(1.1, 2.1), 2)
+                    for _ in range(52)), reverse=True)
+    counts = {"done": 0, "blocked": 0}
+    for days_ago in specs:
+        domain, tpl = rnd.choice(work)
+        gid = w.create_goal(tpl.format(v=rnd.choice(vendors)), domain=domain)
+        created = NOW - days_ago * DAY
+        status = "blocked" if rnd.random() < 0.09 else "done"
+        counts[status] += 1
+        if status == "done":
+            started = created + rnd.uniform(0.2, 5) * 3600
+            # ~1 in 8 deliveries took a failed first run — feeds an honest
+            # outcome mix instead of a suspicious 100% success rate.
+            if rnd.random() < 0.12:
+                started = _episode(gid, started, outcome="error",
+                                   minutes=rnd.uniform(2, 9),
+                                   cost=rnd.uniform(0.05, 0.5)) + 900
+            updated = _episode(gid, started, outcome="success",
+                               minutes=rnd.uniform(4, 45),
+                               cost=rnd.uniform(0.15, 2.6))
+            w.set_goal_status(gid, "done")
+        else:
+            w.set_goal_status(gid, "blocked")
+            updated = created + rnd.uniform(1, 20) * 3600
+        w.conn.execute(
+            "UPDATE goals SET created_at = ?, updated_at = ? WHERE id = ?",
+            (created, updated, gid))
+    w.conn.commit()
+    spend = w.total_spend()
+    print(f"Seeded the Operating Record: 52 goals over ~4 months "
+          f"({counts['done']} delivered, {counts['blocked']} blocked), "
+          f"{spend['runs']} costed runs, ${spend['dollars']:.2f} ledger spend.")
+
+
 def _generate_records_volume(rnd) -> None:
     from maverick import privacy_ops
     # DPA reviews for a slice of the vendor book (varied completeness).
@@ -478,6 +564,7 @@ def seed() -> None:
     rnd = random.Random(42)  # reproducible history
     _generate_volume(rnd)
     _generate_records_volume(rnd)
+    _seed_operating_record(rnd)
 
     from maverick.assessment import list_saved
     rows = list_saved()

@@ -60,6 +60,29 @@
       </div>
     </div>
 
+    {% from "_charts.html" import donut, columns %}
+    <div class="viz-grid">
+      <div class="panel viz-card">
+        <h2>Goal mix</h2>
+        <p class="viz-sub">Every goal on record, by where it stands now.</p>
+        {{ donut([
+             {'label': 'Done',    'value': counts.done,    'cls': 'ok'},
+             {'label': 'Active',  'value': counts.active,  'cls': 'brand'},
+             {'label': 'Blocked', 'value': counts.blocked, 'cls': 'danger'},
+             {'label': 'Queued',  'value': counts.total - counts.done - counts.active - counts.blocked, 'cls': 'idle'},
+           ], counts.total, 'goals',
+           'Goal mix: ' ~ counts.done ~ ' done, ' ~ counts.active ~ ' active, '
+           ~ counts.blocked ~ ' blocked of ' ~ counts.total ~ ' total.') }}
+      </div>
+      <div class="panel viz-card viz-card--wide">
+        <h2>Activity — last 10 weeks</h2>
+        <p class="viz-sub">Goals started vs delivered per week. Hover a week for the exact numbers.</p>
+        {{ columns(weekly, weekly_max,
+                   'Weekly activity: goals started and delivered per week over the last 10 weeks.',
+                   a_label='Started', b_label='Delivered') }}
+      </div>
+    </div>
+
     <div class="section-head"><h2>Recent goals</h2></div>
     <div class="panel">
       <table>
