@@ -1,12 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Deliverables · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Deliverables</h1>
-  <p class="page-subtitle">
-    The work your AI teams produce, organized by deliverable and by who it's
-    for — your forecasts, reports, and items awaiting your sign-off (the full
-    <a href="/goals">run history</a> is separate).
-  </p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Your AI workforce', 'Deliverables',
+               subtitle='Work, organized by who it\'s for',
+               lede='The work your AI teams produce, organized by deliverable
+                     and by who it\'s for — your forecasts, reports, and items
+                     awaiting your sign-off (the full
+                     <a href="/goals">run history</a> is separate).') %}
+    {{ state('Current state',
+             items | length ~ ' deliverable' ~ ('' if items | length == 1 else 's') ~ ' in view',
+             badge=(awaiting | length ~ ' awaiting sign-off') if awaiting else 'clear',
+             badge_class='warn' if awaiting else 'ok',
+             copy='Each deliverable names what it is, who it\'s for, and
+                   whether it needs a sign-off before it is acted on.') }}
+  {% endcall %}
 
   {% if showing_mine %}
     <p class="muted" style="margin-top: calc(-1 * var(--space-2)); margin-bottom: var(--space-4);">

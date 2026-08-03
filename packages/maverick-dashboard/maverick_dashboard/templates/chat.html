@@ -3,15 +3,7 @@
 {% block content %}
 <style>
   /* Chat landing — page-scoped. Uses the design-system tokens from base. */
-  .chat-home { max-width: 760px; margin-inline: auto; padding-top: clamp(var(--space-6), 7vh, 92px); }
-  .chat-hero { text-align: center; margin-bottom: var(--space-6); }
-  .chat-hero__mark { display: inline-block; margin-bottom: var(--space-4); }
-  .chat-greeting { color: var(--muted); font-size: var(--text-sm); letter-spacing: 0.01em; margin: 0 0 var(--space-2); }
-  .display {
-    font-family: var(--font-serif); font-weight: 400;
-    font-size: clamp(1.9rem, 4.4vw, 2.6rem); line-height: 1.12;
-    letter-spacing: -0.012em; color: var(--text); margin: 0;
-  }
+  .chat-home { max-width: 760px; margin-inline: auto; padding-top: var(--space-3); }
   .composer {
     background: var(--surface-1); border: 1px solid var(--border);
     border-radius: 20px; box-shadow: var(--shadow-md);
@@ -98,16 +90,22 @@
   @keyframes chatUp { to { opacity: 1; transform: none; } }
 </style>
 
-<div class="chat-home">
-  <div class="chat-hero chat-anim">
-    <svg class="chat-hero__mark" width="34" height="34" viewBox="0 0 22 22" aria-hidden="true">
-      <rect x="1" y="1" width="20" height="20" rx="6.5" fill="var(--brand)"/>
-      <circle cx="11" cy="11" r="3.2" fill="none" stroke="#fff" stroke-width="1.8"/>
-    </svg>
-    <p class="chat-greeting" id="chat-greeting">Welcome back</p>
-    <h1 class="display">What should Lightwork take on?</h1>
-  </div>
+{% from "_hero.html" import hero, state %}
+{% set chat_running = recent | selectattr('status', 'equalto', 'running') | list | length %}
+{% call hero('Your AI workforce', 'What should Lightwork take on?',
+             subtitle='Start new work in plain English',
+             lede='Describe a goal below — Lightwork plans the work across a
+                   team of agents and runs it within your budget, pausing for
+                   your approval where it matters.') %}
+  {{ state('Current state',
+           (recent | length ~ ' recent goal' ~ ('' if recent | length == 1 else 's')) if recent else 'No goals yet',
+           badge=(chat_running ~ ' running') if chat_running else ('ready' if recent else 'start below'),
+           badge_class='ok' if chat_running or recent else 'idle',
+           copy='Attach files, dictate by voice, or start from an example
+                 chip — recent goals stay one click away below.') }}
+{% endcall %}
 
+<div class="chat-home">
   <form method="post" action="/chat/send" class="composer chat-anim chat-anim-2" enctype="multipart/form-data">
     <input
       type="text"
@@ -200,14 +198,6 @@
 </div>
 
 <script>
-  // Time-of-day greeting (progressive — a static "Welcome back" ships in markup).
-  (function () {
-    var el = document.getElementById('chat-greeting');
-    if (!el) return;
-    var h = new Date().getHours();
-    el.textContent = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
-  })();
-
   // Absolute recent-goal timestamps -> relative ("3h ago"); absolute stays on hover.
   (function () {
     function rel(ts) {
