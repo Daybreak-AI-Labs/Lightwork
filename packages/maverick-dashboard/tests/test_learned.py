@@ -63,6 +63,25 @@ def test_learned_page_renders_empty(monkeypatch, tmp_path):
     assert 'href="/learned"' in _client().get("/learning").text
 
 
+def test_learned_page_has_no_admin_config_copy(monkeypatch, tmp_path):
+    # Everything is configured in-app now: no "For administrators" details
+    # blocks, no config-file / CLI instructions — the page points at the
+    # Learning page's in-app switches instead.
+    _isolate(monkeypatch, tmp_path)
+    _seed_harness(monkeypatch, tmp_path, enabled=False)
+    text = _client().get("/learned").text
+    assert "For administrators" not in text
+    assert "server configuration" not in text
+    assert "maverick self-harness" not in text
+    assert "learned.ndjson" not in text and "generated_tools/" not in text
+    # The shared hero renders with a real fact from context...
+    assert "hero-statebox" in text
+    assert "self-harness off" in text
+    # ...and the OFF note routes users to the in-app switch.
+    assert "Self-harness is OFF" in text
+    assert 'href="/learning"' in text
+
+
 def _seed_harness(monkeypatch, tmp_path, *, enabled=True):
     """Point the self-harness store at tmp_path and seed one model's guidance."""
     from maverick import self_harness as sh

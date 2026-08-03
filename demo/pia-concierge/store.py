@@ -135,6 +135,13 @@ class Store:
         return self._paper_seq.get(
             f"{(vendor or '').strip().lower()}|{instrument}", 0)
 
+    def next_doc_version(self, vendor: str, kind: str) -> int:
+        """Sequential versions for NON-paper deliverables (risk analysis,
+        notice cross-check) per vendor+kind, so the Documents tab reads as a
+        history of legible names, never a pile of case-id files. Namespaced
+        into the same counter map as the paper stream."""
+        return self.next_paper_version(vendor, f"doc:{kind}")
+
     def next_ticket_number(self) -> str:
         with _LOCK:
             self._seq["ticket"] += 1

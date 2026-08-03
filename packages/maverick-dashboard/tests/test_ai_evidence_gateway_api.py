@@ -579,14 +579,16 @@ def test_empty_assurance_cockpit_has_safe_synthetic_demo_path(monkeypatch):
     assert 'aria-label="Production evidence readiness"' in response.text
 
 
-def test_assurance_cockpit_disabled_state_has_copyable_preflight(monkeypatch):
+def test_assurance_cockpit_disabled_state_is_product_copy(monkeypatch):
     _install_gateway(monkeypatch, enabled=lambda: False)
 
     response = client.get("/security/assurance")
 
     assert response.status_code == 200, response.text
     assert "AI Evidence-Ready Gateway is disabled" in response.text
-    assert "maverick preflight --profile cockpit" in response.text
+    assert "Ask an administrator to enable" in response.text
+    # The cockpit is a product surface: no CLI invocations on the page.
+    assert "maverick preflight" not in response.text
 
 
 def test_assurance_cockpit_load_error_is_actionable_and_secret_free(monkeypatch):
@@ -601,7 +603,8 @@ def test_assurance_cockpit_load_error_is_actionable_and_secret_free(monkeypatch)
 
     assert response.status_code == 200, response.text
     assert "No readiness conclusion is available" in response.text
-    assert "maverick doctor" in response.text
+    assert "built-in health checks" in response.text
+    assert "maverick doctor" not in response.text
     assert secret not in response.text
 
 

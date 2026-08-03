@@ -107,7 +107,8 @@ def recommendations_doc(subject: str, picked: dict | None,
                      f"(brand: {picked.get('organizationName', '?')})")
     lines.append("")
     if result["contradictions"]:
-        lines.append("CONTRADICTIONS (critical — resolve before approval):")
+        lines.append("CONTRADICTIONS (critical — resolve before approval)")
+        lines.append("-" * 60)
         for c in result["contradictions"]:
             lines.append(f"  • {c['finding']}")
             if c["notice_quote"]:
@@ -116,7 +117,8 @@ def recommendations_doc(subject: str, picked: dict | None,
         lines.append("No contradictions with the published notice.")
     lines.append("")
     if result["gaps"]:
-        lines.append("DISCLOSURE GAPS (recommended notice additions):")
+        lines.append("DISCLOSURE GAPS (recommended notice additions)")
+        lines.append("-" * 60)
         for g in result["gaps"]:
             lines.append(f"  • {g['finding']}")
             lines.append(f"    RECOMMENDED ADDITION: describe the "

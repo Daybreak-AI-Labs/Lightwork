@@ -7,18 +7,38 @@
   .soc-input { width:100%; min-height:11rem; font-family:var(--font-mono,monospace); }
   @media(max-width:900px){.soc-grid{grid-template-columns:1fr}.soc-wide{grid-column:auto}}
 </style>
-<h1 class="page-title">Environment Threat Hunter</h1>
-<p class="page-subtitle">A governed defensive SOC analyst for customer-owned telemetry:
-  vendor-neutral read-only connectors, Sigma and deterministic correlations, cited events,
-  investigation timelines, and human-approved response playbooks.</p>
+{% from "_hero.html" import hero, state %}
+{% call hero('Defensive operations', 'Environment Threat Hunter',
+             subtitle='Governed SOC analysis',
+             lede='A governed defensive SOC analyst for the telemetry you own:
+                   vendor-neutral read-only connectors, Sigma and deterministic
+                   correlations, cited events, investigation timelines, and
+                   response playbooks that wait for human approval.') %}
+  {% if enabled %}
+  {{ state('Current state', 'Monitoring connected telemetry',
+           badge='response execution ' ~ ('opt-in' if response_execution else 'off'),
+           badge_class='warn' if response_execution else 'ok',
+           copy='Connectors are read-only. ' ~ ('Approved responses can execute
+                 under signed, one-shot approvals.' if response_execution else
+                 'Responses are proposed only; execution stays switched
+                 off.')) }}
+  {% else %}
+  {{ state('Current state', 'Hunter is switched off',
+           badge='opt-in', badge_class='idle',
+           copy='No customer telemetry is being read. An administrator can
+                 switch this hunter on from Security &amp; GRC.') }}
+  {% endif %}
+{% endcall %}
 <div style="display:flex; gap:var(--space-2); flex-wrap:wrap; margin-bottom:var(--space-4);">
   <a class="btn" href="/security">Security &amp; GRC</a><a class="btn" href="/security/threats">Platform hunter</a>
 </div>
 {% if not enabled %}
-<div class="panel"><h2>Environment hunting is off</h2><p>Enable
-  <code>[env_hunt] enable = true</code> and configure least-privilege, read-only
-  connector transports. Approved response execution has its own off-by-default
-  <code>response_execution</code> control.</p></div>
+<div class="panel"><h2>Environment hunting is off</h2>
+  <p>No telemetry sources are being read. An administrator can switch this
+    hunter on under <a href="/security">Security &amp; GRC &rarr; Defensive
+    hunters</a>, then connect least-privilege, read-only telemetry sources.
+    Executing an approved response is a separate control that stays off by
+    default.</p></div>
 {% else %}
 <div class="soc-grid">
   <div class="stat"><div class="num" id="soc-open">-</div><div class="label">open findings</div></div>
@@ -27,10 +47,11 @@
   <div class="stat"><div class="num" id="soc-shield">-</div><div class="label">Shield autonomy posture</div></div>
   <section class="panel soc-wide">
     <h2>Ingest a bounded telemetry batch</h2>
-    <p class="muted">Paste a JSON array only when that connector has the separate
-      <code>push_enable = true</code> opt-in. The production scheduler uses trusted-startup,
-      read-only pull transports. Raw events are evaluated in memory; durable stores retain
-      derived cited findings and investigations, not the raw telemetry batch.</p>
+    <p class="muted">Paste a JSON array only for connectors where an
+      administrator has allowed manual submission. Scheduled analysis uses
+      trusted, read-only pull connections. Raw events are evaluated in memory;
+      durable stores retain the derived cited findings and investigations, not
+      the raw telemetry batch.</p>
     <label>Connector
       <select id="soc-connector"><option>cloudtrail</option><option>guardduty</option><option>syslog</option><option>edr</option><option>splunk</option><option>elastic</option><option>sentinel</option><option>kubernetes_audit</option><option>okta</option><option>entra</option></select>
     </label>

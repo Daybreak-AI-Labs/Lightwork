@@ -1,22 +1,20 @@
 {% extends "base.html" %}
 {% block title %}Approvals · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Approvals</h1>
-  <p class="page-subtitle">The approval queue — high-risk actions an agent has parked for your decision.</p>
-
-  <div class="panel">
-    <p class="muted">
-      High-risk actions an agent has parked for your decision. When approvals
-      are routed to this dashboard, the agent waits here until you approve
-      or deny.
-    </p>
-    <details>
-      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: routing approvals here</summary>
-      <p class="muted" style="font-size: var(--text-sm);">This queue is
-      populated when a goal runs with
-      <code>MAVERICK_CONSENT_MODE=dashboard</code>.</p>
-    </details>
-  </div>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Human in command', 'Approvals',
+               subtitle='The approval queue',
+               lede='High-risk actions an agent has parked for your decision.
+                     The agent waits here — nothing proceeds until a person
+                     approves or denies, and every click lands on the signed
+                     audit chain.') %}
+    {{ state('Current state',
+             approvals | length ~ ' awaiting decision',
+             badge='action needed' if approvals else 'clear',
+             badge_class='warn' if approvals else 'ok',
+             copy='Approving or denying here decides the same governed
+                   approval row the API and OneTrust bridge use.') }}
+  {% endcall %}
 
   <div class="panel">
     {% include "_approvals_queue.html" %}

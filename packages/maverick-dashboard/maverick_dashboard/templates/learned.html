@@ -1,21 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Learned · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Learned</h1>
-  <p class="page-subtitle">What Lightwork taught itself — capabilities acquired mid-run and tools it generated.</p>
-  <div class="panel">
-    <p class="muted">
-      Skills, tools, and integrations your workforce picked up on its own
-      while working, and the tools it built for itself. Self-learning is off
-      by default; this page is empty until it's enabled. Everything here comes
-      from the tamper-evident record kept on this server.
-    </p>
-    <details>
-      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where the record lives</summary>
-      <p class="muted" style="font-size: var(--text-sm);">Source of truth is
-      the ledger at <code>~/.maverick/learned.ndjson</code>.</p>
-    </details>
-  </div>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Self-improving workforce', 'Learned',
+               subtitle='Capabilities & guidance',
+               lede='What Lightwork taught itself — skills, tools, and
+                     integrations picked up mid-run, working guidance
+                     distilled from its own mistakes, and the tools it built
+                     for itself. Everything here comes from the tamper-evident
+                     record kept on this server.') %}
+    {{ state('Current state',
+             learned | length ~ ' learned capabilit' ~ ('y' if learned | length == 1 else 'ies') ~ ' on record',
+             badge='self-harness on' if harness_enabled else 'self-harness off',
+             badge_class='ok' if harness_enabled else 'idle',
+             copy='Self-learning is off by default — switch it on from the
+                   <a href="/learning">Learning</a> page. Any guidance line or
+                   generated tool can be rolled back from this page.') }}
+  {% endcall %}
 
   <div class="section-head"><h2>Learned capabilities</h2></div>
   <div class="panel">
@@ -54,19 +55,10 @@
       be rolled back.
       {% if harness and not harness_enabled %}
         <strong>Self-harness is OFF</strong> — this guidance is stored but
-        <em>not</em> used until an administrator turns it on.
+        <em>not</em> used until self-harness is switched on from the
+        <a href="/learning">Learning</a> page.
       {% endif %}
     </p>
-    <details>
-      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: manage from the command line</summary>
-      <p class="muted" style="font-size: var(--text-sm);">
-        Roll any line back with <code>maverick self-harness forget</code>;
-        review flagged conflicts with <code>maverick self-harness conflicts</code>;
-        graduate or pull probationary (canary) lines with
-        <code>maverick self-harness canary --review</code>. Recall is enabled by
-        setting <code>[self_harness] enable</code> in the server configuration.
-      </p>
-    </details>
     {% if transfer_memory and transfer_memory.pairs %}
       <p class="muted">transfer memory: {{ transfer_memory.pairs }} (target, line) pair{{ '' if transfer_memory.pairs == 1 else 's' }} judged{% if transfer_memory.last_judged_at %} · last {{ transfer_memory.last_judged_at | datetime }}{% endif %}</p>
     {% endif %}
@@ -79,8 +71,8 @@
           <li>
             {{ c.goal }}
             <span class="muted">(expected: {{ c.expected }})</span>
-            <button class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="accept">Accept</button>
-            <button class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="reject">Reject</button>
+            <button type="button" class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="accept">Accept</button>
+            <button type="button" class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="reject">Reject</button>
           </li>
         {% endfor %}
         </ul>
@@ -120,12 +112,6 @@
       Tools Lightwork wrote for itself. Remove pulls a misbehaving tool —
       it's deleted and won't load on the next run.
     </p>
-    <details>
-      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where generated tools live</summary>
-      <p class="muted" style="font-size: var(--text-sm);">Auto-generated
-      Python tool modules are stored in
-      <code>~/.maverick/generated_tools/</code>.</p>
-    </details>
     {% if generated_tools %}
       <table>
         <thead><tr><th scope="col">file</th><th scope="col">action</th></tr></thead>
@@ -133,7 +119,7 @@
         {% for f in generated_tools %}
           <tr data-name="{{ f }}">
             <td><code>{{ f }}</code></td>
-            <td><button class="gt-remove" data-name="{{ f }}">Remove</button></td>
+            <td><button type="button" class="gt-remove" data-name="{{ f }}" aria-label="Remove generated tool {{ f }}">Remove</button></td>
           </tr>
         {% endfor %}
         </tbody>

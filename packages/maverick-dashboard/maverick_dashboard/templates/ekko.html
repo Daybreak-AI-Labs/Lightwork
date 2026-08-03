@@ -2,35 +2,10 @@
 {% block title %}Ekko Work Discovery · Lightwork{% endblock %}
 
 {% block content %}
+{% from "_hero.html" import hero %}
 <style>
-  .ekko-hero {
-    position: relative; overflow: hidden; display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(17rem, .65fr);
-    gap: var(--space-5); align-items: end; padding: clamp(1.4rem, 4vw, 2.8rem);
-    border: 1px solid var(--border); border-radius: var(--radius-lg);
-    background:
-      radial-gradient(circle at 86% 14%, color-mix(in srgb, var(--brand) 28%, transparent), transparent 34%),
-      linear-gradient(135deg, color-mix(in srgb, var(--panel) 88%, transparent), var(--surface-1));
-    box-shadow: var(--shadow-md); margin-bottom: var(--space-5);
-  }
-  .ekko-hero::before {
-    content: ""; position: absolute; inset: 0 0 auto; height: 3px;
-    background: linear-gradient(90deg, var(--brand-hi), var(--accent), transparent 78%);
-  }
-  .ekko-kicker { color: var(--brand-hi); font-size: var(--text-xs); font-weight: 750;
-    letter-spacing: .13em; text-transform: uppercase; }
-  .ekko-title { margin: .25rem 0 0; font-family: var(--font-display); font-size: clamp(2.3rem, 6vw, 4.2rem);
-    line-height: .95; letter-spacing: -.035em; }
-  .ekko-subtitle { color: var(--accent); font-style: italic; margin: .55rem 0 var(--space-3); }
-  .ekko-lede { color: var(--muted); max-width: 46rem; margin: 0; font-size: var(--text-md); }
-  .ekko-statebox { position: relative; padding: var(--space-4); border: 1px solid var(--border);
-    border-radius: var(--radius-lg); background: color-mix(in srgb, var(--panel) 72%, transparent);
-    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
-  .ekko-statebox__label { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase;
-    letter-spacing: .08em; }
-  .ekko-statebox__row { display: flex; align-items: center; justify-content: space-between;
-    gap: var(--space-3); margin: var(--space-2) 0; }
-  .ekko-statebox__copy { color: var(--muted); font-size: var(--text-sm); min-height: 2.5em; margin: 0; }
+  /* The hero itself is the shared .hero component (lightwork.css); EKKO
+     keeps only its page-specific styles below. */
   .ekko-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(18rem, .55fr);
     gap: var(--space-5); align-items: start; }
   .ekko-stack { display: grid; gap: var(--space-4); }
@@ -62,30 +37,25 @@
   .ekko-note { color: var(--muted); font-size: var(--text-sm); margin: var(--space-2) 0 0; }
   .ekko-policy-warning { border-inline-start: 3px solid var(--warn); padding-inline-start: var(--space-3); }
   @media (max-width: 920px) {
-    .ekko-hero, .ekko-layout { grid-template-columns: 1fr; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .ekko-hero::before { background: var(--brand); }
+    .ekko-layout { grid-template-columns: 1fr; }
   }
 </style>
 
-<section class="ekko-hero" aria-labelledby="ekko-title">
-  <div>
-    <div class="ekko-kicker">Digital workforce intelligence</div>
-    <h1 class="page-title ekko-title" id="ekko-title">EKKO</h1>
-    <div class="ekko-subtitle">Work Discovery</div>
-    <p class="ekko-lede">Listens only to client-approved work activity and maps recurring processes
-      into evidence-backed opportunities Lightwork can improve or replace.</p>
-  </div>
-  <div class="ekko-statebox" aria-live="polite">
-    <div class="ekko-statebox__label">Current state</div>
-    <div class="ekko-statebox__row">
+{% call hero('Digital workforce intelligence', 'EKKO',
+             subtitle='Work Discovery',
+             lede='Listens only to client-approved work activity and maps '
+                  'recurring processes into evidence-backed opportunities '
+                  'Lightwork can improve or replace.',
+             title_id='ekko-title') %}
+  <div class="hero-statebox" aria-live="polite">
+    <div class="hero-statebox__label">Current state</div>
+    <div class="hero-statebox__row">
       <strong id="ekko-state-name">Loading…</strong>
       <span class="badge idle" id="ekko-state-badge">checking</span>
     </div>
-    <p class="ekko-statebox__copy" id="ekko-state-copy">Reading the local, owner-bound discovery state.</p>
+    <p class="hero-statebox__copy" id="ekko-state-copy">Reading the local, owner-bound discovery state.</p>
   </div>
-</section>
+{% endcall %}
 
 <div class="card-grid" aria-label="Ekko summary" style="margin-bottom: var(--space-5);">
   <div class="stat"><div class="num" id="ekko-stat-events">0</div><div class="label">Approved observations</div></div>

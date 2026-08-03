@@ -26,7 +26,8 @@ def test_page_renders(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/assessments")
     assert r.status_code == 200
-    assert 'page-title">Assessments' in r.text
+    import re
+    assert re.search(r'<h1 class="page-title[^"]*"[^>]*>Assessments', r.text)
     assert "Assess a subject" in r.text
 
 

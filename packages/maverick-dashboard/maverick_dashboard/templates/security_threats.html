@@ -7,20 +7,39 @@
   .hunt-evidence { font-family:var(--font-mono,monospace); font-size:var(--text-xs); overflow-wrap:anywhere; }
   @media(max-width:900px){.hunt-grid{grid-template-columns:1fr}.hunt-wide{grid-column:auto}}
 </style>
-<h1 class="page-title">Platform Threat Hunter</h1>
-<p class="page-subtitle">Deterministic, MITRE ATT&amp;CK-tagged hunting over Lightwork's
-  signed audit trail, shield events, tools, approvals, budgets, and goal timelines.
-  Findings cite triggering events. Containment is proposed to the human approval queue;
-  this hunter has no autonomous production-response path.</p>
+{% from "_hero.html" import hero, state %}
+{% call hero('Defensive operations', 'Platform Threat Hunter',
+             subtitle='Signed-telemetry hunting',
+             lede="Deterministic, MITRE ATT&amp;CK-tagged hunting over
+                   Lightwork's signed audit trail, shield events, tools,
+                   approvals, budgets, and goal timelines. Every finding cites
+                   the events that triggered it. Containment is proposed to the
+                   human approval queue; this hunter has no autonomous
+                   production-response path.") %}
+  {% if enabled %}
+  {{ state('Current state', 'Hunting on signed telemetry',
+           badge='enabled', badge_class='ok',
+           copy='Stored findings and investigations load below; run a fresh
+                 hunt at any time. The audit-chain check runs before every
+                 hunt.') }}
+  {% else %}
+  {{ state('Current state', 'Hunter is switched off',
+           badge='opt-in', badge_class='idle',
+           copy='No platform telemetry is being processed. An administrator
+                 can switch this hunter on from Security &amp; GRC.') }}
+  {% endif %}
+{% endcall %}
 <div style="display:flex; gap:var(--space-2); flex-wrap:wrap; margin-bottom:var(--space-4);">
   <a class="btn" href="/security">Security &amp; GRC</a>
-  <a class="btn" href="/security/soc">Environment SOC hunter</a>
-  {% if enabled %}<button class="btn btn--primary" id="hunt-run" type="button">Run signed-telemetry hunt</button>{% endif %}
+  <a class="btn" href="/security/soc">Environment hunter</a>
+  {% if enabled %}<button class="btn btn--primary" id="hunt-run" type="button">Run a hunt now</button>{% endif %}
 </div>
 {% if not enabled %}
-<div class="panel"><h2>Platform hunting is off</h2><p>Enable
-  <code>[threat_hunt] enable = true</code> or use the installer. It is opt-in so
-  existing deployments do not begin processing telemetry silently.</p></div>
+<div class="panel"><h2>Platform hunting is off</h2>
+  <p>This hunter is opt-in so existing deployments never start processing
+    telemetry silently. An administrator can switch it on under
+    <a href="/security">Security &amp; GRC &rarr; Defensive hunters</a>;
+    findings and investigations will appear here immediately.</p></div>
 {% else %}
 <div class="hunt-grid">
   <div class="stat"><div class="num" id="hunt-open">-</div><div class="label">open findings</div></div>

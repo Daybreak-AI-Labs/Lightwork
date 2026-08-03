@@ -1,12 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Compartments · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Compartments</h1>
-  <p class="page-subtitle" style="max-width: 48rem;">
-    The agent factory's roster — each domain pack and the bulkhead it runs in.
-    If one domain is attacked it can be sealed off (a sector seal) while the
-    others keep running and become immune.
-  </p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Agent factory', 'Compartments',
+               subtitle='Sealed domains',
+               lede='The agent factory\'s roster — each domain pack and the
+                     bulkhead it runs in. If one domain is attacked it can be
+                     sealed off (a sector seal) while the others keep running
+                     and become immune.') %}
+    {{ state('Current state',
+             domains | length ~ ' sealed domain agent' ~ ('' if domains | length == 1 else 's'),
+             badge='bulkheads up' if domains else 'none yet',
+             badge_class='ok' if domains else 'idle',
+             copy='Every agent runs inside its own compartment with an
+                   explicit tool and knowledge envelope — a breach in one
+                   domain never reaches another.') }}
+  {% endcall %}
   <div class="panel{% if not domains %} empty{% endif %}">
     {% if domains %}
     <table>
@@ -51,11 +60,7 @@
     {% else %}
       <div class="mv-empty">
         <p class="mv-empty__title">No domain agents yet</p>
-        <p class="mv-empty__body">Compartments are created when your organization onboards a department — each one gets its own sealed agent.</p>
-        <details>
-          <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: onboard from the command line</summary>
-          <pre style="background: var(--surface-sunken); color: var(--text); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); display: inline-block; text-align: start; margin: 0;">maverick onboard</pre>
-        </details>
+        <p class="mv-empty__body">Compartments are created when your organization onboards a department — each one gets its own sealed agent. Create your first specialist in the <a href="/agents">Agent Factory</a>.</p>
       </div>
     {% endif %}
   </div>

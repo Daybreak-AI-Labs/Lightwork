@@ -51,10 +51,13 @@ def test_fleets_page_lists_a_saved_fleet(monkeypatch, tmp_path):
 
 
 def test_fleets_empty_state_shows_create_hint(monkeypatch, tmp_path):
+    # Everything is managed in-app: the empty state points at the on-page
+    # create form, never at a CLI command.
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/fleets")
     assert r.status_code == 200
-    assert "maverick fleet create" in r.text
+    assert "Create a fleet" in r.text
+    assert "maverick fleet" not in r.text
 
 
 def test_fleets_page_reachable(monkeypatch, tmp_path):
@@ -63,7 +66,8 @@ def test_fleets_page_reachable(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/fleets")
     assert r.status_code == 200
-    assert 'page-title">Fleets' in r.text
+    # Shared hero h1 (page-title + hero-title classes) carries the page name.
+    assert ">Fleets</h1>" in r.text
 
 
 def test_recent_oversight_panel_shows_governance_holds(monkeypatch, tmp_path):

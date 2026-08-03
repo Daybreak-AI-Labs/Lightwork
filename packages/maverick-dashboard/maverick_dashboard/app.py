@@ -2331,10 +2331,34 @@ async def security_report_page(request: Request) -> HTMLResponse:
         )
     else:
         report["generated"] = "unknown"
+    # The click-through must carry substance: each control with what it does,
+    # its governed status, scope decision, owner, and the reviewed evidence
+    # cited behind that status (joined here so the template stays dumb).
+    evidence_index = {
+        str(row.get("id")): row for row in security_ops.list_evidence()
+    }
+    control_rows = []
+    for row in sorted(
+        security_ops.list_controls(),
+        key=lambda item: (
+            str(item.get("framework") or ""),
+            str(item.get("control_id") or item.get("id") or ""),
+        ),
+    ):
+        cited = []
+        for evidence_id in row.get("evidence_ids") or []:
+            evidence = evidence_index.get(str(evidence_id)) or {}
+            cited.append({
+                "id": evidence_id,
+                "title": evidence.get("title") or evidence_id,
+                "status": evidence.get("status") or "unknown",
+                "source": evidence.get("source") or "",
+            })
+        control_rows.append({**row, "cited_evidence": cited})
     return templates.TemplateResponse(
         request,
         "security_report.html",
-        {"r": report},
+        {"r": report, "controls": control_rows},
     )
 
 
@@ -2428,8 +2452,8 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
                     "No readiness conclusion is available."
                 )
                 gateway_error_action = (
-                    "Run maverick preflight --profile cockpit, then "
-                    "maverick doctor."
+                    "Use the built-in health checks on the Get started page "
+                    "to identify the blocker, then reload this cockpit."
                 )
             gateway_panel_errors["summary"] = gateway_error
         else:
@@ -2463,6 +2487,17 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
         )
         receipt_rows.append(row)
 
+    view = gateway_view(
+        gateway_summary,
+        policies,
+        receipts,
+        regulatory_impacts,
+    )
+    # Product surface: the cockpit never shows CLI invocations. The synthetic
+    # next action's copyable code is a CLI command, so it renders as prose only.
+    if "maverick" in str(view["next_action"].get("code", "")).lower():
+        view["next_action"]["code"] = ""
+
     return templates.TemplateResponse(
         request,
         "model_risk_assurance.html",
@@ -2484,12 +2519,7 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
             "receipts": receipt_rows,
             "regulatory_impacts": regulatory_impacts[:100],
             "impact_page": impact_page,
-            "gateway_view": gateway_view(
-                gateway_summary,
-                policies,
-                receipts,
-                regulatory_impacts,
-            ),
+            "gateway_view": view,
             "gateway_admin": has_global_permission(request, "admin"),
         },
     )
@@ -6221,6 +6251,37 @@ async def automations_page(request: Request) -> HTMLResponse:
         event_triggers_enabled = _events_enabled()
     except Exception:  # pragma: no cover
         event_triggers_enabled = False
+    # Real inventory counts for the page hero, owner-scoped exactly like the
+    # /api/v1 lists the page renders from (fail-soft: an unreadable store just
+    # counts as zero, never a 500).
+    owner = goal_owner_filter(request)
+    schedule_count = trigger_count = event_trigger_count = 0
+    try:
+        from maverick.job_queue import JobQueue
+        schedule_count = sum(
+            1 for j in JobQueue().list(status="pending")
+            if (j.payload or {}).get("__cron__")
+            and (owner is None or (j.payload or {}).get("owner") == owner))
+    except Exception:  # pragma: no cover - the hero count is best-effort
+        pass
+    try:
+        from . import triggers_store
+        trigger_count = sum(
+            1 for t in triggers_store.list_triggers()
+            if owner is None or t.get("owner", "") == owner)
+    except Exception:  # pragma: no cover - the hero count is best-effort
+        pass
+    try:
+        from maverick.paths import current_tenant_id
+
+        from . import event_triggers_store
+        tenant = current_tenant_id() or ""
+        event_trigger_count = sum(
+            1 for t in event_triggers_store.list_triggers()
+            if t.get("tenant", "") == tenant
+            and (owner is None or t.get("owner", "") == owner))
+    except Exception:  # pragma: no cover - the hero count is best-effort
+        pass
     return templates.TemplateResponse(
         request, "automations.html",
         {
@@ -6228,6 +6289,9 @@ async def automations_page(request: Request) -> HTMLResponse:
             "triggers_enabled": feats.get("triggers", True),
             "import_enabled": import_enabled,
             "event_triggers_enabled": event_triggers_enabled,
+            "schedule_count": schedule_count,
+            "trigger_count": trigger_count,
+            "event_trigger_count": event_trigger_count,
         },
     )
 

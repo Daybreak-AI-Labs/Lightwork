@@ -61,12 +61,20 @@
     color: var(--text); border-radius: var(--radius-md); padding: 0.5rem 0.65rem; font: inherit; }
 </style>
 
-  <div class="as-lede">
-    <h1 class="page-title">Assessments</h1>
-    <p>Privacy, security, and AI-risk reviews of every agent and flow — auto-drafted from what
-      each one is actually allowed to do (its tools, data access, and risk ceiling), reviewed and
-      signed off per lens, and automatically flagged for re-review when it changes.</p>
-  </div>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Governance', 'Assessments',
+               subtitle='Continuous review',
+               lede='Privacy, security, and AI-risk reviews of every agent
+                     and flow — auto-drafted from what each one is actually
+                     allowed to do (its tools, data access, and risk
+                     ceiling), reviewed and signed off per lens, and
+                     automatically flagged for re-review when it changes.') %}
+    {{ state('Current state', 'Daily drift sweep',
+             badge='automatic', badge_class='ok',
+             copy='Every subject is re-checked each day; anything that
+                   changed since sign-off is flagged below for a fresh
+                   review.') }}
+  {% endcall %}
 
   <div class="as-bar">
     <span class="pill" id="as-due-count" title="Subjects needing attention">—</span>

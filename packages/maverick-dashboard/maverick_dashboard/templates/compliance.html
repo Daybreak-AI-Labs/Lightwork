@@ -1,14 +1,108 @@
 {% extends "base.html" %}
 {% block title %}Compliance · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Compliance</h1>
-  <p class="page-subtitle">
-    Control-coverage for this deployment, mapped to GDPR + the EU AI Act + US
-    frameworks (NIST AI RMF, Colorado AI Act, NYC Local Law 144, CCPA/CPRA).
-    Control coverage only — not a legal attestation. Hand the export to an
-    auditor as the evidence trail.
-  </p>
+<style>
+  .cmp-stats { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-4); }
+  .cmp-stat { flex: 1 1 10rem; min-width: 9rem; padding: var(--space-3) var(--space-4);
+              border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+  .cmp-stat__n { display: block; font-size: var(--text-xl); font-weight: var(--font-bold); }
+  .cmp-stat__label { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase;
+                     letter-spacing: 0.04em; }
+  .cmp-stat--warn { border-color: var(--warn); background: var(--warn-subtle); }
+  .cmp-stat--warn .cmp-stat__n { color: var(--warn); }
+  .cmp-todo { overflow-x: auto; }
+</style>
 
+  {# Prioritized worklist: every control the report marked action_needed,
+     computed from the same rows the reference tables below render. #}
+  {% set attention = [] %}
+  {% for fw, group in groups.items() %}
+    {% for c in group.rows if c.status == 'action_needed' %}
+      {% set _ = attention.append((group.label, c)) %}
+    {% endfor %}
+  {% endfor %}
+
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Governance', 'Compliance',
+               subtitle='Control coverage, ready for action',
+               lede='Control-coverage for this deployment, mapped to GDPR +
+                     the EU AI Act + US frameworks (NIST AI RMF, Colorado AI
+                     Act, NYC Local Law 144, CCPA/CPRA). Control coverage only
+                     — not a legal attestation. Hand the export to an auditor
+                     as the evidence trail.') %}
+    {% if summary %}
+    {{ state('Current state',
+             summary.get('total', 0) ~ ' controls tracked',
+             badge=(summary.get('action_needed', 0) ~ ' need action') if summary.get('action_needed', 0) else 'all covered',
+             badge_class='warn' if summary.get('action_needed', 0) else 'ok',
+             copy='active: ' ~ summary.get('active', 0) ~ ' · needing action: '
+                  ~ summary.get('action_needed', 0) ~ ' — everything below is
+                  measured from this deployment, not a questionnaire.') }}
+    {% else %}
+    {{ state('Current state', 'No report available',
+             badge='no data', badge_class='idle',
+             copy='Compliance reporting returned nothing for this deployment
+                   or filter.') }}
+    {% endif %}
+  {% endcall %}
+
+  {% if summary %}
+  <div class="cmp-stats">
+    <div class="cmp-stat{% if summary.get('action_needed', 0) %} cmp-stat--warn{% endif %}">
+      <span class="cmp-stat__n">{{ summary.get('action_needed', 0) }}</span>
+      <span class="cmp-stat__label">need action</span>
+    </div>
+    <div class="cmp-stat">
+      <span class="cmp-stat__n">{{ summary.get('active', 0) }}</span>
+      <span class="cmp-stat__label">active</span>
+    </div>
+    <div class="cmp-stat">
+      <span class="cmp-stat__n">{{ summary.get('total', 0) }}</span>
+      <span class="cmp-stat__label">controls tracked</span>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if groups %}
+  <div class="section-head"><h2>Needs attention</h2></div>
+  <div class="panel">
+    {% if attention %}
+    <p class="muted" style="margin-top: 0;">
+      What to do next — each row is a control the platform measured as not yet
+      covered, with the fix in the detail column.
+    </p>
+    <div class="cmp-todo">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">status</th>
+            <th scope="col">control</th>
+            <th scope="col">regulation</th>
+            <th scope="col">what to do</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for label, c in attention %}
+          <tr>
+            <td><span class="badge blocked">action needed</span></td>
+            <td>{{ c.control }} <span class="muted" style="font-size: var(--text-xs);">· {{ label }}</span></td>
+            <td><code>{{ c.regulation }}</code></td>
+            <td>{{ c.detail }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted" style="margin: 0;">
+      Nothing needs action — every measured control in this view is active or
+      available on demand.
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="section-head"><h2>Filter &amp; export</h2></div>
   <div class="panel">
     <form method="get" action="/compliance" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
       <label>
@@ -31,21 +125,10 @@
     </form>
   </div>
 
-  {% if summary %}
-  <div class="panel">
-    <h2 style="margin-top: 0;">Coverage</h2>
-    <div class="muted" style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
-      <span>active: <strong>{{ summary.get('active', 0) }}</strong></span>
-      <span>need action: <strong>{{ summary.get('action_needed', 0) }}</strong></span>
-      <span>total: <strong>{{ summary.get('total', 0) }}</strong></span>
-    </div>
-  </div>
-  {% endif %}
-
   {% if groups %}
     {% for fw, group in groups.items() %}
+    <div class="section-head"><h2>{{ group.label }}</h2></div>
     <div class="panel">
-      <h2 style="margin-top: 0;">{{ group.label }}</h2>
       <table>
         <thead>
           <tr>
@@ -80,14 +163,9 @@
     <div class="panel">
       <p class="muted">
         No compliance controls to report — compliance reporting is
-        unavailable or returned nothing for this filter.
+        unavailable or returned nothing for this filter. Once the platform
+        is doing governed work, control coverage appears here automatically.
       </p>
-      <details>
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: generate this report from the command line</summary>
-        <p class="muted" style="font-size: var(--text-sm);">Run
-        <code>maverick compliance --framework {{ framework }}</code> to see
-        control coverage.</p>
-      </details>
     </div>
   {% endif %}
 

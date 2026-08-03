@@ -1,11 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Tool servers · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Tool servers</h1>
-  <p class="page-subtitle">
-    External tool servers your agents can use — calendars, CRMs, file systems and
-    more — connected through the open MCP standard.
-  </p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Workforce capability', 'Tool servers',
+               subtitle='Connected systems',
+               lede='Tool servers extend what your workforce can reach —
+                     connected and managed right here.') %}
+    {{ state('Current state', (servers | length) ~ ' server(s) connected',
+             badge='live' if servers else 'none yet',
+             badge_class='ok' if servers else 'idle',
+             copy='Each server gives your agents a new set of tools —
+                   calendars, CRMs, file systems and more. Changes made here
+                   apply from the next goal.') }}
+  {% endcall %}
 
   {% if saved %}
   <div class="panel" role="status"
@@ -33,16 +40,16 @@
             <td><code>{{ s.url if s.transport == 'http' else (s.command or '-') }}</code></td>
             <td class="muted" style="font-size: var(--text-sm);">{{ s.args | join(' ') if s.args else '-' }}</td>
             <td>
-              {% if s.source == 'dashboard' %}<span class="badge active">dashboard</span>
-              {% else %}<span class="muted">server configuration</span>{% endif %}
+              {% if s.source == 'dashboard' %}<span class="badge active">added here</span>
+              {% else %}<span class="muted">platform</span>{% endif %}
             </td>
             <td>
               {% if s.removable %}
               <form method="post" action="/mcp/remove" style="margin: 0;">
                 <input type="hidden" name="name" value="{{ s.name }}" />
-                <button type="submit" class="btn btn--ghost" title="Remove this dashboard-added server">Remove</button>
+                <button type="submit" class="btn btn--ghost" title="Remove this server">Remove</button>
               </form>
-              {% else %}<span class="muted">—</span>{% endif %}
+              {% else %}<span class="muted">managed by your administrator</span>{% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -56,9 +63,9 @@
   <div class="section-head"><h2>Add a server running on this machine</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
-      Runs a command on this machine that provides tools to your agents. Changes
-      made here take effect on the next goal and never modify your server's
-      configuration files.
+      Runs a command on this machine that provides tools to your agents.
+      Connected the moment you save — live for your workforce from the next
+      goal.
     </p>
     <form method="post" action="/mcp/add"
           style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">
@@ -87,21 +94,14 @@
       </label>
       <p style="margin: 0;"><button type="submit" class="btn btn--primary">Add local server</button></p>
     </form>
-    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: transport and storage</summary>
-      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
-        Runs a local command that speaks MCP over stdio. Saved to the dashboard
-        overlay (<code>~/.maverick/runtime-overrides.toml</code>), never your
-        <code>config.toml</code>.
-      </p>
-    </details>
   </div>
 
   <div class="section-head"><h2>Add a server by web address (URL)</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
-      Connects to a tool server hosted elsewhere, using its web address. Changes
-      made here take effect on the next goal and never modify your server's
-      configuration files.
+      Connects to a tool server hosted elsewhere, using its web address.
+      Connected the moment you save — live for your workforce from the next
+      goal.
     </p>
     <form method="post" action="/mcp/add"
           style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">
@@ -129,27 +129,5 @@
       </label>
       <p style="margin: 0;"><button type="submit" class="btn btn--primary">Add remote server</button></p>
     </form>
-    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: transport and storage</summary>
-      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
-        Connects to a server over Streamable HTTP. Saved to the dashboard overlay
-        (<code>~/.maverick/runtime-overrides.toml</code>), never your <code>config.toml</code>.
-      </p>
-    </details>
-  </div>
-
-  <div class="panel">
-    <h3 style="margin-top: 0;">What is MCP?</h3>
-    <p class="muted" style="margin-bottom: 0;">
-      MCP (Model Context Protocol) is an open standard for connecting AI agents to
-      outside tools — file storage, GitHub, databases and more. Each server you add
-      here gives your agents a new set of tools they can use on your behalf.
-      Learn more at <a href="https://modelcontextprotocol.io" rel="noopener noreferrer" style="color: var(--brand);">modelcontextprotocol.io</a>.
-    </p>
-    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: tool naming</summary>
-      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
-        Servers expose tools over a JSON-RPC channel; Lightwork consumes them as
-        <code>mcp_&lt;server&gt;__&lt;tool&gt;</code>.
-      </p>
-    </details>
   </div>
 {% endblock %}

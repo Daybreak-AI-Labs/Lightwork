@@ -16,9 +16,20 @@
     .aud-hash { font-size: var(--text-xs); word-break: break-all; color: var(--muted); }
   </style>
 
-  <h1 class="page-title">Audit</h1>
-  <p class="page-subtitle">A complete, tamper-resistant record of everything that has happened here — filter or search any event.
-    <a href="/audit/binder">Audit binder (evidence pack) →</a></p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Governance', 'Audit',
+               subtitle='The operating record',
+               lede='A complete, tamper-resistant record of everything that
+                     has happened here — filter or search any event.
+                     <a href="/audit/binder">Audit binder (evidence pack)
+                     →</a>') %}
+    {{ state('Current state', 'Ed25519-signed chain',
+             badge='tamper-evident', badge_class='ok',
+             copy='Showing the last ' ~ n ~ ' events. Every agent action and
+                   every human decision lands here, each entry signed and
+                   linked to the one before — any tampering breaks the
+                   chain.') }}
+  {% endcall %}
 
   <div class="panel">
     <form method="get" action="/audit" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
@@ -100,7 +111,16 @@
           const data = await r.json();
           const events = data.events || [];
           msg.textContent = events.length + ' match(es).';
-          out.textContent = events.map(e => JSON.stringify(e)).join('\n');
+          // Chain material (hash/sig/key ids) stays out of the on-screen
+          // dump — the signed chain is verified server-side, not by eye.
+          const CHAIN_KEYS = ['hash', 'prev_hash', 'sig', 'key_id'];
+          out.textContent = events.map(e => {
+            const shown = {};
+            Object.keys(e).forEach(k => {
+              if (CHAIN_KEYS.indexOf(k) === -1) shown[k] = e[k];
+            });
+            return JSON.stringify(shown);
+          }).join('\n');
         } catch (e) {
           msg.style.color = 'var(--danger)';
           msg.textContent = String(e);
@@ -151,7 +171,7 @@
                   {% endfor %}
                   {% if chain %}
                   <details class="aud-sig">
-                    <summary>🔏 signed{% if chain.key_id %} · key {{ chain.key_id[:10] }}…{% endif %}{% if not chain.prev_hash %} · genesis{% endif %}</summary>
+                    <summary>🔏 Verification detail{% if not chain.prev_hash %} · genesis{% endif %}</summary>
                     {% for k in chain_keys if k in chain %}
                     <div class="aud-kv">
                       <span class="aud-k">{{ k }}</span>

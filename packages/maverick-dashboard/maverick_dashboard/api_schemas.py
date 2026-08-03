@@ -1332,3 +1332,16 @@ class PartnerTenantIn(BaseModel):
     token: str = Field("", max_length=300)
     theme: str = Field("", max_length=60)
     notes: str = Field("", max_length=500)
+
+
+class FeatureSwitchIn(BaseModel):
+    """Flip one allowlisted platform system on/off from inside the app."""
+    section: str
+    enabled: bool
+
+
+class CopilotIn(BaseModel):
+    """One turn of the platform copilot (the lower-right helper)."""
+    message: str
+    page: str = ""
+    history: list = []

@@ -402,33 +402,119 @@ _SEED_PAPER_PARAGRAPHS = (
 )
 
 
-def _seed_report(kind: str, case_id: str, title: str,
+def _risk_report_text(*, subject: str, ticket: str, requester: str,
+                      result: dict, controls: list[dict],
+                      instrument_line: str, rationale: str,
+                      at: float) -> str:
+    """The full risk-analysis report filed to the vendor record — a document
+    a reviewer can actually defend from: what was found, what it means, what
+    must change, and exactly what the assessment was based on. One composer
+    for the live run and the seeded history, so both read identically."""
+    stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(at))
+    findings = result.get("findings") or []
+    answers = result.get("answers") or []
+    high = sum(1 for f in findings if f.get("severity") == "high")
+    rating = str(result.get("risk_rating", "unknown")).upper()
+    inherent = str(result.get("inherent_risk",
+                              result.get("risk_rating", "?"))).upper()
+    residual = str(result.get("residual_risk", "?")).upper()
+    cip = result.get("controls_in_place", 0)
+    ris = result.get("risks_in_scope", 0)
+
+    lines = [
+        "SUMMARY OF RECORD",
+        "-" * 68,
+        f"System / vendor : {subject}",
+        f"Ticket          : {ticket} — requested by {requester}",
+        "Prepared by     : Lightwork PIA Concierge (agent input + analysis; "
+        "the approval decision is human)",
+        f"Prepared at     : {stamp}",
+        f"Interview       : {result.get('answered', 0)} of "
+        f"{result.get('total', 0)} questions answered",
+        f"Rating filed    : {rating} — inherent {inherent} → residual "
+        f"{residual} ({cip} of {ris} risk areas controlled)",
+        f"Instrument      : {instrument_line}",
+        "",
+        "EXECUTIVE SUMMARY",
+        "-" * 68,
+        (f"{subject} was assessed at {rating} risk. "
+         + (f"{len(findings)} finding(s) — {high} high severity — require "
+            "remediation before contract renewal. "
+            if findings else
+            "No question in scope produced an adverse finding. ")
+         + f"Rationale: {rationale} "
+         + f"Controls are in place for {cip} of {ris} risk areas, leaving "
+           f"residual risk {residual}. The assessment was filed to OneTrust "
+           "as Under Review; nothing is Completed until the privacy team "
+           "approves it."),
+        "",
+        f"FINDINGS ({len(findings)})",
+        "-" * 68,
+    ]
+    if not findings:
+        lines.append("None. Standard processing against the questionnaire "
+                     "in force.")
+    for i, f in enumerate(findings, start=1):
+        lines.append(f"{i}. [{str(f.get('severity', '?')).upper()}] "
+                     f"{f.get('section', 'Assessment')}: "
+                     f"{f.get('text') or f.get('question', '')}")
+        if f.get("guidance"):
+            lines.append(f"   Remediation: {f['guidance']}")
+    lines.append("")
+    if controls:
+        lines += [f"REQUIRED CONTROLS ({len(controls)})", "-" * 68]
+        for c in controls:
+            lines.append(f"- {c.get('id', '?')} — {c.get('title', '')}")
+            if c.get("frameworks"):
+                lines.append(f"  Frameworks: {c['frameworks']}")
+        lines.append("")
+    if answers:
+        lines += [f"INTERVIEW BASIS ({len(answers)} answers, verbatim)",
+                  "-" * 68]
+        for i, a in enumerate(answers, start=1):
+            lines.append(f"{i}. {a.get('question', '')}")
+            by = f" — {a['by']}" if a.get("by") else ""
+            lines.append(f"   Answer: {a.get('answer', '?')}{by}")
+            if a.get("note"):
+                lines.append(f"   Note: {a['note']}")
+        lines.append("")
+    lines += [
+        "GOVERNANCE & METHOD",
+        "-" * 68,
+        "Scoring is deterministic from the questionnaire template in force — "
+        "a model can neither create nor clear a finding. The agent files the "
+        "assessment as Under Review and cannot approve it; the reviewer's "
+        "decision is recorded on Lightwork's Ed25519-signed audit chain.",
+    ]
+    return "\n".join(lines)
+
+
+def _deliverable(vendor: str, kind: str, title: str,
                  body: str) -> tuple[str, bytes, str]:
-    """A seeded deliverable in the same format the live run files: a Word
-    document on the platform, honest plain text in standalone. Returns
-    (filename, content, mime)."""
+    """A filed deliverable: Word on the platform, honest plain text in
+    standalone; named legibly and versioned per vendor+kind so the Documents
+    tab reads as a history. Returns (filename, content, mime)."""
+    version = STORE.next_doc_version(vendor, kind)
+    stem = f"{paper_desk._safe(vendor)}-{kind}-v{version}"
     docx = backend.report_docx(body, title=title)
     if docx is not None:
-        return f"{kind}-{case_id}.docx", docx, paper_desk.DOCX_MIME
-    return (f"{kind}-{case_id}.txt", f"{title}\n{body}".encode(),
-            "text/plain")
+        return f"{stem}.docx", docx, paper_desk.DOCX_MIME
+    return f"{stem}.txt", f"{title}\n{body}".encode(), "text/plain"
 
 
-def _seed_risk_body(risk: str, findings: list[dict]) -> str:
-    rationale = ("; ".join(f["text"] for f in findings)
-                 or "No findings — standard processing.")
-    return (f"Rating filed: {risk.capitalize()}\nRationale: {rationale}\n"
-            "Instrument: dpa — external processing of personal data on the "
-            "controller's behalf\n")
+def _seed_notice_result(vendor: str, risk: str) -> dict:
+    """Synthetic cross-check inputs for the seeded history, rendered through
+    the REAL notice_check composer so seeded and live documents read alike."""
+    if risk == "high":
+        return {"contradictions": [], "gaps": [
+            {"finding": f"The published notice does not describe the "
+                        f"{vendor} processing (behavioural data).",
+             "category": "Behavioural Data"}]}
+    return {"contradictions": [], "gaps": []}
 
 
-_SEED_NOTICE_BODY = (
-    "Notice reviewed : Global Vacation Clubs Privacy Notice (published)\n"
-    "Covered         : contact data (name, email address, phone number), "
-    "payment details\n"
-    "Recommendation  : confirm this vendor's processing purpose is named "
-    "in the 'Sharing' section before renewal; no sale/share language "
-    "change required.\n")
+_SEED_NOTICE_PICKED = {"name": "Global Vacation Clubs Privacy Notice",
+                       "organizationName": "Global Vacation Clubs"}
 
 
 def _seed_paper_docx(vendor: str) -> bytes:
@@ -492,6 +578,10 @@ def _seed_paper_round(case: Case, reviewer: str) -> None:
                                          reviewer=reviewer,
                                          client=_SeedFiler())
     entry["at"] = case.created_at + 3600     # history, not "just now"
+    for att_id in entry["attachment_ids"]:
+        att = _ot_mock.ATTACHMENTS.get(att_id)
+        if att:
+            att["at"] = entry["at"]
 
 
 def _seed_tenant() -> None:
@@ -592,17 +682,28 @@ def _seed_tenant() -> None:
         ticket.created_at = created
         STORE.tickets[ticket_no] = ticket
         # The deliverables the live run attaches, retained as OPENABLE
-        # documents on the vendor's mock record (same format as the live
-        # run: Word on the platform, plain text standalone).
+        # documents on the vendor's mock record — same composers, names,
+        # and format as the live run, backdated to the filing.
+        risk_body = _risk_report_text(
+            subject=vendor, ticket=ticket_no, requester=case.requester,
+            result=ot.result, controls=[],
+            instrument_line="dpa — external processing of personal data on "
+                            "the controller's behalf",
+            rationale=("; ".join(f["text"] for f in findings)
+                       or "No adverse findings."),
+            at=filed_at)
+        notice_body = notice_check.recommendations_doc(
+            vendor, _SEED_NOTICE_PICKED, _seed_notice_result(vendor, risk),
+            [])
         for name, content, mime in (
-            _seed_report("risk-analysis", case_id,
-                         f"Risk analysis — {vendor}",
-                         _seed_risk_body(risk, findings)),
-            _seed_report("notice-crosscheck", case_id,
-                         f"Privacy-notice cross-check — {vendor}",
-                         _SEED_NOTICE_BODY),
+            _deliverable(vendor, "risk-analysis",
+                         f"Privacy Risk Analysis — {vendor}", risk_body),
+            _deliverable(vendor, "notice-crosscheck",
+                         f"Privacy-Notice Cross-Check — {vendor}",
+                         notice_body),
         ):
-            _ot_mock.seed_attachment(vendor, name, content, mime)
+            _ot_mock.seed_attachment(vendor, name, content, mime,
+                                     at=filed_at)
     n_docs = len(_ot_mock.ATTACHMENTS)
     if CAPS["paper_redline"]:
         # Two vendors also carry a filed vendor-paper round (analysis memo +
@@ -1756,37 +1857,31 @@ def _run_onetrust_protocol(case: Case) -> dict:
 
     # Deliverables land on the VENDOR record (assessment-level attach is
     # session-gated on real tenants).
-    report = (f"Rating filed: {risk_option}"
-              f"\nRationale: {rationale}\nInstrument: "
-              f"{instrument['instrument'] or 'none required'} — "
-              f"{instrument['reason']}\n")
-    notice_text = notice_check.recommendations_doc(case.subject, picked,
+    # The full risk-analysis report and notice cross-check — real documents
+    # with the findings, controls, and interview basis, named legibly and
+    # versioned per vendor. Word on the platform; standalone files the
+    # honest plain text.
+    instrument_line = (f"{instrument['instrument'] or 'none required'} — "
+                       f"{instrument['reason']}")
+    report_body = _risk_report_text(
+        subject=case.subject, ticket=case.ticket_number,
+        requester=case.requester, result=case.result or {},
+        controls=case.controls, instrument_line=instrument_line,
+        rationale=rationale, at=time.time())
+    notice_body = notice_check.recommendations_doc(case.subject, picked,
                                                    check, siblings)
-    # Word documents on the platform; the standalone agent has no Word
-    # engine and files the honest plain text instead.
-    risk_docx = backend.report_docx(report,
-                                    title=f"Risk analysis — {case.subject}")
-    if risk_docx is not None:
-        client.attach_to_record(vendor["id"], f"risk-analysis-{case.id}.docx",
-                                risk_docx, mime=paper_desk.DOCX_MIME)
-        client.attach_to_record(
-            vendor["id"], f"notice-crosscheck-{case.id}.docx",
-            backend.report_docx(
-                notice_text,
-                title=f"Privacy-notice cross-check — {case.subject}"),
-            mime=paper_desk.DOCX_MIME)
-        steps.append("Attached risk analysis + notice recommendations to the "
-                     "vendor record as Word documents (two-step upload → "
-                     "link)")
-    else:
-        client.attach_to_record(
-            vendor["id"], f"risk-analysis-{case.id}.txt",
-            (f"Risk analysis — {case.subject}\n" + report).encode())
-        client.attach_to_record(
-            vendor["id"], f"notice-crosscheck-{case.id}.txt",
-            notice_text.encode())
-        steps.append("Attached risk analysis + notice recommendations to the "
-                     "vendor record (two-step upload → link)")
+    risk_name, risk_bytes, risk_mime = _deliverable(
+        case.subject, "risk-analysis",
+        f"Privacy Risk Analysis — {case.subject}", report_body)
+    notice_name, notice_bytes, notice_mime = _deliverable(
+        case.subject, "notice-crosscheck",
+        f"Privacy-Notice Cross-Check — {case.subject}", notice_body)
+    client.attach_to_record(vendor["id"], risk_name, risk_bytes,
+                            mime=risk_mime)
+    client.attach_to_record(vendor["id"], notice_name, notice_bytes,
+                            mime=notice_mime)
+    steps.append(f"Attached {risk_name} + {notice_name} to the vendor "
+                 "record (two-step upload → link)")
 
     value = value_ledger.case_value(
         kind="ai_assessment" if facts["ai"] else "privacy_assessment",
@@ -2061,6 +2156,7 @@ def _vendor_documents(subject: str) -> list[dict]:
     return [{
         "id": a["id"], "filename": a.get("filename", ""),
         "bytes": a.get("bytes", 0),
+        "at": a.get("at", 0),
         "kind": ("docx" if str(a.get("filename", "")).endswith(".docx")
                  else "text" if str(a.get("filename", "")).endswith(".txt")
                  else "other"),

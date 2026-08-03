@@ -494,11 +494,24 @@ def test_seeded_tenant_documents_are_clickable(demo_app, monkeypatch):
     demo_app._seed_tenant()
     docs = demo_app._vendor_documents("Wayne Payments")
     names = [d["filename"] for d in docs]
-    assert any(n.startswith("risk-analysis-") for n in names)
-    assert any(n.startswith("notice-crosscheck-") for n in names)
+    # Legible, versioned names — never case-id soup.
+    assert "Wayne-Payments-risk-analysis-v1.docx" in names
+    assert "Wayne-Payments-notice-crosscheck-v1.docx" in names
     assert any(n.endswith("-redline.docx") for n in names)
     assert any(n.endswith("-analysis.txt") for n in names)
     assert all(d["available"] for d in docs)
+    assert all(d["at"] for d in docs)     # dated, so the tab reads as history
+    # The risk analysis is a REAL report, not a four-line stub.
+    import io as _io
+    import zipfile as _zip
+    att = next(a for a in demo_app._ot_mock.ATTACHMENTS.values()
+               if a["filename"] == "Wayne-Payments-risk-analysis-v1.docx")
+    assert att["bytes"] > 2500
+    doc = _zip.ZipFile(_io.BytesIO(att["content"])).read(
+        "word/document.xml").decode()
+    for section in ("EXECUTIVE SUMMARY", "FINDINGS", "INTERVIEW BASIS",
+                    "GOVERNANCE"):
+        assert section in doc, section
     # The round sits on the case too, so the reviewer desk shows history,
     # and the redline carries real revisions (produced by the real engine).
     case = next(c for c in demo_app.STORE.cases.values()

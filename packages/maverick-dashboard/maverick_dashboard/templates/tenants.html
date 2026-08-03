@@ -3,17 +3,36 @@
 {% block content %}
   <h1 class="page-title">Tenants</h1>
   <p class="page-subtitle">
-    Each tenant is an isolated workspace with its own data and daily spend
+    Each tenant is an isolated workspace with its own records and daily spend
     limit. This roster shows every tenant on this deployment — status, plan,
-    and spend limit.
+    and spend limit. The per-workspace rollup lives on
+    <a href="/tenants/overview">Tenant overview</a>.
   </p>
-  <details>
-    <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: manage tenants from the command line</summary>
-    <p class="muted" style="font-size: var(--text-sm);">
-      Manage with <code>maverick tenant …</code>;
-      rate usage into invoices with <code>maverick billing invoice &lt;tenant&gt;</code>.
+
+  <div class="section-head"><h2>Why create a workspace?</h2></div>
+  <div class="panel">
+    <p class="muted" style="margin-top: 0;">
+      A workspace walls off one client or team. Everything it produces lives
+      in its own home — so one client's evidence can never mix with
+      another's:
     </p>
-  </details>
+    <ul class="muted" style="margin: 0 0 var(--space-2);">
+      <li><strong>Its own records</strong> — a separate operating record and
+        run history; work done for one workspace is invisible to the rest.</li>
+      <li><strong>Its own knowledge</strong> — uploaded documents and
+        customized agents stay inside the workspace that owns them.</li>
+      <li><strong>Its own budget</strong> — a daily spend limit and usage
+        ledger per workspace, so one client can never burn another's
+        budget (and usage rolls up cleanly for billing).</li>
+      <li><strong>Its own access</strong> — people can hold a different role
+        per workspace, and a workspace can be suspended without touching
+        the others.</li>
+    </ul>
+    <p class="muted" style="margin: 0;">
+      One client per workspace is the rule of thumb: separate books, separate
+      evidence, one roster to run it all from.
+    </p>
+  </div>
 
   {% if is_admin %}
   <div class="section-head"><h2>Create a workspace</h2></div>
@@ -79,15 +98,12 @@
     </div>
   {% elif not tenants %}
     <div class="panel">
-      <p class="muted">No tenants provisioned. Single-tenant and
-      unprovisioned deployments run without a registry.</p>
-      <details>
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: create a tenant from the command line</summary>
-        <p class="muted" style="font-size: var(--text-sm);">Create one with
-        <code>maverick tenant create &lt;id&gt;</code>.</p>
-      </details>
+      <p class="muted" style="margin: 0;">No tenants provisioned. Single-tenant and
+      unprovisioned deployments run without a registry — create your first
+      workspace above when you take on a second client or team.</p>
     </div>
   {% else %}
+    <div class="section-head"><h2>Workspace roster</h2></div>
     <div class="panel">
       <table>
         <thead>

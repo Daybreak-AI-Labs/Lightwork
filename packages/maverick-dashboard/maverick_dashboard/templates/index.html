@@ -1,29 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Overview · Lightwork{% endblock %}
 {% block content %}
-  <div id="tour" role="region" aria-label="How to start a goal" hidden
-       class="panel" style="position: relative; border-color: var(--brand);">
-    <button type="button" id="tour-dismiss" aria-label="Dismiss tour"
-            style="position: absolute; top: 0.6rem; inset-inline-end: 0.6rem; background: transparent; color: var(--muted); border: 0; font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0.25rem 0.4rem;">&times;</button>
-    <h2 style="color: var(--brand);">Welcome to Lightwork · 60-second tour</h2>
-    <p style="margin: 0 0 var(--space-2);">
-      Describe what you need in the box below — or open the
-      <a href="/chat">chat</a> — and Lightwork puts a team of AI agents on it,
-      within the budget you allow.
-    </p>
-    <details>
-      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: start work from the API or command line</summary>
-      <ol style="margin: var(--space-2) 0 0; padding-inline-start: 1.2rem; display: grid; gap: var(--space-2);">
-        <li>
-          <strong>REST API</strong> — <code>POST /api/v1/goals</code>:
-          <br /><code>curl -X POST http://127.0.0.1:8765/api/v1/goals -d '{"title":"Plan a trip to Japan"}'</code>
-        </li>
-        <li>
-          <strong>CLI</strong> — <code>maverick start "your goal"</code>.
-        </li>
-      </ol>
-    </details>
-  </div>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Your AI workforce', 'Overview',
+               subtitle='The operating picture',
+               lede='Everything your workforce is doing right now — goals in
+                     flight, work delivered, and anything waiting on you.
+                     Start new work from <a href="/chat">chat</a>, or manage
+                     the teams on <a href="/workforce">Workforce</a>.') %}
+    {{ state('Current state',
+             counts.total ~ ' goal' ~ ('' if counts.total == 1 else 's') ~ ' on record',
+             badge=(counts.active ~ ' active') if counts.active else 'idle',
+             badge_class='ok' if counts.active else 'idle',
+             copy=counts.done ~ ' delivered · ' ~ counts.blocked ~ ' blocked.
+                   Every goal runs inside the budget and guardrails you
+                   set.') }}
+  {% endcall %}
 
   {% if counts.total == 0 %}
     <div class="panel empty">
@@ -83,16 +75,19 @@
         {% endfor %}
         </tbody>
       </table>
+      <p class="muted" style="margin: var(--space-3) 0 0;">
+        <a href="/goals">All goals →</a> · <a href="/spend">Spend →</a>
+      </p>
     </div>
 
-    <div class="section-head"><h2>Facts</h2></div>
+    <div class="section-head"><h2>Business facts</h2></div>
     <div class="panel">
       {% if facts %}
         {% for k, v in facts.items() %}
-          <p><code>{{ k }}</code>: {{ v }}</p>
+          <p><strong>{{ k }}</strong> <span class="muted">— {{ v }}</span></p>
         {% endfor %}
       {% else %}
-        <p class="muted">No facts yet. Facts are details Lightwork remembers about your business — add them on the <a href="/facts">Facts</a> page.</p>
+        <p class="muted">Nothing recorded yet. Facts are details Lightwork remembers about your business — add them on the <a href="/facts">Facts</a> page.</p>
       {% endif %}
     </div>
 
@@ -100,35 +95,15 @@
     <div class="panel">
       {% if skills %}
         {% for s in skills %}
-          <p><code>{{ s.name }}</code> <span class="muted">· {{ s.triggers|length }} trigger(s)</span></p>
+          <p><strong>{{ s.name }}</strong> <span class="muted">· {{ s.triggers|length }} trigger(s)</span></p>
         {% endfor %}
       {% else %}
         <p class="muted">No skills yet. Lightwork turns finished work into reusable skills — they appear after the first multi-step goal completes.</p>
       {% endif %}
     </div>
-
-    <p class="muted" style="margin-top: 2rem;">
-      <a href="/spend" style="color: var(--muted); text-decoration: underline;">View spend</a>
-    </p>
   {% endif %}
 
   <script>
-    // Dismissible landing tour. Hidden by default in markup; reveal only
-    // when it hasn't been dismissed before (persisted in localStorage).
-    (function() {
-      const KEY = 'maverick_tour_dismissed';
-      const tour = document.getElementById('tour');
-      const close = document.getElementById('tour-dismiss');
-      if (!tour || !close) return;
-      let dismissed = false;
-      try { dismissed = localStorage.getItem(KEY) === '1'; } catch (e) {}
-      if (!dismissed) tour.hidden = false;
-      close.addEventListener('click', function() {
-        tour.hidden = true;
-        try { localStorage.setItem(KEY, '1'); } catch (e) {}
-      });
-    })();
-
     // Replace absolute timestamps with relative time on the client.
     (function() {
       function rel(ts) {

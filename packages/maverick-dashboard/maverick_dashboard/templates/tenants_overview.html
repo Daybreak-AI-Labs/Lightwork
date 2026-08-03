@@ -4,15 +4,22 @@
   <h1 class="page-title">Tenant overview</h1>
   <p class="page-subtitle">
     A per-tenant summary: goals by status, today's spend, and how close each
-    tenant is to its daily spend limit. Each tenant is an isolated workspace
-    with its own data and daily spend limit. The full roster lives on
-    <a href="/tenants">/tenants</a>.
+    tenant is to its daily spend limit. The full roster — and where new
+    workspaces are created — lives on <a href="/tenants">Tenants</a>.
   </p>
-  <details>
-    <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: manage tenants from the command line</summary>
-    <p class="muted" style="font-size: var(--text-sm);">Manage with
-    <code>maverick tenant …</code>.</p>
-  </details>
+
+  <div class="section-head"><h2>Why create a workspace?</h2></div>
+  <div class="panel">
+    <p class="muted" style="margin: 0;">
+      A workspace walls off one client or team: its own records and run
+      history, its own uploaded knowledge and customized agents, its own
+      daily spend limit and usage ledger, and its own per-workspace roles.
+      Evidence never mixes between clients, one workspace can never spend
+      another's budget, and any one of them can be suspended without
+      touching the rest. Create and manage workspaces on
+      <a href="/tenants">Tenants</a>.
+    </p>
+  </div>
 
   {% if not is_admin %}
     <div class="panel">
@@ -22,15 +29,13 @@
     </div>
   {% elif not rows %}
     <div class="panel">
-      <p class="muted">No tenants provisioned. Single-tenant and
-      unprovisioned deployments run without a registry.</p>
-      <details>
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: create a tenant from the command line</summary>
-        <p class="muted" style="font-size: var(--text-sm);">Create one with
-        <code>maverick tenant create &lt;id&gt;</code>.</p>
-      </details>
+      <p class="muted" style="margin: 0;">No tenants provisioned. Single-tenant and
+      unprovisioned deployments run without a registry — create your first
+      workspace on <a href="/tenants">Tenants</a> when you take on a second
+      client or team.</p>
     </div>
   {% else %}
+    <div class="section-head"><h2>Per-workspace rollup</h2></div>
     <div class="panel">
       <table>
         <thead>

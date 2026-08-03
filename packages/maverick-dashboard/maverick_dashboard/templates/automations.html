@@ -4,8 +4,7 @@
 <style>
   .auto { max-width: 880px; margin-inline: auto; }
   .auto :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
-  .auto__head { margin-bottom: var(--space-6); }
-  .auto__section { margin-bottom: var(--space-7); }
+  .auto__section { margin-bottom: var(--space-5); }
   .auto__hint { color: var(--muted); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
   .auto__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
   .auto__url { font-family: ui-monospace, SFMono-Regular, Menlo, "Roboto Mono", monospace; font-size: var(--text-xs); }
@@ -18,23 +17,33 @@
   .auto__warn { color: var(--text); background: var(--surface-2); border: 1px solid var(--border-strong); border-left: 3px solid var(--ring); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); font-size: var(--text-sm); margin-bottom: var(--space-3); }
 </style>
 
-<div class="auto">
-  <div class="auto__head">
-    <h1 class="page-title">Automations</h1>
-    <p class="auto__hint">Every way your workflows run on their own — on a schedule, or from an inbound event. Create them in the <a href="/workflow-builder">Workflow Builder</a>’s saved view.</p>
-  </div>
+{% from "_hero.html" import hero, state %}
+{% set automation_total = schedule_count + trigger_count + event_trigger_count %}
+{% set channels_on = (1 if scheduling_enabled else 0) + (1 if triggers_enabled else 0) + (1 if event_triggers_enabled else 0) %}
+{% call hero('Always-on operations', 'Automations',
+             subtitle='Schedules, triggers & flows',
+             lede='Every way your workflows run without you — on a recurring
+                   schedule, from an inbound webhook, or when something new
+                   appears in a connected source. Create them in the
+                   <a href="/workflow-builder">Workflow Builder</a>.') %}
+  {{ state('Current state',
+           automation_total ~ ' automation' ~ ('' if automation_total == 1 else 's') ~ ' configured',
+           badge=(channels_on ~ ' of 3 channels on') if channels_on else 'all channels off',
+           badge_class='ok' if channels_on else 'warn',
+           copy=schedule_count ~ ' schedule' ~ ('' if schedule_count == 1 else 's') ~ ' · '
+                ~ trigger_count ~ ' webhook trigger' ~ ('' if trigger_count == 1 else 's') ~ ' · '
+                ~ event_trigger_count ~ ' event trigger' ~ ('' if event_trigger_count == 1 else 's') ~ '.
+                Schedules fire while the background worker is running.') }}
+{% endcall %}
 
+<div class="auto">
   {% if scheduling_enabled %}
-  <section class="auto__section" id="auto-sched-section" aria-labelledby="auto-sched-h">
+  <section class="auto__section panel" id="auto-sched-section" aria-labelledby="auto-sched-h">
     <div class="section-head">
       <h2 id="auto-sched-h" tabindex="-1">Schedules</h2>
       <span class="muted" id="auto-sched-count"></span>
     </div>
-    <p class="auto__hint">Schedules run while the Lightwork background worker is on.</p>
-    <details style="margin-bottom: var(--space-3);">
-      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: running the worker</summary>
-      <p class="auto__hint" style="margin-top: var(--space-2);">Cron schedules run while <code>maverick worker</code> is active.</p>
-    </details>
+    <p class="auto__hint">Recurring runs — daily reports, weekly digests. Schedules fire while the Lightwork background worker is on.</p>
     <ul class="auto__list" id="auto-sched-list" aria-label="Schedules"></ul>
     <div class="mv-empty" id="auto-sched-empty" hidden>
       <p class="mv-empty__title">No schedules yet</p>
@@ -45,17 +54,13 @@
   {% endif %}
 
   {% if triggers_enabled %}
-  <section class="auto__section" id="auto-trig-section" aria-labelledby="auto-trig-h">
+  <section class="auto__section panel" id="auto-trig-section" aria-labelledby="auto-trig-h">
     <div class="section-head">
       <h2 id="auto-trig-h" tabindex="-1">Webhook triggers</h2>
       <span class="muted" id="auto-trig-count"></span>
     </div>
-    <div class="auto__warn" id="auto-trig-nosecret" hidden>Webhook triggers are not fully set up yet — ask your administrator to configure a signing secret.
-      <details style="margin-top: var(--space-2);">
-        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: configuring the signing secret</summary>
-        <p style="margin: var(--space-2) 0 0;">No <code>[webhooks]</code> secret is configured, so triggers won’t fire. Set one in <code>~/.maverick/config.toml</code> or <code>MAVERICK_WEBHOOK_SECRET</code>.</p>
-      </details>
-    </div>
+    <p class="auto__hint">Start a workflow the moment another system calls in — a form submission, a new ticket, a payment event.</p>
+    <div class="auto__warn" id="auto-trig-nosecret" hidden>Webhook triggers are not fully set up yet — ask your administrator to configure a signing secret.</div>
     <ul class="auto__list" id="auto-trig-list" aria-label="Webhook triggers"></ul>
     <div class="mv-empty" id="auto-trig-empty" hidden>
       <p class="mv-empty__title">No triggers yet</p>
@@ -66,16 +71,12 @@
   {% endif %}
 
   {% if event_triggers_enabled %}
-  <section class="auto__section" id="auto-event-section" aria-labelledby="auto-event-h">
+  <section class="auto__section panel" id="auto-event-section" aria-labelledby="auto-event-h">
     <div class="section-head">
       <h2 id="auto-event-h" tabindex="-1">Event triggers</h2>
       <span class="muted" id="auto-event-count"></span>
     </div>
     <p class="auto__hint">Run a workflow when something new appears in a source that can’t push a webhook — Lightwork checks each source automatically in the background and starts a run per new item, with the item’s fields filling the workflow’s parameters. Use “Poll now” to check immediately.</p>
-    <details style="margin-bottom: var(--space-3);">
-      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: polling on your own schedule</summary>
-      <p class="auto__hint" style="margin-top: var(--space-2);">POST to <code>/api/v1/event-triggers/poll</code> from your own cron to control when sources are checked.</p>
-    </details>
     <ul class="auto__list" id="auto-event-list" aria-label="Event triggers"></ul>
     <div class="mv-empty" id="auto-event-empty" hidden>
       <p class="mv-empty__title">No event triggers yet</p>
@@ -136,7 +137,7 @@
   </section>
   {% endif %}
 
-  <section class="auto__section" id="auto-flows-section" aria-labelledby="auto-flows-h" hidden>
+  <section class="auto__section panel" id="auto-flows-section" aria-labelledby="auto-flows-h" hidden>
     <div class="section-head">
       <h2 id="auto-flows-h" tabindex="-1">Flows</h2>
       <a class="btn btn--primary" href="/flows/designer" id="fd-new">✨ Design a flow</a>
@@ -158,7 +159,7 @@
   </section>
 
   {% if import_enabled %}
-  <section class="auto__section" id="auto-import-section" aria-labelledby="auto-import-h">
+  <section class="auto__section panel" id="auto-import-section" aria-labelledby="auto-import-h">
     <div class="section-head">
       <h2 id="auto-import-h" tabindex="-1">Import from another platform</h2>
     </div>
@@ -195,10 +196,6 @@
   <div class="mv-empty">
     <p class="mv-empty__title">Automations are disabled</p>
     <p class="mv-empty__body">Ask your administrator to turn on scheduling or triggers to use this page.</p>
-    <details style="margin-top: var(--space-2);">
-      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: enabling automations</summary>
-      <p class="mv-empty__body" style="margin-top: var(--space-2);">Enable <code>[features] scheduling</code> and/or <code>[features] triggers</code> in config to use this page.</p>
-    </details>
   </div>
   {% endif %}
 </div>

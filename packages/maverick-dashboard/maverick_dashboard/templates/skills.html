@@ -11,8 +11,6 @@
     --glass-border: color-mix(in srgb, var(--text) 13%, transparent);
     --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 8%, transparent);
   }
-  .sk-lede{ margin: 0 0 var(--space-5); }
-  .sk-lede p{ margin: var(--space-1) 0 0; color: var(--muted); max-width: 46rem; }
   .sk-grid{ display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
     gap: var(--space-5); align-items: start; }
   @media (max-width: 900px){ .sk-grid{ grid-template-columns: 1fr; } }
@@ -64,12 +62,20 @@
     border: 1px dashed var(--glass-border); border-radius: var(--radius-lg); background: var(--glass-soft); }
 </style>
 
-  <div class="sk-lede">
-    <h1 class="page-title">Skills</h1>
-    <p>A skill is a reusable playbook you teach your agents in plain English — a name, the
-      phrases that trigger it, and the steps to follow. Matching agents pick it up on their
-      next run. Every skill is secret- and safety-scanned before it's saved.</p>
-  </div>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Workforce capability', 'Skills',
+               subtitle='Teach it once, reuse it everywhere',
+               lede='A skill is a reusable playbook you teach your agents in
+                     plain English — a name, the phrases that trigger it, and
+                     the steps to follow. Matching agents pick it up on their
+                     next run. Every skill is secret- and safety-scanned
+                     before it\'s saved.') %}
+    {{ state('Current state', (skills | length) ~ ' skill(s) installed',
+             badge='ready' if skills else 'none yet',
+             badge_class='ok' if skills else 'idle',
+             copy='Create one right here, or install from a trusted source —
+                   active on the next agent run.') }}
+  {% endcall %}
 
   <div class="sk-grid">
     <!-- ============ LEFT: build a skill ============ -->
@@ -111,17 +117,10 @@
             <p id="skill-install-msg" role="status" aria-live="polite" class="sk-note"></p>
             <p class="sk-note">
               <strong>Installed skills run untrusted code</strong> the next time an agent uses
-              them — only install from sources you trust.
+              them — only install from sources you trust. In-app authoring and
+              install are an opt-in your administrator manages for this
+              platform.
             </p>
-            <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor:pointer; font-size:var(--text-sm);">For administrators: storage &amp; opt-in</summary>
-              <p class="sk-note">
-                Authored skills are saved to <code>~/.maverick/skills</code> and injected into
-                matching agents on the next run. In-app authoring and install share the same
-                opt-in (<code>MAVERICK_ALLOW_SKILL_INSTALL=1</code>); otherwise use
-                <code>maverick skill install</code> on the host. The body is secret- and
-                shield-scanned before it's written.
-              </p>
-            </details>
           </div>
         </details>
 

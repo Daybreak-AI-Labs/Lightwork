@@ -1,8 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Workforce · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">Workforce</h1>
-  <p class="page-subtitle">Your AI departments — each team's specialists, what they've delivered, and their performance reviews.</p>
+  {% from "_hero.html" import hero, state %}
+  {% call hero('Build your workforce', 'Workforce',
+               subtitle='Departments & specialists',
+               lede='Your AI departments — each team\'s specialists, what
+                     they\'ve delivered, and their performance reviews.') %}
+    {{ state('Current state',
+             pack_total ~ ' specialists on staff',
+             badge=departments | length ~ ' departments', badge_class='ok',
+             copy=connector_total ~ ' connectors wired. Every specialist
+                   works inside its declared tool allowlist and risk
+                   ceiling.') }}
+  {% endcall %}
 
   <div class="grid">
     <div class="stat"><div class="num">{{ departments|length }}</div><div class="label">departments</div></div>
@@ -67,11 +77,27 @@
           <span id="addon-note-{{ d.key }}" class="muted">paid add-on</span>
           {% endif %}
         </p>
-        <div class="dept-detail" hidden></div>
+        <div class="dept-detail" role="status" aria-live="polite" hidden></div>
       </article>
       {% endfor %}
     </div>
   </div>
+
+  <dialog id="dept-modal" aria-labelledby="dept-modal-title"
+          style="border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 0; width: min(640px, calc(100vw - 2rem)); max-height: min(85vh, 760px); background: var(--bg); color: var(--text); box-shadow: var(--shadow-lg); margin: auto; overflow: hidden;">
+    <div style="display: flex; flex-direction: column; max-height: min(85vh, 760px);">
+      <div style="display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-bottom: 1px solid var(--border);">
+        <div style="flex: 1; min-width: 0;">
+          <h3 id="dept-modal-title" style="margin: 0; font-size: var(--text-lg); text-transform: none; letter-spacing: 0; color: var(--text);">Department details</h3>
+          <div class="muted" id="dept-modal-sub" style="font-size: var(--text-sm);"></div>
+        </div>
+        <button type="button" class="btn btn--ghost" id="dept-modal-close" aria-label="Close department details">✕</button>
+      </div>
+      <div id="dept-modal-body" style="padding: var(--space-4) var(--space-5); overflow-y: auto; flex: 1; min-height: 0;">
+        <p class="muted">Loading…</p>
+      </div>
+    </div>
+  </dialog>
 
   <script>
     (function () {
@@ -106,16 +132,39 @@
           "<p class=\"muted\">" + esc(r.governance_note) + "</p>";
       }
 
+      // Pop-out details: "View team" and "Performance review" open in a modal
+      // dialog element (the shared pattern from the Agent Factory), so cards
+      // never stretch the grid. Deploy feedback stays inline on the card.
+      var modal = document.getElementById("dept-modal");
+      var modalTitle = document.getElementById("dept-modal-title");
+      var modalSub = document.getElementById("dept-modal-sub");
+      var modalBody = document.getElementById("dept-modal-body");
+      function openModal(title, sub) {
+        modalTitle.textContent = title;
+        modalSub.textContent = sub || "";
+        modalBody.innerHTML = "<p class=\"muted\">Loading…</p>";
+        if (typeof modal.showModal === "function") modal.showModal();
+        else modal.setAttribute("open", "");
+      }
+      document.getElementById("dept-modal-close").addEventListener("click", function () {
+        modal.close();
+      });
+      modal.addEventListener("click", function (ev) {
+        if (ev.target === modal) modal.close();   // click the backdrop to dismiss
+      });
+
       document.getElementById("dept-grid").addEventListener("click", function (ev) {
         var btn = ev.target.closest("button[data-act]");
         if (!btn) return;
         var key = btn.getAttribute("data-key");
         var act = btn.getAttribute("data-act");
-        var box = btn.closest(".card").querySelector(".dept-detail");
-        box.hidden = false;
-        box.textContent = "Loading…";
+        var card = btn.closest(".card");
+        var deptTitle = (card.querySelector("h3") || {}).textContent || key;
 
         if (act === "deploy") {
+          var box = card.querySelector(".dept-detail");
+          box.hidden = false;
+          box.textContent = "Deploying…";
           fetch("/api/v1/departments/" + encodeURIComponent(key) + "/deploy", {
             method: "POST",
             headers: { "Content-Type": "application/json" }
@@ -139,12 +188,15 @@
           return;
         }
 
+        openModal(deptTitle, act === "review" ? "Performance review" : "Team roster");
         var url = act === "review"
           ? "/api/v1/departments/" + encodeURIComponent(key) + "/review"
           : "/api/v1/departments/" + encodeURIComponent(key);
         fetch(url).then(function (r) { return r.json(); }).then(function (d) {
-          box.innerHTML = act === "review" ? renderReview(d) : renderTeam(d);
-        }).catch(function () { box.textContent = "Could not load."; });
+          modalBody.innerHTML = act === "review" ? renderReview(d) : renderTeam(d);
+        }).catch(function () {
+          modalBody.innerHTML = "<p class=\"muted\">Could not load.</p>";
+        });
       });
 
       var search = document.getElementById("conn-search");

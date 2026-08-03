@@ -33,17 +33,21 @@
   .cx__msg { font-size: var(--text-sm); color: var(--muted); min-height: 1.2em; }
 </style>
 
-<div class="cx">
-  <h1 class="page-title" style="margin:0 0 4px;">Connections</h1>
-  <p class="cx__sub">Connect a tool once — pick what it is and paste its API token — and your
-    flows can use it with no further setup. Tokens are sealed (encrypted at rest) and never
-    shown again. Managing connections is admin-only; builders reference a saved one by name.</p>
-  <details style="margin-bottom: var(--space-4);">
-    <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: token precedence</summary>
-    <p class="cx__sub" style="margin-top: var(--space-2);">An existing
-      <code>&lt;NAME&gt;_TOKEN</code> env var still takes precedence over a saved connection.</p>
-  </details>
+{% from "_hero.html" import hero, state %}
+{% call hero('Integrations', 'Connections',
+             subtitle='Your tools, wired in once',
+             lede='Connect a tool once — pick what it is and paste its API
+                   token — and your flows can use it by name with no further
+                   setup.') %}
+  {{ state('Current state', 'Sealed credential vault',
+           badge='encrypted at rest', badge_class='ok',
+           copy='Tokens are sealed the moment you save and are never shown
+                 again. Managing connections is admin-only; builders
+                 reference a saved connection by name.') }}
+{% endcall %}
 
+<div class="cx">
+  <div class="section-head"><h2>Add a connection</h2></div>
   <form class="cx__form" id="cx-form" autocomplete="off">
     <div class="cx__fld">
       <label for="cx-preset">What are you connecting? <span class="sub">— pick one to prefill it</span></label>
@@ -94,9 +98,9 @@
     </div>
   </form>
 
-  <h2 style="font-size:var(--text-base);">Saved connections</h2>
+  <div class="section-head"><h2>Saved connections</h2></div>
   <ul class="cx__list" id="cx-list"></ul>
-  <p class="cx__sub" id="cx-empty" hidden>None yet.</p>
+  <p class="cx__sub" id="cx-empty" hidden>None yet — save your first connection above and it appears here, ready to test.</p>
 </div>
 
 <script>
