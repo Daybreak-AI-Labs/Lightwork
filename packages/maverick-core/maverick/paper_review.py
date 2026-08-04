@@ -882,7 +882,7 @@ def draft_our_paper(vendor: str, *, instrument: str = "dpa",
                   ("[name, title, date]", True)]),
     ]
     return OurPaperDraft(vendor=(vendor or "").strip(), instrument=instrument,
-                         content=build_docx(blocks), filled=filled,
+                         content=build_docx(blocks, footer_title=_DRAFT_TITLES[instrument]), filled=filled,
                          clause_count=len(checklist))
 
 

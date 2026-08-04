@@ -297,8 +297,57 @@ def test_text_to_docx_turns_rule_underlines_into_headings():
     content = dr.text_to_docx(text, title="Analysis memo")
     assert_valid_opc(content)
     doc = _document_xml(content)
-    # Rule lines disappear; the lines above them become bold headings.
+    # Rule lines disappear; the lines above them become styled headings
+    # (boldness moved into the style sheet, off the individual runs).
     assert "====" not in doc and "----" not in doc
-    assert doc.count("<w:b/>") >= 3   # title + two headings
+    assert 'pStyle w:val="Title"' in doc
+    assert doc.count('pStyle w:val="Heading1"') == 2
     # Body text survives, XML-escaped.
     assert "Do not sign &amp; fix &lt;clauses&gt; first." in doc
+
+
+def test_report_docx_ships_the_designed_package():
+    """Generated deliverables are designed documents: a styles part with the
+    brand ramp, bullets via numbering, a branded header, and a footer with
+    page-number fields."""
+    content = dr.text_to_docx(
+        "SUMMARY OF RECORD\n-----------------\n"
+        "System / vendor : Acme\n"
+        "Ticket          : PRV1 — requested by Kim\n\n"
+        "FINDINGS (1)\n------------\n"
+        "1. [HIGH] Assessment: transfer unsafeguarded.\n"
+        "   Remediation: fix before renewal.\n\n"
+        "REQUIRED CONTROLS\n-----------------\n"
+        "- SCCs executed\n",
+        title="Risk Analysis — Acme", subtitle="Acme · risk analysis · v1")
+    z = zipfile.ZipFile(io.BytesIO(content))
+    names = set(z.namelist())
+    assert {"word/styles.xml", "word/numbering.xml",
+            "word/header1.xml", "word/footer1.xml"} <= names
+    doc = z.read("word/document.xml").decode()
+    # key : value lines fold into the metadata table, padding gone
+    assert "<w:tbl>" in doc and "System / vendor" in doc
+    assert "Ticket          :" not in doc
+    # severity carries its status color; the bullet uses real numbering
+    assert 'w:val="C0392B"' in doc
+    assert "<w:numPr>" in doc
+    footer = z.read("word/footer1.xml").decode()
+    assert " PAGE " in footer and " NUMPAGES " in footer
+    assert "Risk Analysis — Acme" in footer
+    styles = z.read("word/styles.xml").decode()
+    assert "Calibri" in styles and "21426F" in styles
+
+
+def test_build_docx_keeps_legacy_block_contract():
+    """(style, [(text, red_bool)]) blocks from existing callers still render;
+    red fills keep the FF0000 fill color."""
+    content = dr.build_docx([
+        ("title", [("Data Processing Addendum", False)]),
+        ("heading", [("1. Scope (Art. 28)", False)]),
+        ("para", [("Processor shall act only on instructions of ", False),
+                  ("Acme Corp", True)]),
+    ])
+    assert_valid_opc(content)
+    doc = _document_xml(content)
+    assert f'w:val="{dr.FILL_COLOR}"' in doc
+    assert 'pStyle w:val="Title"' in doc

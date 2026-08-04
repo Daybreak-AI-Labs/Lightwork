@@ -225,13 +225,14 @@ def draft_our_paper(vendor: str, *, instrument: str = "dpa"):
     return paper_review.draft_our_paper(vendor, instrument=instrument)
 
 
-def report_docx(text: str, *, title: str = "") -> bytes | None:
-    """A plain-text report rendered as a Word document, or None off-platform
-    (the standalone agent files the honest ``.txt`` instead)."""
+def report_docx(text: str, *, title: str = "",
+                subtitle: str = "") -> bytes | None:
+    """A plain-text report rendered as a designed Word document, or None
+    off-platform (the standalone agent files the honest ``.txt`` instead)."""
     if not CAPS["paper_redline"]:
         return None
     from maverick import docx_redline
-    return docx_redline.text_to_docx(text, title=title)
+    return docx_redline.text_to_docx(text, title=title, subtitle=subtitle)
 
 
 def previous_dpa_gaps(vendor: str) -> set[str]:
