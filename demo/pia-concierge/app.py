@@ -496,7 +496,9 @@ def _deliverable(vendor: str, kind: str, title: str,
     tab reads as a history. Returns (filename, content, mime)."""
     version = STORE.next_doc_version(vendor, kind)
     stem = f"{paper_desk._safe(vendor)}-{kind}-v{version}"
-    docx = backend.report_docx(body, title=title)
+    subtitle = (f"{vendor} \u00b7 {kind.replace('-', ' ')} "
+                f"\u00b7 v{version} \u00b7 {time.strftime('%Y-%m-%d')}")
+    docx = backend.report_docx(body, title=title, subtitle=subtitle)
     if docx is not None:
         return f"{stem}.docx", docx, paper_desk.DOCX_MIME
     return f"{stem}.txt", f"{title}\n{body}".encode(), "text/plain"
