@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% set active = 'onetrust' %}
 {% block title %}OneTrust — Assessments{% endblock %}
+{% block tab_title %}{{ self.title() }}{% endblock %}
+{% block favicon %}<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='16' fill='%236CC04F'/%3E%3Ctext x='16' y='21' font-size='13' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'%3EOT%3C/text%3E%3C/svg%3E">{% endblock %}
+
 {% block body %}
 <style>
   /* A OneTrust-style GRC console rendered as an app window: dark navy rail,
@@ -245,9 +248,21 @@ function openRecord(r) {
   docs.forEach(function (doc) {
     const d = el('div', 'otd__ans');
     const row = el('div');
+    const chip = el('span', 'otd__filechip');
+    if (doc.kind === 'docx') {
+      chip.textContent = 'W'; chip.style.background = '#185abd';
+    } else if (doc.kind === 'pdf') {
+      chip.textContent = 'PDF'; chip.style.background = '#b3261e';
+    } else {
+      chip.textContent = 'TXT'; chip.style.background = '#5f6368';
+    }
+    chip.style.cssText += 'display:inline-block;min-width:22px;text-align:center;' +
+      'color:#fff;font-size:10px;font-weight:700;border-radius:4px;' +
+      'padding:2px 4px;margin-right:7px;vertical-align:1px;';
+    row.appendChild(chip);
     const a = document.createElement('a');
     a.href = '/onetrust/attachment/' + encodeURIComponent(doc.id);
-    a.textContent = '📄 ' + doc.filename;
+    a.textContent = doc.filename;
     a.style.cssText = 'color:#2a7ab0;font-weight:600;text-decoration:none;';
     if (doc.kind === 'text') a.target = '_blank';
     row.appendChild(a);
@@ -263,7 +278,8 @@ function openRecord(r) {
            ? ' · Word document — downloads; auto-filled values are in red'
            : ' · Word document — downloads; opens in Word')
       : doc.kind === 'text' ? ' · opens in a new tab' : '';
-    d.appendChild(el('div', 'note', when + kb + hint +
+    const who = doc.by ? doc.by + ' · ' : '';
+    d.appendChild(el('div', 'note', who + when + kb + hint +
       (doc.available ? '' : ' · content no longer retained')));
     b.appendChild(d);
   });

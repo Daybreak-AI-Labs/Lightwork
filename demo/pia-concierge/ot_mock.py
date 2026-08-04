@@ -541,6 +541,7 @@ async def ot_upload(request: Request) -> JSONResponse:
                            "application/octet-stream",
                            "content": content,
                            "at": time.time(),
+                           "by": "Lightwork Concierge",
                            "linked_to": ""}
     _evict_over_budget()
     return JSONResponse({"Id": att_id}, status_code=201)
@@ -639,7 +640,8 @@ async def ot_notice_versions(guid: str) -> JSONResponse:
 
 
 def seed_attachment(vendor_name: str, filename: str, content: bytes,
-                    mime: str, at: float | None = None) -> str:
+                    mime: str, at: float | None = None,
+                    by: str = "Vendor upload") -> str:
     """Direct (no-HTTP) placement of a document on a vendor's record,
     creating the vendor row when the name isn't in the base fixture set.
 
@@ -661,6 +663,7 @@ def seed_attachment(vendor_name: str, filename: str, content: bytes,
                            "bytes": len(content), "mime": mime,
                            "content": content,
                            "at": at if at is not None else time.time(),
+                           "by": by,
                            "linked_to": vendor["id"]}
     _evict_over_budget()
     return att_id
