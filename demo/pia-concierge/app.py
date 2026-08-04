@@ -252,6 +252,19 @@ def _prefills_from_bytes(case: Case, filename: str, data: bytes,
                                   _doc_text_for_prefill(data, mime))
 
 
+def _latest_counterparty_paper(vendor_id: str) -> dict | None:
+    """The newest document on the vendor's record that came from the OTHER
+    side of the table (vendor or reviewer upload, never our own filings),
+    still retained, in a reviewable format."""
+    ours = ("Lightwork Concierge",)
+    docs = [a for a in _ot_mock.ATTACHMENTS.values()
+            if a.get("linked_to") == vendor_id and a.get("content")
+            and a.get("by") not in ours
+            and str(a.get("filename", "")).lower().endswith(
+                (".docx", ".pdf", ".txt"))]
+    return max(docs, key=lambda a: a.get("at", 0)) if docs else None
+
+
 def _latest_prior_record(subject: str) -> OneTrustAssessment | None:
     matches = [a for a in STORE.onetrust.values()
                if a.subject.strip().lower() == subject.strip().lower()
@@ -405,7 +418,7 @@ _SEED_PAPER_PARAGRAPHS = (
 def _risk_report_text(*, subject: str, ticket: str, requester: str,
                       result: dict, controls: list[dict],
                       instrument_line: str, rationale: str,
-                      at: float) -> str:
+                      at: float, prior_lines: list[str] | None = None) -> str:
     """The full risk-analysis report filed to the vendor record — a document
     a reviewer can actually defend from: what was found, what it means, what
     must change, and exactly what the assessment was based on. One composer
@@ -435,6 +448,8 @@ def _risk_report_text(*, subject: str, ticket: str, requester: str,
         f"{residual} ({cip} of {ris} risk areas controlled)",
         f"Instrument      : {instrument_line}",
         "",
+        *(["CHANGES SINCE THE LAST REVIEW", "-" * 68,
+           *prior_lines, ""] if prior_lines else []),
         "EXECUTIVE SUMMARY",
         "-" * 68,
         (f"{subject} was assessed at {rating} risk. "
@@ -1865,11 +1880,45 @@ def _run_onetrust_protocol(case: Case) -> dict:
     # honest plain text.
     instrument_line = (f"{instrument['instrument'] or 'none required'} — "
                        f"{instrument['reason']}")
+    # Repeat review of a known vendor: v2+ documents must read as a DELTA,
+    # not a duplicate — what changed, what carried, how the risk moved.
+    prior_lines: list[str] = []
+    # Exclude THIS run's record by assessment id, not just case id: on the
+    # wire path the mock mirrors the new filing into the store at submit()
+    # time with its case link still unset, so a case_id check alone would
+    # pick the run's own record as its "prior".
+    prior_rec = next(
+        (a for a in sorted(STORE.onetrust.values(),
+                           key=lambda a: a.filed_at, reverse=True)
+         if a.subject.strip().lower() == case.subject.strip().lower()
+         and a.assessment_id != aid and a.case_id != case.id
+         and a.status in ("Completed", "Under Review")), None)
+    if prior_rec is not None:
+        carried = sum(1 for rec in case.answers.values()
+                      if rec.get("auto") and "last review"
+                      in str(rec.get("source") or ""))
+        fresh_n = sum(1 for rec in case.answers.values()
+                      if not rec.get("auto"))
+        prior_risk = str((prior_rec.result or {}).get(
+            "risk_rating", prior_rec.risk_level or "?")).upper()
+        new_risk = str((case.result or {}).get("risk_rating", "?")).upper()
+        when = time.strftime("%Y-%m-%d", time.gmtime(
+            prior_rec.decided_at or prior_rec.filed_at))
+        prior_lines = [
+            f"Prior review    : {prior_rec.assessment_id} — "
+            f"{prior_rec.status}, decided {when}",
+            f"Carried forward : {carried} answer(s) unchanged from the "
+            "prior review (source shown on each)",
+            f"Fresh this run  : {fresh_n} answer(s) newly established "
+            "or changed",
+            f"Risk movement   : {prior_risk} → {new_risk}"
+            + (" (unchanged)" if prior_risk == new_risk else ""),
+        ]
     report_body = _risk_report_text(
         subject=case.subject, ticket=case.ticket_number,
         requester=case.requester, result=case.result or {},
         controls=case.controls, instrument_line=instrument_line,
-        rationale=rationale, at=time.time())
+        rationale=rationale, at=time.time(), prior_lines=prior_lines)
     notice_body = notice_check.recommendations_doc(case.subject, picked,
                                                    check, siblings)
     risk_name, risk_bytes, risk_mime = _deliverable(
@@ -1884,6 +1933,37 @@ def _run_onetrust_protocol(case: Case) -> dict:
                             mime=notice_mime)
     steps.append(f"Attached {risk_name} + {notice_name} to the vendor "
                  "record (two-step upload → link)")
+
+    # The vendor's own paper never gets skipped: if no clause round has run
+    # on this case but the record carries counterparty paper (their DPA from
+    # this or a prior round), re-run the playbook review and file the memo +
+    # tracked-changes redline in the same protocol run. Deterministic path
+    # (operator playbook), so it needs no model and cannot stall the filing.
+    if CAPS.get("paper_redline") and not case.paper_reviews:
+        paper = _latest_counterparty_paper(vendor["id"])
+        if paper is not None:
+            try:
+                text, _ext = backend.document_text(paper["content"],
+                                                   paper["mime"])
+                if (text or "").strip():
+                    review = backend.review_vendor_paper(
+                        text, vendor=case.subject,
+                        document_name=paper["filename"], use_model=False)
+                    redline = backend.build_redline(
+                        review, original=paper["content"], mime=paper["mime"],
+                        date=_dt.datetime.now(_dt.timezone.utc)
+                        .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        title=f"{case.subject} — "
+                              f"{review.to_dict()['instrument_label']} "
+                              "(Lightwork redline)")
+                    entry = paper_desk.file_paper_review(
+                        case, review, redline, reviewer="Lightwork Concierge")
+                    steps.append(
+                        f"Re-reviewed {paper['filename']} against the clause "
+                        f"playbook — {entry['gaps']} departure(s); memo + "
+                        f"tracked-changes redline filed (v{entry['version']})")
+            except Exception as exc:  # pragma: no cover — filing never dies on paper
+                steps.append(f"Paper re-review skipped: {exc}"[:160])
 
     value = value_ledger.case_value(
         kind="ai_assessment" if facts["ai"] else "privacy_assessment",

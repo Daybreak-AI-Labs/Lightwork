@@ -803,23 +803,53 @@ function offerAppendChoice() {
   fresh.textContent = 'Start a fresh assessment';
   fresh.onclick = async () => {
     bubble('me', 'It\'s changed enough — let\'s do a fresh assessment.');
-    // Carry the last review's answers forward; only new ground gets asked.
-    let r = {};
-    try {
-      r = await (await fetch(`/intake/${CASE}/carry-forward`, {method: 'POST'})).json();
-    } catch (e) { r = {}; }
-    const carried = r.prefilled || [];
-    if (carried.length) {
-      carried.forEach(function (p) {
-        PRE_ANSWERED[p.id] = {answer: p.answer, label: p.label || p.answer,
-                              auto: true, source: p.source};
-        ANSWERED[p.id] = true;
-      });
-      bubble('bot', 'I carried ' + carried.length + ' answer(s) forward from ' +
-        'the last review — I\'ll only ask what\'s new, and the reviewer sees ' +
-        'where every answer came from.');
-    }
-    ask();
+    // The carry-forward is the human's call, never automatic: the agent asks
+    // before reusing proven answers, and the reviewer sees the source on
+    // every carried one.
+    bubble('bot', 'Fresh it is. I can still save you time — the last ' +
+      'review and this ticket already prove some of these answers. Want me ' +
+      'to carry those forward and only ask what\'s new, or ask you ' +
+      'everything from scratch?');
+    const cwrap = document.createElement('div');
+    cwrap.className = 'flow';
+    const carryBtn = document.createElement('button');
+    carryBtn.className = 'btn';
+    carryBtn.textContent = 'Carry what\'s proven';
+    const askAllBtn = document.createElement('button');
+    askAllBtn.className = 'btn ghost';
+    askAllBtn.textContent = 'Ask me everything';
+    const done = () => { carryBtn.disabled = true; askAllBtn.disabled = true;
+                         cwrap.remove(); };
+    carryBtn.onclick = async () => {
+      done();
+      bubble('me', 'Carry forward what we already know.');
+      let r = {};
+      try {
+        r = await (await fetch(`/intake/${CASE}/carry-forward`, {method: 'POST'})).json();
+      } catch (e) { r = {}; }
+      const carried = r.prefilled || [];
+      if (carried.length) {
+        carried.forEach(function (p) {
+          PRE_ANSWERED[p.id] = {answer: p.answer, label: p.label || p.answer,
+                                auto: true, source: p.source};
+          ANSWERED[p.id] = true;
+        });
+        bubble('bot', 'I carried ' + carried.length + ' answer(s) forward ' +
+          'from the last review — I\'ll only ask what\'s new, and the ' +
+          'reviewer sees where every answer came from.');
+      } else {
+        bubble('bot', 'Nothing provable to carry this time — I\'ll ask the ' +
+          'full set.');
+      }
+      ask();
+    };
+    askAllBtn.onclick = () => {
+      done();
+      bubble('me', 'Ask me everything.');
+      ask();
+    };
+    cwrap.append(carryBtn, askAllBtn);
+    controls.appendChild(cwrap);
   };
   wrap.append(add, fresh);
   controls.appendChild(wrap);

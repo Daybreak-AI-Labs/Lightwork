@@ -577,3 +577,70 @@ def test_onetrust_page_is_a_review_surface(demo_app, monkeypatch):
     assert "/onetrust/decide" in html
     assert "Add document to this vendor" in html
     assert "reviews and approves it right here" in html
+
+
+# --------------------------------------------------------------------------- #
+# Repeat review: v2 is a delta, and the vendor's paper is never skipped
+# --------------------------------------------------------------------------- #
+def _docx_text(data: bytes) -> str:
+    import io
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        return z.read("word/document.xml").decode("utf-8", "replace")
+
+
+def test_repeat_review_files_a_delta_and_rereviews_the_paper(
+        demo_app, monkeypatch):
+    # One live tenant for BOTH rounds (_submit re-wires and RESETS the mock,
+    # which would wipe round 1's filings between rounds).
+    _wire_onetrust(demo_app, monkeypatch)
+
+    def _run(case):
+        for qid, (ans, note) in demo_app._DEMO_ANSWERS.items():
+            case.answers[qid] = {"answer": ans, "note": note}
+        asyncio.run(demo_app.intake_submit(_request("POST"), case.id))
+        return demo_app.STORE.onetrust[case.onetrust_id]
+
+    # Round 1: first assessment for the vendor, decided; their DPA lands on
+    # the record as a counterparty upload. Unique vendor name: the module
+    # fixture shares the store across tests, and the delta looks up priors
+    # by subject.
+    case1 = _mkcase(demo_app, subject="Rekall Deux Analytics",
+                    case_id="LW-PIA-T001R", ticket="PRV-T-1R")
+    ot1 = _run(case1)
+    asyncio.run(demo_app.onetrust_decide(_json_request(
+        {"assessment_id": ot1.assessment_id, "decision": "approve",
+         "reviewer": "GT Reviewer"})))
+    demo_app._ot_mock.seed_attachment(
+        case1.subject, "acme-dpa.docx", demo_app._seed_paper_docx(case1.subject),
+        demo_app.paper_desk.DOCX_MIME, by="Vendor upload")
+
+    # Round 2: a fresh case for the same vendor.
+    case2 = _mkcase(demo_app, subject="Rekall Deux Analytics",
+                    case_id="LW-PIA-T002R", ticket="PRV-T-2R")
+    _run(case2)
+
+    # The v2 risk analysis reads as a DELTA against round 1, not a duplicate.
+    docs = demo_app._vendor_documents(case2.subject)
+    risk = [d for d in docs if "-risk-analysis-" in d["filename"]]
+    assert risk, "second review files its own analysis version"
+    assert any("-v2" in d["filename"] for d in risk)
+    newest = max(risk, key=lambda d: d["at"])
+    xml = _docx_text(
+        demo_app._ot_mock.ATTACHMENTS[newest["id"]]["content"])
+    assert "CHANGES SINCE THE LAST REVIEW" in xml
+    assert "Risk movement" in xml and ot1.assessment_id in xml
+    # And the FIRST review never claims a delta: at filing time the run's own
+    # record is already mirrored in the store, and it must not read as its
+    # own "prior" (the self-reference bug this test pinned down).
+    v1 = next(d for d in risk if "-v1" in d["filename"])
+    assert "CHANGES SINCE THE LAST REVIEW" not in _docx_text(
+        demo_app._ot_mock.ATTACHMENTS[v1["id"]]["content"])
+
+    # The DPA on record was re-reviewed in the same run: a clause round with
+    # a filed memo + tracked-changes redline, never silently skipped.
+    assert case2.paper_reviews, "counterparty paper must be re-reviewed"
+    round1 = case2.paper_reviews[-1]
+    assert round1.get("attachment_id") or round1.get("version")
+    filed = demo_app._vendor_documents(case2.subject)
+    assert any("redline" in d["filename"] for d in filed)
