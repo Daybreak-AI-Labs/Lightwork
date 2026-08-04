@@ -133,8 +133,9 @@ def test_records_section_renders_all_four_types():
     assert "authenticated operator workflow" in html
     assert "maverick erase" not in html
     assert "erase_command" not in html
-    # Hero stats grew the records pair.
-    assert "open DSARs" in html and "Art. 30 entries" in html
+    # The records tab strip carries the counts (the old hero stat tiles were
+    # superseded by the live executive board).
+    assert 'data-tab="dsar"' in html and 'data-tab="ropa"' in html
 
 
 def test_records_section_hidden_when_disabled(monkeypatch, tmp_path):
