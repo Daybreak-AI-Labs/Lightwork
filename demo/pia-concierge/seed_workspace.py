@@ -270,10 +270,28 @@ def _seed_operating_record(rnd) -> None:
     # Oldest first, so goal ids follow time and "Recent goals" reads sanely.
     specs = sorted((round(120 * rnd.betavariate(1.1, 2.1), 2)
                     for _ in range(52)), reverse=True)
+    def _work_trail(gid, agent, title, started, minutes):
+        """A believable run trail behind the goal, backdated to the run
+        window — the chat view shows real steps, never "0 steps"."""
+        steps = [
+            ("status", f"Scoped the work: {title}."),
+            ("tool", "Pulled the relevant records from the connected "
+                     "systems and the vendor's prior history."),
+            ("status", "Drafted the deliverable and ran the verification "
+                       "pass against the department's playbook."),
+        ]
+        span = max(minutes * 60.0, 240.0)
+        for i, (kind, content) in enumerate(steps):
+            eid = w.append_event(gid, agent, kind, content)
+            w.conn.execute("UPDATE goal_events SET ts = ? WHERE id = ?",
+                           (started + span * (i + 1) / (len(steps) + 1), eid))
+
     counts = {"done": 0, "blocked": 0}
+    signed = 0
     for days_ago in specs:
         domain, tpl = rnd.choice(work)
-        gid = w.create_goal(tpl.format(v=rnd.choice(vendors)), domain=domain)
+        title = tpl.format(v=rnd.choice(vendors))
+        gid = w.create_goal(title, domain=domain)
         created = NOW - days_ago * DAY
         status = "blocked" if rnd.random() < 0.09 else "done"
         counts[status] += 1
@@ -285,12 +303,29 @@ def _seed_operating_record(rnd) -> None:
                 started = _episode(gid, started, outcome="error",
                                    minutes=rnd.uniform(2, 9),
                                    cost=rnd.uniform(0.05, 0.5)) + 900
+            minutes = rnd.uniform(4, 45)
             updated = _episode(gid, started, outcome="success",
-                               minutes=rnd.uniform(4, 45),
-                               cost=rnd.uniform(0.15, 2.6))
-            w.set_goal_status(gid, "done")
+                               minutes=minutes, cost=rnd.uniform(0.15, 2.6))
+            _work_trail(gid, domain, title, started, minutes)
+            result = (f"Completed: {title}. The deliverable is filed on the "
+                      "record; sources and the verification pass are in the "
+                      "step trail above.")
+            # Result FIRST, then the sign-off: record_signoff requires the
+            # goal to be done, and any later result write revokes the row.
+            w.set_goal_status(gid, "done", result=result)
+            # Most delivered work was reviewed and certified — the sign-off
+            # queue shows a handful of items awaiting a human, not a backlog.
+            if rnd.random() < 0.92:
+                w.record_signoff(gid, "approved", decided_by="C. Day")
+                w.conn.execute(
+                    "UPDATE signoffs SET created_at = ? WHERE goal_id = ?",
+                    (updated + rnd.uniform(1, 30) * 3600, gid))
+                signed += 1
         else:
-            w.set_goal_status(gid, "blocked")
+            w.set_goal_status(
+                gid, "blocked",
+                result=f"Blocked: {title} is waiting on an answer from the "
+                       "business owner before the agent can continue.")
             updated = created + rnd.uniform(1, 20) * 3600
         w.conn.execute(
             "UPDATE goals SET created_at = ?, updated_at = ? WHERE id = ?",
@@ -298,7 +333,8 @@ def _seed_operating_record(rnd) -> None:
     w.conn.commit()
     spend = w.total_spend()
     print(f"Seeded the Operating Record: 52 goals over ~4 months "
-          f"({counts['done']} delivered, {counts['blocked']} blocked), "
+          f"({counts['done']} delivered, {signed} signed off, "
+          f"{counts['blocked']} blocked), "
           f"{spend['runs']} costed runs, ${spend['dollars']:.2f} ledger spend.")
 
 

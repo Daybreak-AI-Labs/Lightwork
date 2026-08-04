@@ -28,6 +28,20 @@ def test_operating_record_seeds_terminal_history(monkeypatch, tmp_path):
 
     spend = w.total_spend()
     assert spend["runs"] > 30 and spend["dollars"] > 5
+    # Opening any seeded goal shows real work, never "Worked across 0 steps":
+    # every done goal carries a step trail and a result summary, and most are
+    # signed off so the deliverables queue is a handful, not a backlog.
+    done = [r[0] for r in w.conn.execute(
+        "SELECT id FROM goals WHERE status = 'done'").fetchall()]
+    with_events = {r[0] for r in w.conn.execute(
+        "SELECT DISTINCT goal_id FROM goal_events").fetchall()}
+    assert set(done) <= with_events
+    assert w.conn.execute(
+        "SELECT COUNT(*) FROM goals WHERE result IS NULL OR result = ''"
+    ).fetchone()[0] == 0
+    signed = w.conn.execute("SELECT COUNT(*) FROM signoffs").fetchone()[0]
+    awaiting = len(done) - signed
+    assert 0 < awaiting <= 8, (len(done), signed)
     # History is backdated months into the past, not stamped "now".
     oldest = w.conn.execute("SELECT MIN(created_at) FROM goals").fetchone()[0]
     assert oldest < time.time() - 60 * 86400
