@@ -244,11 +244,12 @@
       depts.forEach(function (r) { maxHuman = Math.max(maxHuman, r.human_cost); });
       B.hbars(document.getElementById('bd-dept-savings'),
         depts.map(function (r) {
-          return { label: r.department, value_text: B.money(r.saved),
+          var name = String(r.department || '').replace(/_/g, ' ');
+          return { label: name, value_text: B.money(r.saved),
                    pct: Math.max(0, r.saved) / maxHuman * 100,
                    pct_bg: r.human_cost / maxHuman * 100,
                    cls: r.saved < 0 ? 'danger' : 'ok',
-                   title: r.department + ' — saved ' + B.money(r.saved) +
+                   title: name + ' — saved ' + B.money(r.saved) +
                           ' of ' + B.money(r.human_cost) + ' human cost' };
         }), 'Savings by department, scaled to the largest human cost.');
     } else {
