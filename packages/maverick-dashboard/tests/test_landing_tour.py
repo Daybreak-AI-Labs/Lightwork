@@ -49,10 +49,8 @@ def test_overview_stat_row_counts_goal_statuses(monkeypatch, tmp_path):
     w.set_goal_status(done, "done")
 
     body = _client(monkeypatch, tmp_path).get("/overview").text
-    assert "total goals" in body
-    assert '<div class="num">2</div>' in body      # total
-    for label in ("active", "done", "blocked"):
-        assert f'<div class="label">{label}</div>' in body
-    # Both goals surface in the recent-goals table.
-    assert "ship the quarterly report" in body
-    assert "reconcile invoices" in body
+    # Counts render server-side in the hero; the stat row, charts, and the
+    # recent-goals list are the client-rendered executive board.
+    assert "2 goals on record" in body
+    assert 'id="bd-kpis"' in body and "bd-momentum" in body
+    assert "/static/board.js" in body
