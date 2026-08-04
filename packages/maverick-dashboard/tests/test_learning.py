@@ -373,8 +373,11 @@ def test_learning_page_renders_the_moat(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
     assert "learning systems are on" in t
-    assert "What your workforce has accumulated" in t
-    assert "grounded outcomes learned" in t
+    # The static tiles became a live board: the accumulated-judgement card
+    # and its container render client-side from /api/v1/learning.
+    assert "Accumulated judgement" in t
+    assert 'id="bd-acc"' in t
+    assert "grounded outcomes" in t
 
 
 def test_learning_page_is_configured_in_app_not_in_server_files(tmp_path, monkeypatch):
