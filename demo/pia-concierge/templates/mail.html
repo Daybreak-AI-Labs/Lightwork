@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% set active = 'mail' %}
 {% block title %}Requester inbox{% endblock %}
+{% block tab_title %}Inbox — Privacy Office{% endblock %}
+{% block favicon %}<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='16' fill='%230F6CBD'/%3E%3Ctext x='16' y='21' font-size='13' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'%3E%E2%9C%89%3C/text%3E%3C/svg%3E">{% endblock %}
+
 {% block body %}
 <style>
   /* An Outlook-style mail client rendered as an app window. Evokes the real
@@ -53,6 +56,7 @@
   /* Reading pane pop-out */
   dialog.olk-read { border: none; border-radius: 10px; padding: 0; margin: auto;
                     width: min(680px, calc(100vw - 2rem)); box-shadow: 0 24px 80px rgba(0,0,0,.55);
+                    max-height: calc(100vh - 3rem); overflow: auto;
                     font-family: "Segoe UI", -apple-system, sans-serif; color: #252423; }
   dialog.olk-read::backdrop { background: rgba(15, 25, 40, .55); }
   .olkr__bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
@@ -60,11 +64,16 @@
   .olkr__bar button { margin-left: auto; background: transparent; border: none; color: #fff;
                       font-size: 16px; cursor: pointer; padding: 2px 8px; border-radius: 4px; }
   .olkr__bar button:hover { background: rgba(255,255,255,.18); }
-  .olkr__head { display: flex; gap: 12px; padding: 16px 20px 10px; align-items: center; }
-  .olkr__head .who { font-weight: 600; font-size: 14.5px; }
-  .olkr__head .too { color: #8a8886; font-size: 12.5px; }
-  .olkr__head .when { margin-left: auto; color: #8a8886; font-size: 12px; }
-  .olkr__subject { padding: 0 20px; font-size: 18px; font-weight: 700; color: #242424; }
+  .olkr__subject { padding: 14px 20px 0; font-size: 20px; font-weight: 700; color: #242424;
+                   line-height: 1.3; }
+  .olkr__head { display: flex; gap: 12px; padding: 12px 20px 6px; align-items: center; }
+  .olkr__av { width: 40px; height: 40px; border-radius: 50%; flex: none; background: #21426F;
+              color: #fff; font-size: 16px; font-weight: 700; display: flex;
+              align-items: center; justify-content: center; }
+  .olkr__head .who { font-weight: 600; font-size: 14.5px; color: #1A2433; }
+  .olkr__meta { color: #5B6575; font-size: 12px; margin-top: 1px; }
+  .olkr__frame { display: block; width: 100%; height: 60vh; border: 0; background: #fff;
+                 margin-top: 8px; border-top: 1px solid #D9DEE8; }
   .olkr__body { padding: 14px 20px 20px; font-size: 14px; line-height: 1.6;
                 white-space: pre-wrap; color: #3b3a39; }
   .olkr__cta { display: inline-block; background: #0f6cbd; color: #fff !important;
@@ -126,24 +135,34 @@
 
 <dialog class="olk-read" id="reader" aria-labelledby="r-subject">
   <div class="olkr__bar"><span>Message</span><button id="r-close" aria-label="Close message">✕</button></div>
+  <div class="olkr__subject" id="r-subject"></div>
   <div class="olkr__head">
-    <div class="olk__av">PO</div>
+    <div class="olkr__av" id="r-av" aria-hidden="true">P</div>
     <div>
       <div class="who">Privacy Office (automated)</div>
-      <div class="too" id="r-to"></div>
+      <div class="olkr__meta" id="r-meta"></div>
     </div>
-    <div class="when" id="r-when"></div>
   </div>
-  <div class="olkr__subject" id="r-subject"></div>
+  {# Branded messages render in a sandboxed iframe; sandbox has NO tokens, so
+     scripts/forms inside the mail are inert. Plain-only mail falls back to
+     the pre-wrap text body below. #}
+  <iframe class="olkr__frame" id="r-html" sandbox="" title="Message body"
+          style="display:none;"></iframe>
   <div class="olkr__body" id="r-body"></div>
   <a class="olkr__cta" id="r-cta" href="#" style="display:none;">Open the questionnaire →</a>
 </dialog>
 
 <script>
 const MAIL = {{ mail_json | tojson }};
+{# app.py's mail_json predates the HTML part; the branded body and the real
+   sender ride beside it on the same server-rendered, same-order path
+   (inbox|reverse), so indexes line up with data-i. #}
+const MAIL_HTML = {{ inbox | reverse | map(attribute='html') | list | tojson }};
+const MAIL_FROM = {{ inbox | reverse | map(attribute='sender') | list | tojson }};
 const reader = document.getElementById('reader');
 document.querySelectorAll('.olk__msg').forEach(function (row) {
-  const m = MAIL[Number(row.dataset.i)];
+  const i = Number(row.dataset.i);
+  const m = MAIL[i];
   if (!m) return;
   // Primary click = go do the thing the email asks for (one click, no
   // pop-up detour). A message with no action link falls back to preview.
@@ -152,10 +171,27 @@ document.querySelectorAll('.olk__msg').forEach(function (row) {
     if (m.link) { window.location.href = m.link; } else { peek(); }
   }
   function peek() {
-    document.getElementById('r-to').textContent = 'To: ' + m.to;
-    document.getElementById('r-when').textContent = m.when;
+    const from = MAIL_FROM[i] || 'privacy-office@company.com';
+    document.getElementById('r-av').textContent = (from.trim()[0] || 'P').toUpperCase();
     document.getElementById('r-subject').textContent = m.subject;
-    document.getElementById('r-body').textContent = m.body;
+    document.getElementById('r-meta').textContent =
+      'From: ' + from + ' · To: ' + m.to + ' · ' + m.when;
+    const frame = document.getElementById('r-html');
+    const plain = document.getElementById('r-body');
+    const branded = MAIL_HTML[i] || '';
+    if (branded) {
+      // srcdoc via the DOM property; the sandbox attribute (no tokens)
+      // keeps any script/form in the message inert.
+      frame.srcdoc = branded;
+      frame.style.display = 'block';
+      plain.textContent = '';
+      plain.style.display = 'none';
+    } else {
+      frame.removeAttribute('srcdoc');
+      frame.style.display = 'none';
+      plain.textContent = m.body;
+      plain.style.display = 'block';
+    }
     const cta = document.getElementById('r-cta');
     if (m.link) { cta.href = m.link; cta.style.display = 'inline-block'; }
     else { cta.style.display = 'none'; }

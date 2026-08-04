@@ -26,6 +26,7 @@ class Captured:
     sender: str
     subject: str
     body: str
+    html: str = ""          # text/html alternative; empty when plain-only
     at: float = field(default_factory=time.time)
 
 
@@ -42,13 +43,20 @@ def _decode(value: str) -> str:
 
 def _store(raw: bytes) -> None:
     msg = email.message_from_bytes(raw)
-    body = ""
+    body = html_alt = ""
     if msg.is_multipart():
+        # Keep BOTH renderings: text/plain (the agent's words, asserted on by
+        # tests) and text/html (the branded alternative /mail displays).
         for part in msg.walk():
-            if part.get_content_type() == "text/plain":
-                payload = part.get_payload(decode=True)
-                body = payload.decode("utf-8", "replace") if payload else ""
-                break
+            ctype = part.get_content_type()
+            if ctype not in ("text/plain", "text/html"):
+                continue
+            payload = part.get_payload(decode=True)
+            text = payload.decode("utf-8", "replace") if payload else ""
+            if ctype == "text/plain" and not body:
+                body = text
+            elif ctype == "text/html" and not html_alt:
+                html_alt = text
     else:
         payload = msg.get_payload(decode=True)
         body = payload.decode("utf-8", "replace") if payload else str(msg.get_payload())
@@ -57,6 +65,7 @@ def _store(raw: bytes) -> None:
         sender=_decode(msg.get("From", "")),
         subject=_decode(msg.get("Subject", "")),
         body=body,
+        html=html_alt,
     ))
 
 

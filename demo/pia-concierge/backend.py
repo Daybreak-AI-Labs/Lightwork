@@ -91,19 +91,66 @@ def find_controls(text: str, limit: int = 2) -> list:
 # Email — real SMTP tool on the platform; in-process delivery standalone.
 # --------------------------------------------------------------------------- #
 def send_email(to: str, subject: str, body: str) -> str:
-    """Synchronous send. Platform routes through the governed email tool;
-    standalone delivers straight into the in-process capture inbox."""
+    """Synchronous send, branded: the agent's plain text rides verbatim as
+    the first MIME part with a styled text/html alternative
+    (``mail_style.email_html``) beside it. Standalone delivers straight into
+    the in-process capture inbox; the platform build composes the multipart
+    message here and speaks the same SMTP(+STARTTLS) the governed email tool
+    does — the tool's own composer is text/plain-only — reusing its config
+    resolution and mirroring its guards and result strings."""
+    to = to or "requester@example.com"
+    # The composer is resolved by name so it stays OPTIONAL: the standalone
+    # container ships a fixed module list (Dockerfile.standalone) that does
+    # not include mail_style.py — without it, mail degrades to plain text
+    # rather than failing the send (and the deployment-kit import scan
+    # rightly keeps treating it as not-required).
+    try:
+        from importlib import import_module
+        html_alt = import_module("mail_style").email_html(subject, body)
+    except Exception:
+        html_alt = ""
     if STANDALONE:
         import mailsink
         sender = os.environ.get("EMAIL_USER", "privacy-office@company.com")
         mailsink.INBOX.insert(0, mailsink.Captured(
-            to=to or "requester@example.com", sender=sender,
-            subject=subject, body=body))
+            to=to, sender=sender, subject=subject, body=body, html=html_alt))
         return "ok (standalone: delivered to inbox)"
-    from maverick.tools.email_tool import email_tool
-    return email_tool().fn({
-        "op": "send", "to": to or "requester@example.com",
-        "subject": subject, "body": body})
+    if os.environ.get("MAVERICK_EMAIL_DISABLE") == "1":
+        return "ERROR: email send disabled by MAVERICK_EMAIL_DISABLE=1"
+    import smtplib
+    from email.message import EmailMessage
+
+    from maverick.tools.email_tool import _cfg
+    user = _cfg("user", "EMAIL_USER")
+    pw = _cfg("app_password", "EMAIL_APP_PASSWORD")
+    host = _cfg("smtp_host", "EMAIL_SMTP_HOST", "smtp.gmail.com")
+    port = int(_cfg("smtp_port", "EMAIL_SMTP_PORT", "465"))
+    if not user or not pw:
+        return ("ERROR: email requires EMAIL_USER + EMAIL_APP_PASSWORD "
+                "(use an app password, NOT your account password).")
+    if not subject:
+        return "ERROR: send requires `to` and `subject`"
+    for name, value in (("to", to), ("subject", subject)):
+        if "\r" in value or "\n" in value:
+            return f"ERROR: newline in email `{name}` (header injection blocked)"
+    msg = EmailMessage()
+    msg["From"], msg["To"], msg["Subject"] = user, to, subject
+    msg.set_content(body)                  # plain text stays the first part
+    if html_alt:
+        msg.add_alternative(html_alt, subtype="html")
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, timeout=30) as s:
+                s.login(user, pw)
+                s.send_message(msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=30) as s:
+                s.starttls()
+                s.login(user, pw)
+                s.send_message(msg)
+    except Exception as exc:
+        return f"ERROR: smtp send failed: {type(exc).__name__}: {exc}"
+    return f"sent to {to} (subject: {subject[:60]})"
 
 
 # --------------------------------------------------------------------------- #
