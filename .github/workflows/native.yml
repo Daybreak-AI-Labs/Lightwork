@@ -99,7 +99,7 @@ jobs:
             'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
             'packaging==26.2'
           python -I -m pip install -e packages/maverick-core --no-deps
-          python -I -m pip install 'cryptography==49.0.0'
+          python -I -m pip install 'cryptography==50.0.0'
           python -I scripts/verify_constraint_closure.py
           MVK_VERIFY_BIN="$PWD/rust/target/release/maverick-verify-audit" \
             python -I rust/maverick-verify-audit/tests/parity.py

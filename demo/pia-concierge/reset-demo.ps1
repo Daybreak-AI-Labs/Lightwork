@@ -58,6 +58,16 @@ $env:EMAIL_SMTP_HOST              = "127.0.0.1"
 $env:EMAIL_SMTP_PORT              = "1025"
 Ok "environment set (commit $(git rev-parse --short HEAD 2>$null))"
 
+# Model provider key: NEVER stored in this repo. Set it once, user-level:
+#   setx ANTHROPIC_API_KEY "sk-ant-..."     (then open a fresh terminal)
+# With it, the platform copilot and live drafting run at full speed; without
+# it the demo still runs — the concierge flows are deterministic by design.
+if ($env:ANTHROPIC_API_KEY) {
+    Ok "ANTHROPIC_API_KEY present — copilot + live drafting enabled"
+} else {
+    Write-Host "  [--] no ANTHROPIC_API_KEY — demo runs deterministic; set it once with: setx ANTHROPIC_API_KEY `"<your key>`"" -ForegroundColor Yellow
+}
+
 # 4. Launch. Seeding happens on boot; the window stays open running the demo.
 Step "Launching serve.py (seeding takes 1-2 minutes on a fresh workspace)"
 $server = Start-Process -FilePath "python" -ArgumentList "serve.py" `

@@ -10,6 +10,11 @@ cd C:\Users\Cstep\Lightwork\demo\pia-concierge
 powershell -ExecutionPolicy Bypass -File .\reset-demo.ps1
 ```
 
+One-time setup for full speed: set your model key at user level —
+`setx ANTHROPIC_API_KEY "<your key>"` in any terminal, once, then open a new
+one. The reset script picks it up automatically and the checklist confirms
+it. Never put the key in a file in this repository.
+
 Wait for the green **"Demo is ready"** line (~2 minutes — it reseeds 14 months
 of history so every screen is lived-in). Then open these tabs in order, left
 to right, so alt-tabbing tells the story:
