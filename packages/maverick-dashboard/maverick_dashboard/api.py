@@ -497,19 +497,159 @@ def _board_workforce(w, owner, days: int) -> dict:
     }
 
 
+def _board_workspace(department: str) -> dict:
+    """Compact department board (privacy / finance / security): the same
+    assessment records the workspace pages list, rolled into KPIs, a residual-
+    risk mix, a 12-month opened-vs-decided series, and per-framework volume.
+    The deep executive view stays /privacy/board; this is the at-a-glance."""
+    from datetime import datetime, timezone
+
+    from maverick.assessment import custom_template_records, list_saved
+
+    from .app import (
+        FINANCE_ASSESSMENT_TYPES,
+        PRIVACY_ASSESSMENT_TYPES,
+        SECURITY_ASSESSMENT_TYPES,
+    )
+    base = {"privacy": PRIVACY_ASSESSMENT_TYPES,
+            "finance": FINANCE_ASSESSMENT_TYPES,
+            "security": SECURITY_ASSESSMENT_TYPES}[department]
+    types = set(base) | {
+        t for t, rec in custom_template_records().items()
+        if rec.get("department", "privacy") == department}
+    sessions = [x for x in list_saved() if x.get("type") in types]
+
+    kpis = {"total": len(sessions), "open": 0, "needs_more": 0,
+            "approved": 0, "rejected": 0, "due_review": 0}
+    for x in sessions:
+        st = x.get("status")
+        if st == "pending_review":
+            kpis["open"] += 1
+        elif st in ("needs_more", "needs_answers"):
+            kpis["needs_more"] += 1
+        elif st in kpis:
+            kpis[st] += 1
+        if x.get("review_due"):
+            kpis["due_review"] += 1
+
+    risk = {"high": 0, "medium": 0, "low": 0, "minimal": 0, "unrated": 0}
+    for x in sessions:
+        risk[x.get("residual_risk") if x.get("residual_risk") in risk
+             else "unrated"] += 1
+
+    def _month(ts: float) -> str:
+        d = datetime.fromtimestamp(ts, tz=timezone.utc)
+        return f"{d.year}-{d.month:02d}"
+
+    now = datetime.now(tz=timezone.utc)
+    months: list[str] = []
+    y, m = now.year, now.month
+    for _ in range(12):
+        months.insert(0, f"{y}-{m:02d}")
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    monthly = {k: {"d": k, "opened": 0, "decided": 0} for k in months}
+    for x in sessions:
+        for field, key in (("created_at", "opened"), ("decided_at", "decided")):
+            ts = x.get(field)
+            if ts and _month(float(ts)) in monthly:
+                monthly[_month(float(ts))][key] += 1
+
+    by_type: dict[str, dict] = {}
+    for x in sessions:
+        row = by_type.setdefault(x.get("type") or "?", {
+            "label": (x.get("type") or "?").replace("_", " "),
+            "total": 0, "approved": 0})
+        row["total"] += 1
+        if x.get("status") == "approved":
+            row["approved"] += 1
+    return {"kpis": kpis, "risk": risk, "monthly": list(monthly.values()),
+            "types": sorted(by_type.values(), key=lambda r: r["total"],
+                            reverse=True)[:6]}
+
+
+def _board_savings(w, owner, days: int) -> dict:
+    """The value board: the same honest math as /savings (client-set
+    assumptions x completed work - agent spend), plus a daily delivered
+    series so the page can show work over time."""
+    from maverick import savings as savings_mod
+    from maverick.config import get_value
+    day_list, since, _prev = _board_day_list(days)
+    own, params = _owner_sql(owner)
+    daily = {d.isoformat(): {"d": d.isoformat(), "n": 0} for d in day_list}
+    for day, n in w.conn.execute(
+            "SELECT date(updated_at, 'unixepoch') AS day, COUNT(*) FROM goals "
+            "WHERE status = 'done' AND updated_at >= ?" + own + " GROUP BY day",
+            (since, *params)).fetchall():
+        if day in daily:
+            daily[day]["n"] = int(n)
+    report = savings_mod.to_dict(
+        savings_mod.compute(w, window_days=days, cfg=get_value()))
+    return {"report": report, "daily_done": list(daily.values())}
+
+
+def _board_oversight(w, owner, days: int) -> dict:
+    """Mission-control rollup: guardrail interventions from the audit log
+    (fail-soft: unreadable log yields an empty board, never a 500), the
+    pending human queue, and the halt state."""
+    from datetime import date, timedelta
+    day_list, since, _prev = _board_day_list(days)
+    daily = {d.isoformat(): {"d": d.isoformat(), "n": 0} for d in day_list}
+    by_kind: dict[str, int] = {}
+    total = 0
+    try:
+        from maverick.audit.export import iter_audit_events
+        since_day = (date.today() - timedelta(days=days)).isoformat()
+        scanned = 0
+        for e in iter_audit_events(since=since_day):
+            scanned += 1
+            if scanned > 100_000:
+                break
+            total += 1
+            kind = str(e.get("kind") or "event")
+            by_kind[kind] = by_kind.get(kind, 0) + 1
+            ts = e.get("ts")
+            if ts:
+                day = date.fromtimestamp(float(ts)).isoformat()
+                if day in daily:
+                    daily[day]["n"] += 1
+    except Exception:  # pragma: no cover -- fail-soft like the page
+        pass
+    try:
+        pending = sum(1 for a in w.list_approvals(limit=500)
+                      if getattr(a, "status", "") == "pending")
+    except Exception:  # pragma: no cover
+        pending = 0
+    try:
+        halted = bool(w.active_halt())
+    except Exception:  # pragma: no cover
+        halted = False
+    kinds = sorted(({"kind": k.replace("_", " "), "n": n}
+                    for k, n in by_kind.items()),
+                   key=lambda r: r["n"], reverse=True)[:8]
+    return {"interventions": total, "by_kind": kinds,
+            "daily": list(daily.values()),
+            "pending_approvals": pending, "halted": halted}
+
+
 @router.get("/dashboards/{board}")
 async def dashboard_board(request: Request, board: str,
                           days: int | None = None) -> dict:
     """Executive-board payload for the Overview / Spend / Workforce pages."""
     require_permission(request, "view")
-    if board not in ("overview", "spend", "workforce"):
-        raise HTTPException(status_code=404, detail="unknown board")
     w = _world()
     owner = goal_owner_filter(request)
     d = _board_days(days)
-    build = {"overview": _board_overview, "spend": _board_spend,
-             "workforce": _board_workforce}[board]
-    payload = build(w, owner, d)
+    if board in ("privacy", "finance", "security"):
+        payload = _board_workspace(board)
+    elif board in ("overview", "spend", "workforce", "savings", "oversight"):
+        build = {"overview": _board_overview, "spend": _board_spend,
+                 "workforce": _board_workforce, "savings": _board_savings,
+                 "oversight": _board_oversight}[board]
+        payload = build(w, owner, d)
+    else:
+        raise HTTPException(status_code=404, detail="unknown board")
     payload.update({"board": board, "days": d, "generated_at": time.time()})
     return payload
 
