@@ -1,4 +1,4 @@
-# reset-demo.ps1 — one-click pitch reset for the PIA Concierge demo.
+﻿# reset-demo.ps1 - one-click pitch reset for the PIA Concierge demo.
 #
 # Stops anything already running, wipes the demo workspace, relaunches with
 # the full environment, waits for both servers, and prints a go/no-go
@@ -7,7 +7,7 @@
 #   cd C:\Users\Cstep\Lightwork\demo\pia-concierge
 #   powershell -ExecutionPolicy Bypass -File .\reset-demo.ps1
 #
-# The relaunch reseeds ~14 months of history (1-2 minutes) — the script waits
+# The relaunch reseeds ~14 months of history (1-2 minutes) - the script waits
 # and tells you when the demo is ready to present.
 
 $ErrorActionPreference = "Stop"
@@ -26,7 +26,7 @@ foreach ($port in 8765, 8890, 1025) {
         try {
             Stop-Process -Id $c.OwningProcess -Force -ErrorAction Stop
             Ok "stopped PID $($c.OwningProcess) on port $port"
-        } catch { Bad "could not stop PID $($c.OwningProcess) on port $port — close it manually" }
+        } catch { Bad "could not stop PID $($c.OwningProcess) on port $port - close it manually" }
     }
 }
 Start-Sleep -Seconds 1
@@ -37,7 +37,7 @@ if (Test-Path .\.demo-home) {
     Remove-Item -Recurse -Force .\.demo-home
 }
 if (Test-Path .\.demo-home) {
-    Bad ".demo-home is still present (something still has it open) — close Explorer/terminals in that folder and rerun"
+    Bad ".demo-home is still present (something still has it open) - close Explorer/terminals in that folder and rerun"
     exit 1
 }
 Ok "workspace clear"
@@ -61,11 +61,11 @@ Ok "environment set (commit $(git rev-parse --short HEAD 2>$null))"
 # Model provider key: NEVER stored in this repo. Set it once, user-level:
 #   setx ANTHROPIC_API_KEY "sk-ant-..."     (then open a fresh terminal)
 # With it, the platform copilot and live drafting run at full speed; without
-# it the demo still runs — the concierge flows are deterministic by design.
+# it the demo still runs - the concierge flows are deterministic by design.
 if ($env:ANTHROPIC_API_KEY) {
-    Ok "ANTHROPIC_API_KEY present — copilot + live drafting enabled"
+    Ok "ANTHROPIC_API_KEY present - copilot + live drafting enabled"
 } else {
-    Write-Host "  [--] no ANTHROPIC_API_KEY — demo runs deterministic; set it once with: setx ANTHROPIC_API_KEY `"<your key>`"" -ForegroundColor Yellow
+    Write-Host "  [--] no ANTHROPIC_API_KEY - demo runs deterministic; set it once with: setx ANTHROPIC_API_KEY `"<your key>`"" -ForegroundColor Yellow
 }
 
 # 4. Launch. Seeding happens on boot; the window stays open running the demo.
@@ -82,7 +82,7 @@ while ((Get-Date) -lt $deadline) {
         $r = Invoke-WebRequest -Uri "http://127.0.0.1:8765/overview" -UseBasicParsing -TimeoutSec 2
         if ($r.StatusCode -eq 200) { $dashUp = $true; break }
     } catch { }
-    if ($server.HasExited) { Bad "serve.py exited early — scroll up for its error"; exit 1 }
+    if ($server.HasExited) { Bad "serve.py exited early - scroll up for its error"; exit 1 }
     Start-Sleep -Seconds 3
 }
 
@@ -95,9 +95,9 @@ try {
     Ok "External world      http://127.0.0.1:8890"
 } catch { Bad "external world (8890) not answering" }
 if (Test-Path .\.demo-home\.workspace-seeded) { Ok "workspace seeded (fresh history, new-style documents)" }
-else { Bad "seed marker missing — check the server output above" }
+else { Bad "seed marker missing - check the server output above" }
 
 Write-Host ""
-Write-Host "Demo is ready. This window is running the servers — leave it open." -ForegroundColor Green
+Write-Host "Demo is ready. This window is running the servers - leave it open." -ForegroundColor Green
 Write-Host "Ctrl+C here stops the demo." -ForegroundColor DarkGray
 Wait-Process -Id $server.Id
