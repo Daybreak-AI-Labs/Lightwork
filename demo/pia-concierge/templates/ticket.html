@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% set active = 'servicenow' %}
 {% block title %}{{ ticket.number }}{% endblock %}
+{% block tab_title %}{{ ticket.number }} · ServiceNow{% endblock %}
+{% block favicon %}<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='16' fill='%231B9E57'/%3E%3Ctext x='16' y='21' font-size='13' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'%3ESN%3C/text%3E%3C/svg%3E">{% endblock %}
+
 {% block body %}
 <div class="sim-banner"><span class="sim-chip">Simulated</span>
   <span>ServiceNow ticket record. Lightwork writes work notes and state changes back here through the governed connector.</span></div>

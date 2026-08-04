@@ -574,7 +574,7 @@ def _seed_paper_round(case: Case, reviewer: str) -> None:
                              content: bytes, *,
                              mime: str = "text/plain") -> str:
             return _ot_mock.seed_attachment(record_id, filename, content,
-                                            mime)
+                                            mime, by="Lightwork Concierge")
 
     entry = paper_desk.file_paper_review(case, review, redline,
                                          reviewer=reviewer,
@@ -705,7 +705,7 @@ def _seed_tenant() -> None:
                          notice_body),
         ):
             _ot_mock.seed_attachment(vendor, name, content, mime,
-                                     at=filed_at)
+                                     at=filed_at, by="Lightwork Concierge")
     n_docs = len(_ot_mock.ATTACHMENTS)
     if CAPS["paper_redline"]:
         # Two vendors also carry a filed vendor-paper round (analysis memo +
@@ -2161,7 +2161,9 @@ def _vendor_documents(subject: str) -> list[dict]:
         "at": a.get("at", 0),
         "kind": ("docx" if str(a.get("filename", "")).endswith(".docx")
                  else "text" if str(a.get("filename", "")).endswith(".txt")
+                 else "pdf" if str(a.get("filename", "")).endswith(".pdf")
                  else "other"),
+        "by": a.get("by", ""),
         "available": bool(a.get("content")),
     } for a in docs]
 
@@ -2349,7 +2351,7 @@ def _analyze_addendum(ot: OneTrustAssessment, case: Case | None,
     # row in the pop-out is openable, like every other filed document.
     try:
         entry["attachment_id"] = _ot_mock.seed_attachment(
-            ot.subject, filename, data, mime)
+            ot.subject, filename, data, mime, by="Reviewer upload")
     except Exception:  # pragma: no cover -- viewer convenience, never fatal
         entry["attachment_id"] = ""
     ot.addenda.append(entry)
