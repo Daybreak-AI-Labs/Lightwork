@@ -1705,48 +1705,13 @@ async def overview(request: Request) -> HTMLResponse:
         "done":    by_status.get("done", 0),
         "blocked": by_status.get("blocked", 0),
     }
-    # Weekly activity for the operating-picture chart: goals started
-    # (created_at) and goals delivered (status now done, by updated_at) per
-    # week, last 10 weeks. SQL day-buckets (created/updated are plaintext
-    # REAL columns), Python folds days into Monday-anchored weeks.
-    from datetime import date, timedelta
-    monday = date.today() - timedelta(days=date.today().weekday())
-    week_starts = [monday - timedelta(weeks=i) for i in range(9, -1, -1)]
-    since = time.mktime(week_starts[0].timetuple())
-    own_sql, own_params = ("", ()) if owner is None else (" AND owner = ?", (owner,))
-    started_rows = w.conn.execute(
-        "SELECT date(created_at, 'unixepoch') AS d, COUNT(*) FROM goals "
-        "WHERE created_at >= ?" + own_sql + " GROUP BY d",
-        (since, *own_params)).fetchall()
-    done_rows = w.conn.execute(
-        "SELECT date(updated_at, 'unixepoch') AS d, COUNT(*) FROM goals "
-        "WHERE status = 'done' AND updated_at >= ?" + own_sql + " GROUP BY d",
-        (since, *own_params)).fetchall()
-
-    def _bucket(rows_: list) -> list[int]:
-        out = [0] * len(week_starts)
-        for d, n in rows_:
-            day = date.fromisoformat(d)
-            idx = (day - week_starts[0]).days // 7
-            if 0 <= idx < len(out):
-                out[idx] += int(n)
-        return out
-    started_w, done_w = _bucket(started_rows), _bucket(done_rows)
-    weekly = [
-        {"label": f"{ws.strftime('%b')} {ws.day}", "a": started_w[i], "b": done_w[i],
-         "title": (f"Week of {ws.strftime('%b')} {ws.day} — "
-                   f"{started_w[i]} started · {done_w[i]} delivered")}
-        for i, ws in enumerate(week_starts)]
-    # Bounded recent slice instead of "load every goal ever, take last 20".
-    recent = w.list_goals(owner=owner, limit=20, order="desc")
+    # The executive board (charts, KPI deltas, recent list) renders client-side
+    # from GET /api/v1/dashboards/overview; the page only needs the hero counts.
     facts = w.get_facts()
     skills = _load_skills()
     return templates.TemplateResponse(
         request, "index.html",
-        {"counts": counts, "by_status": by_status, "goals": recent,
-         "weekly": weekly, "weekly_max": max([p["a"] for p in weekly]
-                                             + [p["b"] for p in weekly] + [0]),
-         "facts": facts, "skills": skills[:10]},
+        {"counts": counts, "facts": facts, "skills": skills[:10]},
     )
 
 
@@ -1767,7 +1732,7 @@ async def workforce_page(request: Request) -> HTMLResponse:
     from maverick.departments import department_entitled, list_departments
     from maverick.marketplace.storefront import connector_marketplace
     from maverick.operating_record import assemble
-    from maverick.outcomes import firm_totals, worker_cards
+    from maverick.outcomes import firm_totals
 
     from .auth import scope_to_suites
 
@@ -1778,46 +1743,14 @@ async def workforce_page(request: Request) -> HTMLResponse:
                             suite_of=lambda d: d.key, keep_none=False)
     owner = goal_owner_filter(request)
     firm = firm_totals(assemble(w, owner=owner)).to_dict()
-    all_cards = worker_cards(w, owner=owner)
-    leaders = [c.to_dict() for c in all_cards[:5]]
-    # Departmental rollup for the delivery chart: fold the per-worker outcome
-    # cards into their business suite (goals delivered / total / spend).
-    dept_rollup: dict[str, dict] = {}
-    for c in all_cards:
-        row = dept_rollup.setdefault(
-            c.suite_title or "General",
-            {"label": c.suite_title or "General",
-             "completed": 0, "total": 0, "spend": 0.0})
-        row["completed"] += c.goals_completed
-        row["total"] += c.goals_total
-        row["spend"] += c.spend_dollars
-    dept_delivery = sorted(dept_rollup.values(),
-                           key=lambda r: (r["completed"], r["total"]),
-                           reverse=True)[:8]
-    # Pre-shaped rows for the _charts.html bars macro (Jinja has no list
-    # comprehensions; percentages are presentation, computed once here).
-    dmax = max([r["total"] for r in dept_delivery] + [1])
-    smax = max([r["spend"] for r in dept_delivery] + [0.0]) or 1.0
-    dept_rows = [
-        {"label": r["label"],
-         "value_text": f"{r['completed']} of {r['total']}",
-         "pct": r["completed"] / dmax * 100,
-         "pct_bg": r["total"] / dmax * 100,
-         "title": f"{r['label']} — {r['completed']} delivered of {r['total']}"}
-        for r in dept_delivery]
-    dept_spend_rows = [
-        {"label": r["label"], "value_text": f"${r['spend']:,.2f}",
-         "pct": r["spend"] / smax * 100}
-        for r in dept_delivery]
+    # The delivery/spend/leader charts render client-side from
+    # GET /api/v1/dashboards/workforce.
     return templates.TemplateResponse(
         request, "workforce.html",
         {
             "departments": depts,
             "entitlements": {d.key: department_entitled(d.key) for d in depts},
             "firm": firm,
-            "leaders": leaders,
-            "dept_rows": dept_rows,
-            "dept_spend_rows": dept_spend_rows,
             "pack_total": sum(d.headcount for d in depts),
             "connector_total": connector_marketplace()["total"],
         },
@@ -2115,46 +2048,12 @@ async def facts_page(request: Request) -> HTMLResponse:
 
 @app.get("/spend", response_class=HTMLResponse)
 async def spend_page(request: Request) -> HTMLResponse:
+    # The burn/outcome/top-goal charts render client-side from
+    # GET /api/v1/dashboards/spend; the page keeps the episode table + hero.
     w = _world()
-    episodes = w.list_episodes(limit=50)
-    # Daily burn for the spend chart: cost per calendar day over the last 30
-    # days, zero-filled. SQL-aggregated (cost/started_at are plaintext
-    # columns); outcome is encrypted at rest, so the outcome mix is counted
-    # in Python over the decrypted recent slice instead.
-    from datetime import date, timedelta
-    today = date.today()
-    days = [today - timedelta(days=i) for i in range(29, -1, -1)]
-    since = time.mktime(days[0].timetuple())
-    day_rows = w.conn.execute(
-        "SELECT date(started_at, 'unixepoch') AS d, "
-        "SUM(COALESCE(cost_dollars, 0)), COUNT(*) FROM episodes "
-        "WHERE started_at >= ? AND ended_at IS NOT NULL GROUP BY d",
-        (since,)).fetchall()
-    by_day = {r[0]: (float(r[1]), int(r[2])) for r in day_rows}
-    daily = []
-    for i, d in enumerate(days):
-        cost, runs = by_day.get(d.isoformat(), (0.0, 0))
-        daily.append({
-            # Sparse axis labels: one per week (labelling the final day too
-            # collides with the Aug-2-style label right beside it).
-            "label": f"{d.strftime('%b')} {d.day}" if i % 7 == 0 else "",
-            "a": cost,
-            "title": f"{d.strftime('%b')} {d.day} — ${cost:,.2f} · {runs} run(s)",
-        })
-    outcome_mix = {"success": 0, "failed": 0, "running": 0}
-    for e in episodes:
-        if not e.outcome:
-            outcome_mix["running"] += 1
-        elif e.outcome == "success":
-            outcome_mix["success"] += 1
-        else:
-            outcome_mix["failed"] += 1
     return templates.TemplateResponse(
         request, "spend.html",
-        {"episodes": episodes, "total": w.total_spend(),
-         "daily": daily,
-         "daily_max": max([p["a"] for p in daily] + [0.0]),
-         "outcome_mix": outcome_mix},
+        {"episodes": w.list_episodes(limit=50), "total": w.total_spend()},
     )
 
 
@@ -6076,6 +5975,17 @@ async def shell_stylesheet() -> FileResponse:
     return FileResponse(
         _STATIC_DIR / "lightwork.css",
         media_type="text/css; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/static/board.js")
+async def board_engine_js() -> FileResponse:
+    """The shared executive-board engine (KPI tiles, area/donut/bar charts,
+    slicer + live refresh) behind Overview, Spend, and Workforce."""
+    return FileResponse(
+        _STATIC_DIR / "board.js",
+        media_type="application/javascript; charset=utf-8",
         headers={"Cache-Control": "public, max-age=300"},
     )
 

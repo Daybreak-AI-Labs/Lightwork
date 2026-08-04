@@ -255,7 +255,25 @@ def test_workforce_page_rollup_scoped_to_owner(monkeypatch):
 
     body = client.get("/workforce").text
 
+    # The server-rendered firm rollup stays owner-scoped; the charts moved to
+    # the board API (scoped in test_workforce_board_api_scoped_to_owner).
     assert "$12.34" in body
     assert "$112.33" not in body
-    assert "finance_ar" in body
-    assert "finance_ap" not in body
+
+
+def test_workforce_board_api_scoped_to_owner(monkeypatch):
+    import sqlite3
+
+    world = _WorkforceWorld()
+    # The board's windowed KPI counts aggregate the goals table directly.
+    world.conn = sqlite3.connect(":memory:", check_same_thread=False)
+    world.conn.execute(
+        "CREATE TABLE goals (id INTEGER, owner TEXT, status TEXT, "
+        "created_at REAL, updated_at REAL, domain TEXT)")
+    monkeypatch.setattr(api_mod, "_world", lambda: world)
+    monkeypatch.setattr(api_mod, "goal_owner_filter", lambda request: "user:alice")
+
+    data = client.get("/api/v1/dashboards/workforce").json()
+
+    assert data["kpis"]["spend_dollars"] == 12.34
+    assert {c["worker"] for c in data["leaders"]} == {"finance_ar"}

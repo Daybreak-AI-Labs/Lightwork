@@ -2,17 +2,7 @@
 {% block title %}Spend · Lightwork{% endblock %}
 {% block content %}
 <style>
-  /* Spend visualizations — page-scoped, built from the design-system tokens.
-     Everything is derived in-template from `episodes` + `total`; no new data. */
-  .spend-bars { display: flex; align-items: flex-end; gap: 2px; height: 168px; }
-  .spend-bars__col { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
-  .spend-bars__bar {
-    width: 100%; min-height: 2px;
-    background: linear-gradient(180deg, var(--brand-hi), var(--brand));
-    border-radius: 3px 3px 0 0; transition: opacity 0.13s ease;
-  }
-  .spend-bars__col:hover .spend-bars__bar { opacity: 0.72; }
-  .spend-axis { display: flex; justify-content: space-between; margin-top: var(--space-2); color: var(--muted); font-size: var(--text-xs); }
+  /* Spend page — scoped styles for the episode table's cost cells. */
   .cost-cell { display: flex; flex-direction: column; gap: 3px; min-width: 84px; }
   .cost-cell__bar { height: 3px; border-radius: var(--radius-pill); background: var(--brand); opacity: 0.5; }
   .toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
@@ -34,78 +24,39 @@
                    the monthly statement — one ledger, three views.') }}
   {% endcall %}
 
-  <div class="grid">
-    <div class="stat">
-      <div class="num">${{ '%.2f'|format(total.dollars) }}</div>
-      <div class="label">total spent</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ total.runs }}</div>
-      <div class="label">completed runs</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ '{:,}'.format(total.input_tokens) }}</div>
-      <div class="label">input tokens</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ '{:,}'.format(total.output_tokens) }}</div>
-      <div class="label">output tokens</div>
+  <div class="bd-toolbar">
+    <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
+      <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
+    <div class="bd-slicer" role="group" aria-label="Time range">
+      <button type="button" data-days="30" aria-pressed="false">30d</button>
+      <button type="button" data-days="90" class="on" aria-pressed="true">90d</button>
+      <button type="button" data-days="180" aria-pressed="false">180d</button>
+      <button type="button" data-days="365" aria-pressed="false">1y</button>
     </div>
   </div>
 
-  {% set _max = (episodes | map(attribute='cost_dollars') | max) if episodes else 0 %}
-  {% from "_charts.html" import donut, columns, bars %}
+  <div class="bd-kpis" id="bd-kpis"></div>
 
   <div class="viz-grid">
     <div class="panel viz-card viz-card--wide">
-      <h2>Daily burn — last 30 days</h2>
-      <p class="viz-sub">Dollars spent per calendar day, from the run ledger. Hover a day for cost and run count.</p>
-      {% if total.runs %}
-        {{ columns(daily, daily_max,
-                   'Daily spend over the last 30 days, oldest on the left.') }}
-      {% else %}
-        <p class="muted">No completed episodes yet — the burn chart draws from
-          the first finished run.</p>
-      {% endif %}
+      <h2>Burn rate</h2>
+      <p class="viz-sub">Dollars through the ledger over time (weekly at longer ranges). Hover for cost and runs.</p>
+      <div id="bd-burn"></div>
     </div>
     <div class="panel viz-card">
       <h2>Run outcomes</h2>
-      <p class="viz-sub">The {{ episodes | length }} most recent runs, by how they ended.</p>
-      {{ donut([
-           {'label': 'Succeeded', 'value': outcome_mix.success, 'cls': 'ok'},
-           {'label': 'Failed',    'value': outcome_mix.failed,  'cls': 'danger'},
-           {'label': 'Running',   'value': outcome_mix.running, 'cls': 'brand'},
-         ], episodes | length, 'recent runs',
-         'Run outcomes: ' ~ outcome_mix.success ~ ' succeeded, '
-         ~ outcome_mix.failed ~ ' failed, ' ~ outcome_mix.running ~ ' still running.') }}
+      <p class="viz-sub">How runs in this window ended.</p>
+      <div id="bd-outcomes"></div>
     </div>
     <div class="panel viz-card viz-card--wide">
       <h2>Cost per run</h2>
-      <p class="viz-sub">The {{ episodes | length }} most recent runs, oldest to newest.</p>
-      {% if episodes %}
-        <div class="spend-bars" role="img"
-             aria-label="Cost of the {{ episodes|length }} most recent runs, oldest on the left to most recent on the right; peak ${{ '%.4f'|format(_max) }}.">
-          {% for e in episodes | reverse %}
-            <div class="spend-bars__col" title="#{{ e.id }} · ${{ '%.4f'|format(e.cost_dollars) }}">
-              <div class="spend-bars__bar" style="height: {{ ((e.cost_dollars / _max * 100) if _max else 0) | round(1) }}%;"></div>
-            </div>
-          {% endfor %}
-        </div>
-        <div class="spend-axis"><span>oldest</span><span>most recent</span></div>
-      {% else %}
-        <p class="muted">No completed episodes yet.</p>
-      {% endif %}
+      <p class="viz-sub">The most recent runs, oldest to newest — spikes are the expensive ones.</p>
+      <div id="bd-per-run"></div>
     </div>
     <div class="panel viz-card">
-      <h2>Token mix</h2>
-      <p class="viz-sub">Lifetime tokens through the ledger, in vs out.</p>
-      {% set _tokmax = [total.input_tokens, total.output_tokens, 1] | max %}
-      {{ bars([
-           {'label': 'Input',  'value_text': '{:,}'.format(total.input_tokens),
-            'pct': total.input_tokens / _tokmax * 100},
-           {'label': 'Output', 'value_text': '{:,}'.format(total.output_tokens),
-            'pct': total.output_tokens / _tokmax * 100},
-         ], 'Token mix: input vs output tokens across all completed runs.') }}
+      <h2>Top goals by cost</h2>
+      <p class="viz-sub">Where the money actually went.</p>
+      <div id="bd-top-goals"></div>
     </div>
   </div>
 
@@ -114,6 +65,7 @@
     <a class="btn" href="/api/v1/cost.csv" download>⤓ Download CSV</a>
   </div>
   <div class="panel">
+    {% set _max = (episodes | map(attribute='cost_dollars') | max) if episodes else 0 %}
     {% if episodes %}
     <table>
       <thead>
@@ -154,4 +106,95 @@
       Append <code>?month=YYYY-MM</code> to the CSV link for a single month.
     </p>
   </div>
+
+  <script src="/static/board.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var B = window.LWBoard;
+
+    function compact(n) {
+      if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(0) + 'k';
+      return B.fmt(Math.round(n));
+    }
+
+    function render(D) {
+      var k = document.getElementById('bd-kpis');
+      k.textContent = '';
+      k.appendChild(B.kpi({ label: 'Spent', value: D.totals.dollars,
+        format: B.money,
+        chip: { cur: D.totals.dollars, prev: D.prev.dollars, upIsBad: true,
+                format: B.money },
+        sub: 'last ' + D.days + ' days',
+        spark: D.daily.map(function (r) { return r.cost; }) }));
+      k.appendChild(B.kpi({ label: 'Completed runs', value: D.totals.runs,
+        chip: { cur: D.totals.runs, prev: D.prev.runs },
+        sub: 'last ' + D.days + ' days', sparkCls: 'ok',
+        spark: D.daily.map(function (r) { return r.runs; }) }));
+      k.appendChild(B.kpi({ label: 'Avg cost / run',
+        value: D.totals.runs ? D.totals.dollars / D.totals.runs : 0,
+        format: B.money,
+        sub: D.totals.tool_calls ? B.fmt(D.totals.tool_calls) + ' tool calls' : '' }));
+      k.appendChild(B.kpi({ label: 'Tokens',
+        value: D.totals.input_tokens + D.totals.output_tokens,
+        format: compact,
+        sub: compact(D.totals.input_tokens) + ' in · ' +
+             compact(D.totals.output_tokens) + ' out' }));
+
+      if (D.totals.runs || D.prev.runs) {
+        var weekly = D.days > 60;
+        B.area(document.getElementById('bd-burn'), {
+          data: weekly ? B.bucketWeekly(D.daily, ['cost', 'runs']) : D.daily,
+          x: 'd',
+          series: [{ key: 'cost', label: 'Cost', cls: 'brand' }],
+          yFmt: function (v) { return '$' + (v >= 10 ? Math.round(v) : v.toFixed(2)); },
+          aria: 'Spend per ' + (weekly ? 'week' : 'day') +
+                ' over the last ' + D.days + ' days.',
+          tipHead: function (r) { return (weekly ? 'Week of ' : '') + r.d; },
+          xTick: function (r, i, n) {
+            return i % Math.ceil(n / 8) === 0 ? r.d.slice(5) : '';
+          } });
+      } else {
+        B.empty(document.getElementById('bd-burn'),
+          'No completed episodes in this window — the burn chart draws from the first finished run.');
+      }
+
+      B.donut(document.getElementById('bd-outcomes'), {
+        segments: [
+          { label: 'Succeeded', value: D.outcomes.success, cls: 'ok' },
+          { label: 'Failed', value: D.outcomes.failed, cls: 'danger' },
+          { label: 'Running', value: D.outcomes.running, cls: 'brand' }],
+        centerSub: 'runs',
+        aria: 'Run outcomes: ' + D.outcomes.success + ' succeeded, ' +
+              D.outcomes.failed + ' failed, ' + D.outcomes.running + ' running.' });
+
+      if ((D.per_run || []).length) {
+        B.strip(document.getElementById('bd-per-run'),
+          D.per_run.slice().reverse().map(function (r) {
+            return { v: r.cost,
+                     title: '#' + r.id + ' · ' + B.money(r.cost) };
+          }), 'Cost of the ' + D.per_run.length + ' most recent runs, oldest on the left.');
+      } else {
+        B.empty(document.getElementById('bd-per-run'), 'No completed episodes yet.');
+      }
+
+      var tmax = 1;
+      (D.top_goals || []).forEach(function (r) { tmax = Math.max(tmax, r.cost); });
+      if ((D.top_goals || []).length) {
+        B.hbars(document.getElementById('bd-top-goals'),
+          D.top_goals.map(function (r) {
+            return { label: r.title, value_text: B.money(r.cost),
+                     pct: r.cost / tmax * 100,
+                     title: r.title + ' — ' + B.money(r.cost) + ' across ' +
+                            r.runs + ' run(s)' };
+          }), 'The most expensive goals in this window.');
+      } else {
+        B.empty(document.getElementById('bd-top-goals'), 'No costed goals in this window.');
+      }
+    }
+
+    B.attach({ board: 'spend', render: render });
+  })();
+  </script>
 {% endblock %}

@@ -1,6 +1,7 @@
-"""Real dashboards on Overview / Spend / Workforce: the shared _charts.html
-primitives (donut / columns / bars) render populated charts from the world
-ledger, and every page stays honest when the ledger is empty."""
+"""Executive boards on Overview / Spend / Workforce: the board API returns
+windowed, owner-scoped payloads, and the pages ship the board skeleton
+(slicer + stamp + card containers + board.js). Charts render client-side;
+the API payload is the contract these tests pin."""
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -30,46 +31,75 @@ def _seed_world():
     return w
 
 
+def test_overview_board_payload(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _seed_world()
+    d = _client().get("/api/v1/dashboards/overview?days=30").json()
+    assert d["board"] == "overview" and d["days"] == 30
+    assert d["totals"] == {"total": 2, "active": 0, "done": 1, "blocked": 1}
+    assert len(d["daily"]) == 30
+    # Both goals were created today — the last daily bucket carries them.
+    assert d["daily"][-1]["started"] == 2 and d["daily"][-1]["delivered"] == 1
+    assert d["window"]["started"] == 2 and d["window"]["delivered"] == 1
+    # legal_privacy rolls up to its business suite; titles decrypt.
+    assert any(r["total"] for r in d["domains"])
+    assert d["recent"][0]["title"] in ("Vendor DPA review", "Access recert")
+
+
+def test_spend_board_payload(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _seed_world()
+    d = _client().get("/api/v1/dashboards/spend?days=30").json()
+    assert len(d["daily"]) == 30
+    assert d["totals"]["runs"] == 1
+    assert abs(d["totals"]["dollars"] - 1.25) < 1e-6
+    assert d["totals"]["input_tokens"] == 10_000
+    assert d["outcomes"] == {"success": 1, "failed": 0, "running": 0}
+    assert d["top_goals"][0]["title"] == "Vendor DPA review"
+    assert d["per_run"][0]["cost"] == 1.25
+
+
+def test_workforce_board_payload(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _seed_world()
+    d = _client().get("/api/v1/dashboards/workforce?days=90").json()
+    assert d["kpis"]["goals_completed"] == 1
+    assert d["kpis"]["delivered_window"] == 1
+    assert d["depts"] and d["depts"][0]["completed"] == 1
+    assert d["leaders"]
+
+
+def test_board_days_clamped_and_unknown_board_404(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    assert c.get("/api/v1/dashboards/overview?days=7").json()["days"] == 90
+    assert c.get("/api/v1/dashboards/nope").status_code == 404
+
+
+def test_board_payloads_survive_empty_world(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    for board in ("overview", "spend", "workforce"):
+        r = c.get(f"/api/v1/dashboards/{board}")
+        assert r.status_code == 200, board
+        assert r.json()["days"] == 90
+
+
+def test_pages_ship_the_board_skeleton(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _seed_world()
+    c = _client()
+    for path, marker in (("/overview", "bd-momentum"),
+                         ("/spend", "bd-burn"),
+                         ("/workforce", "bd-depts")):
+        t = c.get(path).text
+        assert "/static/board.js" in t, path
+        assert 'class="bd-slicer"' in t and 'id="bd-stamp"' in t, path
+        assert marker in t, path
+
+
 def test_overview_empty_still_offers_first_goal(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/overview").text
     assert "Start your first goal" in t
-    assert "viz-donut" not in t   # no charts drawn over an empty record
-
-
-def test_overview_dashboard_goal_mix_and_weekly(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    _seed_world()
-    t = _client().get("/overview").text
-    assert "Goal mix" in t and "viz-donut" in t
-    # Status legend is text beside the color dot — never hue alone.
-    for label in ("Done", "Active", "Blocked", "Queued"):
-        assert label in t
-    assert "Activity — last 10 weeks" in t
-    # 10 weekly buckets, each a paired started/delivered column.
-    assert t.count("viz-cols__col") == 10
-
-
-def test_spend_dashboard_daily_burn_and_outcomes(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    _seed_world()
-    t = _client().get("/spend").text
-    assert "Daily burn — last 30 days" in t
-    assert t.count("viz-cols__col") == 30
-    assert "Run outcomes" in t and "Succeeded" in t and "Failed" in t
-    assert "Token mix" in t and "10,000" in t
-
-
-def test_workforce_dashboard_department_delivery(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    _seed_world()
-    t = _client().get("/workforce").text
-    assert "Delivery by department" in t and "Spend by department" in t
-    # The legal_privacy goal rolls up to its business suite by title.
-    assert "1 of 1" in t and "$1.25" in t
-
-
-def test_workforce_empty_record_skips_charts(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    t = _client().get("/workforce").text
-    assert "Delivery by department" not in t   # honest: no record, no chart
+    assert "bd-momentum" not in t   # no board over an empty record

@@ -14,28 +14,41 @@
                    ceiling.') }}
   {% endcall %}
 
-  <div class="grid">
-    <div class="stat"><div class="num">{{ departments|length }}</div><div class="label">departments</div></div>
-    <div class="stat"><div class="num">{{ pack_total }}</div><div class="label">specialists</div></div>
-    <div class="stat"><div class="num">{{ connector_total }}</div><div class="label">connectors</div></div>
-    <div class="stat"><div class="num">{{ firm.goals_completed }}</div><div class="label">goals completed</div></div>
+  <div class="bd-toolbar">
+    <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
+      <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
+    <div class="bd-slicer" role="group" aria-label="Time range">
+      <button type="button" data-days="30" aria-pressed="false">30d</button>
+      <button type="button" data-days="90" class="on" aria-pressed="true">90d</button>
+      <button type="button" data-days="180" aria-pressed="false">180d</button>
+      <button type="button" data-days="365" aria-pressed="false">1y</button>
+    </div>
   </div>
 
-  {% from "_charts.html" import bars %}
-  {% if dept_rows %}
+  <div class="bd-kpis" id="bd-kpis"></div>
+
   <div class="viz-grid">
     <div class="panel viz-card viz-card--wide">
       <h2>Delivery by department</h2>
       <p class="viz-sub">Goals delivered (solid) against goals taken on (pale), from the Operating Record.</p>
-      {{ bars(dept_rows, 'Goals delivered against goals taken on, by department.') }}
+      <div id="bd-depts"></div>
     </div>
     <div class="panel viz-card">
+      <h2>Completion</h2>
+      <p class="viz-sub">Of everything the workforce has taken on.</p>
+      <div id="bd-completion"></div>
+    </div>
+    <div class="panel viz-card viz-card--wide">
       <h2>Spend by department</h2>
       <p class="viz-sub">Actual agent spend behind that delivery.</p>
-      {{ bars(dept_spend_rows, 'Agent spend by department.') }}
+      <div id="bd-dept-spend"></div>
+    </div>
+    <div class="panel viz-card">
+      <h2>Top performers</h2>
+      <p class="viz-sub">Best delivery on record.</p>
+      <div id="bd-leaders"></div>
     </div>
   </div>
-  {% endif %}
 
   <div class="panel">
     <div class="section-head"><h2>Delivery</h2></div>
@@ -49,19 +62,6 @@
       </tbody>
     </table>
 
-    <div class="section-head" style="margin-top: var(--space-4);"><h2>Top performers</h2></div>
-    {% if leaders %}
-    <table>
-      <thead><tr><th scope="col">Specialist</th><th scope="col">Department</th><th scope="col">Delivered</th></tr></thead>
-      <tbody>
-        {% for c in leaders %}
-        <tr><td>{{ c.worker }}</td><td>{{ c.suite_title or '—' }}</td><td>{{ c.headline }}</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <p class="muted">No work recorded yet — deploy a department to start the record.</p>
-    {% endif %}
   </div>
 
   <div class="panel">
@@ -115,6 +115,83 @@
     </div>
   </dialog>
 
+  <script src="/static/board.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var B = window.LWBoard;
+
+    function render(D) {
+      var k = document.getElementById('bd-kpis');
+      k.textContent = '';
+      k.appendChild(B.kpi({ label: 'Departments', value: D.kpis.departments,
+        sub: 'with recorded work' }));
+      k.appendChild(B.kpi({ label: 'Specialists', value: D.kpis.specialists,
+        sub: 'on staff across the catalog' }));
+      k.appendChild(B.kpi({ label: 'Delivered', value: D.kpis.delivered_window,
+        chip: { cur: D.kpis.delivered_window, prev: D.kpis.delivered_prev },
+        sub: 'goals in the last ' + D.days + ' days' }));
+      k.appendChild(B.kpi({ label: 'Record spend', value: D.kpis.spend_dollars,
+        format: B.money, sub: 'across ' + B.fmt(D.kpis.goals_total) +
+        ' goals on record' }));
+
+      var dmax = 1;
+      (D.depts || []).forEach(function (r) { dmax = Math.max(dmax, r.total); });
+      if ((D.depts || []).length) {
+        B.hbars(document.getElementById('bd-depts'),
+          D.depts.map(function (r) {
+            return { label: r.label,
+                     value_text: r.completed + ' of ' + r.total,
+                     pct: r.completed / dmax * 100, pct_bg: r.total / dmax * 100,
+                     title: r.label + ' — ' + r.completed + ' delivered of ' + r.total };
+          }), 'Goals delivered against goals taken on, by department.');
+        var smax = 1;
+        D.depts.forEach(function (r) { smax = Math.max(smax, r.spend); });
+        B.hbars(document.getElementById('bd-dept-spend'),
+          D.depts.map(function (r) {
+            return { label: r.label, value_text: B.money(r.spend),
+                     pct: r.spend / smax * 100 };
+          }), 'Agent spend by department.');
+      } else {
+        B.empty(document.getElementById('bd-depts'),
+          'No departmental work on record yet — deploy a team to start it.');
+        B.empty(document.getElementById('bd-dept-spend'), 'No spend on record yet.');
+      }
+
+      B.donut(document.getElementById('bd-completion'), {
+        segments: [
+          { label: 'Delivered', value: D.kpis.goals_completed, cls: 'ok' },
+          { label: 'Everything else',
+            value: Math.max(D.kpis.goals_total - D.kpis.goals_completed, 0),
+            cls: 'idle' }],
+        center: D.kpis.goals_total
+          ? Math.round(100 * D.kpis.goals_completed / D.kpis.goals_total) + '%'
+          : '—',
+        centerSub: 'completed',
+        aria: 'Completion: ' + D.kpis.goals_completed + ' of ' +
+              D.kpis.goals_total + ' goals delivered.' });
+
+      var lbox = document.getElementById('bd-leaders');
+      if ((D.leaders || []).length) {
+        lbox.textContent = '';
+        var ul = B.el('ul', 'viz-legend');
+        D.leaders.forEach(function (c) {
+          var li = B.el('li', 'viz-legend__item');
+          li.appendChild(B.el('span', 'viz-legend__label',
+            String(c.worker || '').replace(/_/g, ' ')));
+          li.appendChild(B.el('span', 'viz-legend__val',
+            (c.suite_title ? c.suite_title + ' · ' : '') + c.headline));
+          ul.appendChild(li);
+        });
+        lbox.appendChild(ul);
+      } else {
+        B.empty(lbox, 'No work recorded yet — deploy a department to start the record.');
+      }
+    }
+
+    B.attach({ board: 'workforce', render: render });
+  })();
+  </script>
   <script>
     (function () {
       function esc(s) {

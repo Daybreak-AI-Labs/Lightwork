@@ -312,6 +312,208 @@ async def workforce_posture(request: Request) -> dict:
     return out
 
 
+# ---- executive boards (Overview / Spend / Workforce) ------------------------
+# One JSON payload per board, windowed by ?days and owner-scoped exactly like
+# the pages that consume them. Timestamp columns (created/updated/started/
+# ended, cost, tokens) are plaintext and safe to aggregate in SQL; episode
+# ``outcome`` is encrypted at rest, so the outcome mix is counted in Python
+# over the decrypted recent slice.
+
+_BOARD_DAYS = (30, 90, 180, 365)
+
+
+def _board_days(days: int | None) -> int:
+    return days if days in _BOARD_DAYS else 90
+
+
+def _board_day_list(days: int):
+    from datetime import date, timedelta
+    today = date.today()
+    day_list = [today - timedelta(days=i) for i in range(days - 1, -1, -1)]
+    since = time.mktime(day_list[0].timetuple())
+    return day_list, since, since - days * 86400
+
+
+def _owner_sql(owner, column: str = "owner"):
+    """(extra WHERE clause, params) for goal-owner scoping."""
+    return ("", ()) if owner is None else (f" AND {column} = ?", (owner,))
+
+
+def _board_overview(w, owner, days: int) -> dict:
+    day_list, since, prev_since = _board_day_list(days)
+    own, params = _owner_sql(owner)
+    by_status = {r[0]: int(r[1]) for r in w.conn.execute(
+        "SELECT status, COUNT(*) FROM goals WHERE 1=1" + own + " GROUP BY status",
+        params).fetchall()}
+    daily = {d.isoformat(): {"d": d.isoformat(), "started": 0, "delivered": 0}
+             for d in day_list}
+    for col, key, extra in (("created_at", "started", ""),
+                            ("updated_at", "delivered", " AND status = 'done'")):
+        rows = w.conn.execute(
+            f"SELECT date({col}, 'unixepoch') AS day, COUNT(*) FROM goals "
+            f"WHERE {col} >= ?" + extra + own + " GROUP BY day",
+            (since, *params)).fetchall()
+        for day, n in rows:
+            if day in daily:
+                daily[day][key] += int(n)
+
+    def _count(col: str, lo: float, hi: float, extra: str = "") -> int:
+        return int(w.conn.execute(
+            f"SELECT COUNT(*) FROM goals WHERE {col} >= ? AND {col} < ?"
+            + extra + own, (lo, hi, *params)).fetchone()[0])
+
+    now = time.time()
+    window = {
+        "started": _count("created_at", since, now),
+        "delivered": _count("updated_at", since, now, " AND status = 'done'"),
+        "started_prev": _count("created_at", prev_since, since),
+        "delivered_prev": _count("updated_at", prev_since, since,
+                                 " AND status = 'done'"),
+    }
+    from maverick.departments import department_title
+    from maverick.domain import suite_for
+    domains: dict[str, dict] = {}
+    for dom, total, done in w.conn.execute(
+            "SELECT domain, COUNT(*), SUM(status = 'done') FROM goals "
+            "WHERE 1=1" + own + " GROUP BY domain", params).fetchall():
+        suite = suite_for(dom or "") if dom else None
+        label = department_title(suite) if suite else "General"
+        row = domains.setdefault(label, {"label": label, "total": 0, "done": 0})
+        row["total"] += int(total)
+        row["done"] += int(done or 0)
+    recent = [{"id": g.id, "title": g.title, "status": g.status,
+               "updated_at": g.updated_at}
+              for g in w.list_goals(owner=owner, limit=12, order="desc")]
+    return {
+        "totals": {
+            "total": sum(by_status.values()),
+            "active": by_status.get("active", 0),
+            "done": by_status.get("done", 0),
+            "blocked": by_status.get("blocked", 0),
+        },
+        "window": window,
+        "daily": list(daily.values()),
+        "domains": sorted(domains.values(),
+                          key=lambda r: r["total"], reverse=True)[:8],
+        "recent": recent,
+    }
+
+
+def _board_spend(w, owner, days: int) -> dict:
+    day_list, since, prev_since = _board_day_list(days)
+    join = ("FROM episodes e JOIN goals g ON e.goal_id = g.id"
+            if owner is not None else "FROM episodes e")
+    own, params = ("", ()) if owner is None else (" AND g.owner = ?", (owner,))
+    ended = " WHERE e.ended_at IS NOT NULL"
+
+    daily = {d.isoformat(): {"d": d.isoformat(), "cost": 0.0, "runs": 0}
+             for d in day_list}
+    for day, cost, runs in w.conn.execute(
+            "SELECT date(e.started_at, 'unixepoch') AS day, "
+            "SUM(COALESCE(e.cost_dollars, 0)), COUNT(*) " + join + ended +
+            " AND e.started_at >= ?" + own + " GROUP BY day",
+            (since, *params)).fetchall():
+        if day in daily:
+            daily[day] = {"d": day, "cost": float(cost or 0), "runs": int(runs)}
+
+    def _tot(lo: float) -> dict:
+        r = w.conn.execute(
+            "SELECT COALESCE(SUM(e.cost_dollars), 0), COUNT(*), "
+            "COALESCE(SUM(e.input_tokens), 0), COALESCE(SUM(e.output_tokens), 0), "
+            "COALESCE(SUM(e.tool_calls), 0) " + join + ended +
+            " AND e.started_at >= ? AND e.started_at < ?" + own,
+            (lo, lo + days * 86400 + 1, *params)).fetchone()
+        return {"dollars": float(r[0]), "runs": int(r[1]),
+                "input_tokens": int(r[2]), "output_tokens": int(r[3]),
+                "tool_calls": int(r[4])}
+
+    totals, prev = _tot(since), _tot(prev_since)
+    episodes = w.list_episodes(limit=200, owner=owner)
+    outcomes = {"success": 0, "failed": 0, "running": 0}
+    for e in episodes:
+        if e.started_at < since:
+            continue
+        if not e.outcome:
+            outcomes["running"] += 1
+        elif e.outcome == "success":
+            outcomes["success"] += 1
+        else:
+            outcomes["failed"] += 1
+    per_run = [{"id": e.id, "goal_id": e.goal_id,
+                "cost": float(e.cost_dollars or 0)}
+               for e in episodes[:60]]
+    top_goals = []
+    for gid, cost, runs in w.conn.execute(
+            "SELECT e.goal_id, SUM(COALESCE(e.cost_dollars, 0)) AS c, COUNT(*) "
+            + join + ended + " AND e.started_at >= ?" + own +
+            " GROUP BY e.goal_id ORDER BY c DESC LIMIT 8",
+            (since, *params)).fetchall():
+        g = w.get_goal(int(gid)) if gid is not None else None
+        top_goals.append({"goal_id": gid, "title": g.title if g else f"#{gid}",
+                          "cost": float(cost or 0), "runs": int(runs)})
+    return {"totals": totals, "prev": prev, "daily": list(daily.values()),
+            "outcomes": outcomes, "per_run": per_run, "top_goals": top_goals}
+
+
+def _board_workforce(w, owner, days: int) -> dict:
+    from maverick.departments import list_departments
+    from maverick.marketplace.storefront import connector_marketplace
+    from maverick.operating_record import assemble
+    from maverick.outcomes import firm_totals, worker_cards
+    _, since, prev_since = _board_day_list(days)
+    own, params = _owner_sql(owner)
+    firm = firm_totals(assemble(w, owner=owner)).to_dict()
+    cards = worker_cards(w, owner=owner)
+    depts: dict[str, dict] = {}
+    for c in cards:
+        row = depts.setdefault(c.suite_title or "General",
+                               {"label": c.suite_title or "General",
+                                "completed": 0, "total": 0, "spend": 0.0})
+        row["completed"] += c.goals_completed
+        row["total"] += c.goals_total
+        row["spend"] += c.spend_dollars
+
+    def _delivered(lo: float, hi: float) -> int:
+        return int(w.conn.execute(
+            "SELECT COUNT(*) FROM goals WHERE status = 'done' "
+            "AND updated_at >= ? AND updated_at < ?" + own,
+            (lo, hi, *params)).fetchone()[0])
+
+    return {
+        "kpis": {
+            "departments": len(depts),
+            "specialists": sum(d.headcount for d in list_departments()),
+            "connectors": connector_marketplace()["total"],
+            "goals_completed": firm["goals_completed"],
+            "goals_total": firm["goals_total"],
+            "spend_dollars": firm["spend_dollars"],
+            "delivered_window": _delivered(since, time.time()),
+            "delivered_prev": _delivered(prev_since, since),
+        },
+        "depts": sorted(depts.values(),
+                        key=lambda r: (r["completed"], r["total"]),
+                        reverse=True)[:8],
+        "leaders": [c.to_dict() for c in cards[:6]],
+    }
+
+
+@router.get("/dashboards/{board}")
+async def dashboard_board(request: Request, board: str,
+                          days: int | None = None) -> dict:
+    """Executive-board payload for the Overview / Spend / Workforce pages."""
+    require_permission(request, "view")
+    if board not in ("overview", "spend", "workforce"):
+        raise HTTPException(status_code=404, detail="unknown board")
+    w = _world()
+    owner = goal_owner_filter(request)
+    d = _board_days(days)
+    build = {"overview": _board_overview, "spend": _board_spend,
+             "workforce": _board_workforce}[board]
+    payload = build(w, owner, d)
+    payload.update({"board": board, "days": d, "generated_at": time.time()})
+    return payload
+
+
 @router.post("/admin/tenants", response_model=TenantOut, status_code=201)
 async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
     require_global_permission(request, "admin")
