@@ -1420,7 +1420,7 @@ def test_native_release_uses_locked_python_tools_and_preserves_wheel_bytes():
     assert "'pip==26.1.2'" in workflow
     assert "'pytest==9.1.1'" in workflow
     assert "'certifi==2026.7.22'" in workflow
-    assert "'cryptography==49.0.0'" in workflow
+    assert "'cryptography==50.0.0'" in workflow
     assert "maturin-version: v1.14.1" in workflow
     assert workflow.count('toolchain: "1.97.1"') == 4
     assert "jetli/wasm-pack-action@" not in workflow
