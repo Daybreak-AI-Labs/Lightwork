@@ -2,6 +2,8 @@
 {% block title %}Security &amp; GRC - Lightwork{% endblock %}
 {% block content %}
 <style>
+  /* The live board below supersedes the workspace chassis' static hero
+     tiles on this page; the shared include still renders them elsewhere. */
   .sec-links { display:flex; gap:var(--space-2); flex-wrap:wrap; margin:var(--space-3) 0; }
   .sec-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-4); }
   .sec-heat { display:flex; gap:var(--space-2); flex-wrap:wrap; margin-top:var(--space-3); }
@@ -69,6 +71,31 @@
   <a class="btn" href="/security/assurance">Model Risk &amp; AI Assurance</a>
   <a class="btn" href="/security/threats">Platform threat hunter</a>
   <a class="btn" href="/security/soc">Environment SOC hunter</a>
+</div>
+
+<div class="bd-toolbar">
+  <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
+    <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
+</div>
+
+<div class="bd-kpis" id="bd-kpis"></div>
+
+<div class="viz-grid">
+  <div class="panel viz-card viz-card--wide">
+    <h2>Assessment flow</h2>
+    <p class="viz-sub">Assessments opened vs decided per month over the last year. Hover for exact numbers.</p>
+    <div id="bd-flow"></div>
+  </div>
+  <div class="panel viz-card">
+    <h2>Residual risk</h2>
+    <p class="viz-sub">Where the record stands after treatment.</p>
+    <div id="bd-risk"></div>
+  </div>
+  <div class="panel viz-card viz-card--wide">
+    <h2>By framework</h2>
+    <p class="viz-sub">Approved against total, per assessment type.</p>
+    <div id="bd-frameworks"></div>
+  </div>
 </div>
 
 {% include "_workspace_worklist.html" %}
@@ -677,6 +704,71 @@
       } catch (error) { status.textContent = error.message; }
     });
   });
+})();
+</script>
+<script src="/static/board.js"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.LWBoard;
+  var EMPTY = 'No security assessments yet — run one from the workspace below.';
+
+  function render(D) {
+    var k = document.getElementById('bd-kpis');
+    k.textContent = '';
+    k.appendChild(B.kpi({ label: 'Assessments', value: D.kpis.total,
+      sub: 'on the security record' }));
+    k.appendChild(B.kpi({ label: 'Open', value: D.kpis.open,
+      sub: D.kpis.needs_more + ' awaiting answers' }));
+    k.appendChild(B.kpi({ label: 'Approved', value: D.kpis.approved,
+      sparkCls: 'ok', sub: D.kpis.rejected + ' rejected' }));
+    k.appendChild(B.kpi({ label: 'Due for re-review', value: D.kpis.due_review,
+      sub: D.kpis.due_review ? 'cadence has come around' : 'nothing due' }));
+
+    if (D.kpis.total) {
+      B.area(document.getElementById('bd-flow'), {
+        data: D.monthly,
+        x: 'd',
+        series: [{ key: 'opened', label: 'Opened', cls: 'brand' },
+                 { key: 'decided', label: 'Decided', cls: 'ok' }],
+        aria: 'Assessments opened vs decided per month over the last year.',
+        tipHead: function (r) { return r.d; },
+        xTick: function (r, i, n) { return i % 2 === 0 ? r.d.slice(2) : ''; } });
+    } else {
+      B.empty(document.getElementById('bd-flow'), EMPTY);
+    }
+
+    B.donut(document.getElementById('bd-risk'), {
+      segments: [
+        { label: 'High', value: D.risk.high, cls: 'danger' },
+        { label: 'Medium', value: D.risk.medium, cls: 'warn' },
+        { label: 'Low', value: D.risk.low, cls: 'info' },
+        { label: 'Minimal', value: D.risk.minimal, cls: 'ok' },
+        { label: 'Unrated', value: D.risk.unrated, cls: 'idle' }],
+      center: D.kpis.total, centerSub: 'assessments',
+      aria: 'Residual risk: ' + D.risk.high + ' high, ' + D.risk.medium +
+            ' medium, ' + D.risk.low + ' low, ' + D.risk.minimal +
+            ' minimal, ' + D.risk.unrated + ' unrated.' });
+
+    var rows = D.types || [];
+    var tmax = 1;
+    rows.forEach(function (r) { tmax = Math.max(tmax, r.total); });
+    if (rows.length) {
+      B.hbars(document.getElementById('bd-frameworks'),
+        rows.map(function (r) {
+          return { label: r.label,
+                   value_text: r.approved + ' of ' + r.total,
+                   pct: r.approved / tmax * 100,
+                   pct_bg: r.total / tmax * 100,
+                   title: r.label + ' — ' + r.approved + ' approved of ' +
+                          r.total };
+        }), 'Assessments by framework: approved against total.');
+    } else {
+      B.empty(document.getElementById('bd-frameworks'), EMPTY);
+    }
+  }
+
+  B.attach({ board: 'security', render: render });
 })();
 </script>
 {% endblock %}

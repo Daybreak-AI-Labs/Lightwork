@@ -30,26 +30,29 @@
                    this server.') }}
   {% endcall %}
 
-  <div class="grid">
-    <div class="stat">
-      {% if halted %}
-      <div class="num" style="color: var(--danger);"><strong>HALTED</strong></div>
-      {% else %}
-      <div class="num">Running</div>
-      {% endif %}
-      <div class="label">Killswitch</div>
+  <div class="bd-toolbar">
+    <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
+      <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
+    <div class="bd-slicer" role="group" aria-label="Time range">
+      <button type="button" data-days="30" aria-pressed="false">30d</button>
+      <button type="button" data-days="90" class="on" aria-pressed="true">90d</button>
+      <button type="button" data-days="180" aria-pressed="false">180d</button>
+      <button type="button" data-days="365" aria-pressed="false">1y</button>
     </div>
-    <div class="stat">
-      <div class="num">{{ active }}</div>
-      <div class="label">Active agents</div>
+  </div>
+
+  <div class="bd-kpis" id="bd-kpis"></div>
+
+  <div class="viz-grid">
+    <div class="panel viz-card viz-card--wide">
+      <h2>Interventions over time</h2>
+      <p class="viz-sub">Guardrail actions through the window (weekly at longer ranges). Hover for the count.</p>
+      <div id="bd-interventions"></div>
     </div>
-    <div class="stat">
-      <div class="num"><a href="/approvals" style="color: inherit; text-decoration: none;">{{ pending }}</a></div>
-      <div class="label">Pending approvals</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ total }}</div>
-      <div class="label">Interventions {% if ranged %}({{ since or '…' }} → {{ until or '…' }}){% elif day %}({{ day }}){% else %}(today){% endif %}</div>
+    <div class="panel viz-card">
+      <h2>What fired</h2>
+      <p class="viz-sub">Which guardrails stepped in, busiest first.</p>
+      <div id="bd-fired"></div>
     </div>
   </div>
 
@@ -178,6 +181,20 @@
   </div>
 
   <div class="section-head" style="margin-top: var(--space-5);"><h2>Recent interventions</h2></div>
+  <div class="grid">
+    <div class="stat">
+      {% if halted %}
+      <div class="num" style="color: var(--danger);"><strong>HALTED</strong></div>
+      {% else %}
+      <div class="num">Running</div>
+      {% endif %}
+      <div class="label">Killswitch</div>
+    </div>
+    <div class="stat">
+      <div class="num">{{ total }}</div>
+      <div class="label">Interventions {% if ranged %}({{ since or '…' }} → {{ until or '…' }}){% elif day %}({{ day }}){% else %}(today){% endif %}</div>
+    </div>
+  </div>
   <details class="panel" style="margin-bottom: var(--space-3);"{% if ranged or day %} open{% endif %}>
     <summary style="cursor: pointer; color: var(--muted); font-size: var(--text-sm);">
       ⧉ Filter window{% if ranged %} — {{ since or '…' }} → {{ until or '…' }}{% elif day %} — {{ day }}{% else %} — today{% endif %}
@@ -231,4 +248,60 @@
       </p>
     {% endif %}
   </div>
+
+  <script src="/static/board.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var B = window.LWBoard;
+
+    function render(D) {
+      var k = document.getElementById('bd-kpis');
+      k.textContent = '';
+      k.appendChild(B.kpi({ label: 'Interventions', value: D.interventions,
+        spark: D.daily.map(function (r) { return r.n; }),
+        sub: 'guardrail actions, last ' + D.days + ' days' }));
+      k.appendChild(B.kpi({ label: 'Pending approvals', value: D.pending_approvals,
+        sub: D.pending_approvals ? 'waiting on a human' : 'queue clear' }));
+      k.appendChild(B.kpi({ label: 'Kill switch', value: D.halted ? 1 : 0,
+        format: function () { return D.halted ? 'HALTED' : 'clear'; },
+        sub: D.halted ? 'the fleet is stopped' : 'fleet running normally' }));
+      k.appendChild(B.kpi({ label: 'Guardrail kinds', value: D.by_kind.length,
+        sub: 'distinct controls that fired' }));
+
+      if (D.interventions) {
+        var weekly = D.days > 60;
+        B.area(document.getElementById('bd-interventions'), {
+          data: weekly ? B.bucketWeekly(D.daily, ['n']) : D.daily,
+          x: 'd',
+          series: [{ key: 'n', label: 'Interventions', cls: 'brand' }],
+          aria: 'Guardrail interventions per ' + (weekly ? 'week' : 'day') +
+                ' over the last ' + D.days + ' days.',
+          tipHead: function (r) { return (weekly ? 'Week of ' : '') + r.d; },
+          xTick: function (r, i, n) {
+            return i % Math.ceil(n / 8) === 0 ? r.d.slice(5) : '';
+          } });
+      } else {
+        B.empty(document.getElementById('bd-interventions'),
+          'No guardrail interventions in this window — nothing needed stopping.');
+      }
+
+      if (D.by_kind.length) {
+        var kmax = 1;
+        D.by_kind.forEach(function (r) { kmax = Math.max(kmax, r.n); });
+        B.hbars(document.getElementById('bd-fired'),
+          D.by_kind.map(function (r) {
+            return { label: r.kind, value_text: B.fmt(r.n),
+                     pct: r.n / kmax * 100,
+                     title: r.kind + ' — ' + B.fmt(r.n) + ' intervention(s)' };
+          }), 'Guardrail interventions by kind in this window.');
+      } else {
+        B.empty(document.getElementById('bd-fired'),
+          'No guardrail interventions in this window — nothing needed stopping.');
+      }
+    }
+
+    B.attach({ board: 'oversight', render: render });
+  })();
+  </script>
 {% endblock %}

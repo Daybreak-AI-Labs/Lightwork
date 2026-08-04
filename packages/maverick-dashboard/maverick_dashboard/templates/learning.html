@@ -39,26 +39,25 @@
 {% endcall %}
 
 <div class="lrn">
-  <section aria-labelledby="lrn-acc-h">
-    <div class="section-head"><h2 id="lrn-acc-h">What your workforce has accumulated</h2></div>
-    <p class="lrn__section-sub">Read-only, from your Operating Record and learning stores — scoped to you.</p>
-    <div class="grid">
-      <div class="stat"><div class="num">{{ snap.components_on }} / {{ snap.components_total }}</div><div class="label">learning systems on</div></div>
-      <div class="stat"><div class="num">{{ snap.accumulated.decisions }}</div><div class="label">decisions recorded</div></div>
-      <div class="stat"><div class="num">{{ snap.accumulated.human_decisions }}</div><div class="label">human judgements</div></div>
-      <div class="stat"><div class="num">{{ snap.accumulated.approvals }}</div><div class="label">approvals on record</div></div>
-      {% if 'grounded_outcomes' in snap.accumulated %}
-      <div class="stat"><div class="num">{{ snap.accumulated.grounded_outcomes }}</div><div class="label">grounded outcomes learned</div></div>
-      {% endif %}
-      {% if 'learned_capabilities' in snap.accumulated %}
-      <div class="stat"><div class="num">{{ snap.accumulated.learned_capabilities }}</div><div class="label">capabilities self-taught</div></div>
-      {% endif %}
-      {% if 'flow_self_improvements' in snap.accumulated %}
-      <div class="stat"><div class="num">{{ snap.accumulated.flow_self_improvements }}</div><div class="label">workflow self-improvements</div></div>
-      {% endif %}
-      <div class="stat"><div class="num">{{ snap.accumulated.departments }}</div><div class="label">departments active</div></div>
+  <div class="bd-toolbar">
+    <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
+      <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
+  </div>
+
+  <div class="bd-kpis" id="bd-kpis"></div>
+
+  <div class="viz-grid">
+    <div class="panel viz-card">
+      <h2>Systems</h2>
+      <p class="viz-sub">Learning systems on vs off — switch each one below.</p>
+      <div id="bd-systems"></div>
     </div>
-  </section>
+    <div class="panel viz-card viz-card--wide">
+      <h2>Accumulated judgement</h2>
+      <p class="viz-sub">Read-only, from your Operating Record and learning stores — scoped to you.</p>
+      <div id="bd-acc"></div>
+    </div>
+  </div>
 
   <div class="lrn__moat">
     <strong>{{ snap.components_on }} of {{ snap.components_total }} learning systems are on.</strong>
@@ -363,4 +362,59 @@
   </section>
   {% endif %}
 </div>
+
+<script src="/static/board.js"></script>
+<script>
+(function () {
+  'use strict';
+  var B = window.LWBoard;
+
+  function render(D) {
+    var acc = D.accumulated || {};
+    var learned = acc.learned_capabilities || 0;
+    var grounded = acc.grounded_outcomes || 0;
+
+    var k = document.getElementById('bd-kpis');
+    k.textContent = '';
+    k.appendChild(B.kpi({ label: 'Learning systems on', value: D.components_on,
+      sub: 'of ' + D.components_total + ' systems' }));
+    k.appendChild(B.kpi({ label: 'Decisions recorded', value: acc.decisions }));
+    k.appendChild(B.kpi({ label: 'Human decisions', value: acc.human_decisions,
+      sub: 'approvals: ' + B.fmt(acc.approvals) }));
+    k.appendChild(B.kpi({ label: 'Learned capabilities', value: learned,
+      sub: B.fmt(grounded) + ' grounded outcomes' }));
+
+    B.donut(document.getElementById('bd-systems'), {
+      segments: [
+        { label: 'On', value: D.components_on, cls: 'ok' },
+        { label: 'Off', value: D.components_total - D.components_on,
+          cls: 'idle' }],
+      center: D.components_on,
+      centerSub: 'of ' + D.components_total,
+      aria: 'Learning systems: ' + D.components_on + ' on of ' +
+            D.components_total + ' total.' });
+
+    var rows = [
+      { label: 'Decisions', value: acc.decisions || 0 },
+      { label: 'Human decisions', value: acc.human_decisions || 0 },
+      { label: 'Approvals', value: acc.approvals || 0 },
+      { label: 'Learned capabilities', value: learned },
+      { label: 'Grounded outcomes', value: grounded }];
+    if ((acc.flow_self_improvements || 0) > 0) {
+      rows.push({ label: 'Flow self-improvements',
+                  value: acc.flow_self_improvements, cls: 'info' });
+    }
+    var max = 1;
+    rows.forEach(function (r) { max = Math.max(max, r.value); });
+    B.hbars(document.getElementById('bd-acc'),
+      rows.map(function (r) {
+        return { label: r.label, value_text: B.fmt(r.value),
+                 pct: r.value / max * 100, cls: r.cls,
+                 title: r.label + ' — ' + B.fmt(r.value) };
+      }), 'What the workforce has accumulated, scaled to the largest count.');
+  }
+
+  B.attach({ board: 'learning', endpoint: '/api/v1/learning', render: render });
+})();
+</script>
 {% endblock %}

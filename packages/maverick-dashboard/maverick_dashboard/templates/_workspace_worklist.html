@@ -1,11 +1,10 @@
-{# Department-workspace chassis, top half: hero stats + the assessment
-   worklist. One chassis serves every department workspace (Privacy, Finance,
-   ...); the page passes `sessions`, `stats`, and (optionally) privacy's
-   `records` for its two extra hero stats. Pair with
-   _workspace_memory_catalog.html, which carries the bottom half + JS. #}
+{# Department-workspace chassis, top half: the assessment worklist. One
+   chassis serves every department workspace (Privacy, Finance, ...); the page
+   passes `sessions` and `stats`. The old hero stat tiles moved into each
+   page's live executive board (GET /api/v1/dashboards/{department}). Pair
+   with _workspace_memory_catalog.html, which carries the bottom half + JS. #}
 <style>
   /* Department workspace — the module view over assessment records. */
-  .pw-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: var(--space-4); margin-bottom: var(--space-5); }
   .pw-filters { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
   .pw-risk { white-space: nowrap; }
   .pw-risk .badge + .badge { margin-inline-start: 4px; }
@@ -20,52 +19,6 @@
   .pw-review-btn:hover { background: var(--brand-hi); }
 </style>
 
-  <div class="pw-hero">
-    <div class="stat">
-      <div class="num">{{ stats.total }}</div>
-      <div class="label">assessments</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ stats.pending }}</div>
-      <div class="label">awaiting review</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ stats.needs_more }}</div>
-      <div class="label">awaiting answers</div>
-    </div>
-    <div class="stat">
-      <div class="num {{ 'pw-age-warn' if stats.high_residual }}">{{ stats.high_residual }}</div>
-      <div class="label">high residual risk</div>
-    </div>
-    <div class="stat">
-      <div class="num {{ 'pw-age-warn' if stats.review_due }}">{{ stats.review_due }}</div>
-      <div class="label">due for re-review</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ stats.oldest_open_days if stats.oldest_open_days is not none else '—' }}{{ 'd' if stats.oldest_open_days is not none }}</div>
-      <div class="label">oldest open item</div>
-    </div>
-    {% if records is defined and records.enabled and records.kind == 'privacy' %}
-    <div class="stat">
-      <div class="num {{ 'pw-age-warn' if records.dsar_overdue }}">{{ records.dsar_open }}</div>
-      <div class="label">open DSARs</div>
-    </div>
-    <div class="stat">
-      <div class="num">{{ records.ropa | length }}</div>
-      <div class="label">Art. 30 entries</div>
-    </div>
-    {% elif records is defined and records.enabled and records.kind == 'security' %}
-    <div class="stat">
-      <div class="num">{{ records.controls | length }}</div>
-      <div class="label">controls in register</div>
-    </div>
-    <div class="stat">
-      {% set open_poam = records.poams | rejectattr('status', 'in', ('closed','complete','accepted')) | list %}
-      <div class="num {{ 'pw-age-warn' if open_poam }}">{{ open_poam | length }}</div>
-      <div class="label">open POA&amp;M items</div>
-    </div>
-    {% endif %}
-  </div>
 
   <div class="section-head"><h2>Worklist</h2></div>
   <div class="panel">

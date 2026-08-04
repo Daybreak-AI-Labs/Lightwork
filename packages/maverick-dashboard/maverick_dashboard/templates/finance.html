@@ -6,6 +6,9 @@
     .fin-scroll { overflow-x:auto; }
     .fin-caveat { border-inline-start:3px solid var(--warn); padding-inline-start:var(--space-3); }
     .fin-digest { display:inline-block; max-width:18rem; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; }
+    /* The static stat tiles live in the shared worklist chassis
+       (_workspace_worklist.html, also used by /security); on this page the
+       live board below the hero carries those numbers, so hide the tiles. */
   </style>
   {% from "_hero.html" import hero, state %}
   {% call hero('Governed workspaces', 'Finance',
@@ -24,6 +27,32 @@
                    re-review: ' ~ stats.review_due ~ ' · awaiting answers: '
                    ~ stats.needs_more) }}
   {% endcall %}
+
+  <div class="bd-toolbar">
+    <span class="bd-live"><span class="dot" aria-hidden="true"></span>Live
+      <span class="bd-stamp" id="bd-stamp" role="status" aria-live="off">loading…</span></span>
+  </div>
+
+  <div class="bd-kpis" id="bd-kpis"></div>
+
+  <div class="viz-grid">
+    <div class="panel viz-card viz-card--wide">
+      <h2>Assessment flow</h2>
+      <p class="viz-sub">Assessments opened vs decided, month by month over the
+        last year.</p>
+      <div id="bd-flow"></div>
+    </div>
+    <div class="panel viz-card">
+      <h2>Residual risk</h2>
+      <p class="viz-sub">Every assessment on record, by residual rating.</p>
+      <div id="bd-risk"></div>
+    </div>
+    <div class="panel viz-card viz-card--wide">
+      <h2>By framework</h2>
+      <p class="viz-sub">Approved against total volume, per assessment type.</p>
+      <div id="bd-types"></div>
+    </div>
+  </div>
 
   <div class="section-head"><h2>Licenses &amp; renewals</h2></div>
   <div class="panel">
@@ -229,4 +258,66 @@
   {% endif %}
 
   {% include "_workspace_memory_catalog.html" %}
+
+  <script src="/static/board.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var B = window.LWBoard;
+    var EMPTY = 'No assessments on this record yet — start one from the worklist below.';
+
+    function render(D) {
+      var k = document.getElementById('bd-kpis');
+      k.textContent = '';
+      k.appendChild(B.kpi({ label: 'On the record', value: D.kpis.total,
+        sub: 'assessments in this workspace' }));
+      k.appendChild(B.kpi({ label: 'Open', value: D.kpis.open,
+        sub: D.kpis.needs_more + ' awaiting answers' }));
+      k.appendChild(B.kpi({ label: 'Approved', value: D.kpis.approved,
+        sub: D.kpis.rejected + ' rejected' }));
+      k.appendChild(B.kpi({ label: 'Due for re-review', value: D.kpis.due_review,
+        sub: D.kpis.due_review ? 'cadence has come around' : 'nothing due' }));
+
+      if (D.kpis.total) {
+        B.area(document.getElementById('bd-flow'), {
+          data: D.monthly,
+          x: 'd',
+          series: [{ key: 'opened', label: 'Opened', cls: 'brand' },
+                   { key: 'decided', label: 'Decided', cls: 'ok' }],
+          aria: 'Assessments opened vs decided per month over the last year.',
+          tipHead: function (r) { return r.d; },
+          xTick: function (r, i) { return i % 2 === 0 ? r.d.slice(2) : ''; } });
+        B.donut(document.getElementById('bd-risk'), {
+          segments: [
+            { label: 'High', value: D.risk.high, cls: 'danger' },
+            { label: 'Medium', value: D.risk.medium, cls: 'warn' },
+            { label: 'Low', value: D.risk.low, cls: 'info' },
+            { label: 'Minimal', value: D.risk.minimal, cls: 'ok' },
+            { label: 'Unrated', value: D.risk.unrated, cls: 'idle' }],
+          center: D.kpis.total, centerSub: 'assessments',
+          aria: 'Residual risk: ' + D.risk.high + ' high, ' + D.risk.medium +
+                ' medium, ' + D.risk.low + ' low, ' + D.risk.minimal +
+                ' minimal, ' + D.risk.unrated + ' unrated.' });
+      } else {
+        B.empty(document.getElementById('bd-flow'), EMPTY);
+        B.empty(document.getElementById('bd-risk'), EMPTY);
+      }
+
+      var tmax = 1;
+      (D.types || []).forEach(function (r) { tmax = Math.max(tmax, r.total); });
+      if ((D.types || []).length) {
+        B.hbars(document.getElementById('bd-types'),
+          D.types.map(function (r) {
+            return { label: r.label, value_text: r.approved + ' of ' + r.total,
+                     pct: r.approved / tmax * 100, pct_bg: r.total / tmax * 100,
+                     title: r.label + ' — ' + r.approved + ' approved of ' + r.total };
+          }), 'Assessments by framework: approved against total volume.');
+      } else {
+        B.empty(document.getElementById('bd-types'), EMPTY);
+      }
+    }
+
+    B.attach({ board: 'finance', render: render });
+  })();
+  </script>
 {% endblock %}

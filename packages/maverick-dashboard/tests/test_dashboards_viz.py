@@ -79,7 +79,8 @@ def test_board_days_clamped_and_unknown_board_404(monkeypatch, tmp_path):
 def test_board_payloads_survive_empty_world(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
-    for board in ("overview", "spend", "workforce"):
+    for board in ("overview", "spend", "workforce", "savings", "oversight",
+                  "privacy", "finance", "security"):
         r = c.get(f"/api/v1/dashboards/{board}")
         assert r.status_code == 200, board
         assert r.json()["days"] == 90

@@ -406,15 +406,21 @@ window.LWBoard = (function () {
   }
 
   // ---- board shell ---------------------------------------------------------
-  // cfg: {board, root, render(D)} — wires the slicer, stamp, fetch, refresh.
+  // cfg: {board, render(D), endpoint?} — wires the slicer (when the page has
+  // one), stamp, fetch, and the 60s visible-tab refresh. `endpoint` overrides
+  // the default board API for pages whose payload already exists elsewhere.
   function attach(cfg) {
     var days = 90;
     var stampEl = document.getElementById('bd-stamp');
     function stamp(msg) {
       if (stampEl) stampEl.textContent = msg;
     }
+    function url() {
+      if (cfg.endpoint) return cfg.endpoint;
+      return '/api/v1/dashboards/' + cfg.board + '?days=' + days;
+    }
     function load() {
-      fetch('/api/v1/dashboards/' + cfg.board + '?days=' + days)
+      fetch(url())
         .then(function (r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.json();
