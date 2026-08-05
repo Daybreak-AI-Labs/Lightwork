@@ -56,7 +56,20 @@ same assessment is in the reviewer's worklist with risk ratings and follow-up
 questions. Approve it live. Then open **Oversight**: every guardrail action
 is on the record, and the kill switch is one click.
 
-**Beat 6 — the receipts.** Finish on the Privacy **command center** board
+**Beat 6 — govern the agents you already have.** Stay in Lightwork and open
+**External agents** (`/external-agents`). The roster shows `sf-quotebot` — a
+Salesforce Agentforce quoting agent the sales team already runs. Lightwork
+doesn't orchestrate it; it governs it: an owner, a department, tool ceilings,
+and a $250/month budget with spend metered against it. Click through to the
+scorecard: two weeks of quoting runs on the same Operating Record as the
+native workforce, one honest failure included. Then open **Approvals**
+(`/approvals`) — the contract it asked to send is parked there, labeled
+**external agent · BYOA gateway**, waiting on a human. **Workforce**
+(`/workforce`) tells the same story: an External agents segment right beside
+the native departments. The point: keep Agentforce, keep Copilot — Lightwork
+is the governance layer over all of them.
+
+**Beat 7 — the receipts.** Finish on the Privacy **command center** board
 (`/privacy/board`) and **Savings**: a year of opened-vs-decided flow,
 residual-risk mix, first-pass acceptance trending up, and dollars saved
 computed from the client's own cost assumptions — never invented numbers.
@@ -69,6 +82,8 @@ computed from the client's own cost assumptions — never invented numbers.
   the runtime, not by policy documents."
 - "This filed into a OneTrust-shaped system today. It files into *your*
   OneTrust the same way."
+- "You don't have to fire the agents you already hired. Agentforce keeps
+  running — Lightwork is what makes it governable."
 
 ## If something looks wrong mid-pitch
 
