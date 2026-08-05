@@ -85,6 +85,10 @@ Agent-facing calls send `Authorization: Bearer <rest token>`.
 OpenAPI 3.0 description of the three agent-facing endpoints — it drops
 directly into Agentforce External Services and Bedrock action groups.
 
+For hand-rolled runtimes, the [external agent
+quickstart](clients/external-agent-quickstart.md) ships copy-paste Python and
+TypeScript helpers for the screen-then-act, report-after loop.
+
 ### Salesforce Agentforce
 
 1. **Credential** — Setup → Named Credentials: create an External Credential
