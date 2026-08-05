@@ -44,10 +44,12 @@ On the **/external-agents** dashboard page (admin permission), enroll with:
 | `agent_id` | Stable identifier; becomes principal `agent:<id>` on the record |
 | `platform` | `agentforce` · `bedrock` · `copilot` · `openai` · `langchain` · `custom` — provenance, not a behavior switch |
 | `description` / `owner` / `department` | Ownership metadata; `department` is the default domain for ingested runs |
-| `allow_tools` / `deny_tools` | Tool ceiling checked at screen time |
+| `allow_tools` / `deny_tools` | Tool ceiling checked at screen time. An allow entry may carry **your** risk rating as `name:risk` (e.g. `send_contract:high`) — it floors whatever the agent later declares, so a foreign tool cannot under-declare its way beneath a gate |
 | `max_risk` | Risk ceiling (`low` / `medium` / `high`) |
-| `max_dollars` | **Cumulative** spend ceiling across all reported runs |
-| `max_wall_seconds`, `data_scopes` | Wall-clock ceiling; memory domains it may touch |
+| `max_dollars` | Spend ceiling for reported runs, metered per `budget_period` |
+| `budget_period` | `monthly` (default — the meter resets each calendar month, UTC) or `total` (lifetime cap) |
+| `max_wall_seconds` | Wall-clock ceiling: a reported `duration_seconds` above it is still ingested (spend is never uncounted) but flagged and counted on the roster |
+| `data_scopes` | Memory domains it may touch |
 | `expires_days` | Trust entry expiry; expired agents are denied until re-enrolled |
 
 One enrollment writes the Agent Trust entry (direction `inbound` — the agent
@@ -236,14 +238,36 @@ are kept.
 
 ## Budget semantics
 
-`max_dollars` is a **cumulative** ceiling, not per-run. Every ingested run
-adds its `cost_dollars` to the agent's reported-spend meter; the ingest
-response flags `over_budget: true` once the meter crosses the ceiling. From
-then on **screening denies with rule `budget`** — the agent is refused
-further actions rather than silently accumulating spend. Run ingest itself
-stays open (accounting never stops, so spend is never uncounted). To lift
-the cutoff, re-enroll with a higher `max_dollars` — the meter is preserved,
-only the ceiling changes.
+`max_dollars` is a ceiling on **reported spend, per budget period** — not
+per-run. Under the default `monthly` period the meter resets each calendar
+month (UTC); under `total` it is a lifetime cap. Every ingested run adds its
+`cost_dollars` to the meter; the ingest response flags `over_budget: true`
+once it crosses the ceiling, and from then on **screening denies with rule
+`budget`** — the agent is refused further actions rather than silently
+accumulating spend. Run ingest itself stays open (accounting never stops,
+so spend is never uncounted). To lift the cutoff early, either re-enroll
+with a higher `max_dollars` or use **Reset budget** on the console (`POST
+/api/v1/external-agents/{id}/reset-budget`, audited) — lifetime totals are
+always preserved.
+
+## Retries, rate limits, and containment
+
+- **Idempotent ingest** — send a stable `idempotency_key` per logical run
+  and a retried `POST /runs` returns the original record (`duplicate:
+  true`) instead of double-counting spend. Keys are per-agent; keep them
+  under 128 characters.
+- **Rate limits** — per agent, per minute: `screen` 120, `runs` 60,
+  `approvals` 120 (the schema route is per-address, 30). Exceeding one
+  returns `429` with `Retry-After: 60`; back off and retry.
+- **Auto-containment** — repeated *misbehavior* denials (ceiling breaches,
+  budget, blocked payloads; 5 within 24 hours) flip the agent to
+  **contained**: every call is refused with rule `contained` until an
+  administrator presses **Release** on the console (`POST
+  /api/v1/external-agents/{id}/release`). Approval-floor parks and
+  platform-side scanner errors never count toward containment. Containment,
+  release, and budget resets are all audited
+  (`external_agent_contained` / `external_agent_released` /
+  `external_budget_reset`).
 
 ## Fail-closed notes
 
@@ -273,8 +297,10 @@ The external boundary fails closed throughout:
 | rule `revoked` | Trust entry revoked | Re-enroll (or clear the revocation) and mint a fresh token |
 | rule `expired` | Past `expires_at` | Re-enroll with a new expiry |
 | rule `direction` | Entry is not inbound | Enrollments are inbound-only; fix hand-edited trust entries |
-| rule `capability` | Tool denied or risk above `max_risk` | Adjust `allow_tools`/`deny_tools` or the risk ceiling |
-| rule `budget` | Cumulative reported spend exceeds `max_dollars` | Re-enroll with a higher ceiling (deliberate raise, audited) |
+| rule `capability` | Tool denied, or risk (after your `name:risk` floor) above `max_risk` | Adjust `allow_tools`/`deny_tools` or the risk ceiling |
+| rule `budget` | Period spend exceeds `max_dollars` | Wait for the monthly reset, **Reset budget** on the console, or re-enroll with a higher ceiling (all audited) |
 | rule `shield` | `detail` blocked by the input screen | Inspect the detail text; strip secrets/injection content |
-| rule `screen_error` | Shield scanner errored — fail-closed deny | Check the shield install and logs, then retry |
+| rule `screen_error` | Shield scanner errored — fail-closed deny (does not count toward containment) | Check the shield install and logs, then retry |
 | rule `approval_required` | Not an error — risk at/above the `[actions] require_approval_at` floor | Poll `GET /api/v1/external/approvals/{approval_id}` until a human decides |
+| rule `contained` | Repeated denials tripped auto-containment | An admin reviews and presses **Release** on /external-agents |
+| `429` | Per-agent rate limit | Honor `Retry-After`; batch reports or slow the loop |

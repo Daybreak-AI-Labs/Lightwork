@@ -218,3 +218,88 @@ def test_status_counts():
     s = xa.status()
     assert s["enrolled"] == 2 and s["active"] == 2
     assert s["platforms"] == ["agentforce", "bedrock"]
+
+
+def test_idempotent_run_ingest_never_double_counts():
+    _enroll()
+    run = {"title": "Quote A", "outcome": "success", "summary": "s",
+           "cost_dollars": 1.0, "idempotency_key": "run-001"}
+    first = xa.record_run("sf-quotebot", run)
+    replay = xa.record_run("sf-quotebot", run)
+    assert replay["goal_id"] == first["goal_id"]
+    assert replay["duplicate"] is True
+    row = xa.roster()[0]
+    assert row["runs"] == 1
+    assert row["spent_dollars"] == pytest.approx(1.0)
+    # A different key is a different run.
+    other = xa.record_run("sf-quotebot", dict(run, idempotency_key="run-002"))
+    assert other["goal_id"] != first["goal_id"]
+
+
+def test_operator_tool_risk_floors_the_declared_risk():
+    _enroll(max_risk="high",
+            allow_tools=["crm_update:low", "send_contract:high", "research"])
+    # The operator rated send_contract high: declaring low cannot dodge the
+    # approval floor.
+    verdict = xa.screen("sf-quotebot", "send_contract", risk="low")
+    assert verdict["rule"] == "approval_required"
+    assert verdict["requires_approval"] is True
+    # Unrated tools keep the declared risk.
+    assert xa.screen("sf-quotebot", "research", risk="low")["rule"] == "allow"
+    # A rated tool above the agent's ceiling is denied outright.
+    xa.enroll("low-bot", "bedrock", max_risk="low",
+              allow_tools=["send_contract:high"])
+    assert xa.screen("low-bot", "send_contract",
+                     risk="low")["rule"] == "capability"
+    with pytest.raises(xa.ExternalAgentsError, match="unknown risk"):
+        xa.enroll("bad-bot", "bedrock", allow_tools=["x:apocalyptic"])
+
+
+def test_monthly_budget_rolls_over_and_resets():
+    _enroll(max_dollars=2.0)   # monthly by default
+    xa.record_run("sf-quotebot", {"title": "Big", "outcome": "success",
+                                  "summary": "s", "cost_dollars": 3.0})
+    assert xa.screen("sf-quotebot", "research", risk="low")["rule"] == "budget"
+    # The calendar month rolls: the meter starts fresh, lifetime is kept.
+    with xa._sidecar_locked():
+        sidecar = xa._load_sidecar()
+        sidecar["sf-quotebot"]["period_key"] = "2020-01"
+        xa._save_sidecar(sidecar)
+    assert xa.screen("sf-quotebot", "research", risk="low")["rule"] == "allow"
+    assert xa.roster()[0]["spent_dollars"] == pytest.approx(3.0)
+    # Admin reset clears the flag and meter explicitly.
+    xa.record_run("sf-quotebot", {"title": "Big2", "outcome": "success",
+                                  "summary": "s", "cost_dollars": 3.0})
+    assert xa.screen("sf-quotebot", "research", risk="low")["rule"] == "budget"
+    assert xa.reset_budget("sf-quotebot", reset_by="admin") is True
+    assert xa.screen("sf-quotebot", "research", risk="low")["rule"] == "allow"
+    assert xa.reset_budget("ghost") is False
+
+
+def test_wall_clock_violations_are_flagged_and_counted():
+    _enroll(max_wall_seconds=600)
+    out = xa.record_run("sf-quotebot", {
+        "title": "Slow run", "outcome": "success", "summary": "s",
+        "duration_seconds": 900})
+    assert out["over_wall"] is True
+    ok = xa.record_run("sf-quotebot", {
+        "title": "Fast run", "outcome": "success", "summary": "s",
+        "duration_seconds": 30})
+    assert ok["over_wall"] is False
+    assert xa.roster()[0]["wall_violations"] == 1
+
+
+def test_repeated_denials_auto_contain_until_released():
+    _enroll(max_risk="medium")
+    for _ in range(5):
+        out = xa.screen("sf-quotebot", "wire_transfer", risk="high")
+    assert out["rule"] == "capability"
+    verdict = xa.screen("sf-quotebot", "research", risk="low")
+    assert verdict["allowed"] is False and verdict["rule"] == "contained"
+    with pytest.raises(xa.ExternalAgentsError, match="contained"):
+        xa.record_run("sf-quotebot", {"title": "x", "outcome": "success",
+                                      "summary": "y"})
+    assert xa.roster()[0]["contained"] is True
+    assert xa.release("sf-quotebot", released_by="admin") is True
+    assert xa.screen("sf-quotebot", "research", risk="low")["rule"] == "allow"
+    assert xa.release("ghost") is False

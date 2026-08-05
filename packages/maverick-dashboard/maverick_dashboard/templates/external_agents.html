@@ -40,20 +40,28 @@
           <td>{{ a.department or '—' }}</td>
           <td>{{ a.max_risk or '—' }}</td>
           <td>
-            ${{ '%.2f' | format(a.spent_dollars) }}{% if a.max_dollars is not none %} / ${{ '%.2f' | format(a.max_dollars) }}{% endif %}
+            ${{ '%.2f' | format(a.period_spent) }}{% if a.max_dollars is not none %} / ${{ '%.2f' | format(a.max_dollars) }}{% endif %}
+            <span class="muted" style="font-size: var(--text-sm)">{{ 'this month' if a.period == 'monthly' else 'lifetime' }}</span>
             {% if a.over_budget %}<span class="badge failure">over budget</span>{% endif %}
           </td>
-          <td>{{ a.runs }}</td>
+          <td>{{ a.runs }}{% if a.wall_violations %} <span class="badge failure" title="runs that exceeded the time ceiling">{{ a.wall_violations }} over time</span>{% endif %}</td>
           <td>
             {% for s in a.credentials %}<span class="badge">{{ s }}</span>{% endfor %}
             {% if not a.credentials %}<span class="muted">none</span>{% endif %}
           </td>
           <td>
-            {% if a.active %}<span class="badge active">{{ a.lifecycle }}</span>
+            {% if a.contained %}<span class="badge failure">contained</span>
+            {% elif a.active %}<span class="badge active">{{ a.lifecycle }}</span>
             {% else %}<span class="badge failure">{{ a.lifecycle }}</span>{% endif %}
           </td>
           <td class="mv-row__actions">
+            {% if a.contained %}
+            <button type="button" class="btn btn--icon" data-xa-release="{{ a.id }}">Release</button>
+            {% endif %}
             <button type="button" class="btn btn--icon" data-xa-mint="{{ a.id }}">Mint credential</button>
+            {% if a.over_budget %}
+            <button type="button" class="btn btn--icon" data-xa-reset-budget="{{ a.id }}">Reset budget</button>
+            {% endif %}
             <button type="button" class="btn btn--icon" data-xa-revoke="{{ a.id }}">Revoke</button>
             <button type="button" class="btn btn--icon btn--ghost" data-xa-remove="{{ a.id }}">Unenroll</button>
           </td>
@@ -106,11 +114,17 @@
           <option value="high">High</option>
         </select>
       </label>
-      <label>Allowed tools <span class="muted">(comma-separated; empty = all within risk)</span>
-        <input class="input" name="allow_tools" placeholder="crm_update, research">
+      <label>Allowed tools <span class="muted">(comma-separated; add your risk rating as name:risk — it overrides what the agent claims)</span>
+        <input class="input" name="allow_tools" placeholder="crm_update:low, send_contract:high, research">
       </label>
-      <label>Budget ceiling ($, cumulative reported spend)
+      <label>Budget ceiling ($ reported spend)
         <input class="input" name="max_dollars" type="number" min="0" step="0.01" placeholder="50.00">
+      </label>
+      <label>Budget period
+        <select class="select" name="budget_period">
+          <option value="monthly" selected>Per month (resets each calendar month)</option>
+          <option value="total">Lifetime total</option>
+        </select>
       </label>
       <label>Credential expiry (days)
         <input class="input" name="expires_days" type="number" min="1" step="1" placeholder="90">
@@ -148,6 +162,7 @@
       data_scopes: list("data_scopes"),
       max_dollars: num("max_dollars"),
       expires_days: num("expires_days"),
+      budget_period: String(f.get("budget_period") || "monthly"),
     };
   }
   async function call(url, opts, okMsg, reload) {
@@ -195,6 +210,24 @@
     var tok = document.getElementById("xa-token").textContent;
     navigator.clipboard.writeText(tok).then(function () {
       window.mvToast("Copied. Store it in your platform's secret manager.");
+    });
+  });
+  document.querySelectorAll("[data-xa-release]").forEach(function (b) {
+    b.addEventListener("click", async function () {
+      var id = b.getAttribute("data-xa-release");
+      if (!(await window.mvConfirm("Release “" + id + "”? Containment lifts and its denial history clears.", { okText: "Release" }))) return;
+      call("/api/v1/external-agents/" + encodeURIComponent(id) + "/release",
+           { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+           "Agent released.", true);
+    });
+  });
+  document.querySelectorAll("[data-xa-reset-budget]").forEach(function (b) {
+    b.addEventListener("click", async function () {
+      var id = b.getAttribute("data-xa-reset-budget");
+      if (!(await window.mvConfirm("Reset “" + id + "”'s budget meter? Lifetime totals are kept; the cap starts counting from zero.", { okText: "Reset" }))) return;
+      call("/api/v1/external-agents/" + encodeURIComponent(id) + "/reset-budget",
+           { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+           "Budget meter reset.", true);
     });
   });
   document.querySelectorAll("[data-xa-revoke]").forEach(function (b) {

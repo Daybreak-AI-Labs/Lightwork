@@ -62,6 +62,18 @@ TOKEN_SURFACES = ("rest", "a2a", "grpc", "mcp")
 _MAX_TEXT = 4000
 _MAX_STEPS = 50
 _MAX_AGENTS = 500
+#: Remembered idempotency keys per agent (newest kept) — a retried
+#: ``record_run`` returns the original goal instead of double-counting.
+_MAX_RUN_KEYS = 200
+#: Auto-containment threshold: this many screening denials inside the window
+#: flips the agent to contained (fail-closed; an admin releases it).
+_CONTAIN_DENIALS = 5
+_CONTAIN_WINDOW_SECONDS = 24 * 3600
+
+#: Budget accounting modes. ``monthly`` resets the meter each calendar month
+#: (UTC); ``total`` is a lifetime cap. Pre-v1.1 enrollments carry no period
+#: and are treated as ``total`` so their semantics never change under them.
+BUDGET_PERIODS = ("monthly", "total")
 
 
 class ExternalAgentsError(Exception):
@@ -137,6 +149,39 @@ def _sidecar_locked():
     return cross_process_lock(registry_path())
 
 
+def _month_key(now: float | None = None) -> str:
+    return time.strftime("%Y-%m", time.gmtime(now if now is not None
+                                              else time.time()))
+
+
+def _period_spent(meta: dict, now: float | None = None) -> float:
+    """The spend that counts against the cap under the agent's budget mode."""
+    if meta.get("period") == "monthly":
+        if meta.get("period_key") != _month_key(now):
+            return 0.0  # the month rolled; nothing spent yet this period
+        return float(meta.get("period_spent") or 0.0)
+    return float(meta.get("spent_dollars") or 0.0)
+
+
+def _parse_tool_entry(entry: str) -> tuple[str, str | None]:
+    """Split an enrollment tool entry ``name`` / ``name:risk``.
+
+    The optional risk is the OPERATOR'S rating for that tool and floors
+    whatever the caller later declares — external tool names are arbitrary,
+    so the registry, not the agent's honesty, decides how risky a tool is."""
+    from .safety.tool_risk import RISK_LEVELS
+    name, sep, risk = str(entry).partition(":")
+    name = name.strip()
+    if not sep:
+        return name, None
+    risk = risk.strip().lower()
+    if risk not in RISK_LEVELS:
+        raise ExternalAgentsError(
+            f"tool entry {entry!r}: unknown risk {risk!r}; expected one of "
+            f"{', '.join(RISK_LEVELS)}")
+    return name, risk
+
+
 # -- text hygiene at the boundary ---------------------------------------------
 
 def _clean_text(text: Any, *, shield: Any | None = None) -> str | None:
@@ -186,6 +231,7 @@ def enroll(
     max_wall_seconds: float | None = None,
     data_scopes: list[str] | None = None,
     expires_days: float | None = None,
+    budget_period: str = "monthly",
     enrolled_by: str = "",
 ) -> dict:
     """Enroll one external agent across every plane in a single call.
@@ -201,13 +247,27 @@ def enroll(
         raise ExternalAgentsError(
             f"unknown platform {platform!r}; expected one of "
             f"{', '.join(sorted(PLATFORMS))}")
+    if budget_period not in BUDGET_PERIODS:
+        raise ExternalAgentsError(
+            f"unknown budget_period {budget_period!r}; expected one of "
+            f"{', '.join(BUDGET_PERIODS)}")
+    # Tool entries may carry the operator's risk rating ("name:risk"); the
+    # trust entry keeps the bare names, the sidecar keeps the risk map.
+    tool_names: list[str] = []
+    tool_risks: dict[str, str] = {}
+    for raw in allow_tools or []:
+        name, tool_risk = _parse_tool_entry(raw)
+        if name:
+            tool_names.append(name)
+            if tool_risk:
+                tool_risks[name] = tool_risk
     sidecar = _load_sidecar()
     if agent_id not in sidecar and len(sidecar) >= _MAX_AGENTS:
         raise ExternalAgentsError("enrollment limit reached")
     entry: dict[str, Any] = {
         "id": agent_id,
         "direction": "inbound",
-        "allow_tools": sorted(allow_tools or []),
+        "allow_tools": sorted(tool_names),
         "deny_tools": sorted(deny_tools or []),
         "max_risk": max_risk,
         "max_dollars": max_dollars,
@@ -245,6 +305,16 @@ def enroll(
             "spent_dollars": float(prior.get("spent_dollars") or 0.0),
             "runs": int(prior.get("runs") or 0),
             "last_run_at": prior.get("last_run_at"),
+            # v1.1 governance state (re-enrollment preserves the meters and
+            # NEVER silently lifts a containment — that's the release action).
+            "period": budget_period,
+            "period_key": prior.get("period_key") or _month_key(),
+            "period_spent": float(prior.get("period_spent") or 0.0),
+            "tool_risks": tool_risks,
+            "run_keys": dict(prior.get("run_keys") or {}),
+            "denials": list(prior.get("denials") or []),
+            "contained": bool(prior.get("contained")),
+            "wall_violations": int(prior.get("wall_violations") or 0),
         }
         _save_sidecar(sidecar)
     from .audit import EventKind, audit_event
@@ -347,6 +417,20 @@ def record_run(agent_id: str, run: dict, *, shield: Any | None = None) -> dict:
         raise ExternalAgentsError(
             f"agent {agent_id!r} has a trust entry but no enrollment; "
             "enroll it before ingesting runs")
+    if sidecar[agent_id].get("contained"):
+        raise ExternalAgentsError(
+            "denied: agent is contained pending review (an administrator "
+            "can release it from the console)")
+    # Exactly-once ingest: a retried report with the same key returns the
+    # original goal instead of double-counting spend (same posture as the
+    # A2A message-id ledger). Keys are per-agent and bounded.
+    idem = str(run.get("idempotency_key") or "").strip()[:128]
+    if idem:
+        prior_gid = (sidecar[agent_id].get("run_keys") or {}).get(idem)
+        if prior_gid is not None:
+            return {"goal_id": prior_gid, "over_budget":
+                    bool(sidecar[agent_id].get("over_budget")),
+                    "duplicate": True}
     title = _clean_text(run.get("title"), shield=shield)
     summary = _clean_text(run.get("summary"), shield=shield)
     if title is None or summary is None or not (title or "").strip():
@@ -385,22 +469,46 @@ def record_run(agent_id: str, run: dict, *, shield: Any | None = None) -> dict:
     w.set_goal_status(
         gid, "done" if outcome == "success" else "blocked",
         result=summary or title)
+    # Wall-clock ceiling: a reported duration above the enrollment's
+    # max_wall_seconds is ingested (spend must never go uncounted) but
+    # flagged and counted — repeat offenders are visible on the roster.
+    duration = max(0.0, float(run.get("duration_seconds") or 0.0))
+    wall_cap = decision.agent.max_wall_seconds if decision.agent else None
+    over_wall = bool(wall_cap is not None and duration > wall_cap)
     over_budget = False
     with _sidecar_locked():
         sidecar = _load_sidecar()
         meta = sidecar.setdefault(agent_id, meta)
         meta["spent_dollars"] = float(meta.get("spent_dollars") or 0.0) + cost
+        if meta.get("period") == "monthly":
+            month = _month_key()
+            if meta.get("period_key") != month:
+                meta["period_key"] = month
+                meta["period_spent"] = 0.0
+            meta["period_spent"] = float(meta.get("period_spent") or 0.0) + cost
         meta["runs"] = int(meta.get("runs") or 0) + 1
         meta["last_run_at"] = time.time()
+        if over_wall:
+            meta["wall_violations"] = int(meta.get("wall_violations") or 0) + 1
+        if idem:
+            keys = dict(meta.get("run_keys") or {})
+            keys[idem] = gid
+            if len(keys) > _MAX_RUN_KEYS:
+                for stale in sorted(keys, key=keys.get)[:len(keys)
+                                                        - _MAX_RUN_KEYS]:
+                    keys.pop(stale, None)
+            meta["run_keys"] = keys
         cap = decision.agent.max_dollars if decision.agent else None
-        over_budget = bool(cap is not None and meta["spent_dollars"] > cap)
+        over_budget = bool(cap is not None and _period_spent(meta) > cap)
         meta["over_budget"] = over_budget
         _save_sidecar(sidecar)
     from .audit import EventKind, audit_event
     audit_event(EventKind.EXTERNAL_RUN_INGESTED, agent="external_agents",
                 goal_id=gid, external_agent=agent_id, outcome=outcome,
-                cost_dollars=cost, steps=len(steps), over_budget=over_budget)
-    return {"goal_id": gid, "over_budget": over_budget}
+                cost_dollars=cost, steps=len(steps), over_budget=over_budget,
+                over_wall=over_wall)
+    return {"goal_id": gid, "over_budget": over_budget,
+            "over_wall": over_wall}
 
 
 # -- pre-action screening (the governance seam) -------------------------------
@@ -415,11 +523,16 @@ def screen(
 ) -> dict:
     """Decide one proposed external action BEFORE the agent takes it.
 
-    Applies, in order: trust admission (registry / direction / revocation /
-    tool + risk ceilings), the cumulative budget cutoff, Shield input
-    scanning over ``detail`` (scanner error = DENY — external boundary), and
-    the ``[actions] require_approval_at`` floor — at/above the floor the
-    action parks a real approval row and the reply says who to wait for.
+    Applies, in order: containment, trust admission (registry / direction /
+    revocation / tool + risk ceilings — the requested risk is FLOORED by the
+    operator's per-tool rating from the enrollment, so an agent cannot
+    under-declare its way beneath a gate), the period budget cutoff, Shield
+    input scanning over ``detail`` (scanner error = DENY — external
+    boundary), and the ``[actions] require_approval_at`` floor — at/above
+    the floor the action parks a real approval row.
+
+    Repeated denials inside the containment window flip the agent to
+    ``contained`` (every call refused until an admin releases it).
 
     Returns ``{allowed, rule, reason, requires_approval?, approval_id?}``.
     Every decision is audited."""
@@ -428,37 +541,51 @@ def screen(
                                "external agents plane is disabled")
     from .agent_trust import decide_inbound, record_denied
     from .safety.tool_risk import RISK_LEVELS, risk_rank
+    meta = _load_sidecar().get(agent_id)
+    if meta is not None and meta.get("contained"):
+        return _screen_verdict(
+            agent_id, tool, False, "contained",
+            "agent is contained pending review (repeated denials); an "
+            "administrator can release it from the console")
     req_risk = str(risk or "").strip().lower()
     if req_risk and req_risk not in RISK_LEVELS:
-        return _screen_verdict(agent_id, tool, False, "bad_risk",
+        return _deny_and_count(agent_id, tool, "bad_risk",
                                f"unknown risk level {req_risk!r}")
+    # The operator's per-tool rating floors the caller's declaration:
+    # external tool names are arbitrary, so the registry decides the risk.
+    mapped = (meta or {}).get("tool_risks", {}).get(tool)
+    if mapped and (not req_risk
+                   or risk_rank(mapped) > risk_rank(req_risk)):
+        req_risk = mapped
     decision = decide_inbound(
         agent_id, requested_tools=[tool] if tool else (),
         max_risk=req_risk or None, enforced=True)
     if not decision.allowed:
         record_denied(agent_id, decision, direction="inbound",
                       correlation_id="screen")
-        return _screen_verdict(agent_id, tool, False, decision.rule,
+        return _deny_and_count(agent_id, tool, decision.rule,
                                decision.reason)
-    meta = _load_sidecar().get(agent_id)
     if meta is None:
         return _screen_verdict(agent_id, tool, False, "not_enrolled",
                                "agent has a trust entry but no enrollment")
     cap = decision.agent.max_dollars if decision.agent else None
-    if cap is not None and float(meta.get("spent_dollars") or 0.0) > cap:
-        return _screen_verdict(
-            agent_id, tool, False, "budget",
-            f"cumulative reported spend exceeds the ${cap:,.2f} ceiling")
+    if cap is not None and _period_spent(meta) > cap:
+        period = ("this month's" if meta.get("period") == "monthly"
+                  else "cumulative")
+        return _deny_and_count(
+            agent_id, tool, "budget",
+            f"{period} reported spend exceeds the ${cap:,.2f} ceiling")
     if detail and shield is not None:
         try:
             verdict = shield.scan_input(str(detail)[:_MAX_TEXT])
             if getattr(verdict, "blocked", False):
-                return _screen_verdict(
-                    agent_id, tool, False, "shield",
+                return _deny_and_count(
+                    agent_id, tool, "shield",
                     "action detail was blocked by the input screen")
         except Exception:
             # Fail CLOSED: an erroring scanner must never wave an external
-            # action through unscreened.
+            # action through unscreened. OUR failure, not the agent's — it
+            # does not count toward containment.
             return _screen_verdict(
                 agent_id, tool, False, "screen_error",
                 "input screen unavailable; action denied (fail-closed)")
@@ -500,6 +627,79 @@ def _screen_verdict(agent_id: str, tool: str, allowed: bool, rule: str,
     return {"allowed": allowed, "rule": rule, "reason": reason}
 
 
+def _deny_and_count(agent_id: str, tool: str, rule: str, reason: str) -> dict:
+    """A denial that counts toward auto-containment.
+
+    Misbehavior denials (ceiling breaches, budget, blocked payloads, junk
+    risk words) accumulate in a sliding window; at the threshold the agent
+    is contained — every subsequent call refused until an administrator
+    releases it. Platform-side failures (scanner errors) and the ordinary
+    approval-floor park never count."""
+    contained_now = False
+    with _sidecar_locked():
+        sidecar = _load_sidecar()
+        meta = sidecar.get(agent_id)
+        if meta is not None:
+            now = time.time()
+            denials = [t for t in (meta.get("denials") or [])
+                       if now - float(t) < _CONTAIN_WINDOW_SECONDS]
+            denials.append(now)
+            meta["denials"] = denials[-(_CONTAIN_DENIALS * 4):]
+            if len(denials) >= _CONTAIN_DENIALS and not meta.get("contained"):
+                meta["contained"] = True
+                contained_now = True
+            _save_sidecar(sidecar)
+    if contained_now:
+        from .audit import EventKind, audit_event
+        audit_event(EventKind.EXTERNAL_AGENT_CONTAINED,
+                    agent="external_agents", external_agent=agent_id,
+                    denials=_CONTAIN_DENIALS,
+                    window_hours=_CONTAIN_WINDOW_SECONDS // 3600,
+                    last_rule=rule)
+    return _screen_verdict(agent_id, tool, False, rule, reason)
+
+
+def release(agent_id: str, *, released_by: str = "") -> bool:
+    """Admin action: lift a containment and clear the denial window."""
+    with _sidecar_locked():
+        sidecar = _load_sidecar()
+        meta = sidecar.get(agent_id)
+        if meta is None:
+            return False
+        meta["contained"] = False
+        meta["denials"] = []
+        _save_sidecar(sidecar)
+    from .audit import EventKind, audit_event
+    audit_event(EventKind.EXTERNAL_AGENT_RELEASED, agent="external_agents",
+                external_agent=agent_id, released_by=released_by)
+    return True
+
+
+def reset_budget(agent_id: str, *, reset_by: str = "") -> bool:
+    """Admin action: zero the active budget meter (period AND the flag).
+
+    The lifetime total is preserved — the reset changes what counts against
+    the cap, never what was historically reported."""
+    with _sidecar_locked():
+        sidecar = _load_sidecar()
+        meta = sidecar.get(agent_id)
+        if meta is None:
+            return False
+        meta["period_key"] = _month_key()
+        meta["period_spent"] = 0.0
+        if meta.get("period") != "monthly":
+            # A lifetime-cap agent's meter IS spent_dollars; a reset converts
+            # the remainder into an explicit baseline by moving to monthly
+            # accounting from now on (documented in the console).
+            meta["period"] = "monthly"
+        meta["over_budget"] = False
+        _save_sidecar(sidecar)
+    from .audit import EventKind, audit_event
+    audit_event(EventKind.EXTERNAL_BUDGET_RESET, agent="external_agents",
+                external_agent=agent_id, reset_by=reset_by)
+    return True
+
+
 def approval_status(approval_id: int) -> dict:
     """Poll endpoint for a parked ``screen`` approval: the external agent
     holds its action until the human decides in the dashboard queue."""
@@ -536,7 +736,12 @@ def roster() -> list[dict]:
             "max_risk": agent.max_risk if agent else None,
             "max_dollars": agent.max_dollars if agent else None,
             "spent_dollars": round(float(meta.get("spent_dollars") or 0.0), 4),
+            "period": meta.get("period", "total"),
+            "period_spent": round(_period_spent(meta), 4),
             "over_budget": bool(meta.get("over_budget")),
+            "contained": bool(meta.get("contained")),
+            "wall_violations": int(meta.get("wall_violations") or 0),
+            "tool_risks": dict(meta.get("tool_risks") or {}),
             "runs": int(meta.get("runs") or 0),
             "last_run_at": meta.get("last_run_at"),
             "credentials": [s for s in TOKEN_SURFACES

@@ -156,3 +156,70 @@ def test_unenroll_over_http():
     assert client.delete("/api/v1/external-agents/sf-quotebot").status_code == 204
     assert client.delete("/api/v1/external-agents/sf-quotebot").status_code == 404
     assert client.get("/api/v1/external-agents").json()["agents"] == []
+
+
+def test_idempotency_key_over_http():
+    _enroll()
+    token = _mint()
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    body = {"title": "Quote", "outcome": "success", "summary": "s",
+            "cost_dollars": 1.0, "idempotency_key": "k-1"}
+    first = bare.post("/api/v1/external/runs", headers=hdr, json=body).json()
+    replay = bare.post("/api/v1/external/runs", headers=hdr, json=body).json()
+    assert replay["goal_id"] == first["goal_id"]
+    assert replay["duplicate"] is True
+    detail = client.get("/api/v1/external-agents/sf-quotebot").json()
+    assert detail["runs"] == 1
+
+
+def test_gateway_rate_limit_trips_and_names_the_action(monkeypatch):
+    from maverick_dashboard import external_gateway as gw
+    _enroll()
+    token = _mint()
+    monkeypatch.setitem(gw._RATE_LIMITS, "screen", 3)
+    monkeypatch.setattr(gw, "_rate_times", {})
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    body = {"tool": "research", "risk": "low"}
+    for _ in range(3):
+        assert bare.post("/api/v1/external/screen", headers=hdr,
+                         json=body).status_code == 200
+    r = bare.post("/api/v1/external/screen", headers=hdr, json=body)
+    assert r.status_code == 429
+    assert "screen" in r.json()["detail"]
+    assert r.headers["Retry-After"] == "60"
+
+
+def test_admin_release_and_reset_budget_routes():
+    _enroll(max_risk="medium", max_dollars=1.0)
+    token = _mint()
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    # Trip the containment via repeated ceiling breaches.
+    for _ in range(5):
+        bare.post("/api/v1/external/screen", headers=hdr,
+                  json={"tool": "wire_transfer", "risk": "high"})
+    verdict = bare.post("/api/v1/external/screen", headers=hdr,
+                        json={"tool": "research", "risk": "low"}).json()
+    assert verdict["rule"] == "contained"
+    r = client.post("/api/v1/external-agents/sf-quotebot/release", json={})
+    assert r.status_code == 200
+    verdict = bare.post("/api/v1/external/screen", headers=hdr,
+                        json={"tool": "research", "risk": "low"}).json()
+    assert verdict["rule"] == "allow"
+    # Over-budget -> reset restores service.
+    bare.post("/api/v1/external/runs", headers=hdr,
+              json={"title": "Big", "outcome": "success", "summary": "s",
+                    "cost_dollars": 2.0})
+    verdict = bare.post("/api/v1/external/screen", headers=hdr,
+                        json={"tool": "research", "risk": "low"}).json()
+    assert verdict["rule"] == "budget"
+    r = client.post("/api/v1/external-agents/sf-quotebot/reset-budget",
+                    json={})
+    assert r.status_code == 200
+    verdict = bare.post("/api/v1/external/screen", headers=hdr,
+                        json={"tool": "research", "risk": "low"}).json()
+    assert verdict["rule"] == "allow"
+    assert client.post("/api/v1/external-agents/ghost/release",
+                       json={}).status_code == 404
