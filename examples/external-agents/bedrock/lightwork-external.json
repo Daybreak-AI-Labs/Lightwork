@@ -499,6 +499,243 @@
           }
         }
       }
+    },
+    "/api/v1/external/execute": {
+      "post": {
+        "operationId": "executeAction",
+        "summary": "Perform one action through a governed connector (reads run now; writes park a digest-bound approval)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "connector",
+                  "op",
+                  "path"
+                ],
+                "properties": {
+                  "connector": {
+                    "type": "string",
+                    "description": "Enabled governed connector name"
+                  },
+                  "op": {
+                    "type": "string",
+                    "enum": [
+                      "get",
+                      "post",
+                      "put",
+                      "patch",
+                      "delete"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "object"
+                  },
+                  "preview": {
+                    "type": "boolean",
+                    "description": "Describe the write without performing it (no side effect)."
+                  },
+                  "detail": {
+                    "type": "string",
+                    "description": "What will be done"
+                  },
+                  "goal_id": {
+                    "type": "integer",
+                    "description": "Bind the effect to one of this agent's live runs."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verdict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "allowed": {
+                      "type": "boolean"
+                    },
+                    "rule": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": "string"
+                    },
+                    "requires_approval": {
+                      "type": "boolean"
+                    },
+                    "approval_id": {
+                      "type": "integer"
+                    },
+                    "execution_id": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "number"
+                    },
+                    "preview": {
+                      "type": "string"
+                    },
+                    "request_sha256": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/external/executions/{execution_id}": {
+      "get": {
+        "operationId": "executionStatus",
+        "summary": "Poll a parked execution; commit once its approval is granted",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "execution_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "approval_id": {
+                      "type": "integer"
+                    },
+                    "connector": {
+                      "type": "string"
+                    },
+                    "op": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "number"
+                    },
+                    "approval_status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/external/executions/{execution_id}/commit": {
+      "post": {
+        "operationId": "commitExecution",
+        "summary": "Commit an approved execution by re-sending the byte-identical request",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "connector",
+                  "op",
+                  "path"
+                ],
+                "properties": {
+                  "connector": {
+                    "type": "string"
+                  },
+                  "op": {
+                    "type": "string",
+                    "enum": [
+                      "get",
+                      "post",
+                      "put",
+                      "patch",
+                      "delete"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verdict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "allowed": {
+                      "type": "boolean"
+                    },
+                    "rule": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "result": {
+                      "type": "string"
+                    },
+                    "execution_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

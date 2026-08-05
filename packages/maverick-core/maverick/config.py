@@ -1628,7 +1628,17 @@ def get_external_agents() -> dict:
     made per-agent in the trust registry once the plane is on. Also honored
     via ``MAVERICK_EXTERNAL_AGENTS=1``."""
     cfg = load_config().get("external_agents", {})
-    return {"enable": bool(cfg.get("enable", False))}
+    raw = cfg.get("connectors", [])
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    return {
+        "enable": bool(cfg.get("enable", False)),
+        # Governed-REST connectors external agents may EXECUTE through (the
+        # enforcement tier above screening). Empty = screen-only; naming one
+        # here is the operator's explicit decision to let foreign agents act
+        # through Lightwork's egress-guarded, receipted connector path.
+        "connectors": [str(p).strip().lower() for p in raw if str(p).strip()],
+    }
 
 
 def get_memory() -> dict:

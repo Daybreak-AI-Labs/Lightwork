@@ -1,6 +1,9 @@
 """Bring-your-own-agent gateway: enrollment across planes, once-only
-credentials, run ingest onto the Operating Record, and fail-closed screening."""
+credentials, run ingest onto the Operating Record, fail-closed screening,
+and the digest-bound governed-execution tier."""
 from __future__ import annotations
+
+import time
 
 import pytest
 from maverick import external_agents as xa
@@ -10,11 +13,17 @@ from maverick.agent_trust import agent_for_token, lookup
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    # Lineage receipts fall back to ~/.maverick/lineage (HOME, not
+    # MAVERICK_HOME) when no tenant is active — keep them in the sandbox too.
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "1")
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     from maverick import config, world_model
+    from maverick.audit import writer as audit_writer
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr(audit_writer, "_default", None)
+    audit_writer._defaults.clear()
     config.reset_config_cache()
     yield
     config.reset_config_cache()
@@ -481,3 +490,285 @@ def test_repeated_denials_auto_contain_until_released():
     assert xa.release("sf-quotebot", released_by="admin") is True
     assert xa.screen("sf-quotebot", "research", risk="low")["rule"] == "allow"
     assert xa.release("ghost") is False
+
+
+# -- governed execution (the enforcement tier above screening) ----------------
+
+class _FakeConn:
+    """Recording governed-REST connector double — no network, no creds."""
+
+    def __init__(self, write_result: str = "updated 1 record"):
+        self.reads: list[dict] = []
+        self.writes: list[dict] = []
+        self.write_result = write_result
+
+    def read(self, params):
+        self.reads.append(dict(params))
+        return "42 open opportunities"
+
+    def preview_write(self, params):
+        return f"would {params['op'].upper()} fakecrm{params['path']}"
+
+    def write(self, params):
+        self.writes.append(dict(params))
+        return self.write_result
+
+
+def _wire_fakecrm(monkeypatch, conn=None):
+    """Enable one fake connector for the execute tier (factory looked up at
+    call time, so a setitem patch is enough)."""
+    from maverick import governed_rest
+    conn = conn if conn is not None else _FakeConn()
+    monkeypatch.setitem(governed_rest.GOVERNED_REST_FACTORIES, "fakecrm",
+                        lambda: conn)
+    monkeypatch.setenv("MAVERICK_EXTERNAL_CONNECTORS", "fakecrm")
+    return conn
+
+
+def _write_request(**kw):
+    req = {"connector": "fakecrm", "op": "post", "path": "/opportunities/42",
+           "body": {"stage": "closed-won"}}
+    req.update(kw)
+    return req
+
+
+def test_execute_refuses_unenabled_connectors(monkeypatch):
+    _enroll()
+    monkeypatch.delenv("MAVERICK_EXTERNAL_CONNECTORS", raising=False)
+    assert xa.execute_connectors() == []
+    verdict = xa.execute("sf-quotebot", {"connector": "fakecrm", "op": "get",
+                                         "path": "/accounts"})
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "connector_not_enabled"
+    # An unknown name in the env var never opens an egress path.
+    monkeypatch.setenv("MAVERICK_EXTERNAL_CONNECTORS", "fakecrm, ghostcrm")
+    assert xa.execute_connectors() == []
+    verdict = xa.execute("sf-quotebot", {"connector": "ghostcrm", "op": "get",
+                                         "path": "/accounts"})
+    assert verdict["rule"] == "connector_not_enabled"
+
+
+def test_execute_read_runs_immediately_and_is_audited(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll()
+    verdict = xa.execute("sf-quotebot", {"connector": "fakecrm", "op": "get",
+                                         "path": "/opportunities"})
+    assert verdict["allowed"] is True and verdict["rule"] == "executed"
+    assert verdict["status"] == "executed"
+    assert "42 open opportunities" in verdict["result"]
+    assert conn.reads == [{"path": "/opportunities"}]
+    from maverick.audit import iter_events
+    fired = [e for e in iter_events(all_days=True)
+             if e.get("kind") == "external_action_executed"]
+    assert len(fired) == 1
+    assert fired[0]["external_agent"] == "sf-quotebot"
+    assert fired[0]["connector"] == "fakecrm"
+    assert fired[0]["outcome"] == "executed"
+
+
+def test_preview_describes_a_write_without_performing_it(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll()
+    verdict = xa.execute("sf-quotebot", _write_request(preview=True))
+    assert verdict["allowed"] is True and verdict["rule"] == "preview"
+    assert verdict["preview"] == "would POST fakecrm/opportunities/42"
+    assert len(verdict["request_sha256"]) == 64
+    assert conn.writes == []
+
+
+def test_write_parks_a_digest_bound_approval(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    verdict = xa.execute("sf-quotebot", _write_request())
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "approval_required"
+    assert verdict["requires_approval"] is True
+    assert verdict["execution_id"]
+    assert conn.writes == []
+    from maverick.world_model import WorldModel
+    approval = WorldModel().get_approval(verdict["approval_id"])
+    assert approval is not None and approval.status == "pending"
+    assert approval.provenance == "external_agents"
+    assert approval.requested_by == "agent:sf-quotebot"
+
+
+def test_execute_status_joins_the_live_approval_decision(monkeypatch):
+    _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    parked = xa.execute("sf-quotebot", _write_request())
+    st = xa.execute_status("sf-quotebot", parked["execution_id"])
+    assert st["status"] == "pending"
+    assert st["approval_status"] == "pending"
+    assert st["approval_id"] == parked["approval_id"]
+    assert st["connector"] == "fakecrm" and st["op"] == "post"
+    with pytest.raises(xa.ExternalAgentsError, match="unknown execution"):
+        xa.execute_status("sf-quotebot", "nope")
+
+
+def test_commit_after_approval_fires_exactly_once(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    parked = xa.execute("sf-quotebot", _write_request())
+    from maverick.world_model import WorldModel
+    assert WorldModel().decide_approval(parked["approval_id"], "approved",
+                                        decided_by="admin@corp.test") is True
+    verdict = xa.execute_commit("sf-quotebot", parked["execution_id"],
+                                _write_request())
+    assert verdict["allowed"] is True and verdict["rule"] == "executed"
+    assert verdict["status"] == "executed"
+    assert verdict["execution_id"] == parked["execution_id"]
+    assert conn.writes == [{"op": "post", "path": "/opportunities/42",
+                            "body": {"stage": "closed-won"}}]
+    # At-most-once: a repeated commit reports the terminal status, no re-fire.
+    again = xa.execute_commit("sf-quotebot", parked["execution_id"],
+                              _write_request())
+    assert again["rule"] == "already_finished"
+    assert again["status"] == "executed"
+    assert len(conn.writes) == 1
+
+
+def test_commit_digest_mismatch_voids_and_counts_toward_containment(
+        monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    parked = xa.execute("sf-quotebot", _write_request())
+    eid = parked["execution_id"]
+    assert xa._load_sidecar()["sf-quotebot"].get("denials", []) == []
+    verdict = xa.execute_commit(
+        "sf-quotebot", eid, _write_request(body={"stage": "closed-lost"}))
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "digest_mismatch"
+    assert conn.writes == []
+    # The slot is voided: even the honest request cannot find it any more.
+    again = xa.execute_commit("sf-quotebot", eid, _write_request())
+    assert again["rule"] == "unknown_execution"
+    assert len(xa._load_sidecar()["sf-quotebot"]["denials"]) == 1
+
+
+def test_commit_after_denial_never_fires(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    parked = xa.execute("sf-quotebot", _write_request())
+    from maverick.world_model import WorldModel
+    WorldModel().decide_approval(parked["approval_id"], "denied",
+                                 decided_by="admin@corp.test")
+    verdict = xa.execute_commit("sf-quotebot", parked["execution_id"],
+                                _write_request())
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "approval_denied"
+    assert conn.writes == []
+    st = xa.execute_status("sf-quotebot", parked["execution_id"])
+    assert st["status"] == "denied"
+
+
+def test_commit_before_decision_stays_pending(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    parked = xa.execute("sf-quotebot", _write_request())
+    verdict = xa.execute_commit("sf-quotebot", parked["execution_id"],
+                                _write_request())
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "approval_pending"
+    assert verdict["requires_approval"] is True
+    assert conn.writes == []
+    st = xa.execute_status("sf-quotebot", parked["execution_id"])
+    assert st["status"] == "pending"
+
+
+def test_parked_execution_expires_after_the_ttl(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    parked = xa.execute("sf-quotebot", _write_request())
+    eid = parked["execution_id"]
+    with xa._sidecar_locked():
+        sidecar = xa._load_sidecar()
+        entry = sidecar["sf-quotebot"]["executions"][eid]
+        entry["created_at"] = time.time() - xa._EXECUTION_TTL_SECONDS - 60
+        xa._save_sidecar(sidecar)
+    assert xa.execute_status("sf-quotebot", eid)["status"] == "expired"
+    verdict = xa.execute_commit("sf-quotebot", eid, _write_request())
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "execution_expired"
+    assert conn.writes == []
+
+
+def test_pending_backlog_refuses_new_parks(monkeypatch):
+    _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    now = time.time()
+    with xa._sidecar_locked():
+        sidecar = xa._load_sidecar()
+        sidecar["sf-quotebot"]["executions"] = {
+            f"bulk-{i}": {"approval_id": None, "digest": f"d{i}",
+                          "connector": "fakecrm", "op": "post", "path": "/x",
+                          "goal_id": None, "created_at": now,
+                          "status": "pending"}
+            for i in range(xa._MAX_PENDING_EXECUTIONS)}
+        xa._save_sidecar(sidecar)
+    verdict = xa.execute("sf-quotebot", _write_request())
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "execution_backlog"
+    assert "approval_id" not in verdict
+    from maverick.world_model import WorldModel
+    count = WorldModel().conn.execute(
+        "SELECT COUNT(*) FROM approvals").fetchone()[0]
+    assert count == 0
+
+
+def test_failed_connector_write_reports_failed_status(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch, _FakeConn(write_result="ERROR: boom"))
+    _enroll(max_risk="high")
+    parked = xa.execute("sf-quotebot", _write_request())
+    from maverick.world_model import WorldModel
+    WorldModel().decide_approval(parked["approval_id"], "approved",
+                                 decided_by="admin@corp.test")
+    verdict = xa.execute_commit("sf-quotebot", parked["execution_id"],
+                                _write_request())
+    assert verdict["allowed"] is True and verdict["rule"] == "executed"
+    assert verdict["status"] == "failed"
+    assert len(conn.writes) == 1
+    st = xa.execute_status("sf-quotebot", parked["execution_id"])
+    assert st["status"] == "failed"
+
+
+def test_roster_and_status_surface_execution_counters(monkeypatch):
+    _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    done = xa.execute("sf-quotebot", {"connector": "fakecrm", "op": "get",
+                                      "path": "/opportunities"})
+    assert done["rule"] == "executed"
+    parked = xa.execute("sf-quotebot", _write_request())
+    assert parked["rule"] == "approval_required"
+    row = xa.roster()[0]
+    assert row["executions_total"] == 1
+    assert row["pending_executions"] == 1
+    s = xa.status()
+    assert s["executions"] == 1 and s["pending_executions"] == 1
+
+
+def test_contained_agent_write_refused_before_any_park(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    with xa._sidecar_locked():
+        sidecar = xa._load_sidecar()
+        sidecar["sf-quotebot"]["contained"] = True
+        xa._save_sidecar(sidecar)
+    verdict = xa.execute("sf-quotebot", _write_request())
+    assert verdict["allowed"] is False and verdict["rule"] == "contained"
+    assert "execution_id" not in verdict
+    assert conn.writes == []
+    from maverick.world_model import WorldModel
+    count = WorldModel().conn.execute(
+        "SELECT COUNT(*) FROM approvals").fetchone()[0]
+    assert count == 0
+
+
+def test_operator_tool_risk_floor_parks_reads_too(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high", allow_tools=["fakecrm.read:high"])
+    verdict = xa.execute("sf-quotebot", {"connector": "fakecrm", "op": "get",
+                                         "path": "/opportunities"})
+    assert verdict["allowed"] is False
+    assert verdict["rule"] == "approval_required"
+    assert verdict["requires_approval"] is True
+    assert conn.reads == []

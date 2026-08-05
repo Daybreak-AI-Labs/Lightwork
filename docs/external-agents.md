@@ -226,6 +226,117 @@ curl -sS -X POST https://lightwork.example.com/api/v1/external/runs \
 required. Titles, summaries, and steps are capped in length; up to 50 steps
 are kept.
 
+## Governed execution
+
+Screening answers *may I?* and trusts the agent to act on its own platform.
+**Governed execution** is the enforcement tier above it: Lightwork performs
+the action itself, on the agent's behalf, through the governed connector
+path — host IP-pinning, enterprise egress allowlists, no redirects — with a
+tamper-evident **PREPARE/COMMIT receipt** written around every effect. What
+touches your system of record is Lightwork's audited egress boundary, never
+the foreign runtime's HTTP stack.
+
+Off unless you name connectors (screening alone needs nothing here):
+
+```toml
+# ~/.maverick/config.toml
+[external_agents]
+enable = true
+connectors = ["salesforce", "servicenow"]
+```
+
+or `MAVERICK_EXTERNAL_CONNECTORS=salesforce,servicenow`. Empty = screen-only;
+unknown names are dropped (a typo can never open an egress path). Each
+connector reads the **same credentials as the enterprise connectors** —
+`SALESFORCE_INSTANCE_URL` + `SALESFORCE_ACCESS_TOKEN`,
+`SERVICENOW_INSTANCE_URL` + `SERVICENOW_TOKEN` — so a system you connected
+once is already credentialed for the governed path.
+
+Three agent-facing endpoints (same `rest` bearer):
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /api/v1/external/execute` | Perform a read, preview a write, or park a write |
+| `GET /api/v1/external/executions/{execution_id}` | Poll a parked execution |
+| `POST /api/v1/external/executions/{execution_id}/commit` | Digest-bound replay once approved |
+
+**Reads run immediately.** `op: "get"` is low-risk and executes in one round
+trip (after the same admission chain as screening):
+
+```bash
+curl -sS -X POST https://lightwork.example.com/api/v1/external/execute \
+  -H "Authorization: Bearer lw-rest-EXAMPLEEXAMPLE" \
+  -H "Content-Type: application/json" \
+  -d '{"connector": "servicenow", "op": "get",
+       "path": "/api/now/table/incident?sysparm_limit=1"}'
+```
+
+```json
+{"allowed": true, "rule": "executed", "status": "executed", "result": "..."}
+```
+
+**Writes always park a human decision** (`post`/`put`/`patch`/`delete`; in
+v1 there is no auto-approval path for external writes). Phase one submits
+the request:
+
+```bash
+curl -sS -X POST https://lightwork.example.com/api/v1/external/execute \
+  -H "Authorization: Bearer lw-rest-EXAMPLEEXAMPLE" \
+  -H "Content-Type: application/json" \
+  -d '{"connector": "servicenow", "op": "post",
+       "path": "/api/now/table/incident",
+       "body": {"short_description": "Renewal follow-up for ACME"}}'
+```
+
+```json
+{"allowed": false, "rule": "approval_required", "requires_approval": true,
+ "approval_id": 57, "execution_id": "kF3x9q2mWv8Zt1Ao", "expires_at": 1780650000.0}
+```
+
+The approver sees the network-free effect preview and the request's sha256
+fingerprint in the dashboard queue. Poll `GET
+/api/v1/external/executions/{execution_id}` until `approval_status` moves to
+`approved`, then phase two — re-send the **identical** request to commit:
+
+```bash
+curl -sS -X POST \
+  https://lightwork.example.com/api/v1/external/executions/kF3x9q2mWv8Zt1Ao/commit \
+  -H "Authorization: Bearer lw-rest-EXAMPLEEXAMPLE" \
+  -H "Content-Type: application/json" \
+  -d '{"connector": "servicenow", "op": "post",
+       "path": "/api/now/table/incident",
+       "body": {"short_description": "Renewal follow-up for ACME"}}'
+```
+
+```json
+{"allowed": true, "rule": "executed", "status": "executed",
+ "execution_id": "kF3x9q2mWv8Zt1Ao", "result": "..."}
+```
+
+The approval is **digest-bound**: the committed request is hashed and
+compared to what the human authorized. Any change — one field, one
+character — voids the parked execution and counts as misbehavior (toward
+auto-containment), so what executes is exactly what was approved, never a
+swapped payload. The commit also re-runs the full admission chain
+(containment, revocation, ceilings, budget re-bind at commit time): the
+human's yes is necessary, not sufficient. A repeated or racing commit
+reports the terminal status instead of re-firing.
+
+Semantics worth knowing:
+
+- `"preview": true` on a write returns the effect description and
+  `request_sha256` with **no network call and no approval** — show a human
+  (or your own planner) what would happen before submitting.
+- A parked execution expires after **24 hours**; at most **20** may await
+  decisions per agent (rule `execution_backlog` past that). Bodies are JSON
+  objects, capped at 32 KB.
+- `goal_id` binds the effect to one of the agent's live runs so the receipt
+  and a step-trail event land on that Operating Record row.
+- Every execution writes PREPARE/COMMIT lineage receipts (field *names* and
+  the request fingerprint — never body values) and an
+  `external_action_executed` audit event; responses are secret-redacted
+  before they return.
+
 ## What shows up where
 
 - **Operating Record** — each reported run is a goal owned by `agent:<id>`
@@ -367,4 +478,8 @@ The external boundary fails closed throughout:
 | rule `screen_error` | Shield scanner errored — fail-closed deny (does not count toward containment) | Check the shield install and logs, then retry |
 | rule `approval_required` | Not an error — risk at/above the `[actions] require_approval_at` floor | Poll `GET /api/v1/external/approvals/{approval_id}` until a human decides |
 | rule `contained` | Repeated denials tripped auto-containment | An admin reviews and presses **Release** on /external-agents |
+| rule `connector_not_enabled` | Connector not named in `[external_agents] connectors` | Add it there (or `MAVERICK_EXTERNAL_CONNECTORS`) and restart the dashboard |
+| rule `digest_mismatch` | Committed request differs from what was approved — the parked execution is voided and it counts as misbehavior | Re-submit via `/execute` and commit the byte-identical request |
+| rule `execution_expired` | Parked longer than 24 hours | Submit the request again |
+| rule `receipt_unavailable` | The PREPARE receipt could not be persisted — nothing fired (fail-closed) | Check the lineage store and logs, then retry the same commit |
 | `429` | Per-agent rate limit | Honor `Retry-After`; batch reports or slow the loop |

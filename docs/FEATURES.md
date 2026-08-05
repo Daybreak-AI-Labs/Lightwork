@@ -1937,7 +1937,16 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   real dashboard approval the agent polls), and **account** (completed runs
   ingest as Operating Record goals owned by `agent:<id>` with step trails and
   costed episodes, so Overview/Spend/Workforce/Savings and the audit binder
-  count foreign agents like native ones). Fail-closed at the boundary: text
+  count foreign agents like native ones). Above screening sits **governed
+  execution** (`[external_agents] connectors` / `MAVERICK_EXTERNAL_CONNECTORS`,
+  empty = screen-only): Lightwork performs the action *itself* through the
+  governed-REST connector path (SSRF host-pinning, enterprise egress
+  allowlists, PREPARE/COMMIT lineage receipts) — reads run immediately, writes
+  always park a digest-bound human approval that commits only on the
+  byte-identical request (a mismatch voids the parked execution and counts
+  toward containment; 24h TTL, 20-pending backlog cap) via
+  `/api/v1/external/execute` + `/executions/{id}` + `/executions/{id}/commit`,
+  audited as `external_action_executed`. Fail-closed at the boundary: text
   hygiene rejects poisoned ingest, over-budget agents are refused further
   actions, and the registry binds here even with the global trust plane
   disengaged. Agent-facing HTTP surface `/api/v1/external/runs|screen|
