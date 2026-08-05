@@ -272,6 +272,25 @@ stoppable — **while it happens**, open a live run:
 
 Heartbeats are limited to 240/minute per agent.
 
+## The learning plane over REST
+
+With `[fleet_memory] enable = true`, enrolled agents reach the governed
+learning plane through the same gateway bearer (previously MCP-only):
+
+- `POST /api/v1/external/memory/ingest` `{kind: success|failure|lesson,
+  goal_text, reflection?, tools_used?, domain?}` deposits an experience
+  record. Vendor provenance is stamped from the **enrollment's platform**,
+  never the caller's claim; the record passes the same redaction, injection
+  tripwires, and data-scope gates as the MCP path, and unenrolled or
+  contained agents are refused. Deposits feed the dream cycle and are
+  provable per vendor via `maverick proof --fleet`.
+- `POST /api/v1/external/memory/recall` `{query, domain?}` returns
+  department-scoped lessons for the asking agent (`{context, reason}`; an
+  empty context with a reason is a refusal, not an error). Every read is
+  audited with the reader's identity.
+- Both are limited to 60 requests/minute per agent. The console shows total
+  lessons shared; each scorecard shows that agent's contributions.
+
 ## Approval notifications
 
 A parked approval no longer waits silently for someone to open the queue:

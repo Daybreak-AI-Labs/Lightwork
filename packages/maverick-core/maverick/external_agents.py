@@ -663,6 +663,79 @@ def finish_run(agent_id: str, goal_id: int, run: dict,
             "over_wall": over_wall}
 
 
+# -- learning plane (fleet memory over the gateway) ---------------------------
+
+def memory_ingest(agent_id: str, record: dict,
+                  *, shield: Any | None = None) -> tuple[bool, str]:
+    """Deposit one experience record into fleet memory over the gateway.
+
+    The learning plane was MCP-only; platforms that speak plain HTTPS
+    (Agentforce External Services, Bedrock action groups) could not reach
+    it. The vendor is the enrollment's platform — provenance comes from OUR
+    registry, never the caller's claim — and the caller identity is bound so
+    the trust plane's "an agent acts only as itself" rule applies."""
+    if not enabled():
+        return False, "external agents plane is disabled"
+    from . import fleet_memory
+    meta = _load_sidecar().get(agent_id)
+    if meta is None:
+        return False, f"agent {agent_id!r} is not enrolled"
+    if meta.get("contained"):
+        return False, "agent is contained pending review"
+    body = {
+        "agent_id": agent_id,
+        "vendor": str(meta.get("platform") or "custom"),
+        "kind": record.get("kind"),
+        "goal_text": record.get("goal_text"),
+        "reflection": record.get("reflection"),
+        "tools_used": record.get("tools_used"),
+        "domain": record.get("domain") or meta.get("department") or None,
+    }
+    with fleet_memory.bind_caller(agent_id):
+        return fleet_memory.ingest(body, shield=shield)
+
+
+def memory_recall(agent_id: str, query: str, *, domain: str | None = None,
+                  shield: Any | None = None) -> tuple[str, str]:
+    """Governed memory read over the gateway — same identity binding and
+    data-scope gates as the MCP path; every read is audited."""
+    if not enabled():
+        return "", "external agents plane is disabled"
+    from . import fleet_memory
+    meta = _load_sidecar().get(agent_id)
+    if meta is None:
+        return "", f"agent {agent_id!r} is not enrolled"
+    if meta.get("contained"):
+        return "", "agent is contained pending review"
+    with fleet_memory.bind_caller(agent_id):
+        return fleet_memory.recall(
+            query, agent_id=agent_id,
+            vendor=str(meta.get("platform") or "custom"),
+            domain=domain or meta.get("department") or None, shield=shield)
+
+
+def _memory_counts() -> dict[str, dict]:
+    """Per-agent fleet-memory contribution counts, keyed by agent id.
+
+    Best-effort join against ``fleet_memory.status()`` (source keys are
+    ``vendor:agent_id``); an unavailable learning plane yields {}."""
+    try:
+        from . import fleet_memory
+        if not fleet_memory.enabled():
+            return {}
+        counts = fleet_memory.status().get("ingested") or {}
+    except Exception:
+        return {}
+    out: dict[str, dict] = {}
+    for source, kinds in counts.items():
+        _, _, agent_id = str(source).partition(":")
+        if agent_id:
+            row = out.setdefault(agent_id, {})
+            for kind, n in (kinds or {}).items():
+                row[kind] = int(row.get(kind, 0)) + int(n)
+    return out
+
+
 # -- pre-action screening (the governance seam) -------------------------------
 
 def screen(
@@ -958,6 +1031,7 @@ def agent_detail(agent_id: str) -> dict:
                     agent_id, e)
         row["record"] = {}
         row["episodes"] = []
+    row["memory"] = _memory_counts().get(agent_id, {})
     return row
 
 
@@ -975,4 +1049,6 @@ def status() -> dict:
         "runs": sum(r["runs"] for r in rows),
         "reported_dollars": round(
             sum(r["spent_dollars"] for r in rows), 4),
+        "memory_contributions": sum(
+            sum(kinds.values()) for kinds in _memory_counts().values()),
     }

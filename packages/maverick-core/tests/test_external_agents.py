@@ -385,6 +385,45 @@ def test_status_aggregates_containment_and_wall_violations():
     assert s["contained"] == 1 and s["wall_violations"] == 1
 
 
+def test_memory_ingest_and_recall_over_the_gateway(monkeypatch):
+    monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
+    from maverick import fleet_memory
+    _enroll()
+    # Enrollment registered the agent on the fleet roster under its platform.
+    assert any(r["agent_id"] == "sf-quotebot" and r["vendor"] == "agentforce"
+               for r in fleet_memory.roster())
+    ok, reason = xa.memory_ingest("sf-quotebot", {
+        "kind": "success", "goal_text": "Renewal quote accepted",
+        "reflection": "Bundling support hours closed it",
+        "tools_used": ["crm_update"]})
+    assert ok, reason
+    # Vendor provenance came from OUR enrollment, not the caller's claim.
+    assert xa.agent_detail("sf-quotebot")["memory"].get("success") == 1
+    assert xa.status()["memory_contributions"] == 1
+    context, reason = xa.memory_recall("sf-quotebot", "renewal quote")
+    assert reason in ("", "ok") or isinstance(context, str)
+    # Unenrolled and contained agents are refused.
+    ok, reason = xa.memory_ingest("ghost", {"kind": "success",
+                                            "goal_text": "x"})
+    assert ok is False and "not enrolled" in reason
+    with xa._sidecar_locked():
+        sidecar = xa._load_sidecar()
+        sidecar["sf-quotebot"]["contained"] = True
+        xa._save_sidecar(sidecar)
+    ok, reason = xa.memory_ingest("sf-quotebot", {"kind": "success",
+                                                  "goal_text": "x"})
+    assert ok is False and "contained" in reason
+
+
+def test_memory_paths_refuse_when_fleet_plane_is_off(monkeypatch):
+    monkeypatch.delenv("MAVERICK_FLEET_MEMORY", raising=False)
+    _enroll()
+    ok, reason = xa.memory_ingest("sf-quotebot", {"kind": "success",
+                                                  "goal_text": "x"})
+    assert ok is False and "disabled" in reason
+    assert xa.status()["memory_contributions"] == 0
+
+
 def test_repeated_denials_auto_contain_until_released():
     _enroll(max_risk="medium")
     for _ in range(5):

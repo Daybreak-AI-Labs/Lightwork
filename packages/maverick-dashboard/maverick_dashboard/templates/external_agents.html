@@ -11,7 +11,9 @@
       <span class="badge">{{ status.enrolled }} enrolled</span>
       <span class="badge">{{ status.runs }} runs ingested</span>
       <span class="badge">${{ '%.2f' | format(status.reported_dollars) }} reported spend</span>
+      {% if status.memory_contributions %}<span class="badge">{{ status.memory_contributions }} lessons shared</span>{% endif %}
       {% if status.over_budget %}<span class="badge failure">{{ status.over_budget }} over budget</span>{% endif %}
+      {% if status.contained %}<span class="badge failure">{{ status.contained }} contained</span>{% endif %}
     </p>
   </div>
 

@@ -41,7 +41,7 @@ router = APIRouter(prefix="/api/v1/external", tags=["external-agents"])
 # Keyed by verified agent id — except the unauthenticated schema route,
 # which keys by client address.
 _RATE_LIMITS = {"screen": 120, "runs": 60, "approvals": 120, "openapi": 30,
-                "heartbeat": 240}
+                "heartbeat": 240, "memory": 60}
 _RATE_BUCKET_CAP = 10_000
 _rate_times: dict[tuple[str, str], deque[float]] = {}
 _rate_lock = threading.Lock()
@@ -95,6 +95,19 @@ class ExternalScreenIn(BaseModel):
     tool: str = Field(min_length=1, max_length=128)
     detail: str = Field(default="", max_length=4000)
     risk: str = Field(default="", max_length=10)
+
+
+class ExternalMemoryIngestIn(BaseModel):
+    kind: str = Field(pattern="^(success|failure|lesson)$")
+    goal_text: str = Field(min_length=1, max_length=2000)
+    reflection: str = Field(default="", max_length=2000)
+    tools_used: list[str] = Field(default_factory=list, max_length=16)
+    domain: str = Field(default="", max_length=100)
+
+
+class ExternalMemoryRecallIn(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
+    domain: str = Field(default="", max_length=100)
 
 
 class ExternalRunStartIn(BaseModel):
@@ -228,6 +241,38 @@ async def external_screen(
     from maverick import external_agents as xa
     return xa.screen(agent_id, payload.tool, detail=payload.detail,
                      risk=payload.risk or None, shield=_shield())
+
+
+@router.post("/memory/ingest", status_code=201)
+async def external_memory_ingest(
+    payload: ExternalMemoryIngestIn, agent_id: str = Depends(_require_agent),
+) -> dict:
+    """Deposit one experience record into the governed learning plane —
+    the REST twin of the MCP fleet-ingest tool, for platforms that only
+    speak HTTPS. Vendor provenance comes from the enrollment, never the
+    caller. Refusals carry the plane's own reason (roster, scope, Shield)."""
+    _rate_limit(agent_id, "memory")
+    from maverick import external_agents as xa
+    ok, reason = xa.memory_ingest(agent_id, payload.model_dump(),
+                                  shield=_shield())
+    if not ok:
+        raise HTTPException(status_code=403, detail=reason)
+    return {"ok": True}
+
+
+@router.post("/memory/recall")
+async def external_memory_recall(
+    payload: ExternalMemoryRecallIn, agent_id: str = Depends(_require_agent),
+) -> dict:
+    """Governed memory read: department-scoped lessons for the asking agent.
+    An empty context with a reason is a refusal, not an error — the caller
+    proceeds without memory."""
+    _rate_limit(agent_id, "memory")
+    from maverick import external_agents as xa
+    context, reason = xa.memory_recall(agent_id, payload.query,
+                                       domain=payload.domain or None,
+                                       shield=_shield())
+    return {"context": context, "reason": reason}
 
 
 @router.get("/approvals/{approval_id}")
@@ -407,6 +452,52 @@ _OPENAPI: dict = {
                             "goal_id": {"type": "integer"},
                             "over_budget": {"type": "boolean"},
                             "over_wall": {"type": "boolean"},
+                        }}}}}},
+            },
+        },
+        "/api/v1/external/memory/ingest": {
+            "post": {
+                "operationId": "memoryIngest",
+                "summary": "Deposit an experience record into the governed "
+                           "learning plane (fleet memory)",
+                "requestBody": {"required": True, "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "required": ["kind", "goal_text"],
+                        "properties": {
+                            "kind": {"type": "string",
+                                     "enum": ["success", "failure",
+                                              "lesson"]},
+                            "goal_text": {"type": "string"},
+                            "reflection": {"type": "string"},
+                            "tools_used": {"type": "array",
+                                           "items": {"type": "string"}},
+                            "domain": {"type": "string"},
+                        }}}}},
+                "responses": {"201": {"description": "Deposited", "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "properties": {"ok": {"type": "boolean"}}}}}}},
+            },
+        },
+        "/api/v1/external/memory/recall": {
+            "post": {
+                "operationId": "memoryRecall",
+                "summary": "Read governed memory scoped to this agent's "
+                           "permitted departments",
+                "requestBody": {"required": True, "content": {
+                    "application/json": {"schema": {
+                        "type": "object", "required": ["query"],
+                        "properties": {
+                            "query": {"type": "string"},
+                            "domain": {"type": "string"},
+                        }}}}},
+                "responses": {"200": {"description": "Context", "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "context": {"type": "string"},
+                            "reason": {"type": "string"},
                         }}}}}},
             },
         },

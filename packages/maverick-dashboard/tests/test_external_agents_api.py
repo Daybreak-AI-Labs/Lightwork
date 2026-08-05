@@ -131,8 +131,40 @@ def test_openapi_artifact_describes_every_gateway_operation():
         "/api/v1/external/runs/start",
         "/api/v1/external/runs/{goal_id}/heartbeat",
         "/api/v1/external/runs/{goal_id}/finish",
+        "/api/v1/external/memory/ingest",
+        "/api/v1/external/memory/recall",
         "/api/v1/external/approvals/{approval_id}"}
     assert spec["security"] == [{"bearer": []}]
+
+
+def test_memory_routes_over_http(monkeypatch):
+    monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
+    from maverick import fleet_memory
+    monkeypatch.setattr(fleet_memory, "registry_path",
+                        lambda: fleet_memory.inbox_dir().parent
+                        / "agents.ndjson")
+    _enroll()
+    token = _mint()
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    r = bare.post("/api/v1/external/memory/ingest", headers=hdr,
+                  json={"kind": "success",
+                        "goal_text": "Renewal quote accepted",
+                        "reflection": "Bundling closed it"})
+    assert r.status_code == 201, r.text
+    r = bare.post("/api/v1/external/memory/recall", headers=hdr,
+                  json={"query": "renewal quote"})
+    assert r.status_code == 200
+    assert "context" in r.json() and "reason" in r.json()
+    # The scorecard surfaces the contribution.
+    page = client.get("/external-agents/sf-quotebot").text
+    assert "Learning contributions" in page
+    # Bad kind is schema-gated; no bearer is 401.
+    assert bare.post("/api/v1/external/memory/ingest", headers=hdr,
+                     json={"kind": "gossip", "goal_text": "x"}
+                     ).status_code == 422
+    assert bare.post("/api/v1/external/memory/recall",
+                     json={"query": "x"}).status_code == 401
 
 
 def test_console_page_renders_roster_and_forms():
