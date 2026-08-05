@@ -146,6 +146,31 @@ def test_mint_approval_is_one_shot(tmp_path):
     assert agent_for_token(token, "rest").id == "sf-quotebot"
 
 
+def test_evicted_mint_approval_stays_spent(tmp_path, monkeypatch):
+    """The used-approval ledger is bounded, but a world approval never
+    expires — so forgetting an id must never make it usable again. The floor
+    remembers the highest evicted id, so eviction can only ever refuse."""
+    _enroll()
+    _mint_gate_on(tmp_path)
+    monkeypatch.setattr(xa, "_MAX_USED_MINT_APPROVALS", 2)
+    from maverick.world_model import WorldModel
+    spent = []
+    for _ in range(3):
+        with pytest.raises(xa.MintApprovalPending) as exc:
+            xa.mint_token("sf-quotebot", "rest")
+        approval_id = exc.value.approval_id
+        WorldModel().decide_approval(approval_id, "approved",
+                                     decided_by="admin@corp.test")
+        xa.mint_token("sf-quotebot", "rest", mint_approval_id=approval_id)
+        spent.append(approval_id)
+    # The first id has aged out of the bounded ledger; the world still reports
+    # it 'approved', so only the floor stands between it and a second mint.
+    used = xa.roster()  # forces a sidecar read; the ledger is internal state
+    assert used  # roster stays readable with the floor recorded
+    with pytest.raises(xa.ExternalAgentsError, match="one-shot"):
+        xa.mint_token("sf-quotebot", "rest", mint_approval_id=spent[0])
+
+
 def test_denied_or_pending_mint_approval_refuses(tmp_path):
     _enroll()
     _mint_gate_on(tmp_path)

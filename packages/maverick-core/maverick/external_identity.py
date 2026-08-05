@@ -18,6 +18,11 @@ to a single :class:`~maverick.agent_trust.TrustedAgent` registry entry:
   domain-separated request digest, with a freshness window and a single-use
   nonce (replay defence mirroring :func:`maverick.handoff.verify_handoff`).
 
+Both signed schemes are SINGLE USE: a valid request is claimed in a durable,
+per-agent ledger (:func:`claim_once`) before it authenticates, so the same
+bytes cannot be replayed inside their freshness window — including against a
+different dashboard worker, which an in-process cache could not prevent.
+
 Pure verifier library: no FastAPI imports, no network. Every function returns
 ``(TrustedAgent | None, rule)`` and FAILS CLOSED — any error, mismatch, or
 missing material yields ``(None, <rule>)``; nothing here ever raises to the
@@ -34,7 +39,6 @@ import time
 from pathlib import Path
 
 from .agent_trust import TrustedAgent, load_registry
-from .handoff import NonceCache
 
 log = logging.getLogger(__name__)
 
@@ -48,10 +52,111 @@ HMAC_MAX_AGE_SECONDS = 300
 _MAX_NONCE_BYTES = 128  # matches handoff.HANDOFF_MAX_NONCE_BYTES
 _MAX_TIMESTAMP_CHARS = 64
 
-#: Single-use nonce ledger for the envelope scheme, keyed ``<agent_id>:<nonce>``
-#: so one agent cannot burn another's nonces. Fail-closed on replay AND on
-#: saturation (a full cache refuses, never evicts a live nonce).
-_NONCE_CACHE = NonceCache()
+#: Per-agent ceiling on remembered replay keys. The ledger is partitioned by
+#: agent so a busy (or hostile) agent can only ever saturate its OWN budget —
+#: a single global cache would let two chatty agents lock every other agent
+#: out of the signed schemes entirely.
+_MAX_KEYS_PER_AGENT = 4096
+
+
+class ReplayStoreError(RuntimeError):
+    """The single-use ledger exists but cannot be read or written. Callers
+    fail CLOSED — a request whose single-use property cannot be PROVEN is
+    refused, exactly like :mod:`maverick_dashboard.saml_replay`."""
+
+
+def _replay_path():
+    """Single-use ledger for the signed schemes, tenant-scoped like the
+    enrollment sidecar: ``{agent_id: {key: expires_at}}``.
+
+    On disk rather than in memory because the gateway runs inside the
+    dashboard app, which is deployed with MULTIPLE WORKERS — a per-process
+    cache would let the same signed request replay successfully on a
+    different worker."""
+    from .paths import data_dir
+    return data_dir("external-replay.json")
+
+
+def _load_replay() -> dict[str, dict[str, float]]:
+    from .file_lock import atomic_read_text, ensure_private_file
+    path = _replay_path()
+    try:
+        ensure_private_file(path)
+        raw = atomic_read_text(path)
+    except FileNotFoundError:
+        return {}
+    except OSError as e:
+        raise ReplayStoreError(f"replay ledger unreadable: {e}") from e
+    if not raw.strip():
+        return {}
+
+    def _reject_constant(value: str):
+        # NaN/Infinity would never expire, so they can never be trusted as
+        # ledger state (the stdlib decoder accepts them by default).
+        raise ValueError(f"non-finite number {value!r}")
+
+    try:
+        data = json.loads(raw, parse_constant=_reject_constant)
+    except (TypeError, ValueError) as e:
+        raise ReplayStoreError(f"replay ledger corrupt: {e}") from e
+    if not isinstance(data, dict):
+        raise ReplayStoreError("replay ledger corrupt: root must be an object")
+    out: dict[str, dict[str, float]] = {}
+    for agent_id, keys in data.items():
+        if not isinstance(keys, dict):
+            raise ReplayStoreError(
+                f"replay ledger corrupt: {agent_id!r} must map keys to expiries")
+        bucket: dict[str, float] = {}
+        for key, expiry in keys.items():
+            if isinstance(expiry, bool) or not isinstance(expiry, (int, float)):
+                raise ReplayStoreError(
+                    f"replay ledger corrupt: expiry for {key!r} must be a number")
+            if not math.isfinite(expiry) or expiry <= 0:
+                raise ReplayStoreError(
+                    f"replay ledger corrupt: expiry for {key!r} must be finite")
+            bucket[str(key)] = float(expiry)
+        out[str(agent_id)] = bucket
+    return out
+
+
+def claim_once(agent_id: str, key: str, *, expires_at: float,
+               now: float) -> str | None:
+    """Claim one single-use key for ``agent_id``; the refusal rule or ``None``.
+
+    First-writer-wins under a cross-process lock, so the claim holds across
+    dashboard workers. Expired keys prune on the way past; a per-agent budget
+    that is still full after pruning REFUSES rather than evicting a live key
+    (evicting one would silently reopen its replay window). Raises
+    :class:`ReplayStoreError` when the ledger cannot be read or written — the
+    caller turns that into a refusal."""
+    from .file_lock import (
+        atomic_write_text,
+        cross_process_lock,
+        ensure_private_directory,
+    )
+    path = _replay_path()
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path):
+        ledger = _load_replay()
+        bucket = {k: v for k, v in (ledger.get(agent_id) or {}).items()
+                  if v > now}
+        if key in bucket:
+            return "replay"
+        if len(bucket) >= _MAX_KEYS_PER_AGENT:
+            return "replay_budget_full"
+        bucket[key] = float(expires_at)
+        ledger[agent_id] = bucket
+        # Drop agents whose keys have all expired so the file stays bounded
+        # by ACTIVE callers, not by every agent ever enrolled.
+        ledger = {a: {k: v for k, v in keys.items() if v > now}
+                  for a, keys in ledger.items()}
+        ledger = {a: keys for a, keys in ledger.items() if keys}
+        try:
+            atomic_write_text(path, json.dumps(ledger, sort_keys=True),
+                              mode=0o600)
+        except OSError as e:
+            raise ReplayStoreError(f"replay ledger unwritable: {e}") from e
+    return None
 
 
 def _active_inbound(agent: TrustedAgent, now: float | None = None) -> str | None:
@@ -242,13 +347,32 @@ def _verify_agent_hmac(
     if not isinstance(body, bytes):
         return None, "bad_body"
     from .webhooks import verify_signature
-    if not verify_signature(body, str(signature or ""), secret,
+    sig = str(signature or "")
+    if not verify_signature(body, sig, secret,
                             timestamp=str(timestamp or ""),
                             max_age=HMAC_MAX_AGE_SECONDS):
         return None, "bad_signature"
     why = _active_inbound(entry)
     if why is not None:
         return None, why
+    # Single-use, keyed by the SIGNATURE itself: it is deterministic over
+    # (secret, timestamp, body), so a captured request replayed inside the
+    # freshness window presents the identical signature and is refused. The
+    # webhook receiver tolerates that ambiguity because a duplicate delivery
+    # is harmless there; here the same bytes would re-drive a governed
+    # endpoint, so an exact duplicate must not authenticate twice. A genuine
+    # retry re-signs with a fresh timestamp.
+    try:
+        refusal = claim_once(
+            agent_id, "hmac:" + hashlib.sha256(sig.encode("utf-8")).hexdigest(),
+            expires_at=time.time() + HMAC_MAX_AGE_SECONDS * 2,
+            now=time.time())
+    except ReplayStoreError:
+        log.warning("external_identity: replay ledger unavailable "
+                    "(fail-closed)", exc_info=True)
+        return None, "replay_store_unavailable"
+    if refusal is not None:
+        return None, refusal
     return entry, "ok"
 
 
@@ -353,16 +477,20 @@ def _verify_agent_envelope(
     why = _active_inbound(entry, now=current)
     if why is not None:
         return None, why
-    # Remember the nonce only after a fully-valid request; a same-nonce race
-    # is a replay, a full cache is safe saturation (never evict a live nonce).
-    key = f"{agent_id}:{nonce}"
-    if _NONCE_CACHE.seen(key, now=current):
-        return None, "replay"
-    if not _NONCE_CACHE.remember(
-            key, expires_at=ts + ENVELOPE_MAX_AGE_SECONDS, now=current):
-        if _NONCE_CACHE.seen(key, now=current):
-            return None, "replay"
-        return None, "nonce_cache_full"
+    # Claim the nonce only after a fully-valid request, durably so the claim
+    # holds across dashboard workers. A ledger failure REFUSES: a request
+    # whose single-use property cannot be proven must not authenticate.
+    try:
+        refusal = claim_once(
+            agent_id, f"nonce:{nonce}",
+            expires_at=ts + ENVELOPE_MAX_AGE_SECONDS
+            + ENVELOPE_CLOCK_SKEW_SECONDS, now=current)
+    except ReplayStoreError:
+        log.warning("external_identity: replay ledger unavailable "
+                    "(fail-closed)", exc_info=True)
+        return None, "replay_store_unavailable"
+    if refusal is not None:
+        return None, refusal
     return entry, "ok"
 
 

@@ -237,7 +237,8 @@ async def _require_agent(request: Request) -> str:
             scheme = "bearer"
             agent = agent_for_token(token, "rest", registry=registry)
             rule = "ok" if agent is not None else "invalid_token"
-            if agent is not None and (agent.pubkey or agent.jwt_issuer):
+            if agent is not None and (agent.pubkey or agent.jwt_issuer
+                                      or agent.hmac_secret_ref):
                 # [external_agents] require_signed: an agent enrolled with a
                 # strong credential must present it — its bearer alone no
                 # longer authenticates. Token-only agents are unaffected.

@@ -520,13 +520,27 @@ def _consume_mint_approval(agent_id: str, surface: str,
         # String-compare the ledger so a junk entry can never crash the
         # check (we only ever write ints; junk stays inert but preserved).
         used = list(meta.get("used_mint_approvals") or [])
+        spent = (f"approval #{approval_id} has already minted a credential; "
+                 "approvals are one-shot — run the mint without an approval "
+                 "id to park a new one")
         if any(str(u) == str(approval_id) for u in used):
-            raise ExternalAgentsError(
-                f"approval #{approval_id} has already minted a credential; "
-                "approvals are one-shot — run the mint without an approval "
-                "id to park a new one")
+            raise ExternalAgentsError(spent)
+        # A world approval never expires, so the bounded ledger alone would
+        # let an id become reusable once it aged out. The floor is the
+        # highest id ever EVICTED: everything at or below it is treated as
+        # spent, so forgetting can only ever refuse, never re-authorize.
+        floor = int(meta.get("mint_approval_floor") or 0)
+        if approval_id <= floor:
+            raise ExternalAgentsError(spent)
         used.append(approval_id)
-        meta["used_mint_approvals"] = used[-_MAX_USED_MINT_APPROVALS:]
+        keep = used[-_MAX_USED_MINT_APPROVALS:]
+        for stale in used[:len(used) - len(keep)]:
+            try:
+                floor = max(floor, int(stale))
+            except (TypeError, ValueError):  # junk entry; nothing to raise to
+                continue
+        meta["mint_approval_floor"] = floor
+        meta["used_mint_approvals"] = keep
         _save_sidecar(sidecar)
     return approval_id
 

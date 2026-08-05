@@ -55,10 +55,8 @@ def _isolated(tmp_path, monkeypatch):
     """Sandbox the managed-overlay/config/audit paths and the nonce ledger."""
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
-    from maverick import config, external_identity
+    from maverick import config
     from maverick.audit import writer as audit_writer
-    from maverick.handoff import NonceCache
-    monkeypatch.setattr(external_identity, "_NONCE_CACHE", NonceCache())
     monkeypatch.setattr(audit_writer, "_default", None)
     audit_writer._defaults.clear()
     config.reset_config_cache()
@@ -79,14 +77,15 @@ def _registry(**overrides) -> dict[str, TrustedAgent]:
 def test_identity_fields_parse_and_default_empty():
     reg = load_registry({"agent_trust": {"agents": [
         {"id": "a", "jwt_issuer": ISSUER, "jwt_audience": AUDIENCE,
-         "jwks_file": "/keys/partner.pem", "hmac_secret_ref": "PARTNER_SECRET"},
+         "jwks_file": "/keys/partner.pem",  # pragma: allowlist secret
+         "hmac_secret_ref": "PARTNER_SECRET"},  # pragma: allowlist secret
         {"id": "b"},
     ]}})
     a = reg["a"]
     assert a.jwt_issuer == ISSUER
     assert a.jwt_audience == AUDIENCE
     assert a.jwks_file == "/keys/partner.pem"
-    assert a.hmac_secret_ref == "PARTNER_SECRET"
+    assert a.hmac_secret_ref == "PARTNER_SECRET"  # pragma: allowlist secret
     b = reg["b"]
     assert (b.jwt_issuer, b.jwt_audience, b.jwks_file, b.hmac_secret_ref) == ("", "", "", "")
 
@@ -235,7 +234,7 @@ def test_jwt_revoked_entry_rejected_after_valid_signature(tmp_path, rsa_keys):
 
 # ---- HMAC --------------------------------------------------------------------
 
-_SECRET_NAME = "XA_TEST_HMAC_SECRET"
+_SECRET_NAME = "XA_TEST_HMAC_SECRET"  # pragma: allowlist secret
 _SECRET = "s3cret-value"  # pragma: allowlist secret
 
 
@@ -424,3 +423,93 @@ def test_mint_token_preserves_identity_fields():
     assert agent.jwks_file == "/keys/partner.pem"
     assert agent.hmac_secret_ref == _SECRET_NAME
     assert agent.rest_token.startswith("sha256:")
+
+
+# ---- single-use ledger: durable, per-agent bounded ---------------------------
+
+
+def test_claim_once_refuses_the_same_key_twice():
+    from maverick.external_identity import claim_once
+    now = time.time()
+    assert claim_once("a", "nonce:x", expires_at=now + 300, now=now) is None
+    assert claim_once("a", "nonce:x", expires_at=now + 300, now=now) == "replay"
+    # A different agent's identical nonce is untouched (keys are partitioned).
+    assert claim_once("b", "nonce:x", expires_at=now + 300, now=now) is None
+
+
+def test_claim_once_survives_a_fresh_process_view():
+    """The ledger is on disk, so a claim made by one dashboard worker binds
+    every other worker — an in-process cache could not do this."""
+    import importlib
+
+    from maverick import external_identity
+    now = time.time()
+    assert external_identity.claim_once(
+        "a", "nonce:worker", expires_at=now + 300, now=now) is None
+    reloaded = importlib.reload(external_identity)
+    assert reloaded.claim_once(
+        "a", "nonce:worker", expires_at=now + 300, now=now) == "replay"
+
+
+def test_claim_once_budget_is_per_agent(monkeypatch):
+    """A saturated agent is refused alone; it can never lock out other agents
+    (a single global cache would let two chatty agents deny everyone else)."""
+    from maverick import external_identity
+    monkeypatch.setattr(external_identity, "_MAX_KEYS_PER_AGENT", 3)
+    now = time.time()
+    for i in range(3):
+        assert external_identity.claim_once(
+            "noisy", f"nonce:{i}", expires_at=now + 300, now=now) is None
+    assert external_identity.claim_once(
+        "noisy", "nonce:overflow", expires_at=now + 300,
+        now=now) == "replay_budget_full"
+    assert external_identity.claim_once(
+        "quiet", "nonce:0", expires_at=now + 300, now=now) is None
+    # Expired keys prune, so the budget recovers on its own.
+    later = now + 600
+    assert external_identity.claim_once(
+        "noisy", "nonce:after-expiry", expires_at=later + 300,
+        now=later) is None
+
+
+def test_claim_once_fails_closed_on_a_corrupt_ledger():
+    from maverick.external_identity import ReplayStoreError, _replay_path, claim_once
+    now = time.time()
+    assert claim_once("a", "nonce:1", expires_at=now + 300, now=now) is None
+    _replay_path().write_text("{not json", encoding="utf-8")
+    with pytest.raises(ReplayStoreError):
+        claim_once("a", "nonce:2", expires_at=now + 300, now=now)
+
+
+@requires_crypto
+def test_envelope_replay_is_refused():
+    priv, pub_hex = _ed25519_pair()
+    now = time.time()
+    ts = str(int(now))
+    body = b'{"op": "post"}'
+    sig = priv.sign(envelope_message("sig-bot", ts, "nonce-once", body)).hex()
+    reg = _envelope_registry(pub_hex)
+    agent, rule = verify_agent_envelope(
+        "sig-bot", body, ts, "nonce-once", sig, registry=reg, now=now)
+    assert agent is not None and rule == "ok"
+    agent, rule = verify_agent_envelope(
+        "sig-bot", body, ts, "nonce-once", sig, registry=reg, now=now)
+    assert agent is None
+    assert rule == "replay"
+
+
+def test_hmac_replay_of_identical_bytes_is_refused(monkeypatch):
+    """The signature is deterministic over (secret, timestamp, body), so a
+    captured request replayed inside the freshness window presents the same
+    signature and must not authenticate twice."""
+    monkeypatch.setenv(_SECRET_NAME, _SECRET)
+    body = b'{"title": "quote run"}'
+    ts = str(int(time.time()))
+    sig = _hmac_sig(_SECRET, ts, body)
+    agent, rule = verify_agent_hmac(
+        "hooky", body, ts, sig, registry=_hmac_registry())
+    assert agent is not None and rule == "ok"
+    agent, rule = verify_agent_hmac(
+        "hooky", body, ts, sig, registry=_hmac_registry())
+    assert agent is None
+    assert rule == "replay"

@@ -40,8 +40,7 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import agent_trust, config, external_agents, external_identity, world_model
-    from maverick.handoff import NonceCache
+    from maverick import agent_trust, config, external_agents, world_model
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "1")
@@ -51,7 +50,6 @@ def _isolated(tmp_path, monkeypatch):
                         lambda: tmp_path / "agent_trust.json")
     monkeypatch.setattr(external_agents, "registry_path",
                         lambda: tmp_path / "external_agents.json")
-    monkeypatch.setattr(external_identity, "_NONCE_CACHE", NonceCache())
     config.reset_config_cache()
     yield
     config.reset_config_cache()
@@ -736,3 +734,21 @@ def test_require_signed_refuses_bearer_for_strong_credential_agents(tmp_path):
                   headers={"Authorization": f"Bearer {plain_token}"},
                   json=body)
     assert r.status_code == 200, r.text
+
+
+def test_require_signed_covers_hmac_only_agents(tmp_path):
+    """An agent whose only strong credential is HMAC must also lose its
+    bearer under require_signed — otherwise a leaked bearer keeps working
+    against the very switch that was meant to retire it."""
+    from maverick import config
+    _enroll()
+    token = _mint()
+    _identity(hmac_secret_ref="SF_QUOTEBOT_HMAC")  # pragma: allowlist secret
+    (tmp_path / "config.toml").write_text(
+        "[external_agents]\nrequire_signed = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    bare = TestClient(app)
+    r = bare.post("/api/v1/external/screen",
+                  headers={"Authorization": f"Bearer {token}"},
+                  json={"tool": "crm_update", "risk": "low"})
+    assert r.status_code == 401

@@ -159,8 +159,14 @@ Requests carry three headers over the raw body:
 
 This is exactly Lightwork's outbound webhook signature format: sign
 `b"<timestamp>." + body` with HMAC-SHA256 and prefix the hex digest with
-`sha256=`. Timestamps older than 300 seconds are rejected (replay defence);
-signature comparison is constant-time.
+`sha256=`. Timestamps older than 300 seconds are rejected; signature
+comparison is constant-time.
+
+Each signed request is also **single use**: the signature is deterministic
+over (secret, timestamp, body), so a captured request replayed inside the
+freshness window presents the same signature and is refused. Vary the
+timestamp per request — a retry after a timeout must be re-signed with a
+fresh one rather than resent byte-for-byte.
 
 ### Ed25519 signed requests
 
@@ -187,9 +193,17 @@ attacker could swap — identity, freshness, replay key, payload — is under
 the signature, and the version prefix means a request signature can never
 double as a handoff, approval, or federation signature. Freshness:
 timestamps more than 60 s in the future or older than 300 s are rejected.
-The nonce is **single-use per agent** — a replayed nonce is refused, and a
-saturated nonce cache refuses new requests rather than evicting a live
-nonce (fail closed). The server needs the `cryptography` package.
+The nonce is **single-use per agent** — a replayed nonce is refused.
+
+Both signed schemes claim each request in a durable, per-agent ledger
+(`external-replay.json` under the data dir) before it authenticates, so a
+claim made on one dashboard worker binds every other worker. The ledger
+fails closed in both directions: a per-agent budget that is still full
+after pruning expired keys refuses new requests rather than evicting a live
+key, and a ledger that cannot be read or written refuses rather than
+letting an unprovable request through. The budget is **per agent**, so a
+saturated agent can never lock other agents out. The server needs the
+`cryptography` package.
 
 ### Requiring the strong credential
 
@@ -631,7 +645,9 @@ The external boundary fails closed throughout:
 | `401` | Missing, wrong, rotated, or revoked rest token (the reply never says which) | Mint a new rest credential; minting replaces the old token immediately |
 | `401` with a native credential | Generic by design — the server log names the rule: `external gateway: <scheme> auth refused (<rule>)` | Match the log rule against the rows below |
 | log rule `stale` / `future_ts` | Timestamp outside the freshness window (300 s age, 60 s forward skew) | Sync clocks (NTP) and sign at send time, not enqueue time |
-| log rule `replay` | Envelope nonce already used for this agent | Generate a fresh nonce per request |
+| log rule `replay` | The request was already claimed (envelope nonce reused, or an HMAC request resent byte-for-byte) | Use a fresh nonce / timestamp per request |
+| log rule `replay_budget_full` | This agent's single-use ledger is full of unexpired keys | Slow the agent down; keys prune as they age past the freshness window |
+| log rule `replay_store_unavailable` | The single-use ledger could not be read or written — requests refuse rather than risk a replay | Check the data dir's permissions and free space |
 | log rule `bad_signature` | HMAC or Ed25519 signature does not verify — wrong key/secret or the signed material differs from the raw body | Rebuild the signing input byte-for-byte (`"<ts>." + body` for HMAC; `envelope_message` for Ed25519) and send exactly those body bytes |
 | log rule `secret_unresolved` | `hmac_secret_ref` names a secret the provider cannot resolve | Export the env var (or mount the secret file) named by the ref |
 | log rule `jwks_unavailable` | `jwks_file` absent, unreadable, or neither PEM nor JWKS | Fix the path/contents; the file is read at verify time |
