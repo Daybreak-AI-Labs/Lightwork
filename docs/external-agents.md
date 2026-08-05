@@ -107,6 +107,8 @@ TypeScript helpers for the screen-then-act, report-after loop.
    action until a human decides; call **runs** once with title/outcome/cost
    when the job completes.
 
+Paste-in packaging (deployable Apex invocable classes + the exact Setup clicks): [`examples/external-agents/agentforce/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/examples/external-agents/agentforce/).
+
 ### AWS Bedrock Agents
 
 1. Save the schema: `curl -H "Authorization: Bearer lw-rest-EXAMPLEEXAMPLE"
@@ -120,6 +122,8 @@ TypeScript helpers for the screen-then-act, report-after loop.
 3. Agent instructions as above: screen before consequential actions, report
    the run at completion.
 4. Rotation = mint a new rest token and update the Secrets Manager value.
+
+Paste-in packaging (SAM template + forwarder Lambda + action-group schema): [`examples/external-agents/bedrock/`](https://github.com/Daybreak-AI-Labs/Lightwork/blob/main/examples/external-agents/bedrock/).
 
 ### OpenAI / LangChain
 

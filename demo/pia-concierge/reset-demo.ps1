@@ -52,6 +52,7 @@ $env:ONETRUST_TOKEN               = "demo-bearer-token"
 $env:PIA_SEED_TENANT              = "1"
 $env:MAVERICK_SHIELD_PROFILE      = "strict"
 $env:MAVERICK_DEFAULT_MAX_DOLLARS = "10"
+$env:MAVERICK_EXTERNAL_AGENTS     = "1"
 $env:EMAIL_USER                   = "privacy-office@company.com"
 $env:EMAIL_APP_PASSWORD           = "demo-app-password"  # pragma: allowlist secret
 $env:EMAIL_SMTP_HOST              = "127.0.0.1"

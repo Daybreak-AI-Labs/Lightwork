@@ -58,6 +58,12 @@ async def main() -> None:
     from app import app as world_app
     from maverick_dashboard.app import app as dash_app
 
+    # Bring-your-own-agent plane ON: the seeded Agentforce agent
+    # (seed_workspace._seed_external_agent) needs it for the /external-agents
+    # roster, the gateway routes, and the parked approval to show. setdefault
+    # so an operator can still force it off with MAVERICK_EXTERNAL_AGENTS=0.
+    os.environ.setdefault("MAVERICK_EXTERNAL_AGENTS", "1")
+
     _maybe_seed_workspace()
 
     dash_port = int(os.environ.get("DASH_PORT", "8765"))

@@ -109,6 +109,40 @@ def enabled() -> bool:
 
 # -- sidecar registry (platform/ownership metadata + reported-spend meter) ----
 
+def _seat_limit() -> int:
+    """Enrollment seat cap: ``[external_agents] max_enrolled`` clamped to the
+    structural ceiling. The commercial seat count lives in config (set by the
+    operator to match their license order); the hard cap protects the
+    JSON-sidecar storage model."""
+    try:
+        from .config import load_config
+        raw = int((load_config() or {}).get(
+            "external_agents", {}).get("max_enrolled", _MAX_AGENTS))
+        return max(1, min(raw, _MAX_AGENTS))
+    except Exception:
+        return _MAX_AGENTS
+
+
+def note_seen(agent_id: str) -> None:
+    """Stamp the agent's last authenticated contact (credential audit trail).
+
+    Throttled to 5-minute granularity so the hot path never write-amplifies
+    the sidecar; failures are swallowed — liveness bookkeeping must never
+    break a request."""
+    try:
+        now = time.time()
+        meta = _load_sidecar().get(agent_id)
+        if meta is None or now - float(meta.get("last_seen") or 0) < 300:
+            return
+        with _sidecar_locked():
+            sidecar = _load_sidecar()
+            if agent_id in sidecar:
+                sidecar[agent_id]["last_seen"] = now
+                _save_sidecar(sidecar)
+    except Exception:  # pragma: no cover -- bookkeeping never blocks
+        log.debug("external_agents: last-seen stamp failed", exc_info=True)
+
+
 def registry_path():
     """Enrollment metadata sidecar (``external_agents.json``), tenant-scoped.
 
@@ -262,8 +296,10 @@ def enroll(
             if tool_risk:
                 tool_risks[name] = tool_risk
     sidecar = _load_sidecar()
-    if agent_id not in sidecar and len(sidecar) >= _MAX_AGENTS:
-        raise ExternalAgentsError("enrollment limit reached")
+    if agent_id not in sidecar and len(sidecar) >= _seat_limit():
+        raise ExternalAgentsError(
+            f"enrollment limit reached ({_seat_limit()} seats); raise "
+            "[external_agents] max_enrolled or unenroll unused agents")
     entry: dict[str, Any] = {
         "id": agent_id,
         "direction": "inbound",
@@ -354,7 +390,10 @@ def mint_token(agent_id: str, surface: str) -> str:
         raise ExternalAgentsError(f"agent {agent_id!r} is not enrolled")
     token = f"lw-{surface}-{secrets.token_urlsafe(32)}"
     entry = _entry_from_agent(agent)
-    entry[f"{surface}_token"] = token
+    # At rest the registry holds only the hash — a leaked overlay backup
+    # must never authenticate. The raw value exists in this return alone.
+    from .agent_trust import hash_token
+    entry[f"{surface}_token"] = hash_token(token)
     try:
         put_agent(entry)
     except AgentTrustError as e:
@@ -1004,6 +1043,7 @@ def roster() -> list[dict]:
             "tool_risks": dict(meta.get("tool_risks") or {}),
             "runs": int(meta.get("runs") or 0),
             "last_run_at": meta.get("last_run_at"),
+            "last_seen": meta.get("last_seen"),
             "credentials": [s for s in TOKEN_SURFACES
                             if agent and getattr(agent, f"{s}_token", "")],
         })

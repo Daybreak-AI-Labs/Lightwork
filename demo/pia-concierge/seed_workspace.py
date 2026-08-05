@@ -338,6 +338,114 @@ def _seed_operating_record(rnd) -> None:
           f"{spend['runs']} costed runs, ${spend['dollars']:.2f} ledger spend.")
 
 
+def _seed_external_agent(rnd) -> None:
+    """The bring-your-own-agent beat: a Salesforce Agentforce agent that
+    Lightwork does not run, only governs.
+
+    Enrolls ``sf-quotebot`` across the trust plane + enrollment sidecar,
+    ingests two weeks of COMPLETED quoting runs through the real gateway
+    (``record_run`` lands each one as a terminal done/blocked goal owned by
+    ``agent:sf-quotebot`` — orphan-reclaim-proof, same rule as the Operating
+    Record seed), backdates them with the same direct-UPDATE trick, then
+    makes ONE real ``screen`` call for a high-risk action so a genuine
+    approval row parks in the dashboard queue, labeled with external-agents
+    provenance."""
+    # The plane must be on for the gateway (and the dashboard roster). The
+    # demo launchers set this too; the setdefault keeps a standalone
+    # `python3 seed_workspace.py` working.
+    os.environ.setdefault("MAVERICK_EXTERNAL_AGENTS", "1")
+    from maverick import external_agents as xa
+
+    if xa._load_sidecar().get("sf-quotebot"):
+        return   # already enrolled; never restack runs or park a second approval
+
+    xa.enroll(
+        "sf-quotebot", "agentforce",
+        description="Agentforce quoting agent (Sales Cloud)",
+        owner="jordan@company.com", department="sales",
+        max_risk="high",
+        allow_tools=["crm_update:low", "send_contract:high", "research"],
+        max_dollars=250.0, budget_period="monthly",
+        enrolled_by="C. Day")
+
+    accounts = ("Contoso", "Globex", "Initech", "Northwind", "Vandelay",
+                "Aperture")
+    # Oldest first (ids follow time), all safely in the past 2 weeks.
+    ages = sorted((rnd.uniform(3.2, 13.5) for _ in accounts), reverse=True)
+    spent = 0.0
+    backdates: list[tuple[int, float, float, float]] = []
+    for i, (account, days_ago) in enumerate(zip(accounts, ages, strict=True)):
+        failed = i == 3   # one honest failure in the fortnight
+        cost = round(rnd.uniform(1.0, 4.0), 2)
+        in_tok = int(cost * rnd.uniform(28_000, 45_000))
+        duration = rnd.uniform(240, 1500)
+        res = xa.record_run("sf-quotebot", {
+            "title": f"Quote for {account} renewal",
+            "outcome": "failure" if failed else "success",
+            "summary": (f"CPQ validation rejected the discount tier; "
+                        f"escalated to the {account} account owner."
+                        if failed else
+                        f"Priced the {account} renewal in CPQ and filed the "
+                        f"quote on the opportunity."),
+            "steps": [
+                f"Pulled the {account} opportunity and current contract "
+                "from Sales Cloud.",
+                "Priced the renewal against the CPQ rate card and the "
+                "discount policy.",
+                ("Discount tier failed CPQ validation; parked the quote "
+                 "for the account owner."
+                 if failed else
+                 "Attached the quote PDF to the opportunity and notified "
+                 "the account owner."),
+            ],
+            "cost_dollars": cost,
+            "input_tokens": in_tok,
+            "output_tokens": int(in_tok * rnd.uniform(0.10, 0.22)),
+            "tool_calls": rnd.randint(4, 18),
+            "duration_seconds": round(duration, 1),
+            "idempotency_key": f"seed-quote-{account.lower()}",
+        })
+        spent += cost
+        created = NOW - days_ago * DAY
+        started = created + rnd.uniform(300, 3600)
+        backdates.append((res["goal_id"], created, started,
+                          started + duration))
+
+    # Backdate in ONE batch after all the ingests (the same direct-UPDATE
+    # trick _seed_operating_record uses). Batched deliberately: each
+    # record_run opens its own world connection, so an uncommitted UPDATE
+    # held across ingests would deadlock SQLite's write lock.
+    from maverick.world_model import WorldModel
+    w = WorldModel()
+    for gid, created, started, ended in backdates:
+        w.conn.execute(
+            "UPDATE goals SET created_at = ?, updated_at = ? WHERE id = ?",
+            (created, ended, gid))
+        w.conn.execute(
+            "UPDATE episodes SET started_at = ?, ended_at = ? "
+            "WHERE goal_id = ?", (started, ended, gid))
+        events = [r[0] for r in w.conn.execute(
+            "SELECT id FROM goal_events WHERE goal_id = ? ORDER BY id",
+            (gid,)).fetchall()]
+        for j, eid in enumerate(events):
+            w.conn.execute(
+                "UPDATE goal_events SET ts = ? WHERE id = ?",
+                (started + (ended - started) * (j + 1) / (len(events) + 1),
+                 eid))
+    w.conn.commit()
+
+    # The governance seam, for real: the agent asks BEFORE sending a
+    # contract; high risk is at the approval floor, so the action parks in
+    # the queue for a human ("external agent · BYOA gateway" in /approvals).
+    verdict = xa.screen(
+        "sf-quotebot", "send_contract", risk="high",
+        detail="Issue the Northwind renewal contract for e-signature")
+    print(f"Seeded the BYOA gateway: sf-quotebot (Salesforce Agentforce), "
+          f"{len(accounts)} governed runs over 2 weeks "
+          f"(${spent:.2f} reported spend), 1 approval parked in the queue "
+          f"(#{verdict.get('approval_id')}).")
+
+
 def _generate_records_volume(rnd) -> None:
     from maverick import privacy_ops
     # DPA reviews for a slice of the vendor book (varied completeness).
@@ -601,6 +709,7 @@ def seed() -> None:
     _generate_volume(rnd)
     _generate_records_volume(rnd)
     _seed_operating_record(rnd)
+    _seed_external_agent(rnd)
 
     from maverick.assessment import list_saved
     rows = list_saved()

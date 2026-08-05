@@ -39,6 +39,8 @@ export PIA_SEED_TENANT="${PIA_SEED_TENANT:-1}"
 export MAVERICK_SHIELD_PROFILE="${MAVERICK_SHIELD_PROFILE:-strict}"
 # --- dashboard-created goals otherwise clamp to $2 and can die mid-demo
 export MAVERICK_DEFAULT_MAX_DOLLARS="${MAVERICK_DEFAULT_MAX_DOLLARS:-10}"
+# --- bring-your-own-agent: the seeded Agentforce agent needs the plane on
+export MAVERICK_EXTERNAL_AGENTS="${MAVERICK_EXTERNAL_AGENTS:-1}"
 
 echo "MAVERICK_HOME        → $MAVERICK_HOME"
 
