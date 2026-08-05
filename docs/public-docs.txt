@@ -17,6 +17,7 @@ starter-goals.md
 api.md
 grpc.md
 a2a.md
+external-agents.md
 comparison.md
 performance/streaming-parity.md
 SECURITY_GRC.md
