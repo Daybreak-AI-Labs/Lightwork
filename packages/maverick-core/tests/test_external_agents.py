@@ -79,6 +79,115 @@ def test_minted_token_resolves_and_is_shown_once():
         xa.mint_token("ghost", "rest")
 
 
+def _mint_gate_on(tmp_path):
+    """Flip on step-up re-auth for credential minting."""
+    (tmp_path / "config.toml").write_text(
+        "[external_agents]\nenable = true\nmint_approval = true\n",
+        encoding="utf-8")
+    from maverick import config
+    config.reset_config_cache()
+
+
+def test_mint_gate_off_by_default_mints_directly():
+    _enroll()
+    token = xa.mint_token("sf-quotebot", "rest")
+    assert token.startswith("lw-rest-")
+    from maverick.world_model import WorldModel
+    count = WorldModel().conn.execute(
+        "SELECT COUNT(*) FROM approvals").fetchone()[0]
+    assert count == 0
+
+
+def test_gated_mint_parks_an_approval_and_refuses(tmp_path):
+    _enroll()
+    _mint_gate_on(tmp_path)
+    with pytest.raises(xa.MintApprovalPending) as exc:
+        xa.mint_token("sf-quotebot", "rest", minted_by="admin@corp.test")
+    approval_id = exc.value.approval_id
+    assert f"#{approval_id}" in str(exc.value)
+    # NO token was minted; the parked approval is bound to agent + surface.
+    assert xa.roster()[0]["credentials"] == []
+    from maverick.world_model import WorldModel
+    approval = WorldModel().get_approval(approval_id)
+    assert approval.status == "pending" and approval.risk == "high"
+    assert approval.action == "mint-credential:sf-quotebot:rest"
+    assert approval.provenance == "external_agents"
+    assert approval.requested_by == "admin@corp.test"
+
+
+def test_gated_mint_succeeds_with_an_approved_id(tmp_path):
+    _enroll()
+    _mint_gate_on(tmp_path)
+    with pytest.raises(xa.MintApprovalPending) as exc:
+        xa.mint_token("sf-quotebot", "rest")
+    approval_id = exc.value.approval_id
+    from maverick.world_model import WorldModel
+    assert WorldModel().decide_approval(approval_id, "approved",
+                                        decided_by="admin@corp.test") is True
+    token = xa.mint_token("sf-quotebot", "rest",
+                          mint_approval_id=approval_id)
+    assert agent_for_token(token, "rest").id == "sf-quotebot"
+
+
+def test_mint_approval_is_one_shot(tmp_path):
+    _enroll()
+    _mint_gate_on(tmp_path)
+    with pytest.raises(xa.MintApprovalPending) as exc:
+        xa.mint_token("sf-quotebot", "rest")
+    approval_id = exc.value.approval_id
+    from maverick.world_model import WorldModel
+    WorldModel().decide_approval(approval_id, "approved",
+                                 decided_by="admin@corp.test")
+    token = xa.mint_token("sf-quotebot", "rest",
+                          mint_approval_id=approval_id)
+    # The approval is spent: replaying it refuses; the minted bearer stays.
+    with pytest.raises(xa.ExternalAgentsError, match="one-shot"):
+        xa.mint_token("sf-quotebot", "rest", mint_approval_id=approval_id)
+    assert agent_for_token(token, "rest").id == "sf-quotebot"
+
+
+def test_denied_or_pending_mint_approval_refuses(tmp_path):
+    _enroll()
+    _mint_gate_on(tmp_path)
+    with pytest.raises(xa.MintApprovalPending) as exc:
+        xa.mint_token("sf-quotebot", "rest")
+    approval_id = exc.value.approval_id
+    # Still pending: the id alone is not enough.
+    with pytest.raises(xa.ExternalAgentsError, match="pending"):
+        xa.mint_token("sf-quotebot", "rest", mint_approval_id=approval_id)
+    from maverick.world_model import WorldModel
+    WorldModel().decide_approval(approval_id, "denied",
+                                 decided_by="admin@corp.test")
+    with pytest.raises(xa.ExternalAgentsError, match="denied"):
+        xa.mint_token("sf-quotebot", "rest", mint_approval_id=approval_id)
+    assert xa.roster()[0]["credentials"] == []
+    with pytest.raises(xa.ExternalAgentsError, match="unknown"):
+        xa.mint_token("sf-quotebot", "rest", mint_approval_id=999999)
+
+
+def test_mint_approval_action_mismatch_refuses(tmp_path):
+    _enroll()
+    xa.enroll("aws-triage", "bedrock")
+    _mint_gate_on(tmp_path)
+    with pytest.raises(xa.MintApprovalPending) as exc:
+        xa.mint_token("sf-quotebot", "rest")
+    approval_id = exc.value.approval_id
+    from maverick.world_model import WorldModel
+    WorldModel().decide_approval(approval_id, "approved",
+                                 decided_by="admin@corp.test")
+    # The approval is bound to sf-quotebot:rest — a different surface or a
+    # different agent cannot spend it...
+    with pytest.raises(xa.ExternalAgentsError, match="bound"):
+        xa.mint_token("sf-quotebot", "mcp", mint_approval_id=approval_id)
+    with pytest.raises(xa.ExternalAgentsError, match="bound"):
+        xa.mint_token("aws-triage", "rest", mint_approval_id=approval_id)
+    assert all(r["credentials"] == [] for r in xa.roster())
+    # ...and the failed attempts did not consume it: the honest mint works.
+    token = xa.mint_token("sf-quotebot", "rest",
+                          mint_approval_id=approval_id)
+    assert agent_for_token(token, "rest").id == "sf-quotebot"
+
+
 def test_record_run_lands_on_the_operating_record():
     _enroll()
     out = xa.record_run("sf-quotebot", {

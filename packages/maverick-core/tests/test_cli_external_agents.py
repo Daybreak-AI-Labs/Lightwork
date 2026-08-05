@@ -128,6 +128,36 @@ def test_mint_other_surface_and_unknown_agent():
     assert "not enrolled" in r.output
 
 
+def test_mint_step_up_gate_parks_then_mints_with_approval_id(tmp_path):
+    import re
+    _enroll_cli()
+    (tmp_path / "config.toml").write_text(
+        "[external_agents]\nmint_approval = true\n", encoding="utf-8")
+    from maverick import config
+    config.reset_config_cache()
+    # The gated first run parks an approval and prints how to continue.
+    r = _run("external-agents", "mint", "sf-quotebot")
+    assert r.exit_code == 1
+    assert "approval required" in r.output
+    assert "--approval-id" in r.output
+    assert "lw-rest-" not in r.output
+    approval_id = int(re.search(r"approval #(\d+)", r.output).group(1))
+    from maverick.world_model import WorldModel
+    assert WorldModel().decide_approval(approval_id, "approved",
+                                        decided_by="admin@corp.test") is True
+    r = _run("external-agents", "mint", "sf-quotebot",
+             "--approval-id", str(approval_id))
+    assert r.exit_code == 0, r.output
+    tokens = [ln for ln in r.output.splitlines() if ln.startswith("lw-rest-")]
+    assert len(tokens) == 1
+    assert agent_for_token(tokens[0], "rest").id == "sf-quotebot"
+    # One approval mints exactly one credential.
+    r = _run("external-agents", "mint", "sf-quotebot",
+             "--approval-id", str(approval_id))
+    assert r.exit_code == 1
+    assert "one-shot" in r.output
+
+
 # ---- show ------------------------------------------------------------------
 
 

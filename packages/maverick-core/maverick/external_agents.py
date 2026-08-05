@@ -89,10 +89,25 @@ _MAX_EXECUTE_BODY_BYTES = 32 * 1024
 #: between the claim and the terminal write, so the effect may or may not
 #: have fired and must never re-fire automatically.
 _EXECUTING_GRACE_SECONDS = 600
+#: Consumed step-up mint approvals remembered per agent (newest kept) — the
+#: one-shot ledger that makes one approval mint exactly one credential.
+_MAX_USED_MINT_APPROVALS = 50
 
 
 class ExternalAgentsError(Exception):
     """Operator-facing failure (bad input, unknown agent, plane disabled)."""
+
+
+class MintApprovalPending(ExternalAgentsError):
+    """A gated credential mint parked a world approval and stopped.
+
+    ``[external_agents] mint_approval`` requires a human decision before a
+    bearer is issued; the caller re-runs the mint with ``mint_approval_id``
+    once approval ``approval_id`` is approved."""
+
+    def __init__(self, message: str, approval_id: int):
+        super().__init__(message)
+        self.approval_id = approval_id
 
 
 def entitled() -> bool:
@@ -389,12 +404,20 @@ def unenroll(agent_id: str) -> bool:
     return removed
 
 
-def mint_token(agent_id: str, surface: str) -> str:
+def mint_token(agent_id: str, surface: str, *, minted_by: str = "",
+               mint_approval_id: int | None = None) -> str:
     """Mint (or rotate) the bearer credential for one surface.
 
     Returns the token value — the ONLY time it is ever shown; the registry
     stores it for verification but no read path returns it. Raises on an
-    unknown agent or surface."""
+    unknown agent or surface.
+
+    Step-up re-auth: with ``[external_agents] mint_approval`` on, a call
+    without ``mint_approval_id`` parks a world approval (dual-control quorum
+    at "high" risk, requested by ``minted_by``) and raises
+    :class:`MintApprovalPending` carrying its id; the caller re-runs the mint
+    with that id once a decision-maker approves. Approvals are one-shot and
+    bound to exactly this agent + surface."""
     from .agent_trust import AgentTrustError, lookup, put_agent
     if surface not in TOKEN_SURFACES:
         raise ExternalAgentsError(
@@ -403,6 +426,17 @@ def mint_token(agent_id: str, surface: str) -> str:
     agent = lookup(agent_id)
     if agent is None:
         raise ExternalAgentsError(f"agent {agent_id!r} is not enrolled")
+    approved_id: int | None = None
+    if _mint_approval_required():
+        if mint_approval_id is None:
+            approval_id = _park_mint_approval(agent_id, surface, minted_by)
+            raise MintApprovalPending(
+                f"credential mint for {agent_id!r} ({surface}) requires "
+                f"approval: parked as approval #{approval_id} — have a "
+                "decision-maker approve it in the dashboard queue, then "
+                "re-run the mint with that approval id", approval_id)
+        approved_id = _consume_mint_approval(agent_id, surface,
+                                             mint_approval_id)
     token = f"lw-{surface}-{secrets.token_urlsafe(32)}"
     entry = _entry_from_agent(agent)
     # At rest the registry holds only the hash — a leaked overlay backup
@@ -414,9 +448,87 @@ def mint_token(agent_id: str, surface: str) -> str:
     except AgentTrustError as e:
         raise ExternalAgentsError(str(e)) from e
     from .audit import EventKind, audit_event
+    extra = {"mint_approval_id": approved_id} if approved_id else {}
     audit_event(EventKind.EXTERNAL_CREDENTIAL_MINTED, agent="external_agents",
-                external_agent=agent_id, surface=surface)
+                external_agent=agent_id, surface=surface, **extra)
     return token
+
+
+def _mint_approval_required() -> bool:
+    """``[external_agents] mint_approval``: step-up re-auth on credential
+    minting — a mint parks a world approval a decision-maker must approve."""
+    try:
+        from .config import get_external_agents
+        return bool(get_external_agents()["mint_approval"])
+    except Exception:
+        return False
+
+
+def _mint_action(agent_id: str, surface: str) -> str:
+    """The approval action string a mint approval is bound to — the exact-
+    match check is what stops an approval minting for another agent/surface."""
+    return f"mint-credential:{agent_id}:{surface}"
+
+
+def _park_mint_approval(agent_id: str, surface: str, minted_by: str) -> int:
+    """Park the step-up approval for one credential mint; returns its id."""
+    from .safety.dual_control import required_approvals
+    from .world_model import open_world
+    return open_world().create_approval(
+        _mint_action(agent_id, surface), risk="high",
+        detail=f"Mint (or rotate) the {surface} bearer credential for "
+               f"external agent {agent_id!r}. The token is shown once to the "
+               "requester; the previous bearer stops working immediately.",
+        provenance="external_agents",
+        approvals_required=required_approvals("high"),
+        requested_by=minted_by or "")
+
+
+def _consume_mint_approval(agent_id: str, surface: str,
+                           mint_approval_id: int) -> int:
+    """Validate + spend one mint approval; returns its id, raises on refusal.
+
+    The approval must exist under our provenance, match this agent + surface's
+    action string exactly, and be approved. Consumption is recorded in the
+    agent's sidecar (``used_mint_approvals``, bounded, checked under the lock)
+    BEFORE the mint so one approval mints exactly one credential — a racing or
+    repeated mint with the same id is refused, and a storage failure after the
+    spend burns the approval rather than ever letting it cover two mints."""
+    try:
+        approval_id = int(mint_approval_id)
+    except (TypeError, ValueError) as e:
+        raise ExternalAgentsError(
+            f"mint_approval_id {mint_approval_id!r} is not an approval "
+            "id") from e
+    from .world_model import open_world
+    approval = open_world().get_approval(approval_id)
+    if approval is None or approval.provenance != "external_agents":
+        raise ExternalAgentsError(f"unknown mint approval {approval_id!r}")
+    action = _mint_action(agent_id, surface)
+    if approval.action != action:
+        raise ExternalAgentsError(
+            f"approval #{approval_id} was granted for {approval.action!r}, "
+            f"not {action!r} — a mint approval is bound to exactly one "
+            "agent and surface")
+    if approval.status != "approved":
+        raise ExternalAgentsError(
+            f"approval #{approval_id} is {approval.status}; minting needs "
+            "an approved decision")
+    with _sidecar_locked():
+        sidecar = _load_sidecar()
+        meta = sidecar.setdefault(agent_id, {})
+        # String-compare the ledger so a junk entry can never crash the
+        # check (we only ever write ints; junk stays inert but preserved).
+        used = list(meta.get("used_mint_approvals") or [])
+        if any(str(u) == str(approval_id) for u in used):
+            raise ExternalAgentsError(
+                f"approval #{approval_id} has already minted a credential; "
+                "approvals are one-shot — run the mint without an approval "
+                "id to park a new one")
+        used.append(approval_id)
+        meta["used_mint_approvals"] = used[-_MAX_USED_MINT_APPROVALS:]
+        _save_sidecar(sidecar)
+    return approval_id
 
 
 def _entry_from_agent(agent) -> dict:
@@ -437,6 +549,10 @@ def _entry_from_agent(agent) -> dict:
         "a2a_token": agent.a2a_token,
         "grpc_token": agent.grpc_token,
         "mcp_token": agent.mcp_token,
+        "jwt_issuer": agent.jwt_issuer,
+        "jwt_audience": agent.jwt_audience,
+        "jwks_file": agent.jwks_file,
+        "hmac_secret_ref": agent.hmac_secret_ref,
         "not_before": agent.not_before,
         "expires_at": agent.expires_at,
         "revoked": agent.revoked,

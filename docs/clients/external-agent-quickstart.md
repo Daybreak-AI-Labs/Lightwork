@@ -248,6 +248,48 @@ Full semantics — enabling, connector credentials, `preview`, the 24-hour
 TTL, and troubleshooting — in [governed
 execution](../external-agents.md#governed-execution).
 
+## Platform-native credentials (optional)
+
+The minted bearer is not the only way in. If the operator pins identity
+material on your trust entry, the same endpoints accept [platform-native
+credentials](../external-agents.md#platform-native-identity): a
+connected-app **JWT** (send it as `Authorization: Bearer <jwt>`; its `sub`
+must be your agent id), a webhook-format **HMAC**, or a pinned-key
+**Ed25519** request signature. The signed schemes drop the `Authorization`
+header and sign the raw body instead:
+
+```python
+# HMAC: sha256=hex(HMAC-SHA256(secret, b"<ts>." + raw_body))
+import hashlib, hmac, json, time
+raw = json.dumps({"tool": "send_email", "risk": "medium"}).encode()
+ts = str(int(time.time()))
+mac = hmac.new(SECRET.encode(), f"{ts}.".encode() + raw, hashlib.sha256)
+headers = {"X-Lightwork-Agent-Id": "sf-quotebot",
+           "X-Maverick-Timestamp": ts,
+           "X-Maverick-Signature": "sha256=" + mac.hexdigest(),
+           "Content-Type": "application/json"}
+```
+
+```python
+# Ed25519: sign the domain-separated envelope with your private key
+import secrets
+nonce = secrets.token_urlsafe(16)                       # single-use
+digest = hashlib.sha256(raw).hexdigest()
+msg = (f"lightwork-external-request-v1|sf-quotebot|{ts}|{nonce}|"
+       f"{digest}".encode())
+headers = {"X-Lightwork-Agent-Id": "sf-quotebot",
+           "X-Maverick-Timestamp": ts,
+           "X-Lightwork-Nonce": nonce,
+           "X-Lightwork-Request-Signature": private_key.sign(msg).hex(),
+           "Content-Type": "application/json"}
+```
+
+Send the *exact* bytes you signed as the request body (in a Python client,
+`maverick.external_identity.envelope_message` builds the Ed25519 message
+for you). Timestamps have a 300-second freshness window, so sign at send
+time; auth failures stay a generic `401` and the server log names the
+reason.
+
 ## Operational notes
 
 - **Rate limits** (per agent, per minute): `screen` 120, `runs` 60,

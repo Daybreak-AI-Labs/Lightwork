@@ -744,7 +744,29 @@ def test_external_agents_connectors_write_and_are_read(tmp_path, monkeypatch):
 def test_external_agents_without_connectors_stays_screen_only(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {"external_agents": True})
     parsed = tomllib.loads(cfg)
-    assert parsed["external_agents"] == {"enable": True}  # no connectors key
+    assert parsed["external_agents"] == {"enable": True}  # no hardening keys
+
+
+def test_external_agents_identity_hardening_flags_write_and_are_read(
+        tmp_path, monkeypatch):
+    """Rule-6 loop: the require_signed / mint_approval follow-ups write
+    [external_agents] keys and the kernel's get_external_agents reads them."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = _write(cfg_dir, monkeypatch, {
+        "external_agents": True,
+        "external_require_signed": True,
+        "external_mint_approval": True,
+    })
+    parsed = tomllib.loads(cfg)
+    assert parsed["external_agents"]["require_signed"] is True
+    assert parsed["external_agents"]["mint_approval"] is True
+
+    from maverick.config import get_external_agents
+    xa = get_external_agents()
+    assert xa["require_signed"] is True and xa["mint_approval"] is True
 
 
 def test_audit_worm_writes_worm_section(tmp_path, monkeypatch):

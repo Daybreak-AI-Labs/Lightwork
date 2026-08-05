@@ -223,6 +223,19 @@ class TrustedAgent:
     # The external-agents HTTP gateway (run ingest / action screening) is its
     # own surface with its own bearer, same isolation rationale as above.
     rest_token: str = ""
+    # Platform-native identity (external gateway). ``jwt_issuer`` /
+    # ``jwt_audience`` route and pin an OIDC-style JWT to THIS entry;
+    # ``jwks_file`` is a local path to the issuer's signing key material (PEM
+    # public key or JSON JWKS) read at VERIFY time, never at parse time.
+    # ``hmac_secret_ref`` NAMES a secret resolved through
+    # ``maverick.secret_provider.get_secret`` at verify time — the registry
+    # stores the reference, never the secret (it must stay recoverable, unlike
+    # a hashed bearer). "" = that scheme is not configured for this agent.
+    # Ed25519 identity stays on ``pubkey``; JWT key material never overloads it.
+    jwt_issuer: str = ""
+    jwt_audience: str = ""
+    jwks_file: str = ""
+    hmac_secret_ref: str = ""
     # Key lifecycle (all default to "always valid" so existing configs are
     # byte-for-byte unchanged): a revoked or out-of-window entry is denied by
     # decide_inbound/decide_outbound/verify_identity. `not_before`/`expires_at`
@@ -471,7 +484,9 @@ def _agent_from_entry(entry: dict) -> TrustedAgent | None:
                     "dropping entry (fail-closed)", agent_id)
         return None
     tokens: dict[str, str] = {}
-    for field in ("a2a_token", "grpc_token", "mcp_token", "rest_token"):
+    for field in ("a2a_token", "grpc_token", "mcp_token", "rest_token",
+                  "jwt_issuer", "jwt_audience", "jwks_file",
+                  "hmac_secret_ref"):
         value = entry.get(field, "")
         if (
             not isinstance(value, str)
@@ -504,6 +519,10 @@ def _agent_from_entry(entry: dict) -> TrustedAgent | None:
         grpc_token=tokens["grpc_token"],
         mcp_token=tokens["mcp_token"],
         rest_token=tokens["rest_token"],
+        jwt_issuer=tokens["jwt_issuer"],
+        jwt_audience=tokens["jwt_audience"],
+        jwks_file=tokens["jwks_file"],
+        hmac_secret_ref=tokens["hmac_secret_ref"],
         not_before=not_before,  # type: ignore[arg-type]  # float|None (not _INVALID)
         expires_at=expires_at,  # type: ignore[arg-type]
         revoked=revoked,

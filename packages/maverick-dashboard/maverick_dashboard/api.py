@@ -8154,11 +8154,21 @@ async def external_agent_detail(request: Request, agent_id: str) -> dict:
 async def external_agent_mint(request: Request, agent_id: str,
                               payload: ExternalCredentialIn) -> dict:
     """Mint or rotate one per-surface bearer (admin). The token appears in
-    THIS response only — it is stored for verification, never for reading."""
+    THIS response only — it is stored for verification, never for reading.
+    With ``[external_agents] mint_approval`` on, the first call parks a
+    step-up approval and answers 409 with its id; re-post with
+    ``approval_id`` once a decision-maker approves."""
     require_permission(request, "admin")
     from maverick import external_agents as xa
     try:
-        token = xa.mint_token(agent_id, payload.surface)
+        token = xa.mint_token(
+            agent_id, payload.surface,
+            minted_by=caller_principal(request) or "admin",
+            mint_approval_id=payload.approval_id)
+    except xa.MintApprovalPending as e:
+        return JSONResponse(status_code=409, content={
+            "detail": str(e), "status": "approval_required",
+            "approval_id": e.approval_id})
     except xa.ExternalAgentsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"ok": True, "id": agent_id, "surface": payload.surface,

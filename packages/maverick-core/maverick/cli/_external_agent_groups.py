@@ -124,15 +124,27 @@ def xa_enroll_cmd(agent_id, platform, description, owner, department,
 @click.option("--surface", type=click.Choice(["rest", "a2a", "grpc", "mcp"]),
               default="rest", show_default=True,
               help="Which credential surface the bearer authenticates.")
-def xa_mint_cmd(agent_id: str, surface: str) -> None:
+@click.option("--approval-id", type=int, default=None,
+              help="Replay a step-up mint approval ([external_agents] "
+                   "mint_approval); one approval mints exactly one token.")
+def xa_mint_cmd(agent_id: str, surface: str, approval_id: int | None) -> None:
     """Mint (or rotate) AGENT_ID's bearer token for one surface.
 
     The token is printed exactly once, below; it is stored for verification
     but no read path ever returns it again. Minting again rotates it (the
-    old bearer stops working immediately)."""
+    old bearer stops working immediately). With ``[external_agents]
+    mint_approval`` on, the first run parks an approval and stops; re-run
+    with --approval-id once a decision-maker approves it."""
     from .. import external_agents as xa
     try:
-        token = xa.mint_token(agent_id, surface)
+        token = xa.mint_token(agent_id, surface, minted_by="cli",
+                              mint_approval_id=approval_id)
+    except xa.MintApprovalPending as e:
+        click.echo(click.style(f"approval required — parked as approval "
+                               f"#{e.approval_id}", fg="yellow"))
+        raise click.ClickException(
+            f"{e} — e.g. `maverick external-agents mint {agent_id} "
+            f"--surface {surface} --approval-id {e.approval_id}`") from e
     except xa.ExternalAgentsError as e:
         raise click.ClickException(str(e)) from e
     click.echo(click.style(

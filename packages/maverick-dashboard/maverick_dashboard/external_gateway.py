@@ -14,7 +14,10 @@ Lightwork while doing their work elsewhere:
   action groups as-is).
 
 Auth is the per-agent ``rest`` bearer minted on the /external-agents page —
-NOT the dashboard session/bearer. The ``/api/v1/external/`` prefix is
+or a platform-native credential pinned on the trust entry (signed Ed25519
+request envelope, webhook-format HMAC, or platform JWT; see
+``maverick.external_identity``) — NOT the dashboard session/bearer. The
+``/api/v1/external/`` prefix is
 therefore registered as self-authenticating (see ``auth.py`` and the
 dashboard-token middleware in ``app.py``), same pattern as ``/a2a/v1`` and
 the HMAC webhooks: an external platform has no dashboard credential, and
@@ -24,6 +27,8 @@ Gold entitlement (403), so including the router unconditionally is inert.
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import threading
 import time
@@ -163,24 +168,85 @@ def _gate() -> None:
                    "included in this license")
 
 
-def _require_agent(request: Request) -> str:
-    """Dependency: resolve the caller's per-agent ``rest`` bearer to its
-    enrolled id — solved BEFORE the body model, so an unauthenticated caller
-    gets 401, never a 422 that leaks the request schema.
+def _looks_like_jwt(token: str) -> bool:
+    """Route an Authorization bearer: exactly three dot-separated segments
+    whose first decodes to a JSON object is a JWT for the platform-identity
+    verifier; everything else stays on the minted-bearer path. Minted tokens
+    (``lw-rest-<urlsafe>``) can never contain a dot, so no collision."""
+    if token.count(".") != 2:
+        return False
+    header = token.split(".", 1)[0]
+    try:
+        raw = base64.urlsafe_b64decode(header + "=" * (-len(header) % 4))
+        return isinstance(json.loads(raw), dict)
+    except ValueError:
+        return False
 
-    The token is the identity: no session, no CSRF surface, no fallback to
-    the dashboard credential. 401 (not 403) on failure so a rotated token
-    reads as "re-authenticate", and the reply never says whether the id
-    exists."""
+
+async def _require_agent(request: Request) -> str:
+    """Dependency: resolve the caller to its enrolled agent id — solved
+    BEFORE the body model, so an unauthenticated caller gets 401, never a
+    422 that leaks the request schema.
+
+    Resolution order: the Ed25519 request envelope (agent-id + timestamp +
+    nonce + signature headers), the webhook-format HMAC (agent-id +
+    timestamp + signature), a platform JWT on the Authorization header, then
+    the minted per-agent ``rest`` bearer. The credential is the identity: no
+    session, no CSRF surface, no fallback to the dashboard credential. Every
+    refusal is the same generic 401 (so a rotated credential reads as
+    "re-authenticate" and the reply never says whether the id exists or
+    which stage refused); the precise rule goes to the server log only."""
     _gate()
-    auth = request.headers.get("authorization", "")
-    token = auth[7:].strip() if auth.startswith("Bearer ") else ""
-    if not token:
-        raise HTTPException(status_code=401, detail="missing bearer token")
-    from maverick.agent_trust import agent_for_token
-    agent = agent_for_token(token, "rest")
+    from maverick import external_identity
+    from maverick.agent_trust import AgentTrustError, agent_for_token, load_trust_state
+    try:
+        # ONE trust snapshot per request (the grpc server pattern), so a
+        # registry edit mid-request cannot split the auth decision.
+        _, registry = load_trust_state()
+    except AgentTrustError as e:
+        log.warning("external gateway: trust state unreadable (fail-closed)")
+        raise HTTPException(status_code=401,
+                            detail="invalid credentials") from e
+    agent_hdr = request.headers.get("x-lightwork-agent-id", "")
+    ts = request.headers.get("x-maverick-timestamp", "")
+    nonce = request.headers.get("x-lightwork-nonce", "")
+    envelope_sig = request.headers.get("x-lightwork-request-signature", "")
+    hmac_sig = request.headers.get("x-maverick-signature", "")
+    if agent_hdr and ts and nonce and envelope_sig:
+        scheme = "envelope"
+        # Starlette caches the body, so the endpoint model still parses it.
+        body = await request.body()
+        agent, rule = external_identity.verify_agent_envelope(
+            agent_hdr, body, ts, nonce, envelope_sig, registry=registry)
+    elif agent_hdr and ts and hmac_sig:
+        scheme = "hmac"
+        body = await request.body()
+        agent, rule = external_identity.verify_agent_hmac(
+            agent_hdr, body, ts, hmac_sig, registry=registry)
+    else:
+        auth = request.headers.get("authorization", "")
+        token = auth[7:].strip() if auth.startswith("Bearer ") else ""
+        if not token:
+            raise HTTPException(status_code=401,
+                                detail="missing credentials")
+        if _looks_like_jwt(token):
+            scheme = "jwt"
+            agent, rule = external_identity.verify_agent_jwt(
+                token, registry=registry)
+        else:
+            scheme = "bearer"
+            agent = agent_for_token(token, "rest", registry=registry)
+            rule = "ok" if agent is not None else "invalid_token"
+            if agent is not None and (agent.pubkey or agent.jwt_issuer):
+                # [external_agents] require_signed: an agent enrolled with a
+                # strong credential must present it — its bearer alone no
+                # longer authenticates. Token-only agents are unaffected.
+                from maverick.config import get_external_agents
+                if get_external_agents().get("require_signed"):
+                    agent, rule = None, "require_signed"
     if agent is None:
-        raise HTTPException(status_code=401, detail="invalid bearer token")
+        log.info("external gateway: %s auth refused (%s)", scheme, rule)
+        raise HTTPException(status_code=401, detail="invalid credentials")
     from maverick import external_agents as xa
     xa.note_seen(agent.id)  # throttled credential-audit stamp
     return agent.id
