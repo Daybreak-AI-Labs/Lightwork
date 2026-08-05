@@ -1852,6 +1852,14 @@ def pick_advanced() -> dict[str, Any]:
             "An explicit trust decision; OFF by default.",
             default=False,
         ),
+        "external_agents": _q_confirm(
+            "External-agent gateway? Govern agents built on OTHER platforms "
+            "(Salesforce Agentforce, AWS Bedrock, custom runtimes): enroll "
+            "them, credential them, screen their actions, and account their "
+            "runs on the Operating Record. An explicit trust decision; OFF "
+            "by default.",
+            default=False,
+        ),
         "memory_guard": _q_confirm(
             "Memory Guard (OWASP ASI06)? Screen every stored fact for prompt-"
             "injection/poisoning, stamp it with provenance + a trust tier, and "
@@ -4205,6 +4213,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("fleet_memory"):
         lines.append("")
         lines.append("[fleet_memory]")
+        lines.append("enable = true")
+    if advanced.get("external_agents"):
+        lines.append("")
+        lines.append("[external_agents]")
         lines.append("enable = true")
     if advanced.get("memory_guard"):
         lines.append("")

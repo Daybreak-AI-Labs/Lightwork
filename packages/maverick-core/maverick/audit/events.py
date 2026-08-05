@@ -153,6 +153,17 @@ class EventKind:
     # payload: peer:str, direction:str (inbound|outbound), rule:str, reason:str,
     # correlation_id:str ("" when none).
     AGENT_TRUST_DENIED = "agent_trust_denied"
+    # Bring-your-own-agent gateway: enrollment lifecycle and the governed
+    # traffic of agents that run on OTHER platforms (Agentforce, Bedrock, ...).
+    # ENROLLED payload: external_agent, platform, department, enrolled_by.
+    # CREDENTIAL_MINTED payload: external_agent, surface (never the token).
+    # RUN_INGESTED payload: external_agent, outcome, cost_dollars, steps,
+    # over_budget (goal_id column carries the Operating Record row).
+    # ACTION_SCREENED payload: external_agent, tool, allowed, rule, reason.
+    EXTERNAL_AGENT_ENROLLED = "external_agent_enrolled"
+    EXTERNAL_CREDENTIAL_MINTED = "external_credential_minted"
+    EXTERNAL_RUN_INGESTED = "external_run_ingested"
+    EXTERNAL_ACTION_SCREENED = "external_action_screened"
     # Learning governance: one row per dream cycle (what the learning system
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.

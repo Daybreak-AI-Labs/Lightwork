@@ -71,6 +71,8 @@ from .api_schemas import (
     DsarIn,
     EventTriggerIn,
     EventTriggerOut,
+    ExternalAgentIn,
+    ExternalCredentialIn,
     FactIn,
     FeatureSwitchIn,
     FeedbackIn,
@@ -7989,6 +7991,81 @@ async def trust_agent_remove(request: Request, agent_id: str) -> None:
             detail="this agent is not in the app-managed registry (it may be "
                    "defined in the server's config file).",
         )
+
+
+@router.get("/external-agents")
+async def external_agents_list(request: Request) -> dict:
+    """The bring-your-own-agent roster: platform provenance, ownership,
+    ceilings, lifecycle, reported spend, and which credential surfaces each
+    agent holds (never token values)."""
+    from maverick import external_agents as xa
+    return {"enabled": xa.enabled(), "status": xa.status(),
+            "agents": xa.roster()}
+
+
+@router.post("/external-agents", status_code=201)
+async def external_agent_enroll(request: Request,
+                                payload: ExternalAgentIn) -> dict:
+    """Enroll an agent built on another platform (admin): trust entry +
+    fleet-memory roster + platform metadata in one call."""
+    require_permission(request, "admin")
+    from maverick import external_agents as xa
+    if not xa.entitled():
+        raise HTTPException(
+            status_code=403,
+            detail="external-agent governance is a paid (Gold) add-on not "
+                   "included in this license")
+    try:
+        out = xa.enroll(
+            payload.id, payload.platform, description=payload.description,
+            owner=payload.owner, department=payload.department,
+            allow_tools=payload.allow_tools, deny_tools=payload.deny_tools,
+            max_risk=payload.max_risk, max_dollars=payload.max_dollars,
+            max_wall_seconds=payload.max_wall_seconds,
+            data_scopes=payload.data_scopes,
+            expires_days=payload.expires_days,
+            enrolled_by=caller_principal(request) or "admin")
+    except xa.ExternalAgentsError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return out
+
+
+@router.get("/external-agents/{agent_id}")
+async def external_agent_detail(request: Request, agent_id: str) -> dict:
+    """One enrolled agent: roster row + its Operating Record footprint
+    (spend, recent episodes)."""
+    from maverick import external_agents as xa
+    try:
+        return xa.agent_detail(agent_id)
+    except xa.ExternalAgentsError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.post("/external-agents/{agent_id}/credentials")
+async def external_agent_mint(request: Request, agent_id: str,
+                              payload: ExternalCredentialIn) -> dict:
+    """Mint or rotate one per-surface bearer (admin). The token appears in
+    THIS response only — it is stored for verification, never for reading."""
+    require_permission(request, "admin")
+    from maverick import external_agents as xa
+    try:
+        token = xa.mint_token(agent_id, payload.surface)
+    except xa.ExternalAgentsError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "id": agent_id, "surface": payload.surface,
+            "token": token}
+
+
+@router.delete("/external-agents/{agent_id}", status_code=204)
+async def external_agent_unenroll(request: Request, agent_id: str) -> None:
+    """Unenroll (admin): removes the managed trust entry + metadata. The
+    fleet-memory roster keeps its history — provenance is never rewritten.
+    Prefer revoking (POST /trust/agents/{id}/revoke) to keep the entry."""
+    require_permission(request, "admin")
+    from maverick import external_agents as xa
+    if not xa.unenroll(agent_id):
+        raise HTTPException(status_code=404,
+                            detail=f"agent {agent_id!r} is not enrolled")
 
 
 @router.get("/discovery")

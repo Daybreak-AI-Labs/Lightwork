@@ -53,7 +53,7 @@ $env:PIA_SEED_TENANT              = "1"
 $env:MAVERICK_SHIELD_PROFILE      = "strict"
 $env:MAVERICK_DEFAULT_MAX_DOLLARS = "10"
 $env:EMAIL_USER                   = "privacy-office@company.com"
-$env:EMAIL_APP_PASSWORD           = "demo-app-password"
+$env:EMAIL_APP_PASSWORD           = "demo-app-password"  # pragma: allowlist secret
 $env:EMAIL_SMTP_HOST              = "127.0.0.1"
 $env:EMAIL_SMTP_PORT              = "1025"
 Ok "environment set (commit $(git rev-parse --short HEAD 2>$null))"

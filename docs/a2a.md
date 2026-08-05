@@ -40,6 +40,12 @@ localhost you can run it open with `MAVERICK_A2A_ALLOW_UNAUTHENTICATED=1`
 
 The Agent Card itself (discovery) is public, like any A2A card.
 
+See also: agents enrolled through the
+[bring-your-own-agent gateway](external-agents.md) can hold a per-caller
+`a2a` credential (minted from the **/external-agents** dashboard page) that
+resolves them to principal `agent:<id>` under the Agent Trust Plane — per-agent
+admission and ceilings instead of the one shared surface token.
+
 ## Budget caps
 
 Client-supplied budget is always clamped to operator ceilings, so a remote

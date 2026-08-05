@@ -106,6 +106,7 @@ nav:
       - API: api.md
       - gRPC API: grpc.md
       - A2A (Agent2Agent): a2a.md
+      - External agents (BYOA): external-agents.md
       - How Lightwork compares: comparison.md
   - Performance:
       - Streaming parity: performance/streaming-parity.md

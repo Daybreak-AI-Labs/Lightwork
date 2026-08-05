@@ -1922,6 +1922,30 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   (per-caller entry, or the surface-wide `"grpc"` / `"mcp"` entry for a
   shared-bearer caller) — so every external ingress (federation, A2A, fleet,
   channel, marketplace, gRPC, MCP) is default-denied at the boundary.
+- **Bring-your-own-agent gateway** (`external_agents.py`, opt-in
+  `[external_agents] enable` / `MAVERICK_EXTERNAL_AGENTS=1`, gold-tier
+  `external_agents` entitlement) — agents built on *other* runtimes
+  (Agentforce, Bedrock Agents, Copilot Studio, OpenAI, LangChain/LangGraph,
+  custom) enroll into the governed workforce: they run on their runtime,
+  governed on ours. Four verbs: **enroll** (one call writes the inbound Agent
+  Trust entry — tool/risk/budget ceilings, expiry — plus the fleet-memory
+  roster and platform/ownership provenance), **credential** (per-surface
+  bearer tokens, rest/a2a/grpc/mcp, shown exactly once; rotate = re-mint,
+  revoke everywhere at once), **screen** (pre-action admission: trust
+  ceilings, cumulative budget cutoff, Shield input scan — a scanner error
+  **denies** — and the `[actions] require_approval_at` floor, which parks a
+  real dashboard approval the agent polls), and **account** (completed runs
+  ingest as Operating Record goals owned by `agent:<id>` with step trails and
+  costed episodes, so Overview/Spend/Workforce/Savings and the audit binder
+  count foreign agents like native ones). Fail-closed at the boundary: text
+  hygiene rejects poisoned ingest, over-budget agents are refused further
+  actions, and the registry binds here even with the global trust plane
+  disengaged. Agent-facing HTTP surface `/api/v1/external/runs|screen|
+  approvals` + an importable `/api/v1/external/openapi.json` (drops into
+  Agentforce External Services / Bedrock action groups); audit kinds
+  `external_agent_enrolled` / `external_credential_minted` /
+  `external_run_ingested` / `external_action_screened`. See
+  `docs/external-agents.md`.
 - **gRPC API v1 — stable** (`grpc_api/maverick.proto`, package `maverick.v1`;
   contract gate `grpc_api/contract.py` + committed golden
   `maverick_v1_contract.json`, wired into CI): additive changes pass; removing/
