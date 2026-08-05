@@ -409,6 +409,30 @@ class TrustRevokeIn(BaseModel):
     revoked: bool = True
 
 
+class ExternalAgentIn(BaseModel):
+    """Enroll (or re-enroll) a bring-your-own agent: one call writes the trust
+    entry (inbound, with ceilings + expiry), the fleet-memory roster, and the
+    platform/ownership metadata the /external-agents console shows."""
+    id: str = Field(..., min_length=1, max_length=64)
+    platform: str = Field(..., min_length=1, max_length=32)
+    description: str = Field(default="", max_length=500)
+    owner: str = Field(default="", max_length=200)
+    department: str = Field(default="", max_length=100)
+    allow_tools: list[str] = Field(default_factory=list, max_length=128)
+    deny_tools: list[str] = Field(default_factory=list, max_length=128)
+    max_risk: str | None = Field(default=None, pattern="^(low|medium|high)$")
+    max_dollars: float | None = Field(default=None, ge=0)
+    max_wall_seconds: float | None = Field(default=None, ge=0)
+    data_scopes: list[str] = Field(default_factory=list, max_length=64)
+    expires_days: float | None = Field(default=None, gt=0, le=3650)
+
+
+class ExternalCredentialIn(BaseModel):
+    """Mint (or rotate) one per-surface bearer for an enrolled external agent.
+    The response carries the token exactly once; it is never readable again."""
+    surface: str = Field(default="rest", pattern="^(rest|a2a|grpc|mcp)$")
+
+
 class ConnectionIn(BaseModel):
     """Create/replace a named SaaS connection: the connector it credentials, its
     base URL, and an API token (sealed at rest, never returned). ``name`` lets

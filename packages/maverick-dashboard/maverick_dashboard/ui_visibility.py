@@ -166,6 +166,11 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "audit"},
     {"path": "/trust", "label": "Agent Trust", "group": "Govern", "icon": "agents",
      "floor": "view", "default": "view"},
+    # Bring-your-own-agent console: enroll + credential + govern agents built
+    # on other platforms. Reading the roster is a governance view; every
+    # mutation (enroll / mint / revoke) is admin-gated at the API.
+    {"path": "/external-agents", "label": "External Agents", "group": "Govern",
+     "icon": "agents", "floor": "view", "default": "view"},
     # -- Extend ---------------------------------------------------------------
     {"path": "/skills", "label": "Skills", "group": "Extend", "icon": "skills",
      "floor": "view", "default": "operate"},

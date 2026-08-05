@@ -1,0 +1,158 @@
+"""Bring-your-own-agent gateway over HTTP: admin enrollment + credential
+minting on the dashboard surface, and the self-authenticated agent-facing
+routes (bearer-only — no session, no CSRF surface, 404 while disabled)."""
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+from maverick_dashboard.app import app
+
+client = TestClient(app, headers={"Origin": "http://testserver"})
+
+
+@pytest.fixture(autouse=True)
+def _isolated(tmp_path, monkeypatch):
+    from maverick import agent_trust, config, external_agents, world_model
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_EXTERNAL_AGENTS", "1")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr(agent_trust, "managed_path",
+                        lambda: tmp_path / "agent_trust.json")
+    monkeypatch.setattr(external_agents, "registry_path",
+                        lambda: tmp_path / "external_agents.json")
+    config.reset_config_cache()
+    yield
+    config.reset_config_cache()
+
+
+def _enroll(**overrides):
+    body = {"id": "sf-quotebot", "platform": "agentforce",
+            "description": "quoting agent", "owner": "jordan@corp.test",
+            "department": "sales", "max_risk": "medium", "max_dollars": 5.0}
+    body.update(overrides)
+    return client.post("/api/v1/external-agents", json=body)
+
+
+def _mint() -> str:
+    r = client.post("/api/v1/external-agents/sf-quotebot/credentials",
+                    json={"surface": "rest"})
+    assert r.status_code == 200
+    return r.json()["token"]
+
+
+def test_enroll_mint_and_roster_roundtrip():
+    r = _enroll()
+    assert r.status_code == 201
+    assert r.json()["trust"] == "registered"
+    token = _mint()
+    assert token.startswith("lw-rest-")
+    listing = client.get("/api/v1/external-agents").json()
+    (row,) = listing["agents"]
+    assert row["platform_label"] == "Salesforce Agentforce"
+    assert row["credentials"] == ["rest"]
+    # The token value never reappears on any read surface.
+    assert token not in str(listing)
+    detail = client.get("/api/v1/external-agents/sf-quotebot").json()
+    assert detail["department"] == "sales"
+    assert client.get("/api/v1/external-agents/ghost").status_code == 404
+
+
+def test_enroll_validates_platform_and_surface():
+    assert _enroll(platform="skynet").status_code == 400
+    _enroll()
+    r = client.post("/api/v1/external-agents/sf-quotebot/credentials",
+                    json={"surface": "carrier-pigeon"})
+    assert r.status_code == 422
+
+
+def test_agent_facing_routes_require_the_rest_bearer():
+    _enroll()
+    token = _mint()
+    # No session, no Origin — the bearer alone authenticates (self-auth path).
+    bare = TestClient(app)
+    r = bare.post("/api/v1/external/runs",
+                  headers={"Authorization": f"Bearer {token}"},
+                  json={"title": "Quote for Northwind", "outcome": "success",
+                        "summary": "sent", "cost_dollars": 1.25})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["ok"] is True and body["over_budget"] is False
+    # The run is on the Operating Record, visible from the admin detail.
+    detail = client.get("/api/v1/external-agents/sf-quotebot").json()
+    assert detail["runs"] == 1
+    assert detail["record"]["dollars"] == pytest.approx(1.25)
+    # Missing/garbage bearer -> 401, never a fallback to ambient auth.
+    assert bare.post("/api/v1/external/runs", json={}).status_code == 401
+    r = bare.post("/api/v1/external/screen",
+                  headers={"Authorization": "Bearer lw-rest-wrong"},
+                  json={"tool": "crm_update"})
+    assert r.status_code == 401
+
+
+def test_screen_flow_and_approval_poll_over_http():
+    _enroll(max_risk="high")
+    token = _mint()
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    ok = bare.post("/api/v1/external/screen", headers=hdr,
+                   json={"tool": "crm_update", "detail": "update stage",
+                         "risk": "low"}).json()
+    assert ok["allowed"] is True
+    parked = bare.post("/api/v1/external/screen", headers=hdr,
+                       json={"tool": "send_contract", "risk": "high"}).json()
+    assert parked["requires_approval"] is True
+    poll = bare.get(f"/api/v1/external/approvals/{parked['approval_id']}",
+                    headers=hdr)
+    assert poll.status_code == 200
+    assert poll.json()["status"] == "pending"
+    assert bare.get("/api/v1/external/approvals/999999",
+                    headers=hdr).status_code == 404
+
+
+def test_gateway_404s_while_disabled(monkeypatch):
+    _enroll()
+    token = _mint()
+    monkeypatch.delenv("MAVERICK_EXTERNAL_AGENTS", raising=False)
+    bare = TestClient(app)
+    r = bare.post("/api/v1/external/screen",
+                  headers={"Authorization": f"Bearer {token}"},
+                  json={"tool": "crm_update"})
+    assert r.status_code == 404
+    assert bare.get("/api/v1/external/openapi.json").status_code == 404
+
+
+def test_openapi_artifact_describes_the_three_operations():
+    spec = TestClient(app).get("/api/v1/external/openapi.json").json()
+    assert spec["openapi"].startswith("3.")
+    assert set(spec["paths"]) == {
+        "/api/v1/external/screen", "/api/v1/external/runs",
+        "/api/v1/external/approvals/{approval_id}"}
+    assert spec["security"] == [{"bearer": []}]
+
+
+def test_console_page_renders_roster_and_forms():
+    _enroll()
+    page = client.get("/external-agents").text
+    assert "Enroll an external agent" in page
+    assert 'id="xa-add"' in page
+    assert "data-xa-mint" in page
+    assert "Salesforce Agentforce" in page
+    assert "Connect your platform" in page
+
+
+def test_admin_mutations_are_csrf_gated_but_gateway_is_not():
+    # The ADMIN surface keeps the same-origin gate in no-token mode…
+    bare = TestClient(app)
+    assert bare.post("/api/v1/external-agents",
+                     json={"id": "x", "platform": "custom"}).status_code == 403
+    # …while the agent-facing prefix authenticates by bearer alone (asserted
+    # in test_agent_facing_routes_require_the_rest_bearer).
+
+
+def test_unenroll_over_http():
+    _enroll()
+    assert client.delete("/api/v1/external-agents/sf-quotebot").status_code == 204
+    assert client.delete("/api/v1/external-agents/sf-quotebot").status_code == 404
+    assert client.get("/api/v1/external-agents").json()["agents"] == []

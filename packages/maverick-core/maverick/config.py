@@ -1621,6 +1621,16 @@ def get_fleet_memory() -> dict:
     return {"enable": bool(cfg.get("enable", False))}
 
 
+def get_external_agents() -> dict:
+    """Return the ``[external_agents]`` section (bring-your-own-agent gateway:
+    enrollment, run ingest onto the Operating Record, pre-action screening).
+    OFF by default: admitting foreign runtimes is an explicit trust decision,
+    made per-agent in the trust registry once the plane is on. Also honored
+    via ``MAVERICK_EXTERNAL_AGENTS=1``."""
+    cfg = load_config().get("external_agents", {})
+    return {"enable": bool(cfg.get("enable", False))}
+
+
 def get_memory() -> dict:
     """Return the ``[memory]`` section. ``temporal`` keeps a bitemporal history
     of every fact value (validity windows) instead of overwriting, so the

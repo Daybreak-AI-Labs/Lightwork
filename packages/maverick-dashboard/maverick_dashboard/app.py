@@ -552,6 +552,14 @@ app.include_router(scim_router)
 from .saml import router as saml_router  # noqa: E402
 
 app.include_router(saml_router)
+# Bring-your-own-agent gateway (/api/v1/external/...): agents on OTHER
+# platforms report runs and ask for action screening with their per-agent
+# rest bearer. Self-gates on [external_agents] enable (404 off) and the Gold
+# entitlement, so including it unconditionally is inert. The prefix is
+# self-authenticating (see _AUTH_EXEMPT rationale for /a2a/v1).
+from .external_gateway import router as external_gateway_router  # noqa: E402
+
+app.include_router(external_gateway_router)
 a2a.mount(app)
 
 _DOCS_CSP = (
@@ -1054,7 +1062,11 @@ async def bearer_auth(request: Request, call_next):
             or request.url.path.startswith("/scim/")
             or request.url.path.startswith("/form/")
             or request.url.path.startswith("/saml/")
-            or request.url.path.startswith("/auth/invite/")):
+            or request.url.path.startswith("/auth/invite/")
+            # BYOA gateway: per-agent rest bearer from the trust registry is
+            # the credential (external_gateway.py); the trailing slash keeps
+            # the ADMIN surface /api/v1/external-agents under dashboard auth.
+            or request.url.path.startswith("/api/v1/external/")):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
         # an external recipient has no dashboard bearer, like the webhook paths.
@@ -2878,6 +2890,21 @@ async def trust_page(request: Request) -> HTMLResponse:
     agent allowed to interact, with its tool/risk/budget ceilings + lifecycle."""
     from .control_plane import trust_overview
     return templates.TemplateResponse(request, "trust.html", trust_overview())
+
+
+@app.get("/external-agents", response_class=HTMLResponse)
+async def external_agents_page(request: Request) -> HTMLResponse:
+    """Bring-your-own-agent console: enroll agents built on other platforms
+    (Agentforce, Bedrock, Copilot Studio, custom), mint their credentials,
+    and watch their governed runs/spend land on the Operating Record."""
+    from maverick import external_agents as xa
+    return templates.TemplateResponse(request, "external_agents.html", {
+        "enabled": xa.enabled(),
+        "status": xa.status(),
+        "agents": xa.roster(),
+        "platforms": xa.PLATFORMS,
+        "surfaces": xa.TOKEN_SURFACES,
+    })
 
 
 @app.get("/discovery", response_class=HTMLResponse)

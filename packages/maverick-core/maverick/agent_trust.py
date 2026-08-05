@@ -220,6 +220,9 @@ class TrustedAgent:
     a2a_token: str = ""
     grpc_token: str = ""
     mcp_token: str = ""
+    # The external-agents HTTP gateway (run ingest / action screening) is its
+    # own surface with its own bearer, same isolation rationale as above.
+    rest_token: str = ""
     # Key lifecycle (all default to "always valid" so existing configs are
     # byte-for-byte unchanged): a revoked or out-of-window entry is denied by
     # decide_inbound/decide_outbound/verify_identity. `not_before`/`expires_at`
@@ -468,7 +471,7 @@ def _agent_from_entry(entry: dict) -> TrustedAgent | None:
                     "dropping entry (fail-closed)", agent_id)
         return None
     tokens: dict[str, str] = {}
-    for field in ("a2a_token", "grpc_token", "mcp_token"):
+    for field in ("a2a_token", "grpc_token", "mcp_token", "rest_token"):
         value = entry.get(field, "")
         if (
             not isinstance(value, str)
@@ -500,6 +503,7 @@ def _agent_from_entry(entry: dict) -> TrustedAgent | None:
         a2a_token=tokens["a2a_token"],
         grpc_token=tokens["grpc_token"],
         mcp_token=tokens["mcp_token"],
+        rest_token=tokens["rest_token"],
         not_before=not_before,  # type: ignore[arg-type]  # float|None (not _INVALID)
         expires_at=expires_at,  # type: ignore[arg-type]
         revoked=revoked,
@@ -700,7 +704,8 @@ def lookup(agent_id: str, *, registry: dict[str, TrustedAgent] | None = None) ->
     return reg.get(agent_id)
 
 
-_TOKEN_ATTRS = {"a2a": "a2a_token", "grpc": "grpc_token", "mcp": "mcp_token"}
+_TOKEN_ATTRS = {"a2a": "a2a_token", "grpc": "grpc_token", "mcp": "mcp_token",
+                "rest": "rest_token"}
 
 
 def agent_for_token(

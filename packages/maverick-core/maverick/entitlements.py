@@ -52,6 +52,7 @@ DEFAULT_GRACE_DAYS = 14
 #: a *core* feature and is always allowed (fail-open). Add gated capabilities
 #: here so there is exactly one enforcement registry.
 GATED_FEATURES: dict[str, str] = {
+    "external_agents": "gold",
     "fleet_governance": "gold",
     "fleet_memory": "gold",
     "siem_export": "gold",
