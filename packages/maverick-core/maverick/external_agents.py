@@ -84,6 +84,11 @@ _EXECUTION_TTL_SECONDS = 24 * 3600
 #: the approver display must stay readable; bulk payloads belong on the
 #: system of record's own bulk surfaces, not proxied through the gateway.
 _MAX_EXECUTE_BODY_BYTES = 32 * 1024
+#: How long a claimed (``executing``) entry stays authoritative past its
+#: claim before the status view reports it INDETERMINATE — the worker died
+#: between the claim and the terminal write, so the effect may or may not
+#: have fired and must never re-fire automatically.
+_EXECUTING_GRACE_SECONDS = 600
 
 
 class ExternalAgentsError(Exception):
@@ -1087,13 +1092,105 @@ def _request_digest(connector: str, op: str, path: str,
 
 
 def _prune_executions(meta: dict, now: float | None = None) -> dict:
-    """Drop expired execution-ledger entries in place; returns the live map."""
+    """Drop expired execution-ledger entries in place; returns the live map.
+
+    An ``executing`` entry gets the claim grace on top of the TTL: a commit
+    whose network call straddles the TTL boundary must still find its row
+    for the terminal status write — pruning it mid-flight would erase the
+    ledger's memory of a fired effect."""
     now = time.time() if now is None else now
-    ex = {k: v for k, v in dict(meta.get("executions") or {}).items()
-          if isinstance(v, dict)
-          and now - float(v.get("created_at") or 0) <= _EXECUTION_TTL_SECONDS}
+    ex: dict[str, dict] = {}
+    for k, v in dict(meta.get("executions") or {}).items():
+        if not isinstance(v, dict):
+            continue
+        horizon = _EXECUTION_TTL_SECONDS
+        if v.get("status") == "executing":
+            horizon += _EXECUTING_GRACE_SECONDS
+        if now - float(v.get("created_at") or 0) <= horizon:
+            ex[k] = v
     meta["executions"] = ex
     return ex
+
+
+def _screen_execute_request(agent_id: str, request: dict, *,
+                            shield: Any | None) -> tuple[dict | None, dict]:
+    """Parse and boundary-screen one execute request.
+
+    Validation bounds every component FIRST (detail 4k, path 2k, body 32k
+    canonical JSON), then the injection tripwire and Shield scan cover the
+    WHOLE blob with no truncation — nothing can pad another field outside
+    the scan window. The checker erroring denies (external boundary,
+    fail-closed), and the request is never rewritten: a redacted path would
+    execute against the wrong record, so we flag, never launder. Returns
+    ``(deny_verdict|None, parsed)``."""
+    from .governed_rest import WRITE_OPS
+    connector = str(request.get("connector") or "").strip().lower()
+    op = str(request.get("op") or "").strip().lower()
+    path = str(request.get("path") or "").strip()
+    body = request.get("body")
+    detail = str(request.get("detail") or "")
+    tool = (f"{connector}.{'read' if op == 'get' else 'write'}"
+            if connector else "execute")
+    parsed = {"connector": connector, "op": op, "path": path,
+              "body": body if isinstance(body, dict) else None,
+              "preview": bool(request.get("preview")), "detail": detail,
+              "tool": tool}
+    if connector not in execute_connectors():
+        return _screen_verdict(
+            agent_id, tool, False, "connector_not_enabled",
+            f"connector {connector!r} is not enabled for external "
+            "execution ([external_agents] connectors)"), parsed
+    if op != "get" and op not in WRITE_OPS:
+        return _deny_and_count(
+            agent_id, tool, "bad_op",
+            f"unknown op {op!r}; expected get or one of "
+            f"{', '.join(WRITE_OPS)}"), parsed
+    if not path or len(path) > 2000:
+        return _screen_verdict(
+            agent_id, tool, False, "bad_path",
+            "path is required (and bounded at 2000 chars)"), parsed
+    if body is not None and not isinstance(body, dict):
+        return _screen_verdict(agent_id, tool, False, "bad_body",
+                               "body must be a JSON object"), parsed
+    if len(detail) > _MAX_TEXT:
+        return _screen_verdict(
+            agent_id, tool, False, "detail_too_long",
+            f"detail exceeds {_MAX_TEXT} chars"), parsed
+    body_json = ""
+    if body:
+        body_json = json.dumps(body, sort_keys=True,
+                               separators=(",", ":"), default=str)
+        if len(body_json.encode("utf-8")) > _MAX_EXECUTE_BODY_BYTES:
+            return _screen_verdict(
+                agent_id, tool, False, "body_too_large",
+                f"request body exceeds {_MAX_EXECUTE_BODY_BYTES} bytes"), \
+                parsed
+    scan_blob = "\n".join(x for x in (detail, path, body_json) if x)
+    try:
+        from .memory_guard import injection_markers
+        if injection_markers(scan_blob):
+            return _deny_and_count(
+                agent_id, tool, "injection",
+                "request payload tripped the injection screen"), parsed
+    except Exception:
+        return _screen_verdict(
+            agent_id, tool, False, "screen_error",
+            "injection screen unavailable; action denied "
+            "(fail-closed)"), parsed
+    if shield is not None:
+        try:
+            verdict = shield.scan_input(scan_blob)
+            if getattr(verdict, "blocked", False):
+                return _deny_and_count(
+                    agent_id, tool, "shield",
+                    "request payload was blocked by the input screen"), \
+                    parsed
+        except Exception:
+            return _screen_verdict(
+                agent_id, tool, False, "screen_error",
+                "input screen unavailable; action denied "
+                "(fail-closed)"), parsed
+    return None, parsed
 
 
 def execute(agent_id: str, request: dict, *,
@@ -1120,58 +1217,17 @@ def execute(agent_id: str, request: dict, *,
     if not enabled():
         return _screen_verdict(agent_id, "execute", False, "disabled",
                                "external agents plane is disabled")
-    from .governed_rest import WRITE_OPS
-    connector = str(request.get("connector") or "").strip().lower()
-    op = str(request.get("op") or "").strip().lower()
-    path = str(request.get("path") or "").strip()
-    body = request.get("body")
-    preview = bool(request.get("preview"))
-    detail = str(request.get("detail") or "")
-    tool = (f"{connector}.{'read' if op == 'get' else 'write'}"
-            if connector else "execute")
-    if connector not in execute_connectors():
-        return _screen_verdict(
-            agent_id, tool, False, "connector_not_enabled",
-            f"connector {connector!r} is not enabled for external "
-            "execution ([external_agents] connectors)")
-    if op != "get" and op not in WRITE_OPS:
-        return _deny_and_count(
-            agent_id, tool, "bad_op",
-            f"unknown op {op!r}; expected get or one of "
-            f"{', '.join(WRITE_OPS)}")
-    if not path or len(path) > 2000:
-        return _screen_verdict(
-            agent_id, tool, False, "bad_path",
-            "path is required (and bounded at 2000 chars)")
-    if body is not None and not isinstance(body, dict):
-        return _screen_verdict(agent_id, tool, False, "bad_body",
-                               "body must be a JSON object")
-    body_json = ""
-    if body:
-        body_json = json.dumps(body, sort_keys=True,
-                               separators=(",", ":"), default=str)
-        if len(body_json.encode("utf-8")) > _MAX_EXECUTE_BODY_BYTES:
-            return _screen_verdict(
-                agent_id, tool, False, "body_too_large",
-                f"request body exceeds {_MAX_EXECUTE_BODY_BYTES} bytes")
-    # Injection tripwire over everything the request carries, independent of
-    # whether a Shield instance is wired; the checker erroring denies —
-    # external boundary, fail-closed. Never rewrite the request (a redacted
-    # path would execute against the wrong record): flag, don't launder.
-    scan_blob = "\n".join(x for x in (detail, path, body_json) if x)
-    try:
-        from .memory_guard import injection_markers
-        if injection_markers(scan_blob[:_MAX_EXECUTE_BODY_BYTES]):
-            return _deny_and_count(
-                agent_id, tool, "injection",
-                "request payload tripped the injection screen")
-    except Exception:
-        return _screen_verdict(
-            agent_id, tool, False, "screen_error",
-            "injection screen unavailable; action denied (fail-closed)")
+    deny, parsed = _screen_execute_request(agent_id, request, shield=shield)
+    if deny is not None:
+        return deny
+    connector, op, path = parsed["connector"], parsed["op"], parsed["path"]
+    body, preview = parsed["body"], parsed["preview"]
+    detail, tool = parsed["detail"], parsed["tool"]
     risk = "low" if (op == "get" or preview) else "high"
+    # detail="" — the full blob (detail included) was scanned above; the
+    # shared chain still applies containment, ceilings, and budget.
     deny, meta, _decision, req_risk = _screen_admission(
-        agent_id, tool, risk=risk, detail=scan_blob[:_MAX_TEXT],
+        agent_id, tool, risk=risk, detail="",
         shield=shield, correlation="execute")
     if deny is not None:
         return deny
@@ -1255,16 +1311,29 @@ def _park_execution(agent_id: str, conn, meta: dict, *, tool: str,
             agent_id, tool, False, "execution_backlog",
             f"{_MAX_PENDING_EXECUTIONS} executions already await decisions "
             "for this agent; wait for approvals or expiry")
-    describe = (conn.preview_write({"op": op, "path": path,
-                                    "body": body or {}})
-                if op != "get" else f"would GET {connector}{path}")
-    from .world_model import open_world
-    approval_id = open_world().create_approval(
-        f"external-exec:{agent_id}:{tool}", risk=req_risk,
-        scope=meta.get("department") or None,
-        detail=(f"{describe}\nrequest sha256: {digest}\n"
-                f"{detail or ''}")[:2000],
-        provenance="external_agents", requested_by=f"agent:{agent_id}")
+    try:
+        describe = (conn.preview_write({"op": op, "path": path,
+                                        "body": body or {}})
+                    if op != "get" else f"would GET {connector}{path}")
+        from .world_model import open_world
+        approval_id = open_world().create_approval(
+            f"external-exec:{agent_id}:{tool}", risk=req_risk,
+            scope=meta.get("department") or None,
+            detail=(f"{describe}\nrequest sha256: {digest}\n"
+                    f"{detail or ''}")[:2000],
+            provenance="external_agents", requested_by=f"agent:{agent_id}")
+    except Exception:
+        # Nothing was authorized and nothing will fire — hand the reserved
+        # slot back instead of stranding a 24h pending entry that has no
+        # approval row and can never be committed.
+        log.warning("external_agents: park failed for %r; releasing the "
+                    "slot", agent_id, exc_info=True)
+        _set_execution_status(agent_id, execution_id, None, drop=True,
+                              expect="pending")
+        return _screen_verdict(
+            agent_id, tool, False, "park_failed",
+            "could not create the approval; nothing was recorded — "
+            "submit the request again")
     with _sidecar_locked():
         sidecar = _load_sidecar()
         entry = ((sidecar.get(agent_id) or {}).get("executions")
@@ -1293,8 +1362,15 @@ def execute_status(agent_id: str, execution_id: str) -> dict:
         raise ExternalAgentsError(f"unknown execution {execution_id!r}")
     created = float(entry.get("created_at") or 0)
     status = str(entry.get("status") or "pending")
-    if status == "pending" and time.time() - created > _EXECUTION_TTL_SECONDS:
+    now = time.time()
+    if status == "pending" and now - created > _EXECUTION_TTL_SECONDS:
         status = "expired"
+    elif status == "executing" and now - float(
+            entry.get("claimed_at") or created) > _EXECUTING_GRACE_SECONDS:
+        # The worker died between the claim and the terminal write: the
+        # effect may or may not have fired. Never re-fire automatically —
+        # the operator verifies in the system of record.
+        status = "indeterminate"
     out = {"execution_id": str(execution_id), "status": status,
            "approval_id": entry.get("approval_id"),
            "connector": entry.get("connector"), "op": entry.get("op"),
@@ -1336,30 +1412,68 @@ def execute_commit(agent_id: str, execution_id: str, request: dict, *,
         return _screen_verdict(agent_id, tool, False, "unknown_execution",
                                f"unknown execution {str(execution_id)!r}")
     now = time.time()
-    if now - float(entry.get("created_at") or 0) > _EXECUTION_TTL_SECONDS:
-        _set_execution_status(agent_id, str(execution_id), None, drop=True)
-        return _screen_verdict(
-            agent_id, tool, False, "execution_expired",
-            "the parked execution expired; submit it again")
+    # Terminal state FIRST, regardless of age: a replayed commit on an
+    # already-fired execution must always hear the terminal status — an
+    # aged executed entry told "expired; submit it again" is an instruction
+    # to duplicate the effect through a second park + approval.
     if entry.get("status") != "pending":
+        status = str(entry.get("status") or "")
+        if status == "executing" and now - float(
+                entry.get("claimed_at")
+                or entry.get("created_at") or 0) > _EXECUTING_GRACE_SECONDS:
+            status = "indeterminate"
         out = _screen_verdict(
             agent_id, tool, False, "already_finished",
-            f"execution already {entry.get('status')}; a commit never "
-            "re-fires")
-        out["status"] = entry.get("status")
+            f"execution already {status}; a commit never re-fires"
+            + (" — verify in the system of record"
+               if status == "indeterminate" else ""))
+        out["status"] = status
         return out
+    # The operator's connector allowlist re-binds at commit time: emptying
+    # [external_agents] connectors is the documented kill switch, and an
+    # approval parked before the switch flipped must not outrun it.
+    if connector not in execute_connectors():
+        return _screen_verdict(
+            agent_id, tool, False, "connector_not_enabled",
+            f"connector {connector!r} is no longer enabled for external "
+            "execution ([external_agents] connectors)")
+    if now - float(entry.get("created_at") or 0) > _EXECUTION_TTL_SECONDS:
+        if not _set_execution_status(agent_id, str(execution_id), None,
+                                     drop=True, expect="pending"):
+            # A concurrent commit claimed it between our snapshot and the
+            # void — report the live state instead of acting on the stale one.
+            return execute_commit(agent_id, execution_id, request,
+                                  shield=shield)
+        return _screen_verdict(
+            agent_id, tool, False, "execution_expired",
+            "the parked execution expired before any effect; submit it "
+            "again")
     if body is not None and not isinstance(body, dict):
         return _screen_verdict(agent_id, tool, False, "bad_body",
                                "body must be a JSON object")
+    approval_id = entry.get("approval_id")
+    if not approval_id:
+        # The park never completed (approval creation failed after the slot
+        # was reserved). Nothing was authorized and nothing fired — void the
+        # slot and have the agent start over.
+        _set_execution_status(agent_id, str(execution_id), None,
+                              drop=True, expect="pending")
+        return _screen_verdict(
+            agent_id, tool, False, "park_incomplete",
+            "the park never completed (no approval exists); submit the "
+            "request again")
     digest = _request_digest(connector, op, path,
                              body if isinstance(body, dict) else None)
     if digest != entry.get("digest"):
-        _set_execution_status(agent_id, str(execution_id), None, drop=True)
+        # Void only while still pending: a stale snapshot must never delete
+        # an entry a concurrent (correct) commit has claimed and is
+        # executing. The mismatch is misbehavior either way — count it.
+        _set_execution_status(agent_id, str(execution_id), None,
+                              drop=True, expect="pending")
         return _deny_and_count(
             agent_id, tool, "digest_mismatch",
             "the committed request does not match what was approved; the "
             "parked execution has been voided")
-    approval_id = entry.get("approval_id")
     approval = None
     if approval_id:
         try:
@@ -1369,7 +1483,8 @@ def execute_commit(agent_id: str, execution_id: str, request: dict, *,
             approval = None
     decision = getattr(approval, "status", None)
     if decision == "denied":
-        _set_execution_status(agent_id, str(execution_id), "denied")
+        _set_execution_status(agent_id, str(execution_id), "denied",
+                              expect="pending")
         return _screen_verdict(agent_id, tool, False, "approval_denied",
                                "a human denied this action")
     if decision != "approved":
@@ -1397,10 +1512,12 @@ def execute_commit(agent_id: str, execution_id: str, request: dict, *,
     if verdict.get("rule") == "receipt_unavailable":
         # Nothing fired — hand the slot back so the agent can retry the
         # commit once the receipt store recovers.
-        _set_execution_status(agent_id, str(execution_id), "pending")
+        _set_execution_status(agent_id, str(execution_id), "pending",
+                              expect="executing")
     else:
         _set_execution_status(agent_id, str(execution_id),
-                              verdict.get("status") or "failed")
+                              verdict.get("status") or "failed",
+                              expect="executing")
     verdict["execution_id"] = str(execution_id)
     return verdict
 
@@ -1414,25 +1531,34 @@ def _claim_execution(agent_id: str, execution_id: str) -> bool:
         if entry is None or entry.get("status") != "pending":
             return False
         entry["status"] = "executing"
+        entry["claimed_at"] = time.time()
         _save_sidecar(sidecar)
     return True
 
 
 def _set_execution_status(agent_id: str, execution_id: str,
-                          status: str | None, *, drop: bool = False) -> None:
+                          status: str | None, *, drop: bool = False,
+                          expect: str | None = None) -> bool:
+    """Mutate (or drop) one ledger entry under the lock.
+
+    ``expect`` guards against acting on a stale snapshot: the change applies
+    only while the entry's CURRENT status still matches — a drop decided
+    against a pending snapshot must never delete an entry a concurrent
+    commit has since claimed. Returns whether the change was applied."""
     with _sidecar_locked():
         sidecar = _load_sidecar()
         meta = sidecar.get(agent_id)
         if meta is None:
-            return
+            return False
         ex = dict(meta.get("executions") or {})
+        entry = ex.get(execution_id)
+        if entry is None:
+            return False
+        if expect is not None and entry.get("status") != expect:
+            return False
         if drop:
-            if ex.pop(execution_id, None) is None:
-                return
+            ex.pop(execution_id, None)
         else:
-            entry = ex.get(execution_id)
-            if entry is None:
-                return
             entry = dict(entry)
             entry["status"] = status
             if status in ("executed", "failed", "denied"):
@@ -1442,6 +1568,7 @@ def _set_execution_status(agent_id: str, execution_id: str,
             ex[execution_id] = entry
         meta["executions"] = ex
         _save_sidecar(sidecar)
+    return True
 
 
 def _perform_execution(agent_id: str, connector: str, op: str, path: str,

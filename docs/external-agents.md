@@ -480,6 +480,9 @@ The external boundary fails closed throughout:
 | rule `contained` | Repeated denials tripped auto-containment | An admin reviews and presses **Release** on /external-agents |
 | rule `connector_not_enabled` | Connector not named in `[external_agents] connectors` | Add it there (or `MAVERICK_EXTERNAL_CONNECTORS`) and restart the dashboard |
 | rule `digest_mismatch` | Committed request differs from what was approved — the parked execution is voided and it counts as misbehavior | Re-submit via `/execute` and commit the byte-identical request |
-| rule `execution_expired` | Parked longer than 24 hours | Submit the request again |
+| rule `execution_expired` | Parked longer than 24 hours before any effect | Submit the request again |
 | rule `receipt_unavailable` | The PREPARE receipt could not be persisted — nothing fired (fail-closed) | Check the lineage store and logs, then retry the same commit |
+| rule `detail_too_long` | `detail` exceeds 4000 chars (bounded before scanning) | Shorten the free-text detail |
+| rule `park_failed` / `park_incomplete` | The approval could not be created when parking — nothing was authorized and nothing fired | Submit the request again |
+| status `indeterminate` | The worker died between claiming the commit and writing its outcome — the effect may or may not have fired | Verify in the system of record before doing anything else; the entry never re-fires |
 | `429` | Per-agent rate limit | Honor `Retry-After`; batch reports or slow the loop |
