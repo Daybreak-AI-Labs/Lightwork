@@ -25,6 +25,9 @@ Gold entitlement (403), so including the router unconditionally is inert.
 from __future__ import annotations
 
 import logging
+import threading
+import time
+from collections import deque
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -32,6 +35,43 @@ from pydantic import BaseModel, Field
 log = logging.getLogger("maverick.dashboard.external_gateway")
 
 router = APIRouter(prefix="/api/v1/external", tags=["external-agents"])
+
+# Per-caller request throttles (window: 60s). Budgets gate dollars; these
+# gate volume, so a misbehaving or looping agent cannot hammer the gateway.
+# Keyed by verified agent id — except the unauthenticated schema route,
+# which keys by client address.
+_RATE_LIMITS = {"screen": 120, "runs": 60, "approvals": 120, "openapi": 30}
+_RATE_BUCKET_CAP = 10_000
+_rate_times: dict[tuple[str, str], deque[float]] = {}
+_rate_lock = threading.Lock()
+
+
+def _rate_limit(key: str, action: str) -> None:
+    now = time.monotonic()
+    limit = _RATE_LIMITS[action]
+    bucket = (action, key)
+    with _rate_lock:
+        if bucket not in _rate_times and len(_rate_times) >= _RATE_BUCKET_CAP:
+            for candidate, window in tuple(_rate_times.items()):
+                while window and now - window[0] >= 60:
+                    window.popleft()
+                if not window:
+                    _rate_times.pop(candidate, None)
+            if len(_rate_times) >= _RATE_BUCKET_CAP:
+                raise HTTPException(
+                    status_code=429,
+                    detail="gateway rate-limit capacity reached",
+                    headers={"Retry-After": "60"})
+        window = _rate_times.setdefault(bucket, deque())
+        while window and now - window[0] >= 60:
+            window.popleft()
+        if len(window) >= limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"rate limit reached for {action} "
+                       f"({limit}/minute); slow down and retry",
+                headers={"Retry-After": "60"})
+        window.append(now)
 
 
 class ExternalRunIn(BaseModel):
@@ -43,7 +83,11 @@ class ExternalRunIn(BaseModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     tool_calls: int = Field(default=0, ge=0)
+    duration_seconds: float = Field(default=0.0, ge=0)
     department: str = Field(default="", max_length=100)
+    # Send a stable key per logical run and retries become exactly-once:
+    # a replay returns the original goal instead of double-counting.
+    idempotency_key: str = Field(default="", max_length=128)
 
 
 class ExternalScreenIn(BaseModel):
@@ -104,6 +148,7 @@ async def external_run_report(
     payload: ExternalRunIn, agent_id: str = Depends(_require_agent),
 ) -> dict:
     """Ingest one completed external run onto the Operating Record."""
+    _rate_limit(agent_id, "runs")
     from maverick import external_agents as xa
     try:
         out = xa.record_run(agent_id, payload.model_dump(), shield=_shield())
@@ -117,6 +162,7 @@ async def external_screen(
     payload: ExternalScreenIn, agent_id: str = Depends(_require_agent),
 ) -> dict:
     """Decide a proposed action before the external agent takes it."""
+    _rate_limit(agent_id, "screen")
     from maverick import external_agents as xa
     return xa.screen(agent_id, payload.tool, detail=payload.detail,
                      risk=payload.risk or None, shield=_shield())
@@ -127,6 +173,7 @@ async def external_approval_status(
     approval_id: int, agent_id: str = Depends(_require_agent),
 ) -> dict:
     """Poll a parked approval (the human decides in the dashboard queue)."""
+    _rate_limit(agent_id, "approvals")
     from maverick import external_agents as xa
     try:
         out = xa.approval_status(approval_id)
@@ -205,7 +252,14 @@ _OPENAPI: dict = {
                             "input_tokens": {"type": "integer"},
                             "output_tokens": {"type": "integer"},
                             "tool_calls": {"type": "integer"},
+                            "duration_seconds": {"type": "number"},
                             "department": {"type": "string"},
+                            "idempotency_key": {
+                                "type": "string",
+                                "description": "Stable key per logical run; "
+                                               "retries return the original "
+                                               "record instead of "
+                                               "double-counting."},
                         }}}}},
                 "responses": {"201": {"description": "Recorded", "content": {
                     "application/json": {"schema": {
@@ -247,4 +301,6 @@ async def external_openapi(request: Request) -> dict:
     from maverick import external_agents as xa
     if not xa.enabled():
         raise HTTPException(status_code=404, detail="not found")
+    client = request.client.host if request.client else "unknown"
+    _rate_limit(client, "openapi")
     return _OPENAPI

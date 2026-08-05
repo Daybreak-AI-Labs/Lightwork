@@ -8024,10 +8024,38 @@ async def external_agent_enroll(request: Request,
             max_wall_seconds=payload.max_wall_seconds,
             data_scopes=payload.data_scopes,
             expires_days=payload.expires_days,
+            budget_period=payload.budget_period,
             enrolled_by=caller_principal(request) or "admin")
     except xa.ExternalAgentsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return out
+
+
+@router.post("/external-agents/{agent_id}/release")
+async def external_agent_release(request: Request, agent_id: str) -> dict:
+    """Lift an auto-containment and clear the denial window (admin)."""
+    require_permission(request, "admin")
+    from maverick import external_agents as xa
+    if not xa.release(agent_id,
+                      released_by=caller_principal(request) or "admin"):
+        raise HTTPException(status_code=404,
+                            detail=f"agent {agent_id!r} is not enrolled")
+    return {"ok": True, "id": agent_id}
+
+
+@router.post("/external-agents/{agent_id}/reset-budget")
+async def external_agent_reset_budget(request: Request,
+                                      agent_id: str) -> dict:
+    """Zero the active budget meter and clear the over-budget flag (admin).
+    Lifetime totals are preserved — this changes what counts against the
+    cap, never what was historically reported."""
+    require_permission(request, "admin")
+    from maverick import external_agents as xa
+    if not xa.reset_budget(agent_id,
+                           reset_by=caller_principal(request) or "admin"):
+        raise HTTPException(status_code=404,
+                            detail=f"agent {agent_id!r} is not enrolled")
+    return {"ok": True, "id": agent_id}
 
 
 @router.get("/external-agents/{agent_id}")

@@ -425,6 +425,10 @@ class ExternalAgentIn(BaseModel):
     max_wall_seconds: float | None = Field(default=None, ge=0)
     data_scopes: list[str] = Field(default_factory=list, max_length=64)
     expires_days: float | None = Field(default=None, gt=0, le=3650)
+    # "monthly" resets the spend meter each calendar month (UTC); "total"
+    # is a lifetime cap. allow_tools entries may carry the operator's risk
+    # rating as "name:risk", which floors whatever the agent declares.
+    budget_period: str = Field(default="monthly", pattern="^(monthly|total)$")
 
 
 class ExternalCredentialIn(BaseModel):

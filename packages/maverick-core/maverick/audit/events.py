@@ -164,6 +164,13 @@ class EventKind:
     EXTERNAL_CREDENTIAL_MINTED = "external_credential_minted"
     EXTERNAL_RUN_INGESTED = "external_run_ingested"
     EXTERNAL_ACTION_SCREENED = "external_action_screened"
+    # Containment lifecycle: CONTAINED fires when repeated denials inside the
+    # window trip the auto-containment (payload: external_agent, denials,
+    # window_hours, last_rule); RELEASED and BUDGET_RESET are the admin
+    # actions that lift it / zero the meter (payload carries who did it).
+    EXTERNAL_AGENT_CONTAINED = "external_agent_contained"
+    EXTERNAL_AGENT_RELEASED = "external_agent_released"
+    EXTERNAL_BUDGET_RESET = "external_budget_reset"
     # Learning governance: one row per dream cycle (what the learning system
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.
