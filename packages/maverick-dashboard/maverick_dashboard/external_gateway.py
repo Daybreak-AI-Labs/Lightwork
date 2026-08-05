@@ -41,7 +41,8 @@ router = APIRouter(prefix="/api/v1/external", tags=["external-agents"])
 # Keyed by verified agent id — except the unauthenticated schema route,
 # which keys by client address.
 _RATE_LIMITS = {"screen": 120, "runs": 60, "approvals": 120, "openapi": 30,
-                "heartbeat": 240, "memory": 60}
+                "heartbeat": 240, "memory": 60, "execute": 30,
+                "executions": 120}
 _RATE_BUCKET_CAP = 10_000
 _rate_times: dict[tuple[str, str], deque[float]] = {}
 _rate_lock = threading.Lock()
@@ -126,6 +127,27 @@ class ExternalRunFinishIn(BaseModel):
     tool_calls: int = Field(default=0, ge=0)
     duration_seconds: float = Field(default=0.0, ge=0)
     idempotency_key: str = Field(default="", max_length=128)
+
+
+# Deliberately permissive: the core adjudicates connector/op/path/body and
+# answers with typed verdict rules (connector_not_enabled, bad_op, bad_path,
+# bad_body, body_too_large...); pre-rejecting here would replace those
+# readable verdicts with a 422. Only basic JSON types are enforced.
+class ExternalExecuteIn(BaseModel):
+    connector: str
+    op: str
+    path: str
+    body: dict | None = None
+    preview: bool = False
+    detail: str = ""
+    goal_id: int | None = None
+
+
+class ExternalExecuteCommitIn(BaseModel):
+    connector: str
+    op: str
+    path: str
+    body: dict | None = None
 
 
 def _gate() -> None:
@@ -292,6 +314,46 @@ async def external_approval_status(
     # any enrolled agent may poll only external_agents approvals.
     log.debug("external approval poll by %s: %s", agent_id, out["status"])
     return out
+
+
+@router.post("/execute")
+async def external_execute(
+    payload: ExternalExecuteIn, agent_id: str = Depends(_require_agent),
+) -> dict:
+    """Perform one outbound action on the agent's behalf through a governed
+    connector — the enforcement tier above /screen. Reads run immediately;
+    writes park a digest-bound approval to commit later; every decision
+    comes back as a typed verdict, never an exception."""
+    _rate_limit(agent_id, "execute")
+    from maverick import external_agents as xa
+    return xa.execute(agent_id, payload.model_dump(), shield=_shield())
+
+
+@router.get("/executions/{execution_id}")
+async def external_execution_status(
+    execution_id: str, agent_id: str = Depends(_require_agent),
+) -> dict:
+    """Poll a parked execution (ledger status joined with the approval
+    decision) so the agent knows when to re-send the request and commit."""
+    _rate_limit(agent_id, "executions")
+    from maverick import external_agents as xa
+    try:
+        return xa.execute_status(agent_id, execution_id)
+    except xa.ExternalAgentsError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.post("/executions/{execution_id}/commit")
+async def external_execution_commit(
+    execution_id: str, payload: ExternalExecuteCommitIn,
+    agent_id: str = Depends(_require_agent),
+) -> dict:
+    """Commit one approved execution: a digest-bound replay of the identical
+    request. Shares the execute rate bucket — a commit can fire a write."""
+    _rate_limit(agent_id, "execute")
+    from maverick import external_agents as xa
+    return xa.execute_commit(agent_id, execution_id, payload.model_dump(),
+                             shield=_shield())
 
 
 #: Hand-maintained on purpose: FastAPI's generated schema spans the whole
@@ -517,6 +579,110 @@ _OPENAPI: dict = {
                             "approval_id": {"type": "integer"},
                             "status": {"type": "string"},
                             "risk": {"type": "string"},
+                        }}}}}},
+            },
+        },
+        "/api/v1/external/execute": {
+            "post": {
+                "operationId": "executeAction",
+                "summary": "Perform one action through a governed connector "
+                           "(reads run now; writes park a digest-bound "
+                           "approval)",
+                "requestBody": {"required": True, "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "required": ["connector", "op", "path"],
+                        "properties": {
+                            "connector": {"type": "string",
+                                          "description": "Enabled governed "
+                                                         "connector name"},
+                            "op": {"type": "string",
+                                   "enum": ["get", "post", "put", "patch",
+                                            "delete"]},
+                            "path": {"type": "string"},
+                            "body": {"type": "object"},
+                            "preview": {
+                                "type": "boolean",
+                                "description": "Describe the write without "
+                                               "performing it (no side "
+                                               "effect)."},
+                            "detail": {"type": "string",
+                                       "description": "What will be done"},
+                            "goal_id": {
+                                "type": "integer",
+                                "description": "Bind the effect to one of "
+                                               "this agent's live runs."},
+                        }}}}},
+                "responses": {"200": {"description": "Verdict", "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "allowed": {"type": "boolean"},
+                            "rule": {"type": "string"},
+                            "reason": {"type": "string"},
+                            "status": {"type": "string"},
+                            "result": {"type": "string"},
+                            "requires_approval": {"type": "boolean"},
+                            "approval_id": {"type": "integer"},
+                            "execution_id": {"type": "string"},
+                            "expires_at": {"type": "number"},
+                            "preview": {"type": "string"},
+                            "request_sha256": {"type": "string"},
+                        }}}}}},
+            },
+        },
+        "/api/v1/external/executions/{execution_id}": {
+            "get": {
+                "operationId": "executionStatus",
+                "summary": "Poll a parked execution; commit once its "
+                           "approval is granted",
+                "parameters": [{"name": "execution_id", "in": "path",
+                                "required": True,
+                                "schema": {"type": "string"}}],
+                "responses": {"200": {"description": "Status", "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "execution_id": {"type": "string"},
+                            "status": {"type": "string"},
+                            "approval_id": {"type": "integer"},
+                            "connector": {"type": "string"},
+                            "op": {"type": "string"},
+                            "expires_at": {"type": "number"},
+                            "approval_status": {"type": "string"},
+                        }}}}}},
+            },
+        },
+        "/api/v1/external/executions/{execution_id}/commit": {
+            "post": {
+                "operationId": "commitExecution",
+                "summary": "Commit an approved execution by re-sending the "
+                           "byte-identical request",
+                "parameters": [{"name": "execution_id", "in": "path",
+                                "required": True,
+                                "schema": {"type": "string"}}],
+                "requestBody": {"required": True, "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "required": ["connector", "op", "path"],
+                        "properties": {
+                            "connector": {"type": "string"},
+                            "op": {"type": "string",
+                                   "enum": ["get", "post", "put", "patch",
+                                            "delete"]},
+                            "path": {"type": "string"},
+                            "body": {"type": "object"},
+                        }}}}},
+                "responses": {"200": {"description": "Verdict", "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "allowed": {"type": "boolean"},
+                            "rule": {"type": "string"},
+                            "reason": {"type": "string"},
+                            "status": {"type": "string"},
+                            "result": {"type": "string"},
+                            "execution_id": {"type": "string"},
                         }}}}}},
             },
         },

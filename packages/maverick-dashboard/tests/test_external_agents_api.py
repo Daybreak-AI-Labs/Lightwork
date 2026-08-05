@@ -133,7 +133,10 @@ def test_openapi_artifact_describes_every_gateway_operation():
         "/api/v1/external/runs/{goal_id}/finish",
         "/api/v1/external/memory/ingest",
         "/api/v1/external/memory/recall",
-        "/api/v1/external/approvals/{approval_id}"}
+        "/api/v1/external/approvals/{approval_id}",
+        "/api/v1/external/execute",
+        "/api/v1/external/executions/{execution_id}",
+        "/api/v1/external/executions/{execution_id}/commit"}
     assert spec["security"] == [{"bearer": []}]
 
 
@@ -311,3 +314,180 @@ def test_admin_release_and_reset_budget_routes():
     assert verdict["rule"] == "allow"
     assert client.post("/api/v1/external-agents/ghost/release",
                        json={}).status_code == 404
+
+
+# -- governed execution over HTTP ---------------------------------------------
+
+class _FakeConn:
+    """Recording governed-REST connector double — no network, no creds."""
+
+    def __init__(self, write_result: str = "updated 1 record"):
+        self.reads: list[dict] = []
+        self.writes: list[dict] = []
+        self.write_result = write_result
+
+    def read(self, params):
+        self.reads.append(dict(params))
+        return "42 open opportunities"
+
+    def preview_write(self, params):
+        return f"would {params['op'].upper()} fakecrm{params['path']}"
+
+    def write(self, params):
+        self.writes.append(dict(params))
+        return self.write_result
+
+
+def _wire_fakecrm(monkeypatch):
+    """Enable one fake connector for the execute tier (the factory is looked
+    up at call time, so a setitem patch is enough)."""
+    from maverick import governed_rest
+    conn = _FakeConn()
+    monkeypatch.setitem(governed_rest.GOVERNED_REST_FACTORIES, "fakecrm",
+                        lambda: conn)
+    monkeypatch.setenv("MAVERICK_EXTERNAL_CONNECTORS", "fakecrm")
+    return conn
+
+
+def _write_body(**kw):
+    body = {"connector": "fakecrm", "op": "post",
+            "path": "/opportunities/42", "body": {"stage": "closed-won"}}
+    body.update(kw)
+    return body
+
+
+def test_execute_requires_bearer_before_validation():
+    _enroll()
+    bare = TestClient(app)
+    # Even a body that could never validate gets 401, not 422 — the bearer
+    # dependency resolves before the schema, so nothing leaks to strangers.
+    assert bare.post("/api/v1/external/execute",
+                     json={"op": "teleport"}).status_code == 401
+    r = bare.post("/api/v1/external/execute",
+                  headers={"Authorization": "Bearer lw-rest-wrong"},
+                  json={"op": "teleport"})
+    assert r.status_code == 401
+
+
+def test_execute_routes_404_while_disabled(monkeypatch):
+    _enroll()
+    token = _mint()
+    monkeypatch.delenv("MAVERICK_EXTERNAL_AGENTS", raising=False)
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    assert bare.post("/api/v1/external/execute", headers=hdr,
+                     json=_write_body()).status_code == 404
+    assert bare.get("/api/v1/external/executions/x",
+                    headers=hdr).status_code == 404
+    assert bare.post("/api/v1/external/executions/x/commit", headers=hdr,
+                     json=_write_body()).status_code == 404
+
+
+def test_execute_verdict_when_connector_not_enabled(monkeypatch):
+    _enroll()
+    token = _mint()
+    monkeypatch.delenv("MAVERICK_EXTERNAL_CONNECTORS", raising=False)
+    bare = TestClient(app)
+    r = bare.post("/api/v1/external/execute",
+                  headers={"Authorization": f"Bearer {token}"},
+                  json={"connector": "fakecrm", "op": "get",
+                        "path": "/accounts"})
+    # Denials are 200-with-verdict, never HTTP errors — typed rules travel.
+    assert r.status_code == 200
+    assert r.json()["allowed"] is False
+    assert r.json()["rule"] == "connector_not_enabled"
+
+
+def test_execute_read_end_to_end_over_http(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll()
+    token = _mint()
+    bare = TestClient(app)
+    r = bare.post("/api/v1/external/execute",
+                  headers={"Authorization": f"Bearer {token}"},
+                  json={"connector": "fakecrm", "op": "get",
+                        "path": "/opportunities"})
+    assert r.status_code == 200
+    verdict = r.json()
+    assert verdict["allowed"] is True and verdict["rule"] == "executed"
+    assert verdict["status"] == "executed"
+    assert "42 open opportunities" in verdict["result"]
+    assert conn.reads == [{"path": "/opportunities"}]
+
+
+def test_write_park_poll_approve_and_commit_over_http(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    token = _mint()
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    parked = bare.post("/api/v1/external/execute", headers=hdr,
+                       json=_write_body()).json()
+    assert parked["allowed"] is False
+    assert parked["rule"] == "approval_required"
+    assert parked["requires_approval"] is True
+    eid = parked["execution_id"]
+    assert conn.writes == []
+    poll = bare.get(f"/api/v1/external/executions/{eid}", headers=hdr)
+    assert poll.status_code == 200
+    assert poll.json()["status"] == "pending"
+    assert poll.json()["approval_status"] == "pending"
+    from maverick.world_model import WorldModel
+    assert WorldModel().decide_approval(parked["approval_id"], "approved",
+                                        decided_by="admin@corp.test") is True
+    done = bare.post(f"/api/v1/external/executions/{eid}/commit",
+                     headers=hdr, json=_write_body()).json()
+    assert done["allowed"] is True and done["rule"] == "executed"
+    assert done["status"] == "executed"
+    assert done["execution_id"] == eid
+    assert conn.writes == [{"op": "post", "path": "/opportunities/42",
+                            "body": {"stage": "closed-won"}}]
+
+
+def test_commit_digest_mismatch_over_http(monkeypatch):
+    conn = _wire_fakecrm(monkeypatch)
+    _enroll(max_risk="high")
+    token = _mint()
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    parked = bare.post("/api/v1/external/execute", headers=hdr,
+                       json=_write_body()).json()
+    eid = parked["execution_id"]
+    r = bare.post(f"/api/v1/external/executions/{eid}/commit", headers=hdr,
+                  json=_write_body(body={"stage": "closed-lost"}))
+    assert r.status_code == 200
+    assert r.json()["allowed"] is False
+    assert r.json()["rule"] == "digest_mismatch"
+    assert conn.writes == []
+
+
+def test_execution_status_unknown_id_404s():
+    _enroll()
+    token = _mint()
+    bare = TestClient(app)
+    r = bare.get("/api/v1/external/executions/nope",
+                 headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 404
+
+
+def test_execute_rate_limit_trips_and_commit_shares_the_bucket(monkeypatch):
+    from maverick_dashboard import external_gateway as gw
+    _wire_fakecrm(monkeypatch)
+    _enroll()
+    token = _mint()
+    monkeypatch.setitem(gw._RATE_LIMITS, "execute", 2)
+    monkeypatch.setattr(gw, "_rate_times", {})
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    body = {"connector": "fakecrm", "op": "get", "path": "/opportunities"}
+    for _ in range(2):
+        assert bare.post("/api/v1/external/execute", headers=hdr,
+                         json=body).status_code == 200
+    r = bare.post("/api/v1/external/execute", headers=hdr, json=body)
+    assert r.status_code == 429
+    assert "execute" in r.json()["detail"]
+    assert r.headers["Retry-After"] == "60"
+    # A commit can fire a write, so it draws from the same bucket.
+    r = bare.post("/api/v1/external/executions/x/commit", headers=hdr,
+                  json=_write_body())
+    assert r.status_code == 429

@@ -75,6 +75,21 @@ _CONTAIN_WINDOW_SECONDS = 24 * 3600
 #: and are treated as ``total`` so their semantics never change under them.
 BUDGET_PERIODS = ("monthly", "total")
 
+#: Governed-execution ledger bounds. A parked (approved-not-yet-committed)
+#: execution lives at most the TTL; a full pending backlog refuses new parks
+#: rather than growing the sidecar without bound.
+_MAX_PENDING_EXECUTIONS = 20
+_EXECUTION_TTL_SECONDS = 24 * 3600
+#: Canonical-JSON body ceiling for the execute tier — the sidecar ledger and
+#: the approver display must stay readable; bulk payloads belong on the
+#: system of record's own bulk surfaces, not proxied through the gateway.
+_MAX_EXECUTE_BODY_BYTES = 32 * 1024
+#: How long a claimed (``executing``) entry stays authoritative past its
+#: claim before the status view reports it INDETERMINATE — the worker died
+#: between the claim and the terminal write, so the effect may or may not
+#: have fired and must never re-fire automatically.
+_EXECUTING_GRACE_SECONDS = 600
+
 
 class ExternalAgentsError(Exception):
     """Operator-facing failure (bad input, unknown agent, plane disabled)."""
@@ -803,56 +818,11 @@ def screen(
     if not enabled():
         return _screen_verdict(agent_id, tool, False, "disabled",
                                "external agents plane is disabled")
-    from .agent_trust import decide_inbound, record_denied
-    from .safety.tool_risk import RISK_LEVELS, risk_rank
-    meta = _load_sidecar().get(agent_id)
-    if meta is not None and meta.get("contained"):
-        return _screen_verdict(
-            agent_id, tool, False, "contained",
-            "agent is contained pending review (repeated denials); an "
-            "administrator can release it from the console")
-    req_risk = str(risk or "").strip().lower()
-    if req_risk and req_risk not in RISK_LEVELS:
-        return _deny_and_count(agent_id, tool, "bad_risk",
-                               f"unknown risk level {req_risk!r}")
-    # The operator's per-tool rating floors the caller's declaration:
-    # external tool names are arbitrary, so the registry decides the risk.
-    mapped = (meta or {}).get("tool_risks", {}).get(tool)
-    if mapped and (not req_risk
-                   or risk_rank(mapped) > risk_rank(req_risk)):
-        req_risk = mapped
-    decision = decide_inbound(
-        agent_id, requested_tools=[tool] if tool else (),
-        max_risk=req_risk or None, enforced=True)
-    if not decision.allowed:
-        record_denied(agent_id, decision, direction="inbound",
-                      correlation_id="screen")
-        return _deny_and_count(agent_id, tool, decision.rule,
-                               decision.reason)
-    if meta is None:
-        return _screen_verdict(agent_id, tool, False, "not_enrolled",
-                               "agent has a trust entry but no enrollment")
-    cap = decision.agent.max_dollars if decision.agent else None
-    if cap is not None and _period_spent(meta) > cap:
-        period = ("this month's" if meta.get("period") == "monthly"
-                  else "cumulative")
-        return _deny_and_count(
-            agent_id, tool, "budget",
-            f"{period} reported spend exceeds the ${cap:,.2f} ceiling")
-    if detail and shield is not None:
-        try:
-            verdict = shield.scan_input(str(detail)[:_MAX_TEXT])
-            if getattr(verdict, "blocked", False):
-                return _deny_and_count(
-                    agent_id, tool, "shield",
-                    "action detail was blocked by the input screen")
-        except Exception:
-            # Fail CLOSED: an erroring scanner must never wave an external
-            # action through unscreened. OUR failure, not the agent's — it
-            # does not count toward containment.
-            return _screen_verdict(
-                agent_id, tool, False, "screen_error",
-                "input screen unavailable; action denied (fail-closed)")
+    from .safety.tool_risk import risk_rank
+    deny, meta, _decision, req_risk = _screen_admission(
+        agent_id, tool, risk=risk, detail=detail, shield=shield)
+    if deny is not None:
+        return deny
     floor = _approval_floor()
     if req_risk and risk_rank(req_risk) >= risk_rank(floor):
         from .world_model import open_world
@@ -871,6 +841,83 @@ def screen(
         out["approval_id"] = approval_id
         return out
     return _screen_verdict(agent_id, tool, True, "allow", "within ceilings")
+
+
+def _screen_admission(
+    agent_id: str,
+    tool: str,
+    *,
+    risk: str | None,
+    detail: str,
+    shield: Any | None,
+    correlation: str = "screen",
+) -> tuple[dict | None, dict | None, Any, str]:
+    """The admission chain shared by ``screen`` and the execute tier.
+
+    Containment, risk validation + the operator's per-tool floor, trust
+    admission (registry / direction / revocation / tool + risk ceilings),
+    enrollment, the period budget cutoff, and Shield input scanning —
+    everything except the approval floor, which each caller handles itself
+    (a screen parks a bare approval; an execute parks a digest-bound pending
+    execution). Returns ``(deny_verdict|None, meta, decision, req_risk)``;
+    a non-None verdict has already been audited and, where it should,
+    counted toward containment."""
+    from .agent_trust import decide_inbound, record_denied
+    from .safety.tool_risk import RISK_LEVELS, risk_rank
+    meta = _load_sidecar().get(agent_id)
+    if meta is not None and meta.get("contained"):
+        return (_screen_verdict(
+            agent_id, tool, False, "contained",
+            "agent is contained pending review (repeated denials); an "
+            "administrator can release it from the console"), meta, None, "")
+    req_risk = str(risk or "").strip().lower()
+    if req_risk and req_risk not in RISK_LEVELS:
+        return (_deny_and_count(agent_id, tool, "bad_risk",
+                                f"unknown risk level {req_risk!r}"),
+                meta, None, "")
+    # The operator's per-tool rating floors the caller's declaration:
+    # external tool names are arbitrary, so the registry decides the risk.
+    mapped = (meta or {}).get("tool_risks", {}).get(tool)
+    if mapped and (not req_risk
+                   or risk_rank(mapped) > risk_rank(req_risk)):
+        req_risk = mapped
+    decision = decide_inbound(
+        agent_id, requested_tools=[tool] if tool else (),
+        max_risk=req_risk or None, enforced=True)
+    if not decision.allowed:
+        record_denied(agent_id, decision, direction="inbound",
+                      correlation_id=correlation)
+        return (_deny_and_count(agent_id, tool, decision.rule,
+                                decision.reason), meta, decision, req_risk)
+    if meta is None:
+        return (_screen_verdict(agent_id, tool, False, "not_enrolled",
+                                "agent has a trust entry but no enrollment"),
+                None, decision, req_risk)
+    cap = decision.agent.max_dollars if decision.agent else None
+    if cap is not None and _period_spent(meta) > cap:
+        period = ("this month's" if meta.get("period") == "monthly"
+                  else "cumulative")
+        return (_deny_and_count(
+            agent_id, tool, "budget",
+            f"{period} reported spend exceeds the ${cap:,.2f} ceiling"),
+            meta, decision, req_risk)
+    if detail and shield is not None:
+        try:
+            verdict = shield.scan_input(str(detail)[:_MAX_TEXT])
+            if getattr(verdict, "blocked", False):
+                return (_deny_and_count(
+                    agent_id, tool, "shield",
+                    "action detail was blocked by the input screen"),
+                    meta, decision, req_risk)
+        except Exception:
+            # Fail CLOSED: an erroring scanner must never wave an external
+            # action through unscreened. OUR failure, not the agent's — it
+            # does not count toward containment.
+            return (_screen_verdict(
+                agent_id, tool, False, "screen_error",
+                "input screen unavailable; action denied (fail-closed)"),
+                meta, decision, req_risk)
+    return None, meta, decision, req_risk
 
 
 def _notify_approval(approval_id: int, agent_id: str, tool: str,
@@ -1010,6 +1057,622 @@ def approval_status(approval_id: int) -> dict:
             "risk": approval.risk}
 
 
+# -- governed execution (the enforcement tier above screening) ----------------
+
+def execute_connectors() -> list[str]:
+    """Governed-REST connectors external agents may execute through.
+
+    ``[external_agents] connectors`` (env override
+    ``MAVERICK_EXTERNAL_CONNECTORS``, comma-separated), intersected with the
+    reference factories — an unknown name can never open an egress path.
+    Empty means the enforcement tier is off and the gateway is screen-only."""
+    import os
+
+    from .governed_rest import GOVERNED_REST_FACTORIES
+    raw = os.environ.get("MAVERICK_EXTERNAL_CONNECTORS")
+    if raw is not None:
+        names = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    else:
+        try:
+            from .config import get_external_agents
+            names = get_external_agents()["connectors"]
+        except Exception:
+            return []
+    return [n for n in names if n in GOVERNED_REST_FACTORIES]
+
+
+def _request_digest(connector: str, op: str, path: str,
+                    body: dict | None) -> str:
+    """Canonical fingerprint binding an approval to EXACTLY one request."""
+    import hashlib
+    canon = json.dumps(
+        {"connector": connector, "op": op, "path": path, "body": body or {}},
+        sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+
+
+def _prune_executions(meta: dict, now: float | None = None) -> dict:
+    """Drop expired execution-ledger entries in place; returns the live map.
+
+    An ``executing`` entry gets the claim grace on top of the TTL: a commit
+    whose network call straddles the TTL boundary must still find its row
+    for the terminal status write — pruning it mid-flight would erase the
+    ledger's memory of a fired effect."""
+    now = time.time() if now is None else now
+    ex: dict[str, dict] = {}
+    for k, v in dict(meta.get("executions") or {}).items():
+        if not isinstance(v, dict):
+            continue
+        horizon = _EXECUTION_TTL_SECONDS
+        if v.get("status") == "executing":
+            horizon += _EXECUTING_GRACE_SECONDS
+        if now - float(v.get("created_at") or 0) <= horizon:
+            ex[k] = v
+    meta["executions"] = ex
+    return ex
+
+
+def _screen_execute_request(agent_id: str, request: dict, *,
+                            shield: Any | None) -> tuple[dict | None, dict]:
+    """Parse and boundary-screen one execute request.
+
+    Validation bounds every component FIRST (detail 4k, path 2k, body 32k
+    canonical JSON), then the injection tripwire and Shield scan cover the
+    WHOLE blob with no truncation — nothing can pad another field outside
+    the scan window. The checker erroring denies (external boundary,
+    fail-closed), and the request is never rewritten: a redacted path would
+    execute against the wrong record, so we flag, never launder. Returns
+    ``(deny_verdict|None, parsed)``."""
+    from .governed_rest import WRITE_OPS
+    connector = str(request.get("connector") or "").strip().lower()
+    op = str(request.get("op") or "").strip().lower()
+    path = str(request.get("path") or "").strip()
+    body = request.get("body")
+    detail = str(request.get("detail") or "")
+    tool = (f"{connector}.{'read' if op == 'get' else 'write'}"
+            if connector else "execute")
+    parsed = {"connector": connector, "op": op, "path": path,
+              "body": body if isinstance(body, dict) else None,
+              "preview": bool(request.get("preview")), "detail": detail,
+              "tool": tool}
+    if connector not in execute_connectors():
+        return _screen_verdict(
+            agent_id, tool, False, "connector_not_enabled",
+            f"connector {connector!r} is not enabled for external "
+            "execution ([external_agents] connectors)"), parsed
+    if op != "get" and op not in WRITE_OPS:
+        return _deny_and_count(
+            agent_id, tool, "bad_op",
+            f"unknown op {op!r}; expected get or one of "
+            f"{', '.join(WRITE_OPS)}"), parsed
+    if not path or len(path) > 2000:
+        return _screen_verdict(
+            agent_id, tool, False, "bad_path",
+            "path is required (and bounded at 2000 chars)"), parsed
+    if body is not None and not isinstance(body, dict):
+        return _screen_verdict(agent_id, tool, False, "bad_body",
+                               "body must be a JSON object"), parsed
+    if len(detail) > _MAX_TEXT:
+        return _screen_verdict(
+            agent_id, tool, False, "detail_too_long",
+            f"detail exceeds {_MAX_TEXT} chars"), parsed
+    body_json = ""
+    if body:
+        body_json = json.dumps(body, sort_keys=True,
+                               separators=(",", ":"), default=str)
+        if len(body_json.encode("utf-8")) > _MAX_EXECUTE_BODY_BYTES:
+            return _screen_verdict(
+                agent_id, tool, False, "body_too_large",
+                f"request body exceeds {_MAX_EXECUTE_BODY_BYTES} bytes"), \
+                parsed
+    scan_blob = "\n".join(x for x in (detail, path, body_json) if x)
+    try:
+        from .memory_guard import injection_markers
+        if injection_markers(scan_blob):
+            return _deny_and_count(
+                agent_id, tool, "injection",
+                "request payload tripped the injection screen"), parsed
+    except Exception:
+        return _screen_verdict(
+            agent_id, tool, False, "screen_error",
+            "injection screen unavailable; action denied "
+            "(fail-closed)"), parsed
+    if shield is not None:
+        try:
+            verdict = shield.scan_input(scan_blob)
+            if getattr(verdict, "blocked", False):
+                return _deny_and_count(
+                    agent_id, tool, "shield",
+                    "request payload was blocked by the input screen"), \
+                    parsed
+        except Exception:
+            return _screen_verdict(
+                agent_id, tool, False, "screen_error",
+                "input screen unavailable; action denied "
+                "(fail-closed)"), parsed
+    return None, parsed
+
+
+def execute(agent_id: str, request: dict, *,
+            shield: Any | None = None) -> dict:
+    """Perform one outbound action ON THE AGENT'S BEHALF through a governed
+    connector — the enforcement tier above :func:`screen`.
+
+    ``screen`` answers "may I?" and trusts the agent to act on its own
+    platform; ``execute`` makes Lightwork the actor. The request runs through
+    the same admission chain, then through the governed-REST connector path —
+    host IP-pinning, enterprise egress allowlists, no redirects — with a
+    tamper-evident PREPARE/COMMIT receipt around the effect. Reads are
+    low-risk and run immediately; writes are high-risk and park a
+    DIGEST-BOUND approval: the agent re-sends the byte-identical request to
+    :func:`execute_commit` once a human approves, so what executes is exactly
+    what was authorized — never a swapped payload.
+
+    ``request``: ``{connector, op: get|post|put|patch|delete, path, body?,
+    preview?, detail?, goal_id?}``. ``preview: true`` describes a write
+    without performing it (no network, no approval — there is no side
+    effect). ``goal_id`` binds the effect to one of the agent's live runs so
+    the receipt and the step trail land on that Operating Record row.
+    Returns a verdict dict; every decision is audited."""
+    if not enabled():
+        return _screen_verdict(agent_id, "execute", False, "disabled",
+                               "external agents plane is disabled")
+    deny, parsed = _screen_execute_request(agent_id, request, shield=shield)
+    if deny is not None:
+        return deny
+    connector, op, path = parsed["connector"], parsed["op"], parsed["path"]
+    body, preview = parsed["body"], parsed["preview"]
+    detail, tool = parsed["detail"], parsed["tool"]
+    risk = "low" if (op == "get" or preview) else "high"
+    # detail="" — the full blob (detail included) was scanned above; the
+    # shared chain still applies containment, ceilings, and budget.
+    deny, meta, _decision, req_risk = _screen_admission(
+        agent_id, tool, risk=risk, detail="",
+        shield=shield, correlation="execute")
+    if deny is not None:
+        return deny
+    gid = request.get("goal_id")
+    if gid is not None:
+        try:
+            gid = int(gid)
+        except (TypeError, ValueError):
+            return _screen_verdict(agent_id, tool, False, "bad_goal",
+                                   "goal_id must be an integer")
+        from .world_model import open_world
+        goal = open_world().get_goal(gid)
+        if (goal is None or goal.owner != f"agent:{agent_id}"
+                or goal.status not in ("active", "pending")):
+            return _screen_verdict(
+                agent_id, tool, False, "bad_goal",
+                "goal is not a live run owned by this agent")
+    from .governed_rest import GOVERNED_REST_FACTORIES
+    conn = GOVERNED_REST_FACTORIES[connector]()
+    digest = _request_digest(connector, op, path,
+                             body if isinstance(body, dict) else None)
+    if preview:
+        if op == "get":
+            return _screen_verdict(agent_id, tool, False, "bad_op",
+                                   "preview applies to writes only")
+        out = _screen_verdict(
+            agent_id, tool, True, "preview",
+            "described without performing (no side effect)")
+        out["preview"] = conn.preview_write(
+            {"op": op, "path": path, "body": body or {}})
+        out["request_sha256"] = digest
+        return out
+    from .safety.tool_risk import risk_rank
+    floor = _approval_floor()
+    if req_risk and risk_rank(req_risk) >= risk_rank(floor):
+        return _park_execution(agent_id, conn, meta, tool=tool,
+                               connector=connector, op=op, path=path,
+                               body=body, detail=detail, digest=digest,
+                               req_risk=req_risk, floor=floor, goal_id=gid)
+    return _perform_execution(agent_id, connector, op, path,
+                              body if isinstance(body, dict) else None,
+                              goal_id=gid, digest=digest, tool=tool,
+                              approved=False)
+
+
+def _park_execution(agent_id: str, conn, meta: dict, *, tool: str,
+                    connector: str, op: str, path: str, body: dict | None,
+                    detail: str, digest: str, req_risk: str, floor: str,
+                    goal_id: int | None) -> dict:
+    """Park one digest-bound execution behind a real approval row.
+
+    The slot is reserved BEFORE the approval is created so a full backlog
+    never strands an orphan approval in the queue; the approval id is bound
+    to the slot right after. The approver sees the network-free preview and
+    the request fingerprint — what they authorize is exactly what
+    :func:`execute_commit` will verify before acting."""
+    execution_id = secrets.token_urlsafe(12)
+    now = time.time()
+    backlog = enrolled = False
+    with _sidecar_locked():
+        sidecar = _load_sidecar()
+        m = sidecar.get(agent_id)
+        if m is not None:
+            enrolled = True
+            live = _prune_executions(m, now)
+            if sum(1 for e in live.values()
+                   if e.get("status") == "pending") >= _MAX_PENDING_EXECUTIONS:
+                backlog = True
+            else:
+                live[execution_id] = {
+                    "approval_id": None, "digest": digest,
+                    "connector": connector, "op": op, "path": path[:500],
+                    "goal_id": goal_id, "created_at": now,
+                    "status": "pending"}
+                _save_sidecar(sidecar)
+    if not enrolled:
+        return _screen_verdict(agent_id, tool, False, "not_enrolled",
+                               "agent has a trust entry but no enrollment")
+    if backlog:
+        return _screen_verdict(
+            agent_id, tool, False, "execution_backlog",
+            f"{_MAX_PENDING_EXECUTIONS} executions already await decisions "
+            "for this agent; wait for approvals or expiry")
+    try:
+        describe = (conn.preview_write({"op": op, "path": path,
+                                        "body": body or {}})
+                    if op != "get" else f"would GET {connector}{path}")
+        from .world_model import open_world
+        approval_id = open_world().create_approval(
+            f"external-exec:{agent_id}:{tool}", risk=req_risk,
+            scope=meta.get("department") or None,
+            detail=(f"{describe}\nrequest sha256: {digest}\n"
+                    f"{detail or ''}")[:2000],
+            provenance="external_agents", requested_by=f"agent:{agent_id}")
+    except Exception:
+        # Nothing was authorized and nothing will fire — hand the reserved
+        # slot back instead of stranding a 24h pending entry that has no
+        # approval row and can never be committed.
+        log.warning("external_agents: park failed for %r; releasing the "
+                    "slot", agent_id, exc_info=True)
+        _set_execution_status(agent_id, execution_id, None, drop=True,
+                              expect="pending")
+        return _screen_verdict(
+            agent_id, tool, False, "park_failed",
+            "could not create the approval; nothing was recorded — "
+            "submit the request again")
+    with _sidecar_locked():
+        sidecar = _load_sidecar()
+        entry = ((sidecar.get(agent_id) or {}).get("executions")
+                 or {}).get(execution_id)
+        if entry is not None:
+            entry["approval_id"] = approval_id
+            _save_sidecar(sidecar)
+    _notify_approval(approval_id, agent_id, tool, req_risk,
+                     meta.get("department") or "")
+    out = _screen_verdict(
+        agent_id, tool, False, "approval_required",
+        f"risk {req_risk} is at/above the {floor} approval floor; re-send "
+        "the identical request to the commit endpoint once approved")
+    out.update({"requires_approval": True, "approval_id": approval_id,
+                "execution_id": execution_id,
+                "expires_at": now + _EXECUTION_TTL_SECONDS})
+    return out
+
+
+def execute_status(agent_id: str, execution_id: str) -> dict:
+    """Poll one parked execution: ledger status joined with the live approval
+    decision, so the agent knows when to re-send the request and commit."""
+    meta = _load_sidecar().get(agent_id)
+    entry = ((meta or {}).get("executions") or {}).get(str(execution_id))
+    if entry is None:
+        raise ExternalAgentsError(f"unknown execution {execution_id!r}")
+    created = float(entry.get("created_at") or 0)
+    status = str(entry.get("status") or "pending")
+    now = time.time()
+    if status == "pending" and now - created > _EXECUTION_TTL_SECONDS:
+        status = "expired"
+    elif status == "executing" and now - float(
+            entry.get("claimed_at") or created) > _EXECUTING_GRACE_SECONDS:
+        # The worker died between the claim and the terminal write: the
+        # effect may or may not have fired. Never re-fire automatically —
+        # the operator verifies in the system of record.
+        status = "indeterminate"
+    out = {"execution_id": str(execution_id), "status": status,
+           "approval_id": entry.get("approval_id"),
+           "connector": entry.get("connector"), "op": entry.get("op"),
+           "expires_at": created + _EXECUTION_TTL_SECONDS}
+    if status == "pending" and entry.get("approval_id"):
+        try:
+            from .world_model import open_world
+            ap = open_world().get_approval(int(entry["approval_id"]))
+            out["approval_status"] = ap.status if ap else "unknown"
+        except Exception:
+            out["approval_status"] = "unknown"
+    return out
+
+
+def execute_commit(agent_id: str, execution_id: str, request: dict, *,
+                   shield: Any | None = None) -> dict:
+    """Commit one approved execution — a digest-bound replay.
+
+    The agent re-sends the IDENTICAL request; a sha256 mismatch voids the
+    parked execution and counts as misbehavior (an attempt to swap the
+    payload after approval). The admission chain runs again in full because
+    the world may have changed while the approval sat in the queue —
+    containment, revocation, ceilings, and budget all re-bind at commit
+    time; the human's yes is necessary, not sufficient. At-most-once: the
+    entry is claimed before the effect, so a racing or repeated commit
+    reports the terminal status instead of re-firing."""
+    if not enabled():
+        return _screen_verdict(agent_id, "execute", False, "disabled",
+                               "external agents plane is disabled")
+    connector = str(request.get("connector") or "").strip().lower()
+    op = str(request.get("op") or "").strip().lower()
+    path = str(request.get("path") or "").strip()
+    body = request.get("body")
+    tool = (f"{connector}.{'read' if op == 'get' else 'write'}"
+            if connector else "execute")
+    entry = ((_load_sidecar().get(agent_id) or {}).get("executions")
+             or {}).get(str(execution_id))
+    if entry is None:
+        return _screen_verdict(agent_id, tool, False, "unknown_execution",
+                               f"unknown execution {str(execution_id)!r}")
+    now = time.time()
+    # Terminal state FIRST, regardless of age: a replayed commit on an
+    # already-fired execution must always hear the terminal status — an
+    # aged executed entry told "expired; submit it again" is an instruction
+    # to duplicate the effect through a second park + approval.
+    if entry.get("status") != "pending":
+        status = str(entry.get("status") or "")
+        if status == "executing" and now - float(
+                entry.get("claimed_at")
+                or entry.get("created_at") or 0) > _EXECUTING_GRACE_SECONDS:
+            status = "indeterminate"
+        out = _screen_verdict(
+            agent_id, tool, False, "already_finished",
+            f"execution already {status}; a commit never re-fires"
+            + (" — verify in the system of record"
+               if status == "indeterminate" else ""))
+        out["status"] = status
+        return out
+    # The operator's connector allowlist re-binds at commit time: emptying
+    # [external_agents] connectors is the documented kill switch, and an
+    # approval parked before the switch flipped must not outrun it.
+    if connector not in execute_connectors():
+        return _screen_verdict(
+            agent_id, tool, False, "connector_not_enabled",
+            f"connector {connector!r} is no longer enabled for external "
+            "execution ([external_agents] connectors)")
+    if now - float(entry.get("created_at") or 0) > _EXECUTION_TTL_SECONDS:
+        if not _set_execution_status(agent_id, str(execution_id), None,
+                                     drop=True, expect="pending"):
+            # A concurrent commit claimed it between our snapshot and the
+            # void — report the live state instead of acting on the stale one.
+            return execute_commit(agent_id, execution_id, request,
+                                  shield=shield)
+        return _screen_verdict(
+            agent_id, tool, False, "execution_expired",
+            "the parked execution expired before any effect; submit it "
+            "again")
+    if body is not None and not isinstance(body, dict):
+        return _screen_verdict(agent_id, tool, False, "bad_body",
+                               "body must be a JSON object")
+    approval_id = entry.get("approval_id")
+    if not approval_id:
+        # The park never completed (approval creation failed after the slot
+        # was reserved). Nothing was authorized and nothing fired — void the
+        # slot and have the agent start over.
+        _set_execution_status(agent_id, str(execution_id), None,
+                              drop=True, expect="pending")
+        return _screen_verdict(
+            agent_id, tool, False, "park_incomplete",
+            "the park never completed (no approval exists); submit the "
+            "request again")
+    digest = _request_digest(connector, op, path,
+                             body if isinstance(body, dict) else None)
+    if digest != entry.get("digest"):
+        # Void only while still pending: a stale snapshot must never delete
+        # an entry a concurrent (correct) commit has claimed and is
+        # executing. The mismatch is misbehavior either way — count it.
+        _set_execution_status(agent_id, str(execution_id), None,
+                              drop=True, expect="pending")
+        return _deny_and_count(
+            agent_id, tool, "digest_mismatch",
+            "the committed request does not match what was approved; the "
+            "parked execution has been voided")
+    approval = None
+    if approval_id:
+        try:
+            from .world_model import open_world
+            approval = open_world().get_approval(int(approval_id))
+        except Exception:
+            approval = None
+    decision = getattr(approval, "status", None)
+    if decision == "denied":
+        _set_execution_status(agent_id, str(execution_id), "denied",
+                              expect="pending")
+        return _screen_verdict(agent_id, tool, False, "approval_denied",
+                               "a human denied this action")
+    if decision != "approved":
+        out = _screen_verdict(agent_id, tool, False, "approval_pending",
+                              "still awaiting a human decision")
+        out.update({"requires_approval": True, "approval_id": approval_id,
+                    "execution_id": str(execution_id)})
+        return out
+    risk = "low" if op == "get" else "high"
+    deny, _meta, _decision, _risk = _screen_admission(
+        agent_id, tool, risk=risk, detail="", shield=shield,
+        correlation="execute_commit")
+    if deny is not None:
+        return deny
+    if not _claim_execution(agent_id, str(execution_id)):
+        out = _screen_verdict(
+            agent_id, tool, False, "already_finished",
+            "a concurrent commit claimed this execution first")
+        return out
+    verdict = _perform_execution(
+        agent_id, connector, op, path,
+        body if isinstance(body, dict) else None,
+        goal_id=entry.get("goal_id"), digest=digest, tool=tool,
+        approved=True)
+    if verdict.get("rule") == "receipt_unavailable":
+        # Nothing fired — hand the slot back so the agent can retry the
+        # commit once the receipt store recovers.
+        _set_execution_status(agent_id, str(execution_id), "pending",
+                              expect="executing")
+    else:
+        _set_execution_status(agent_id, str(execution_id),
+                              verdict.get("status") or "failed",
+                              expect="executing")
+    verdict["execution_id"] = str(execution_id)
+    return verdict
+
+
+def _claim_execution(agent_id: str, execution_id: str) -> bool:
+    """Flip pending -> executing atomically; the loser of a race gets False."""
+    with _sidecar_locked():
+        sidecar = _load_sidecar()
+        entry = ((sidecar.get(agent_id) or {}).get("executions")
+                 or {}).get(execution_id)
+        if entry is None or entry.get("status") != "pending":
+            return False
+        entry["status"] = "executing"
+        entry["claimed_at"] = time.time()
+        _save_sidecar(sidecar)
+    return True
+
+
+def _set_execution_status(agent_id: str, execution_id: str,
+                          status: str | None, *, drop: bool = False,
+                          expect: str | None = None) -> bool:
+    """Mutate (or drop) one ledger entry under the lock.
+
+    ``expect`` guards against acting on a stale snapshot: the change applies
+    only while the entry's CURRENT status still matches — a drop decided
+    against a pending snapshot must never delete an entry a concurrent
+    commit has since claimed. Returns whether the change was applied."""
+    with _sidecar_locked():
+        sidecar = _load_sidecar()
+        meta = sidecar.get(agent_id)
+        if meta is None:
+            return False
+        ex = dict(meta.get("executions") or {})
+        entry = ex.get(execution_id)
+        if entry is None:
+            return False
+        if expect is not None and entry.get("status") != expect:
+            return False
+        if drop:
+            ex.pop(execution_id, None)
+        else:
+            entry = dict(entry)
+            entry["status"] = status
+            if status in ("executed", "failed", "denied"):
+                entry["finished_at"] = time.time()
+                # The digest is spent — a finished entry must never re-fire.
+                entry.pop("digest", None)
+            ex[execution_id] = entry
+        meta["executions"] = ex
+        _save_sidecar(sidecar)
+    return True
+
+
+def _perform_execution(agent_id: str, connector: str, op: str, path: str,
+                       body: dict | None, *, goal_id: int | None,
+                       digest: str, tool: str, approved: bool) -> dict:
+    """The effect itself, receipted.
+
+    PREPARE is fsynced tamper-evident BEFORE any network I/O (no receipt =
+    no effect, same posture as the internal governed-write path); the call
+    goes through the governed-REST connector — the SSRF-safe,
+    enterprise-egress-guarded request path — and a COMMIT (or, on a
+    transport error, INDETERMINATE) receipt closes the transaction. The
+    receipt carries field NAMES and the request fingerprint, never body
+    values; the response is secret-redacted and bounded before it returns
+    to the caller."""
+    from .governed_actions import record_tool_lineage
+    from .governed_rest import GOVERNED_REST_FACTORIES
+    principal = f"agent:{agent_id}"
+    fields = sorted(body) if isinstance(body, dict) and body else []
+    receipt = {"path": path, "fields": fields, "request_sha256": digest}
+    try:
+        prepared = record_tool_lineage(
+            goal_id, tool, receipt, actor=principal,
+            sources=(f"external:{agent_id}",), transaction_id=digest[:16],
+            phase="prepare", force=True, strict=True)
+    except Exception:
+        prepared = False
+    if not prepared:
+        return _screen_verdict(
+            agent_id, tool, False, "receipt_unavailable",
+            "could not persist the PREPARE receipt; refusing to act "
+            "(fail-closed)")
+    conn = GOVERNED_REST_FACTORIES[connector]()
+    try:
+        if op == "get":
+            raw = conn.read({"path": path})
+        else:
+            raw = conn.write({"op": op, "path": path, "body": body or {}})
+    except Exception as e:
+        try:
+            record_tool_lineage(
+                goal_id, tool, receipt, actor=principal,
+                transaction_id=digest[:16], phase="indeterminate",
+                result=str(e)[:200], force=True)
+        except Exception:  # pragma: no cover -- receipt is best-effort here
+            log.warning("external_agents: INDETERMINATE receipt failed",
+                        exc_info=True)
+        _audit_execution(agent_id, connector, op, "failed", digest,
+                         approved=approved, goal_id=goal_id)
+        return {"allowed": True, "rule": "executed", "status": "failed",
+                "result": "ERROR: the request failed in transit; its effect "
+                          "is INDETERMINATE — verify in the system of record "
+                          "before retrying"}
+    outcome = "failed" if str(raw).lstrip().startswith("ERROR") else "executed"
+    try:
+        record_tool_lineage(
+            goal_id, tool, receipt, actor=principal,
+            transaction_id=digest[:16], phase="commit", result=outcome,
+            force=True)
+    except Exception:  # pragma: no cover -- effect already happened
+        log.warning("external_agents: COMMIT receipt failed", exc_info=True)
+    try:
+        from .safety.secret_detector import redact
+        result = redact(str(raw))[0][:_MAX_TEXT]
+    except Exception:
+        # The redactor erroring must not leak the raw response outward.
+        result = f"({outcome}; response withheld — redaction unavailable)"
+    if goal_id is not None:
+        try:
+            from .world_model import open_world
+            open_world().append_event(
+                int(goal_id), principal, "status",
+                f"{op.upper()} {connector}{path} -> {outcome} "
+                "(governed execution)")
+        except Exception:  # pragma: no cover -- bookkeeping never blocks
+            log.warning("external_agents: goal event append failed",
+                        exc_info=True)
+    try:
+        with _sidecar_locked():
+            sidecar = _load_sidecar()
+            m = sidecar.get(agent_id)
+            if m is not None:
+                m["executions_total"] = int(
+                    m.get("executions_total") or 0) + 1
+                _save_sidecar(sidecar)
+    except Exception:  # pragma: no cover -- bookkeeping never blocks
+        log.warning("external_agents: execution meter failed", exc_info=True)
+    _audit_execution(agent_id, connector, op, outcome, digest,
+                     approved=approved, goal_id=goal_id)
+    return {"allowed": True, "rule": "executed", "status": outcome,
+            "result": result}
+
+
+def _audit_execution(agent_id: str, connector: str, op: str, outcome: str,
+                     digest: str, *, approved: bool,
+                     goal_id: int | None) -> None:
+    from .audit import EventKind, audit_event
+    extra = {"goal_id": int(goal_id)} if goal_id is not None else {}
+    audit_event(EventKind.EXTERNAL_ACTION_EXECUTED, agent="external_agents",
+                external_agent=agent_id, connector=connector, op=op,
+                outcome=outcome, request_sha256=digest, approved=approved,
+                **extra)
+
+
 # -- roster / detail (the dashboard's data) -----------------------------------
 
 def roster() -> list[dict]:
@@ -1044,6 +1707,12 @@ def roster() -> list[dict]:
             "runs": int(meta.get("runs") or 0),
             "last_run_at": meta.get("last_run_at"),
             "last_seen": meta.get("last_seen"),
+            "executions_total": int(meta.get("executions_total") or 0),
+            "pending_executions": sum(
+                1 for e in (meta.get("executions") or {}).values()
+                if isinstance(e, dict) and e.get("status") == "pending"
+                and time.time() - float(e.get("created_at") or 0)
+                <= _EXECUTION_TTL_SECONDS),
             "credentials": [s for s in TOKEN_SURFACES
                             if agent and getattr(agent, f"{s}_token", "")],
         })
@@ -1087,6 +1756,8 @@ def status() -> dict:
         "wall_violations": sum(r["wall_violations"] for r in rows),
         "platforms": sorted({r["platform"] for r in rows}),
         "runs": sum(r["runs"] for r in rows),
+        "executions": sum(r["executions_total"] for r in rows),
+        "pending_executions": sum(r["pending_executions"] for r in rows),
         "reported_dollars": round(
             sum(r["spent_dollars"] for r in rows), 4),
         "memory_contributions": sum(

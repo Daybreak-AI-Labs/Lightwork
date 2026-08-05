@@ -174,6 +174,14 @@ class EventKind:
     # A LIVE external run opened (goal_id carries the row; the matching
     # close is EXTERNAL_RUN_INGESTED with live=True).
     EXTERNAL_RUN_STARTED = "external_run_started"
+    # The enforcement tier above screening: Lightwork PERFORMED an outbound
+    # action on an external agent's behalf through a governed connector.
+    # Payload: external_agent, connector, op, outcome (executed|failed),
+    # request_sha256, approved (True when it went through a parked
+    # approval), goal_id when the run bound one. Never the request body or
+    # the response text — those stay out of the audit row by design.
+    # (Previews and parks audit as ACTION_SCREENED — no effect occurred.)
+    EXTERNAL_ACTION_EXECUTED = "external_action_executed"
     # Learning governance: one row per dream cycle (what the learning system
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.

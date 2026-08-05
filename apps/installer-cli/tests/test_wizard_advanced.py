@@ -719,6 +719,34 @@ def test_both_editing_locks_share_one_features_table(tmp_path, monkeypatch):
     assert feats["pack_editing"] is False and feats["role_editing"] is False
 
 
+def test_external_agents_connectors_write_and_are_read(tmp_path, monkeypatch):
+    """Rule-6 loop: the governed-execution follow-up writes [external_agents]
+    connectors, and the kernel's execute allowlist reads it back."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_EXTERNAL_AGENTS", raising=False)
+    monkeypatch.delenv("MAVERICK_EXTERNAL_CONNECTORS", raising=False)
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = _write(cfg_dir, monkeypatch, {
+        "external_agents": True,
+        "external_connectors": ["salesforce", "servicenow"],
+    })
+    assert "[external_agents]" in cfg
+    assert 'connectors = ["salesforce", "servicenow"]' in cfg
+    parsed = tomllib.loads(cfg)
+    assert parsed["external_agents"]["connectors"] == ["salesforce", "servicenow"]
+
+    from maverick.external_agents import execute_connectors
+    assert execute_connectors() == ["salesforce", "servicenow"]
+
+
+def test_external_agents_without_connectors_stays_screen_only(tmp_path, monkeypatch):
+    cfg = _write(tmp_path, monkeypatch, {"external_agents": True})
+    parsed = tomllib.loads(cfg)
+    assert parsed["external_agents"] == {"enable": True}  # no connectors key
+
+
 def test_audit_worm_writes_worm_section(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {"audit_worm": True})
     assert "[audit.worm]" in cfg

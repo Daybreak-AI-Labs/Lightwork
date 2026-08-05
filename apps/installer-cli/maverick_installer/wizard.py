@@ -2381,6 +2381,29 @@ def pick_advanced() -> dict[str, Any]:
             "blank = approve from the dashboard)", default="").strip()
         if flows_url:
             advanced["flows_public_url"] = flows_url
+    # Governed execution rides on the external-agent gateway: naming a
+    # connector is the operator's explicit decision to let foreign agents ACT
+    # through Lightwork's egress-guarded, receipted connector path. Blank
+    # keeps the gateway screen-only; the kernel intersects with its reference
+    # factories anyway, so the filter here just surfaces a typo at answer
+    # time instead of silently at runtime.
+    if advanced.get("external_agents"):
+        raw = _q_text(
+            "  Governed connectors external agents may EXECUTE through "
+            "(comma-separated: salesforce, servicenow; blank = screen-only)",
+            default="",
+        )
+        connectors = []
+        for name in dict.fromkeys(_csv_list(raw, lower=True)):
+            if name in ("salesforce", "servicenow"):
+                connectors.append(name)
+            else:
+                console.print(
+                    f"  [yellow]unknown connector '{name}' — skipped "
+                    "(valid: salesforce, servicenow)[/yellow]"
+                )
+        if connectors:
+            advanced["external_connectors"] = connectors
     # Self-harness has a handful of optional paths beyond the validation floors
     # written by default. Only worth asking once the loop itself is on; each
     # stays at its historical default unless the operator opts in here.
@@ -4218,6 +4241,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[external_agents]")
         lines.append("enable = true")
+        if advanced.get("external_connectors"):
+            _emit_kv(lines, "connectors", advanced["external_connectors"])
     if advanced.get("memory_guard"):
         lines.append("")
         lines.append("[memory_guard]")

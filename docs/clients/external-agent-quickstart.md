@@ -219,6 +219,35 @@ For a fire-and-forget job that reports only after the fact, skip the
 start/heartbeat/finish trio and end with a single
 `lw.report(title, "success", steps=[...], cost_dollars=..., idempotency_key=...)`.
 
+## Governed execution (optional)
+
+With `[external_agents] connectors` set (e.g. `["servicenow"]`), your agent
+can go beyond asking permission: **Lightwork performs the action itself**
+through its SSRF-pinned, egress-allowlisted connector path, with
+PREPARE/COMMIT receipts around every effect. Reads (`op: "get"`) run
+immediately; a write parks a **digest-bound** approval — once a human
+approves, re-send the *identical* request to commit (any change voids it):
+
+```bash
+curl -sS -X POST https://lightwork.example.com/api/v1/external/execute \
+  -H "Authorization: Bearer lw-rest-EXAMPLEEXAMPLE" \
+  -H "Content-Type: application/json" \
+  -d '{"connector": "servicenow", "op": "post", "path": "/api/now/table/incident",
+       "body": {"short_description": "Renewal follow-up"}}'
+# -> {"rule": "approval_required", "approval_id": 57, "execution_id": "kF3...", ...}
+
+curl -sS -X POST https://lightwork.example.com/api/v1/external/executions/kF3.../commit \
+  -H "Authorization: Bearer lw-rest-EXAMPLEEXAMPLE" \
+  -H "Content-Type: application/json" \
+  -d '{"connector": "servicenow", "op": "post", "path": "/api/now/table/incident",
+       "body": {"short_description": "Renewal follow-up"}}'
+# -> {"rule": "executed", "status": "executed", ...}
+```
+
+Full semantics — enabling, connector credentials, `preview`, the 24-hour
+TTL, and troubleshooting — in [governed
+execution](../external-agents.md#governed-execution).
+
 ## Operational notes
 
 - **Rate limits** (per agent, per minute): `screen` 120, `runs` 60,

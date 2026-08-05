@@ -36,6 +36,9 @@ OPERATIONS: dict[str, tuple[str, str]] = {
     "memoryIngest": ("POST", "/api/v1/external/memory/ingest"),
     "memoryRecall": ("POST", "/api/v1/external/memory/recall"),
     "approvalStatus": ("GET", "/api/v1/external/approvals/{approval_id}"),
+    "executeAction": ("POST", "/api/v1/external/execute"),
+    "executionStatus": ("GET", "/api/v1/external/executions/{execution_id}"),
+    "commitExecution": ("POST", "/api/v1/external/executions/{execution_id}/commit"),
 }
 _BY_ROUTE: dict[tuple[str, str], tuple[str, str]] = {
     (method, path): (method, path) for method, path in OPERATIONS.values()
