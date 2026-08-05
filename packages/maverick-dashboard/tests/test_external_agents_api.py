@@ -123,13 +123,48 @@ def test_gateway_404s_while_disabled(monkeypatch):
     assert bare.get("/api/v1/external/openapi.json").status_code == 404
 
 
-def test_openapi_artifact_describes_the_three_operations():
+def test_openapi_artifact_describes_every_gateway_operation():
     spec = TestClient(app).get("/api/v1/external/openapi.json").json()
     assert spec["openapi"].startswith("3.")
     assert set(spec["paths"]) == {
         "/api/v1/external/screen", "/api/v1/external/runs",
+        "/api/v1/external/runs/start",
+        "/api/v1/external/runs/{goal_id}/heartbeat",
+        "/api/v1/external/runs/{goal_id}/finish",
+        "/api/v1/external/memory/ingest",
+        "/api/v1/external/memory/recall",
         "/api/v1/external/approvals/{approval_id}"}
     assert spec["security"] == [{"bearer": []}]
+
+
+def test_memory_routes_over_http(monkeypatch):
+    monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
+    from maverick import fleet_memory
+    monkeypatch.setattr(fleet_memory, "registry_path",
+                        lambda: fleet_memory.inbox_dir().parent
+                        / "agents.ndjson")
+    _enroll()
+    token = _mint()
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    r = bare.post("/api/v1/external/memory/ingest", headers=hdr,
+                  json={"kind": "success",
+                        "goal_text": "Renewal quote accepted",
+                        "reflection": "Bundling closed it"})
+    assert r.status_code == 201, r.text
+    r = bare.post("/api/v1/external/memory/recall", headers=hdr,
+                  json={"query": "renewal quote"})
+    assert r.status_code == 200
+    assert "context" in r.json() and "reason" in r.json()
+    # The scorecard surfaces the contribution.
+    page = client.get("/external-agents/sf-quotebot").text
+    assert "Learning contributions" in page
+    # Bad kind is schema-gated; no bearer is 401.
+    assert bare.post("/api/v1/external/memory/ingest", headers=hdr,
+                     json={"kind": "gossip", "goal_text": "x"}
+                     ).status_code == 422
+    assert bare.post("/api/v1/external/memory/recall",
+                     json={"query": "x"}).status_code == 401
 
 
 def test_console_page_renders_roster_and_forms():
@@ -156,6 +191,59 @@ def test_unenroll_over_http():
     assert client.delete("/api/v1/external-agents/sf-quotebot").status_code == 204
     assert client.delete("/api/v1/external-agents/sf-quotebot").status_code == 404
     assert client.get("/api/v1/external-agents").json()["agents"] == []
+
+
+def test_live_run_flow_over_http():
+    _enroll()
+    token = _mint()
+    bare = TestClient(app)
+    hdr = {"Authorization": f"Bearer {token}"}
+    start = bare.post("/api/v1/external/runs/start", headers=hdr,
+                      json={"title": "Live quote", "summary": "working"})
+    assert start.status_code == 201
+    gid = start.json()["goal_id"]
+    assert start.json()["heartbeat_seconds"] > 0
+    hb = bare.post(f"/api/v1/external/runs/{gid}/heartbeat", headers=hdr)
+    assert hb.status_code == 200 and hb.json()["continue"] is True
+    fin = bare.post(f"/api/v1/external/runs/{gid}/finish", headers=hdr,
+                    json={"outcome": "success", "summary": "sent",
+                          "cost_dollars": 1.5, "steps": ["a"]})
+    assert fin.status_code == 200
+    assert fin.json()["over_budget"] is False
+    # Closed run: heartbeat says stop, finish refuses.
+    hb = bare.post(f"/api/v1/external/runs/{gid}/heartbeat", headers=hdr)
+    assert hb.json()["continue"] is False
+    fin = bare.post(f"/api/v1/external/runs/{gid}/finish", headers=hdr,
+                    json={"outcome": "success", "summary": "again"})
+    assert fin.status_code == 403
+    detail = client.get("/api/v1/external-agents/sf-quotebot").json()
+    assert detail["record"]["dollars"] == pytest.approx(1.5)
+
+
+def test_scorecard_page_renders_and_404s_unknown():
+    _enroll()
+    page = client.get("/external-agents/sf-quotebot")
+    assert page.status_code == 200
+    assert "Spend and budget" in page.text
+    assert "Salesforce Agentforce" in page.text
+    assert client.get("/external-agents/ghost").status_code == 404
+
+
+def test_boards_carry_platform_segments():
+    _enroll()
+    token = _mint()
+    bare = TestClient(app)
+    bare.post("/api/v1/external/runs",
+              headers={"Authorization": f"Bearer {token}"},
+              json={"title": "Quote", "outcome": "success", "summary": "s",
+                    "cost_dollars": 2.0})
+    spend = client.get("/api/v1/dashboards/spend").json()
+    assert any(r["label"] == "Salesforce Agentforce"
+               for r in spend["by_platform"])
+    wf = client.get("/api/v1/dashboards/workforce").json()
+    (row,) = [r for r in wf["platforms"]
+              if r["label"] == "Salesforce Agentforce"]
+    assert row["completed"] == 1 and row["spend"] == pytest.approx(2.0)
 
 
 def test_idempotency_key_over_http():

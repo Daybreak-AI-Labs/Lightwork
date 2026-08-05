@@ -73,6 +73,10 @@
     tiles.appendChild(tile('cases filed', fmt(f.cases)));
     tiles.appendChild(tile('hours saved', fmt(f.hours)));
     tiles.appendChild(tile('value counted', '$' + fmt(f.dollars)));
+    if (f.external_agents) {
+      tiles.appendChild(tile('external agents', fmt(f.external_agents) +
+        (f.external_attention ? ' · ' + fmt(f.external_attention) + ' need attention' : '')));
+    }
 
     var rows = $('pf-rows');
     rows.textContent = '';

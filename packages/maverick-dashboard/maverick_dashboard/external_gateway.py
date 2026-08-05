@@ -40,7 +40,8 @@ router = APIRouter(prefix="/api/v1/external", tags=["external-agents"])
 # gate volume, so a misbehaving or looping agent cannot hammer the gateway.
 # Keyed by verified agent id — except the unauthenticated schema route,
 # which keys by client address.
-_RATE_LIMITS = {"screen": 120, "runs": 60, "approvals": 120, "openapi": 30}
+_RATE_LIMITS = {"screen": 120, "runs": 60, "approvals": 120, "openapi": 30,
+                "heartbeat": 240, "memory": 60}
 _RATE_BUCKET_CAP = 10_000
 _rate_times: dict[tuple[str, str], deque[float]] = {}
 _rate_lock = threading.Lock()
@@ -94,6 +95,37 @@ class ExternalScreenIn(BaseModel):
     tool: str = Field(min_length=1, max_length=128)
     detail: str = Field(default="", max_length=4000)
     risk: str = Field(default="", max_length=10)
+
+
+class ExternalMemoryIngestIn(BaseModel):
+    kind: str = Field(pattern="^(success|failure|lesson)$")
+    goal_text: str = Field(min_length=1, max_length=2000)
+    reflection: str = Field(default="", max_length=2000)
+    tools_used: list[str] = Field(default_factory=list, max_length=16)
+    domain: str = Field(default="", max_length=100)
+
+
+class ExternalMemoryRecallIn(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
+    domain: str = Field(default="", max_length=100)
+
+
+class ExternalRunStartIn(BaseModel):
+    title: str = Field(min_length=1, max_length=500)
+    summary: str = Field(default="", max_length=4000)
+    department: str = Field(default="", max_length=100)
+
+
+class ExternalRunFinishIn(BaseModel):
+    outcome: str = Field(max_length=20)
+    summary: str = Field(default="", max_length=4000)
+    steps: list[str] = Field(default_factory=list, max_length=50)
+    cost_dollars: float = Field(default=0.0, ge=0, le=1_000_000)
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    tool_calls: int = Field(default=0, ge=0)
+    duration_seconds: float = Field(default=0.0, ge=0)
+    idempotency_key: str = Field(default="", max_length=128)
 
 
 def _gate() -> None:
@@ -157,6 +189,49 @@ async def external_run_report(
     return {"ok": True, **out}
 
 
+@router.post("/runs/start", status_code=201)
+async def external_run_start(
+    payload: ExternalRunStartIn, agent_id: str = Depends(_require_agent),
+) -> dict:
+    """Open a LIVE run: the goal is visible on the Operating Record while
+    the work happens, and the reply names the heartbeat interval the agent
+    must honor or the run is reclaimed."""
+    _rate_limit(agent_id, "runs")
+    from maverick import external_agents as xa
+    try:
+        out = xa.start_run(agent_id, payload.model_dump(), shield=_shield())
+    except xa.ExternalAgentsError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    return {"ok": True, **out}
+
+
+@router.post("/runs/{goal_id}/heartbeat")
+async def external_run_heartbeat(
+    goal_id: int, agent_id: str = Depends(_require_agent),
+) -> dict:
+    """Keep a live run alive and learn whether to continue — ``continue:
+    false`` is the kill switch reaching mid-flight work."""
+    _rate_limit(agent_id, "heartbeat")
+    from maverick import external_agents as xa
+    return xa.heartbeat(agent_id, goal_id)
+
+
+@router.post("/runs/{goal_id}/finish")
+async def external_run_finish(
+    goal_id: int, payload: ExternalRunFinishIn,
+    agent_id: str = Depends(_require_agent),
+) -> dict:
+    """Close a live run with its outcome, steps, and cost."""
+    _rate_limit(agent_id, "runs")
+    from maverick import external_agents as xa
+    try:
+        out = xa.finish_run(agent_id, goal_id, payload.model_dump(),
+                            shield=_shield())
+    except xa.ExternalAgentsError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    return {"ok": True, **out}
+
+
 @router.post("/screen")
 async def external_screen(
     payload: ExternalScreenIn, agent_id: str = Depends(_require_agent),
@@ -166,6 +241,38 @@ async def external_screen(
     from maverick import external_agents as xa
     return xa.screen(agent_id, payload.tool, detail=payload.detail,
                      risk=payload.risk or None, shield=_shield())
+
+
+@router.post("/memory/ingest", status_code=201)
+async def external_memory_ingest(
+    payload: ExternalMemoryIngestIn, agent_id: str = Depends(_require_agent),
+) -> dict:
+    """Deposit one experience record into the governed learning plane —
+    the REST twin of the MCP fleet-ingest tool, for platforms that only
+    speak HTTPS. Vendor provenance comes from the enrollment, never the
+    caller. Refusals carry the plane's own reason (roster, scope, Shield)."""
+    _rate_limit(agent_id, "memory")
+    from maverick import external_agents as xa
+    ok, reason = xa.memory_ingest(agent_id, payload.model_dump(),
+                                  shield=_shield())
+    if not ok:
+        raise HTTPException(status_code=403, detail=reason)
+    return {"ok": True}
+
+
+@router.post("/memory/recall")
+async def external_memory_recall(
+    payload: ExternalMemoryRecallIn, agent_id: str = Depends(_require_agent),
+) -> dict:
+    """Governed memory read: department-scoped lessons for the asking agent.
+    An empty context with a reason is a refusal, not an error — the caller
+    proceeds without memory."""
+    _rate_limit(agent_id, "memory")
+    from maverick import external_agents as xa
+    context, reason = xa.memory_recall(agent_id, payload.query,
+                                       domain=payload.domain or None,
+                                       shield=_shield())
+    return {"context": context, "reason": reason}
 
 
 @router.get("/approvals/{approval_id}")
@@ -268,6 +375,129 @@ _OPENAPI: dict = {
                             "ok": {"type": "boolean"},
                             "goal_id": {"type": "integer"},
                             "over_budget": {"type": "boolean"},
+                        }}}}}},
+            },
+        },
+        "/api/v1/external/runs/start": {
+            "post": {
+                "operationId": "startRun",
+                "summary": "Open a LIVE run (visible while working; "
+                           "heartbeat required)",
+                "requestBody": {"required": True, "content": {
+                    "application/json": {"schema": {
+                        "type": "object", "required": ["title"],
+                        "properties": {
+                            "title": {"type": "string"},
+                            "summary": {"type": "string"},
+                            "department": {"type": "string"},
+                        }}}}},
+                "responses": {"201": {"description": "Opened", "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "ok": {"type": "boolean"},
+                            "goal_id": {"type": "integer"},
+                            "heartbeat_seconds": {
+                                "type": "number",
+                                "description": "Beat at least this often "
+                                               "or the run is reclaimed."},
+                        }}}}}},
+            },
+        },
+        "/api/v1/external/runs/{goal_id}/heartbeat": {
+            "post": {
+                "operationId": "heartbeatRun",
+                "summary": "Keep a live run alive; continue=false is the "
+                           "kill switch — stop working when you see it",
+                "parameters": [{"name": "goal_id", "in": "path",
+                                "required": True,
+                                "schema": {"type": "integer"}}],
+                "responses": {"200": {"description": "Liveness", "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "continue": {"type": "boolean"},
+                            "reason": {"type": "string"},
+                        }}}}}},
+            },
+        },
+        "/api/v1/external/runs/{goal_id}/finish": {
+            "post": {
+                "operationId": "finishRun",
+                "summary": "Close a live run with outcome, steps, and cost",
+                "parameters": [{"name": "goal_id", "in": "path",
+                                "required": True,
+                                "schema": {"type": "integer"}}],
+                "requestBody": {"required": True, "content": {
+                    "application/json": {"schema": {
+                        "type": "object", "required": ["outcome"],
+                        "properties": {
+                            "outcome": {"type": "string",
+                                        "enum": ["success", "failure"]},
+                            "summary": {"type": "string"},
+                            "steps": {"type": "array",
+                                      "items": {"type": "string"}},
+                            "cost_dollars": {"type": "number"},
+                            "input_tokens": {"type": "integer"},
+                            "output_tokens": {"type": "integer"},
+                            "tool_calls": {"type": "integer"},
+                            "duration_seconds": {"type": "number"},
+                            "idempotency_key": {"type": "string"},
+                        }}}}},
+                "responses": {"200": {"description": "Closed", "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "ok": {"type": "boolean"},
+                            "goal_id": {"type": "integer"},
+                            "over_budget": {"type": "boolean"},
+                            "over_wall": {"type": "boolean"},
+                        }}}}}},
+            },
+        },
+        "/api/v1/external/memory/ingest": {
+            "post": {
+                "operationId": "memoryIngest",
+                "summary": "Deposit an experience record into the governed "
+                           "learning plane (fleet memory)",
+                "requestBody": {"required": True, "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "required": ["kind", "goal_text"],
+                        "properties": {
+                            "kind": {"type": "string",
+                                     "enum": ["success", "failure",
+                                              "lesson"]},
+                            "goal_text": {"type": "string"},
+                            "reflection": {"type": "string"},
+                            "tools_used": {"type": "array",
+                                           "items": {"type": "string"}},
+                            "domain": {"type": "string"},
+                        }}}}},
+                "responses": {"201": {"description": "Deposited", "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "properties": {"ok": {"type": "boolean"}}}}}}},
+            },
+        },
+        "/api/v1/external/memory/recall": {
+            "post": {
+                "operationId": "memoryRecall",
+                "summary": "Read governed memory scoped to this agent's "
+                           "permitted departments",
+                "requestBody": {"required": True, "content": {
+                    "application/json": {"schema": {
+                        "type": "object", "required": ["query"],
+                        "properties": {
+                            "query": {"type": "string"},
+                            "domain": {"type": "string"},
+                        }}}}},
+                "responses": {"200": {"description": "Context", "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "properties": {
+                            "context": {"type": "string"},
+                            "reason": {"type": "string"},
                         }}}}}},
             },
         },

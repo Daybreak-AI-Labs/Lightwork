@@ -2907,6 +2907,21 @@ async def external_agents_page(request: Request) -> HTMLResponse:
     })
 
 
+@app.get("/external-agents/{agent_id}", response_class=HTMLResponse)
+async def external_agent_scorecard(request: Request,
+                                   agent_id: str) -> HTMLResponse:
+    """One external agent's scorecard: ceilings, spend vs budget, run
+    history on the Operating Record, and governance state (containment,
+    wall violations, credentials)."""
+    from maverick import external_agents as xa
+    try:
+        detail = xa.agent_detail(agent_id)
+    except xa.ExternalAgentsError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return templates.TemplateResponse(request, "external_agent_detail.html",
+                                      {"a": detail})
+
+
 @app.get("/discovery", response_class=HTMLResponse)
 async def discovery_page(request: Request) -> HTMLResponse:
     """Inventory every governable surface the deployment exposes (tools, MCP
@@ -3692,6 +3707,8 @@ def _approval_source(provenance: str | None) -> str | None:
     """
     if provenance == "governance":
         return "governance · Art 14"
+    if provenance == "external_agents":
+        return "external agent · BYOA gateway"
     return None
 
 @app.get("/approvals", response_class=HTMLResponse)

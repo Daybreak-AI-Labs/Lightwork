@@ -85,6 +85,10 @@ Agent-facing calls send `Authorization: Bearer <rest token>`.
 OpenAPI 3.0 description of the three agent-facing endpoints — it drops
 directly into Agentforce External Services and Bedrock action groups.
 
+For hand-rolled runtimes, the [external agent
+quickstart](clients/external-agent-quickstart.md) ships copy-paste Python and
+TypeScript helpers for the screen-then-act, report-after loop.
+
 ### Salesforce Agentforce
 
 1. **Credential** — Setup → Named Credentials: create an External Credential
@@ -249,6 +253,62 @@ so spend is never uncounted). To lift the cutoff early, either re-enroll
 with a higher `max_dollars` or use **Reset budget** on the console (`POST
 /api/v1/external-agents/{id}/reset-budget`, audited) — lifetime totals are
 always preserved.
+
+## Live runs (start / heartbeat / finish)
+
+`POST /runs` reports work after the fact. For work you want visible — and
+stoppable — **while it happens**, open a live run:
+
+1. `POST /api/v1/external/runs/start` `{title, summary?, department?}` →
+   `{goal_id, heartbeat_seconds}`. The goal lands **active** on the
+   Operating Record immediately.
+2. `POST /api/v1/external/runs/{goal_id}/heartbeat` at least every
+   `heartbeat_seconds` (default 60; the deployment's orphan-reclaim window).
+   The reply is the kill switch: `{"continue": false, "reason": ...}` means
+   **stop working now** — containment, revocation, expiry, and reclaimed or
+   finished runs all return false. An agent that ignores it stops refreshing
+   its liveness anyway: the run is reclaimed to `blocked` with a restart
+   marker.
+3. `POST /api/v1/external/runs/{goal_id}/finish` with the same body as
+   `/runs` minus `title` — outcome, steps, cost, `duration_seconds`,
+   `idempotency_key`. Cross-agent heartbeats and finishes are refused; a
+   finished run cannot be finished again.
+
+Heartbeats are limited to 240/minute per agent.
+
+## The learning plane over REST
+
+With `[fleet_memory] enable = true`, enrolled agents reach the governed
+learning plane through the same gateway bearer (previously MCP-only):
+
+- `POST /api/v1/external/memory/ingest` `{kind: success|failure|lesson,
+  goal_text, reflection?, tools_used?, domain?}` deposits an experience
+  record. Vendor provenance is stamped from the **enrollment's platform**,
+  never the caller's claim; the record passes the same redaction, injection
+  tripwires, and data-scope gates as the MCP path, and unenrolled or
+  contained agents are refused. Deposits feed the dream cycle and are
+  provable per vendor via `maverick proof --fleet`.
+- `POST /api/v1/external/memory/recall` `{query, domain?}` returns
+  department-scoped lessons for the asking agent (`{context, reason}`; an
+  empty context with a reason is a refusal, not an error). Every read is
+  audited with the reader's identity.
+- Both are limited to 60 requests/minute per agent. The console shows total
+  lessons shared; each scorecard shows that agent's contributions.
+
+## Approval notifications
+
+A parked approval no longer waits silently for someone to open the queue:
+
+- The ops push transport (`[alerts]` / `[notifications]`, when configured)
+  gets a high-priority "external agent waiting on approval #N" push.
+- Set `[external_agents] approval_webhook = "https://…"` and the deployment
+  fires a **signed** `external_approval.created` callback (HMAC-SHA256 via
+  the shared `[webhooks] secret`, timestamped, SSRF-guarded) with a
+  provenance-only payload: `approval_id`, `agent_id`, `tool`, `risk`,
+  `department` — never the free-form detail text. Point it at your
+  platform's inbound hook to unblock the agent the moment a human decides.
+- The dashboard approval queue labels these rows "external agent · BYOA
+  gateway".
 
 ## Retries, rate limits, and containment
 

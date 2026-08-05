@@ -1,6 +1,6 @@
-"""AutoGen + CrewAI interop (roadmap: 2027 H2 ecosystem).
+"""AutoGen + CrewAI + OpenAI interop (roadmap: 2027 H2 ecosystem).
 
-The LangChain adapter's two directions, extended to the other two frameworks
+The LangChain adapter's two directions, extended to the other frameworks
 people actually run multi-agent stacks on. The delegation core is shared —
 :func:`maverick.langchain_adapter.run_maverick_goal` (transport-agnostic,
 already unit-tested) — so this module is wrappers only:
@@ -11,14 +11,19 @@ already unit-tested) — so this module is wrappers only:
     ``autogen_core.tools.FunctionTool`` when the package is installed.
   - **Lightwork as a CrewAI tool** — :func:`maverick_crewai_tool` returns a
     CrewAI ``BaseTool`` subclass instance (lazy import, clear install hint).
+  - **Lightwork as an OpenAI function tool** — :func:`maverick_openai_tool`
+    returns the ``(tool_def, executor)`` pair for OpenAI's function-calling
+    wire format (plain dicts; no SDK dependency at all).
   - **Their tools as Lightwork tools** — :func:`wrap_autogen_tool` /
-    :func:`wrap_crewai_tool` adapt an AutoGen ``FunctionTool`` / CrewAI
-    ``BaseTool`` into a Lightwork :class:`~maverick.tools.Tool`, so the swarm
-    can call into either ecosystem's tools.
+    :func:`wrap_crewai_tool` / :func:`wrap_openai_tool` adapt an AutoGen
+    ``FunctionTool`` / CrewAI ``BaseTool`` / OpenAI function-tool definition
+    into a Lightwork :class:`~maverick.tools.Tool`, so the swarm can call
+    into any of these ecosystems' tools.
 
-Nothing here imports ``autogen``/``crewai`` at module import time; each
-wrapper lazy-imports and raises an actionable hint when the package is
-absent (mirrors the ``[langchain]`` extra discipline).
+Nothing here imports ``autogen``/``crewai``/``openai`` at module import time;
+each wrapper lazy-imports and raises an actionable hint when the package is
+absent (mirrors the ``[langchain]`` extra discipline). The OpenAI pair is
+dict-only and needs no package.
 """
 from __future__ import annotations
 
@@ -104,6 +109,49 @@ def maverick_crewai_tool(*, max_dollars: float = 2.0, **binds: Any):
                                      max_dollars=max_dollars, **binds)
 
     return MaverickTool()
+
+
+# ---- Lightwork as an OpenAI function tool ------------------------------------
+
+def maverick_openai_tool(*, max_dollars: float = 2.0, **binds: Any):
+    """Lightwork as an OpenAI function tool (dependency-free).
+
+    OpenAI's function calling is a plain JSON wire format, so this returns the
+    ``(tool_def, executor)`` pair directly — pass ``tool_def`` in the request's
+    ``tools`` list and call ``executor`` with the model's parsed tool-call
+    arguments (``executor(**json.loads(call.function.arguments))``). The
+    factory ``max_dollars`` is a ceiling: a model-supplied ``max_dollars`` may
+    lower the budget for one call, never raise it."""
+    ceiling = max_dollars
+
+    def run_maverick(prompt: str, max_dollars: float | None = None) -> str:
+        """Delegate a goal to the Lightwork agent swarm and return its result."""
+        dollars = ceiling if max_dollars is None else min(float(max_dollars), ceiling)
+        return run_maverick_goal(prompt, "", max_dollars=dollars, **binds)
+
+    tool_def = {
+        "type": "function",
+        "function": {
+            "name": "maverick_run_goal",
+            "description": _GOAL_DESCRIPTION,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "The goal to delegate to the swarm.",
+                    },
+                    "max_dollars": {
+                        "type": "number",
+                        "description": "Optional per-call budget cap in USD "
+                                       "(never raises the configured ceiling).",
+                    },
+                },
+                "required": ["prompt"],
+            },
+        },
+    }
+    return tool_def, run_maverick
 
 
 # ---- Their tools as Lightwork tools ------------------------------------------
@@ -307,7 +355,46 @@ def wrap_crewai_tool(crewai_tool: Any) -> Tool:
     return Tool(name=name, description=description, input_schema=schema, fn=fn)
 
 
+def wrap_openai_tool(tool_def: Any, executor: Any) -> Tool:
+    """Adapt an OpenAI function-tool definition + executor into a Lightwork Tool.
+
+    ``tool_def`` is the plain function-calling dict
+    (``{"type": "function", "function": {name, description, parameters}}``;
+    the flat Responses-API shape with ``name`` beside ``type`` is also
+    accepted) and ``executor`` is the callable your tool-loop would run for
+    it — called with the model's arguments as keywords.
+    """
+    if not isinstance(tool_def, dict):
+        raise ValueError("openai tool definition must be a dict")
+    if tool_def.get("type", "function") != "function":
+        raise ValueError("openai tool definition must have type 'function'")
+    fn_def = tool_def.get("function", tool_def)
+    if not isinstance(fn_def, dict):
+        raise ValueError("openai tool definition must have a 'function' object")
+    if not callable(executor):
+        raise ValueError("openai tool executor must be callable")
+
+    schema = fn_def.get("parameters")
+    if schema is None:
+        schema = dict(_DEFAULT_SCHEMA)
+    else:
+        _validate_schema(schema)
+    name, description, schema = _secure_tool_metadata(
+        framework="openai",
+        namespace="openai",
+        raw_name=fn_def.get("name", "") or "openai_tool",
+        raw_description=fn_def.get("description", ""),
+        schema=schema,
+    )
+
+    def fn(args: dict[str, Any]) -> str:
+        return _result_text(executor(**args))
+
+    return Tool(name=name, description=description, input_schema=schema, fn=fn)
+
+
 __all__ = [
     "maverick_autogen_callable", "maverick_autogen_tool",
-    "maverick_crewai_tool", "wrap_autogen_tool", "wrap_crewai_tool",
+    "maverick_crewai_tool", "maverick_openai_tool",
+    "wrap_autogen_tool", "wrap_crewai_tool", "wrap_openai_tool",
 ]

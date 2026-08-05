@@ -171,6 +171,9 @@ class EventKind:
     EXTERNAL_AGENT_CONTAINED = "external_agent_contained"
     EXTERNAL_AGENT_RELEASED = "external_agent_released"
     EXTERNAL_BUDGET_RESET = "external_budget_reset"
+    # A LIVE external run opened (goal_id carries the row; the matching
+    # close is EXTERNAL_RUN_INGESTED with live=True).
+    EXTERNAL_RUN_STARTED = "external_run_started"
     # Learning governance: one row per dream cycle (what the learning system
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.

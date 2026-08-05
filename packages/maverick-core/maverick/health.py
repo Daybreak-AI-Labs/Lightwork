@@ -663,6 +663,58 @@ def _check_agent_trust() -> None:
              fix="rotate the credential before it lapses (maverick trust ...)")
 
 
+def _check_external_agents() -> None:
+    """Surface the bring-your-own-agent gateway state: an enabled plane with
+    zero enrollments, contained agents nobody released, and over-budget
+    cutoffs — each otherwise visible only when a foreign agent starts
+    getting refused."""
+    try:
+        from .external_agents import roster
+        from .external_agents import status as xa_status
+        st = xa_status()
+    except Exception as e:  # pragma: no cover - never break doctor
+        _row(YELLOW, "external-agents", f"status unavailable: {e}")
+        return
+    if not st.get("enabled"):
+        _row(GREEN, "external-agents", "disabled (default)")
+        return
+    enrolled = int(st.get("enrolled") or 0)
+    if enrolled == 0:
+        _row(RED, "external-agents",
+             "ENABLED but no agents are enrolled — the gateway answers 401 "
+             "to everyone",
+             fix="enroll an agent on /external-agents, or unset "
+                 "[external_agents] enable")
+        return
+    contained = int(st.get("contained") or 0)
+    over_budget = int(st.get("over_budget") or 0)
+    detail = f"enabled — {enrolled} agent(s) enrolled"
+    if contained or over_budget:
+        _row(YELLOW, "external-agents",
+             detail + f"; {contained} contained, {over_budget} over budget",
+             fix="review and release/reset from /external-agents")
+    else:
+        _row(GREEN, "external-agents", detail)
+    # Same proactive expiry horizon as the trust plane: these are minted
+    # credentials that lapse silently.
+    import time as _time
+    now = _time.time()
+    try:
+        rows = roster()
+    except Exception:  # pragma: no cover - never break doctor
+        return
+    from .agent_trust import lookup
+    for r in rows:
+        agent = lookup(r["id"])
+        exp = agent.expires_at if agent else None
+        if (r.get("active") and isinstance(exp, (int, float))
+                and 0 < (exp - now) <= _EXPIRY_HORIZON_S):
+            _row(YELLOW, "external-agents",
+                 f"agent {r['id']!r} enrollment expires in "
+                 f"{(exp - now) / 86400.0:.1f} day(s)",
+                 fix="re-enroll before it lapses (/external-agents)")
+
+
 _EXPIRY_HORIZON_S = 14 * 86400  # warn when a credential expires within 14 days
 _TLS_CERT_HORIZON_S = 30 * 86400  # warn when a TLS cert expires within 30 days
 
@@ -762,6 +814,7 @@ def diagnose() -> int:
     _check_world_db()
     _check_shield()
     _check_agent_trust()
+    _check_external_agents()
     _check_tls_cert_expiry()
     click.echo("")
     if _FAILURES:
