@@ -159,6 +159,8 @@ def _require_agent(request: Request) -> str:
     agent = agent_for_token(token, "rest")
     if agent is None:
         raise HTTPException(status_code=401, detail="invalid bearer token")
+    from maverick import external_agents as xa
+    xa.note_seen(agent.id)  # throttled credential-audit stamp
     return agent.id
 
 

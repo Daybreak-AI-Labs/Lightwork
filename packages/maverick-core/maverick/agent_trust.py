@@ -707,6 +707,32 @@ def lookup(agent_id: str, *, registry: dict[str, TrustedAgent] | None = None) ->
 _TOKEN_ATTRS = {"a2a": "a2a_token", "grpc": "grpc_token", "mcp": "mcp_token",
                 "rest": "rest_token"}
 
+#: Tokens minted from the app are stored hashed; hand-edited config-file
+#: tokens stay plaintext-compatible. The prefix disambiguates the two forms.
+_TOKEN_HASH_PREFIX = "sha256:"
+
+
+def hash_token(raw: str) -> str:
+    """The at-rest form of a minted bearer: ``sha256:<hex>``.
+
+    The managed overlay (``agent_trust.json``) should never hold a raw
+    credential — a leaked backup of that file must not authenticate. Raw
+    tokens in the operator's hand-edited TOML remain accepted for
+    compatibility; app-minted tokens always store this form."""
+    import hashlib
+    return _TOKEN_HASH_PREFIX + hashlib.sha256(
+        (raw or "").encode()).hexdigest()
+
+
+def _token_matches(configured: str, presented: bytes) -> bool:
+    """Constant-time bearer check handling both at-rest forms."""
+    import hashlib
+    import hmac
+    if configured.startswith(_TOKEN_HASH_PREFIX):
+        digest = _TOKEN_HASH_PREFIX + hashlib.sha256(presented).hexdigest()
+        return hmac.compare_digest(configured.encode(), digest.encode())
+    return hmac.compare_digest(configured.encode(), presented)
+
 
 def agent_for_token(
     token: str, surface: str, *, registry: dict[str, TrustedAgent] | None = None,
@@ -722,7 +748,6 @@ def agent_for_token(
     management methods as well as task execution. This is how a per-caller
     bearer maps to a specific :class:`TrustedAgent` so the registry can govern
     individual callers on a single-shared-bearer surface."""
-    import hmac
     attr = _TOKEN_ATTRS.get(surface)
     presented = (token or "").encode()
     if attr is None or not presented:
@@ -732,7 +757,7 @@ def agent_for_token(
     active_matches = 0
     for agent in reg.values():
         configured = getattr(agent, attr, "")
-        if configured and hmac.compare_digest(configured.encode(), presented):
+        if configured and _token_matches(configured, presented):
             active, _ = agent.is_active()
             if active and agent.permits_inbound():
                 active_matches += 1

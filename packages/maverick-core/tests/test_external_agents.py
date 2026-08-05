@@ -211,6 +211,49 @@ def test_unenroll_removes_trust_and_metadata():
     assert xa.unenroll("sf-quotebot") is False
 
 
+def test_minted_tokens_are_hashed_at_rest_and_legacy_plaintext_still_works():
+    from maverick.agent_trust import managed_path, put_agent
+    _enroll()
+    token = xa.mint_token("sf-quotebot", "rest")
+    # The overlay never holds the raw credential.
+    raw = managed_path().read_text(encoding="utf-8")
+    assert token not in raw
+    assert "sha256:" in raw
+    assert agent_for_token(token, "rest").id == "sf-quotebot"
+    # Hand-edited plaintext entries (operator TOML style) keep working.
+    put_agent({"id": "legacy-bot", "direction": "inbound",
+               "rest_token": "lw-rest-legacy-plaintext"})
+    assert agent_for_token("lw-rest-legacy-plaintext",
+                           "rest").id == "legacy-bot"
+    assert agent_for_token("lw-rest-wrong", "rest") is None
+
+
+def test_seat_limit_is_configurable(monkeypatch, tmp_path):
+    (tmp_path / "config.toml").write_text(
+        "[external_agents]\nenable = true\nmax_enrolled = 2\n",
+        encoding="utf-8")
+    from maverick import config
+    config.reset_config_cache()
+    xa.enroll("bot-1", "custom")
+    xa.enroll("bot-2", "custom")
+    with pytest.raises(xa.ExternalAgentsError, match="enrollment limit"):
+        xa.enroll("bot-3", "custom")
+    # Re-enrolling an existing id is never blocked by the cap.
+    xa.enroll("bot-2", "bedrock")
+    assert len(xa.roster()) == 2
+
+
+def test_note_seen_stamps_and_throttles():
+    _enroll()
+    assert xa.roster()[0]["last_seen"] is None
+    xa.note_seen("sf-quotebot")
+    first = xa.roster()[0]["last_seen"]
+    assert first is not None
+    xa.note_seen("sf-quotebot")   # inside the throttle window: unchanged
+    assert xa.roster()[0]["last_seen"] == first
+    xa.note_seen("ghost")         # unknown id: silently ignored
+
+
 def test_status_counts():
     _enroll()
     xa.enroll("aws-triage", "bedrock", description="ticket triage",
