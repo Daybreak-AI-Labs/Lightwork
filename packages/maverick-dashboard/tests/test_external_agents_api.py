@@ -1,11 +1,39 @@
 """Bring-your-own-agent gateway over HTTP: admin enrollment + credential
 minting on the dashboard surface, and the self-authenticated agent-facing
-routes (bearer-only — no session, no CSRF surface, 404 while disabled)."""
+routes (minted bearer or platform-native credential — no session, no CSRF
+surface, 404 while disabled)."""
 from __future__ import annotations
+
+import hashlib
+import hmac as hmac_mod
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
+
+# Crypto availability gate for the signed-identity tests (same probe as
+# test_oidc / test_external_identity): if this sandbox's cryptography/PyJWT
+# is broken they SKIP — CI has working crypto and is the real gate.
+_CRYPTO_OK = True
+_CRYPTO_SKIP_REASON = ""
+try:  # noqa: SIM105
+    import jwt  # noqa: F401
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
+
+    _probe = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    _probe.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+except Exception as _e:  # pragma: no cover - env-dependent
+    _CRYPTO_OK = False
+    _CRYPTO_SKIP_REASON = (
+        f"working cryptography/PyJWT unavailable: {type(_e).__name__}: {_e}")
+
+requires_crypto = pytest.mark.skipif(not _CRYPTO_OK,
+                                     reason=_CRYPTO_SKIP_REASON)
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -65,6 +93,36 @@ def test_enroll_validates_platform_and_surface():
     r = client.post("/api/v1/external-agents/sf-quotebot/credentials",
                     json={"surface": "carrier-pigeon"})
     assert r.status_code == 422
+
+
+def test_mint_step_up_approval_gate_over_http(tmp_path):
+    _enroll()
+    (tmp_path / "config.toml").write_text(
+        "[external_agents]\nmint_approval = true\n", encoding="utf-8")
+    from maverick import config
+    config.reset_config_cache()
+    # First call parks the approval and answers 409 — no token minted.
+    r = client.post("/api/v1/external-agents/sf-quotebot/credentials",
+                    json={"surface": "rest"})
+    assert r.status_code == 409
+    body = r.json()
+    assert body["status"] == "approval_required"
+    assert "approval" in body["detail"]
+    approval_id = body["approval_id"]
+    row = client.get("/api/v1/external-agents").json()["agents"][0]
+    assert row["credentials"] == []
+    from maverick.world_model import WorldModel
+    assert WorldModel().decide_approval(approval_id, "approved",
+                                        decided_by="admin@corp.test") is True
+    # Replaying the approved id mints; the approval is then spent (one-shot).
+    r = client.post("/api/v1/external-agents/sf-quotebot/credentials",
+                    json={"surface": "rest", "approval_id": approval_id})
+    assert r.status_code == 200
+    assert r.json()["token"].startswith("lw-rest-")
+    r = client.post("/api/v1/external-agents/sf-quotebot/credentials",
+                    json={"surface": "rest", "approval_id": approval_id})
+    assert r.status_code == 400
+    assert "one-shot" in r.json()["detail"]
 
 
 def test_agent_facing_routes_require_the_rest_bearer():
@@ -491,3 +549,206 @@ def test_execute_rate_limit_trips_and_commit_shares_the_bucket(monkeypatch):
     r = bare.post("/api/v1/external/executions/x/commit", headers=hdr,
                   json=_write_body())
     assert r.status_code == 429
+
+
+# -- platform-native identity over HTTP ---------------------------------------
+
+_ISSUER = "https://partner-idp.example.com"
+_AUDIENCE = "lightwork-gateway"
+_HMAC_REF = "XA_GATEWAY_TEST_SECRET"
+_HMAC_SECRET = "gw-test-secret"  # pragma: allowlist secret
+_SCREEN_BODY = b'{"tool": "crm_update", "risk": "low"}'
+
+
+def _identity(**fields):
+    """Attach platform-identity fields to the enrolled agent's trust entry
+    (the same read-modify-write mint_token uses, so bearers survive)."""
+    from maverick import external_agents as xa
+    from maverick.agent_trust import lookup, put_agent
+    entry = xa._entry_from_agent(lookup("sf-quotebot"))
+    entry.update(fields)
+    put_agent(entry)
+
+
+def _ed25519_pair():
+    priv = ed25519.Ed25519PrivateKey.generate()
+    pub_hex = priv.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+    return priv, pub_hex
+
+
+def _envelope_headers(priv, body: bytes, *, nonce: str) -> dict:
+    from maverick.external_identity import envelope_message
+    ts = str(int(time.time()))
+    sig = priv.sign(envelope_message("sf-quotebot", ts, nonce, body)).hex()
+    return {"X-Lightwork-Agent-Id": "sf-quotebot",
+            "X-Maverick-Timestamp": ts,
+            "X-Lightwork-Nonce": nonce,
+            "X-Lightwork-Request-Signature": sig,
+            "Content-Type": "application/json"}
+
+
+@requires_crypto
+def test_envelope_auth_over_http():
+    _enroll()
+    priv, pub_hex = _ed25519_pair()
+    _identity(pubkey=pub_hex)
+    r = TestClient(app).post(
+        "/api/v1/external/screen",
+        headers=_envelope_headers(priv, _SCREEN_BODY, nonce="n-1"),
+        content=_SCREEN_BODY)
+    assert r.status_code == 200, r.text
+    assert r.json()["allowed"] is True
+
+
+@requires_crypto
+def test_envelope_replayed_nonce_is_401():
+    _enroll()
+    priv, pub_hex = _ed25519_pair()
+    _identity(pubkey=pub_hex)
+    hdr = _envelope_headers(priv, _SCREEN_BODY, nonce="n-replay")
+    bare = TestClient(app)
+    assert bare.post("/api/v1/external/screen", headers=hdr,
+                     content=_SCREEN_BODY).status_code == 200
+    # A byte-identical replay carries a valid signature; the single-use
+    # nonce is what refuses it — with the same generic 401.
+    r = bare.post("/api/v1/external/screen", headers=hdr,
+                  content=_SCREEN_BODY)
+    assert r.status_code == 401
+
+
+def _hmac_headers(body: bytes, *, ts: str | None = None) -> dict:
+    ts = ts or str(int(time.time()))
+    mac = hmac_mod.new(_HMAC_SECRET.encode(), f"{ts}.".encode() + body,
+                       hashlib.sha256)
+    return {"X-Lightwork-Agent-Id": "sf-quotebot",
+            "X-Maverick-Timestamp": ts,
+            "X-Maverick-Signature": "sha256=" + mac.hexdigest(),
+            "Content-Type": "application/json"}
+
+
+def test_hmac_auth_over_http(monkeypatch):
+    monkeypatch.setenv(_HMAC_REF, _HMAC_SECRET)
+    _enroll()
+    _identity(hmac_secret_ref=_HMAC_REF)
+    r = TestClient(app).post("/api/v1/external/screen",
+                             headers=_hmac_headers(_SCREEN_BODY),
+                             content=_SCREEN_BODY)
+    assert r.status_code == 200, r.text
+    assert r.json()["allowed"] is True
+
+
+def test_hmac_stale_timestamp_is_401(monkeypatch):
+    monkeypatch.setenv(_HMAC_REF, _HMAC_SECRET)
+    _enroll()
+    _identity(hmac_secret_ref=_HMAC_REF)
+    hdr = _hmac_headers(_SCREEN_BODY, ts=str(int(time.time()) - 4000))
+    r = TestClient(app).post("/api/v1/external/screen", headers=hdr,
+                             content=_SCREEN_BODY)
+    assert r.status_code == 401
+
+
+def _jwt_setup(tmp_path) -> bytes:
+    """Pin issuer/audience + a PEM key file on the enrolled agent; return
+    the matching private key for minting tokens."""
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    priv_pem = priv.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption())
+    key_file = tmp_path / "partner.pem"
+    key_file.write_bytes(priv.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo))
+    _identity(jwt_issuer=_ISSUER, jwt_audience=_AUDIENCE,
+              jwks_file=str(key_file))
+    return priv_pem
+
+
+def _jwt_token(priv_pem: bytes, **overrides) -> str:
+    now = int(time.time())
+    claims = {"sub": "sf-quotebot", "iss": _ISSUER, "aud": _AUDIENCE,
+              "iat": now, "exp": now + 600}
+    claims.update(overrides)
+    return jwt.encode(claims, priv_pem, algorithm="RS256")
+
+
+@requires_crypto
+def test_jwt_auth_over_http(tmp_path):
+    _enroll()
+    priv_pem = _jwt_setup(tmp_path)
+    r = TestClient(app).post(
+        "/api/v1/external/screen",
+        headers={"Authorization": f"Bearer {_jwt_token(priv_pem)}"},
+        json={"tool": "crm_update", "risk": "low"})
+    assert r.status_code == 200, r.text
+    assert r.json()["allowed"] is True
+
+
+@requires_crypto
+def test_jwt_for_another_subject_is_401(tmp_path):
+    """A validly-signed token whose sub names another agent never
+    authenticates this one."""
+    _enroll()
+    priv_pem = _jwt_setup(tmp_path)
+    token = _jwt_token(priv_pem, sub="other-bot")
+    r = TestClient(app).post(
+        "/api/v1/external/screen",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"tool": "crm_update", "risk": "low"})
+    assert r.status_code == 401
+
+
+def test_bearer_still_works_alongside_strong_credentials():
+    """require_signed defaults OFF: enrolling a pubkey does not strand an
+    agent still calling with its minted bearer."""
+    _enroll()
+    token = _mint()
+    _identity(pubkey="ab" * 32)
+    r = TestClient(app).post("/api/v1/external/screen",
+                             headers={"Authorization": f"Bearer {token}"},
+                             json={"tool": "crm_update", "risk": "low"})
+    assert r.status_code == 200, r.text
+    assert r.json()["allowed"] is True
+
+
+def test_require_signed_refuses_bearer_for_strong_credential_agents(tmp_path):
+    from maverick import config
+    _enroll()
+    token = _mint()
+    _identity(pubkey="ab" * 32)
+    _enroll(id="langbot", platform="custom")
+    r = client.post("/api/v1/external-agents/langbot/credentials",
+                    json={"surface": "rest"})
+    plain_token = r.json()["token"]
+    (tmp_path / "config.toml").write_text(
+        "[external_agents]\nrequire_signed = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    bare = TestClient(app)
+    body = {"tool": "crm_update", "risk": "low"}
+    # The pubkey-bearing agent must present its strong credential…
+    r = bare.post("/api/v1/external/screen",
+                  headers={"Authorization": f"Bearer {token}"}, json=body)
+    assert r.status_code == 401
+    # …while a token-only agent keeps working.
+    r = bare.post("/api/v1/external/screen",
+                  headers={"Authorization": f"Bearer {plain_token}"},
+                  json=body)
+    assert r.status_code == 200, r.text
+
+
+def test_require_signed_covers_hmac_only_agents(tmp_path):
+    """An agent whose only strong credential is HMAC must also lose its
+    bearer under require_signed — otherwise a leaked bearer keeps working
+    against the very switch that was meant to retire it."""
+    from maverick import config
+    _enroll()
+    token = _mint()
+    _identity(hmac_secret_ref="SF_QUOTEBOT_HMAC")  # pragma: allowlist secret
+    (tmp_path / "config.toml").write_text(
+        "[external_agents]\nrequire_signed = true\n", encoding="utf-8")
+    config.reset_config_cache()
+    bare = TestClient(app)
+    r = bare.post("/api/v1/external/screen",
+                  headers={"Authorization": f"Bearer {token}"},
+                  json={"tool": "crm_update", "risk": "low"})
+    assert r.status_code == 401

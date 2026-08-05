@@ -1633,11 +1633,26 @@ def get_external_agents() -> dict:
         raw = raw.split(",")
     return {
         "enable": bool(cfg.get("enable", False)),
+        # Signed-identity enforcement on the gateway: when on, an agent
+        # enrolled with a strong credential (pinned Ed25519 pubkey or JWT
+        # issuer) may no longer authenticate with its minted bearer alone —
+        # it must present that credential. Agents holding only bearers are
+        # unaffected. Strict bool; a malformed value engages the refusal
+        # (fail closed — this is a tightening switch).
+        "require_signed": _strict_config_bool(
+            cfg, "require_signed", False, invalid=True),
         # Governed-REST connectors external agents may EXECUTE through (the
         # enforcement tier above screening). Empty = screen-only; naming one
         # here is the operator's explicit decision to let foreign agents act
         # through Lightwork's egress-guarded, receipted connector path.
         "connectors": [str(p).strip().lower() for p in raw if str(p).strip()],
+        # Step-up re-auth on credential minting: when on, ``mint_token`` parks
+        # a world approval (dual-control quorum at "high" risk) and refuses to
+        # mint until a decision-maker approves; each approval mints exactly
+        # one credential. Strict bool; a malformed value engages the gate
+        # (fail closed — this is a tightening switch).
+        "mint_approval": _strict_config_bool(
+            cfg, "mint_approval", False, invalid=True),
     }
 
 

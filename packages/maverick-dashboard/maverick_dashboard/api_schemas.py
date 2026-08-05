@@ -433,8 +433,11 @@ class ExternalAgentIn(BaseModel):
 
 class ExternalCredentialIn(BaseModel):
     """Mint (or rotate) one per-surface bearer for an enrolled external agent.
-    The response carries the token exactly once; it is never readable again."""
+    The response carries the token exactly once; it is never readable again.
+    ``approval_id`` replays a step-up mint approval when ``[external_agents]
+    mint_approval`` gates the mint (one approval mints exactly one token)."""
     surface: str = Field(default="rest", pattern="^(rest|a2a|grpc|mcp)$")
+    approval_id: int | None = None
 
 
 class ConnectionIn(BaseModel):

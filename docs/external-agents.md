@@ -76,8 +76,183 @@ secret store immediately; no read path ever returns it again.
   dashboard button) denies the agent everywhere at once.
 - Surfaces are distinct (`rest` / `a2a` / `grpc` / `mcp`) so a leak on one
   surface cannot authenticate another. The BYOA HTTP API uses `rest`.
+- With `[external_agents] mint_approval = true`, every mint first parks a
+  dashboard approval — see [Step-up on mint](#step-up-on-mint).
 
 Agent-facing calls send `Authorization: Bearer <rest token>`.
+
+## Platform-native identity
+
+The minted bearer is the default credential, not the only one. Three
+**platform-native** modes let an agent authenticate with material its own
+platform already holds — each pinned to that agent's trust entry and
+verified **offline** (no network at verify time). The gateway resolves every
+`/api/v1/external/*` request through one auth chokepoint, in this order:
+Ed25519 signed request → HMAC → JWT → minted `rest` bearer. Every refusal is
+the same generic `401` — the reply never says whether the id exists or which
+stage refused; the precise rule goes to the server log only
+(`external gateway: <scheme> auth refused (<rule>)`).
+
+Identity fields live on the agent's Agent Trust entry. A hand-managed entry
+is the `[agent_trust] agents` list in `~/.maverick/config.toml`; an agent
+enrolled from the dashboard lives in the managed overlay
+(`agent_trust.json` under the data dir), which overrides a TOML entry with
+the same id. Credential mints, revokes, and restores preserve the fields;
+**re-enrolling rewrites the managed entry**, so re-apply identity fields
+after a re-enroll.
+
+```toml
+[[agent_trust.agents]]
+id = "sf-quotebot"
+direction = "inbound"
+# Connected-app JWT
+jwt_issuer = "https://login.salesforce.com"
+jwt_audience = "lightwork-prod"
+jwks_file = "/etc/lightwork/keys/sf-quotebot.jwks.json"  # local PEM or JWKS
+# HMAC (webhook signature format)
+hmac_secret_ref = "SF_QUOTEBOT_HMAC_SECRET"  # pragma: allowlist secret — a secret NAME, never the value
+# Ed25519 signed requests
+pubkey = "<64-hex Ed25519 public key>"
+```
+
+Configure any subset — an empty field means that scheme is off for the
+agent. Whichever scheme authenticates, the entry must still be active (not
+revoked / expired / not-yet-valid) and inbound, and every per-agent ceiling
+(tools, risk, budget, containment) applies unchanged.
+
+### Connected-app JWT
+
+Set `jwt_issuer`, `jwt_audience`, and `jwks_file` on the entry and send the
+platform's JWT as `Authorization: Bearer <jwt>`. The gateway routes the
+token by its `iss`/`aud` claims to the matching entry, then verifies
+signature, expiry, issuer, and audience against key material read from
+`jwks_file` — a **local** file holding either a PEM public key or a JSON
+JWKS document, read at verify time so key rotation is a file swap; no JWKS
+endpoint is ever fetched. The **verified `sub` claim must equal the agent id
+exactly**, so a token minted for one agent can never authenticate another.
+Asymmetric algorithms only (`alg: none` and HMAC algorithms are rejected);
+the server needs the `pyjwt[crypto]` extra.
+
+**Salesforce:** a Connected App already doing the OAuth 2.0 **JWT bearer
+flow** can present the same style of assertion to Lightwork directly — set
+`jwt_issuer` to the assertion's `iss` (the consumer key), `jwt_audience` to
+the audience it signs, and point `jwks_file` at the Connected App
+certificate's public key. Sign the assertion with `sub` set to the enrolled
+agent id (ids are lowercase `a-z0-9._-`, so a Salesforce username does not
+work verbatim).
+
+### HMAC (webhook signature format)
+
+Set `hmac_secret_ref` to the **name** of a secret and share the secret value
+with the platform. The registry stores only the reference — the name is
+resolved through the secret provider (process env, or a mounted secrets dir
+via `[secrets]` / `MAVERICK_SECRETS_BACKEND`) at verify time, so rotation
+happens in the secret store, never in the registry.
+
+Requests carry three headers over the raw body:
+
+| Header | Value |
+| --- | --- |
+| `X-Lightwork-Agent-Id` | The enrolled agent id |
+| `X-Maverick-Timestamp` | Unix seconds; the signature covers it |
+| `X-Maverick-Signature` | `sha256=` + hex `HMAC-SHA256(secret, "<ts>." + raw_body)` |
+
+This is exactly Lightwork's outbound webhook signature format: sign
+`b"<timestamp>." + body` with HMAC-SHA256 and prefix the hex digest with
+`sha256=`. Timestamps older than 300 seconds are rejected; signature
+comparison is constant-time.
+
+Each signed request is also **single use**: the signature is deterministic
+over (secret, timestamp, body), so a captured request replayed inside the
+freshness window presents the same signature and is refused. Vary the
+timestamp per request — a retry after a timeout must be re-signed with a
+fresh one rather than resent byte-for-byte.
+
+### Ed25519 signed requests
+
+Pin the agent's raw Ed25519 public key on the entry (`pubkey`, 64 hex
+chars) — the same identity the trust plane pins for federation peers. Each
+request carries four headers:
+
+| Header | Value |
+| --- | --- |
+| `X-Lightwork-Agent-Id` | The enrolled agent id |
+| `X-Maverick-Timestamp` | Unix seconds |
+| `X-Lightwork-Nonce` | A fresh random string (≤128 bytes), single-use |
+| `X-Lightwork-Request-Signature` | Hex Ed25519 signature over the message below |
+
+The signed message is domain-separated and versioned:
+
+```
+lightwork-external-request-v1|<agent_id>|<timestamp>|<nonce>|<hex sha256(raw body)>
+```
+
+(`maverick.external_identity.envelope_message` builds these exact bytes —
+import it in a Python client rather than reimplementing.) Everything an
+attacker could swap — identity, freshness, replay key, payload — is under
+the signature, and the version prefix means a request signature can never
+double as a handoff, approval, or federation signature. Freshness:
+timestamps more than 60 s in the future or older than 300 s are rejected.
+The nonce is **single-use per agent** — a replayed nonce is refused.
+
+Both signed schemes claim each request in a durable, per-agent ledger
+(`external-replay.json` under the data dir) before it authenticates, so a
+claim made on one dashboard worker binds every other worker. The ledger
+fails closed in both directions: a per-agent budget that is still full
+after pruning expired keys refuses new requests rather than evicting a live
+key, and a ledger that cannot be read or written refuses rather than
+letting an unprovable request through. The budget is **per agent**, so a
+saturated agent can never lock other agents out. The server needs the
+`cryptography` package.
+
+### Requiring the strong credential
+
+Once an agent holds a native credential, turn its minted bearer off:
+
+```toml
+[external_agents]
+require_signed = true
+```
+
+An agent whose entry pins a `pubkey` or names a `jwt_issuer` may no longer
+authenticate with its minted `rest` bearer alone — it must present the
+signed request or JWT. Agents holding only bearers are unaffected, so the
+rollout is per-agent: pin the strong credential, switch the platform over,
+then flip `require_signed` on. Strict bool; a malformed value engages the
+refusal (fail closed — it is a tightening switch).
+
+### Step-up on mint
+
+Minting a credential is itself a sensitive action. With
+
+```toml
+[external_agents]
+mint_approval = true
+```
+
+every mint (and rotation — same operation) takes a human decision first:
+
+1. **Request the mint** as usual — `POST
+   /api/v1/external-agents/{id}/credentials` with `{"surface": "rest"}`
+   (admin), or `maverick external-agents mint <id> --surface rest`. Nothing
+   is minted: the call parks a **world approval** at high risk (the
+   deployment's dual-control quorum for high risk applies) and answers
+   `409` with `{"status": "approval_required", "approval_id": N}`; the CLI
+   prints the same approval id.
+2. **A decision-maker approves** approval `N` in the dashboard Approvals
+   queue — provenance `external_agents`, action
+   `mint-credential:<agent_id>:<surface>`, requested by the admin who asked.
+3. **Replay with the id** — re-POST with `{"surface": "rest",
+   "approval_id": N}` (or re-run the CLI with `--approval-id N`). The token
+   mints and appears in this response only; the audit event records the
+   `mint_approval_id`.
+
+Approvals are **one-shot and exactly bound**: approval `N` covers one
+agent + surface pair (an id granted for a different agent or surface is
+refused), and it is spent on use — replaying the same id is refused; park a
+new approval instead. A denied approval refuses the mint. The CLI goes
+through the same core gate, so there is no ungated mint path. Strict bool;
+a malformed config value engages the gate (fail closed).
 
 ## Platform setup
 
@@ -468,6 +643,20 @@ The external boundary fails closed throughout:
 | `404` on `/api/v1/external/*` | Plane is off | Enable `[external_agents]` and restart the dashboard |
 | `403` | License lacks the `external_agents` (Gold) entitlement | Install a Gold-tier license |
 | `401` | Missing, wrong, rotated, or revoked rest token (the reply never says which) | Mint a new rest credential; minting replaces the old token immediately |
+| `401` with a native credential | Generic by design — the server log names the rule: `external gateway: <scheme> auth refused (<rule>)` | Match the log rule against the rows below |
+| log rule `stale` / `future_ts` | Timestamp outside the freshness window (300 s age, 60 s forward skew) | Sync clocks (NTP) and sign at send time, not enqueue time |
+| log rule `replay` | The request was already claimed (envelope nonce reused, or an HMAC request resent byte-for-byte) | Use a fresh nonce / timestamp per request |
+| log rule `replay_budget_full` | This agent's single-use ledger is full of unexpired keys | Slow the agent down; keys prune as they age past the freshness window |
+| log rule `replay_store_unavailable` | The single-use ledger could not be read or written — requests refuse rather than risk a replay | Check the data dir's permissions and free space |
+| log rule `bad_signature` | HMAC or Ed25519 signature does not verify — wrong key/secret or the signed material differs from the raw body | Rebuild the signing input byte-for-byte (`"<ts>." + body` for HMAC; `envelope_message` for Ed25519) and send exactly those body bytes |
+| log rule `secret_unresolved` | `hmac_secret_ref` names a secret the provider cannot resolve | Export the env var (or mount the secret file) named by the ref |
+| log rule `jwks_unavailable` | `jwks_file` absent, unreadable, or neither PEM nor JWKS | Fix the path/contents; the file is read at verify time |
+| log rule `no_matching_entry` | No entry's `jwt_issuer` + `jwt_audience` match the token's `iss`/`aud` | Align the trust entry with the claims the platform actually signs |
+| log rule `subject_mismatch` | The verified `sub` differs from the entry id | Mint the JWT with `sub` set to the enrolled agent id |
+| log rule `jwt_unavailable` / `no_crypto` | Optional server dependency missing | Install `pyjwt[crypto]` (JWT) / `cryptography` (Ed25519) |
+| log rule `require_signed` | `[external_agents] require_signed` refuses the minted bearer for an agent with a pinned key or JWT issuer | Present the strong credential (or turn the switch off) |
+| `409` `approval_required` on mint | Not an error — `mint_approval` parked approval #N | Have a decision-maker approve it in the queue, then re-run the mint with `approval_id` |
+| "approval #N has already minted a credential" | Mint approvals are one-shot | Run the mint without an approval id to park a new one |
 | rule `not_in_registry` | Agent has no trust entry | Enroll it on /external-agents |
 | rule `revoked` | Trust entry revoked | Re-enroll (or clear the revocation) and mint a fresh token |
 | rule `expired` | Past `expires_at` | Re-enroll with a new expiry |

@@ -1765,6 +1765,52 @@ def pick_oidc() -> dict[str, Any]:
     return result
 
 
+def _ask_external_agent_followups(advanced: dict[str, Any]) -> None:
+    """The external-agent gateway's follow-up questions (gateway already on).
+
+    Governed execution rides on the gateway: naming a connector is the
+    operator's explicit decision to let foreign agents ACT through
+    Lightwork's egress-guarded, receipted connector path. Blank keeps the
+    gateway screen-only; the kernel intersects with its reference factories
+    anyway, so the filter here just surfaces a typo at answer time instead
+    of silently at runtime.
+    """
+    raw = _q_text(
+        "  Governed connectors external agents may EXECUTE through "
+        "(comma-separated: salesforce, servicenow; blank = screen-only)",
+        default="",
+    )
+    connectors = []
+    for name in dict.fromkeys(_csv_list(raw, lower=True)):
+        if name in ("salesforce", "servicenow"):
+            connectors.append(name)
+        else:
+            console.print(
+                f"  [yellow]unknown connector '{name}' — skipped "
+                "(valid: salesforce, servicenow)[/yellow]"
+            )
+    if connectors:
+        advanced["external_connectors"] = connectors
+    # Both hardening switches below are strict, tightening booleans in the
+    # kernel (a malformed config value engages them, never disables).
+    if _q_confirm(
+        "  Require the strong credential? An agent whose trust entry pins "
+        "an Ed25519 key or names a JWT issuer must present it -- its "
+        "minted bearer alone stops authenticating (token-only agents are "
+        "unaffected). Off by default.",
+        default=False,
+    ):
+        advanced["external_require_signed"] = True
+    if _q_confirm(
+        "  Step-up approval on credential minting? Each mint/rotation "
+        "parks a dashboard approval a decision-maker must approve before "
+        "the token is issued (one approval mints exactly one credential). "
+        "Off by default.",
+        default=False,
+    ):
+        advanced["external_mint_approval"] = True
+
+
 def pick_advanced() -> dict[str, Any]:
     """Configure advanced reasoning, learning, and governance features.
 
@@ -2381,29 +2427,8 @@ def pick_advanced() -> dict[str, Any]:
             "blank = approve from the dashboard)", default="").strip()
         if flows_url:
             advanced["flows_public_url"] = flows_url
-    # Governed execution rides on the external-agent gateway: naming a
-    # connector is the operator's explicit decision to let foreign agents ACT
-    # through Lightwork's egress-guarded, receipted connector path. Blank
-    # keeps the gateway screen-only; the kernel intersects with its reference
-    # factories anyway, so the filter here just surfaces a typo at answer
-    # time instead of silently at runtime.
     if advanced.get("external_agents"):
-        raw = _q_text(
-            "  Governed connectors external agents may EXECUTE through "
-            "(comma-separated: salesforce, servicenow; blank = screen-only)",
-            default="",
-        )
-        connectors = []
-        for name in dict.fromkeys(_csv_list(raw, lower=True)):
-            if name in ("salesforce", "servicenow"):
-                connectors.append(name)
-            else:
-                console.print(
-                    f"  [yellow]unknown connector '{name}' — skipped "
-                    "(valid: salesforce, servicenow)[/yellow]"
-                )
-        if connectors:
-            advanced["external_connectors"] = connectors
+        _ask_external_agent_followups(advanced)
     # Self-harness has a handful of optional paths beyond the validation floors
     # written by default. Only worth asking once the loop itself is on; each
     # stays at its historical default unless the operator opts in here.
@@ -4241,8 +4266,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[external_agents]")
         lines.append("enable = true")
+        if advanced.get("external_require_signed"):
+            lines.append("require_signed = true")
         if advanced.get("external_connectors"):
             _emit_kv(lines, "connectors", advanced["external_connectors"])
+        if advanced.get("external_mint_approval"):
+            lines.append("mint_approval = true")
     if advanced.get("memory_guard"):
         lines.append("")
         lines.append("[memory_guard]")

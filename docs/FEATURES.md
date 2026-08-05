@@ -1953,7 +1953,17 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   approvals` + an importable `/api/v1/external/openapi.json` (drops into
   Agentforce External Services / Bedrock action groups); audit kinds
   `external_agent_enrolled` / `external_credential_minted` /
-  `external_run_ingested` / `external_action_screened`. See
+  `external_run_ingested` / `external_action_screened`. **Platform-native
+  identity** (`external_identity.py`) layers on the minted bearers: a trust
+  entry can pin a connected-app JWT (`jwt_issuer` / `jwt_audience` /
+  `jwks_file`, verified offline against a local PEM/JWKS with `sub` = agent
+  id), a webhook-format HMAC secret *reference* (`hmac_secret_ref`, resolved
+  through the secret provider at verify time), and/or Ed25519 signed requests
+  against the entry's `pubkey` (domain-separated `lightwork-external-request-v1`
+  message, single-use nonce, fail-closed replay defence). `[external_agents]
+  require_signed` then refuses the bearer for agents holding a strong
+  credential, and `mint_approval` step-up gates every credential mint behind
+  a one-shot, dual-control dashboard approval. See
   `docs/external-agents.md`.
 - **gRPC API v1 — stable** (`grpc_api/maverick.proto`, package `maverick.v1`;
   contract gate `grpc_api/contract.py` + committed golden
