@@ -38,11 +38,12 @@ def _read() -> list[dict]:
 
 
 def _write(rows: list[dict]) -> None:
+    # Rows carry per-tenant bearer tokens: private directory + 0600 file,
+    # atomic like the other credential-bearing stores.
+    from maverick.file_lock import atomic_write_text, ensure_private_directory
     p = _path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(rows, indent=2), encoding="utf-8")
-    tmp.replace(p)
+    ensure_private_directory(p.parent)
+    atomic_write_text(p, json.dumps(rows, indent=2), mode=0o600)
 
 
 def list_tenants() -> list[dict]:

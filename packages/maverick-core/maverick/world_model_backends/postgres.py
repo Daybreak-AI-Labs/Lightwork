@@ -1366,6 +1366,28 @@ class PostgresWorldModel:
             cur.execute(sql, tuple(params))
             return cur.rowcount == 1
 
+    def touch_goal(
+        self, goal_id: int, *, expected_owner: str | None = None,
+    ) -> bool:
+        """Refresh a live goal's ``updated_at`` (the orphan-reclaim liveness
+        signal) with no other side effect — the external-agent heartbeat
+        primitive, mirroring the SQLite semantics: only in-flight rows
+        qualify, and the owner predicate rides in the same statement."""
+        now = time.time()
+        frag, fparams = _tenant_scope()
+        sql = ("UPDATE goals SET updated_at=%s "
+               "WHERE id=%s AND status IN ('active', 'pending')")
+        params: list = [now, int(goal_id)]
+        if expected_owner is not None:
+            sql += " AND owner=%s"
+            params.append(str(expected_owner))
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            return cur.rowcount == 1
+
     # --- Backend parity (SQLite v13 -> v20 catch-up): methods on existing
     #     tables that the SQLite WorldModel exposes but the PG backend lacked.
     #     New-table methods (projects/share-links/sign-offs/artifacts/origin)

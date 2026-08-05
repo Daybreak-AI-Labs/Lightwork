@@ -475,10 +475,26 @@ def record_run(agent_id: str, run: dict, *, shield: Any | None = None) -> dict:
     duration = max(0.0, float(run.get("duration_seconds") or 0.0))
     wall_cap = decision.agent.max_wall_seconds if decision.agent else None
     over_wall = bool(wall_cap is not None and duration > wall_cap)
-    over_budget = False
+    over_budget = _settle_spend(
+        agent_id, gid, cost=cost, idem=idem, over_wall=over_wall,
+        cap=decision.agent.max_dollars if decision.agent else None)
+    from .audit import EventKind, audit_event
+    audit_event(EventKind.EXTERNAL_RUN_INGESTED, agent="external_agents",
+                goal_id=gid, external_agent=agent_id, outcome=outcome,
+                cost_dollars=cost, steps=len(steps), over_budget=over_budget,
+                over_wall=over_wall)
+    return {"goal_id": gid, "over_budget": over_budget,
+            "over_wall": over_wall}
+
+
+def _settle_spend(agent_id: str, gid: int, *, cost: float, idem: str,
+                  over_wall: bool, cap: float | None) -> bool:
+    """Meter one run against the sidecar: spend, period rollover, run count,
+    wall violations, idempotency ledger, and the over-budget flag. Shared by
+    after-the-fact ingest and the live finish path."""
     with _sidecar_locked():
         sidecar = _load_sidecar()
-        meta = sidecar.setdefault(agent_id, meta)
+        meta = sidecar.setdefault(agent_id, {})
         meta["spent_dollars"] = float(meta.get("spent_dollars") or 0.0) + cost
         if meta.get("period") == "monthly":
             month = _month_key()
@@ -498,16 +514,152 @@ def record_run(agent_id: str, run: dict, *, shield: Any | None = None) -> dict:
                                                         - _MAX_RUN_KEYS]:
                     keys.pop(stale, None)
             meta["run_keys"] = keys
-        cap = decision.agent.max_dollars if decision.agent else None
         over_budget = bool(cap is not None and _period_spent(meta) > cap)
         meta["over_budget"] = over_budget
         _save_sidecar(sidecar)
+    return over_budget
+
+
+# -- live runs (start / heartbeat / finish) -----------------------------------
+
+def start_run(agent_id: str, run: dict, *, shield: Any | None = None) -> dict:
+    """Open a LIVE external run on the Operating Record.
+
+    The goal lands ``active`` under ``agent:<id>`` so Oversight sees the work
+    while it is happening, and the kill switch can bite mid-flight: the agent
+    must heartbeat within the orphan-reclaim window (default 60s, see
+    ``MAVERICK_ORPHAN_RECLAIM_SECONDS``) or the run is reclaimed to blocked
+    with a restart marker. Schema: ``{title, summary?, department?}``."""
+    if not enabled():
+        raise ExternalAgentsError("external agents plane is disabled")
+    from .agent_trust import decide_inbound, record_denied
+    decision = decide_inbound(agent_id, enforced=True)
+    if not decision.allowed:
+        record_denied(agent_id, decision, direction="inbound",
+                      correlation_id="start_run")
+        raise ExternalAgentsError(f"denied: {decision.reason}")
+    sidecar = _load_sidecar()
+    meta = sidecar.get(agent_id)
+    if meta is None:
+        raise ExternalAgentsError(
+            f"agent {agent_id!r} has a trust entry but no enrollment")
+    if meta.get("contained"):
+        raise ExternalAgentsError("denied: agent is contained pending review")
+    title = _clean_text(run.get("title"), shield=shield)
+    summary = _clean_text(run.get("summary"), shield=shield)
+    if title is None or summary is None or not (title or "").strip():
+        raise ExternalAgentsError("run title rejected by the ingest screen")
+    principal = f"agent:{agent_id}"
+    from .world_model import open_world
+    w = open_world()
+    gid = w.create_goal(
+        title, description=summary or "", owner=principal,
+        domain=str(run.get("department") or meta.get("department") or ""))
+    # Freshly created by us; the id is unknown to anyone else, so the
+    # ownerless CAS is safe (and the Postgres backend's owner-aware claim
+    # deliberately fails closed).
+    w.claim_goal_for_run(gid)
+    from .audit import EventKind, audit_event
+    audit_event(EventKind.EXTERNAL_RUN_STARTED, agent="external_agents",
+                goal_id=gid, external_agent=agent_id)
+    from .world_model import reclaim_window_seconds
+    return {"goal_id": gid,
+            "heartbeat_seconds": reclaim_window_seconds()}
+
+
+def heartbeat(agent_id: str, goal_id: int) -> dict:
+    """Keep a live run alive AND ask permission to continue.
+
+    Returns ``{"continue": bool, "reason": str}``. ``continue: false`` is
+    the kill switch reaching mid-flight work: containment, revocation,
+    expiry, or the run having been reclaimed/finished all stop the agent.
+    A truthful agent halts on false; an agent that ignores it stops
+    refreshing its liveness anyway and gets reclaimed."""
+    if not enabled():
+        return {"continue": False, "reason": "external agents plane disabled"}
+    from .agent_trust import decide_inbound
+    decision = decide_inbound(agent_id, enforced=True)
+    if not decision.allowed:
+        return {"continue": False, "reason": decision.reason}
+    meta = _load_sidecar().get(agent_id)
+    if meta is None or meta.get("contained"):
+        return {"continue": False,
+                "reason": "agent is contained or unenrolled"}
+    from .world_model import open_world
+    alive = open_world().touch_goal(int(goal_id),
+                                    expected_owner=f"agent:{agent_id}")
+    if not alive:
+        return {"continue": False,
+                "reason": "run is not live under this agent (finished, "
+                          "reclaimed, or not yours)"}
+    return {"continue": True, "reason": "ok"}
+
+
+def finish_run(agent_id: str, goal_id: int, run: dict,
+               *, shield: Any | None = None) -> dict:
+    """Close a live run: outcome, step trail, costed episode, spend meter.
+
+    Same schema as ``record_run`` minus ``title``. The goal must be live and
+    owned by the caller — cross-agent finishes are refused."""
+    if not enabled():
+        raise ExternalAgentsError("external agents plane is disabled")
+    from .agent_trust import decide_inbound, lookup, record_denied
+    decision = decide_inbound(agent_id, enforced=True)
+    if not decision.allowed:
+        record_denied(agent_id, decision, direction="inbound",
+                      correlation_id="finish_run")
+        raise ExternalAgentsError(f"denied: {decision.reason}")
+    principal = f"agent:{agent_id}"
+    from .world_model import open_world
+    w = open_world()
+    goal = w.get_goal(int(goal_id))
+    if goal is None or goal.owner != principal or goal.status not in (
+            "active", "pending"):
+        raise ExternalAgentsError(
+            "run is not live under this agent (finished, reclaimed, or "
+            "not yours)")
+    summary = _clean_text(run.get("summary"), shield=shield)
+    if summary is None:
+        raise ExternalAgentsError("run summary rejected by the ingest screen")
+    outcome = "success" if str(run.get("outcome", "")).lower() in (
+        "success", "done", "ok") else "failure"
+    steps: list[str] = []
+    for raw in list(run.get("steps") or [])[:_MAX_STEPS]:
+        cleaned = _clean_text(raw, shield=shield)
+        if cleaned is None:
+            raise ExternalAgentsError(
+                "a run step was rejected by the ingest screen")
+        if cleaned:
+            steps.append(cleaned)
+    for step in steps:
+        w.append_event(goal_id, principal, "status", step)
+    cost = max(0.0, float(run.get("cost_dollars") or 0.0))
+    eid = w.start_episode(goal_id)
+    w.end_episode(
+        eid, summary or goal.title,
+        "success" if outcome == "success" else "failure",
+        cost_dollars=cost,
+        input_tokens=max(0, int(run.get("input_tokens") or 0)),
+        output_tokens=max(0, int(run.get("output_tokens") or 0)),
+        tool_calls=max(0, int(run.get("tool_calls") or 0)),
+    )
+    w.set_goal_status(
+        goal_id, "done" if outcome == "success" else "blocked",
+        result=summary or goal.title)
+    agent = lookup(agent_id)
+    duration = max(0.0, float(run.get("duration_seconds") or 0.0))
+    wall_cap = agent.max_wall_seconds if agent else None
+    over_wall = bool(wall_cap is not None and duration > wall_cap)
+    over_budget = _settle_spend(
+        agent_id, int(goal_id), cost=cost,
+        idem=str(run.get("idempotency_key") or "").strip()[:128],
+        over_wall=over_wall, cap=agent.max_dollars if agent else None)
     from .audit import EventKind, audit_event
     audit_event(EventKind.EXTERNAL_RUN_INGESTED, agent="external_agents",
-                goal_id=gid, external_agent=agent_id, outcome=outcome,
-                cost_dollars=cost, steps=len(steps), over_budget=over_budget,
-                over_wall=over_wall)
-    return {"goal_id": gid, "over_budget": over_budget,
+                goal_id=int(goal_id), external_agent=agent_id,
+                outcome=outcome, cost_dollars=cost, steps=len(steps),
+                over_budget=over_budget, over_wall=over_wall, live=True)
+    return {"goal_id": int(goal_id), "over_budget": over_budget,
             "over_wall": over_wall}
 
 
@@ -597,6 +749,8 @@ def screen(
             scope=meta.get("department") or None,
             detail=str(detail or "")[:2000], provenance="external_agents",
             requested_by=f"agent:{agent_id}")
+        _notify_approval(approval_id, agent_id, tool, req_risk,
+                         meta.get("department") or "")
         out = _screen_verdict(
             agent_id, tool, False, "approval_required",
             f"risk {req_risk} is at/above the {floor} approval floor; "
@@ -605,6 +759,39 @@ def screen(
         out["approval_id"] = approval_id
         return out
     return _screen_verdict(agent_id, tool, True, "allow", "within ceilings")
+
+
+def _notify_approval(approval_id: int, agent_id: str, tool: str,
+                     risk: str, department: str) -> None:
+    """Tell a human an external agent is blocked waiting — fail-soft.
+
+    Approvals were pull-only: the agent sat in a poll loop until someone
+    happened to open the queue. Two channels, both best-effort on a
+    governance hot path: the ops push transport, and the signed outbound
+    webhook (``[external_agents] approval_webhook``, HMAC + SSRF guard via
+    the shared webhook machinery). The payload is provenance-only — never
+    the ``detail`` string, which is untrusted external text."""
+    try:
+        from .ops_alert import alert
+        alert("external_approval.pending",
+              f"{agent_id} is waiting on approval #{approval_id}: "
+              f"{tool} ({risk})", severity="high")
+    except Exception:  # pragma: no cover -- notification never blocks
+        log.warning("external_agents: approval push notification failed",
+                    exc_info=True)
+    try:
+        from .config import load_config
+        url = str((load_config() or {}).get("external_agents", {}).get(
+            "approval_webhook", "")).strip()
+        if url:
+            from .webhooks import fire
+            fire("external_approval.created",
+                 {"approval_id": approval_id, "agent_id": agent_id,
+                  "tool": tool, "risk": risk, "department": department},
+                 urls=[url])
+    except Exception:  # pragma: no cover -- notification never blocks
+        log.warning("external_agents: approval webhook failed",
+                    exc_info=True)
 
 
 def _approval_floor() -> str:
@@ -782,6 +969,8 @@ def status() -> dict:
         "enrolled": len(rows),
         "active": sum(1 for r in rows if r["active"]),
         "over_budget": sum(1 for r in rows if r["over_budget"]),
+        "contained": sum(1 for r in rows if r["contained"]),
+        "wall_violations": sum(r["wall_violations"] for r in rows),
         "platforms": sorted({r["platform"] for r in rows}),
         "runs": sum(r["runs"] for r in rows),
         "reported_dollars": round(

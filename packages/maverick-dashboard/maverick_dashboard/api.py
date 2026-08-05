@@ -454,7 +454,39 @@ def _board_spend(w, owner, days: int) -> dict:
         top_goals.append({"goal_id": gid, "title": g.title if g else f"#{gid}",
                           "cost": float(cost or 0), "runs": int(runs)})
     return {"totals": totals, "prev": prev, "daily": list(daily.values()),
-            "outcomes": outcomes, "per_run": per_run, "top_goals": top_goals}
+            "outcomes": outcomes, "per_run": per_run, "top_goals": top_goals,
+            "by_platform": _external_platform_spend(w, owner, since)}
+
+
+def _external_platform_spend(w, owner, since: float) -> list[dict]:
+    """Spend by external-agent platform (bring-your-own-agent runs).
+
+    Forces the episodes⋈goals join unconditionally — the admin/auth-off view
+    passes ``owner is None``, and that is precisely the view where
+    ``agent:*`` rows exist. Individual humans keep owner scoping and simply
+    see an empty segment."""
+    if owner is not None:
+        return []
+    from maverick.external_agents import PLATFORMS, roster
+    platform_of = {f"agent:{r['id']}": r["platform"] for r in roster()}
+    if not platform_of:
+        return []
+    agg: dict[str, dict] = {}
+    for own_id, cost, runs in w.conn.execute(
+            "SELECT g.owner, SUM(COALESCE(e.cost_dollars, 0)), COUNT(*) "
+            "FROM episodes e JOIN goals g ON e.goal_id = g.id "
+            "WHERE e.ended_at IS NOT NULL AND e.started_at >= ? "
+            "AND g.owner LIKE 'agent:%' GROUP BY g.owner",
+            (since,)).fetchall():
+        platform = platform_of.get(str(own_id))
+        if platform is None:
+            continue
+        row = agg.setdefault(platform, {
+            "label": PLATFORMS.get(platform, platform),
+            "cost": 0.0, "runs": 0})
+        row["cost"] += float(cost or 0)
+        row["runs"] += int(runs)
+    return sorted(agg.values(), key=lambda r: r["cost"], reverse=True)[:8]
 
 
 def _board_workforce(w, owner, days: int) -> dict:
@@ -496,7 +528,39 @@ def _board_workforce(w, owner, days: int) -> dict:
                         key=lambda r: (r["completed"], r["total"]),
                         reverse=True)[:8],
         "leaders": [c.to_dict() for c in cards[:6]],
+        "platforms": _external_platform_workforce(w, owner),
     }
+
+
+def _external_platform_workforce(w, owner) -> list[dict]:
+    """Goals by external-agent platform for the workforce board. Same
+    admin-view-only rule as the spend segment: individual humans keep owner
+    scoping and see an empty segment."""
+    if owner is not None:
+        return []
+    from maverick.external_agents import PLATFORMS, roster
+    platform_of = {f"agent:{r['id']}": r["platform"] for r in roster()}
+    if not platform_of:
+        return []
+    agg: dict[str, dict] = {}
+    for own_id, completed, total, spend in w.conn.execute(
+            "SELECT g.owner, "
+            "SUM(CASE WHEN g.status = 'done' THEN 1 ELSE 0 END), COUNT(*), "
+            "(SELECT COALESCE(SUM(e.cost_dollars), 0) FROM episodes e "
+            " JOIN goals g2 ON e.goal_id = g2.id WHERE g2.owner = g.owner) "
+            "FROM goals g WHERE g.owner LIKE 'agent:%' GROUP BY g.owner"
+            ).fetchall():
+        platform = platform_of.get(str(own_id))
+        if platform is None:
+            continue
+        row = agg.setdefault(platform, {
+            "label": PLATFORMS.get(platform, platform),
+            "completed": 0, "total": 0, "spend": 0.0})
+        row["completed"] += int(completed or 0)
+        row["total"] += int(total or 0)
+        row["spend"] += float(spend or 0)
+    return sorted(agg.values(), key=lambda r: (r["completed"], r["total"]),
+                  reverse=True)[:8]
 
 
 def _board_workspace(department: str) -> dict:
@@ -2495,6 +2559,19 @@ def _probe_tenant(t: dict) -> dict:
                             "dollars": round(float(d.get("dollars") or 0), 2)}
     except Exception:  # value ledger is optional on older agents
         pass
+    try:
+        x = httpx.get(f"{base}/api/v1/external-agents", headers=headers,
+                      timeout=4)
+        if x.status_code == 200:
+            st = (x.json() or {}).get("status") or {}
+            out["external"] = {
+                "enrolled": int(st.get("enrolled") or 0),
+                "active": int(st.get("active") or 0),
+                "over_budget": int(st.get("over_budget") or 0),
+                "contained": int(st.get("contained") or 0),
+            }
+    except Exception:  # BYOA console is optional on older tenants
+        pass
     return out
 
 
@@ -2563,6 +2640,7 @@ async def partner_fleet(request: Request, check: int = 0) -> dict:
     tenants = [partner_store.public_row(r) for r in rows]
     checks = [t.get("last_check") or {} for t in tenants]
     values = [c.get("value") for c in checks if c.get("value")]
+    externals = [c.get("external") for c in checks if c.get("external")]
     return {"tenants": tenants,
             "fleet": {
                 "total": len(tenants),
@@ -2570,6 +2648,9 @@ async def partner_fleet(request: Request, check: int = 0) -> dict:
                 "cases": sum(v["cases"] for v in values),
                 "hours": round(sum(v["hours"] for v in values), 1),
                 "dollars": round(sum(v["dollars"] for v in values), 2),
+                "external_agents": sum(x["enrolled"] for x in externals),
+                "external_attention": sum(
+                    x["over_budget"] + x["contained"] for x in externals),
             }}
 
 

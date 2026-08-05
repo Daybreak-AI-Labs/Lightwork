@@ -1273,13 +1273,7 @@ class WorldModel:
 
         Returns rows reclaimed.
         """
-        import os as _os
-        env_override = _os.environ.get("MAVERICK_ORPHAN_RECLAIM_SECONDS")
-        if env_override is not None:
-            try:
-                max_age_seconds = max(0.0, float(env_override))
-            except ValueError:
-                pass
+        max_age_seconds = reclaim_window_seconds(default=max_age_seconds)
         cutoff = time.time() - max_age_seconds
         now = time.time()
         marker = " [process restarted mid-run]"
@@ -1880,6 +1874,29 @@ class WorldModel:
             "UPDATE goals SET status = 'active', updated_at = ? "
             "WHERE id = ? AND status = 'pending'"
         )
+        params: tuple[Any, ...] = (time.time(), int(goal_id))
+        if expected_owner is not None:
+            sql += " AND owner = ?"
+            params += (str(expected_owner),)
+        with self._writing() as conn:
+            cur = conn.execute(sql, params)
+            return cur.rowcount == 1
+
+    def touch_goal(
+        self, goal_id: int, *, expected_owner: str | None = None,
+    ) -> bool:
+        """Refresh a live goal's ``updated_at`` — the orphan-reclaim liveness
+        signal — without any other side effect.
+
+        A pure keep-alive for work running OUTSIDE this process (external
+        agents heartbeating a run, remote workers between status writes):
+        ``set_goal_status('active')`` would drop signoffs and flip a pending
+        row, so liveness gets its own single-statement primitive. Only
+        in-flight rows qualify; terminal goals are never revived. The owner
+        predicate rides in the same statement so authorization cannot be
+        separated from the touch by a race."""
+        sql = ("UPDATE goals SET updated_at = ? "
+               "WHERE id = ? AND status IN ('active', 'pending')")
         params: tuple[Any, ...] = (time.time(), int(goal_id))
         if expected_owner is not None:
             sql += " AND owner = ?"
@@ -3850,6 +3867,23 @@ class PostgresAtRestUnsupported(RuntimeError):
     does, via ``crypto_at_rest``). Rather than silently storing regulated /
     encrypted-at-rest data as plaintext, :func:`open_world` fails closed. See
     ``docs/encryption.md`` and ``FIXES.md`` (P1)."""
+
+
+def reclaim_window_seconds(default: float = 60.0) -> float:
+    """The orphan-reclaim staleness window in seconds.
+
+    ``MAVERICK_ORPHAN_RECLAIM_SECONDS`` when set and valid, else ``default``
+    — exactly the precedence :meth:`WorldModel.reclaim_orphan_goals` has
+    always applied. Public so out-of-process work (external-agent
+    heartbeats) can tell callers how often they must refresh liveness."""
+    import os
+    raw = os.environ.get("MAVERICK_ORPHAN_RECLAIM_SECONDS")
+    if raw is not None:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return default
 
 
 def open_world(path: Path | None = None) -> Any:

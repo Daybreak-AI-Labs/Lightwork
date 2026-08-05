@@ -289,6 +289,102 @@ def test_wall_clock_violations_are_flagged_and_counted():
     assert xa.roster()[0]["wall_violations"] == 1
 
 
+def test_live_run_lifecycle_with_heartbeat_and_reclaim():
+    from maverick.world_model import WorldModel
+    _enroll(max_wall_seconds=600)
+    out = xa.start_run("sf-quotebot", {"title": "Live quote",
+                                       "summary": "working"})
+    gid = out["goal_id"]
+    assert out["heartbeat_seconds"] > 0
+    w = WorldModel()
+    assert w.get_goal(gid).status == "active"
+    assert xa.heartbeat("sf-quotebot", gid)["continue"] is True
+    # A fresh heartbeat survives the reclaim sweep.
+    assert w.reclaim_orphan_goals(max_age_seconds=30) == 0
+    assert w.get_goal(gid).status == "active"
+    # Cross-agent access is refused (heartbeat AND finish).
+    xa.enroll("other-bot", "bedrock")
+    assert xa.heartbeat("other-bot", gid)["continue"] is False
+    with pytest.raises(xa.ExternalAgentsError, match="not live"):
+        xa.finish_run("other-bot", gid, {"outcome": "success", "summary": "x"})
+    fin = xa.finish_run("sf-quotebot", gid, {
+        "outcome": "success", "summary": "quote sent",
+        "steps": ["a", "b"], "cost_dollars": 2.0, "duration_seconds": 120})
+    assert fin["over_wall"] is False
+    assert w.get_goal(gid).status == "done"
+    assert w.total_spend(owner="agent:sf-quotebot")["dollars"] == \
+        pytest.approx(2.0)
+    with pytest.raises(xa.ExternalAgentsError, match="not live"):
+        xa.finish_run("sf-quotebot", gid, {"outcome": "success",
+                                           "summary": "again"})
+
+
+def test_abandoned_live_run_is_reclaimed_and_heartbeat_says_stop():
+    from maverick.world_model import WorldModel
+    _enroll()
+    gid = xa.start_run("sf-quotebot", {"title": "Abandoned"})["goal_id"]
+    w = WorldModel()
+    w.conn.execute("UPDATE goals SET updated_at = updated_at - 120 "
+                   "WHERE id = ?", (gid,))
+    w.conn.commit()
+    assert w.reclaim_orphan_goals(max_age_seconds=60) == 1
+    assert w.get_goal(gid).status == "blocked"
+    assert xa.heartbeat("sf-quotebot", gid)["continue"] is False
+
+
+def test_containment_reaches_midflight_via_heartbeat():
+    _enroll()
+    gid = xa.start_run("sf-quotebot", {"title": "To be stopped"})["goal_id"]
+    with xa._sidecar_locked():
+        sidecar = xa._load_sidecar()
+        sidecar["sf-quotebot"]["contained"] = True
+        xa._save_sidecar(sidecar)
+    assert xa.heartbeat("sf-quotebot", gid)["continue"] is False
+    with pytest.raises(xa.ExternalAgentsError):
+        xa.start_run("sf-quotebot", {"title": "Another"})
+
+
+def test_parked_approval_notifies_and_fires_webhook(monkeypatch, tmp_path):
+    _enroll(max_risk="high")
+    (tmp_path / "config.toml").write_text(
+        '[external_agents]\nenable = true\n'
+        'approval_webhook = "https://hooks.corp.test/lw"\n',
+        encoding="utf-8")
+    from maverick import config
+    config.reset_config_cache()
+    pushes: list[tuple] = []
+    fired: list[tuple] = []
+    import maverick.ops_alert as ops_alert
+    import maverick.webhooks as webhooks
+    monkeypatch.setattr(ops_alert, "alert",
+                        lambda event, detail="", **kw: pushes.append(
+                            (event, detail)) or True)
+    monkeypatch.setattr(webhooks, "fire",
+                        lambda event, payload, **kw: fired.append(
+                            (event, payload, kw)) or 1)
+    verdict = xa.screen("sf-quotebot", "send_contract",
+                        detail="issue contract", risk="high")
+    assert verdict["requires_approval"] is True
+    assert pushes and pushes[0][0] == "external_approval.pending"
+    assert fired and fired[0][0] == "external_approval.created"
+    payload = fired[0][1]
+    assert payload["agent_id"] == "sf-quotebot"
+    assert "detail" not in payload  # untrusted text never leaves
+    assert fired[0][2]["urls"] == ["https://hooks.corp.test/lw"]
+
+
+def test_status_aggregates_containment_and_wall_violations():
+    _enroll(max_wall_seconds=10)
+    xa.record_run("sf-quotebot", {"title": "Slow", "outcome": "success",
+                                  "summary": "s", "duration_seconds": 99})
+    with xa._sidecar_locked():
+        sidecar = xa._load_sidecar()
+        sidecar["sf-quotebot"]["contained"] = True
+        xa._save_sidecar(sidecar)
+    s = xa.status()
+    assert s["contained"] == 1 and s["wall_violations"] == 1
+
+
 def test_repeated_denials_auto_contain_until_released():
     _enroll(max_risk="medium")
     for _ in range(5):
