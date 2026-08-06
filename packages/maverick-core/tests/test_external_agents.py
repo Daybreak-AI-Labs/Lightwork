@@ -121,7 +121,7 @@ def test_record_run_rejects_injection_payloads():
 
 def test_screen_allows_within_ceilings_and_denies_above():
     _enroll()
-    ok = xa.screen("sf-quotebot", "crm_update", detail="update stage",
+    ok = xa.screen("sf-quotebot", "read_file", detail="read quote history",
                    risk="low")
     assert ok["allowed"] is True and ok["rule"] == "allow"
     over = xa.screen("sf-quotebot", "crm_update", risk="high")
@@ -146,6 +146,20 @@ def test_screen_parks_an_approval_at_the_floor():
         xa.approval_status(999999)
 
 
+def test_screen_uses_server_side_risk_for_approval_floor():
+    _enroll(max_risk="high")
+    omitted = xa.screen("sf-quotebot", "shell")
+    assert omitted["allowed"] is False
+    assert omitted["rule"] == "approval_required"
+    assert omitted["requires_approval"] is True
+    assert xa.approval_status(omitted["approval_id"])["risk"] == "high"
+
+    underreported = xa.screen("sf-quotebot", "shell", risk="low")
+    assert underreported["allowed"] is False
+    assert underreported["rule"] == "approval_required"
+    assert xa.approval_status(underreported["approval_id"])["risk"] == "high"
+
+
 def test_screen_fails_closed_on_scanner_error_and_shield_block():
     _enroll()
 
@@ -153,7 +167,7 @@ def test_screen_fails_closed_on_scanner_error_and_shield_block():
         def scan_input(self, text):
             raise RuntimeError("detector crashed")
 
-    verdict = xa.screen("sf-quotebot", "crm_update", detail="anything",
+    verdict = xa.screen("sf-quotebot", "read_file", detail="anything",
                         risk="low", shield=_Boom())
     assert verdict["allowed"] is False and verdict["rule"] == "screen_error"
 
@@ -163,7 +177,7 @@ def test_screen_fails_closed_on_scanner_error_and_shield_block():
                 blocked = True
             return V()
 
-    verdict = xa.screen("sf-quotebot", "crm_update", detail="bad payload",
+    verdict = xa.screen("sf-quotebot", "read_file", detail="bad payload",
                         risk="low", shield=_Block())
     assert verdict["allowed"] is False and verdict["rule"] == "shield"
 
@@ -173,7 +187,7 @@ def test_budget_cutoff_denies_further_actions():
     xa.record_run("sf-quotebot", {"title": "Run one", "outcome": "success",
                                   "summary": "work", "cost_dollars": 3.0})
     assert xa.roster()[0]["over_budget"] is True
-    verdict = xa.screen("sf-quotebot", "crm_update", risk="low")
+    verdict = xa.screen("sf-quotebot", "read_file", risk="low")
     assert verdict["allowed"] is False and verdict["rule"] == "budget"
 
 
@@ -183,7 +197,7 @@ def test_revoked_agent_is_denied_everywhere():
     from maverick.agent_trust import set_revoked
     assert set_revoked("sf-quotebot", True)
     assert agent_for_token(token, "rest") is None
-    verdict = xa.screen("sf-quotebot", "crm_update", risk="low")
+    verdict = xa.screen("sf-quotebot", "read_file", risk="low")
     assert verdict["allowed"] is False and verdict["rule"] == "revoked"
     with pytest.raises(xa.ExternalAgentsError, match="denied"):
         xa.record_run("sf-quotebot", {"title": "x", "outcome": "success",
@@ -193,7 +207,7 @@ def test_revoked_agent_is_denied_everywhere():
 def test_disabled_plane_refuses_traffic(monkeypatch):
     _enroll()
     monkeypatch.delenv("MAVERICK_EXTERNAL_AGENTS", raising=False)
-    verdict = xa.screen("sf-quotebot", "crm_update", risk="low")
+    verdict = xa.screen("sf-quotebot", "read_file", risk="low")
     assert verdict["allowed"] is False and verdict["rule"] == "disabled"
     with pytest.raises(xa.ExternalAgentsError, match="disabled"):
         xa.record_run("sf-quotebot", {"title": "x", "outcome": "success",

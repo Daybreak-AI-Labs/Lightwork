@@ -97,7 +97,7 @@ def test_screen_flow_and_approval_poll_over_http():
     bare = TestClient(app)
     hdr = {"Authorization": f"Bearer {token}"}
     ok = bare.post("/api/v1/external/screen", headers=hdr,
-                   json={"tool": "crm_update", "detail": "update stage",
+                   json={"tool": "read_file", "detail": "read quote history",
                          "risk": "low"}).json()
     assert ok["allowed"] is True
     parked = bare.post("/api/v1/external/screen", headers=hdr,

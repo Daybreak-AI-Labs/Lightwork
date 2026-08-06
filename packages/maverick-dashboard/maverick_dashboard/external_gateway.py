@@ -173,7 +173,9 @@ _OPENAPI: dict = {
                             "detail": {"type": "string",
                                        "description": "What will be done"},
                             "risk": {"type": "string",
-                                     "enum": ["low", "medium", "high"]},
+                                     "enum": ["low", "medium", "high"],
+                                     "description": ("Optional caller claim; Lightwork derives "
+                                                    "the effective risk server-side.")},
                         }}}}},
                 "responses": {"200": {"description": "Decision", "content": {
                     "application/json": {"schema": {

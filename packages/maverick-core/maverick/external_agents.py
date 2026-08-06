@@ -427,14 +427,22 @@ def screen(
         return _screen_verdict(agent_id, tool, False, "disabled",
                                "external agents plane is disabled")
     from .agent_trust import decide_inbound, record_denied
-    from .safety.tool_risk import RISK_LEVELS, risk_rank
+    from .safety.tool_risk import (
+        RISK_LEVELS,
+        risk_rank,
+        tool_risk,
+        tool_risk_is_classified,
+    )
     req_risk = str(risk or "").strip().lower()
     if req_risk and req_risk not in RISK_LEVELS:
         return _screen_verdict(agent_id, tool, False, "bad_risk",
                                f"unknown risk level {req_risk!r}")
+    classified_risk = tool_risk(tool) if tool_risk_is_classified(tool) else "high"
+    effective_risk = max(
+        [r for r in (classified_risk, req_risk) if r], key=risk_rank)
     decision = decide_inbound(
         agent_id, requested_tools=[tool] if tool else (),
-        max_risk=req_risk or None, enforced=True)
+        max_risk=effective_risk, enforced=True)
     if not decision.allowed:
         record_denied(agent_id, decision, direction="inbound",
                       correlation_id="screen")
@@ -463,16 +471,16 @@ def screen(
                 agent_id, tool, False, "screen_error",
                 "input screen unavailable; action denied (fail-closed)")
     floor = _approval_floor()
-    if req_risk and risk_rank(req_risk) >= risk_rank(floor):
+    if risk_rank(effective_risk) >= risk_rank(floor):
         from .world_model import open_world
         approval_id = open_world().create_approval(
-            f"external:{agent_id}:{tool}", risk=req_risk,
+            f"external:{agent_id}:{tool}", risk=effective_risk,
             scope=meta.get("department") or None,
             detail=str(detail or "")[:2000], provenance="external_agents",
             requested_by=f"agent:{agent_id}")
         out = _screen_verdict(
             agent_id, tool, False, "approval_required",
-            f"risk {req_risk} is at/above the {floor} approval floor; "
+            f"risk {effective_risk} is at/above the {floor} approval floor; "
             "awaiting a human decision")
         out["requires_approval"] = True
         out["approval_id"] = approval_id
