@@ -1656,6 +1656,69 @@ def get_external_agents() -> dict:
     }
 
 
+def get_repl() -> dict:
+    """Return the ``[repl]`` section (governed code execution).
+
+    A session kernel lets an agent write Python instead of composing fixed
+    tool schemas — the Prime-Agent-style substrate — but every statement runs
+    through ``sandbox.exec`` and lands a tamper-evident receipt, so the code
+    IS the audited artifact. OFF by default: this is arbitrary code execution
+    and admitting it is an explicit operator decision. Also honored via
+    ``MAVERICK_REPL=1``."""
+    import os
+    cfg = load_config().get("repl", {})
+    enable = _strict_config_bool(cfg, "enable", False, invalid=False)
+    if str(os.environ.get("MAVERICK_REPL", "")).strip() == "1":
+        enable = True
+    return {
+        "enable": enable,
+        # Per-statement wall ceiling, output cap, and the size of the carried
+        # namespace. All bounded: an unbounded kernel is a denial-of-service
+        # surface and an unbounded transcript is an audit liability.
+        "max_seconds": max(1.0, float(cfg.get("max_seconds", 30.0) or 30.0)),
+        "max_output_chars": max(
+            256, int(cfg.get("max_output_chars", 8000) or 8000)),
+        "max_state_bytes": max(
+            1024, int(cfg.get("max_state_bytes", 262_144) or 262_144)),
+        "max_statements": max(1, int(cfg.get("max_statements", 200) or 200)),
+    }
+
+
+def get_harness_refine() -> dict:
+    """Return the ``[harness_refine]`` section (governed self-refinement).
+
+    The agent may PROPOSE changes to its own operating instructions from an
+    observed failure; applying one is snapshotted, audited, and reversible.
+    OFF by default, and ``require_approval`` defaults ON so a proposal never
+    self-applies — ungoverned self-modification is precisely what an audited
+    deployment cannot run. Also honored via ``MAVERICK_HARNESS_REFINE=1``."""
+    import os
+    cfg = load_config().get("harness_refine", {})
+    enable = _strict_config_bool(cfg, "enable", False, invalid=False)
+    if str(os.environ.get("MAVERICK_HARNESS_REFINE", "")).strip() == "1":
+        enable = True
+    return {
+        "enable": enable,
+        # Fail CLOSED on a malformed value: a typo must never disarm the gate.
+        "require_approval": _strict_config_bool(
+            cfg, "require_approval", True, invalid=True),
+        "max_pending": max(1, int(cfg.get("max_pending", 20) or 20)),
+    }
+
+
+def get_session_tree() -> dict:
+    """Return the ``[session_tree]`` section (run forking + provenance).
+
+    Forking a run at a decision point lets Oversight hold the counterfactual
+    beside what actually happened. ON by default — it only records lineage
+    between runs that already exist and never changes execution."""
+    cfg = load_config().get("session_tree", {})
+    return {
+        "enable": _strict_config_bool(cfg, "enable", True, invalid=True),
+        "max_depth": max(1, int(cfg.get("max_depth", 10) or 10)),
+    }
+
+
 def get_memory() -> dict:
     """Return the ``[memory]`` section. ``temporal`` keeps a bitemporal history
     of every fact value (validity windows) instead of overwriting, so the

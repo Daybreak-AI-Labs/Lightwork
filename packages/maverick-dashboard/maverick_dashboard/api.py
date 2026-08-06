@@ -10302,6 +10302,32 @@ async def marketplace_packs_api(request: Request, q: str = "") -> dict:
     return {"departments": departments}
 
 
+@router.get("/run-tree/{goal_id}")
+async def run_tree_api(request: Request, goal_id: int) -> dict:
+    """One run's fork tree: the branch that shipped and the counterfactuals
+    recorded beside it, nested under their common root.
+
+    Forks inherit the parent's owner, so the tree is returned from the run's
+    root and BOTH ends are access-checked — a caller who may not read the root
+    gets the subtree they asked for instead. Missing lineage is not an error:
+    an un-forked run answers with itself and no children.
+    """
+    from maverick import session_tree
+    world = _world()
+    goal = world.get_goal(goal_id)
+    if goal is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, goal)
+    lineage = session_tree.lineage(goal_id)
+    root = lineage["root"]
+    if root != goal_id:
+        root_goal = world.get_goal(root)
+        if root_goal is None or not can_access_goal(request, root_goal):
+            root = goal_id
+    return {"enabled": session_tree.enabled(), "goal_id": goal_id,
+            "root": root, "lineage": lineage, "tree": session_tree.tree(root)}
+
+
 @router.get("/marketplace/connectors")
 async def marketplace_connectors_api(request: Request, q: str = "") -> dict:
     """Connector marketplace: honest total + optional substring search."""

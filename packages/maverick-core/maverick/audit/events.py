@@ -182,6 +182,20 @@ class EventKind:
     # the response text — those stay out of the audit row by design.
     # (Previews and parks audit as ACTION_SCREENED — no effect occurred.)
     EXTERNAL_ACTION_EXECUTED = "external_action_executed"
+    # Governed code execution: one row per statement run in a session kernel.
+    # Payload: session, statement_sha256, ok, exit_code, wall_seconds (never
+    # the code text or its output — those live in the lineage receipt and the
+    # session ledger, which redact and bound).
+    REPL_EXECUTED = "repl_executed"
+    # Harness self-refinement. PROPOSED carries the observed failure and the
+    # proposed change's digest; APPLIED carries the snapshot id that makes it
+    # reversible (and is accompanied by a LEARNING_UPDATE row, so learned-state
+    # verification covers it like any other learned write).
+    HARNESS_REFINEMENT_PROPOSED = "harness_refinement_proposed"
+    HARNESS_REFINEMENT_APPLIED = "harness_refinement_applied"
+    # A run forked from another at a specific point in its event trail, so the
+    # Operating Record can hold counterfactuals side by side.
+    SESSION_FORKED = "session_forked"
     # Learning governance: one row per dream cycle (what the learning system
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.

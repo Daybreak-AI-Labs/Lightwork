@@ -769,6 +769,60 @@ def test_external_agents_identity_hardening_flags_write_and_are_read(
     assert xa["require_signed"] is True and xa["mint_approval"] is True
 
 
+def test_governed_execution_planes_write_and_are_read(tmp_path, monkeypatch):
+    """Rule-6 loop: the governed-kernel and self-refinement opt-ins write
+    [repl] / [harness_refine] and the kernel's getters read them back."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_REPL", raising=False)
+    monkeypatch.delenv("MAVERICK_HARNESS_REFINE", raising=False)
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = _write(cfg_dir, monkeypatch, {"repl": True, "harness_refine": True})
+    parsed = tomllib.loads(cfg)
+    assert parsed["repl"] == {"enable": True}
+    # require_approval is default-on and fails closed, so an accepted gate
+    # writes no line at all.
+    assert parsed["harness_refine"] == {"enable": True}
+
+    from maverick.config import get_harness_refine, get_repl
+    assert get_repl()["enable"] is True
+    refine = get_harness_refine()
+    assert refine["enable"] is True and refine["require_approval"] is True
+
+
+def test_declined_refinement_approval_gate_is_written_explicitly(
+        tmp_path, monkeypatch):
+    """Declining the gate is a real decision: it must reach the file, because
+    the default (and a malformed value) both mean 'approval required'."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_HARNESS_REFINE", raising=False)
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    cfg_dir = tmp_path / ".maverick"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    cfg = _write(cfg_dir, monkeypatch, {
+        "harness_refine": True, "harness_refine_require_approval": False,
+    })
+    assert tomllib.loads(cfg)["harness_refine"]["require_approval"] is False
+
+    from maverick.config import get_harness_refine
+    assert get_harness_refine()["require_approval"] is False
+
+
+def test_advanced_off_writes_no_governed_execution_sections(tmp_path, monkeypatch):
+    cfg = _write(tmp_path, monkeypatch, {"repl": False, "harness_refine": False})
+    assert "[repl]" not in cfg and "[harness_refine]" not in cfg
+
+
+def test_run_forking_writes_only_an_explicit_decline(tmp_path, monkeypatch):
+    """[session_tree] is on by default (lineage only, no execution), so an
+    accepted prompt stays byte-identical and only a decline writes."""
+    assert "[session_tree]" not in _write(tmp_path, monkeypatch,
+                                         {"session_tree": True})
+    cfg = _write(tmp_path, monkeypatch, {"session_tree": False})
+    assert tomllib.loads(cfg)["session_tree"]["enable"] is False
+
+
 def test_audit_worm_writes_worm_section(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {"audit_worm": True})
     assert "[audit.worm]" in cfg

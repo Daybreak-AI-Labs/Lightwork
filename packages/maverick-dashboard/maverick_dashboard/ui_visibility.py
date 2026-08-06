@@ -84,6 +84,9 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "view"},
     {"path": "/discovery", "label": "Discovery", "group": "Observe", "icon": "overview",
      "floor": "view", "default": "view"},
+    # Counterfactual review: forked runs and their branches under one root.
+    {"path": "/run-tree", "label": "Run Tree", "group": "Observe", "icon": "eye",
+     "floor": "view", "default": "view"},
     {"path": "/spend", "label": "Spend", "group": "Observe", "icon": "spend",
      "floor": "view", "default": "view"},
     # ROI: money saved vs the client's own human-cost assumptions.

@@ -16,6 +16,22 @@ here.
   reflector), run in parallel (`orchestrator.py`, `agent.py`, `swarm.py`).
 - **Durable, resumable execution** — checkpoint / rewind / `maverick resume`
   (`checkpoint.py`), opt-in via `[durable]`.
+- **Session forking + run tree** (`session_tree.py`, default-on
+  `[session_tree] enable`, depth-capped by `max_depth`) — branch a run at one
+  decision point so Oversight can read what the agent chose *beside* the
+  alternative instead of only the branch that shipped. `fork(goal_id,
+  at_event=…)` creates a new goal, copies the parent's event trail up to an
+  absolute `goal_events` id (ids, not offsets — there is no per-goal sequence
+  column), appends a marker event naming its origin, and audits
+  `session_forked`; `lineage` / `tree` / `roots` read it back. **Nothing is
+  re-executed** — a replayed event is a record row, so forking calls no tool,
+  spends no token, and never touches the sandbox. Lineage lives in a
+  tenant-scoped `session_tree.json` sidecar (released migrations are
+  immutable) and deliberately does *not* set `goals.parent_id`, so a
+  counterfactual never appears as a decomposition sub-goal; a corrupt sidecar
+  degrades to "no known forks" rather than taking a review page down. Read-only
+  **Run Tree** dashboard page (`/run-tree`, owner-scoped) +
+  `GET /api/v1/run-tree/{goal_id}` (both ends access-checked).
 - **Kernel lifecycle hooks** — `PreToolUse` / `PostToolUse` / `UserPromptSubmit`
   (`hooks.py`), registrable from plugins.
 - **Budget caps** — hard dollar + wall-clock + tool-call ceilings the kernel
@@ -76,6 +92,27 @@ here.
   with a persisted per-conversation cursor — folds only new turns), and
   **`graph`** (an entity-relation digest); each degrades deterministically
   without an llm and is selected by name via `[context] compaction_strategy`.
+- **Governed session kernel** (`governed_repl.py`, opt-in `[repl] enable` /
+  `MAVERICK_REPL=1`, OFF by default) — an agent writes **Python** against a
+  live namespace instead of composing fixed tool schemas, and the code is the
+  audited artifact: every statement is SHA-256 hashed, injection-screened
+  (`memory_guard`, fail-closed on a broken screen), receipted on the
+  hash-chained lineage ledger PREPARE-before/COMMIT-after (`strict=True`, so a
+  tampered chain refuses rather than extends — no receipt, no execution),
+  audited as `repl_executed` with the digest and never the source, and
+  appended to a per-session `ledger.jsonl` that outlives the session. Runs
+  through `sandbox.exec` like every other shell, so the configured backend is
+  the containment boundary; per-statement wall/output/state/statement-count
+  caps come from `[repl]`, and output is secret-redacted host-side. Continuity
+  is an explicit **JSON namespace carry** (a stdlib driver re-loads and
+  re-dumps the serializable globals), so a side-effecting statement runs
+  exactly once — no prelude replay — and values that cannot cross that
+  boundary (modules, callables, arbitrary objects) are dropped and **named**
+  in the result and the ledger. No tool bridge in v1, deliberately: a kernel
+  that reached the registry would dispatch outside `tool_authz.authorize`.
+  The module API (`open_session` / `execute` / `transcript` / `close_session`)
+  is the entry point in v1 — no CLI verb, no dashboard page. Documented in
+  [`governed-execution.md`](./governed-execution.md).
 - **Governed learning defaults on** — the in-process learning loops are enabled
   on a clean install and can be disabled individually or together from the
   dashboard Learning page. Higher-authority actions do not inherit that default:
@@ -136,6 +173,30 @@ here.
   kernel-template mutation. Reflexions now carry a `model_id` for the per-model
   mining. After *Self-Harness: Harnesses That Improve Themselves* (arXiv
   2606.09498); design in [`docs/proposals/self-harness.md`](./proposals/self-harness.md).
+- **Governed harness self-refinement** (`harness_refine.py`, opt-in
+  `[harness_refine] enable` / `MAVERICK_HARNESS_REFINE=1`, OFF by default) —
+  an agent **proposes** a change to its own operating instructions from an
+  observed failure; a human **applies** it. `propose` accepts one observation
+  (`failure/target/name/change/rationale`) against a closed target set
+  (`prompt` / `skill` / `memory`, so a proposal cannot widen its own blast
+  radius), screens every free-text field for injection tripwires (a hit
+  **refuses** — untrusted text is never queued for a write into the agent's
+  own instructions), secret-redacts it, and parks a real world-model approval
+  at `dual_control.required_approvals("high")` bound to that one target and
+  name. `require_approval` defaults ON and fails closed on a malformed value.
+  `apply` refuses unless the proposal is pending, its change still matches the
+  approved digest, the killswitch is clear, the evaluator anchors verify, and
+  the approval is approved and unspent (one-shot, burned before the effect);
+  it snapshots the overlay through the learned-state machinery first, so a
+  mid-way failure restores rather than half-writes, and emits
+  `harness_refinement_applied` **plus** `learning_update` so learned-state
+  verification covers it like a dream cycle. `revert` restores the snapshot
+  wholesale and is deliberately not gated on `enable` (turning the capability
+  off must never strand an applied refinement); `refinements()` is the read
+  seam. Stores are tenant-scoped and 0600, with their own snapshot base — never
+  the shared dream store. The module API is the entry point in v1; the human
+  half runs in the existing dashboard approval queue. Documented in
+  [`governed-execution.md`](./governed-execution.md).
 - **Evaluator co-evolution (promote a better judge, don't just freeze)** —
   `maverick.evaluator_evolution` (default-on
   `[self_improvement] evaluator_evolution`)

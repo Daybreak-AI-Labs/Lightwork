@@ -11,6 +11,7 @@ deployment.md
 reference-architectures.md
 operations.md
 safety.md
+governed-execution.md
 plugins.md
 connectors.md
 starter-goals.md
