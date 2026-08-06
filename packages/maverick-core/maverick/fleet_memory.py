@@ -313,7 +313,10 @@ def roster() -> list[dict]:
     return out
 
 
-def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
+def ingest(
+    record: dict, *, shield: Any | None = None,
+    force_data_scope: bool = False,
+) -> tuple[bool, str]:
     """Deposit one external experience record. Returns ``(ok, reason)``.
 
     Schema: ``{agent_id, vendor, kind: success|failure|lesson, goal_text,
@@ -374,7 +377,7 @@ def ingest(record: dict, *, shield: Any | None = None) -> tuple[bool, str]:
     try:
         from . import agent_trust
         enforced, registry = agent_trust.load_trust_state()
-        if enforced:
+        if enforced or force_data_scope:
             d = agent_trust.decide_memory_access(
                 agent_id, domain, registry=registry, enforced=True)
             if d.denied:
@@ -423,6 +426,7 @@ def recall(
     query: str, *, agent_id: str = "", vendor: str = "",
     domain: str | None = None, channel: str | None = None,
     user_id: str | None = None, shield: Any | None = None,
+    force_data_scope: bool = False,
 ) -> tuple[str, str]:
     """Governed memory read for an external agent. Returns ``(context, reason)``.
 
@@ -452,7 +456,7 @@ def recall(
     try:
         from . import agent_trust
         enforced, registry = agent_trust.load_trust_state()
-        if enforced:
+        if enforced or force_data_scope:
             d = agent_trust.decide_memory_access(
                 agent_id, domain, registry=registry, enforced=True)
             if d.denied:
@@ -468,7 +472,7 @@ def recall(
     def _in_scope(items: list) -> list:
         # When engaged, drop any hit whose domain != the (validated) requested
         # scope, so boost-only ranking can't surface another department's data.
-        if not enforced:
+        if not (enforced or force_data_scope):
             return items
         return [pair for pair in items
                 if getattr(pair[1], "domain", None) == domain]

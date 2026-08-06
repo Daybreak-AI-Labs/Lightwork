@@ -731,7 +731,8 @@ def memory_ingest(agent_id: str, record: dict,
         "domain": record.get("domain") or meta.get("department") or None,
     }
     with fleet_memory.bind_caller(agent_id):
-        return fleet_memory.ingest(body, shield=shield)
+        return fleet_memory.ingest(
+            body, shield=shield, force_data_scope=True)
 
 
 def memory_recall(agent_id: str, query: str, *, domain: str | None = None,
@@ -750,7 +751,8 @@ def memory_recall(agent_id: str, query: str, *, domain: str | None = None,
         return fleet_memory.recall(
             query, agent_id=agent_id,
             vendor=str(meta.get("platform") or "custom"),
-            domain=domain or meta.get("department") or None, shield=shield)
+            domain=domain or meta.get("department") or None, shield=shield,
+            force_data_scope=True)
 
 
 def _memory_counts() -> dict[str, dict]:

@@ -431,7 +431,7 @@ def test_status_aggregates_containment_and_wall_violations():
 def test_memory_ingest_and_recall_over_the_gateway(monkeypatch):
     monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
     from maverick import fleet_memory
-    _enroll()
+    _enroll(data_scopes=["sales"])
     # Enrollment registered the agent on the fleet roster under its platform.
     assert any(r["agent_id"] == "sf-quotebot" and r["vendor"] == "agentforce"
                for r in fleet_memory.roster())
@@ -456,6 +456,34 @@ def test_memory_ingest_and_recall_over_the_gateway(monkeypatch):
     ok, reason = xa.memory_ingest("sf-quotebot", {"kind": "success",
                                                   "goal_text": "x"})
     assert ok is False and "contained" in reason
+
+
+def test_gateway_memory_forces_data_scope_when_trust_plane_is_off(monkeypatch):
+    monkeypatch.setenv("MAVERICK_FLEET_MEMORY", "1")
+    monkeypatch.delenv("MAVERICK_AGENT_TRUST", raising=False)
+    from types import SimpleNamespace
+
+    from maverick import reflexion
+
+    _enroll(data_scopes=["sales"])
+    ok, reason = xa.memory_ingest("sf-quotebot", {
+        "kind": "lesson", "goal_text": "Wire controls",
+        "reflection": "Finance-only threshold", "domain": "finance",
+    })
+    assert ok is False
+    assert "finance" in reason
+
+    monkeypatch.setattr(reflexion, "recall", lambda *a, **k: [
+        (0.9, SimpleNamespace(domain="sales")),
+        (0.8, SimpleNamespace(domain="finance")),
+    ])
+    monkeypatch.setattr(
+        reflexion, "format_context",
+        lambda hits, shield=None: ",".join(h.domain for _, h in hits),
+    )
+    context, reason = xa.memory_recall("sf-quotebot", "wire controls")
+    assert reason == "ok"
+    assert context == "sales"
 
 
 def test_memory_paths_refuse_when_fleet_plane_is_off(monkeypatch):
