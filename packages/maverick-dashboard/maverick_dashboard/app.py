@@ -3743,6 +3743,11 @@ def _approval_source(provenance: str | None) -> str | None:
         return "governance · Art 14"
     if provenance == "external_agents":
         return "external agent · BYOA gateway"
+    if provenance == "harness_refine":
+        # The agent is asking to change its OWN operating instructions.
+        # An approver must be able to see that at a glance, not read it as
+        # an ordinary task approval.
+        return "self-refinement · changes the agent's instructions"
     return None
 
 @app.get("/approvals", response_class=HTMLResponse)

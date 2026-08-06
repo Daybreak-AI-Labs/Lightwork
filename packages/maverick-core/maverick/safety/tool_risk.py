@@ -41,6 +41,10 @@ RISK_LEVELS = ("low", "medium", "high")
 _DEFAULT_RISK: dict[str, str] = {
     # high: arbitrary code / host mutation / full control
     "shell": "high",
+    # The session kernel executes model-written Python. It is exactly as
+    # consequential as `shell` and must never fall through to the medium
+    # default that an unclassified name would get.
+    "repl_exec": "high",
     "computer": "high",
     "browser": "high",
     "apply_patch": "high",

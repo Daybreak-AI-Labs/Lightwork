@@ -790,6 +790,49 @@ jobs:
           --verify-manifest "$RUNNER_TEMP/governance-frontier-manifest.json"
           --trusted-pubkey-file "$RUNNER_TEMP/governance-frontier.pub"
 
+  harness-overhead:
+    # What the governance record COSTS: identical deterministic tasks run in
+    # governed and ungoverned arms, stubbed at the model boundary so both call
+    # the same pure function. No provider key, model, or network. The
+    # deterministic invariants (equal model calls / tokens / steps, identical
+    # results, the expected evidence artifacts) are hard gates; measured wall
+    # time is recorded but never a pass/fail threshold — it is machine noise.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+      - name: Install overhead benchmark dependencies
+        run: |
+          python -m pip install -e './packages/maverick-core[audit-signing]'
+          python -m pip install -e ./packages/maverick-shield
+          python -m pip install pytest pytest-asyncio
+      - name: Harness-overhead focused tests
+        run: >-
+          python -m pytest -q
+          packages/maverick-core/tests/test_eval_harness_overhead.py
+      - name: Verify checked-in harness-overhead artifacts
+        run: >-
+          python benchmarks/eval_harness_overhead.py
+          --verify-tracked-artifacts
+      - name: Assert the deterministic overhead invariants
+        run: python benchmarks/eval_harness_overhead.py --ci
+      - name: Measured offline governed-vs-ungoverned run
+        run: >-
+          python benchmarks/eval_harness_overhead.py
+          --output "$RUNNER_TEMP/harness-overhead-manifest.json"
+          --report "$RUNNER_TEMP/harness-overhead-report.md"
+          --publisher-key-out "$RUNNER_TEMP/harness-overhead.pub"
+      - name: Verify signed run manifest
+        run: >-
+          python benchmarks/eval_harness_overhead.py
+          --verify-manifest "$RUNNER_TEMP/harness-overhead-manifest.json"
+          --trusted-pubkey-file "$RUNNER_TEMP/harness-overhead.pub"
+
   postgres:
     # DB-backed tests for the Postgres world-model backend. The default `test`
     # job has no Postgres, so test_postgres_world.py skips there; this job
