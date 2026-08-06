@@ -551,9 +551,10 @@ def screen(
     if req_risk and req_risk not in RISK_LEVELS:
         return _deny_and_count(agent_id, tool, "bad_risk",
                                f"unknown risk level {req_risk!r}")
+    normalized_tool = str(tool).strip() if tool else ""
     # The operator's per-tool rating floors the caller's declaration:
     # external tool names are arbitrary, so the registry decides the risk.
-    mapped = (meta or {}).get("tool_risks", {}).get(tool)
+    mapped = (meta or {}).get("tool_risks", {}).get(normalized_tool)
     if mapped and (not req_risk
                    or risk_rank(mapped) > risk_rank(req_risk)):
         req_risk = mapped

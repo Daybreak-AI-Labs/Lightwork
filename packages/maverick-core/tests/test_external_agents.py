@@ -246,10 +246,13 @@ def test_operator_tool_risk_floors_the_declared_risk():
     assert verdict["requires_approval"] is True
     # Unrated tools keep the declared risk.
     assert xa.screen("sf-quotebot", "research", risk="low")["rule"] == "allow"
-    # A rated tool above the agent's ceiling is denied outright.
+    # A rated tool above the agent's ceiling is denied outright, even when
+    # caller-provided whitespace differs from the enrolled tool name.
     xa.enroll("low-bot", "bedrock", max_risk="low",
               allow_tools=["send_contract:high"])
     assert xa.screen("low-bot", "send_contract",
+                     risk="low")["rule"] == "capability"
+    assert xa.screen("low-bot", "send_contract ",
                      risk="low")["rule"] == "capability"
     with pytest.raises(xa.ExternalAgentsError, match="unknown risk"):
         xa.enroll("bad-bot", "bedrock", allow_tools=["x:apocalyptic"])
