@@ -139,6 +139,60 @@ content is decoded as strict UTF-8 and line endings are normalized to LF before
 hashing, so Windows CRLF and Linux LF checkouts of identical Git text share the
 same signed snapshot; any other content change still invalidates it.
 
+## What does the governance cost? (the overhead)
+
+`eval_harness_overhead.py` answers the objection the frontier suite invites:
+if every consequential action carries a receipt, an approval and an audit row,
+what does the record *cost*? It runs **12 fixed task definitions** across two
+shapes (`analysis`, read-only; `actuation`, ending on a high-risk posting
+action) twice under pinned order seeds `11,23,37` — 36 paired instances — with
+each task executed both ways:
+
+- **ungoverned** — the step list runs directly: no budget meter, no
+  authorization, no receipts, no audit rows, no screening;
+- **governed** — the *identical* step list runs through the real control plane
+  (`budget.Budget`, `tool_authz.authorize`, `governed_actions` PREPARE/COMMIT
+  receipts, world-model approvals at the `dual_control` quorum, `audit_event`
+  rows, `shield_policy` + `memory_guard` screens, `secret_detector` redaction).
+
+The model boundary is `stub://deterministic-sha256-v1`, a pure function of the
+prompt called by **both** arms, so any token or call-count difference is caused
+by governance and nothing else. No key, no network, no LLM: this is an overhead
+measurement, not a capability benchmark.
+
+The headline is a **zero** delta: same model calls, same input/output tokens,
+same task steps and tool calls, and byte-identical answers and external effects
+in every pair. That is a property of *this* control plane, not a truism — a
+governance layer built on an LLM critic or an LLM-as-judge policy would show a
+positive token delta here. What governance does cost is wall time, reported
+against the durable evidence it produces: receipts read back from the lineage
+store, audit rows off the signed chain, approvals out of the world model,
+counted separately from control invocations that gate a run but persist
+nothing. Overhead tracks the number of *consequential* actions rather than
+steps, so the `actuation` shape pays visibly more than read-only `analysis`.
+The ungoverned arm produced zero governance artifacts of any kind, which is the
+control on the measurement. Timings are host-local observations, recorded but
+never asserted: `--ci` gates only the deterministic invariants (arm equality,
+call/token/step parity, exact artifact counts). Numbers, by-shape split, and
+the "what this does not show" caveats live in
+[`HARNESS_OVERHEAD_RESULTS.md`](./HARNESS_OVERHEAD_RESULTS.md), generated from
+an Ed25519-signed manifest with the run public key emitted alongside it.
+
+```bash
+python benchmarks/eval_harness_overhead.py
+python benchmarks/eval_harness_overhead.py --ci
+python benchmarks/eval_harness_overhead.py \
+  --verify-manifest benchmarks/results/harness-overhead-v1/measured-manifest.json \
+  --trusted-pubkey-file \
+  benchmarks/results/harness-overhead-v1/trusted-publisher.pub
+python benchmarks/eval_harness_overhead.py --verify-tracked-artifacts
+python -m pytest -q packages/maverick-core/tests/test_eval_harness_overhead.py
+```
+
+The three runtime planes that ride these same evidence surfaces — the governed
+session kernel, harness self-refinement, and run forking — are documented in
+[`../docs/governed-execution.md`](../docs/governed-execution.md).
+
 ## Comparing across providers
 
 Re-run the same benchmark with different `[models]` config blocks:

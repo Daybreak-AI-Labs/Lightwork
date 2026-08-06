@@ -1811,6 +1811,39 @@ def _ask_external_agent_followups(advanced: dict[str, Any]) -> None:
         advanced["external_mint_approval"] = True
 
 
+def _ask_governed_execution_followups(advanced: dict[str, Any]) -> None:
+    """Follow-ups for the two default-off governed-execution planes.
+
+    The session kernel's containment IS the sandbox backend, which was already
+    chosen several steps back, so the note points back at that answer and
+    names the backends that can host a session at all: the kernel writes its
+    driver, statement and result file into the sandbox workdir, which ssh and
+    kubernetes do not share with the host.
+
+    Self-refinement's approval gate is asked separately because it is the
+    whole reason an agent may write its own instructions at all; declining it
+    is a real choice, so it is written explicitly rather than defaulted.
+    """
+    if advanced.get("repl"):
+        console.print(
+            "[dim]  The kernel runs model-written Python through "
+            "sandbox.exec, so the sandbox backend you picked earlier is its "
+            "containment boundary: it should be docker/gvisor/podman -- "
+            "'local' runs that code on this machine. ssh and kubernetes "
+            "cannot host a session (the kernel needs a workdir shared with "
+            "the host); edit [sandbox] backend if you chose one of those."
+            "[/dim]"
+        )
+    if advanced.get("harness_refine") and not _q_confirm(
+        "  Require a human approval before a refinement is applied? Each "
+        "proposal parks a dual-control approval bound to that one target and "
+        "name, spent once. Declining lets an applied refinement rewrite the "
+        "agent's own instructions with no human decision. ON by default.",
+        default=True,
+    ):
+        advanced["harness_refine_require_approval"] = False
+
+
 def pick_advanced() -> dict[str, Any]:
     """Configure advanced reasoning, learning, and governance features.
 
@@ -1905,6 +1938,30 @@ def pick_advanced() -> dict[str, Any]:
             "runs on the Operating Record. An explicit trust decision; OFF "
             "by default.",
             default=False,
+        ),
+        "repl": _q_confirm(
+            "Governed session kernel? Let an agent write PYTHON against a live "
+            "namespace instead of composing fixed tool calls -- every "
+            "statement is hashed, injection-screened, receipted on the "
+            "tamper-evident chain and audited. It admits ARBITRARY CODE "
+            "EXECUTION, so run it on a container sandbox backend "
+            "(docker/gvisor/podman), never on 'local'. OFF by default.",
+            default=False,
+        ),
+        "harness_refine": _q_confirm(
+            "Governed self-refinement? Let an agent PROPOSE a change to its "
+            "own operating instructions (prompt / skill / memory) from a "
+            "failure it observed. Nothing self-applies: a proposal parks a "
+            "human approval, applying is snapshotted and reversible, and both "
+            "ends land in the signed learning audit. OFF by default.",
+            default=False,
+        ),
+        "session_tree": _q_confirm(
+            "Run forking? Branch a run at a decision point so Oversight can "
+            "read what the agent chose beside the alternative, under one root "
+            "on the Run Tree page. Lineage only -- forking re-executes "
+            "nothing and spends no tokens. ON by default.",
+            default=True,
         ),
         "memory_guard": _q_confirm(
             "Memory Guard (OWASP ASI06)? Screen every stored fact for prompt-"
@@ -2429,6 +2486,9 @@ def pick_advanced() -> dict[str, Any]:
             advanced["flows_public_url"] = flows_url
     if advanced.get("external_agents"):
         _ask_external_agent_followups(advanced)
+    # Both governed-execution planes are off by default, so the helper guards
+    # each of its own questions rather than gating the call.
+    _ask_governed_execution_followups(advanced)
     # Self-harness has a handful of optional paths beyond the validation floors
     # written by default. Only worth asking once the loop itself is on; each
     # stays at its historical default unless the operator opts in here.
@@ -4272,6 +4332,23 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
             _emit_kv(lines, "connectors", advanced["external_connectors"])
         if advanced.get("external_mint_approval"):
             lines.append("mint_approval = true")
+    if advanced.get("repl"):
+        lines.append("")
+        lines.append("[repl]")
+        lines.append("enable = true")
+    if advanced.get("harness_refine"):
+        lines.append("")
+        lines.append("[harness_refine]")
+        lines.append("enable = true")
+        # require_approval defaults ON (a proposal must never self-apply), so
+        # only an explicit decline is written.
+        if advanced.get("harness_refine_require_approval") is False:
+            lines.append("require_approval = false")
+    # Forking defaults ON (lineage only, no execution); only a decline writes.
+    if advanced.get("session_tree") is False:
+        lines.append("")
+        lines.append("[session_tree]")
+        lines.append("enable = false")
     if advanced.get("memory_guard"):
         lines.append("")
         lines.append("[memory_guard]")

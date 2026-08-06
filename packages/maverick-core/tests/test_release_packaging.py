@@ -1535,18 +1535,27 @@ def test_secret_scan_excludes_only_the_rotating_signed_manifest():
     assert len(patterns) == 1
     exclusion = re.compile(patterns[0])
 
-    manifest = (
-        "benchmarks/results/governance-frontier-v1/measured-manifest.json"
+    # Each published suite's rotating manifest is named EXPLICITLY. The
+    # exclusion must never become a wildcard over benchmarks/results: a new
+    # suite's artifacts would then be able to carry a real secret past the
+    # scanner the day they land, before anyone had audited them.
+    manifests = (
+        "benchmarks/results/governance-frontier-v1/measured-manifest.json",
+        "benchmarks/results/harness-overhead-v1/measured-manifest.json",
     )
-    assert exclusion.search(manifest)
-    assert exclusion.search(manifest.replace("/", "\\"))
+    for manifest in manifests:
+        assert exclusion.search(manifest)
+        assert exclusion.search(manifest.replace("/", "\\"))
+        assert not exclusion.search(f"{manifest}.bak")
     assert not exclusion.search(
         "benchmarks/results/governance-frontier-v1/trusted-publisher.pub"
     )
     assert not exclusion.search(
         "benchmarks\\results\\governance-frontier-v1\\trusted-publisher.pub"
     )
-    assert not exclusion.search(f"{manifest}.bak")
+    assert not exclusion.search(
+        "benchmarks/results/harness-overhead-v1/trusted-publisher.pub"
+    )
     assert not exclusion.search(
         "benchmarks/results/another-run/measured-manifest.json"
     )

@@ -28,6 +28,7 @@ nav:
       - Reference architectures: reference-architectures.md
       - Operations: operations.md
       - Safety: safety.md
+      - Governed execution: governed-execution.md
       - Plugins: plugins.md
       - Connectors: connectors.md
       - Starter goals: starter-goals.md

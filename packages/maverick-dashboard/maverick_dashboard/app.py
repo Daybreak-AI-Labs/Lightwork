@@ -3291,6 +3291,40 @@ async def oversight_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/run-tree", response_class=HTMLResponse)
+async def run_tree_page(request: Request) -> HTMLResponse:
+    """Counterfactual review: the runs that were forked, and their branches.
+
+    Read-only. Forking happens on the run itself; this is where a reviewer
+    reads what the agent chose against what the alternative did, under one
+    root. Owner-scoped like the goal listings, and fail-soft: an unreadable
+    lineage sidecar renders the empty state, never a 500.
+    """
+    from maverick import session_tree
+    owner_filter = goal_owner_filter(request)
+    rows = session_tree.roots(limit=200)
+    if owner_filter is not None:
+        rows = [r for r in rows if r["owner"] == owner_filter]
+    selected = request.query_params.get("goal")
+    try:
+        goal_id = int(selected) if selected else (rows[0]["goal_id"] if rows else 0)
+    except (TypeError, ValueError):
+        goal_id = 0
+    tree = session_tree.tree(goal_id) if goal_id else {}
+    if tree and owner_filter is not None and tree.get("owner") != owner_filter:
+        tree = {}
+    try:
+        from maverick.config import get_session_tree
+        cfg = get_session_tree()
+    except Exception:  # pragma: no cover - unreadable config => documented defaults
+        cfg = {"enable": False, "max_depth": 10}
+    return templates.TemplateResponse(
+        request, "run_tree.html",
+        {"enabled": bool(cfg.get("enable")), "max_depth": cfg.get("max_depth"),
+         "roots": rows, "tree": tree},
+    )
+
+
 @app.get("/safety", response_class=HTMLResponse)
 async def safety_page(request: Request) -> HTMLResponse:
     """Shield activity: what the safety layer blocked, by stage and reason."""
