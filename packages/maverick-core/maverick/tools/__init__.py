@@ -718,6 +718,18 @@ def base_registry(
     # single contribution to SWE-bench scores — eliminates ~30% of
     # apply-fail failures by side-stepping hand-authored diffs.
     reg.register(str_replace_editor(sandbox))
+    # Governed session kernel. Registered ONLY when the operator has turned
+    # it on: an unregistered tool costs no catalog tokens and cannot be
+    # called, so the default deployment is unchanged.
+    try:
+        from ..governed_repl import enabled as _repl_enabled
+        if _repl_enabled():
+            from .repl import repl_exec
+            reg.register(repl_exec(goal_id=goal_id, principal=principal))
+    except Exception as e:  # pragma: no cover - config read must not break setup
+        import logging as _repl_logging
+        _repl_logging.getLogger(__name__).warning(
+            "repl tool registration skipped: %s", e)
 
     from .a11y import a11y
     from .a11y_tree import a11y_tree

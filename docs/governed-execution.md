@@ -10,9 +10,9 @@ shipped.
 
 | Plane | Module | Config | Default | Where you see it |
 | --- | --- | --- | --- | --- |
-| Session kernel | `governed_repl.py` | `[repl]` | **off** | Module API; `repl_executed` audit rows |
-| Self-refinement | `harness_refine.py` | `[harness_refine]` | **off** | Approval queue (`/approvals`); signed learning audit |
-| Run forking | `session_tree.py` | `[session_tree]` | **on** | **Run Tree** page (`/run-tree`) |
+| Session kernel | `governed_repl.py` | `[repl]` | **off** | `repl_exec` agent tool; `maverick repl`; `repl_executed` audit rows |
+| Self-refinement | `harness_refine.py` | `[harness_refine]` | **off** | Approval queue (`/approvals`); `maverick refine`; the standing brief; signed learning audit |
+| Run forking | `session_tree.py` | `[session_tree]` | **on** | **Run Tree** page (`/run-tree`); `maverick run-tree` |
 
 All three are asked in the installer wizard's advanced flow (**Governed
 session kernel?**, **Governed self-refinement?**, **Run forking?**), and
@@ -74,8 +74,27 @@ refuses.
 
 ### Using it
 
-The interface in v1 is the module API — there is no CLI verb and no dashboard
-page for the kernel itself.
+Three ways in, all through the same governed path.
+
+**The agent.** When `[repl] enable` is on, the tool registry gains a
+`repl_exec` tool and the agent can write Python instead of composing tool
+schemas. One session is opened per goal and reused for the rest of the run,
+so state built in one call is still bound in the next. The tool is registered
+only when the knob is on — while it is off the tool does not appear in the
+catalog at all, so it costs no prompt tokens and cannot be called. It is
+classified `high` risk alongside `shell`, and it is never parallel-safe.
+
+**The CLI**, for operators and for trying it by hand:
+
+```console
+$ maverick repl exec 'rows = [1, 2, 3]'
+$ maverick repl exec 'print(sum(rows))' --session <id>
+6
+$ maverick repl transcript <id>     # the append-only statement ledger
+$ maverick repl close <id>
+```
+
+**The module API**, for embedding:
 
 ```python
 from maverick import governed_repl as repl
@@ -181,7 +200,31 @@ of leaving it half-written, and emits both `harness_refinement_applied` and
 exactly like a dream cycle.
 
 **`refinements(target=None)`** is the read seam: the applied overlay, newest
-first. A governed write nothing reads would be inert.
+first. A governed write nothing reads would be inert — so the orchestrator
+consumes it. Applied `prompt` refinements are folded into the agent's
+standing brief on every run, under a heading that says a human approved
+them, after the same redaction and Shield pass the facts block gets (the
+observation behind a refinement can originate in an untrusted run). The
+block is bounded like every other standing section: the newest 20 entries,
+500 characters each. An unreadable overlay yields an empty block rather than
+failing the run.
+
+The whole lifecycle is also available as CLI verbs, so a headless install can
+drive it:
+
+```console
+$ maverick refine propose --failure "cited no sources" \
+    --change "Always cite the source file for a claim."
+proposal 7f3c… · pending
+awaiting approval #128 (decide it in the dashboard queue)
+$ maverick refine apply 7f3c… --approval-id 128
+$ maverick refine show      # what the agent is actually being told
+$ maverick refine revert 7f3c…
+```
+
+In the approvals queue a refinement is labelled **self-refinement · changes
+the agent's instructions**, so an approver can see at a glance that this is
+the agent asking to rewrite its own guidance rather than an ordinary task.
 
 ### Enabling
 
@@ -291,6 +334,10 @@ session_tree.lineage(child)   # {'goal_id', 'parent', 'children', 'depth', 'root
 session_tree.tree(42)         # the nested branch tree under a root
 session_tree.roots(limit=50)  # runs that have been forked, newest fork first
 ```
+
+The same three operations exist as CLI verbs — `maverick run-tree fork
+<goal> --at-event <id> --label "…"`, `maverick run-tree show <goal>`, and
+`maverick run-tree list` — alongside the read-only **/run-tree** dashboard page.
 
 `at_event` is an absolute **`goal_events.id`**, not an offset: `goal_events.id`
 is a global autoincrement with no per-goal sequence column, so an offset would

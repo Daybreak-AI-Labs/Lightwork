@@ -542,6 +542,58 @@ def _maybe_record_reflexion(
         )
 
 
+#: Applied refinements are standing instructions on every run, so the block
+#: is bounded the same way the facts block is.
+_REFINE_MAX = 20
+_REFINE_MAX_CHARS = 500
+
+
+def _brief_refinements_block(shield: Any | None) -> str:
+    """Human-approved harness refinements, as standing guidance.
+
+    Every entry here cleared a dual-control approval bound to its digest and
+    was snapshotted on apply, so unlike facts these are NOT untrusted input
+    — a human authorized this exact text. We still redact and shield-scan:
+    the observation that motivated a refinement can originate in an
+    untrusted run, and defence in depth at a prompt boundary is cheap.
+    Returns "" when the plane is off, empty, or unreadable (fail-soft: a
+    broken store must never take the agent down)."""
+    try:
+        from . import harness_refine
+        if not harness_refine.enabled():
+            return ""
+        applied = harness_refine.refinements(target="prompt")
+    except Exception:  # pragma: no cover -- never block a run on the overlay
+        return ""
+    if not applied:
+        return ""
+    from .compaction import excerpt
+    lines: list[str] = []
+    for entry in applied[:_REFINE_MAX]:
+        text = str(entry.get("change") or "").strip()
+        if not text:
+            continue
+        try:
+            from .safety.secret_detector import redact as _redact
+            text, _ = _redact(text)
+        except Exception:  # pragma: no cover
+            pass
+        text = text.replace("\r", " ").replace("\n", " ")
+        text = excerpt(text, _REFINE_MAX_CHARS)
+        if shield is not None:
+            try:
+                verdict = shield.scan_input(text)
+                if not getattr(verdict, "allowed", True):
+                    continue
+            except Exception:  # pragma: no cover
+                continue
+        lines.append(f"  - {text}")
+    if not lines:
+        return ""
+    return ("Standing refinements (approved by a human operator; follow "
+            "them):\n" + "\n".join(lines) + "\n\n")
+
+
 def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> str:
     """Redacted, shield-scanned, trust-filtered facts section of the brief.
     [features] world_model gates it; Memory Guard drops low-trust facts."""
@@ -920,11 +972,19 @@ async def _build_orchestrator_brief(
         except Exception:  # pragma: no cover -- never block a run on routing
             description = goal.description
 
+    # Applied harness refinements. This is the READ side of
+    # maverick.harness_refine: a refinement that a human approved and that
+    # was snapshotted on apply becomes a standing instruction here. Without
+    # this block the whole propose/approve/apply loop writes a store nothing
+    # consumes, so an operator's approval would change nothing.
+    refine_block = _brief_refinements_block(shield)
+
     brief = (
         f"Top-level goal: {goal.title}\n"
         f"Description: {description}\n"
         f"{history_block}"
         f"{qa_block}\n"
+        f"{refine_block}"
         # Facts are writable from untrusted sources (the agent's own kv_memory
         # set, the dashboard set_fact endpoint, MCP), so a fact value can be a
         # stored prompt injection that persists across runs. Frame it as DATA

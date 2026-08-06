@@ -663,6 +663,63 @@ def _check_agent_trust() -> None:
              fix="rotate the credential before it lapses (maverick trust ...)")
 
 
+def _check_governed_execution() -> None:
+    """Surface the two execution planes an operator can arm by accident.
+
+    The kernel runs model-written code, so an operator needs to see that it
+    is ON and — more importantly — whether it is running against a real
+    container sandbox or the local host backend. Refinement is flagged when
+    its approval gate is disarmed (the agent can then rewrite its own
+    standing instructions with no human in the loop) and when proposals are
+    piling up unread."""
+    try:
+        from .config import get_harness_refine, get_repl
+        repl_cfg = get_repl()
+        refine_cfg = get_harness_refine()
+    except Exception as e:  # pragma: no cover - never break doctor
+        _row(YELLOW, "governed-execution", f"config unavailable: {e}")
+        return
+    if not repl_cfg.get("enable"):
+        _row(GREEN, "session-kernel", "disabled (default)")
+    else:
+        contained = False
+        try:
+            from .sandbox import container_backend_required
+            contained = bool(container_backend_required())
+        except Exception:  # pragma: no cover
+            contained = False
+        if contained:
+            _row(GREEN, "session-kernel",
+                 "enabled — statements run in a container sandbox")
+        else:
+            _row(YELLOW, "session-kernel",
+                 "enabled WITHOUT a container backend — model-written code "
+                 "runs on this host with a scrubbed environment",
+                 fix="set [sandbox] backend to a container runtime, or "
+                     "unset [repl] enable")
+    if not refine_cfg.get("enable"):
+        _row(GREEN, "self-refinement", "disabled (default)")
+        return
+    if not refine_cfg.get("require_approval"):
+        _row(RED, "self-refinement",
+             "ENABLED with require_approval OFF — the agent can rewrite its "
+             "own standing instructions with no human decision",
+             fix="set [harness_refine] require_approval = true")
+        return
+    try:
+        from .harness_refine import list_proposals
+        pending = len(list_proposals(status="pending"))
+    except Exception:  # pragma: no cover
+        pending = 0
+    detail = "enabled — every change needs a human approval"
+    if pending:
+        _row(YELLOW, "self-refinement",
+             f"{detail}; {pending} proposal(s) awaiting a decision",
+             fix="review them in the approvals queue")
+    else:
+        _row(GREEN, "self-refinement", detail)
+
+
 def _check_external_agents() -> None:
     """Surface the bring-your-own-agent gateway state: an enabled plane with
     zero enrollments, contained agents nobody released, and over-budget
@@ -815,6 +872,7 @@ def diagnose() -> int:
     _check_shield()
     _check_agent_trust()
     _check_external_agents()
+    _check_governed_execution()
     _check_tls_cert_expiry()
     click.echo("")
     if _FAILURES:
