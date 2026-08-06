@@ -196,6 +196,15 @@ class EventKind:
     # A run forked from another at a specific point in its event trail, so the
     # Operating Record can hold counterfactuals side by side.
     SESSION_FORKED = "session_forked"
+    # The prompt loop: the platform composing the operator's next work order.
+    # PROPOSED is one row per cycle (payload: cycle, orders, sources, top,
+    # composer) -- the queue is advice, so the batch is the auditable unit.
+    # DISPATCHED is one row per order actually handed back to the agent as a
+    # goal in auto mode (payload: order, digest, order_kind, risk,
+    # dispatched_by; goal_id carries the row). Never the prompt text itself:
+    # it lives in the goal description, which redacts and bounds.
+    PROMPT_LOOP_PROPOSED = "prompt_loop_proposed"
+    PROMPT_LOOP_DISPATCHED = "prompt_loop_dispatched"
     # Learning governance: one row per dream cycle (what the learning system
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.

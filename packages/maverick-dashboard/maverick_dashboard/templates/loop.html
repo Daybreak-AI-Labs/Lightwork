@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Next · Lightwork{% endblock %}
+{% block content %}
+<style>
+  /* The prompt loop queue — scoped. The prompt itself is the hero: it is the
+     thing a human copies, so it gets monospace, room to breathe, and a copy
+     button rather than being folded into a table cell. */
+  .pl-order { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1); padding: 1rem 1.1rem; margin-bottom: 1rem; }
+  .pl-order.pl-top { border-color: var(--accent, var(--border)); }
+  .pl-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.5rem; }
+  .pl-head h2 { margin: 0; font-size: var(--text-md, 1rem); }
+  .pl-why { color: var(--muted); margin: 0.5rem 0 0.75rem; }
+  .pl-prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-sm, 0.86rem); white-space: pre-wrap; background: var(--surface-2, var(--surface-1)); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 0.9rem; max-height: 22rem; overflow: auto; margin: 0; }
+  .pl-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; align-items: center; }
+  .pl-actions input[type=text] { flex: 1 1 18rem; min-width: 12rem; }
+  .pl-score { color: var(--muted); font-size: var(--text-sm, 0.86rem); font-variant-numeric: tabular-nums; }
+  .pl-next { margin-top: 0.75rem; border-left: 2px solid var(--accent, var(--border)); padding-left: 0.9rem; }
+</style>
+
+  <h1 class="page-title">Next</h1>
+  <p class="page-subtitle">What the platform thinks you should do next, written as a prompt you can run. The queue is composed from what is true right now — approvals waiting on a human, failures that keep recurring, work stuck in flight, learning that has frozen, code nothing reaches. Report back on one and the loop composes the follow-up itself.</p>
+
+  <div class="panel">
+    <p style="margin: 0;">
+      {% if status.enabled %}<span class="badge active">loop on</span>
+      {% else %}<span class="badge">loop off — enable [prompt_loop] in Settings</span>{% endif %}
+      <span class="badge">{{ status.mode }} mode</span>
+      {% if not status.readable %}<span class="badge">ledger unreadable — the loop is refusing rather than starting from a blank queue</span>{% endif %}
+      <span class="badge">{{ status.cycles or 0 }} cycle{{ '' if status.cycles == 1 else 's' }}</span>
+      <span class="badge">{{ status.open or 0 }} open</span>
+      <span class="badge">{{ status.done or 0 }} done</span>
+      {% if status.compose_with_model %}<span class="badge">model composer on</span>{% endif %}
+      <button type="button" class="btn" id="pl-cycle" style="margin-left:0.75rem">Look again</button>
+    </p>
+    <p class="muted" style="margin:0.6rem 0 0">A cycle reads the deployment and spends nothing: no tokens, no network, no execution. In <strong>advise</strong> mode the queue is text for a human. In <strong>auto</strong> mode an order may be handed back to the agent as a goal — under the risk ceiling, once, and against a digest of the exact prompt that was approved.</p>
+  </div>
+
+  <div id="pl-queue">
+  {% if orders %}
+    {% for o in orders %}
+    <div class="pl-order{% if loop.first %} pl-top{% endif %}" data-id="{{ o.id }}">
+      <div class="pl-head">
+        <h2>{{ o.title }}</h2>
+        <span class="badge">{{ o.kind }}</span>
+        <span class="badge">{{ o.risk }} risk</span>
+        <span class="badge">{{ o.source }}</span>
+        {% if o.state != 'open' %}<span class="badge active">{{ o.state }}</span>{% endif %}
+        <span class="pl-score">score {{ o.score }}
+          {%- if o.components %} · impact {{ o.components.impact }} · confidence {{ o.components.confidence }} · effort {{ o.components.effort }} · affinity {{ o.components.affinity }}{% endif %}</span>
+      </div>
+      <p class="pl-why">{{ o.rationale }}</p>
+      <pre class="pl-prompt" id="pl-prompt-{{ o.id }}">{{ o.prompt }}</pre>
+      <div class="pl-actions">
+        <button type="button" class="btn" data-copy="{{ o.id }}">Copy prompt</button>
+        <button type="button" class="btn" data-take="{{ o.id }}">Take it</button>
+        <input type="text" data-outcome="{{ o.id }}"
+               aria-label="What happened on this work order — the follow-up prompt is composed from it"
+               placeholder="What happened? The follow-up is composed from this.">
+        <button type="button" class="btn" data-done="{{ o.id }}">Done</button>
+        <button type="button" class="btn" data-skip="{{ o.id }}">Not now</button>
+      </div>
+      <div class="pl-next" hidden></div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="panel">
+      <p style="margin:0">Nothing is queued. Press <strong>Look again</strong> to run a cycle — if nothing is wrong, the loop offers the next standing hardening pass rather than an empty screen.</p>
+    </div>
+  {% endif %}
+  </div>
+
+  {% if recent %}
+  <div class="panel">
+    <h2 style="margin-top:0">Recently completed</h2>
+    <table>
+      <thead><tr><th>Order</th><th>Kind</th><th>Source</th><th>Outcome</th></tr></thead>
+      <tbody>
+        {% for o in recent %}
+        <tr>
+          <td>{{ o.title }}</td>
+          <td><span class="badge">{{ o.kind }}</span></td>
+          <td class="muted">{{ o.source }}</td>
+          <td class="muted">{{ o.outcome or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+<script>
+(function () {
+  {% include "_dash_helpers.js" %}
+
+  function card(id) { return document.querySelector('.pl-order[data-id="' + id + '"]'); }
+  function outcomeOf(id) {
+    var input = document.querySelector('input[data-outcome="' + id + '"]');
+    return input ? input.value : '';
+  }
+  function note(id, text) {
+    var box = card(id) && card(id).querySelector('.pl-next');
+    if (!box) return;
+    box.hidden = false;
+    box.textContent = text;
+  }
+
+  async function post(url, body) {
+    var res = await api(url, { method: 'POST', body: JSON.stringify(body || {}) });
+    var data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) throw new Error((data && data.detail) || ('HTTP ' + res.status));
+    return data;
+  }
+
+  document.addEventListener('click', async function (ev) {
+    var t = ev.target;
+    if (!t || t.tagName !== 'BUTTON') return;
+
+    if (t.id === 'pl-cycle') {
+      t.disabled = true;
+      try { await post('/api/v1/loop/cycle'); location.reload(); }
+      catch (e) { t.disabled = false; alert('Could not run a cycle: ' + e.message); }
+      return;
+    }
+    var copyId = t.getAttribute('data-copy');
+    if (copyId) {
+      var pre = document.getElementById('pl-prompt-' + copyId);
+      if (pre && navigator.clipboard) {
+        await navigator.clipboard.writeText(pre.textContent);
+        t.textContent = 'Copied';
+        setTimeout(function () { t.textContent = 'Copy prompt'; }, 1500);
+      }
+      return;
+    }
+    var takeId = t.getAttribute('data-take');
+    if (takeId) {
+      try { await post('/api/v1/loop/' + encodeURIComponent(takeId) + '/take'); location.reload(); }
+      catch (e) { alert('Could not take it: ' + e.message); }
+      return;
+    }
+    var doneId = t.getAttribute('data-done');
+    if (doneId) {
+      try {
+        var out = await post('/api/v1/loop/' + encodeURIComponent(doneId) + '/done',
+                             { outcome: outcomeOf(doneId) });
+        if (out && out.next) {
+          note(doneId, 'Next, composed from that outcome — ' + out.next.title);
+          setTimeout(function () { location.reload(); }, 1200);
+        } else {
+          location.reload();
+        }
+      } catch (e) { alert('Could not close it: ' + e.message); }
+      return;
+    }
+    var skipId = t.getAttribute('data-skip');
+    if (skipId) {
+      try {
+        await post('/api/v1/loop/' + encodeURIComponent(skipId) + '/skip',
+                   { outcome: outcomeOf(skipId) });
+        location.reload();
+      } catch (e) { alert('Could not skip it: ' + e.message); }
+    }
+  });
+})();
+</script>
+{% endblock %}

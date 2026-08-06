@@ -1706,6 +1706,38 @@ def get_harness_refine() -> dict:
     }
 
 
+def get_prompt_loop() -> dict:
+    """Return the ``[prompt_loop]`` section (the self-prompting work loop).
+
+    The loop reads what is true about the deployment right now and writes the
+    operator's next work order — a ready-to-run prompt with its rationale,
+    evidence and definition of done. Observation and advice are ON by default:
+    they are read-only, spend no tokens, and reach no network.
+
+    The two halves that are not free are OFF by default and fail closed on a
+    malformed value. ``compose_with_model`` lets a live model sharpen the
+    wording of a prompt (never its risk band or score). ``mode = "auto"`` lets
+    the loop hand its own order back to the agent as a goal, bounded by
+    ``auto_risk_ceiling`` and, unless explicitly disarmed, a human approval
+    bound to a digest of the exact prompt."""
+    cfg = load_config().get("prompt_loop", {})
+    mode = str(cfg.get("mode", "advise") or "advise").strip().lower()
+    ceiling = str(cfg.get("auto_risk_ceiling", "low") or "low").strip().lower()
+    return {
+        "enable": _strict_config_bool(cfg, "enable", True, invalid=True),
+        # An unrecognised mode advises. Autonomy is never reached by typo.
+        "mode": mode if mode in ("advise", "auto") else "advise",
+        "compose_with_model": _strict_config_bool(
+            cfg, "compose_with_model", False, invalid=False),
+        # Fail CLOSED: a malformed value must never disarm the approval gate.
+        "require_approval": _strict_config_bool(
+            cfg, "require_approval", True, invalid=True),
+        "auto_risk_ceiling": ceiling if ceiling in ("low", "medium", "high")
+        else "low",
+        "max_orders": max(1, min(200, int(cfg.get("max_orders", 50) or 50))),
+    }
+
+
 def get_session_tree() -> dict:
     """Return the ``[session_tree]`` section (run forking + provenance).
 

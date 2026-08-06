@@ -6789,6 +6789,7 @@ from . import (  # noqa: E402,F401
     _import_groups,
     _knowledge_groups,
     _learning_groups,
+    _loop_groups,
     _ops_groups,
     _reporting_groups,
     _training_groups,

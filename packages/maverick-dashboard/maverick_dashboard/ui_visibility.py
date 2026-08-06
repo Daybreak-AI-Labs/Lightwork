@@ -44,6 +44,11 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "operate"},
     {"path": "/chat", "label": "Chat", "group": "Operate", "icon": "chat",
      "floor": "view", "default": "operate"},
+    # The prompt loop: the platform's own answer to "what should I do next",
+    # written as a runnable prompt. Operate default -- taking and closing an
+    # order changes queue state, so it belongs with the doing pages.
+    {"path": "/loop", "label": "Next", "group": "Operate", "icon": "target",
+     "floor": "view", "default": "operate"},
     {"path": "/goals", "label": "Goals", "group": "Operate", "icon": "target",
      "floor": "view", "default": "view"},
     # Alternate goal composers, linked from the Goals page toolbar.

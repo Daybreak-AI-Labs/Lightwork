@@ -2922,6 +2922,27 @@ async def external_agent_scorecard(request: Request,
                                       {"a": detail})
 
 
+@app.get("/loop", response_class=HTMLResponse)
+async def prompt_loop_page(request: Request) -> HTMLResponse:
+    """The next best thing to do, written as a prompt you can run.
+
+    The queue is composed by the platform from what is true right now; the
+    page is where a human picks one, takes it, and reports back — and the
+    report composes the follow-up."""
+    from maverick import prompt_loop as pl
+    try:
+        orders = pl.next_orders(limit=10)
+        recent = pl.next_orders(limit=10, state="done")
+    except pl.PromptLoopError as e:
+        orders, recent = [], []
+        log.warning("prompt loop ledger unreadable: %s", e)
+    return templates.TemplateResponse(request, "loop.html", {
+        "status": pl.status(),
+        "orders": orders,
+        "recent": recent,
+    })
+
+
 @app.get("/discovery", response_class=HTMLResponse)
 async def discovery_page(request: Request) -> HTMLResponse:
     """Inventory every governable surface the deployment exposes (tools, MCP

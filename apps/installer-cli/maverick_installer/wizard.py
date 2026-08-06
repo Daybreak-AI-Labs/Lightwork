@@ -1956,6 +1956,23 @@ def pick_advanced() -> dict[str, Any]:
             "ends land in the signed learning audit. OFF by default.",
             default=False,
         ),
+        "prompt_loop": _q_confirm(
+            "Prompt loop? Let the platform write your NEXT work order — it "
+            "reads what is true right now (approvals waiting, failures that "
+            "keep recurring, work stuck in flight, learning that has frozen, "
+            "code nothing reaches) and composes a ready-to-run prompt with "
+            "its evidence and definition of done. Read-only: no tokens, no "
+            "network, nothing executes. ON by default.",
+            default=True,
+        ),
+        "prompt_loop_auto": _q_confirm(
+            "  ...and let it RUN its own orders? In auto mode the loop can "
+            "hand a low-risk order back to the agent as a goal, once, against "
+            "a human approval bound to a digest of that exact prompt. This is "
+            "the line between an advisor and an autonomous scheduler. OFF by "
+            "default.",
+            default=False,
+        ),
         "session_tree": _q_confirm(
             "Run forking? Branch a run at a decision point so Oversight can "
             "read what the agent chose beside the alternative, under one root "
@@ -4344,6 +4361,19 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         # only an explicit decline is written.
         if advanced.get("harness_refine_require_approval") is False:
             lines.append("require_approval = false")
+    # The loop defaults ON (read-only advice); only a decline, or the explicit
+    # step up to auto mode, writes a section.
+    if advanced.get("prompt_loop") is False:
+        lines.append("")
+        lines.append("[prompt_loop]")
+        lines.append("enable = false")
+    elif advanced.get("prompt_loop_auto"):
+        lines.append("")
+        lines.append("[prompt_loop]")
+        lines.append('mode = "auto"')
+        # require_approval defaults ON and auto_risk_ceiling to "low"; the
+        # wizard never writes the weaker values, so stepping up to auto still
+        # lands on the gated, low-risk-only configuration.
     # Forking defaults ON (lineage only, no execution); only a decline writes.
     if advanced.get("session_tree") is False:
         lines.append("")

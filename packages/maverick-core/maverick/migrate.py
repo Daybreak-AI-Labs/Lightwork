@@ -58,7 +58,7 @@ KNOWN_SECTIONS = frozenset({
     "obsidian", "operations_scientist",
     "perf", "persona", "planning", "plugins", "privacy",
     "privacy_ops", "provider_failover", "providers", "queue", "quotas", "reflexion",
-    "repl", "harness_refine", "session_tree",
+    "repl", "harness_refine", "session_tree", "prompt_loop",
     "retention", "role_assignments", "roles", "routing", "safety",
     "sandbox", "screening", "search", "security", "self_learning",
     "sharing", "shield", "skill_synthesis", "skills", "security_ops",

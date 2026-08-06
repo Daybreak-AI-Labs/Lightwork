@@ -112,6 +112,7 @@ from .api_schemas import (
     OutcomeIn,
     OutcomeLinkIn,
     PartnerTenantIn,
+    PromptLoopOutcomeIn,
     RedactIn,
     ReparentIn,
     RetitleIn,
@@ -8201,6 +8202,88 @@ async def external_agent_unenroll(request: Request, agent_id: str) -> None:
     if not xa.unenroll(agent_id):
         raise HTTPException(status_code=404,
                             detail=f"agent {agent_id!r} is not enrolled")
+
+
+@router.get("/loop")
+async def prompt_loop_queue(request: Request, limit: int = 10,
+                            state: str = "open") -> dict:
+    """The prompt loop's queue: what the platform thinks you should do next.
+
+    Read-only. Each order carries the whole prompt plus the score components
+    that put it where it is, so the ranking is legible rather than trusted."""
+    from maverick import prompt_loop as pl
+    try:
+        orders = pl.next_orders(limit=max(1, min(50, int(limit))),
+                                state=state.strip())
+    except pl.PromptLoopError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    return {"status": pl.status(), "orders": orders}
+
+
+@router.post("/loop/cycle")
+async def prompt_loop_cycle(request: Request, limit: int = 5) -> dict:
+    """Run one observe → compose → rank pass and return the new orders."""
+    require_permission(request, "operate")
+    from maverick import prompt_loop as pl
+    from maverick.world_model import open_world
+    try:
+        orders = pl.cycle(world=open_world(), limit=max(1, min(20, int(limit))))
+    except pl.PromptLoopError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"orders": orders, "status": pl.status()}
+
+
+@router.post("/loop/{order_id}/take")
+async def prompt_loop_take(request: Request, order_id: str) -> dict:
+    """Claim a work order."""
+    require_permission(request, "operate")
+    from maverick import prompt_loop as pl
+    try:
+        return pl.take(order_id, by=caller_principal(request) or "")
+    except pl.PromptLoopError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/loop/{order_id}/done")
+async def prompt_loop_done(request: Request, order_id: str,
+                           payload: PromptLoopOutcomeIn) -> dict:
+    """Close a work order and get its follow-up, composed from the outcome.
+
+    The outcome is injection-screened before it can be quoted into the next
+    prompt — a poisoned run must not be able to write the next instruction."""
+    require_permission(request, "operate")
+    from maverick import prompt_loop as pl
+    try:
+        return pl.complete(order_id, outcome=payload.outcome,
+                           by=caller_principal(request) or "")
+    except pl.PromptLoopError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/loop/{order_id}/skip")
+async def prompt_loop_skip(request: Request, order_id: str,
+                           payload: PromptLoopOutcomeIn) -> dict:
+    """Decline a work order. The loop learns from it."""
+    require_permission(request, "operate")
+    from maverick import prompt_loop as pl
+    try:
+        return pl.skip(order_id, reason=payload.outcome)
+    except pl.PromptLoopError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/loop/{order_id}/dispatch")
+async def prompt_loop_dispatch(request: Request, order_id: str) -> dict:
+    """Hand a work order back to the agent as a goal (auto mode, admin).
+
+    Refuses in advise mode, above the risk ceiling, or without the approval
+    bound to a digest of this exact prompt."""
+    require_permission(request, "admin")
+    from maverick import prompt_loop as pl
+    try:
+        return pl.dispatch(order_id, by=caller_principal(request) or "admin")
+    except pl.PromptLoopError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/discovery")

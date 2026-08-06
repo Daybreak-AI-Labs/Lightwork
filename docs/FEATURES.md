@@ -197,6 +197,39 @@ here.
   the shared dream store. The module API is the entry point in v1; the human
   half runs in the existing dashboard approval queue. Documented in
   [`governed-execution.md`](./governed-execution.md).
+- **The prompt loop — the platform writes the operator's next work order**
+  (`prompt_loop.py`, `[prompt_loop]`, advice ON by default, `mode = "auto"`
+  and `compose_with_model` OFF) — every other loop in the product improves the
+  *system*; this one removes the bottleneck of a human deciding what to work
+  on. One cycle **observes** (eight read-only sensors: parked approvals,
+  recurring failure clusters, goals stuck past six hours, frozen learning,
+  unreached modules from `reachability.lock.json`, past-due deprecations,
+  contained or over-budget external agents, spend that went to failed goals),
+  **composes** each signal into a ready-to-run prompt carrying its rationale,
+  evidence, per-kind steps, the standing operating constraints and a
+  definition of done, and **ranks** by `impact x confidence x affinity x
+  novelty / effort` with the components attached so the order is legible
+  rather than trusted. Completing an order **chains**: an investigation earns
+  a fix, a fix earns its verification, a verification that found something
+  routes back to a fix, and a clean one ends on the write-up — the
+  self-prompting half, composed from the reported outcome. A live composer is
+  an injected seam that may rewrite the *wording only*: kind, risk, score,
+  evidence and the constraints block are recomputed deterministically over
+  whatever it returns, so a model can sharpen a prompt and never widen one,
+  and a composer that fails falls back to the deterministic draft (the loop
+  runs with no provider at all). Outcomes are injection-screened before they
+  can be quoted into a follow-up. Dispositions are learned (completing raises
+  a source's weight, skipping lowers it and starts a cooldown, three skips
+  mute a signal), and when nothing survives filtering the loop offers the next
+  standing hardening pass rather than an empty screen. In `auto` mode an order
+  may be handed back to the agent as a goal — under `auto_risk_ceiling`,
+  at most once, and against an approval bound to a digest of that exact
+  prompt, so editing an order after approval voids it. Ledger is tenant-scoped
+  and 0600 and **refuses on corruption** rather than degrading to a blank
+  queue (the spent-approval floor lives there). Audited as
+  `prompt_loop_proposed` (one row per cycle) and `prompt_loop_dispatched`.
+  Surfaces: `maverick loop cycle|next|list|show|take|done|skip|dispatch|status`,
+  `GET/POST /api/v1/loop*`, and the **Next** page (`/loop`).
 - **Evaluator co-evolution (promote a better judge, don't just freeze)** —
   `maverick.evaluator_evolution` (default-on
   `[self_improvement] evaluator_evolution`)

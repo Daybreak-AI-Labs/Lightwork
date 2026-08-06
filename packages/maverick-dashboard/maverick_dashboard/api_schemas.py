@@ -409,6 +409,15 @@ class TrustRevokeIn(BaseModel):
     revoked: bool = True
 
 
+class PromptLoopOutcomeIn(BaseModel):
+    """What happened on a work order — the text the loop composes the next
+    prompt from (on ``done``) or records as the decline reason (on ``skip``).
+
+    Bounded here as well as in the module: the follow-up prompt quotes this
+    back, and in auto mode that prompt can be handed to an agent."""
+    outcome: str = Field(default="", max_length=6000)
+
+
 class ExternalAgentIn(BaseModel):
     """Enroll (or re-enroll) a bring-your-own agent: one call writes the trust
     entry (inbound, with ceilings + expiry), the fleet-memory roster, and the
