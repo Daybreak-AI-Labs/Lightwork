@@ -813,6 +813,56 @@ def test_viewer_aggregates_operator_records_and_global_admin_controls(monkeypatc
     assert client.get("/api/v1/security/config").status_code == 200
 
 
+def test_feature_switch_rejects_tenant_only_admin(monkeypatch):
+    from maverick_dashboard import auth, settings_store
+
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "admin")
+    monkeypatch.setattr(
+        auth, "global_role_for_principal", lambda principal: "viewer"
+    )
+
+    response = client.post(
+        "/api/v1/features/switches",
+        json={"section": "threat_hunt", "enabled": False},
+    )
+
+    assert response.status_code == 403
+    assert settings_store.load_overlay() == {}
+
+
+def test_hunter_feature_switch_uses_governed_security_update(monkeypatch):
+    from maverick_dashboard import security_api
+
+    seen = []
+
+    async def current(_request):
+        return {
+            "security_ops": True, "threat_hunt": False, "env_hunt": True,
+            "response_execution": False, "revision": 7,
+        }
+
+    async def update(_request, body):
+        seen.append(body)
+        return {}
+
+    monkeypatch.setattr(security_api, "security_config", current)
+    monkeypatch.setattr(security_api, "update_security_config", update)
+
+    response = client.post(
+        "/api/v1/features/switches",
+        json={"section": "threat_hunt", "enabled": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"section": "threat_hunt", "enabled": True}
+    assert len(seen) == 1
+    assert seen[0].model_dump() == {
+        "security_ops": True, "threat_hunt": True, "env_hunt": True,
+        "response_execution": False, "expected_revision": 7,
+    }
+
+
 def test_security_config_preserves_unrelated_overlay_fields_and_audits(monkeypatch):
     from maverick import config
     from maverick_dashboard import security_api, settings_store
