@@ -7615,10 +7615,26 @@ async def set_feature_switch(request: Request,
     """Flip one system on or off from inside the app. Admin-gated and
     allowlisted; persists through the same settings overlay the rest of the
     in-app configuration uses -- no server files, no restart."""
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     if body.section not in _FEATURE_SWITCHES:
         raise HTTPException(status_code=400,
                             detail=f"unknown system {body.section!r}")
+    if body.section in {"threat_hunt", "env_hunt"}:
+        from . import security_api
+        from .api_schemas import SecuritySuiteConfigIn
+
+        current = await security_api.security_config(request)
+        update = SecuritySuiteConfigIn(
+            security_ops=current["security_ops"],
+            threat_hunt=(bool(body.enabled) if body.section == "threat_hunt"
+                         else current["threat_hunt"]),
+            env_hunt=(bool(body.enabled) if body.section == "env_hunt"
+                      else current["env_hunt"]),
+            response_execution=current["response_execution"],
+            expected_revision=current["revision"],
+        )
+        await security_api.update_security_config(request, update)
+        return {"section": body.section, "enabled": bool(body.enabled)}
     from maverick_dashboard import settings_store
     await run_in_threadpool(settings_store.set_section_enable, body.section,
                             bool(body.enabled))
