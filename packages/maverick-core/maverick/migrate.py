@@ -68,6 +68,7 @@ KNOWN_SECTIONS = frozenset({
     "ai_inventory", "evidence_gateway", "evidence_graph",
     "model_risk_assurance", "model_improvement", "policy_packs",
     "agent_topology", "drift_monitoring", "portfolio_risk", "red_team_assurance",
+    "ai_incident_reporting",
     # Registry drift, again: these are all read by real load_config() call sites
     # AND written by the installer wizard, yet were missing here -- so an operator
     # who enabled a documented, wizard-offered feature got a false "unknown

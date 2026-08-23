@@ -1156,6 +1156,18 @@ def list_snapshots(*, now: float | None = None) -> list[dict[str, Any]]:
     return _DEFAULT.list_snapshots(now=now)
 
 
+def portfolio_trend(
+    *, now: float | None = None, contributor_limit: int = 100
+) -> dict[str, Any]:
+    return _DEFAULT.portfolio_trend(now=now, contributor_limit=contributor_limit)
+
+
+def get_contributor_drillthrough(
+    period_id: str, contributor_id: str, *, now: float | None = None
+) -> dict[str, Any] | None:
+    return _DEFAULT.get_contributor_drillthrough(period_id, contributor_id, now=now)
+
+
 __all__ = [
     "ClosedPortfolioPeriod",
     "FORMULA_VERSION",
@@ -1166,9 +1178,12 @@ __all__ = [
     "REPORT_SCHEMA",
     "SEVERITY_POINTS",
     "SNAPSHOT_SCHEMA",
+    "TREND_SCHEMA",
     "current_report",
     "enabled",
+    "get_contributor_drillthrough",
     "get_snapshot",
     "list_snapshots",
+    "portfolio_trend",
     "refresh_current_snapshot",
 ]

@@ -816,6 +816,33 @@ async def portfolio_risk_snapshot(
     return await _record_call(portfolio.get_snapshot, period_id)
 
 
+@router.get("/portfolio-risk/trend")
+async def portfolio_risk_trend(
+    request: Request,
+    contributor_limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    """Prior-quarter comparison with contributor deltas and drill-through ids."""
+    require_permission(request, "view")
+    portfolio = _module("portfolio_risk", "portfolio_risk")
+    return await _call(
+        portfolio.portfolio_trend, contributor_limit=contributor_limit
+    )
+
+
+@router.get("/portfolio-risk/snapshots/{period_id}/contributors/{contributor_id}")
+async def portfolio_risk_contributor(
+    request: Request,
+    period_id: str,
+    contributor_id: str,
+) -> dict[str, Any]:
+    """Content-free contributor identity for click-through from the trend."""
+    require_permission(request, "view")
+    portfolio = _module("portfolio_risk", "portfolio_risk")
+    return await _record_call(
+        portfolio.get_contributor_drillthrough, period_id, contributor_id
+    )
+
+
 @router.post("/portfolio-risk/snapshots")
 async def refresh_portfolio_risk_snapshot(
     request: Request,

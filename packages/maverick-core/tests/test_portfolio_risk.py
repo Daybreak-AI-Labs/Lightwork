@@ -411,3 +411,221 @@ def test_snapshot_cas_has_one_winner_and_tenant_storage_isolated():
         assert len(portfolio_risk.PortfolioRiskService().list_snapshots()) == 1
     with tenant_scope(tenant="beta"):
         assert portfolio_risk.PortfolioRiskService().list_snapshots() == []
+
+
+def _governed_quarter(clock):
+    """One system->component->agent hierarchy under a fixed test clock."""
+    officer = mra.ModelRiskAssuranceOfficer(clock=lambda: clock[0])
+    system = _observe(officer, "system", asset_type="system")
+    component = _observe(officer, "component", asset_type="component")
+    agent = _observe(officer, "agent", asset_type="agent")
+    _declaration(officer, system)
+    _declaration(officer, component, parent_asset_id=system["asset_id"])
+    _declaration(
+        officer,
+        agent,
+        parent_asset_id=component["asset_id"],
+        prohibited_signal=True,
+    )
+    service = portfolio_risk.PortfolioRiskService(
+        officer=officer, clock=lambda: clock[0]
+    )
+    return officer, service, component
+
+
+def test_trend_with_no_prior_quarter_reports_no_comparison():
+    clock = [datetime(2026, 8, 23, 12, tzinfo=timezone.utc).timestamp()]
+    _officer, service, _component = _governed_quarter(clock)
+    service.refresh_current_snapshot(actor="risk-officer")
+
+    trend = service.portfolio_trend()
+    assert trend["schema"] == portfolio_risk.TREND_SCHEMA
+    assert trend["current_period_id"] == "2026-Q3"
+    assert trend["expected_prior_period_id"] == "2026-Q2"
+    assert trend["comparison_available"] is False
+    assert trend["prior_period_id"] is None
+    assert trend["direction"] == "not_available"
+    assert trend["portfolio_score"]["delta"] is None
+    assert trend["risk_load"]["delta"] is None
+    assert trend["contributor_deltas"] == []
+    assert trend["legal_certification"] is False
+    assert trend["notice"] == mra.NON_CERTIFICATION_NOTICE
+    assert len(trend["trend_sha256"]) == 64
+
+
+def test_trend_compares_consecutive_quarters_and_directions_on_risk_load():
+    clock = [datetime(2026, 5, 15, 12, tzinfo=timezone.utc).timestamp()]
+    officer, service, component = _governed_quarter(clock)
+    prior = service.refresh_current_snapshot(actor="risk-officer")
+    assert prior["period_id"] == "2026-Q2"
+
+    clock[0] = datetime(2026, 8, 23, 12, tzinfo=timezone.utc).timestamp()
+    officer.record_incident(
+        component["asset_id"],
+        source_id="q3-incident",
+        severity="medium",
+        summary="A new current-quarter incident increases the risk load.",
+        actor="incident-manager",
+        occurred_at=clock[0],
+        evidence_ids=[],
+    )
+    service.refresh_current_snapshot(actor="risk-officer")
+
+    trend = service.portfolio_trend()
+    assert trend["comparison_available"] is True
+    assert trend["prior_period_id"] == "2026-Q2"
+    assert trend["is_consecutive"] is True
+    # The prohibited-signal agent pins the max-based score at 100 in both
+    # quarters, so the direction must come from the risk-load fallback -- the
+    # exact branch the pre-handoff Ruff finding (FURB110) lived on.
+    assert trend["portfolio_score"]["delta"] == 0
+    assert trend["risk_load"]["delta"] > 0
+    assert trend["direction_basis"] == "risk_load"
+    assert trend["direction"] == "worsened"
+
+    new_contributors = [
+        row for row in trend["contributor_deltas"] if row["prior_present"] is False
+    ]
+    # The incident lands as a derived assurance finding contributor carrying
+    # the medium-severity points -- the exact 50-point load increase above.
+    assert [row["delta"] for row in new_contributors] == [50]
+    assert new_contributors[0]["source_kind"] == "finding"
+    assert new_contributors[0]["current_residual_points"] == 50
+    assert trend["contributor_delta_count"] >= len(trend["contributor_deltas"])
+    assert trend["drill_through_ids"]["contributor_ids"]
+    for row in trend["contributor_deltas"]:
+        assert row["direction"] in {"worsened", "improved", "unchanged"}
+
+
+def test_trend_after_skipped_quarter_is_not_consecutive():
+    clock = [datetime(2026, 2, 15, 12, tzinfo=timezone.utc).timestamp()]
+    _officer, service, _component = _governed_quarter(clock)
+    first = service.refresh_current_snapshot(actor="risk-officer")
+    assert first["period_id"] == "2026-Q1"
+
+    clock[0] = datetime(2026, 8, 23, 12, tzinfo=timezone.utc).timestamp()
+    service.refresh_current_snapshot(actor="risk-officer")
+
+    trend = service.portfolio_trend()
+    assert trend["comparison_available"] is True
+    assert trend["prior_period_id"] == "2026-Q1"
+    assert trend["expected_prior_period_id"] == "2026-Q2"
+    assert trend["is_consecutive"] is False
+
+
+def test_trend_requires_current_snapshot_and_validates_limit():
+    clock = [datetime(2026, 8, 23, 12, tzinfo=timezone.utc).timestamp()]
+    _officer, service, _component = _governed_quarter(clock)
+    with pytest.raises(portfolio_risk.PortfolioRiskStateError, match="missing"):
+        service.portfolio_trend()
+
+    service.refresh_current_snapshot(actor="risk-officer")
+    for bad in (0, -1, 501, True, "10"):
+        with pytest.raises(ValueError, match="contributor_limit"):
+            service.portfolio_trend(contributor_limit=bad)
+
+
+def test_contributor_drillthrough_is_bounded_and_content_free():
+    clock = [datetime(2026, 8, 23, 12, tzinfo=timezone.utc).timestamp()]
+    _officer, service, _component = _governed_quarter(clock)
+    snapshot = service.refresh_current_snapshot(actor="risk-officer")
+    contributor_id = snapshot["report"]["contributors"][0]["contributor_id"]
+
+    row = service.get_contributor_drillthrough("2026-Q3", contributor_id)
+    assert row is not None
+    assert row["contributor_id"] == contributor_id
+    assert row["period_id"] == "2026-Q3"
+    assert row["report_sha256"] == snapshot["report_sha256"]
+    assert row["legal_certification"] is False
+    # Identity projection only: never summaries, citations, or acceptance text.
+    assert set(row) == {
+        "snapshot_id", "snapshot_revision", "period_id", "report_sha256",
+        "source_state_sha256", "contributor_id", "finding_id", "asset_id",
+        "source_kind", "finding_type", "severity", "inherent_points",
+        "residual_points", "accepted", "legal_certification",
+        "compliance_verdict",
+    }
+
+    assert service.get_contributor_drillthrough("2027-Q1", contributor_id) is None
+    assert service.get_contributor_drillthrough("2026-Q3", "absent-id") is None
+    with pytest.raises(ValueError, match="contributor_id"):
+        service.get_contributor_drillthrough("2026-Q3", "../escape")
+    with pytest.raises(ValueError, match="period_id"):
+        service.get_contributor_drillthrough("2026-Q9", contributor_id)
+
+
+def _projection_row(**overrides):
+    row = {
+        "contributor_id": "MAF-abc123",
+        "source_kind": "finding",
+        "finding_id": "MAF-abc123",
+        "finding_sha256": "a" * 64,
+        "finding_type": "evaluation_evidence_missing",
+        "asset_id": "MAA-def456",
+        "severity": "high",
+        "summary": "bounded",
+        "accepted": False,
+        "acceptance": None,
+        "inherent_points": 75,
+        "residual_points": 75,
+        "source_citations": [],
+    }
+    row.update(overrides)
+    return row
+
+
+def _projection_snapshot(rows):
+    return {"report": {"contributors": rows, "counts": {"contributors": len(rows)}}}
+
+
+def test_trend_contributor_projection_refuses_corruption():
+    parse = portfolio_risk.PortfolioRiskService._trend_contributors
+    assert "MAF-abc123" in parse(_projection_snapshot([_projection_row()]))
+
+    corrupt = [
+        # Count no longer matches the projection list.
+        {"report": {"contributors": [_projection_row()], "counts": {"contributors": 2}}},
+        # A field was added or removed from the closed projection shape.
+        _projection_snapshot([{**_projection_row(), "extra": True}]),
+        # Severity/points tampering.
+        _projection_snapshot([_projection_row(severity="catastrophic")]),
+        _projection_snapshot([_projection_row(inherent_points=74)]),
+        _projection_snapshot([_projection_row(residual_points=40)]),
+        # Acceptance invariants: only non-critical findings zero out.
+        _projection_snapshot([_projection_row(accepted=True)]),
+        _projection_snapshot([
+            _projection_row(
+                accepted=True, residual_points=0, severity="critical",
+                inherent_points=100,
+            ),
+        ]),
+        # Incident rows must not carry finding drill-through identity.
+        _projection_snapshot([
+            _projection_row(source_kind="incident"),
+        ]),
+        # Duplicated identity.
+        _projection_snapshot([_projection_row(), _projection_row()]),
+        # Unsafe drill-through identifier.
+        _projection_snapshot([_projection_row(contributor_id="../escape")]),
+    ]
+    for snapshot in corrupt:
+        with pytest.raises(portfolio_risk.PortfolioRiskStateError):
+            parse(snapshot)
+
+
+def test_trend_and_drillthrough_are_tenant_isolated():
+    clock = [datetime(2026, 8, 23, 12, tzinfo=timezone.utc).timestamp()]
+    with tenant_scope(tenant="acme"):
+        _officer, service, _component = _governed_quarter(clock)
+        snapshot = service.refresh_current_snapshot(actor="risk-officer")
+        contributor_id = snapshot["report"]["contributors"][0]["contributor_id"]
+        assert service.portfolio_trend()["current_period_id"] == "2026-Q3"
+
+    with tenant_scope(tenant="globex"):
+        other = portfolio_risk.PortfolioRiskService(
+            officer=mra.ModelRiskAssuranceOfficer(clock=lambda: clock[0]),
+            clock=lambda: clock[0],
+        )
+        with pytest.raises(portfolio_risk.PortfolioRiskStateError, match="missing"):
+            other.portfolio_trend()
+        assert other.get_contributor_drillthrough("2026-Q3", contributor_id) is None

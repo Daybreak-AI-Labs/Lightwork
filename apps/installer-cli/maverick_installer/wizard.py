@@ -2042,6 +2042,14 @@ def pick_advanced() -> dict[str, Any]:
             "rows and vectors are not retained. OFF by default.",
             default=False,
         ),
+        "ai_incident_reporting": _q_confirm(
+            "EU AI Act Art. 73 serious-incident reporting? Classify an "
+            "assurance incident under Art. 3(49), start the tiered 2/10/15-day "
+            "clock from awareness, draft the report for the routed Member-State "
+            "authority, and record human-gated submissions. Clocks and drafts "
+            "only -- nothing is ever transmitted. OFF by default.",
+            default=False,
+        ),
         "agent_topology": _q_confirm(
             "Agent dependency and MCP blast-radius governance? Project each "
             "enabled agent's tools, MCP servers, hosts, paths, knowledge, and model "
@@ -4473,6 +4481,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("drift_monitoring"):
         lines.append("")
         lines.append("[drift_monitoring]")
+        lines.append("enable = true")
+    if advanced.get("ai_incident_reporting"):
+        lines.append("")
+        lines.append("[ai_incident_reporting]")
         lines.append("enable = true")
     if advanced.get("agent_topology"):
         lines.append("")

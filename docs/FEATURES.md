@@ -825,6 +825,20 @@ here.
   inventory as governed `tool` assets with safe manifest digests, pin posture,
   transport, and referencing agents. Tokens, header/environment values, URL
   paths, queries, and raw launch arguments are neither projected nor persisted.
+- **EU AI Act serious-incident reporting** (`ai_incident_reporting.py`,
+  opt-in `[ai_incident_reporting] enable`, requires the assurance officer) —
+  classifies an existing assurance incident under Art. 3(49) (death, serious
+  health harm, irreversible critical-infrastructure disruption, fundamental-
+  rights infringement, property/environment harm; Art. 3(61) widespread flag)
+  and starts the Art. 73 tiered clock from *awareness*: 15 days by default
+  (73(2)), 2 days for widespread/critical-infrastructure (73(3)), 10 days for
+  death (73(4)); the strictest applicable window binds and the GDPR Art. 33
+  72-hour clock is deliberately not reused. Declarations, initial/complete
+  submissions (73(5)) and withdrawals are human assertions with named actors
+  on CAS-governed records; the module routes to the operator-named market
+  surveillance authority of an EU-27 Member State (73(1)), renders a bounded
+  report draft with citations, and never transmits anything itself. Citations
+  carry the consolidated basis (2026-07-27) as versioned metadata.
 - **Signed AI policy packs** (`policy_packs.py`, opt-in `[policy_packs]
   enable`) — bounded NIST AI RMF and EU AI Act starter mappings plus
   Ed25519-verified external updates, anti-rollback staging, explicit global
