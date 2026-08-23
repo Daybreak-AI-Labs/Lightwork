@@ -277,7 +277,12 @@ def test_report_draft_carries_citations_routing_and_notice():
     assert incident["id"] in draft
     assert "misrouted an emergency case" in draft
     assert air.REPORTING_NOTICE in draft
-    assert "72" not in draft                # no GDPR clock leakage
+    # No GDPR Art. 33 clock leakage. A bare "72" substring is not assertable:
+    # the draft embeds epoch timestamps and hex ids that contain it by chance.
+    assert "72-hour" not in draft
+    assert "72 hours" not in draft
+    assert "Art. 33" not in draft
+    assert "GDPR" not in draft
     with pytest.raises(KeyError):
         air.render_report("ASI-missing")
 
