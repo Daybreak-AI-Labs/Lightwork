@@ -325,7 +325,7 @@ def test_typescript_client_dependency_and_ci_security_gates():
     assert "npm audit --audit-level=low" in workflow
     assert workflow.count("persist-credentials: false") == 2
     for packaging_tool in (
-        "'pip==26.1.2'",
+        "'pip==26.2.1'",
         "'setuptools==83.0.0'",
         "'wheel==0.47.0'",
         "'packaging==26.2'",
@@ -350,7 +350,7 @@ def test_typescript_client_dependency_and_ci_security_gates():
         assert "PIP_CONSTRAINT:" in client_workflow
         assert "scripts/verify_constraint_closure.py" in client_workflow
         for packaging_tool in (
-            "'pip==26.1.2'",
+            "'pip==26.2.1'",
             "'setuptools==83.0.0'",
             "'wheel==0.47.0'",
             "'packaging==26.2'",
