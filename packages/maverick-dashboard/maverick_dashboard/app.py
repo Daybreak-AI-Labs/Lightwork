@@ -2375,50 +2375,254 @@ async def security_report_page(request: Request) -> HTMLResponse:
     )
 
 
-@app.get("/security/assurance", response_class=HTMLResponse)
-async def model_risk_assurance_page(request: Request) -> HTMLResponse:
-    """Governed AI evidence gateway and model-risk operator cockpit."""
-    require_permission(request, "operate")
-    from maverick import ai_evidence_gateway, model_risk_assurance
-
-    from .auth import has_global_permission
-
-    model_risk_enabled = model_risk_assurance.enabled()
-    model_risk_errors: dict[str, str] = {}
-    if model_risk_enabled:
-        model_results = await asyncio.gather(
-            run_in_threadpool(model_risk_assurance.list_inventory),
-            run_in_threadpool(model_risk_assurance.list_evidence),
-            run_in_threadpool(model_risk_assurance.findings),
+async def _model_risk_page_data(module: Any) -> dict[str, Any]:
+    enabled = module.enabled()
+    assets: list[dict[str, Any]] = []
+    evidence: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    errors: dict[str, str] = {}
+    if enabled:
+        results = await asyncio.gather(
+            run_in_threadpool(module.list_inventory),
+            run_in_threadpool(module.list_evidence),
+            run_in_threadpool(module.findings),
             return_exceptions=True,
         )
-        assets, evidence, findings = [], [], []
         for label, result in zip(
             ("assets", "evidence", "findings"),
-            model_results,
+            results,
             strict=True,
         ):
             if isinstance(result, Exception):
-                model_risk_errors[label] = (
-                    f"Model-risk {label} are temporarily unavailable."
-                )
+                errors[label] = f"Model-risk {label} are temporarily unavailable."
             elif label == "assets":
                 assets = result
             elif label == "evidence":
                 evidence = result
             else:
                 findings = result
-    else:
-        assets, evidence, findings = [], [], []
+    return {
+        "enabled": enabled,
+        "assets": assets,
+        "evidence": evidence,
+        "findings": findings,
+        "errors": errors,
+    }
 
-    gateway_enabled = ai_evidence_gateway.enabled()
-    gateway_error = ""
-    gateway_error_action = ""
-    gateway_panel_errors: dict[str, str] = {}
-    gateway_summary: dict[str, Any] = {}
+
+async def _governance_extensions_page_data(
+    vendor: Any,
+    drift: Any,
+    topology: Any,
+    officer: Any,
+) -> dict[str, Any]:
+    """Bounded status for additive assurance workflows.
+
+    The page does not load vendor document text, raw drift samples, or topology
+    configuration.  Detailed records are reachable only through their
+    authenticated API routes.
+    """
+
+    data: dict[str, Any] = {
+        "vendor_items": [],
+        "vendor_error": "",
+        "drift_items": [],
+        "drift_enabled": False,
+        "drift_error": "",
+        "topology_enabled": False,
+        "topology_error": "",
+    }
+    try:
+        listing = await run_in_threadpool(vendor.list_vendor_assessments, limit=20)
+        data["vendor_items"] = list(listing.get("items") or [])[:20]
+    except Exception as exc:
+        data["vendor_error"] = (
+            "Select a company or tenant before loading AI vendor assessments."
+            if "tenant" in str(exc).lower()
+            else "AI vendor assessments are temporarily unavailable."
+        )
+    data["drift_enabled"] = drift.enabled()
+    if data["drift_enabled"]:
+        try:
+            evidence = await run_in_threadpool(officer.list_evidence)
+            data["drift_items"] = [
+                row for row in evidence
+                if row.get("evidence_kind") == "drift_monitoring"
+            ][:20]
+        except Exception:
+            data["drift_error"] = "Drift evidence is temporarily unavailable."
+    data["topology_enabled"] = topology.enabled()
+    if not data["topology_enabled"]:
+        data["topology_error"] = "Agent topology is disabled."
+    return data
+
+
+async def _portfolio_risk_page_data(module: Any) -> dict[str, Any]:
+    enabled = module.enabled()
+    report: dict[str, Any] = {}
+    snapshots: list[dict[str, Any]] = []
+    error = ""
+    if enabled:
+        report_result, snapshots_result = await asyncio.gather(
+            run_in_threadpool(module.current_report),
+            run_in_threadpool(module.list_snapshots),
+            return_exceptions=True,
+        )
+        if isinstance(report_result, Exception):
+            error = (
+                "Portfolio risk could not be calculated from a stable governed "
+                "source snapshot. No score is shown."
+            )
+        else:
+            report = report_result
+        if isinstance(snapshots_result, Exception):
+            error = error or "Quarterly portfolio snapshots are temporarily unavailable."
+        else:
+            snapshots = snapshots_result
+    return {
+        "enabled": enabled,
+        "report": report,
+        "snapshots": snapshots,
+        "error": error,
+    }
+
+
+async def _red_team_page_data(module: Any, external_agents: Any) -> dict[str, Any]:
+    enabled = module.enabled()
+    campaigns: list[dict[str, Any]] = []
+    agents: list[dict[str, Any]] = []
+    error = ""
+    if enabled:
+        campaign_result, roster_result = await asyncio.gather(
+            run_in_threadpool(module.list_campaigns, limit=20),
+            run_in_threadpool(external_agents.roster),
+            return_exceptions=True,
+        )
+        if isinstance(campaign_result, Exception):
+            error = "Red-team campaign records are temporarily unavailable."
+        else:
+            campaigns = campaign_result["items"]
+        if isinstance(roster_result, Exception):
+            error = error or "The external-agent roster is temporarily unavailable."
+        else:
+            agents = [row for row in roster_result if row.get("active") is True]
+    return {
+        "enabled": enabled,
+        "campaigns": campaigns,
+        "agents": agents,
+        "error": error,
+    }
+
+
+async def _ai_inventory_page_data(
+    module: Any,
+    model_risk_assets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    enabled = module.enabled()
+    assets: list[dict[str, Any]] = []
+    runs: list[dict[str, Any]] = []
+    statuses: dict[str, Any] = {}
+    connectors: list[str] = []
+    error = ""
+    if enabled:
+        try:
+            inventory_config = module.get_ai_inventory_config()
+            connectors = list(inventory_config.get("connectors") or [])
+            results = await asyncio.gather(
+                run_in_threadpool(module.list_discovered_assets),
+                run_in_threadpool(module.list_discovery_runs, limit=50),
+                *(
+                    run_in_threadpool(module.connector_status, connector)
+                    for connector in connectors
+                ),
+                return_exceptions=True,
+            )
+            asset_result, run_result, *status_results = results
+            if isinstance(asset_result, Exception) or isinstance(run_result, Exception):
+                raise RuntimeError("inventory governed records unavailable")
+            observation_index = {
+                row.get("asset_id"): row for row in model_risk_assets
+            }
+            for state_row in asset_result:
+                row = dict(state_row)
+                observation = observation_index.get(row.get("asset_id")) or {}
+                row["governed_display_name"] = observation.get("display_name")
+                row["governed_version_digest"] = observation.get("version_digest")
+                assets.append(row)
+            runs = run_result
+            for connector, result in zip(connectors, status_results, strict=True):
+                statuses[connector] = (
+                    None if isinstance(result, Exception) else result
+                )
+        except Exception as exc:
+            if "active tenant" in str(exc).lower():
+                error = (
+                    "Select a company or tenant before loading discovered AI "
+                    "assets. No inventory records were read."
+                )
+            else:
+                error = "AI inventory records are temporarily unavailable."
+    return {
+        "enabled": enabled,
+        "assets": assets,
+        "runs": runs,
+        "statuses": statuses,
+        "connectors": connectors,
+        "error": error,
+    }
+
+
+async def _policy_pack_page_data(module: Any) -> dict[str, Any]:
+    enabled = module.enabled()
+    bundled: dict[str, dict[str, Any]] = {}
+    catalog: dict[str, Any] = {"items": [], "count": 0}
+    channels: dict[str, Any] = {"items": [], "count": 0}
+    subscriptions: dict[str, Any] = {"items": [], "count": 0}
+    error = ""
+    if enabled:
+        results = await asyncio.gather(
+            run_in_threadpool(module.bundled_summaries),
+            run_in_threadpool(module.list_catalog),
+            run_in_threadpool(module.list_channels),
+            run_in_threadpool(module.list_subscriptions),
+            return_exceptions=True,
+        )
+        bundled_result, catalog_result, channel_result, subscription_result = results
+        if isinstance(bundled_result, Exception):
+            error = "Bundled policy-pack manifests are unavailable."
+        else:
+            bundled = bundled_result
+        if isinstance(catalog_result, Exception):
+            error = error or "The policy-pack catalog is temporarily unavailable."
+        else:
+            catalog = catalog_result
+        if isinstance(channel_result, Exception):
+            error = error or "Active policy-pack channels are temporarily unavailable."
+        else:
+            channels = channel_result
+        if isinstance(subscription_result, Exception):
+            error = error or "Select a tenant to view policy-pack subscriptions."
+        else:
+            subscriptions = subscription_result
+    return {
+        "enabled": enabled,
+        "bundled": bundled,
+        "catalog": catalog,
+        "channels": channels,
+        "subscriptions": subscriptions,
+        "error": error,
+    }
+
+
+async def _evidence_gateway_page_data(module: Any) -> dict[str, Any]:
+    enabled = module.enabled()
+    error = ""
+    error_action = ""
+    panel_errors: dict[str, str] = {}
+    summary: dict[str, Any] = {}
     policies: list[dict[str, Any]] = []
     receipts: list[dict[str, Any]] = []
-    regulatory_impacts: list[dict[str, Any]] = []
+    impacts: list[dict[str, Any]] = []
     impact_page: dict[str, Any] = {
         "next_cursor": None,
         "snapshot_total": 0,
@@ -2426,70 +2630,64 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
         "status": None,
         "pending_first": True,
     }
-    if gateway_enabled:
-        gateway_results = await asyncio.gather(
-            run_in_threadpool(ai_evidence_gateway.summary),
-            run_in_threadpool(ai_evidence_gateway.list_policies),
+    if enabled:
+        results = await asyncio.gather(
+            run_in_threadpool(module.summary),
+            run_in_threadpool(module.list_policies),
+            run_in_threadpool(module.list_interaction_receipts, limit=100),
             run_in_threadpool(
-                ai_evidence_gateway.list_interaction_receipts,
-                limit=100,
-            ),
-            run_in_threadpool(
-                ai_evidence_gateway.list_regulatory_impacts_page,
+                module.list_regulatory_impacts_page,
                 limit=100,
                 pending_first=True,
             ),
             return_exceptions=True,
         )
-        summary_result, policy_result, receipt_result, impact_result = (
-            gateway_results
-        )
+        summary_result, policy_result, receipt_result, impact_result = results
         if isinstance(summary_result, Exception):
-            exc = summary_result
             if (
-                type(exc).__name__ == "EvidenceGatewayStateError"
-                and str(exc)
+                type(summary_result).__name__ == "EvidenceGatewayStateError"
+                and str(summary_result)
                 == "AI evidence gateway records require an explicit tenant scope"
             ):
-                gateway_error = (
+                error = (
                     "Select a company or tenant before loading evidence. "
                     "No records were read."
                 )
-                gateway_error_action = (
+                error_action = (
                     "Set [client] id in the Lightwork configuration or set "
                     "MAVERICK_TENANT, then restart the dashboard."
                 )
             else:
-                gateway_error = (
+                error = (
                     "Gateway records could not be loaded safely. "
                     "No readiness conclusion is available."
                 )
-                gateway_error_action = (
+                error_action = (
                     "Use the built-in health checks on the Get started page "
                     "to identify the blocker, then reload this cockpit."
                 )
-            gateway_panel_errors["summary"] = gateway_error
+            panel_errors["summary"] = error
         else:
-            gateway_summary = summary_result
+            summary = summary_result
         if isinstance(policy_result, Exception):
-            gateway_panel_errors["policies"] = (
+            panel_errors["policies"] = (
                 "Policy and model bindings are temporarily unavailable."
             )
         else:
             policies = policy_result
         if isinstance(receipt_result, Exception):
-            gateway_panel_errors["receipts"] = (
+            panel_errors["receipts"] = (
                 "Interaction receipts are temporarily unavailable."
             )
         else:
             receipts = receipt_result
         if isinstance(impact_result, Exception):
-            gateway_panel_errors["impacts"] = (
+            panel_errors["impacts"] = (
                 "Regulatory impacts are temporarily unavailable."
             )
         else:
             impact_page = impact_result
-            regulatory_impacts = list(impact_page["items"])
+            impacts = list(impact_page["items"])
     from .operator_cockpit import display_timestamp, gateway_view
 
     receipt_rows = []
@@ -2499,17 +2697,98 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
             row.get("issued_at") or row.get("created_at")
         )
         receipt_rows.append(row)
-
-    view = gateway_view(
-        gateway_summary,
-        policies,
-        receipts,
-        regulatory_impacts,
-    )
-    # Product surface: the cockpit never shows CLI invocations. The synthetic
-    # next action's copyable code is a CLI command, so it renders as prose only.
+    view = gateway_view(summary, policies, receipts, impacts)
     if "maverick" in str(view["next_action"].get("code", "")).lower():
         view["next_action"]["code"] = ""
+    return {
+        "enabled": enabled,
+        "error": error,
+        "error_action": error_action,
+        "panel_errors": panel_errors,
+        "summary": summary,
+        "policies": policies,
+        "receipts": receipt_rows,
+        "impacts": impacts,
+        "impact_page": impact_page,
+        "view": view,
+    }
+
+
+@app.get("/security/assurance", response_class=HTMLResponse)
+async def model_risk_assurance_page(request: Request) -> HTMLResponse:
+    """Governed AI evidence gateway and model-risk operator cockpit."""
+    require_permission(request, "operate")
+    from maverick import (
+        agent_topology,
+        ai_evidence_gateway,
+        ai_inventory,
+        ai_vendor_risk,
+        drift_monitoring,
+        external_agents,
+        model_risk_assurance,
+        policy_packs,
+        portfolio_risk,
+        red_team_assurance,
+    )
+
+    from .auth import has_global_permission
+
+    model_data = await _model_risk_page_data(model_risk_assurance)
+    model_risk_enabled = model_data["enabled"]
+    model_risk_errors = model_data["errors"]
+    assets = model_data["assets"]
+    evidence = model_data["evidence"]
+    findings = model_data["findings"]
+
+    extensions_data = await _governance_extensions_page_data(
+        ai_vendor_risk,
+        drift_monitoring,
+        agent_topology,
+        model_risk_assurance,
+    )
+
+    portfolio_data = await _portfolio_risk_page_data(portfolio_risk)
+    portfolio_enabled = portfolio_data["enabled"]
+    portfolio_report = portfolio_data["report"]
+    portfolio_snapshots = portfolio_data["snapshots"]
+    portfolio_error = portfolio_data["error"]
+
+    red_team_data = await _red_team_page_data(
+        red_team_assurance,
+        external_agents,
+    )
+    red_team_enabled = red_team_data["enabled"]
+    red_team_campaigns = red_team_data["campaigns"]
+    red_team_agents = red_team_data["agents"]
+    red_team_error = red_team_data["error"]
+
+    inventory_data = await _ai_inventory_page_data(ai_inventory, assets)
+    ai_inventory_enabled = inventory_data["enabled"]
+    ai_inventory_assets = inventory_data["assets"]
+    ai_inventory_runs = inventory_data["runs"]
+    ai_inventory_statuses = inventory_data["statuses"]
+    ai_inventory_connectors = inventory_data["connectors"]
+    ai_inventory_error = inventory_data["error"]
+
+    policy_data = await _policy_pack_page_data(policy_packs)
+    policy_packs_enabled = policy_data["enabled"]
+    policy_pack_bundled = policy_data["bundled"]
+    policy_pack_catalog = policy_data["catalog"]
+    policy_pack_channels = policy_data["channels"]
+    policy_pack_subscriptions = policy_data["subscriptions"]
+    policy_pack_error = policy_data["error"]
+
+    gateway_data = await _evidence_gateway_page_data(ai_evidence_gateway)
+    gateway_enabled = gateway_data["enabled"]
+    gateway_error = gateway_data["error"]
+    gateway_error_action = gateway_data["error_action"]
+    gateway_panel_errors = gateway_data["panel_errors"]
+    gateway_summary = gateway_data["summary"]
+    policies = gateway_data["policies"]
+    receipt_rows = gateway_data["receipts"]
+    regulatory_impacts = gateway_data["impacts"]
+    impact_page = gateway_data["impact_page"]
+    view = gateway_data["view"]
 
     return templates.TemplateResponse(
         request,
@@ -2522,7 +2801,35 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
                 "findings": len(findings),
             },
             "findings": findings[:20],
+            "model_risk_assets": assets[:500],
             "model_risk_errors": model_risk_errors,
+            "ai_vendor_items": extensions_data["vendor_items"],
+            "ai_vendor_error": extensions_data["vendor_error"],
+            "drift_monitoring_enabled": extensions_data["drift_enabled"],
+            "drift_monitoring_items": extensions_data["drift_items"],
+            "drift_monitoring_error": extensions_data["drift_error"],
+            "agent_topology_enabled": extensions_data["topology_enabled"],
+            "agent_topology_error": extensions_data["topology_error"],
+            "portfolio_enabled": portfolio_enabled,
+            "portfolio_report": portfolio_report,
+            "portfolio_snapshots": portfolio_snapshots[:20],
+            "portfolio_error": portfolio_error,
+            "red_team_enabled": red_team_enabled,
+            "red_team_campaigns": red_team_campaigns[:20],
+            "red_team_agents": red_team_agents[:500],
+            "red_team_error": red_team_error,
+            "ai_inventory_enabled": ai_inventory_enabled,
+            "ai_inventory_assets": ai_inventory_assets[:500],
+            "ai_inventory_runs": ai_inventory_runs[:50],
+            "ai_inventory_statuses": ai_inventory_statuses,
+            "ai_inventory_connectors": ai_inventory_connectors,
+            "ai_inventory_error": ai_inventory_error,
+            "policy_packs_enabled": policy_packs_enabled,
+            "policy_pack_bundled": policy_pack_bundled,
+            "policy_pack_catalog": policy_pack_catalog,
+            "policy_pack_channels": policy_pack_channels,
+            "policy_pack_subscriptions": policy_pack_subscriptions,
+            "policy_pack_error": policy_pack_error,
             "gateway_enabled": gateway_enabled,
             "gateway_error": gateway_error,
             "gateway_error_action": gateway_error_action,

@@ -158,8 +158,12 @@ def _approved_evidence(
         scope_digest=scope_digest or _hex(f"scope:{kind}:{label or 'one'}"),
         artifact_digest=observation["version_digest"],
         evaluator_digest=evaluator["version_digest"],
+        evaluator_asset_id=evaluator["asset_id"],
         summary=f"Bounded {kind} result for the exact artifact and evaluator.",
-        metrics={"cases": 42, "pass_rate": 1.0 if result == "passed" else 0.0},
+        metrics={
+            "cases": 42,
+            "pass_rate": 1.0 if result == "passed" else 0.0,
+        },
         observed_at=now,
         valid_until=now + lifetime,
         actor="evaluation-runner",
@@ -436,6 +440,7 @@ def test_evidence_is_bounded_review_gated_expiring_and_citation_bound():
             scope_digest=_hex("scope"),
             artifact_digest=artifact["version_digest"],
             evaluator_digest=evaluator["version_digest"],
+            evaluator_asset_id=evaluator["asset_id"],
             observed_at=now,
             valid_until=now,
             actor="runner",
@@ -449,6 +454,7 @@ def test_evidence_is_bounded_review_gated_expiring_and_citation_bound():
             scope_digest=_hex("scope"),
             artifact_digest=artifact["version_digest"],
             evaluator_digest=evaluator["version_digest"],
+            evaluator_asset_id=evaluator["asset_id"],
             metrics={"api_token": "not-permitted"},
             observed_at=now,
             valid_until=now + 60,
@@ -462,6 +468,7 @@ def test_evidence_is_bounded_review_gated_expiring_and_citation_bound():
         scope_digest=_hex("scope"),
         artifact_digest=artifact["version_digest"],
         evaluator_digest=evaluator["version_digest"],
+        evaluator_asset_id=evaluator["asset_id"],
         observed_at=now,
         valid_until=now + 10,
         actor="runner",
@@ -805,6 +812,69 @@ def test_enabled_gate_preserves_non_weights_evidence_requirements(monkeypatch):
     ) == (True, "exact model-risk authority is current and approved")
 
 
+def test_promotion_rejects_legacy_red_team_approval_without_producer_binding():
+    from maverick import evidence_graph
+
+    officer = mra.ModelRiskAssuranceOfficer()
+    (
+        artifact,
+        evaluator,
+        declaration,
+        evaluation,
+        red_team,
+        _payload,
+        _authorization,
+    ) = _promotion_fixture(officer)
+    evidence_store = officer._evidence  # noqa: SLF001 - legacy-record fixture
+
+    def remove_producer(row):
+        row.pop("producer_actor", None)
+
+    legacy = evidence_store.update(
+        red_team["id"],
+        remove_producer,
+        expected_revision=red_team["revision"],
+        action="simulate_legacy_red_team_record",
+        actor="migration-test",
+    )
+    assert legacy is not None
+    with pytest.raises(ValueError, match="source_review_separation_invalid"):
+        evidence_graph.project_model_risk_evidence(
+            legacy["id"],
+            actor="migration-test",
+        )
+    payload = _hex("legacy-red-team-candidate")
+    officer.authorize_promotion_candidate(
+        candidate_id="legacy-red-team-candidate",
+        rung="config",
+        payload_sha256=payload,
+        asset_id=artifact["asset_id"],
+        artifact_revision=artifact["revision"],
+        artifact_digest=artifact["version_digest"],
+        declaration_revision=declaration["revision"],
+        evaluator_asset_id=evaluator["asset_id"],
+        evaluator_revision=evaluator["revision"],
+        evaluator_digest=evaluator["version_digest"],
+        evidence_ids=[evaluation["id"], legacy["id"]],
+        reviewer="change-advisory-board",
+        rationale="Legacy record must fail closed during authority verification.",
+        expires_at=time.time() + 600,
+    )
+
+    allowed, reason = officer.verify_promotion_candidate(
+        candidate_id="legacy-red-team-candidate",
+        rung="config",
+        payload_sha256=payload,
+    )
+    assert allowed is False
+    assert reason == "red-team evidence lacks independent producer review"
+    assert any(
+        row["finding_type"] == "red_team_evidence_missing"
+        for row in officer.findings()
+        if row["asset_id"] == artifact["asset_id"]
+    )
+
+
 def test_weights_gate_rejects_data_assessment_for_other_training_data():
     officer = mra.ModelRiskAssuranceOfficer()
     _, _, _, _, _, payload, _ = _promotion_fixture(
@@ -883,7 +953,7 @@ def test_promotion_expiry_uses_authority_clock_not_caller_clock():
     assert "expired" in reason
 
 
-def test_promotion_rejects_evidence_from_a_different_evaluator():
+def test_promotion_accepts_distinct_current_per_evidence_evaluators():
     officer = mra.ModelRiskAssuranceOfficer()
     artifact = _observe(officer, "evaluator-binding-model")
     evaluator = _observe(officer, "approved-evaluator", asset_type="tool")
@@ -896,7 +966,7 @@ def test_promotion_rejects_evidence_from_a_different_evaluator():
     payload = _hex("evaluator-binding-candidate")
     officer.authorize_promotion_candidate(
         candidate_id="candidate-evaluator-binding",
-        rung="weights",
+        rung="config",
         payload_sha256=payload,
         asset_id=artifact["asset_id"],
         artifact_revision=artifact["revision"],
@@ -907,16 +977,47 @@ def test_promotion_rejects_evidence_from_a_different_evaluator():
         evaluator_digest=evaluator["version_digest"],
         evidence_ids=[wrong_evaluation["id"], red_team["id"]],
         reviewer="change-advisory-board",
-        rationale="This should remain blocked because the eval used another evaluator.",
+        rationale="Each evidence kind has its own exact current evaluator binding.",
         expires_at=time.time() + 600,
     )
     allowed, reason = officer.verify_promotion_candidate(
         candidate_id="candidate-evaluator-binding",
-        rung="weights",
+        rung="config",
         payload_sha256=payload,
     )
-    assert allowed is False
-    assert "different evaluator" in reason
+    assert allowed is True
+    assert reason == "exact model-risk authority is current and approved"
+
+
+def test_findings_reject_evidence_from_a_rotated_evaluator():
+    officer = mra.ModelRiskAssuranceOfficer()
+    artifact = _observe(officer, "finding-evaluator-model")
+    evaluator = _observe(officer, "finding-evaluator", asset_type="tool")
+    _declare(officer, artifact)
+    _approved_evidence(officer, artifact, evaluator, "evaluation")
+    _approved_evidence(officer, artifact, evaluator, "red_team")
+    before = {
+        row["finding_type"]
+        for row in officer.findings()
+        if row["asset_id"] == artifact["asset_id"]
+    }
+    assert "evaluation_evidence_missing" not in before
+    assert "red_team_evidence_missing" not in before
+
+    _observe(
+        officer,
+        "finding-evaluator",
+        asset_type="tool",
+        digest=_hex("finding-evaluator:v2"),
+        expected_revision=evaluator["revision"],
+    )
+    after = {
+        row["finding_type"]
+        for row in officer.findings()
+        if row["asset_id"] == artifact["asset_id"]
+    }
+    assert "evaluation_evidence_missing" in after
+    assert "red_team_evidence_missing" in after
 
 
 def test_revoked_or_expired_evidence_fails_promotion_closed():

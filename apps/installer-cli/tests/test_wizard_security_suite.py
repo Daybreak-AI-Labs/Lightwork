@@ -10,7 +10,19 @@ except ModuleNotFoundError:  # Python 3.10
 def test_pick_security_suite_safe_defaults(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True, False, False, False, False, False, False])
+    answers = iter([
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+    ])
     monkeypatch.setattr(
         wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
     )
@@ -22,6 +34,11 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "evidence_gateway": False,
         "model_improvement": False,
         "allow_hosted_training": False,
+        "ai_inventory": False,
+        "inventory_connectors": [],
+        "portfolio_risk": False,
+        "policy_packs": False,
+        "red_team_assurance": False,
         "threat_hunt": False,
         "env_hunt": False,
         "response_execution": False,
@@ -31,11 +48,12 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
 def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True, True, True, True, True, True, True, True, True])
+    answers = iter([True] * 13)
     monkeypatch.setattr(
         wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
     )
     checkbox_answers = iter([
+        ["AWS Bedrock", "Google Vertex AI"],
         ["AWS CloudTrail", "Microsoft Entra ID"],
         ["AWS CloudTrail"],
         ["Microsoft Entra ID"],
@@ -48,6 +66,10 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["evidence_gateway"] is True
     assert picked["model_improvement"] is True
     assert picked["allow_hosted_training"] is True
+    assert picked["inventory_connectors"] == ["bedrock", "vertex_ai"]
+    assert picked["portfolio_risk"] is True
+    assert picked["policy_packs"] is True
+    assert picked["red_team_assurance"] is True
     assert picked["env_hunt"] is True
     assert picked["response_execution"] is True
     assert picked["connectors"]["cloudtrail"] == {
@@ -86,6 +108,11 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
             "evidence_gateway": True,
             "model_improvement": True,
             "allow_hosted_training": False,
+            "ai_inventory": True,
+            "inventory_connectors": ["bedrock", "vertex_ai"],
+            "portfolio_risk": True,
+            "policy_packs": True,
+            "red_team_assurance": True,
             "threat_hunt": True,
             "env_hunt": True,
             "response_execution": False,
@@ -101,6 +128,33 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
         "gate_promotions": True,
     }
     assert parsed["evidence_gateway"] == {"enable": True}
+    assert parsed["ai_inventory"] == {
+        "enable": True,
+        "connectors": ["bedrock", "vertex_ai"],
+        "page_cap": 100,
+        "record_cap": 5000,
+        "retry_attempts": 3,
+        "timeout_seconds": 30,
+        "missing_grace_runs": 2,
+    }
+    assert parsed["portfolio_risk"] == {"enable": True}
+    assert parsed["policy_packs"] == {"enable": True}
+    assert parsed["red_team_assurance"] == {
+        "enable": True,
+        "commitment_secret_ref": "MAVERICK_RED_TEAM_COMMITMENT_KEY",
+        "max_cases": 12,
+        "max_response_bytes": 65536,
+        "campaign_ttl_seconds": 604800,
+        "evidence_validity_seconds": 7776000,
+    }
+    environment = (tmp_path / ".env").read_text(encoding="utf-8")
+    commitment_line = next(
+        line
+        for line in environment.splitlines()
+        if line.startswith("MAVERICK_RED_TEAM_COMMITMENT_KEY=")
+    )
+    assert len(commitment_line.partition("=")[2]) >= 32
+    assert parsed["external_agents"]["enable"] is True
     assert parsed["model_improvement"] == {
         "enable": True,
         "allow_hosted": False,
@@ -132,7 +186,19 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
 def test_evidence_gateway_enables_assurance_dependencies(monkeypatch):
     from maverick_installer import wizard
 
-    answers = iter([True, False, False, True, False, False, False])
+    answers = iter([
+        True,
+        False,
+        False,
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+    ])
     monkeypatch.setattr(
         wizard, "_q_confirm", lambda *args, **kwargs: next(answers)
     )

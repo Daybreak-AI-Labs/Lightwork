@@ -140,6 +140,39 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # exposes only the master opt-in; misspelled enforcement keys must not
     # silently create an open-ended policy surface.
     "evidence_gateway": {"enable"},
+    # AI-governance admission capabilities are explicit, default-off
+    # authorities. Keep these schemas closed so a misspelled safety limit does
+    # not silently fall back to a more permissive value.
+    "ai_inventory": {
+        "enable",
+        "connectors",
+        "page_cap",
+        "record_cap",
+        "retry_attempts",
+        "timeout_seconds",
+        "missing_grace_runs",
+    },
+    "policy_packs": {"enable"},
+    "portfolio_risk": {"enable"},
+    "drift_monitoring": {
+        "enable",
+        "bins",
+        "min_samples",
+        "psi_threshold",
+        "kl_threshold",
+        "embedding_cosine_threshold",
+        "performance_decay_threshold",
+        "evidence_validity_seconds",
+    },
+    "agent_topology": {"enable"},
+    "red_team_assurance": {
+        "enable",
+        "commitment_secret_ref",
+        "max_cases",
+        "max_response_bytes",
+        "campaign_ttl_seconds",
+        "evidence_validity_seconds",
+    },
     # --- dynamic / open-ended sections (any subkey accepted) ---
     "providers": None,
     "models": None,

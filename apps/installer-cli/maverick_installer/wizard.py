@@ -18,6 +18,7 @@ v0.1.1 additions (council UX feedback):
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -1480,6 +1481,51 @@ def pick_security_suite() -> dict[str, Any]:
             "consent scope? Cross-tenant training remains refused.",
             default=False,
         )
+    ai_inventory = _q_confirm(
+        "Enable read-only discovery of customer-owned AI assets in Bedrock, "
+        "Azure AI Foundry, Vertex AI, Databricks, or Copilot Studio? "
+        "Credentials are configured separately and are never stored in the "
+        "inventory ledger.",
+        default=False,
+    )
+    inventory_connectors: list[str] = []
+    if ai_inventory:
+        evidence_graph = True
+        model_risk_assurance = True
+        connector_labels = {
+            "AWS Bedrock": "bedrock",
+            "Azure AI Foundry": "azure_ai_foundry",
+            "Google Vertex AI": "vertex_ai",
+            "Databricks Unity Catalog": "databricks_unity_catalog",
+            "Microsoft Copilot Studio": "copilot_studio",
+        }
+        selected = _q_checkbox(
+            "Prepare which read-only AI inventory connectors?",
+            list(connector_labels),
+            default=[],
+        )
+        inventory_connectors = [
+            connector_labels[label] for label in selected if label in connector_labels
+        ]
+    portfolio_risk = _q_confirm(
+        "Enable transparent AI portfolio-risk rollups and immutable quarterly "
+        "snapshots? Scores remain decision support, not compliance verdicts.",
+        default=False,
+    )
+    policy_packs = _q_confirm(
+        "Enable signed, versioned AI policy packs with human activation and "
+        "evidence-staleness tracking? Packs do not certify compliance.",
+        default=False,
+    )
+    red_team_assurance = _q_confirm(
+        "Enable governed red-team campaigns for enrolled external agents? "
+        "Raw target output stays transient; only keyed commitments and bounded metrics "
+        "enter review-pending evidence.",
+        default=False,
+    )
+    if portfolio_risk or policy_packs or red_team_assurance:
+        evidence_graph = True
+        model_risk_assurance = True
     threat_hunt = _q_confirm(
         "Enable the defensive Lightwork platform threat hunter?", default=False
     )
@@ -1560,6 +1606,11 @@ def pick_security_suite() -> dict[str, Any]:
         "evidence_gateway": evidence_gateway,
         "model_improvement": model_improvement,
         "allow_hosted_training": allow_hosted_training,
+        "ai_inventory": ai_inventory,
+        "inventory_connectors": inventory_connectors,
+        "portfolio_risk": portfolio_risk,
+        "policy_packs": policy_packs,
+        "red_team_assurance": red_team_assurance,
         "threat_hunt": threat_hunt,
         "env_hunt": env_hunt,
         "response_execution": response_execution,
@@ -1981,6 +2032,22 @@ def pick_advanced() -> dict[str, Any]:
             "outcomes over a rolling window and raise a signed FAIRNESS_ALERT when "
             "the four-fifths rule is breached or fairness drifts below baseline. A "
             "deployment opts in by feeding the monitor its outcomes. OFF by default.",
+            default=False,
+        ),
+        "drift_monitoring": _q_confirm(
+            "Continuous model drift monitoring? Keep governed aggregate baselines "
+            "for feature/prediction distributions, embeddings, and delayed-ground-"
+            "truth performance; emit bound assurance evidence and a signed alert "
+            "when configured PSI, KL, cosine, or decay thresholds are crossed. Raw "
+            "rows and vectors are not retained. OFF by default.",
+            default=False,
+        ),
+        "agent_topology": _q_confirm(
+            "Agent dependency and MCP blast-radius governance? Project each "
+            "enabled agent's tools, MCP servers, hosts, paths, knowledge, and model "
+            "routes with the trust boundary at every hop; promote configured MCP "
+            "servers into the assurance inventory without retaining credentials. "
+            "OFF by default.",
             default=False,
         ),
         "specialist_discipline": _q_confirm(
@@ -3635,6 +3702,21 @@ def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
 def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
     if security_suite is None:
         return []
+    allowed_inventory_connectors = {
+        "azure_ai_foundry",
+        "bedrock",
+        "copilot_studio",
+        "databricks_unity_catalog",
+        "vertex_ai",
+    }
+    inventory_connectors = list(dict.fromkeys(
+        str(value).strip().lower()
+        for value in (security_suite.get("inventory_connectors") or [])
+        if str(value).strip().lower() in allowed_inventory_connectors
+    ))
+    rendered_inventory_connectors = ", ".join(
+        _toml_str(value) for value in inventory_connectors
+    )
     lines = [
         "",
         "[security_ops]",
@@ -3655,6 +3737,33 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "[evidence_gateway]",
         "enable = "
         f"{'true' if security_suite.get('evidence_gateway', False) else 'false'}",
+        "",
+        "[ai_inventory]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_inventory', False) else 'false'}",
+        f"connectors = [{rendered_inventory_connectors}]",
+        "page_cap = 100",
+        "record_cap = 5000",
+        "retry_attempts = 3",
+        "timeout_seconds = 30",
+        "missing_grace_runs = 2",
+        "",
+        "[portfolio_risk]",
+        "enable = "
+        f"{'true' if security_suite.get('portfolio_risk', False) else 'false'}",
+        "",
+        "[policy_packs]",
+        "enable = "
+        f"{'true' if security_suite.get('policy_packs', False) else 'false'}",
+        "",
+        "[red_team_assurance]",
+        "enable = "
+        f"{'true' if security_suite.get('red_team_assurance', False) else 'false'}",
+        'commitment_secret_ref = "MAVERICK_RED_TEAM_COMMITMENT_KEY"',
+        "max_cases = 12",
+        "max_response_bytes = 65536",
+        "campaign_ttl_seconds = 604800",
+        "evidence_validity_seconds = 7776000",
         "",
         "[model_improvement]",
         "enable = "
@@ -4361,6 +4470,14 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[fairness_monitor]")
         lines.append("enable = true")
+    if advanced.get("drift_monitoring"):
+        lines.append("")
+        lines.append("[drift_monitoring]")
+        lines.append("enable = true")
+    if advanced.get("agent_topology"):
+        lines.append("")
+        lines.append("[agent_topology]")
+        lines.append("enable = true")
     # Discipline defaults ON; only an explicit decline is written.
     if advanced.get("specialist_discipline") is False:
         lines.append("")
@@ -4731,6 +4848,24 @@ def write_config(
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
+    keys = dict(keys)
+    if security_suite and security_suite.get("red_team_assurance"):
+        commitment_name = "MAVERICK_RED_TEAM_COMMITMENT_KEY"
+        prior = os.environ.get(commitment_name, "")
+        if not prior and ENV_FILE.is_file():
+            try:
+                for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+                    name, separator, value = line.partition("=")
+                    if separator and name == commitment_name:
+                        prior = value
+                        break
+            except OSError:
+                prior = ""
+        keys.setdefault(
+            commitment_name,
+            prior or secrets.token_urlsafe(48),
+        )
+
     # Re-running the wizard truncates config.toml / .env. The loader explicitly
     # supports hand-editing, so back up any existing file first (0o600) instead
     # of silently destroying a user's manual edits.
@@ -4760,6 +4895,12 @@ def write_config(
         _flows_url = advanced.pop("flows_public_url", None)
         if _flows_url:
             flows.setdefault("public_url", _flows_url)
+
+    # Push-based red-team campaigns are delivered only through the enrolled,
+    # self-authenticating external-agent boundary. Enabling the campaign plane
+    # therefore prepares that dependency once in the advanced config block.
+    if security_suite and security_suite.get("red_team_assurance"):
+        advanced["external_agents"] = True
 
     lines = [
         "# Lightwork config. Regenerate with:  maverick init",

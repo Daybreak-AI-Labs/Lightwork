@@ -47,8 +47,9 @@ router = APIRouter(prefix="/api/v1/external", tags=["external-agents"])
 # which keys by client address.
 _RATE_LIMITS = {"screen": 120, "runs": 60, "approvals": 120, "openapi": 30,
                 "heartbeat": 240, "memory": 60, "execute": 30,
-                "executions": 120}
+                "executions": 120, "red_team": 120}
 _RATE_BUCKET_CAP = 10_000
+_MAX_RED_TEAM_HTTP_BODY_BYTES = 2 * 1024 * 1024
 _rate_times: dict[tuple[str, str], deque[float]] = {}
 _rate_lock = threading.Lock()
 
@@ -155,6 +156,23 @@ class ExternalExecuteCommitIn(BaseModel):
     body: dict | None = None
 
 
+class ExternalRedTeamResultIn(BaseModel):
+    """Transient target output; core persists commitments, never this text."""
+
+    case_id: str = Field(min_length=1, max_length=64)
+    target_artifact_sha256: str = Field(pattern=r"^(?:sha256:)?[0-9a-f]{64}$")
+    response: str = ""
+    tool_calls: list[str | dict] = Field(default_factory=list, max_length=64)
+    tool_trace_status: str = Field(
+        default="unavailable",
+        pattern="^(complete|unavailable)$",
+    )
+    transport_status: str = Field(
+        default="completed",
+        pattern="^(completed|timeout|error|cancelled)$",
+    )
+
+
 def _gate() -> None:
     """Self-gate: 404 while the plane is off (the route doesn't exist for
     this deployment), 403 when the license lacks the paid capability."""
@@ -251,6 +269,36 @@ async def _require_agent(request: Request) -> str:
     from maverick import external_agents as xa
     xa.note_seen(agent.id)  # throttled credential-audit stamp
     return agent.id
+
+
+async def _cache_limited_red_team_body(request: Request) -> None:
+    """Bound signed and bearer request bodies before auth or model parsing."""
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            declared = int(content_length)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="invalid Content-Length",
+            ) from None
+        if declared < 0:
+            raise HTTPException(status_code=400, detail="invalid Content-Length")
+        if declared > _MAX_RED_TEAM_HTTP_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="request body too large")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > _MAX_RED_TEAM_HTTP_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="request body too large")
+    request._body = bytes(body)  # noqa: SLF001 - cache for auth and FastAPI parsing
+
+
+async def _require_red_team_agent(request: Request) -> str:
+    _gate()
+    await _cache_limited_red_team_body(request)
+    return await _require_agent(request)
 
 
 def _shield():
@@ -421,6 +469,57 @@ async def external_execution_commit(
     from maverick import external_agents as xa
     return xa.execute_commit(agent_id, execution_id, payload.model_dump(),
                              shield=_shield())
+
+
+@router.get("/red-team/{campaign_id}/cases")
+async def external_red_team_cases(
+    campaign_id: str, agent_id: str = Depends(_require_red_team_agent),
+) -> dict:
+    """Pull pending synthetic probes for this exact enrolled-agent binding."""
+
+    _rate_limit(agent_id, "red_team")
+    from maverick import red_team_assurance as rta
+    try:
+        return rta.cases_for_agent(
+            campaign_id,
+            external_agent_id=agent_id,
+        )
+    except rta.RedTeamDisabled as exc:
+        raise HTTPException(status_code=404, detail="not found") from exc
+    except rta.RedTeamStateError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.post("/red-team/{campaign_id}/results", status_code=201)
+async def external_red_team_result(
+    campaign_id: str,
+    payload: ExternalRedTeamResultIn,
+    agent_id: str = Depends(_require_red_team_agent),
+) -> dict:
+    """Evaluate raw target output transiently and commit bounded metrics."""
+
+    _rate_limit(agent_id, "red_team")
+    from maverick import red_team_assurance as rta
+    from maverick.privacy_ops import RecordConflict
+    try:
+        row = rta.submit_result(
+            campaign_id,
+            external_agent_id=agent_id,
+            **payload.model_dump(),
+        )
+    except rta.RedTeamDisabled as exc:
+        raise HTTPException(status_code=404, detail="not found") from exc
+    except rta.RedTeamStateError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (RecordConflict, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "result_id": row["id"],
+        "case_id": row["case_id"],
+        "outcome": row["outcome"],
+        "response_commitment": row["response_commitment"],
+    }
 
 
 #: Hand-maintained on purpose: FastAPI's generated schema spans the whole
@@ -753,6 +852,60 @@ _OPENAPI: dict = {
                         }}}}}},
             },
         },
+        "/api/v1/external/red-team/{campaign_id}/cases": {
+            "get": {
+                "operationId": "pullRedTeamCases",
+                "summary": "Pull pending synthetic assurance probes bound "
+                           "to this enrolled agent",
+                "parameters": [{"name": "campaign_id", "in": "path",
+                                "required": True,
+                                "schema": {"type": "string"}}],
+                "responses": {"200": {"description": "Pending probes",
+                                        "content": {"application/json": {
+                                            "schema": {"type": "object"}}}}},
+            },
+        },
+        "/api/v1/external/red-team/{campaign_id}/results": {
+            "post": {
+                "operationId": "submitRedTeamResult",
+                "summary": "Submit transient target output; Lightwork keeps "
+                           "only a keyed commitment and bounded detector metrics",
+                "parameters": [{"name": "campaign_id", "in": "path",
+                                "required": True,
+                                "schema": {"type": "string"}}],
+                "requestBody": {"required": True, "content": {
+                    "application/json": {"schema": {
+                        "type": "object", "required": [
+                            "case_id", "target_artifact_sha256",
+                        ],
+                        "properties": {
+                            "case_id": {"type": "string"},
+                            "target_artifact_sha256": {
+                                "type": "string",
+                                "pattern": "^(?:sha256:)?[0-9a-f]{64}$",
+                            },
+                            "response": {"type": "string"},
+                            "tool_calls": {"type": "array",
+                                           "items": {"oneOf": [
+                                               {"type": "string"},
+                                               {"type": "object"},
+                                           ]}},
+                            "tool_trace_status": {
+                                "type": "string",
+                                "enum": ["complete", "unavailable"],
+                                "default": "unavailable",
+                            },
+                            "transport_status": {
+                                "type": "string",
+                                "enum": ["completed", "timeout", "error",
+                                         "cancelled"],
+                            },
+                        }}}}},
+                "responses": {"201": {"description": "Committed result",
+                                        "content": {"application/json": {
+                                            "schema": {"type": "object"}}}}},
+            },
+        },
     },
 }
 
@@ -768,4 +921,20 @@ async def external_openapi(request: Request) -> dict:
         raise HTTPException(status_code=404, detail="not found")
     client = request.client.host if request.client else "unknown"
     _rate_limit(client, "openapi")
-    return _OPENAPI
+    document = {**_OPENAPI, "paths": dict(_OPENAPI["paths"])}
+    try:
+        from maverick import red_team_assurance as rta
+
+        red_team_enabled = rta.enabled()
+    except Exception:
+        red_team_enabled = False
+    if not red_team_enabled:
+        document["paths"].pop(
+            "/api/v1/external/red-team/{campaign_id}/cases",
+            None,
+        )
+        document["paths"].pop(
+            "/api/v1/external/red-team/{campaign_id}/results",
+            None,
+        )
+    return document
