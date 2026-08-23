@@ -117,7 +117,7 @@ def test_document_extraction_produces_all_answers_with_bound_citations():
 
 
 def test_document_citation_redacts_secret_and_never_persists_full_text():
-    secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456"
+    secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456"  # pragma: allowlist secret
     document = (
         "Model provenance is documented with provider and version " + secret + ". "
         "This unrelated confidential paragraph must not be retained anywhere."

@@ -141,7 +141,7 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
     assert parsed["policy_packs"] == {"enable": True}
     assert parsed["red_team_assurance"] == {
         "enable": True,
-        "commitment_secret_ref": "MAVERICK_RED_TEAM_COMMITMENT_KEY",
+        "commitment_secret_ref": "MAVERICK_RED_TEAM_COMMITMENT_KEY",  # pragma: allowlist secret
         "max_cases": 12,
         "max_response_bytes": 65536,
         "campaign_ttl_seconds": 604800,

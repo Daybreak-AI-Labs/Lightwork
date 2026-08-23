@@ -463,7 +463,7 @@ def test_copilot_studio_follows_same_origin_odata_nextlink_and_extracts_model():
 def test_http_retry_honors_retry_after_without_persisting_response_body():
     sleeps: list[float] = []
     responses = [
-        _Response({"secret": "must-not-be-read"}, 429, {"Retry-After": "3"}),
+        _Response({"secret": "must-not-be-read"}, 429, {"Retry-After": "3"}),  # pragma: allowlist secret
         _Response({"value": []}),
     ]
     transport = _Transport(lambda _call: responses.pop(0))
@@ -636,7 +636,7 @@ def test_missing_grace_is_derived_only_from_complete_runs_and_never_deletes():
 
 
 def test_tenant_state_isolated_and_provider_secrets_are_not_persisted(monkeypatch):
-    secret = "top-secret-copilot-token"
+    secret = "top-secret-copilot-token"  # pragma: allowlist secret
     monkeypatch.setenv("COPILOT_STUDIO_TOKEN", secret)
 
     def handler(_call):

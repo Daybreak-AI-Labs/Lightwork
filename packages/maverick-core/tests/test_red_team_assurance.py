@@ -47,7 +47,7 @@ def _write_config(tmp_path, *, red_team: bool) -> None:
         "enable = true\n"
         "\n[red_team_assurance]\n"
         f"enable = {'true' if red_team else 'false'}\n"
-        'commitment_secret_ref = "MAVERICK_RED_TEAM_COMMITMENT_KEY"\n'
+        'commitment_secret_ref = "MAVERICK_RED_TEAM_COMMITMENT_KEY"\n'  # pragma: allowlist secret
         "max_cases = 12\n"
         "max_response_bytes = 65536\n"
         "campaign_ttl_seconds = 86400\n"
@@ -228,7 +228,7 @@ def test_raw_output_and_tool_arguments_are_never_persisted():
     campaign, _target, _evaluator = _campaign(manager, officer)
     case = next(row for row in campaign["cases"] if row["category"] == "tool_poisoning")
     raw = "Private target output that must never enter the governed ledger."
-    secret_argument = "sk-test-this-is-transient-and-not-a-real-credential"
+    secret_argument = "sk-test-this-is-transient-and-not-a-real-credential"  # pragma: allowlist secret
 
     saved = manager.submit_result(
         campaign["id"],
@@ -1026,7 +1026,7 @@ def test_default_agent_binding_tracks_effective_jwks_and_hmac_rotation(
         jwt_issuer="https://issuer.example",
         jwt_audience="lightwork",
         jwks_file=str(jwks),
-        hmac_secret_ref="RUNNER_HMAC",
+        hmac_secret_ref="RUNNER_HMAC",  # pragma: allowlist secret
     )
     monkeypatch.setattr(agent_trust, "lookup", lambda _agent_id: trusted)
     monkeypatch.setattr(

@@ -3767,7 +3767,7 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "[red_team_assurance]",
         "enable = "
         f"{'true' if security_suite.get('red_team_assurance', False) else 'false'}",
-        'commitment_secret_ref = "MAVERICK_RED_TEAM_COMMITMENT_KEY"',
+        'commitment_secret_ref = "MAVERICK_RED_TEAM_COMMITMENT_KEY"',  # pragma: allowlist secret
         "max_cases = 12",
         "max_response_bytes = 65536",
         "campaign_ttl_seconds = 604800",
