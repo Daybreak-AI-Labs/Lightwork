@@ -2457,6 +2457,47 @@ async def _governance_extensions_page_data(
     return data
 
 
+async def _ai_incident_page_data(module: Any) -> dict[str, Any]:
+    """Bounded Art. 73 clock status; report drafts stay behind the API."""
+
+    enabled = module.enabled()
+    rows: list[dict[str, Any]] = []
+    overdue = 0
+    error = ""
+    if enabled:
+        try:
+            declarations = await run_in_threadpool(module.list_declarations)
+        except Exception:
+            error = "Serious-incident declarations are temporarily unavailable."
+        else:
+            for record in declarations[:20]:
+                clock = record.get("clock") or {}
+                is_overdue = bool(clock.get("overdue"))
+                remaining = float(clock.get("seconds_remaining") or 0.0)
+                rows.append(
+                    {
+                        "id": record.get("id"),
+                        "category": record.get("category"),
+                        "member_state": record.get("member_state"),
+                        "status": record.get("status"),
+                        "deadline_citation": record.get("deadline_citation"),
+                        "clock_label": (
+                            "OVERDUE"
+                            if is_overdue
+                            else f"{remaining / 86_400:.1f}d left"
+                        ),
+                        "overdue": is_overdue,
+                    }
+                )
+            overdue = sum(1 for row in rows if row["overdue"])
+    return {
+        "enabled": enabled,
+        "declarations": rows,
+        "overdue": overdue,
+        "error": error,
+    }
+
+
 async def _portfolio_risk_page_data(module: Any) -> dict[str, Any]:
     enabled = module.enabled()
     report: dict[str, Any] = {}
@@ -2721,6 +2762,7 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
     from maverick import (
         agent_topology,
         ai_evidence_gateway,
+        ai_incident_reporting,
         ai_inventory,
         ai_vendor_risk,
         drift_monitoring,
@@ -2752,6 +2794,8 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
     portfolio_report = portfolio_data["report"]
     portfolio_snapshots = portfolio_data["snapshots"]
     portfolio_error = portfolio_data["error"]
+
+    ai_incident_data = await _ai_incident_page_data(ai_incident_reporting)
 
     red_team_data = await _red_team_page_data(
         red_team_assurance,
@@ -2810,6 +2854,10 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
             "drift_monitoring_error": extensions_data["drift_error"],
             "agent_topology_enabled": extensions_data["topology_enabled"],
             "agent_topology_error": extensions_data["topology_error"],
+            "ai_incident_enabled": ai_incident_data["enabled"],
+            "ai_incident_declarations": ai_incident_data["declarations"],
+            "ai_incident_overdue": ai_incident_data["overdue"],
+            "ai_incident_error": ai_incident_data["error"],
             "portfolio_enabled": portfolio_enabled,
             "portfolio_report": portfolio_report,
             "portfolio_snapshots": portfolio_snapshots[:20],

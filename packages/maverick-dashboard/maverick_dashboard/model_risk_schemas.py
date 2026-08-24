@@ -233,11 +233,62 @@ class RedTeamFinalizeIn(BaseModel):
     force_incomplete: bool = False
 
 
+class RedTeamScheduleIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    external_agent_id: str = Field(..., min_length=1, max_length=128)
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+    safe_target_environment: bool
+    cadence_seconds: int = Field(..., ge=300, le=2_592_000)
+    first_run_at: float | None = Field(None, gt=0)
+    case_keys: list[str] | None = Field(None, min_length=1, max_length=32)
+    campaign_ttl_seconds: int | None = Field(None, ge=300, le=2_592_000)
+
+    @model_validator(mode="after")
+    def bound_case_keys(self):
+        if self.case_keys is not None:
+            _validate_string_items(
+                self.case_keys,
+                label="red-team case key",
+                max_length=64,
+            )
+            if len(set(self.case_keys)) != len(self.case_keys):
+                raise ValueError("red-team case keys must be unique")
+        return self
+
+
+class RedTeamRunDueIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    limit: int = Field(20, ge=1, le=100)
+
+
 class PortfolioSnapshotRefreshIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     expected_revision: int = Field(0, ge=0)
     period_id: str | None = Field(None, pattern=r"^20[0-9]{2}-Q[1-4]$")
+
+
+class PolicyPackEvidenceBindingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    requirement_id: str = Field(..., min_length=1, max_length=64)
+    evidence_id: str = Field(..., min_length=1, max_length=128)
+    evidence_revision: int = Field(..., ge=1, le=2_147_483_647)
+    evidence_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+
+
+class PolicyPackAttestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    control_id: str = Field(..., min_length=1, max_length=64)
+    expected_revision: int = Field(..., ge=1)
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+    evidence_bindings: list[PolicyPackEvidenceBindingIn] = Field(
+        ..., min_length=1, max_length=512,
+    )
 
 
 class PolicyPackActivateIn(BaseModel):

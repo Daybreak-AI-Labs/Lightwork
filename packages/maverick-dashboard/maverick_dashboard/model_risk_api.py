@@ -792,6 +792,117 @@ async def cancel_red_team_campaign(
     )
 
 
+@router.get("/red-team/schedules")
+async def red_team_schedules(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    manager = _module("red_team_assurance", "red_team_assurance")
+    page = await _call(manager.list_schedules, limit=limit)
+    return {
+        "schedules": page["items"],
+        "count": page["count"],
+        "truncated": page["truncated"],
+        "limit": page["limit"],
+    }
+
+
+@router.get("/red-team/schedules/{schedule_id}")
+async def red_team_schedule(
+    request: Request,
+    schedule_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    manager = _module("red_team_assurance", "red_team_assurance")
+    return await _record_call(manager.get_schedule, schedule_id)
+
+
+@router.post("/red-team/schedules", status_code=201)
+async def create_red_team_schedule(
+    request: Request,
+    body: schemas.RedTeamScheduleIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    manager = _module("red_team_assurance", "red_team_assurance")
+    return await _call(
+        manager.create_schedule,
+        **body.model_dump(),
+        actor=_actor(request),
+    )
+
+
+@router.post("/red-team/schedules/{schedule_id}/cancel")
+async def cancel_red_team_schedule(
+    request: Request,
+    schedule_id: str,
+    body: schemas.RedTeamCancelIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    manager = _module("red_team_assurance", "red_team_assurance")
+    return await _record_call(
+        manager.cancel_schedule,
+        schedule_id,
+        expected_revision=body.expected_revision,
+        actor=_actor(request),
+        rationale=body.rationale,
+    )
+
+
+@router.post("/red-team/schedules/run-due")
+async def run_due_red_team_schedules(
+    request: Request,
+    body: schemas.RedTeamRunDueIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    manager = _module("red_team_assurance", "red_team_assurance")
+    return await _call(
+        manager.run_due_schedules,
+        actor=_actor(request),
+        limit=body.limit,
+    )
+
+
+@router.get("/ai-incidents")
+async def ai_incident_declarations(
+    request: Request,
+    status: str | None = Query(default=None, min_length=1, max_length=32),
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    rows = await _call(reporting.list_declarations, status=status)
+    return {"declarations": rows, "count": len(rows)}
+
+
+@router.get("/ai-incidents/categories")
+async def ai_incident_categories(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    return {
+        "categories": reporting.SERIOUS_INCIDENT_CATEGORIES,
+        "regulation": reporting.REGULATION_METADATA,
+    }
+
+
+@router.get("/ai-incidents/overdue")
+async def ai_incident_overdue(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    rows = await _call(reporting.overdue_declarations)
+    return {"declarations": rows, "count": len(rows)}
+
+
+@router.get("/ai-incidents/{record_id}/report")
+async def ai_incident_report_draft(
+    request: Request,
+    record_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    draft = await _call(reporting.render_report, record_id)
+    return {"record_id": record_id, "draft": draft}
+
+
 @router.get("/portfolio-risk/report")
 async def portfolio_risk_report(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
@@ -1022,6 +1133,68 @@ async def refresh_policy_pack_subscription(
     return await _record_call(
         packs.get_subscription_summary,
         refreshed["pack_id"],
+    )
+
+
+@router.get("/policy-packs/subscriptions/{pack_id}/changes")
+async def policy_pack_subscription_changes(
+    request: Request,
+    pack_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    _require_active_tenant()
+    packs = _module("policy_packs", "policy_packs")
+    return await _record_call(packs.subscription_changes, pack_id)
+
+
+def _governed_evidence_resolver() -> Callable[[str], Mapping[str, Any] | None]:
+    """Adapt assurance evidence rows to the policy-pack resolver contract."""
+    from datetime import datetime, timezone
+
+    from maverick import model_risk_assurance as mra
+
+    def resolve(evidence_id: str) -> Mapping[str, Any] | None:
+        record = mra.get_evidence(evidence_id)
+        if record is None:
+            return None
+        observed = record.get("observed_at")
+        if isinstance(observed, (int, float)):
+            observed = datetime.fromtimestamp(
+                float(observed), tz=timezone.utc,
+            ).isoformat()
+        return {
+            "id": record.get("id"),
+            "revision": record.get("revision"),
+            "content_sha256": record.get("payload_sha256"),
+            "evidence_kind": record.get("evidence_kind"),
+            "schema": record.get("schema"),
+            "observed_at": observed,
+        }
+
+    return resolve
+
+
+@router.post("/policy-packs/subscriptions/{subscription_id}/attest")
+async def attest_policy_pack_control(
+    request: Request,
+    subscription_id: str,
+    body: schemas.PolicyPackAttestIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    packs = _module("policy_packs", "policy_packs")
+    _module("model_risk_assurance", "model_risk_assurance")
+    return await _record_call(
+        packs.attest_control,
+        subscription_id,
+        body.control_id,
+        evidence_bindings=[
+            binding.model_dump() for binding in body.evidence_bindings
+        ],
+        evidence_resolver=_governed_evidence_resolver(),
+        expected_revision=body.expected_revision,
+        actor=_actor(request),
+        idempotency_key=body.idempotency_key,
     )
 
 

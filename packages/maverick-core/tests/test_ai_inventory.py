@@ -823,3 +823,250 @@ def test_config_gate_is_default_off_and_rejects_unknown_connector(tmp_path):
     assert inventory.enabled() is False
     with pytest.raises(inventory.AIInventoryConfigError, match="unknown"):
         inventory.get_ai_inventory_config()
+
+
+class _SageMaker:
+    def __init__(self):
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def list_models(self, **kwargs):
+        self.calls.append(("models", kwargs))
+        created = datetime(2026, 8, 1, tzinfo=timezone.utc)
+        if kwargs.get("NextToken") == "models-2":
+            return {
+                "Models": [
+                    {
+                        "ModelName": "fraud-scorer-b",
+                        "ModelArn": "arn:aws:sagemaker:us-east-1:123:model/fraud-scorer-b",
+                        "CreationTime": created,
+                    }
+                ]
+            }
+        return {
+            "Models": [
+                {
+                    "ModelName": "fraud-scorer-a",
+                    "ModelArn": "arn:aws:sagemaker:us-east-1:123:model/fraud-scorer-a",
+                    "CreationTime": created,
+                }
+            ],
+            "NextToken": "models-2",
+        }
+
+    def list_endpoints(self, **kwargs):
+        self.calls.append(("endpoints", kwargs))
+        return {
+            "Endpoints": [
+                {
+                    "EndpointName": "fraud-scorer-prod",
+                    "EndpointArn": "arn:aws:sagemaker:us-east-1:123:endpoint/fraud-scorer-prod",
+                    "CreationTime": datetime(2026, 8, 2, tzinfo=timezone.utc),
+                    "LastModifiedTime": datetime(2026, 8, 3, tzinfo=timezone.utc),
+                    "EndpointStatus": "InService",
+                }
+            ]
+        }
+
+    def list_tags(self, **kwargs):
+        self.calls.append(("tags", kwargs))
+        return {"Tags": [{"Key": "owner", "Value": "fraud-team@example.com"}]}
+
+
+def test_sagemaker_lists_models_and_endpoints_with_normalized_tag_owners():
+    client = _SageMaker()
+    adapter = inventory.SageMakerInventoryAdapter(
+        sagemaker_client=client,
+        region="us-east-1",
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert [(asset.asset_type, asset.display_name) for asset in result.assets] == [
+        ("model", "fraud-scorer-a"),
+        ("model", "fraud-scorer-b"),
+        ("model", "fraud-scorer-prod"),
+    ]
+    # AWS Key/Value tag casing is normalized before owner extraction.
+    assert all(asset.owner == "fraud-team@example.com" for asset in result.assets)
+    assert result.assets[0].source_id.startswith("arn:aws:sagemaker:")
+    assert result.assets[2].binding_strength == "observed_snapshot"
+    assert result.assets[2].metadata["resource_kind"] == "endpoint"
+    # Pagination followed the token exactly once, then stopped.
+    model_calls = [kwargs for op, kwargs in client.calls if op == "models"]
+    assert model_calls == [{"MaxResults": 100}, {"MaxResults": 100, "NextToken": "models-2"}]
+
+
+def test_sagemaker_rejects_pagination_token_cycles():
+    class _Cyclic(_SageMaker):
+        def list_models(self, **kwargs):
+            return {
+                "Models": [],
+                "NextToken": "same-token",
+            }
+
+    adapter = inventory.SageMakerInventoryAdapter(
+        sagemaker_client=_Cyclic(),
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="cycle"):
+        adapter.discover()
+
+
+def test_mlflow_registered_models_and_latest_versions_bind_exactly(monkeypatch):
+    monkeypatch.setenv("MLFLOW_TRACKING_TOKEN", "mlflow-test-token")
+
+    def handler(call):
+        assert call["url"].endswith("/api/2.0/mlflow/registered-models/search")
+        if call["params"].get("page_token") == "page-2":
+            return _Response(
+                {
+                    "registered_models": [
+                        {
+                            "name": "churn-model",
+                            "user_id": "ml-platform@example.com",
+                            "creation_timestamp": 1_754_000_000_000,
+                            "last_updated_timestamp": 1_754_100_000_000,
+                            "latest_versions": [
+                                {
+                                    "name": "churn-model",
+                                    "version": "7",
+                                    "current_stage": "Production",
+                                    "run_id": "run-777",
+                                    "source": "s3://bucket/artifacts/run-777",
+                                    "last_updated_timestamp": 1_754_100_000_000,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+        return _Response(
+            {
+                "registered_models": [
+                    {
+                        "name": "triage-model",
+                        "tags": [{"key": "owner", "value": "risk@example.com"}],
+                        "last_updated_timestamp": 1_753_000_000_000,
+                        "latest_versions": [],
+                    }
+                ],
+                "next_page_token": "page-2",
+            }
+        )
+
+    transport = _Transport(handler)
+    adapter = inventory.MLflowInventoryAdapter(
+        tracking_uri="https://mlflow.internal.example.com",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 2
+    names = [asset.display_name for asset in result.assets]
+    assert names == ["triage-model", "churn-model", "churn-model v7"]
+    assert result.assets[0].owner == "risk@example.com"
+    assert result.assets[1].owner == "ml-platform@example.com"
+    version = result.assets[2]
+    assert version.binding_strength == "immutable_provider_revision"
+    assert version.dependencies == (f"{adapter._server_key}:churn-model",)
+    # Millisecond epochs are converted, never persisted raw.
+    assert all(asset.last_seen < 1e11 for asset in result.assets)
+    assert version.metadata["stage"] == "Production"
+
+
+def test_huggingface_follows_same_origin_link_cursor_and_binds_sha(monkeypatch):
+    monkeypatch.setenv("HUGGINGFACE_TOKEN", "hf-test-token")
+    fake_revision = "0f0e0d0c0b0a09080706050403020100aabbccdd"  # pragma: allowlist secret
+
+    def handler(call):
+        if "cursor" not in call["url"]:
+            assert call["params"]["author"] == "example-org"
+            return _Response(
+                [
+                    {
+                        "id": "example-org/classifier",
+                        "sha": fake_revision,
+                        "lastModified": "2026-08-05T00:00:00Z",
+                        "pipeline_tag": "text-classification",
+                        "private": True,
+                    }
+                ],
+                headers={
+                    "Link": '<https://huggingface.co/api/models?cursor=abc>; rel="next"'
+                },
+            )
+        return _Response(
+            [
+                {
+                    "id": "example-org/reranker",
+                    "lastModified": "2026-08-06T00:00:00Z",
+                    "private": True,
+                }
+            ]
+        )
+
+    transport = _Transport(handler)
+    adapter = inventory.HuggingFaceInventoryAdapter(
+        organization="example-org",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 2
+    exact, snapshot = result.assets
+    assert exact.binding_strength == "immutable_provider_revision"
+    assert exact.metadata["revision"] == fake_revision
+    assert snapshot.binding_strength == "observed_snapshot"
+    assert all(asset.owner == "example-org" for asset in result.assets)
+
+
+def test_huggingface_rejects_off_origin_links_foreign_repos_and_non_lists(
+    monkeypatch,
+):
+    monkeypatch.setenv("HUGGINGFACE_TOKEN", "hf-test-token")
+
+    hostile_link = _Transport(
+        lambda call: _Response(
+            [],
+            headers={"Link": '<https://evil.example.com/api/models?cursor=x>; rel="next"'},
+        )
+    )
+    adapter = inventory.HuggingFaceInventoryAdapter(
+        organization="example-org",
+        transport=hostile_link,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError):
+        adapter.discover()
+
+    foreign_repo = _Transport(
+        lambda call: _Response([{"id": "someone-else/exfil", "private": False}])
+    )
+    adapter = inventory.HuggingFaceInventoryAdapter(
+        organization="example-org",
+        transport=foreign_repo,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="organization"):
+        adapter.discover()
+
+    non_list = _Transport(lambda call: _Response({"error": "nope"}))
+    adapter = inventory.HuggingFaceInventoryAdapter(
+        organization="example-org",
+        transport=non_list,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="list"):
+        adapter.discover()

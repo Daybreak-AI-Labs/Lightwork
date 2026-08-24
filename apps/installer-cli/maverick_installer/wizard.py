@@ -1483,9 +1483,9 @@ def pick_security_suite() -> dict[str, Any]:
         )
     ai_inventory = _q_confirm(
         "Enable read-only discovery of customer-owned AI assets in Bedrock, "
-        "Azure AI Foundry, Vertex AI, Databricks, or Copilot Studio? "
-        "Credentials are configured separately and are never stored in the "
-        "inventory ledger.",
+        "SageMaker, Azure AI Foundry, Vertex AI, Databricks, Copilot Studio, "
+        "MLflow, or Hugging Face? Credentials are configured separately and "
+        "are never stored in the inventory ledger.",
         default=False,
     )
     inventory_connectors: list[str] = []
@@ -1494,10 +1494,13 @@ def pick_security_suite() -> dict[str, Any]:
         model_risk_assurance = True
         connector_labels = {
             "AWS Bedrock": "bedrock",
+            "Amazon SageMaker": "sagemaker",
             "Azure AI Foundry": "azure_ai_foundry",
             "Google Vertex AI": "vertex_ai",
             "Databricks Unity Catalog": "databricks_unity_catalog",
             "Microsoft Copilot Studio": "copilot_studio",
+            "MLflow tracking server": "mlflow",
+            "Hugging Face Hub organization": "huggingface",
         }
         selected = _q_checkbox(
             "Prepare which read-only AI inventory connectors?",
@@ -2048,6 +2051,15 @@ def pick_advanced() -> dict[str, Any]:
             "clock from awareness, draft the report for the routed Member-State "
             "authority, and record human-gated submissions. Clocks and drafts "
             "only -- nothing is ever transmitted. OFF by default.",
+            default=False,
+        ),
+        "ai_regulatory_feed": _q_confirm(
+            "AI regulatory-change impact bridge? Run reviewed regulatory "
+            "alerts through explicit operator rules to create policy-impact "
+            "records, exact evidence-staleness flags, and idempotent customer "
+            "notices. Requires finance operations and the AI evidence gateway. "
+            "Decision support, never a legal applicability opinion. OFF by "
+            "default.",
             default=False,
         ),
         "agent_topology": _q_confirm(
@@ -4485,6 +4497,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("ai_incident_reporting"):
         lines.append("")
         lines.append("[ai_incident_reporting]")
+        lines.append("enable = true")
+    if advanced.get("ai_regulatory_feed"):
+        lines.append("")
+        lines.append("[ai_regulatory_feed]")
         lines.append("enable = true")
     if advanced.get("agent_topology"):
         lines.append("")

@@ -689,3 +689,349 @@ def ai_incidents_report(record_id: str) -> None:
         click.echo(render_report(record_id))
     except (KeyError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
+
+
+@main.group("red-team")
+def red_team() -> None:
+    """Continuous red-team assurance schedules and their dispatcher.
+
+    A schedule is a standing, human-created authority that materializes
+    push-based campaigns on a cadence; `run-due` is the dispatch step an
+    operator or cron invokes to turn due slots into campaigns. Enrolled
+    agents still pull and lease each case -- nothing here executes attacks.
+    """
+
+
+@red_team.command("schedules")
+@click.option("--limit", type=int, default=100, show_default=True,
+              help="Maximum schedules to list.")
+def red_team_schedules_cli(limit: int) -> None:
+    """Schedules with their status, cadence, and next due slot."""
+    from ..red_team_assurance import list_schedules
+    try:
+        page = list_schedules(limit=limit)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    rows = page["items"]
+    if not rows:
+        click.echo("no red-team schedules.")
+        return
+    for row in rows:
+        click.echo(f"  {row['id']}  {row['status']:10s} "
+                   f"every {int(row['cadence_seconds'])}s  "
+                   f"next {row.get('next_run_at')}  runs {row.get('run_count', 0)}  "
+                   f"target {row.get('target_asset_id')}")
+    if page["truncated"]:
+        click.echo(f"  ... truncated at {page['limit']}")
+
+
+@red_team.command("schedule")
+@click.option("--asset", "asset_id", required=True,
+              help="Observed target asset id (MRA-...).")
+@click.option("--agent", "external_agent_id", required=True,
+              help="Enrolled external agent that pulls the cases.")
+@click.option("--key", "idempotency_key", required=True,
+              help="Idempotency key; re-running with the same key is a no-op.")
+@click.option("--cadence", "cadence_seconds", type=int, required=True,
+              help="Seconds between materialized campaigns (min 300).")
+@click.option("--first-run-at", type=float, default=None,
+              help="Unix timestamp of the first slot (default: now).")
+@click.option("--ttl", "campaign_ttl_seconds", type=int, default=None,
+              help="Per-campaign TTL seconds (default: configured TTL).")
+@click.option("--case", "case_keys", multiple=True,
+              help="Restrict to specific case keys (repeatable).")
+@click.option("--safe-target-environment", is_flag=True,
+              help="Attest the target runs in an isolated non-production "
+                   "environment. Required.")
+@click.option("--by", "actor", required=True, help="Creating human.")
+def red_team_schedule_create(asset_id: str, external_agent_id: str,
+                             idempotency_key: str, cadence_seconds: int,
+                             first_run_at: float | None,
+                             campaign_ttl_seconds: int | None,
+                             case_keys: tuple[str, ...],
+                             safe_target_environment: bool, actor: str) -> None:
+    """Create a recurring schedule against one observed asset."""
+    from ..red_team_assurance import create_schedule
+    try:
+        record = create_schedule(
+            asset_id=asset_id, external_agent_id=external_agent_id,
+            idempotency_key=idempotency_key, actor=actor,
+            safe_target_environment=safe_target_environment,
+            cadence_seconds=cadence_seconds, first_run_at=first_run_at,
+            case_keys=list(case_keys) or None,
+            campaign_ttl_seconds=campaign_ttl_seconds,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"schedule {record['id']}: next run at {record['next_run_at']}")
+
+
+@red_team.command("run-due")
+@click.option("--limit", type=int, default=20, show_default=True,
+              help="Maximum due schedules to materialize this pass.")
+@click.option("--by", "actor", required=True, help="Dispatching human or cron identity.")
+def red_team_run_due(limit: int, actor: str) -> None:
+    """Materialize campaigns for every due schedule (the dispatch step)."""
+    from ..red_team_assurance import run_due_schedules
+    try:
+        result = run_due_schedules(actor=actor, limit=limit)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"materialized {result['count']} of {result['due_count']} due"
+               f"{' (truncated)' if result['truncated'] else ''}")
+    for row in result["campaigns"]:
+        target = (row.get("target_binding") or {}).get("asset_id")
+        click.echo(f"  campaign {row['id']} against {target}")
+    for failure in result["failures"]:
+        click.echo(f"  FAILED {failure['schedule_id']}: {failure['reason']}")
+    if result["failure_count"]:
+        raise click.ClickException(
+            f"{result['failure_count']} schedule(s) failed to materialize"
+        )
+
+
+@red_team.command("cancel-schedule")
+@click.argument("schedule_id")
+@click.option("--revision", type=int, required=True,
+              help="Expected schedule revision (CAS).")
+@click.option("--rationale", required=True, help="Why the cadence ends.")
+@click.option("--by", "actor", required=True, help="Cancelling human.")
+def red_team_cancel_schedule(schedule_id: str, revision: int,
+                             rationale: str, actor: str) -> None:
+    """Cancel future slots; an already-claimed run stays in flight."""
+    from ..red_team_assurance import cancel_schedule
+    try:
+        record = cancel_schedule(
+            schedule_id, expected_revision=revision, actor=actor,
+            rationale=rationale,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{record['id']} {record['status']}")
+
+
+@main.group("regulatory-feed")
+def regulatory_feed() -> None:
+    """Bridge reviewed regulatory alerts into AI-governance impact records.
+
+    The finance regulatory-change engine stays the source/version authority
+    and its human review queue stays the disposition authority. `sync` runs
+    reviewed alerts through operator-configured impact rules to create
+    impact, evidence-staleness, and customer-notice records. Decision
+    support only -- never a legal applicability opinion.
+    """
+
+
+@regulatory_feed.command("sync")
+@click.option("--rules", "rules_path", required=True,
+              type=click.Path(exists=True, dir_okay=False),
+              help="JSON file: a list of explicit impact-rule mappings.")
+@click.option("--status", default="accepted", show_default=True,
+              type=click.Choice(["open", "in_review", "accepted"]),
+              help="Which alert queue state feeds the bridge.")
+@click.option("--limit", type=int, default=100, show_default=True,
+              help="Maximum alerts to bridge this pass.")
+@click.option("--deliver", is_flag=True,
+              help="Also deliver each created notice through the configured "
+                   "notification backends.")
+@click.option("--by", "actor", required=True,
+              help="Dispatching human or cron identity.")
+def regulatory_feed_sync(rules_path: str, status: str, limit: int,
+                         deliver: bool, actor: str) -> None:
+    """Run each reviewed alert through the impact bridge, idempotently."""
+    import json
+
+    from ..ai_regulatory_feed import sync_alert
+    from ..finance.regulatory_change import RegulatoryChangeEngine
+    from ..paths import data_dir
+
+    try:
+        rules = json.loads(Path(rules_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise click.ClickException(f"could not load rules: {e}") from e
+    if not isinstance(rules, list) or not rules:
+        raise click.ClickException("rules file must be a non-empty JSON list")
+    try:
+        engine = RegulatoryChangeEngine(
+            data_dir("finance_operations", "regulatory_change.sqlite3")
+        )
+        alerts = engine.list_alerts(status=status, limit=limit)
+    except (OSError, ValueError, RuntimeError) as e:
+        raise click.ClickException(f"could not list alerts: {e}") from e
+    if not alerts:
+        click.echo(f"no {status} regulatory alerts.")
+        return
+    matched = 0
+    failures: list[str] = []
+    for alert in alerts:
+        try:
+            result = sync_alert(alert, rules=rules, actor=actor, deliver=deliver)
+        except (KeyError, ValueError, RuntimeError) as e:
+            failures.append(f"{getattr(alert, 'alert_id', '?')}: {e}")
+            continue
+        impact = result.get("impact")
+        if impact is None:
+            continue
+        matched += 1
+        notice = result.get("notice") or {}
+        staleness = result.get("staleness") or []
+        click.echo(f"  {getattr(alert, 'alert_id', '?')}: impact "
+                   f"{impact.get('id')}  stale-evidence {len(staleness)}  "
+                   f"notice {notice.get('id')} [{notice.get('status')}]")
+    click.echo(f"bridged {matched} of {len(alerts)} {status} alert(s)")
+    if failures:
+        for line in failures:
+            click.echo(f"  FAILED {line}")
+        raise click.ClickException(f"{len(failures)} alert(s) failed to bridge")
+
+
+@regulatory_feed.command("staleness")
+@click.option("--evidence", "evidence_id", default=None,
+              help="Only staleness rows naming this evidence id.")
+@click.option("--limit", type=int, default=100, show_default=True)
+def regulatory_feed_staleness(evidence_id: str | None, limit: int) -> None:
+    """Active evidence-staleness records, oldest first."""
+    from ..ai_regulatory_feed import list_active_staleness
+    try:
+        rows = list_active_staleness(evidence_id=evidence_id, limit=limit)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    if not rows:
+        click.echo("no active regulatory staleness.")
+        return
+    for row in rows:
+        click.echo(f"  {row['id']}  rev {row.get('revision')}  "
+                   f"evidence {row.get('evidence_id')}  "
+                   f"control {row.get('control_id')}  {row.get('created_at')}")
+
+
+@regulatory_feed.command("resolve")
+@click.argument("staleness_id")
+@click.option("--revision", type=int, required=True,
+              help="Expected record revision (CAS).")
+@click.option("--resolution", required=True,
+              help="What was refreshed or re-attested, and why it suffices.")
+@click.option("--by", "actor", required=True, help="Resolving human.")
+def regulatory_feed_resolve(staleness_id: str, revision: int,
+                            resolution: str, actor: str) -> None:
+    """Resolve one staleness record after the evidence was refreshed."""
+    from ..ai_regulatory_feed import resolve_staleness
+    try:
+        row = resolve_staleness(
+            staleness_id, expected_revision=revision,
+            resolution=resolution, actor=actor,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{row['id']} {row.get('status')}")
+
+
+@regulatory_feed.command("notices")
+@click.option("--limit", type=int, default=100, show_default=True)
+def regulatory_feed_notices(limit: int) -> None:
+    """Customer notices with their delivery state."""
+    from ..ai_regulatory_feed import list_notices
+    try:
+        rows = list_notices(limit=limit)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    if not rows:
+        click.echo("no regulatory customer notices.")
+        return
+    for row in rows:
+        click.echo(f"  {row['id']}  {row.get('status'):10s} rev "
+                   f"{row.get('revision')}  {row.get('title')}")
+
+
+@regulatory_feed.command("deliver")
+@click.argument("notice_id")
+@click.option("--revision", type=int, required=True,
+              help="Expected record revision (CAS).")
+@click.option("--by", "actor", required=True, help="Delivering human or cron identity.")
+def regulatory_feed_deliver(notice_id: str, revision: int, actor: str) -> None:
+    """Deliver one notice through the configured notification backends."""
+    from ..ai_regulatory_feed import deliver_notice
+    try:
+        row = deliver_notice(notice_id, expected_revision=revision, actor=actor)
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{row['id']} {row.get('status')}")
+
+
+@main.group("ai-inventory")
+def ai_inventory_group() -> None:
+    """Read-only AI asset discovery sweeps across configured providers.
+
+    `sync` runs every configured connector (or the ones named) through the
+    governed discovery service -- credentials stay environment references,
+    listings are bounded, and each discovered asset lands in the model-risk
+    inventory. Cron `sync` for recurring sweeps; `status` shows each
+    connector's last outcome.
+    """
+
+
+@ai_inventory_group.command("sync")
+@click.option("--connector", "connector_names", multiple=True,
+              help="Sync only this connector (repeatable; default: all "
+                   "configured connectors).")
+@click.option("--by", "actor", required=True,
+              help="Dispatching human or cron identity.")
+def ai_inventory_sync(connector_names: tuple[str, ...], actor: str) -> None:
+    """Sweep configured providers into the governed inventory."""
+    from ..ai_inventory import (
+        AIInventoryError,
+        get_ai_inventory_config,
+        sync_connector,
+    )
+    try:
+        config = get_ai_inventory_config()
+    except AIInventoryError as e:
+        raise click.ClickException(str(e)) from e
+    targets = list(connector_names) or list(config.get("connectors") or [])
+    if not targets:
+        raise click.ClickException(
+            "no connectors configured ([ai_inventory] connectors) and none named"
+        )
+    failures: list[str] = []
+    for name in targets:
+        try:
+            run = sync_connector(name, actor=actor)
+        except (AIInventoryError, ValueError, RuntimeError) as e:
+            failures.append(f"{name}: {e}")
+            continue
+        click.echo(f"  {name}: {run.get('status')}  "
+                   f"assets {run.get('asset_count', 0)}")
+    click.echo(f"synced {len(targets) - len(failures)} of {len(targets)} connector(s)")
+    if failures:
+        for line in failures:
+            click.echo(f"  FAILED {line}")
+        raise click.ClickException(f"{len(failures)} connector(s) failed to sync")
+
+
+@ai_inventory_group.command("status")
+def ai_inventory_status() -> None:
+    """Each configured connector's last discovery outcome."""
+    from ..ai_inventory import (
+        AIInventoryError,
+        connector_status,
+        get_ai_inventory_config,
+    )
+    try:
+        config = get_ai_inventory_config()
+    except AIInventoryError as e:
+        raise click.ClickException(str(e)) from e
+    connectors = list(config.get("connectors") or [])
+    if not connectors:
+        click.echo("no connectors configured ([ai_inventory] connectors).")
+        return
+    for name in connectors:
+        try:
+            row = connector_status(name)
+        except (AIInventoryError, ValueError, RuntimeError) as e:
+            click.echo(f"  {name}: status unavailable ({e})")
+            continue
+        if row is None:
+            click.echo(f"  {name}: never synced")
+        else:
+            click.echo(f"  {name}: {row.get('state')}  "
+                       f"completed {row.get('completed_sequence', 0)} run(s)")
