@@ -242,6 +242,122 @@ def test_substantial_modification_forces_reassessment_unless_predetermined():
     assert reopened["modifications"][-1]["predetermined"] is False
 
 
+def test_list_assessment_routes_filters_by_status():
+    other = "MAA-" + "b" * 32
+    euc.record_assessment_route(
+        _ASSET,
+        route="internal_control_annex_vi",
+        annex_iii_point=4,
+        harmonised_standards_applied=True,
+        common_specifications_applied=False,
+        rationale="Point 4 internal control.",
+        actor="quality-lead",
+    )
+    flagged = euc.record_assessment_route(
+        other,
+        route="internal_control_annex_vi",
+        annex_iii_point=5,
+        harmonised_standards_applied=False,
+        common_specifications_applied=False,
+        rationale="Point 5 internal control.",
+        actor="quality-lead",
+    )
+    euc.mark_substantial_modification(
+        other,
+        reason="A new data source changed the system's behaviour.",
+        actor="quality-lead",
+        expected_revision=flagged["revision"],
+    )
+
+    rows = euc.list_assessment_routes()
+    assert [row["asset_id"] for row in rows] == sorted([_ASSET, other])
+    flagged_rows = euc.list_assessment_routes(status="reassessment_required")
+    assert [row["asset_id"] for row in flagged_rows] == [other]
+    with pytest.raises(ValueError, match="status"):
+        euc.list_assessment_routes(status="nope")
+
+
+def test_pmm_plan_record_and_review():
+    recorded = euc.record_pmm_plan(
+        _ASSET, plan_reference="wiki/models/credit/pmm-plan", actor="quality-lead",
+    )
+    assert recorded["citation"] == "Art. 72(1)"
+    assert "2026-02-02" in recorded["template_note"]
+
+    with pytest.raises(ValueError, match="no_change review cannot move"):
+        euc.record_pmm_review(
+            _ASSET, outcome="no_change", actor="quality-lead",
+            expected_revision=recorded["revision"],
+            plan_reference="wiki/elsewhere",
+        )
+    reviewed = euc.record_pmm_review(
+        _ASSET, outcome="no_change", actor="quality-lead",
+        expected_revision=recorded["revision"],
+    )
+    assert len(reviewed["reviews"]) == 1
+    moved = euc.record_pmm_review(
+        _ASSET, outcome="plan_updated", actor="quality-lead",
+        expected_revision=reviewed["revision"],
+        plan_reference="wiki/models/credit/pmm-plan-v2",
+    )
+    assert moved["plan_reference"] == "wiki/models/credit/pmm-plan-v2"
+    assert len(moved["reviews"]) == 2
+
+    with pytest.raises(KeyError):
+        euc.record_pmm_review(
+            "MAA-" + "c" * 32, outcome="no_change", actor="quality-lead",
+            expected_revision=1,
+        )
+    assert [row["asset_id"] for row in euc.list_pmm_plans()] == [_ASSET]
+
+
+def test_registration_refuses_the_wrong_registry():
+    with pytest.raises(euc.EUConformityError, match=r"Art\. 49\(1\)"):
+        euc.record_registration(
+            _ASSET, basis="provider_high_risk", registry="national",
+            reference="NAT-1", actor="counsel",
+        )
+    with pytest.raises(euc.EUConformityError, match=r"Art\. 49\(5\)"):
+        euc.record_registration(
+            _ASSET, basis="annex_iii_point_2_national", registry="eu_database",
+            reference="EUDB-1", actor="counsel",
+        )
+    with pytest.raises(ValueError, match="basis"):
+        euc.record_registration(
+            _ASSET, basis="nope", registry="eu_database",
+            reference="EUDB-1", actor="counsel",
+        )
+    recorded = euc.record_registration(
+        _ASSET, basis="annex_iii_point_2_national", registry="national",
+        reference="NAT-2026-9", actor="counsel",
+    )
+    assert recorded["citation"] == "Art. 49(5)"
+    assert euc.get_registration(_ASSET)["reference"] == "NAT-2026-9"
+    assert len(euc.list_registrations()) == 1
+
+
+def test_ifu_checklist_tracks_all_six_items():
+    record = euc.open_ifu(_ASSET, actor="counsel")
+    assert euc.open_ifu(_ASSET, actor="counsel")["id"] == record["id"]
+    with pytest.raises(ValueError, match="item"):
+        euc.assert_ifu_item(
+            record["id"], "nope", reference="wiki", actor="counsel",
+            expected_revision=record["revision"],
+        )
+    revision = record["revision"]
+    for item in euc.IFU_ITEMS:
+        saved = euc.assert_ifu_item(
+            record["id"], item, reference=f"handbook#{item}", actor="counsel",
+            expected_revision=revision,
+        )
+        revision = saved["revision"]
+    state = euc.ifu_status(record["id"])
+    assert state["asserted"] == state["total"] == 6
+    assert state["complete"] is True
+    assert euc.get_ifu(_ASSET)["items"]["log_collection"]["citation"] == "Art. 13(3)(f)"
+    assert [row["asset_id"] for row in euc.list_ifu_checklists()] == [_ASSET]
+
+
 def test_registers_are_tenant_scoped():
     with tenant_scope(tenant="alpha"):
         _complete_fria()

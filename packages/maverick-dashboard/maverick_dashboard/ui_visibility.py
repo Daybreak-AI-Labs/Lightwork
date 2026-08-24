@@ -126,6 +126,11 @@ PAGES: tuple[dict, ...] = (
     # entry while role visibility still protects every direct URL.
     {"path": "/security", "label": "Security & GRC", "group": "Govern",
      "icon": "shield", "floor": "operate", "default": "operate"},
+    # The governance workspace: plain-language FRIA / Annex IV / literacy /
+    # Art. 73 workflows for legal, privacy, and compliance staff. Its own
+    # sidebar entry -- those personas never open the technical cockpit.
+    {"path": "/security/governance", "label": "AI Governance", "group": "Govern",
+     "icon": "shield", "floor": "operate", "default": "operate"},
     {"path": "/security/threats", "label": "Platform Threat Hunter",
      "group": "Govern", "icon": "shield", "floor": "operate",
      "default": "operate", "in_nav": False},

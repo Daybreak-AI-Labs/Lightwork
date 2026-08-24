@@ -126,9 +126,65 @@ ANNEX_IV_ITEMS = {
 
 ROUTES = ("internal_control_annex_vi", "notified_body_annex_vii", "sectoral_annex_i")
 
+PMM_SCHEMA = "lightwork.eu-pmm-plan.v1"
+REGISTRATION_SCHEMA = "lightwork.eu-registration.v1"
+IFU_SCHEMA = "lightwork.eu-ifu.v1"
+
+#: Art. 49 registration bases -> (citation, the registry that basis belongs in).
+#: Points 49(1)-(3) register in the Commission's EU database; Annex III point 2
+#: systems register at national level instead (Art. 49(5)).
+REGISTRATION_BASES = {
+    "provider_high_risk": ("Art. 49(1)", "eu_database"),
+    "provider_not_high_risk": ("Art. 49(2)", "eu_database"),
+    "public_authority_deployer": ("Art. 49(3)", "eu_database"),
+    "annex_iii_point_2_national": ("Art. 49(5)", "national"),
+}
+REGISTRIES = ("eu_database", "national")
+
+#: Art. 13(3) instructions-for-use content items, mirrored from the Annex IV
+#: checklist pattern: the register records WHERE each item is documented.
+IFU_ITEMS = {
+    "provider_identity": (
+        "Art. 13(3)(a)",
+        "The identity and contact details of the provider and, where "
+        "applicable, its authorised representative.",
+    ),
+    "system_characteristics": (
+        "Art. 13(3)(b)",
+        "The characteristics, capabilities and limitations of performance: "
+        "intended purpose, accuracy, robustness and cybersecurity, known "
+        "foreseeable risks, input-data specifications, and how to interpret "
+        "the system's output.",
+    ),
+    "predetermined_changes": (
+        "Art. 13(3)(c)",
+        "The changes to the system and its performance pre-determined by the "
+        "provider at the moment of the initial conformity assessment.",
+    ),
+    "human_oversight_measures": (
+        "Art. 13(3)(d)",
+        "The human oversight measures, including the technical measures put "
+        "in place to facilitate the interpretation of the outputs.",
+    ),
+    "resources_and_maintenance": (
+        "Art. 13(3)(e)",
+        "The computational and hardware resources needed, the expected "
+        "lifetime, and the necessary maintenance and care measures, "
+        "including software updates.",
+    ),
+    "log_collection": (
+        "Art. 13(3)(f)",
+        "Where relevant, the mechanisms allowing deployers to properly "
+        "collect, store and interpret the logs (Art. 12).",
+    ),
+}
+
 _FRIA = GovernedRecordStore("eu_fria", "ECF", "eu_fria_assessment")
 _ANNEX_IV = GovernedRecordStore("eu_annex_iv", "ECD", "eu_annex_iv_checklist")
 _ROUTES = GovernedRecordStore("eu_art43_routes", "ECA", "eu_art43_route")
+_PMM = GovernedRecordStore("eu_pmm_plans", "ECP", "eu_pmm_plan")
+_REGISTRATIONS = GovernedRecordStore("eu_registrations", "ECR", "eu_registration")
+_IFU = GovernedRecordStore("eu_ifu", "ECI", "eu_ifu_checklist")
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}\Z")
 _MAX_LIST = 500
@@ -492,6 +548,12 @@ def assert_annex_iv_item(
     return dict(saved)
 
 
+def get_annex_iv(asset_id: str) -> dict[str, Any] | None:
+    _require_enabled()
+    record = _ANNEX_IV.get(_annex_id(_text(asset_id, "asset_id", 64)))
+    return None if record is None else dict(record)
+
+
 def annex_iv_status(record_id: str) -> dict[str, Any]:
     _require_enabled()
     record = _ANNEX_IV.get(_text(record_id, "record_id", 64))
@@ -664,6 +726,277 @@ def get_assessment_route(asset_id: str) -> dict[str, Any] | None:
     return None if record is None else dict(record)
 
 
+def list_assessment_routes(*, status: str | None = None) -> list[dict[str, Any]]:
+    _require_enabled()
+    if status is not None and status not in {"recorded", "reassessment_required"}:
+        raise ValueError("status must be recorded or reassessment_required")
+    rows = _ROUTES.list(limit=_MAX_LIST)
+    rows.sort(key=lambda row: (str(row.get("asset_id") or ""), str(row.get("id") or "")))
+    return [
+        dict(row) for row in rows
+        if status is None or row.get("status") == status
+    ]
+
+
+# --------------------------------------------------------------------------
+# Art. 72 post-market monitoring plan
+# --------------------------------------------------------------------------
+def _pmm_id(asset_id: str) -> str:
+    return f"ECP-{_sha256(asset_id)[:24]}"
+
+
+def record_pmm_plan(
+    asset_id: str, *, plan_reference: str, actor: str,
+) -> dict[str, Any]:
+    """Record that a documented Art. 72 post-market monitoring plan exists.
+
+    The register records WHERE the plan lives; it never authors the plan.
+    """
+
+    _require_enabled()
+    asset = _text(asset_id, "asset_id", 64)
+    where = _text(plan_reference, "plan_reference", 512)
+    operator = _text(actor, "actor", 256)
+    record = {
+        "id": _pmm_id(asset),
+        "schema": PMM_SCHEMA,
+        "asset_id": asset,
+        "plan_reference": where,
+        "reviews": [],
+        "established_by": operator,
+        "established_at": time.time(),
+        "citation": "Art. 72(1)",
+        "template_note": (
+            "The plan shall be based on the Commission's post-market "
+            "monitoring plan template (Art. 72(3), implementing act due "
+            "2026-02-02)."
+        ),
+        "regulation": dict(REGULATION_METADATA),
+        "notice": NON_CERTIFICATION_NOTICE,
+    }
+    return dict(_PMM.create(record, action="record_pmm_plan", actor=operator))
+
+
+def record_pmm_review(
+    asset_id: str,
+    *,
+    outcome: str,
+    actor: str,
+    expected_revision: int,
+    plan_reference: str | None = None,
+) -> dict[str, Any]:
+    """Append one monitoring-plan review; ``plan_updated`` may move the plan."""
+
+    _require_enabled()
+    if outcome not in {"no_change", "plan_updated"}:
+        raise ValueError("outcome must be no_change or plan_updated")
+    operator = _text(actor, "actor", 256)
+    moved = (
+        None if plan_reference is None
+        else _text(plan_reference, "plan_reference", 512)
+    )
+    if outcome == "no_change" and moved is not None:
+        raise ValueError("a no_change review cannot move the plan reference")
+
+    def mutate(value: dict[str, Any]) -> None:
+        reviews = list(value.get("reviews") or [])
+        reviews.append(
+            {
+                "outcome": outcome,
+                "reviewed_by": operator,
+                "reviewed_at": time.time(),
+            }
+        )
+        value["reviews"] = reviews[-50:]
+        if moved is not None:
+            value["plan_reference"] = moved
+
+    saved = _PMM.update(
+        _pmm_id(_text(asset_id, "asset_id", 64)),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="record_pmm_review",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"monitoring plan is not recorded for asset: {asset_id}")
+    return dict(saved)
+
+
+def get_pmm_plan(asset_id: str) -> dict[str, Any] | None:
+    _require_enabled()
+    record = _PMM.get(_pmm_id(_text(asset_id, "asset_id", 64)))
+    return None if record is None else dict(record)
+
+
+def list_pmm_plans() -> list[dict[str, Any]]:
+    _require_enabled()
+    rows = _PMM.list(limit=_MAX_LIST)
+    rows.sort(key=lambda row: str(row.get("asset_id") or ""))
+    return [dict(row) for row in rows]
+
+
+# --------------------------------------------------------------------------
+# Art. 49 registration
+# --------------------------------------------------------------------------
+def _registration_id(asset_id: str) -> str:
+    return f"ECR-{_sha256(asset_id)[:24]}"
+
+
+def record_registration(
+    asset_id: str,
+    *,
+    basis: str,
+    registry: str,
+    reference: str,
+    actor: str,
+) -> dict[str, Any]:
+    """Record a completed Art. 49 registration, refusing the wrong registry."""
+
+    _require_enabled()
+    if basis not in REGISTRATION_BASES:
+        raise ValueError(
+            f"basis must be one of: {', '.join(sorted(REGISTRATION_BASES))}"
+        )
+    if registry not in REGISTRIES:
+        raise ValueError(f"registry must be one of: {', '.join(REGISTRIES)}")
+    citation, expected_registry = REGISTRATION_BASES[basis]
+    if registry != expected_registry:
+        raise EUConformityError(
+            f"{citation}: a {basis} registration belongs in the "
+            f"{expected_registry} registry"
+        )
+    asset = _text(asset_id, "asset_id", 64)
+    operator = _text(actor, "actor", 256)
+    record = {
+        "id": _registration_id(asset),
+        "schema": REGISTRATION_SCHEMA,
+        "asset_id": asset,
+        "basis": basis,
+        "citation": citation,
+        "registry": registry,
+        "reference": _text(reference, "reference", 512),
+        "registered_by": operator,
+        "recorded_at": time.time(),
+        "regulation": dict(REGULATION_METADATA),
+        "notice": NON_CERTIFICATION_NOTICE,
+    }
+    return dict(
+        _REGISTRATIONS.create(record, action="record_registration", actor=operator)
+    )
+
+
+def get_registration(asset_id: str) -> dict[str, Any] | None:
+    _require_enabled()
+    record = _REGISTRATIONS.get(_registration_id(_text(asset_id, "asset_id", 64)))
+    return None if record is None else dict(record)
+
+
+def list_registrations() -> list[dict[str, Any]]:
+    _require_enabled()
+    rows = _REGISTRATIONS.list(limit=_MAX_LIST)
+    rows.sort(key=lambda row: str(row.get("asset_id") or ""))
+    return [dict(row) for row in rows]
+
+
+# --------------------------------------------------------------------------
+# Art. 13(3) instructions-for-use checklist
+# --------------------------------------------------------------------------
+def _ifu_id(asset_id: str) -> str:
+    return f"ECI-{_sha256(asset_id)[:24]}"
+
+
+def open_ifu(asset_id: str, *, actor: str) -> dict[str, Any]:
+    _require_enabled()
+    asset = _text(asset_id, "asset_id", 64)
+    operator = _text(actor, "actor", 256)
+    record_id = _ifu_id(asset)
+    current = _IFU.get(record_id)
+    if current is not None:
+        return dict(current)
+    record = {
+        "id": record_id,
+        "schema": IFU_SCHEMA,
+        "asset_id": asset,
+        "items": dict.fromkeys(IFU_ITEMS),
+        "opened_by": operator,
+        "regulation": dict(REGULATION_METADATA),
+        "notice": NON_CERTIFICATION_NOTICE,
+    }
+    return dict(_IFU.create(record, action="open_ifu", actor=operator))
+
+
+def assert_ifu_item(
+    record_id: str,
+    item: str,
+    *,
+    reference: str,
+    actor: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """A named human asserts where one Art. 13(3) item is documented."""
+
+    _require_enabled()
+    if item not in IFU_ITEMS:
+        raise ValueError(f"item must be one of: {', '.join(sorted(IFU_ITEMS))}")
+    operator = _text(actor, "actor", 256)
+    where = _text(reference, "reference", 512)
+
+    def mutate(value: dict[str, Any]) -> None:
+        items = dict(value.get("items") or {})
+        items[item] = {
+            "citation": IFU_ITEMS[item][0],
+            "reference": where,
+            "asserted_by": operator,
+            "asserted_at": time.time(),
+        }
+        value["items"] = items
+
+    saved = _IFU.update(
+        _text(record_id, "record_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="assert_ifu_item",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"instructions-for-use checklist is not recorded: {record_id}")
+    return dict(saved)
+
+
+def ifu_status(record_id: str) -> dict[str, Any]:
+    _require_enabled()
+    record = _IFU.get(_text(record_id, "record_id", 64))
+    if record is None:
+        raise KeyError(f"instructions-for-use checklist is not recorded: {record_id}")
+    items = record.get("items") or {}
+    missing = sorted(
+        key for key in IFU_ITEMS if not isinstance(items.get(key), Mapping)
+    )
+    return {
+        "id": record.get("id"),
+        "asset_id": record.get("asset_id"),
+        "asserted": len(IFU_ITEMS) - len(missing),
+        "total": len(IFU_ITEMS),
+        "missing": missing,
+        "complete": not missing,
+        "revision": record.get("revision"),
+    }
+
+
+def get_ifu(asset_id: str) -> dict[str, Any] | None:
+    _require_enabled()
+    record = _IFU.get(_ifu_id(_text(asset_id, "asset_id", 64)))
+    return None if record is None else dict(record)
+
+
+def list_ifu_checklists() -> list[dict[str, Any]]:
+    _require_enabled()
+    rows = _IFU.list(limit=_MAX_LIST)
+    rows.sort(key=lambda row: str(row.get("asset_id") or ""))
+    return [dict(row) for row in rows]
+
+
 def list_frias(*, status: str | None = None) -> list[dict[str, Any]]:
     _require_enabled()
     if status is not None and status not in {"draft", "completed", "outdated"}:
@@ -691,7 +1024,24 @@ __all__ = [
     "enabled",
     "get_assessment_route",
     "get_eu_conformity_config",
+    "IFU_ITEMS",
+    "REGISTRATION_BASES",
+    "REGISTRIES",
+    "assert_ifu_item",
+    "get_annex_iv",
+    "get_ifu",
+    "get_pmm_plan",
+    "get_registration",
+    "ifu_status",
+    "list_assessment_routes",
     "list_frias",
+    "list_ifu_checklists",
+    "list_pmm_plans",
+    "list_registrations",
+    "open_ifu",
+    "record_pmm_plan",
+    "record_pmm_review",
+    "record_registration",
     "mark_fria_outdated",
     "mark_substantial_modification",
     "open_annex_iv",
