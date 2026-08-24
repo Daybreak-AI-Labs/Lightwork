@@ -166,6 +166,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     },
     "agent_topology": {"enable"},
     "ai_incident_reporting": {"enable"},
+    "ai_literacy": {"enable"},
     "ai_regulatory_feed": {"enable"},
     "grc_sync": {"enable", "connector", "findings_path", "acceptances_path",
                  "incidents_path", "backlink_base", "response_field_params"},

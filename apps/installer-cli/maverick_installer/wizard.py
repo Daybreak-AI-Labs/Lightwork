@@ -2065,6 +2065,14 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "ai_literacy": _q_confirm(
+            "EU AI Act Art. 4 AI-literacy register? Named humans set which "
+            "trainings each role requires, record completions with evidence "
+            "references, and export gap and evidence snapshots for auditors. "
+            "Decision support, never a certification of competence. OFF by "
+            "default.",
+            default=False,
+        ),
         "grc_sync": _q_confirm(
             "Outbound GRC synchronization? Idempotently mirror model-risk "
             "findings, accepted risks, and incidents into your ServiceNow, "
@@ -4512,6 +4520,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("ai_regulatory_feed"):
         lines.append("")
         lines.append("[ai_regulatory_feed]")
+        lines.append("enable = true")
+    if advanced.get("ai_literacy"):
+        lines.append("")
+        lines.append("[ai_literacy]")
         lines.append("enable = true")
     if advanced.get("grc_sync"):
         lines.append("")

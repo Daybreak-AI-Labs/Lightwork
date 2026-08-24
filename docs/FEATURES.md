@@ -857,6 +857,15 @@ here.
   before/after values are retained; full source documents, notification
   credentials, and delivery receipts are never persisted. Decision support
   requiring human review — never a legal applicability opinion.
+- **AI-literacy register** (`ai_literacy.py`, opt-in `[ai_literacy] enable`,
+  `maverick ai-literacy`) — the EU AI Act Art. 4 obligation (applicable since
+  2025-02-02) made inspectable: named humans set per-role training
+  requirements with validity windows, assign people, and record completions
+  with evidence references and bounded history; `gaps` derives who is
+  missing or expired and `export` emits one bounded JSON evidence snapshot.
+  Person identifiers are operator-chosen tokens in a tenant-scoped governed
+  store. Decision support for the obligation — never a certification of
+  competence or training sufficiency.
 - **Outbound GRC synchronization** (`grc_sync.py`, opt-in `[grc_sync] enable`,
   `maverick grc-sync`) — idempotently mirrors model-risk findings, accepted
   risks, and incidents into a customer's ServiceNow IRM, Archer, or other

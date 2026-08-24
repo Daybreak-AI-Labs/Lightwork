@@ -1103,3 +1103,138 @@ def grc_sync_outbound(limit: int) -> None:
     for row in rows:
         click.echo(f"  {row['id']}  {row['kind']:16s} {row['status']:22s} "
                    f"{row['source_id']}  ->  {row['remote_id'] or '-'}")
+
+
+@main.group("ai-literacy")
+def ai_literacy_group() -> None:
+    """EU AI Act Art. 4 AI-literacy register.
+
+    Named humans set which trainings each role requires and record who
+    completed what; `gaps` derives who is missing or expired, and `export`
+    emits one bounded JSON evidence snapshot. Decision support for the
+    Art. 4 obligation -- never a certification of competence.
+    """
+
+
+@ai_literacy_group.command("require")
+@click.argument("role")
+@click.option("--training", "trainings", multiple=True, required=True,
+              help="key:title[:validity_days] (repeatable).")
+@click.option("--revision", type=int, default=0, show_default=True,
+              help="Expected revision when updating an existing role (CAS).")
+@click.option("--by", "actor", required=True, help="Requiring human.")
+def ai_literacy_require(role: str, trainings: tuple[str, ...],
+                        revision: int, actor: str) -> None:
+    """Set the training requirement for one role."""
+    from ..ai_literacy import set_role_requirement
+    parsed = []
+    for raw in trainings:
+        parts = raw.split(":", 2)
+        if len(parts) < 2:
+            raise click.ClickException(
+                f"--training must be key:title[:validity_days], got {raw!r}"
+            )
+        entry: dict = {"key": parts[0], "title": parts[1]}
+        if len(parts) == 3 and parts[2]:
+            try:
+                entry["validity_days"] = int(parts[2])
+            except ValueError as e:
+                raise click.ClickException(
+                    f"validity_days must be an integer, got {parts[2]!r}"
+                ) from e
+        else:
+            entry["validity_days"] = None
+        parsed.append(entry)
+    try:
+        record = set_role_requirement(
+            role, parsed, actor=actor, expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{record['role']}: {len(record['trainings'])} training(s) "
+               f"required (rev {record['revision']})")
+
+
+@ai_literacy_group.command("assign")
+@click.argument("person")
+@click.option("--role", "roles", multiple=True, required=True,
+              help="Role with a recorded requirement (repeatable).")
+@click.option("--revision", type=int, default=0, show_default=True,
+              help="Expected revision when updating an assignment (CAS).")
+@click.option("--by", "actor", required=True, help="Assigning human.")
+def ai_literacy_assign(person: str, roles: tuple[str, ...],
+                       revision: int, actor: str) -> None:
+    """Assign one person to one or more required roles."""
+    from ..ai_literacy import assign_roles
+    try:
+        record = assign_roles(
+            person, list(roles), actor=actor, expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{record['person']}: {', '.join(record['roles'])}")
+
+
+@ai_literacy_group.command("complete")
+@click.argument("person")
+@click.argument("training")
+@click.option("--at", "completed_at", type=float, required=True,
+              help="Unix timestamp of the completion.")
+@click.option("--evidence", "evidence_ref", required=True,
+              help="Where the completion evidence lives (LMS ref, ticket).")
+@click.option("--by", "actor", required=True,
+              help="Recording human or feed identity.")
+def ai_literacy_complete(person: str, training: str, completed_at: float,
+                         evidence_ref: str, actor: str) -> None:
+    """Record (or refresh) one training completion."""
+    from ..ai_literacy import record_completion
+    try:
+        record = record_completion(
+            person, training, completed_at=completed_at,
+            evidence_ref=evidence_ref, actor=actor,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{record['person']} completed {record['training']} "
+               f"(history {len(record.get('history') or [])})")
+
+
+@ai_literacy_group.command("gaps")
+def ai_literacy_gaps_cli() -> None:
+    """Who is missing or expired on a required training."""
+    from ..ai_literacy import literacy_gaps
+    try:
+        gaps = literacy_gaps()
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    counts = gaps["counts"]
+    click.echo(f"persons {gaps['person_count']}  current {counts['current']}  "
+               f"expired {counts['expired']}  missing {counts['missing']}")
+    for person in gaps["persons"]:
+        if not person["gap_count"]:
+            continue
+        stale = [row["training"] for row in person["trainings"]
+                 if row["status"] != "current"]
+        click.echo(f"  {person['person']}: {', '.join(stale)}")
+
+
+@ai_literacy_group.command("export")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write the evidence snapshot here (default stdout).")
+def ai_literacy_export(output) -> None:
+    """Export the bounded JSON evidence snapshot for an auditor."""
+    from ..ai_literacy import export_evidence
+    try:
+        payload = export_evidence()
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    if output:
+        try:
+            fd = os.open(str(output), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload + "\n")
+        except OSError as e:
+            raise click.ClickException(f"could not write {output}: {e}") from e
+        click.echo(f"wrote {output}")
+    else:
+        click.echo(payload)
