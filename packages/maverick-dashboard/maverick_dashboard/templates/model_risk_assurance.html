@@ -115,6 +115,14 @@
   .assurance-next code { display:block; width:max-content; max-width:100%; overflow-wrap:anywhere; margin:var(--space-2) 0; }
   .assurance-empty { margin:var(--space-2) 0; }
   .assurance-empty .mv-empty__body { max-width:42rem; }
+  .assurance-form {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:var(--space-3);
+    margin:var(--space-3) 0;
+  }
+  .assurance-form label { display:grid; gap:var(--space-1); }
+  .assurance-form .assurance-form__wide { grid-column:1/-1; }
   .assurance-sr {
     position:absolute;
     width:1px;
@@ -127,7 +135,8 @@
     border:0;
   }
   @media (max-width:900px) {
-    .assurance-stats, .assurance-grid, .assurance-checklist { grid-template-columns:1fr; }
+    .assurance-stats, .assurance-grid, .assurance-checklist,
+    .assurance-form { grid-template-columns:1fr; }
     .assurance-overview__head { flex-direction:column; }
   }
 </style>
@@ -162,6 +171,59 @@
 <p class="assurance-note"><strong>Decision boundary:</strong> this cockpit reports
   evidence and deterministic control state. It does not certify compliance, make
   a legal classification, or replace a qualified human reviewer.</p>
+
+<section class="panel" id="governance-extensions-panel">
+  <h2>Vendor, drift &amp; agent assurance</h2>
+  <p class="assurance-muted">These workflows keep document text and raw monitoring
+    samples out of the cockpit. Only bounded, reviewable projections are shown.</p>
+  <div class="assurance-grid">
+    <section>
+      <h3>AI vendor risk</h3>
+      {% if ai_vendor_error %}<p class="assurance-alert">{{ ai_vendor_error }}</p>{% endif %}
+      <form id="ai-vendor-create" class="assurance-form">
+        <label>Vendor name<input name="vendor" required maxlength="300"></label>
+        <label>Answers (optional JSON)<textarea name="answers" rows="2" placeholder='{"aiv_model_training":{"answer":"yes","note":"Human-confirmed"}}'></textarea></label>
+        <label class="assurance-form__wide">Connected document (optional; source:id)<input name="document" maxlength="768" placeholder="configured_source:document-id"></label>
+        <div class="assurance-form__wide"><button type="submit">Create review-required assessment</button> <span id="ai-vendor-status" class="assurance-muted" aria-live="polite"></span></div>
+      </form>
+      {% if ai_vendor_items %}
+      <div class="assurance-table"><table><caption>Latest bounded assessments</caption><thead><tr><th>Vendor</th><th>Risk</th><th>Status</th><th>Review</th></tr></thead><tbody>
+      {% for row in ai_vendor_items %}<tr><td>{{ row.vendor }}</td><td>{{ row.risk_rating }}</td><td>{{ row.status }}</td><td>{% if gateway_admin and row.status == 'pending_review' %}<button type="button" data-vendor-review="{{ row.id }}" data-revision="{{ row.revision }}">Review</button>{% elif gateway_admin and row.status == 'approved' %}<button type="button" data-vendor-project="{{ row.id }}">Project to asset</button>{% else %}{{ row.revision }}{% endif %}</td></tr>{% endfor %}
+      </tbody></table></div>
+      {% else %}<p class="assurance-empty">No vendor assessments are available for this tenant.</p>{% endif %}
+    </section>
+    <section>
+      <h3>Aggregate drift monitoring</h3>
+      {% if not drift_monitoring_enabled %}<p class="assurance-alert">Enable drift monitoring to capture aggregate-only baselines.</p>{% elif drift_monitoring_error %}<p class="assurance-alert">{{ drift_monitoring_error }}</p>{% else %}
+      <form id="drift-baseline-create" class="assurance-form">
+        <label>Governed asset ID<input name="asset_id" required pattern="MAA-[0-9a-f]{32}"></label>
+        <label>Source ID<input name="source_id" required maxlength="256"></label>
+        <label class="assurance-form__wide">Aggregate samples JSON<textarea name="samples" required rows="3" placeholder='{"feature_samples":{"age":[1,2,3]}}'></textarea></label>
+        <div class="assurance-form__wide"><button type="submit">Capture baseline</button> <span id="drift-baseline-status" class="assurance-muted" aria-live="polite"></span></div>
+      </form>
+      <form id="drift-evaluate" class="assurance-form">
+        <label>Baseline ID<input name="baseline_id" required maxlength="256"></label>
+        <label>Run ID<input name="run_id" required maxlength="256"></label>
+        <label class="assurance-form__wide">Aggregate samples JSON<textarea name="samples" required rows="3" placeholder='{"feature_samples":{"age":[8,9,10]}}'></textarea></label>
+        <div class="assurance-form__wide"><button type="submit">Evaluate drift</button> <span id="drift-evaluate-status" class="assurance-muted" aria-live="polite"></span></div>
+      </form>
+      {% if drift_monitoring_items %}<p>{{ drift_monitoring_items|length }} recent aggregate evaluation record(s); detailed metrics are available through the authenticated API.</p>{% else %}<p class="assurance-empty">No aggregate drift evaluations recorded.</p>{% endif %}
+      {% endif %}
+    </section>
+  </div>
+  <section>
+    <h3>Agent &amp; MCP topology</h3>
+    {% if not agent_topology_enabled %}<p class="assurance-alert">{{ agent_topology_error }}</p>{% else %}
+    <form id="agent-topology-query" class="assurance-form">
+      <label>Agent name<input name="agent_name" required maxlength="256"></label>
+      <label>Blast-radius kind<input name="kind" maxlength="64" placeholder="mcp_server"></label>
+      <label class="assurance-form__wide">Blast-radius name<input name="name" maxlength="256" placeholder="server-name"></label>
+      <div class="assurance-form__wide"><button type="submit">Inspect governed topology</button>{% if gateway_admin %} <button type="button" id="agent-topology-sync">Sync MCP inventory</button>{% endif %} <span id="agent-topology-status" class="assurance-muted" aria-live="polite"></span></div>
+    </form>
+    <pre id="agent-topology-result" class="assurance-table assurance-muted" hidden></pre>
+    {% endif %}
+  </section>
+</section>
 
 {% if not gateway_enabled %}
   <section class="panel">
@@ -472,6 +534,378 @@
   {% endif %}
 </section>
 
+<section class="panel" id="ai-inventory-panel"
+         aria-labelledby="ai-inventory-title">
+  <h2 id="ai-inventory-title">External AI inventory</h2>
+  <p class="assurance-muted">Configured cloud and SaaS connectors reconcile
+    customer-owned models and agents into governed Model Risk observations.
+    Failed or partial discovery runs never mark unseen assets missing.</p>
+  {% if not ai_inventory_enabled %}
+    <p>Switched off for this deployment. An administrator can enable
+      <code>[ai_inventory]</code> and configure one or more connectors; no
+      external inventory is queried while the feature is off.</p>
+  {% elif ai_inventory_error %}
+    <div class="assurance-alert" role="status">{{ ai_inventory_error }}</div>
+  {% else %}
+    <div class="assurance-stats" aria-label="External AI inventory totals">
+      <div class="assurance-stat"><strong>{{ ai_inventory_assets|length }}</strong><span>discovered assets shown</span></div>
+      <div class="assurance-stat"><strong>{{ ai_inventory_connectors|length }}</strong><span>configured connectors</span></div>
+      <div class="assurance-stat"><strong>{{ ai_inventory_runs|length }}</strong><span>recent runs shown</span></div>
+      <div class="assurance-stat"><strong>{{ ai_inventory_assets|selectattr("discovery_status", "equalto", "missing")|list|length }}</strong><span>assets past missing grace</span></div>
+    </div>
+
+    <h3>Read-only connector status</h3>
+    <div class="assurance-table"><table>
+      <caption>Last governed status for every configured connector</caption>
+      <thead><tr><th>connector</th><th>state</th><th>last complete run</th><th>assets</th></tr></thead>
+      <tbody>{% for connector in ai_inventory_connectors %}
+        {% set connector_status = ai_inventory_statuses.get(connector) %}
+        <tr>
+          <td><code>{{ connector }}</code></td>
+          {% if connector_status %}
+          <td>{{ connector_status.state|default("unknown", true) }}
+            {% if connector_status.last_error_type %}<br><span class="assurance-status-stale">{{ connector_status.last_error_type }}</span>{% endif %}</td>
+          <td>{% if connector_status.last_completed_at %}{{ connector_status.last_completed_at|datetime }}<br><code>{{ connector_status.last_completed_id }}</code>{% else %}never completed{% endif %}</td>
+          <td>{{ connector_status.last_asset_count|default(0, true) }}</td>
+          {% else %}
+          <td>never run</td><td>never completed</td><td>0</td>
+          {% endif %}
+        </tr>
+      {% else %}<tr><td colspan="4">No connectors are configured. Discovery
+        remains idle until an administrator selects a connector.</td></tr>{% endfor %}</tbody>
+    </table></div>
+
+    {% if gateway_admin and ai_inventory_connectors %}
+    <div aria-labelledby="ai-inventory-admin-title">
+      <h3 id="ai-inventory-admin-title">Administrator actions</h3>
+      <p class="assurance-muted">Each action starts one bounded, tenant-scoped
+        discovery run. Provider credentials are resolved by the connector and
+        are never entered or displayed here.</p>
+      <div class="assurance-actions">
+        {% for connector in ai_inventory_connectors %}
+        <button class="btn btn--ghost" type="button"
+                data-inventory-connector="{{ connector }}">
+          Sync {{ connector }}
+        </button>
+        {% endfor %}
+        <span id="ai-inventory-action-status" role="status"
+              aria-live="polite"></span>
+      </div>
+    </div>
+    {% endif %}
+
+    <h3>Discovered assets</h3>
+    <div class="assurance-table"><table>
+      <caption>Tenant-scoped provider observations; at most 500 are shown</caption>
+      <thead><tr><th>asset</th><th>platform / model</th><th>owner</th><th>binding</th><th>discovery</th><th>last seen</th></tr></thead>
+      <tbody>{% for row in ai_inventory_assets %}<tr>
+        <td>{{ row.governed_display_name|default(row.display_name, true) }}<br>
+          <code>{{ row.asset_id }}</code><br>
+          <span class="assurance-muted">{{ row.asset_type }}</span></td>
+        <td>{{ row.platform|default("unknown", true) }}<br>
+          <code>{{ row.model|default("unknown", true) }}</code>
+          {% if row.source_url is string and row.source_url.startswith("https://") %}<br><a href="{{ row.source_url }}" target="_blank"
+             rel="noopener noreferrer">Provider record</a>{% endif %}</td>
+        <td>{{ row.owner|default("unassigned", true) }}</td>
+        <td><code>{{ row.binding_strength|default("unknown", true) }}</code></td>
+        <td>{{ row.discovery_status|default(row.status, true) }}
+          {% if row.missing_count %}<br><span class="assurance-muted">missed {{ row.missing_count }} complete run(s)</span>{% endif %}</td>
+        <td>{% if row.provider_last_seen_at %}{{ row.provider_last_seen_at|datetime }}{% else %}unknown{% endif %}<br>
+          <span class="assurance-muted">run <code>{{ row.last_run_id|default("—", true) }}</code></span></td>
+      </tr>{% else %}<tr><td colspan="6">
+        <div class="mv-empty assurance-empty">
+          <p class="mv-empty__title">No external AI assets recorded.</p>
+          <p class="mv-empty__body">A completed connector run is required before
+            this empty inventory can be interpreted as a provider observation.</p>
+        </div>
+      </td></tr>{% endfor %}</tbody>
+    </table></div>
+
+    <details>
+      <summary>Recent discovery runs ({{ ai_inventory_runs|length }})</summary>
+      <div class="assurance-table"><table>
+        <caption>Complete, partial, and failed run lineage; at most 50 are shown</caption>
+        <thead><tr><th>run</th><th>connector</th><th>status</th><th>pages / assets</th><th>started</th></tr></thead>
+        <tbody>{% for row in ai_inventory_runs %}<tr>
+          <td><code>{{ row.id }}</code></td>
+          <td><code>{{ row.connector }}</code></td>
+          <td>{{ row.status }}{% if row.error_type %}<br><span class="assurance-status-stale">{{ row.error_type }}</span>{% endif %}</td>
+          <td>{{ row.pages|default(0, true) }} / {{ row.asset_count|default(0, true) }}</td>
+          <td>{% if row.started_at %}{{ row.started_at|datetime }}{% else %}unknown{% endif %}</td>
+        </tr>{% else %}<tr><td colspan="5">No discovery runs recorded.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </details>
+  {% endif %}
+</section>
+
+<section class="panel" id="policy-packs-panel"
+         aria-labelledby="policy-packs-title">
+  <h2 id="policy-packs-title">Governed policy packs</h2>
+  <p class="assurance-muted">Versioned starter packs bind cited control
+    requirements to tenant evidence. They support human review; they are not a
+    compliance certification, legal classification, or substitute for counsel.</p>
+  {% if not policy_packs_enabled %}
+    <p>Switched off for this deployment. An administrator can enable
+      <code>[policy_packs]</code>; bundled manifests remain inactive until they
+      are explicitly staged and activated.</p>
+  {% else %}
+    {% if policy_pack_error %}
+    <div class="assurance-alert" role="status">{{ policy_pack_error }}
+      Available governed records are shown below, but administrator actions are
+      withheld until every required policy-pack store can be read safely.</div>
+    {% endif %}
+    <div class="assurance-stats" aria-label="Policy pack totals">
+      <div class="assurance-stat"><strong>{{ policy_pack_bundled|length }}</strong><span>bundled starters</span></div>
+      <div class="assurance-stat"><strong>{{ policy_pack_catalog.count|default(0, true) }}</strong><span>staged catalog entries</span></div>
+      <div class="assurance-stat"><strong>{{ policy_pack_channels.count|default(0, true) }}</strong><span>active channels</span></div>
+      <div class="assurance-stat"><strong>{{ policy_pack_subscriptions.count|default(0, true) }}</strong><span>tenant subscriptions</span></div>
+    </div>
+
+    <h3>Read-only governed state</h3>
+    <div class="assurance-table"><table>
+      <caption>Deployment-global staged catalog</caption>
+      <thead><tr><th>pack</th><th>framework</th><th>coverage</th><th>provenance</th><th>revision</th></tr></thead>
+      <tbody>{% for row in policy_pack_catalog["items"] %}<tr>
+        <td><code>{{ row.pack_id }}</code><br>version {{ row.pack_version }}</td>
+        <td>{{ row.framework.name|default("unknown", true) }}<br>
+          <span class="assurance-muted">as of {{ row.framework.as_of|default("unknown", true) }}</span></td>
+        <td>{{ row.coverage }}<br>{{ row.control_count }} control(s)</td>
+        <td>{{ row.provenance_kind }}</td><td>{{ row.revision }}</td>
+      </tr>{% else %}<tr><td colspan="5">No policy packs are staged.</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% if policy_pack_catalog.truncated %}<p class="assurance-muted">The staged
+      catalog is truncated to its bounded API page.</p>{% endif %}
+
+    <div class="assurance-grid">
+      <div class="assurance-table"><table>
+        <caption>Deployment-global active channels</caption>
+        <thead><tr><th>pack</th><th>active version</th><th>controls</th><th>revision</th></tr></thead>
+        <tbody>{% for row in policy_pack_channels["items"] %}<tr>
+          <td><code>{{ row.pack_id }}</code></td><td>{{ row.pack_version }}</td>
+          <td>{{ row.control_count }}</td><td>{{ row.revision }}</td>
+        </tr>{% else %}<tr><td colspan="4">No policy-pack channels are active.</td></tr>{% endfor %}</tbody>
+      </table></div>
+      <div class="assurance-table"><table>
+        <caption>Tenant-local subscriptions and evidence coverage</caption>
+        <thead><tr><th>pack</th><th>version state</th><th>evidence state</th><th>revision</th></tr></thead>
+        <tbody>{% for row in policy_pack_subscriptions["items"] %}<tr>
+          <td><code>{{ row.pack_id }}</code></td>
+          <td>{{ row.pack_version }}{% if row.needs_refresh %}<br><span class="assurance-status-stale">active {{ row.active_pack_version }}</span>{% else %}<br><span class="assurance-status-current">current</span>{% endif %}</td>
+          <td>{{ row.current_count }} current / {{ row.stale_count }} stale / {{ row.missing_count }} missing</td>
+          <td>{{ row.revision }}</td>
+        </tr>{% else %}<tr><td colspan="4">No tenant policy-pack subscriptions.</td></tr>{% endfor %}</tbody>
+      </table></div>
+    </div>
+
+    {% if gateway_admin and not policy_pack_error
+          and not policy_pack_catalog.truncated
+          and not policy_pack_channels.truncated
+          and not policy_pack_subscriptions.truncated %}
+    <div aria-labelledby="policy-pack-admin-title">
+      <h3 id="policy-pack-admin-title">Administrator actions</h3>
+      <p class="assurance-muted">Staging verifies and records an immutable
+        catalog entry but does not activate it. Activation changes the global
+        channel. Subscribe and refresh change only the selected tenant.</p>
+
+      <h4>1. Stage a bundled starter</h4>
+      <div class="assurance-actions">
+        {% for pack_id, manifest in policy_pack_bundled.items() %}
+        <button class="btn btn--ghost" type="button" data-policy-action="stage"
+                data-policy-id="{{ pack_id }}">
+          Stage {{ manifest.framework.name|default(pack_id, true) }}
+          {{ manifest.version }}
+        </button>
+        {% else %}<span>No bundled starters are available.</span>{% endfor %}
+      </div>
+
+      <h4>2. Activate a staged version</h4>
+      <div class="assurance-actions">
+        {% for row in policy_pack_catalog["items"] %}
+          {% set active_channel = namespace(entry_id="", revision=0) %}
+          {% for channel in policy_pack_channels["items"] %}
+            {% if channel.pack_id == row.pack_id %}
+              {% set active_channel.entry_id = channel.catalog_entry_id %}
+              {% set active_channel.revision = channel.revision %}
+            {% endif %}
+          {% endfor %}
+          {% if active_channel.entry_id == row.id %}
+          <span><code>{{ row.pack_id }}</code> {{ row.pack_version }} is active.</span>
+          {% else %}
+          <button class="btn btn--ghost" type="button"
+                  data-policy-action="activate" data-policy-id="{{ row.id }}"
+                  data-policy-revision="{{ active_channel.revision }}">
+            Activate {{ row.pack_id }} {{ row.pack_version }}
+          </button>
+          {% endif %}
+        {% else %}<span>Stage a pack before activation.</span>{% endfor %}
+      </div>
+
+      <h4>3. Subscribe this tenant or refresh its version</h4>
+      <div class="assurance-actions">
+        {% for channel in policy_pack_channels["items"] %}
+          {% set tenant_subscription = namespace(found=false) %}
+          {% for subscription in policy_pack_subscriptions["items"] %}
+            {% if subscription.pack_id == channel.pack_id %}
+              {% set tenant_subscription.found = true %}
+            {% endif %}
+          {% endfor %}
+          {% if not tenant_subscription.found %}
+          <button class="btn btn--ghost" type="button"
+                  data-policy-action="subscribe" data-policy-id="{{ channel.pack_id }}">
+            Subscribe to {{ channel.pack_id }} {{ channel.pack_version }}
+          </button>
+          {% endif %}
+        {% endfor %}
+        {% for row in policy_pack_subscriptions["items"] %}
+          {% if row.needs_refresh %}
+          <button class="btn btn--ghost" type="button"
+                  data-policy-action="refresh" data-policy-id="{{ row.id }}"
+                  data-policy-revision="{{ row.revision }}">
+            Refresh {{ row.pack_id }} to {{ row.active_pack_version }}
+          </button>
+          {% endif %}
+        {% endfor %}
+        <span id="policy-pack-action-status" role="status"
+              aria-live="polite"></span>
+      </div>
+    </div>
+    {% elif gateway_admin and (policy_pack_catalog.truncated
+          or policy_pack_channels.truncated
+          or policy_pack_subscriptions.truncated) %}
+    <p class="assurance-alert" role="status">Administrator actions are withheld
+      because at least one governed policy-pack list exceeded this page's
+      bounded read window. Resolve the list bound before changing authority.</p>
+    {% endif %}
+  {% endif %}
+</section>
+
+<div class="assurance-grid">
+  <section class="panel">
+    <h2>AI portfolio risk</h2>
+    <p class="assurance-muted">Transparent formula v1 rolls exact current
+      findings through the declared system/component hierarchy. Human risk
+      acceptance can reduce non-critical residual risk; critical findings are
+      never suppressed.</p>
+    {% if not portfolio_enabled %}
+      <p>Switched off for this deployment. Enable the portfolio-risk plane to
+        calculate bounded current-quarter reports and governed snapshots.</p>
+    {% elif portfolio_error %}
+      <div class="assurance-alert" role="status">{{ portfolio_error }}</div>
+    {% else %}
+      <div class="assurance-stats" aria-label="AI portfolio risk totals">
+        <div class="assurance-stat"><strong>{{ portfolio_report.portfolio_score|default(0, true) }}</strong><span>residual score</span></div>
+        <div class="assurance-stat"><strong>{{ portfolio_report.portfolio_inherent_score|default(0, true) }}</strong><span>inherent score</span></div>
+        <div class="assurance-stat"><strong>{{ portfolio_report.risk_load|default(0, true) }}</strong><span>residual risk load</span></div>
+        <div class="assurance-stat"><strong>{{ portfolio_snapshots|length }}</strong><span>quarter snapshots</span></div>
+      </div>
+      <p><strong>Current period:</strong>
+        <code>{{ portfolio_report.period_id|default("unknown", true) }}</code>
+        · formula <code>{{ portfolio_report.formula_version|default("unknown", true) }}</code>
+      </p>
+      <div class="assurance-table"><table>
+        <caption>Current exact-source contributors</caption>
+        <thead><tr><th>finding</th><th>severity</th><th>asset</th><th>residual points</th></tr></thead>
+        <tbody>{% for row in portfolio_report.contributors|default([], true) %}<tr>
+          <td><code>{{ row.finding_id }}</code></td>
+          <td>{{ row.severity }}</td>
+          <td><code>{{ row.asset_id }}</code></td>
+          <td>{{ row.residual_points }}{% if row.accepted %} (accepted){% endif %}</td>
+        </tr>{% else %}<tr><td colspan="4">No current contributors. An empty
+          report is not proof that every asset has been assessed.</td></tr>{% endfor %}</tbody>
+      </table></div>
+      {% if gateway_admin %}
+      <div class="assurance-actions">
+        <button class="btn" id="portfolio-snapshot-refresh" type="button">
+          Publish current-quarter snapshot
+        </button>
+        <span id="portfolio-snapshot-status" role="status" aria-live="polite"></span>
+      </div>
+      {% endif %}
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Governed red-team assurance</h2>
+    <p class="assurance-muted">An enrolled external agent pulls synthetic
+      probes. Target output and tool arguments are evaluated transiently;
+      governed records retain commitments and detector metrics only.</p>
+    {% if not red_team_enabled %}
+      <p>Switched off for this deployment. It requires the external-agent,
+        Model Risk, and evidence-graph planes.</p>
+    {% elif red_team_error %}
+      <div class="assurance-alert" role="status">{{ red_team_error }}</div>
+    {% else %}
+      <div class="assurance-table"><table>
+        <caption>Recent runner-attested digest campaigns</caption>
+        <thead><tr><th>campaign</th><th>target</th><th>progress</th><th>grade</th>
+          {% if gateway_admin %}<th>actions</th>{% endif %}</tr></thead>
+        <tbody>{% for row in red_team_campaigns %}<tr>
+          <td><code>{{ row.id }}</code><br>{{ row.status }}</td>
+          <td><code>{{ row.target_binding.asset_id }}</code></td>
+          <td>{{ row.submitted_case_count }} / {{ row.case_count }}</td>
+          <td>{{ row.summary.grade|default("pending", true) }}<br>
+            <span class="assurance-muted">evidence:
+              {{ row.summary.evidence_status|default("not emitted", true) }}</span></td>
+          {% if gateway_admin %}<td>
+            {% if row.status == "running" %}
+            <button class="btn" type="button" data-red-team-action="finalize"
+                    data-campaign-id="{{ row.id }}" data-revision="{{ row.revision }}">
+              Finalize submitted cases
+            </button>
+            {% if row.submitted_case_count < row.case_count %}
+            <button class="btn" type="button" data-red-team-action="force-finalize"
+                    data-campaign-id="{{ row.id }}" data-revision="{{ row.revision }}">
+              Force incomplete finalization
+            </button>
+            {% endif %}
+            <button class="btn" type="button" data-red-team-action="cancel"
+                    data-campaign-id="{{ row.id }}" data-revision="{{ row.revision }}">
+              Stop new work
+            </button>
+            {% else %}<span class="assurance-muted">No lifecycle action</span>{% endif %}
+          </td>{% endif %}
+        </tr>{% else %}<tr><td colspan="{{ 5 if gateway_admin else 4 }}">No red-team campaigns recorded.</td></tr>{% endfor %}</tbody>
+      </table></div>
+      {% if gateway_admin %}<p id="red-team-action-status" role="status" aria-live="polite"></p>{% endif %}
+      {% if gateway_admin %}
+      <form id="red-team-create" class="assurance-form">
+        <label>Target asset
+          <select name="asset_id" required>
+            <option value="">Select an observed model, agent, or system</option>
+            {% for row in model_risk_assets %}
+              {% if row.identity.asset_type in ["model", "agent", "system", "component"] %}
+              <option value="{{ row.asset_id }}">{{ row.display_name }} · {{ row.identity.asset_type }}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        </label>
+        <label>Enrolled runner
+          <select name="external_agent_id" required>
+            <option value="">Select an active external agent</option>
+            {% for row in red_team_agents %}
+              <option value="{{ row.id }}">{{ row.id }} · {{ row.platform_label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Idempotency key
+          <input name="idempotency_key" maxlength="128" required
+                 placeholder="quarterly-campaign-2026-q3">
+        </label>
+        <label class="assurance-form__wide">
+          <input type="checkbox" name="safe_target_environment" required>
+          I attest that the target is isolated and non-production. Server-side
+          cancellation stops new work only; it cannot stop probes already fetched.
+        </label>
+        <div class="assurance-form__wide assurance-actions">
+          <button class="btn" type="submit">Create starter campaign</button>
+          <span id="red-team-create-status" role="status" aria-live="polite"></span>
+        </div>
+      </form>
+      {% endif %}
+    {% endif %}
+  </section>
+</div>
+
 <p><a class="btn" href="/security">Back to Security &amp; GRC</a></p>
 
 {% if gateway_enabled %}
@@ -544,4 +978,330 @@
 })();
 </script>
 {% endif %}
+{% if ai_inventory_enabled and gateway_admin and not ai_inventory_error
+      and ai_inventory_connectors %}
+<script>
+(() => {
+  const panel = document.getElementById("ai-inventory-panel");
+  const status = document.getElementById("ai-inventory-action-status");
+  if (!panel || !status) return;
+  const buttons = Array.from(
+    panel.querySelectorAll("button[data-inventory-connector]")
+  ).slice(0, 32);
+  const safeDetail = async (response, fallback) => {
+    const raw = (await response.text()).slice(0, 4096);
+    try {
+      const body = JSON.parse(raw);
+      return typeof body.detail === "string"
+        ? body.detail.slice(0, 240)
+        : fallback;
+    } catch (_error) {
+      return fallback;
+    }
+  };
+  buttons.forEach(button => button.addEventListener("click", async () => {
+    const connector = button.dataset.inventoryConnector || "";
+    if (!/^[a-z0-9_]{1,64}$/.test(connector)) {
+      status.textContent = "The configured connector name is invalid.";
+      return;
+    }
+    buttons.forEach(item => { item.disabled = true; });
+    button.setAttribute("aria-busy", "true");
+    status.textContent = `Running bounded ${connector} discovery…`;
+    try {
+      const response = await fetch(
+        "/api/v1/security/assurance/ai-inventory/connectors/" +
+          encodeURIComponent(connector) + "/sync",
+        {method: "POST", credentials: "same-origin"}
+      );
+      if (!response.ok) {
+        throw new Error(await safeDetail(response, "Inventory sync failed"));
+      }
+      status.textContent = "Discovery run completed. Refreshing…";
+      window.location.reload();
+    } catch (error) {
+      status.textContent = error instanceof Error
+        ? error.message.slice(0, 240)
+        : "Inventory sync failed.";
+      buttons.forEach(item => { item.disabled = false; });
+      button.removeAttribute("aria-busy");
+    }
+  }));
+})();
+</script>
+{% endif %}
+{% if policy_packs_enabled and gateway_admin and not policy_pack_error
+      and not policy_pack_catalog.truncated
+      and not policy_pack_channels.truncated
+      and not policy_pack_subscriptions.truncated %}
+<script>
+(() => {
+  const panel = document.getElementById("policy-packs-panel");
+  const status = document.getElementById("policy-pack-action-status");
+  if (!panel || !status) return;
+  const buttons = Array.from(
+    panel.querySelectorAll("button[data-policy-action]")
+  ).slice(0, 320);
+  const safeDetail = async (response, fallback) => {
+    const raw = (await response.text()).slice(0, 4096);
+    try {
+      const body = JSON.parse(raw);
+      return typeof body.detail === "string"
+        ? body.detail.slice(0, 240)
+        : fallback;
+    } catch (_error) {
+      return fallback;
+    }
+  };
+  buttons.forEach(button => button.addEventListener("click", async () => {
+    const action = button.dataset.policyAction || "";
+    const identity = button.dataset.policyId || "";
+    const revision = Number(button.dataset.policyRevision || "0");
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(identity)) {
+      status.textContent = "The selected policy-pack identity is invalid.";
+      return;
+    }
+    if (!Number.isSafeInteger(revision) || revision < 0) {
+      status.textContent = "The selected policy-pack revision is invalid.";
+      return;
+    }
+    const encoded = encodeURIComponent(identity);
+    let endpoint = "";
+    let options = {method: "POST", credentials: "same-origin"};
+    if (action === "stage") {
+      endpoint = "/api/v1/security/assurance/policy-packs/bundled/" + encoded + "/stage";
+    } else if (action === "activate") {
+      endpoint = "/api/v1/security/assurance/policy-packs/catalog/" + encoded + "/activate";
+      options = {
+        ...options,
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({expected_revision: revision})
+      };
+    } else if (action === "subscribe") {
+      endpoint = "/api/v1/security/assurance/policy-packs/" + encoded + "/subscribe";
+    } else if (action === "refresh") {
+      endpoint = "/api/v1/security/assurance/policy-packs/subscriptions/" + encoded + "/refresh";
+      options = {
+        ...options,
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({expected_revision: revision})
+      };
+    } else {
+      status.textContent = "Unsupported policy-pack action.";
+      return;
+    }
+    buttons.forEach(item => { item.disabled = true; });
+    button.setAttribute("aria-busy", "true");
+    status.textContent = `Applying ${action} as an explicit administrator action…`;
+    try {
+      const response = await fetch(endpoint, options);
+      if (!response.ok) {
+        throw new Error(await safeDetail(response, "Policy-pack action failed"));
+      }
+      status.textContent = "Governed policy-pack state updated. Refreshing…";
+      window.location.reload();
+    } catch (error) {
+      status.textContent = error instanceof Error
+        ? error.message.slice(0, 240)
+        : "Policy-pack action failed.";
+      buttons.forEach(item => { item.disabled = false; });
+      button.removeAttribute("aria-busy");
+    }
+  }));
+})();
+</script>
+{% endif %}
+<script>
+(() => {
+  const snapshotButton = document.getElementById("portfolio-snapshot-refresh");
+  const snapshotStatus = document.getElementById("portfolio-snapshot-status");
+  if (snapshotButton) snapshotButton.addEventListener("click", async () => {
+    snapshotButton.disabled = true;
+    if (snapshotStatus) snapshotStatus.textContent = "Publishing governed snapshot…";
+    try {
+      const listResponse = await fetch(
+        "/api/v1/security/assurance/portfolio-risk/snapshots",
+        {credentials: "same-origin"}
+      );
+      if (!listResponse.ok) throw new Error("Could not read current snapshots");
+      const listing = await listResponse.json();
+      const period = {{ portfolio_report.period_id|default("", true)|tojson }};
+      const current = (listing.snapshots || []).find(
+        item => item.period_id === period
+      );
+      const response = await fetch(
+        "/api/v1/security/assurance/portfolio-risk/snapshots",
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            expected_revision: current ? current.revision : 0,
+            period_id: period || null
+          })
+        }
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "Snapshot failed");
+      if (snapshotStatus) snapshotStatus.textContent = "Snapshot published. Refreshing…";
+      window.location.reload();
+    } catch (error) {
+      if (snapshotStatus) snapshotStatus.textContent = error.message || "Snapshot failed.";
+      snapshotButton.disabled = false;
+    }
+  });
+
+  const campaignForm = document.getElementById("red-team-create");
+  const campaignStatus = document.getElementById("red-team-create-status");
+  const actionStatus = document.getElementById("red-team-action-status");
+  const actionButtons = Array.from(
+    document.querySelectorAll("[data-red-team-action]")
+  );
+  actionButtons.forEach(button => button.addEventListener("click", async () => {
+    const action = button.dataset.redTeamAction || "";
+    const campaignId = button.dataset.campaignId || "";
+    const revision = Number(button.dataset.revision || "0");
+    if (!/^RTC-[0-9a-f]{24}$/.test(campaignId) || !Number.isInteger(revision) || revision < 1) {
+      if (actionStatus) actionStatus.textContent = "Campaign authority is malformed.";
+      return;
+    }
+    let endpoint = `/api/v1/security/assurance/red-team/campaigns/${encodeURIComponent(campaignId)}/finalize`;
+    let payload = {force_incomplete: action === "force-finalize"};
+    if (action === "force-finalize" && !window.confirm(
+      "Finalize missing cases as inconclusive? This does not stop probes already fetched."
+    )) return;
+    if (action === "cancel") {
+      const rationale = window.prompt(
+        "Why should Lightwork stop accepting new results for this campaign?"
+      );
+      if (!rationale || !rationale.trim()) return;
+      endpoint = `/api/v1/security/assurance/red-team/campaigns/${encodeURIComponent(campaignId)}/cancel`;
+      payload = {expected_revision: revision, rationale: rationale.trim()};
+    } else if (!['finalize', 'force-finalize'].includes(action)) {
+      if (actionStatus) actionStatus.textContent = "Unsupported campaign action.";
+      return;
+    }
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    if (actionStatus) actionStatus.textContent = "Applying governed campaign action…";
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "Campaign action failed");
+      if (actionStatus) actionStatus.textContent = "Campaign updated. Refreshing…";
+      window.location.reload();
+    } catch (error) {
+      if (actionStatus) actionStatus.textContent = error.message || "Campaign action failed.";
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+    }
+  }));
+  if (!campaignForm) return;
+  campaignForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    const button = campaignForm.querySelector("button[type=submit]");
+    button.disabled = true;
+    if (campaignStatus) campaignStatus.textContent = "Creating runner-attested digest campaign…";
+    try {
+      const fields = new FormData(campaignForm);
+      const response = await fetch(
+        "/api/v1/security/assurance/red-team/campaigns",
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            asset_id: fields.get("asset_id"),
+            external_agent_id: fields.get("external_agent_id"),
+            idempotency_key: fields.get("idempotency_key"),
+            safe_target_environment: fields.has("safe_target_environment")
+          })
+        }
+      );
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "Campaign creation failed");
+      if (campaignStatus) campaignStatus.textContent = "Campaign created. Refreshing…";
+      window.location.reload();
+    } catch (error) {
+      if (campaignStatus) campaignStatus.textContent = error.message || "Campaign creation failed.";
+      button.disabled = false;
+    }
+  });
+})();
+</script>
+<script>
+(() => {
+  const prefix = "/api/v1/security/assurance";
+  const status = (id, message) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = String(message || "").slice(0, 280);
+  };
+  const detail = async (response, fallback) => {
+    try { const data = await response.json(); return typeof data.detail === "string" ? data.detail : fallback; }
+    catch (_error) { return fallback; }
+  };
+  const post = async (path, body) => {
+    const response = await fetch(prefix + path, {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    if (!response.ok) throw new Error(await detail(response, "Governed action failed"));
+    return response.json();
+  };
+  const object = (value) => {
+    if (!value.trim()) return {};
+    const parsed = JSON.parse(value);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("JSON must be an object.");
+    return parsed;
+  };
+  const vendorForm = document.getElementById("ai-vendor-create");
+  if (vendorForm) vendorForm.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(vendorForm); const button = vendorForm.querySelector("button"); button.disabled = true;
+    try {
+      const raw = String(fields.get("document") || "").trim(); let documents = [];
+      if (raw) { const point = raw.indexOf(":"); if (point <= 0 || point === raw.length - 1) throw new Error("Connected document must use source:document-id."); documents = [{source: raw.slice(0, point), document_id: raw.slice(point + 1)}]; }
+      status("ai-vendor-status", "Creating review-required assessment…");
+      await post("/ai-vendor/assessments", {vendor: fields.get("vendor"), answers: object(String(fields.get("answers") || "")), documents});
+      status("ai-vendor-status", "Assessment created. Refreshing…"); window.location.reload();
+    } catch (error) { status("ai-vendor-status", error instanceof Error ? error.message : "Assessment failed."); button.disabled = false; }
+  });
+  document.querySelectorAll("[data-vendor-review]").forEach(button => button.addEventListener("click", async () => {
+    const decision = window.prompt("Type approved or rejected for this human review:"); if (decision !== "approved" && decision !== "rejected") return;
+    const rationale = window.prompt("Human review rationale:"); if (!rationale || !rationale.trim()) return; button.disabled = true;
+    try { await post("/ai-vendor/assessments/" + encodeURIComponent(button.dataset.vendorReview) + "/review", {decision, rationale: rationale.trim(), expected_revision: Number(button.dataset.revision)}); window.location.reload(); }
+    catch (error) { status("ai-vendor-status", error instanceof Error ? error.message : "Review failed."); button.disabled = false; }
+  }));
+  document.querySelectorAll("[data-vendor-project]").forEach(button => button.addEventListener("click", async () => {
+    const asset_id = window.prompt("Current governed asset ID (MAA-…):"); if (!asset_id) return;
+    const valid_until = Number(window.prompt("Evidence valid-until Unix time:", String(Math.floor(Date.now() / 1000) + 2592000)) || "0"); if (!Number.isFinite(valid_until) || valid_until <= 0) return; button.disabled = true;
+    try { await post("/ai-vendor/assessments/" + encodeURIComponent(button.dataset.vendorProject) + "/project", {asset_id, valid_until}); status("ai-vendor-status", "Projected for independent model-risk review."); }
+    catch (error) { status("ai-vendor-status", error instanceof Error ? error.message : "Projection failed."); button.disabled = false; }
+  }));
+  const baseline = document.getElementById("drift-baseline-create");
+  if (baseline) baseline.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(baseline); const button = baseline.querySelector("button"); button.disabled = true;
+    try { status("drift-baseline-status", "Capturing aggregate baseline…"); const result = await post("/drift/baselines", {asset_id: fields.get("asset_id"), source_id: fields.get("source_id"), ...object(String(fields.get("samples") || ""))}); status("drift-baseline-status", "Baseline captured: " + result.id); baseline.reset(); }
+    catch (error) { status("drift-baseline-status", error instanceof Error ? error.message : "Baseline failed."); } finally { button.disabled = false; }
+  });
+  const evaluate = document.getElementById("drift-evaluate");
+  if (evaluate) evaluate.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(evaluate); const button = evaluate.querySelector("button"); button.disabled = true;
+    try { status("drift-evaluate-status", "Evaluating aggregate drift…"); const result = await post("/drift/baselines/" + encodeURIComponent(String(fields.get("baseline_id"))) + "/evaluations", {run_id: fields.get("run_id"), ...object(String(fields.get("samples") || ""))}); status("drift-evaluate-status", "Evaluation " + result.result + "; evidence " + result.evidence_id + "."); }
+    catch (error) { status("drift-evaluate-status", error instanceof Error ? error.message : "Evaluation failed."); } finally { button.disabled = false; }
+  });
+  const topology = document.getElementById("agent-topology-query"); const result = document.getElementById("agent-topology-result");
+  if (topology) topology.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(topology); const agent = String(fields.get("agent_name") || ""); const kind = String(fields.get("kind") || ""); const name = String(fields.get("name") || "");
+    try {
+      status("agent-topology-status", "Loading bounded topology…"); const response = await fetch(prefix + "/agent-topology/agents/" + encodeURIComponent(agent), {credentials: "same-origin"}); if (!response.ok) throw new Error(await detail(response, "Topology query failed")); const payload = {agent: await response.json()};
+      if (kind || name) { if (!kind || !name) throw new Error("Blast radius requires both kind and name."); const blast = await fetch(prefix + "/agent-topology/blast-radius/" + encodeURIComponent(kind) + "/" + encodeURIComponent(name), {credentials: "same-origin"}); if (!blast.ok) throw new Error(await detail(blast, "Blast-radius query failed")); payload.blast_radius = await blast.json(); }
+      result.hidden = false; result.textContent = JSON.stringify(payload, null, 2).slice(0, 65536); status("agent-topology-status", "Topology loaded.");
+    } catch (error) { status("agent-topology-status", error instanceof Error ? error.message : "Topology query failed."); }
+  });
+  const sync = document.getElementById("agent-topology-sync");
+  if (sync) sync.addEventListener("click", async () => { sync.disabled = true; try { const outcome = await post("/agent-topology/mcp/sync", {}); status("agent-topology-status", "Synced " + outcome.count + " MCP server(s)."); } catch (error) { status("agent-topology-status", error instanceof Error ? error.message : "MCP sync failed."); } finally { sync.disabled = false; } });
+})();
+</script>
 {% endblock %}

@@ -793,6 +793,79 @@ here.
   collection as proof. Framework and legal mappings are advisory; applicability
   and every consequential decision remain human-owned. See
   [`MODEL_RISK_ASSURANCE.md`](./MODEL_RISK_ASSURANCE.md).
+- **External AI estate discovery** (`ai_inventory.py`, the assurance API and
+  cockpit, opt-in `[ai_inventory] enable`) — tenant-scoped, read-only inventory
+  synchronization for customer-owned AWS Bedrock, Azure AI Foundry, Google
+  Vertex AI, Databricks Unity Catalog, and Microsoft Copilot Studio estates.
+  Connectors use fixed list operations, bounded pagination/retries/record caps,
+  provider revision bindings, missing-asset grace runs, and explicit safe read
+  projections. Credentials resolve from the standard provider chain or named
+  environment references and are never written to discovery records. A sync is
+  global-admin initiated; reads require an explicitly selected tenant.
+- **AI system hierarchy and portfolio risk** (`model_risk_assurance.py`,
+  `portfolio_risk.py`, opt-in `[portfolio_risk] enable`) — declarations can
+  bind components to governed parent systems with cycle/depth checks and
+  ancestor-drift invalidation. The cockpit renders a transparent bounded risk
+  roll-up and revision-CAS quarterly snapshots; the score is decision support,
+  not a compliance or legal verdict.
+- **Governed model drift monitoring** (`drift_monitoring.py`, opt-in
+  `[drift_monitoring] enable`) — tenant-scoped aggregate baselines and bounded
+  evaluations for feature PSI/KL, prediction drift, embedding-centroid cosine
+  distance, and delayed-ground-truth performance decay. Raw feature rows,
+  predictions, labels, and embeddings remain transient. Threshold breaches emit
+  exact-artifact `drift_monitoring` evidence, a signed aggregate alert, and the
+  assurance officer's ordinary `drift_detected` finding. Metrics are operational
+  decision support and require deployment-specific calibration.
+- **Agent dependency and MCP governance** (`agent_topology.py`, opt-in
+  `[agent_topology] enable`) — an on-demand transitive view over enabled domain
+  capabilities, configured MCP servers, and the existing operational entity
+  graph. Every tool, server, endpoint, host, filesystem path, knowledge source,
+  and model edge names its trust boundary and authority; reverse blast-radius
+  queries identify affected agents. MCP servers synchronize into the model-risk
+  inventory as governed `tool` assets with safe manifest digests, pin posture,
+  transport, and referencing agents. Tokens, header/environment values, URL
+  paths, queries, and raw launch arguments are neither projected nor persisted.
+- **EU AI Act serious-incident reporting** (`ai_incident_reporting.py`,
+  opt-in `[ai_incident_reporting] enable`, requires the assurance officer) —
+  classifies an existing assurance incident under Art. 3(49) (death, serious
+  health harm, irreversible critical-infrastructure disruption, fundamental-
+  rights infringement, property/environment harm; Art. 3(61) widespread flag)
+  and starts the Art. 73 tiered clock from *awareness*: 15 days by default
+  (73(2)), 2 days for widespread/critical-infrastructure (73(3)), 10 days for
+  death (73(4)); the strictest applicable window binds and the GDPR Art. 33
+  72-hour clock is deliberately not reused. Declarations, initial/complete
+  submissions (73(5)) and withdrawals are human assertions with named actors
+  on CAS-governed records; the module routes to the operator-named market
+  surveillance authority of an EU-27 Member State (73(1)), renders a bounded
+  report draft with citations, and never transmits anything itself. Citations
+  carry the consolidated basis (2026-07-27) as versioned metadata.
+- **Signed AI policy packs** (`policy_packs.py`, opt-in `[policy_packs]
+  enable`) — bounded NIST AI RMF and EU AI Act starter mappings plus
+  Ed25519-verified external updates, anti-rollback staging, explicit global
+  admin activation, tenant-local subscriptions, exact evidence attestations,
+  requirement diffs, and stale/missing/current counts. Catalog/channel reads
+  expose metadata-only projections; subscription operations fail without an
+  active tenant. Packs are advisory control mappings, not certification,
+  conformity assessment, standards-text redistribution, or legal advice.
+- **Governed external red-team campaigns** (`red_team_assurance.py`, external
+  gateway + assurance cockpit, opt-in `[red_team_assurance] enable`) — an
+  actively enrolled inbound agent pulls deterministic synthetic probes for an
+  operator-attested isolated non-production target. Each campaign binds the
+  observed target digest, current deterministic evaluator implementation and
+  suite, agent credential version, rules of engagement, and a
+  campaign/case/tenant-domain-separated keyed response-commitment scheme.
+  Raw responses, tool arguments, and tool names stay transient; any declared
+  tool call fails and an unavailable trace is inconclusive. Finalization is a
+  recoverable CAS transition that emits review-pending Model Risk evidence;
+  approval requires a different human from the producer, and the cockpit has
+  explicit finalize, force-incomplete, and stop-new-work controls. The
+  installer provisions `MAVERICK_RED_TEAM_COMMITMENT_KEY` in its private
+  `.env`; non-wizard deployments must supply a secret of at least 32 bytes.
+  This is bounded lexical assurance with a runner-attested target digest, not a
+  signed runtime receipt or certification. It does **not** yet ship the broader
+  recommendation's scheduler, bias probes, measured refusal floor,
+  remediation recommendations, cancellable per-case leases/live stop, or proof
+  against hidden runtime side effects.
 - **AI Evidence-Ready Gateway** (`ai_evidence_gateway.py`, the existing
   `/security/assurance` cockpit, opt-in `[evidence_gateway] enable`) -
   deterministic text-delivery disclosures, machine-readable markings,

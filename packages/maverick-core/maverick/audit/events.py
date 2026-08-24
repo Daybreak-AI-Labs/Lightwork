@@ -280,6 +280,12 @@ class EventKind:
     # equal_opportunity_diff:float|None, failing_groups:list[str], samples:int,
     # threshold:float.
     FAIRNESS_ALERT = "fairness_alert"
+    # Model/data drift monitoring: bounded aggregate PSI, KL, prediction,
+    # embedding-centroid, or delayed-ground-truth performance metrics crossed a
+    # configured threshold. Raw feature rows, predictions, labels, and vectors
+    # are not part of the event. payload: asset_id:str, baseline_id:str,
+    # evidence_id:str, reasons:list[str].
+    MODEL_DRIFT_ALERT = "model_drift_alert"
     # Governance assessment sign-off: a reviewer accepted (or sent back) one lens
     # of a privacy/security/AI-risk assessment. Anchoring the decision in the
     # signed chain means a "reviewed" governance record can't rest on the mutable

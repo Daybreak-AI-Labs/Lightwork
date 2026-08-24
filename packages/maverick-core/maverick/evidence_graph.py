@@ -286,6 +286,43 @@ def _model_risk_evidence_authority(
             "source_authority_invalid",
             current_revision=revision,
         )
+    if authority.get("evidence_kind") == "red_team":
+        producer = authority.get("producer_actor")
+        reviewer = decision.get("reviewer")
+        if (
+            not isinstance(producer, str)
+            or not producer.strip()
+            or not isinstance(reviewer, str)
+            or not reviewer.strip()
+            or producer.strip().casefold() == reviewer.strip().casefold()
+        ):
+            raise _InheritedAuthorityError(
+                "source_review_separation_invalid",
+                current_revision=revision,
+            )
+    asset = model_risk_assurance.get_observation(str(authority.get("asset_id") or ""))
+    if (
+        not isinstance(asset, dict)
+        or asset.get("version_digest") != authority.get("artifact_digest")
+    ):
+        raise _InheritedAuthorityError(
+            "source_artifact_authority_stale",
+            current_revision=revision,
+        )
+    evaluator_asset_id = authority.get("evaluator_asset_id")
+    if evaluator_asset_id is not None:
+        evaluator = model_risk_assurance.get_observation(str(evaluator_asset_id))
+        binding = authority.get("evaluator_binding")
+        if (
+            not isinstance(evaluator, dict)
+            or not isinstance(binding, dict)
+            or not model_risk_assurance.citation_is_current(binding, evaluator)
+            or evaluator.get("version_digest") != authority.get("evaluator_digest")
+        ):
+            raise _InheritedAuthorityError(
+                "source_evaluator_authority_stale",
+                current_revision=revision,
+            )
     try:
         valid_until = float(authority.get("valid_until"))
     except (TypeError, ValueError) as exc:
@@ -727,6 +764,13 @@ def project_model_risk_evidence(
         attributes["evaluator_digest"] = _sha256_digest(
             evaluator_digest,
             "evaluator digest",
+        )
+    evaluator_asset_id = evidence.get("evaluator_asset_id")
+    if evaluator_asset_id is not None:
+        attributes["evaluator_asset_id"] = _required(
+            evaluator_asset_id,
+            "evaluator asset id",
+            128,
         )
     return _ingest(
         source="model_risk_assurance",

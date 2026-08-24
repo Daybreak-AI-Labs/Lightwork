@@ -97,7 +97,10 @@ _TRAINING_RECEIPT_ID = r"^[A-Za-z0-9][A-Za-z0-9._:+/@-]{0,127}$"
 class ModelRiskObservationIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    asset_type: str = Field(..., pattern="^(model|agent|tool|dataset|provider)$")
+    asset_type: str = Field(
+        ...,
+        pattern="^(system|component|model|agent|tool|dataset|provider)$",
+    )
     source: str = Field(..., min_length=1, max_length=64)
     source_id: str = Field(..., min_length=1, max_length=256)
     display_name: str = Field(..., min_length=1, max_length=256)
@@ -137,6 +140,7 @@ class ModelRiskDeclarationIn(BaseModel):
     lifecycle: str = Field("proposed", pattern="^(proposed|rejected)$")
     risk_context: dict = Field(default_factory=dict, max_length=128)
     eu_ai_act: dict = Field(default_factory=dict, max_length=32)
+    parent_asset_id: str | None = Field(None, pattern=_MODEL_RISK_ASSET_ID)
 
     @model_validator(mode="after")
     def bound_declaration(self):
@@ -168,20 +172,11 @@ class ModelRiskDeclarationUpdateIn(BaseModel):
     risk_tier: str | None = Field(None, pattern="^(low|medium|high|critical)$")
     risk_context: dict | None = Field(None, max_length=128)
     eu_ai_act: dict | None = Field(None, max_length=32)
+    parent_asset_id: str | None = Field(None, pattern=_MODEL_RISK_ASSET_ID)
 
     @model_validator(mode="after")
     def require_bounded_change(self):
-        if all(
-            value is None
-            for value in (
-                self.owner,
-                self.purpose,
-                self.intended_use,
-                self.risk_tier,
-                self.risk_context,
-                self.eu_ai_act,
-            )
-        ):
+        if not self.model_fields_set.difference({"expected_revision"}):
             raise ValueError("at least one declaration field must be updated")
         for value, label, fields in (
             (self.risk_context, "model-risk context", 128),
@@ -200,6 +195,61 @@ class ModelRiskDeclarationUpdateIn(BaseModel):
                     max_key_chars=128,
                 )
         return self
+
+
+class RedTeamCampaignIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    external_agent_id: str = Field(..., min_length=1, max_length=128)
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+    safe_target_environment: bool
+    case_keys: list[str] | None = Field(None, min_length=1, max_length=32)
+    ttl_seconds: int | None = Field(None, ge=300, le=2_592_000)
+
+    @model_validator(mode="after")
+    def bound_case_keys(self):
+        if self.case_keys is not None:
+            _validate_string_items(
+                self.case_keys,
+                label="red-team case key",
+                max_length=64,
+            )
+            if len(set(self.case_keys)) != len(self.case_keys):
+                raise ValueError("red-team case keys must be unique")
+        return self
+
+
+class RedTeamCancelIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    rationale: str = Field(..., min_length=1, max_length=2000)
+
+
+class RedTeamFinalizeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    force_incomplete: bool = False
+
+
+class PortfolioSnapshotRefreshIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(0, ge=0)
+    period_id: str | None = Field(None, pattern=r"^20[0-9]{2}-Q[1-4]$")
+
+
+class PolicyPackActivateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(0, ge=0)
+
+
+class PolicyPackRefreshIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
 
 
 class ModelRiskDeclarationReviewIn(BaseModel):
@@ -226,6 +276,7 @@ class ModelRiskEvidenceIn(BaseModel):
     scope_digest: str = Field(..., pattern=_MODEL_RISK_DIGEST)
     artifact_digest: str = Field(..., pattern=_MODEL_RISK_DIGEST)
     evaluator_digest: str | None = Field(None, pattern=_MODEL_RISK_DIGEST)
+    evaluator_asset_id: str | None = Field(None, pattern=_MODEL_RISK_ASSET_ID)
     summary: str = Field("", max_length=4000)
     metrics: dict = Field(default_factory=dict, max_length=128)
     observed_at: float = Field(..., gt=0)
@@ -235,6 +286,15 @@ class ModelRiskEvidenceIn(BaseModel):
     def bound_evidence(self):
         if self.valid_until <= self.observed_at:
             raise ValueError("valid_until must be later than observed_at")
+        if self.evaluator_asset_id is not None and self.evaluator_digest is None:
+            raise ValueError("evaluator_asset_id requires evaluator_digest")
+        if (
+            self.evidence_kind in {"evaluation", "red_team"}
+            and self.evaluator_asset_id is None
+        ):
+            raise ValueError(
+                f"{self.evidence_kind} evidence requires evaluator_asset_id",
+            )
         _validate_assurance_json(
             self.metrics,
             label="model-risk evidence metrics",
@@ -351,6 +411,139 @@ class ModelRiskDeploymentIn(BaseModel):
     payload_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
     predecessor_digest: str | None = Field(None, pattern=_MODEL_RISK_DIGEST)
     expected_revision: int = Field(0, ge=0)
+
+
+# AI vendor risk, drift monitoring, and agent topology ----------------------
+
+_SAFE_IDENTIFIER = r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}$"
+
+
+class VendorDocumentReferenceIn(BaseModel):
+    """A connector-bound document reference; the browser never supplies bytes."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source: str = Field(..., pattern=_SAFE_IDENTIFIER)
+    document_id: str = Field(..., min_length=1, max_length=512)
+    document_name: str = Field("", max_length=512)
+    ref: dict = Field(default_factory=dict, max_length=32)
+
+    @model_validator(mode="after")
+    def bound_reference(self):
+        _validate_assurance_json(
+            self.ref,
+            label="vendor document reference",
+            max_bytes=16 * 1024,
+            max_depth=4,
+            max_nodes=128,
+            max_object_items=32,
+            max_array_items=64,
+            max_string_chars=1024,
+            max_key_chars=128,
+        )
+        return self
+
+
+class VendorAssessmentDraftIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    vendor: str = Field(..., min_length=1, max_length=300)
+    answers: dict = Field(default_factory=dict, max_length=32)
+    documents: list[VendorDocumentReferenceIn] = Field(default_factory=list, max_length=8)
+    use_prior: bool = True
+
+    @model_validator(mode="after")
+    def bound_draft(self):
+        _validate_assurance_json(
+            self.answers,
+            label="vendor assessment answers",
+            max_bytes=128 * 1024,
+            max_depth=6,
+            max_nodes=1024,
+            max_object_items=32,
+            max_array_items=64,
+            max_string_chars=4000,
+            max_key_chars=128,
+        )
+        return self
+
+
+class VendorAssessmentReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    decision: str = Field(..., pattern="^(approved|rejected)$")
+    rationale: str = Field(..., min_length=1, max_length=4000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class VendorAssessmentProjectionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    valid_until: float = Field(..., gt=0)
+
+
+class DriftBaselineIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    source_id: str = Field(..., pattern=_SAFE_IDENTIFIER)
+    feature_samples: dict | None = Field(None, max_length=64)
+    predictions: list | None = Field(None, max_length=10_000)
+    embeddings: list | None = Field(None, max_length=10_000)
+    ground_truth: list | None = Field(None, max_length=10_000)
+    expected_revision: int = Field(0, ge=0)
+
+    @model_validator(mode="after")
+    def bound_samples(self):
+        _validate_assurance_json(
+            {
+                "feature_samples": self.feature_samples,
+                "predictions": self.predictions,
+                "embeddings": self.embeddings,
+                "ground_truth": self.ground_truth,
+            },
+            label="aggregate drift samples",
+            max_bytes=2 * 1024 * 1024,
+            max_depth=5,
+            max_nodes=100_000,
+            max_object_items=64,
+            max_array_items=10_000,
+            max_string_chars=256,
+            max_key_chars=128,
+        )
+        return self
+
+
+class DriftEvaluationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    run_id: str = Field(..., pattern=_SAFE_IDENTIFIER)
+    feature_samples: dict | None = Field(None, max_length=64)
+    predictions: list | None = Field(None, max_length=10_000)
+    embeddings: list | None = Field(None, max_length=10_000)
+    ground_truth: list | None = Field(None, max_length=10_000)
+    observed_at: float | None = Field(None, gt=0)
+
+    @model_validator(mode="after")
+    def bound_samples(self):
+        _validate_assurance_json(
+            {
+                "feature_samples": self.feature_samples,
+                "predictions": self.predictions,
+                "embeddings": self.embeddings,
+                "ground_truth": self.ground_truth,
+            },
+            label="aggregate drift samples",
+            max_bytes=2 * 1024 * 1024,
+            max_depth=5,
+            max_nodes=100_000,
+            max_object_items=64,
+            max_array_items=10_000,
+            max_string_chars=256,
+            max_key_chars=128,
+        )
+        return self
 
 
 # AI Evidence-Ready Gateway -------------------------------------------------

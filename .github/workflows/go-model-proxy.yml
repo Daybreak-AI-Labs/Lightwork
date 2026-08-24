@@ -52,7 +52,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.5"
+          go-version: "1.26.6"
       - run: go build -mod=readonly ./...
       - run: go vet -mod=readonly ./...
       - name: gofmt (no diff)
@@ -81,7 +81,7 @@ jobs:
       - name: Install the locked Python parity environment
         run: |
           python -I -m pip install --upgrade \
-            'pip==26.1.2' 'setuptools==83.0.0' 'wheel==0.47.0' \
+            'pip==26.2.1' 'setuptools==83.0.0' 'wheel==0.47.0' \
             'packaging==26.2'
           python -I -m pip install -e ./packages/maverick-core
           python -I -m pip check

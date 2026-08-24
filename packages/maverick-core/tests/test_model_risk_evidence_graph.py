@@ -33,6 +33,13 @@ def _approved_evidence() -> dict[str, Any]:
         "scope_digest": "b" * 64,
         "artifact_digest": "c" * 64,
         "evaluator_digest": "d" * 64,
+        "evaluator_asset_id": "MAS-governed-evaluator",
+        "evaluator_binding": {
+            "record_id": "MAO-governed-evaluator",
+            "revision": 1,
+            "record_sha256": "e" * 64,
+            "relation": "produced_evidence",
+        },
         "summary": "The bounded evaluation met its declared acceptance criteria.",
         "metrics": {"pass_rate": 0.99},
         "observed_at": now - 60,
@@ -54,6 +61,27 @@ def _approved_evidence() -> dict[str, Any]:
 
 
 def _install_authority(monkeypatch, state: dict[str, Any]) -> None:
+    state.setdefault(
+        "asset",
+        {
+            "id": "MAO-governed-target",
+            "revision": 1,
+            "asset_id": state["record"]["asset_id"],
+            "version_digest": state["record"]["artifact_digest"],
+        },
+    )
+    state.setdefault(
+        "evaluator",
+        {
+            "id": "MAO-governed-evaluator",
+            "revision": 1,
+            "asset_id": state["record"]["evaluator_asset_id"],
+            "version_digest": state["record"]["evaluator_digest"],
+        },
+    )
+    state["record"]["evaluator_binding"]["record_sha256"] = (
+        model_risk._record_sha(state["evaluator"])  # noqa: SLF001
+    )
     monkeypatch.setattr(
         model_risk,
         "list_evidence",
@@ -66,6 +94,19 @@ def _install_authority(monkeypatch, state: dict[str, Any]) -> None:
             dict(state["record"])
             if evidence_id == state["record"]["id"]
             else None
+        ),
+    )
+    monkeypatch.setattr(
+        model_risk,
+        "get_observation",
+        lambda asset_id: (
+            dict(state["asset"])
+            if asset_id == state["asset"]["asset_id"]
+            else (
+                dict(state["evaluator"])
+                if asset_id == state["evaluator"]["asset_id"]
+                else None
+            )
         ),
     )
 
@@ -123,6 +164,9 @@ def test_projection_rereads_authority_and_public_ingest_cannot_inherit_approval(
         ("decision", "source_not_approved"),
         ("decision_content", "source_decision_changed"),
         ("payload_binding", "source_authority_invalid"),
+        ("artifact", "source_artifact_authority_stale"),
+        ("evaluator", "source_evaluator_authority_stale"),
+        ("evaluator_content", "source_evaluator_authority_stale"),
         ("expiry", "source_expired"),
     ],
 )
@@ -157,6 +201,12 @@ def test_projected_authority_fails_closed_after_source_drift(
             **state["record"]["review"],
             "payload_sha256": "e" * 64,
         }
+    elif mutation == "artifact":
+        state["asset"]["version_digest"] = "f" * 64
+    elif mutation == "evaluator":
+        state["evaluator"]["version_digest"] = "f" * 64
+    elif mutation == "evaluator_content":
+        state["evaluator"]["display_name"] = "Changed without a revision"
     elif mutation == "expiry":
         state["record"]["valid_until"] = time.time() - 1
         state["record"]["freshness"] = "stale"
@@ -197,4 +247,26 @@ def test_collection_is_bounded_and_rereads_each_governed_id(monkeypatch):
         lambda: [forged] * 2049,
     )
     with pytest.raises(ValueError, match="2048-record projection limit"):
+        evidence_graph.collect_model_risk_evidence(actor="collector")
+
+
+@pytest.mark.parametrize("producer", [None, "MODEL-RISK-OWNER"])
+def test_red_team_projection_requires_independent_server_bound_producer(
+    monkeypatch,
+    producer,
+):
+    record = _approved_evidence()
+    record["id"] = "MRE-governed-red-team"
+    record["evidence_kind"] = "red_team"
+    if producer is not None:
+        record["producer_actor"] = producer
+    state = {"record": record}
+    _install_authority(monkeypatch, state)
+
+    with pytest.raises(ValueError, match="source_review_separation_invalid"):
+        evidence_graph.project_model_risk_evidence(
+            record["id"],
+            actor="collector",
+        )
+    with pytest.raises(ValueError, match="source_review_separation_invalid"):
         evidence_graph.collect_model_risk_evidence(actor="collector")

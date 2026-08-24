@@ -195,7 +195,114 @@ def test_openapi_artifact_describes_every_gateway_operation():
         "/api/v1/external/execute",
         "/api/v1/external/executions/{execution_id}",
         "/api/v1/external/executions/{execution_id}/commit"}
+
+
+def test_openapi_advertises_red_team_only_when_its_plane_is_enabled(monkeypatch):
+    from maverick import red_team_assurance as rta
+
+    monkeypatch.setattr(rta, "enabled", lambda: True)
+    spec = TestClient(app).get("/api/v1/external/openapi.json").json()
+    assert "/api/v1/external/red-team/{campaign_id}/cases" in spec["paths"]
+    result = spec["paths"][
+        "/api/v1/external/red-team/{campaign_id}/results"
+    ]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert "target_artifact_sha256" in result["required"]
     assert spec["security"] == [{"bearer": []}]
+
+
+def test_red_team_routes_preserve_agent_binding_and_do_not_echo_raw(monkeypatch):
+    from maverick import red_team_assurance as rta
+
+    _enroll()
+    token = _mint()
+    bare = TestClient(app)
+    headers = {"Authorization": f"Bearer {token}"}
+    observed: dict = {}
+
+    def cases(campaign_id, *, external_agent_id):
+        observed["pull"] = (campaign_id, external_agent_id)
+        return {
+            "campaign_id": campaign_id,
+            "cases": [{"case_id": "RTCASE-one", "prompt": "synthetic probe"}],
+        }
+
+    def submit(campaign_id, **kwargs):
+        observed["submit"] = (campaign_id, kwargs)
+        return {
+            "id": "RTR-one",
+            "case_id": kwargs["case_id"],
+            "outcome": "passed",
+            "response_commitment": "a" * 64,
+        }
+
+    monkeypatch.setattr(rta, "cases_for_agent", cases)
+    monkeypatch.setattr(rta, "submit_result", submit)
+
+    pulled = bare.get(
+        "/api/v1/external/red-team/RTC-one/cases",
+        headers=headers,
+    )
+    assert pulled.status_code == 200
+    assert observed["pull"] == ("RTC-one", "sf-quotebot")
+
+    raw = "transient model output"
+    submitted = bare.post(
+        "/api/v1/external/red-team/RTC-one/results",
+        headers=headers,
+        json={
+            "case_id": "RTCASE-one",
+            "target_artifact_sha256": "a" * 64,
+            "response": raw,
+            "tool_calls": [],
+            "tool_trace_status": "complete",
+        },
+    )
+    assert submitted.status_code == 201
+    assert observed["submit"][1]["external_agent_id"] == "sf-quotebot"
+    assert observed["submit"][1]["response"] == raw
+    assert raw not in submitted.text
+
+
+def test_red_team_result_body_is_bounded_before_signed_auth():
+    from maverick_dashboard import external_gateway
+
+    response = TestClient(app).post(
+        "/api/v1/external/red-team/RTC-one/results",
+        content=b"{}",
+        headers={
+            "content-type": "application/json",
+            "content-length": str(
+                external_gateway._MAX_RED_TEAM_HTTP_BODY_BYTES + 1  # noqa: SLF001
+            ),
+            "x-lightwork-agent-id": "untrusted-agent",
+            "x-maverick-timestamp": "1700000000",
+            "x-lightwork-nonce": "nonce-one",
+            "x-lightwork-request-signature": "00",
+        },
+    )
+
+    assert response.status_code == 413
+
+
+def test_red_team_case_pull_body_is_bounded_before_signed_auth():
+    from maverick_dashboard import external_gateway
+
+    response = TestClient(app).request(
+        "GET",
+        "/api/v1/external/red-team/RTC-one/cases",
+        content=b"{}",
+        headers={
+            "content-length": str(
+                external_gateway._MAX_RED_TEAM_HTTP_BODY_BYTES + 1  # noqa: SLF001
+            ),
+            "x-lightwork-agent-id": "untrusted-agent",
+            "x-maverick-timestamp": "1700000000",
+            "x-lightwork-nonce": "nonce-one",
+            "x-lightwork-request-signature": "00",
+        },
+    )
+
+    assert response.status_code == 413
 
 
 def test_memory_routes_over_http(monkeypatch):

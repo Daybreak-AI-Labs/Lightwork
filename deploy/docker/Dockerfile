@@ -40,7 +40,7 @@ COPY apps/installer-cli ./apps/installer-cli
 
 # Build the complete manifest-driven cohort and every dependency into a private
 # wheelhouse. The runtime stage has no project trees, pyprojects, or tests.
-RUN python -m pip install --upgrade 'pip==26.1.2' \
+RUN python -m pip install --upgrade 'pip==26.2.1' \
     && python scripts/install_release_cohort.py \
         --target-python python \
         --core-extra release-runtime \
@@ -65,7 +65,7 @@ RUN apt-get update \
 # from falling back to a public lookalike.
 COPY --from=wheel-builder /wheelhouse /wheelhouse
 COPY requirements/ci.txt /tmp/requirements/ci.txt
-RUN python -m pip install --upgrade 'pip==26.1.2' \
+RUN python -m pip install --upgrade 'pip==26.2.1' \
     && python -m pip install \
         --no-index \
         --find-links=/wheelhouse \

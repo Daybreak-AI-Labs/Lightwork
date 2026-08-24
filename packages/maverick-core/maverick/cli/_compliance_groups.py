@@ -572,3 +572,120 @@ def dsar_export(user_id: str, tenant: str | None, output, compact: bool) -> None
         click.echo(f"exported to {output}")
     else:
         click.echo(payload)
+
+
+@main.group("ai-incidents")
+def ai_incidents() -> None:
+    """EU AI Act Art. 73 serious-incident clocks and report drafts.
+
+    Classify an assurance incident under Art. 3(49), watch the tiered
+    2/10/15-day awareness clock, draft the report for the routed Member-State
+    market surveillance authority, and record human-gated submissions. Clocks
+    and drafts only -- nothing is ever transmitted by the platform.
+    """
+
+
+@ai_incidents.command("declare")
+@click.argument("incident_id")
+@click.option("--category", required=True,
+              help="Art. 3(49) category (see `maverick ai-incidents categories`).")
+@click.option("--widespread", is_flag=True,
+              help="Art. 3(61) widespread infringement (forces the 2-day clock).")
+@click.option("--aware-at", type=float, required=True,
+              help="Unix timestamp when the provider became aware.")
+@click.option("--causal-link", default="under_investigation",
+              show_default=True,
+              help="established | reasonably_likely | under_investigation.")
+@click.option("--member-state", required=True,
+              help="EU-27 code of the Member State where the incident occurred.")
+@click.option("--authority", required=True,
+              help="The market surveillance authority the report routes to.")
+@click.option("--by", "declared_by", required=True, help="Declaring human.")
+def ai_incidents_declare(incident_id: str, category: str, widespread: bool,
+                         aware_at: float, causal_link: str, member_state: str,
+                         authority: str, declared_by: str) -> None:
+    """Declare one assurance incident as an Art. 3(49) serious incident."""
+    from ..ai_incident_reporting import declare_serious_incident
+    try:
+        record = declare_serious_incident(
+            incident_id, category=category, widespread=widespread,
+            became_aware_at=aware_at, causal_link=causal_link,
+            member_state=member_state, authority=authority,
+            declared_by=declared_by,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"declared {record['id']}: report due at "
+               f"{record['report_due_at']} ({record['deadline_citation']})")
+
+
+@ai_incidents.command("categories")
+def ai_incidents_categories() -> None:
+    """The Art. 3(49) categories and the clock each one starts."""
+    from ..ai_incident_reporting import SERIOUS_INCIDENT_CATEGORIES
+    for token, entry in sorted(SERIOUS_INCIDENT_CATEGORIES.items()):
+        click.echo(f"  {token:38s} {entry['window_days']:>2d} days "
+                   f"({entry['deadline_citation']}; {entry['category_citation']})")
+
+
+@ai_incidents.command("list")
+@click.option("--status", default="", help="Filter by lifecycle status.")
+@click.option("--overdue", "overdue_only", is_flag=True,
+              help="Only declarations past their Art. 73 deadline.")
+def ai_incidents_list(status: str, overdue_only: bool) -> None:
+    """Declarations with their live clocks, most urgent first."""
+    from ..ai_incident_reporting import list_declarations, overdue_declarations
+    try:
+        rows = (overdue_declarations() if overdue_only
+                else list_declarations(status=status.strip() or None))
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    if not rows:
+        click.echo("no serious-incident declarations.")
+        return
+    for row in rows:
+        clock = row["clock"]
+        marker = "OVERDUE" if clock["overdue"] else f"{clock['seconds_remaining'] / 86400:.1f}d left"
+        click.echo(f"  {row['id']}  {row['status']:18s} {row['category']:38s} "
+                   f"{row['member_state']}  {marker}")
+
+
+@ai_incidents.command("submit")
+@click.argument("record_id")
+@click.option("--kind", type=click.Choice(["initial", "complete"]), required=True,
+              help="Art. 73(5): an incomplete initial report may precede the "
+                   "complete one.")
+@click.option("--by", "submitted_by", required=True, help="Submitting human.")
+@click.option("--at", "submitted_at", type=float, required=True,
+              help="Unix timestamp of the filing.")
+@click.option("--reference", required=True,
+              help="The authority's ticket / filing reference.")
+@click.option("--revision", type=int, required=True,
+              help="Expected record revision (CAS).")
+def ai_incidents_submit(record_id: str, kind: str, submitted_by: str,
+                        submitted_at: float, reference: str, revision: int) -> None:
+    """Record that a human filed the report with the routed authority."""
+    from ..ai_incident_reporting import record_submission
+    try:
+        record = record_submission(
+            record_id, kind=kind, submitted_by=submitted_by,
+            submitted_at=submitted_at, reference=reference,
+            expected_revision=revision,
+        )
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    if record is None:
+        raise click.ClickException(f"no declaration {record_id!r}")
+    late = record["submissions"][-1]["late"]
+    click.echo(f"{record['status']}{' (late filing recorded)' if late else ''}")
+
+
+@ai_incidents.command("report")
+@click.argument("record_id")
+def ai_incidents_report(record_id: str) -> None:
+    """Render the bounded Art. 73 report draft for one declaration."""
+    from ..ai_incident_reporting import render_report
+    try:
+        click.echo(render_report(record_id))
+    except (KeyError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e

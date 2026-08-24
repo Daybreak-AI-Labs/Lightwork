@@ -1,0 +1,825 @@
+"""Protocol and reconciliation tests for external AI-estate discovery."""
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+
+import pytest
+from maverick import ai_inventory as inventory
+from maverick import model_risk_assurance as mra
+from maverick.paths import tenant_scope
+
+
+@pytest.fixture(autouse=True)
+def _isolate(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    monkeypatch.setenv("MAVERICK_SECURE_DEFAULT", "0")
+    monkeypatch.setenv("MAVERICK_TENANT", "tenant-a")
+    monkeypatch.setenv("AZURE_AI_FOUNDRY_TOKEN", "azure-test-token")
+    monkeypatch.setenv("VERTEX_ACCESS_TOKEN", "vertex-test-token")
+    monkeypatch.setenv("DATABRICKS_TOKEN", "databricks-test-token")
+    monkeypatch.setenv("COPILOT_STUDIO_TOKEN", "copilot-test-token")
+    monkeypatch.setenv("DATABRICKS_HOST", "https://workspace.example.databricks.com")
+    monkeypatch.setenv("VERTEX_PROJECT", "test-project")
+    monkeypatch.setenv("VERTEX_LOCATION", "us-central1")
+    monkeypatch.setenv("COPILOT_STUDIO_DATAVERSE_URL", "https://org.crm.dynamics.com")
+    (tmp_path / "config.toml").write_text(
+        "[governed_records]\n"
+        'backend = "local"\n'
+        "\n[evidence_graph]\n"
+        "enable = true\n"
+        "\n[model_risk_assurance]\n"
+        "enable = true\n"
+        "gate_promotions = true\n"
+        "\n[ai_inventory]\n"
+        "enable = true\n"
+        'connectors = ["bedrock", "azure_ai_foundry", "vertex_ai", '
+        '"databricks_unity_catalog", "copilot_studio"]\n'
+        "page_cap = 20\n"
+        "record_cap = 100\n"
+        "retry_attempts = 3\n"
+        "timeout_seconds = 5\n"
+        "missing_grace_runs = 2\n",
+        encoding="utf-8",
+    )
+    from maverick import audit, config
+
+    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(audit, "record_global", lambda *_args, **_kwargs: True)
+    config.reset_config_cache()
+    yield
+    config.reset_config_cache()
+
+
+@dataclass
+class _Response:
+    payload: Any
+    status_code: int = 200
+    headers: dict[str, str] | None = None
+
+    def __post_init__(self):
+        self.headers = dict(self.headers or {})
+
+    def json(self):
+        return self.payload
+
+
+class _Transport:
+    def __init__(self, handler):
+        self.handler = handler
+        self.calls: list[dict[str, Any]] = []
+
+    def get(self, url, *, headers, params, timeout):
+        call = {
+            "url": url,
+            "headers": dict(headers),
+            "params": dict(params or {}),
+            "timeout": timeout,
+        }
+        self.calls.append(call)
+        return self.handler(call)
+
+
+class _BedrockControl:
+    def __init__(self):
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def list_custom_models(self, **kwargs):
+        self.calls.append(("custom", kwargs))
+        now = datetime(2026, 8, 1, tzinfo=timezone.utc)
+        if kwargs.get("nextToken") == "custom-2":
+            return {
+                "modelSummaries": [
+                    {
+                        "modelArn": "arn:aws:bedrock:us-east-1:123:custom-model/two",
+                        "modelName": "Custom Two",
+                        "baseModelArn": "arn:aws:bedrock::foundation-model/base-two",
+                        "creationTime": now,
+                    }
+                ]
+            }
+        return {
+            "modelSummaries": [
+                {
+                    "modelArn": "arn:aws:bedrock:us-east-1:123:custom-model/one",
+                    "modelName": "Custom One",
+                    "baseModelArn": "arn:aws:bedrock::foundation-model/base-one",
+                    "creationTime": now,
+                }
+            ],
+            "nextToken": "custom-2",
+        }
+
+    def list_imported_models(self, **kwargs):
+        self.calls.append(("imported", kwargs))
+        return {
+            "modelSummaries": [
+                {
+                    "modelArn": "arn:aws:bedrock:us-east-1:123:imported-model/one",
+                    "modelName": "Imported One",
+                    "modelArchitecture": "llama",
+                    "creationTime": "2026-08-02T00:00:00Z",
+                }
+            ]
+        }
+
+    def list_provisioned_model_throughputs(self, **kwargs):
+        self.calls.append(("provisioned", kwargs))
+        return {
+            "provisionedModelSummaries": [
+                {
+                    "provisionedModelArn": "arn:aws:bedrock:us-east-1:123:provisioned-model/p1",
+                    "provisionedModelName": "Production Throughput",
+                    "modelArn": "arn:aws:bedrock:us-east-1:123:custom-model/one",
+                    "status": "InService",
+                    "lastModifiedTime": "2026-08-03T00:00:00Z",
+                }
+            ]
+        }
+
+    def list_tags_for_resource(self, **kwargs):
+        self.calls.append(("tags", kwargs))
+        return {"tags": {"owner": "ai-platform@example.com"}}
+
+
+class _BedrockAgent:
+    def __init__(self):
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    def list_agents(self, **kwargs):
+        self.calls.append(("agents", kwargs))
+        return {
+            "agentSummaries": [
+                {
+                    "agentId": "AGENT123",
+                    "agentName": "Claims Agent",
+                    "latestAgentVersion": "7",
+                    "updatedAt": "2026-08-04T00:00:00Z",
+                }
+            ]
+        }
+
+    def get_agent(self, **kwargs):
+        self.calls.append(("get_agent", kwargs))
+        return {
+            "agent": {
+                "agentId": kwargs["agentId"],
+                "agentArn": "arn:aws:bedrock:us-east-1:123:agent/AGENT123",
+                "foundationModel": "anthropic.claude",
+            }
+        }
+
+    def list_tags_for_resource(self, **kwargs):
+        self.calls.append(("tags", kwargs))
+        return {"tags": {"owner": "claims@example.com"}}
+
+
+def _limits(**overrides):
+    values = {"page_cap": 20, "record_cap": 100, "retry_attempts": 3}
+    values.update(overrides)
+    return inventory.DiscoveryLimits(**values)
+
+
+def test_bedrock_uses_all_customer_owned_list_operations_and_full_pagination():
+    control = _BedrockControl()
+    agent = _BedrockAgent()
+    adapter = inventory.BedrockInventoryAdapter(
+        control_client=control,
+        agent_client=agent,
+        region="us-east-1",
+        limits=_limits(),
+        sleep=lambda _delay: None,
+        clock=lambda: 1_780_000_000.0,
+    )
+
+    result = adapter.discover()
+
+    assert len(result.assets) == 5
+    assert result.pages == 5
+    assert [name for name, _ in control.calls if name != "tags"] == [
+        "custom",
+        "custom",
+        "imported",
+        "provisioned",
+    ]
+    assert [name for name, _ in agent.calls if name != "tags"] == ["agents", "get_agent"]
+    assert all(asset.platform == "AWS Bedrock" for asset in result.assets)
+    assert {asset.owner for asset in result.assets} == {
+        "ai-platform@example.com",
+        "claims@example.com",
+    }
+    assert not hasattr(control, "list_foundation_models")
+
+
+def test_foundry_v1_agents_and_deployments_are_paginated_and_typed():
+    def handler(call):
+        if call["url"].endswith("/agents") and "after" not in call["params"]:
+            return _Response(
+                {
+                    "data": [
+                        {
+                            "id": "agent-1",
+                            "name": "Underwriting Agent",
+                            "version": "4",
+                            "updated_at": "2026-08-05T00:00:00Z",
+                            "metadata": {"owner": "risk@example.com"},
+                            "definition": {"kind": "prompt", "model": "gpt-5"},
+                        }
+                    ],
+                    "has_more": True,
+                    "last_id": "agent-1",
+                }
+            )
+        if call["url"].endswith("/agents"):
+            assert call["params"]["after"] == "agent-1"
+            return _Response({"data": [], "has_more": False})
+        if call["url"].endswith("/deployments"):
+            return _Response(
+                {
+                    "value": [
+                        {
+                            "id": "deployment-1",
+                            "name": "gpt-prod",
+                            "version": "2026-08-01",
+                            "model": "gpt-5",
+                            "systemData": {
+                                "lastModifiedBy": "platform@example.com",
+                                "lastModifiedAt": "2026-08-06T00:00:00Z",
+                            },
+                            "properties": {"provisioningState": "Succeeded"},
+                        }
+                    ]
+                }
+            )
+        raise AssertionError(call)
+
+    transport = _Transport(handler)
+    adapter = inventory.AzureAIFoundryInventoryAdapter(
+        endpoint="https://foundry.services.ai.azure.com/api/projects/project-one",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 3
+    assert [(asset.asset_type, asset.model) for asset in result.assets] == [
+        ("agent", "gpt-5"),
+        ("model", "gpt-5"),
+    ]
+    assert all(call["params"].get("api-version") == "v1" for call in transport.calls)
+    assert result.assets[0].owner == "risk@example.com"
+
+
+def test_vertex_lists_models_endpoints_and_reasoning_engines_with_tokens():
+    def handler(call):
+        if call["url"].endswith("/models"):
+            if call["params"].get("pageToken") == "models-2":
+                return _Response({"models": []})
+            return _Response(
+                {
+                    "models": [
+                        {
+                            "name": "projects/p/locations/us-central1/models/123",
+                            "displayName": "Fraud Model",
+                            "artifactSha256": "a" * 64,
+                            "updateTime": "2026-08-07T00:00:00Z",
+                            "labels": {"owner": "fraud@example.com"},
+                        }
+                    ],
+                    "nextPageToken": "models-2",
+                }
+            )
+        if call["url"].endswith("/endpoints"):
+            return _Response(
+                {
+                    "endpoints": [
+                        {
+                            "name": "projects/p/locations/us-central1/endpoints/456",
+                            "displayName": "Fraud Endpoint",
+                            "updateTime": "2026-08-08T00:00:00Z",
+                            "deployedModels": [
+                                {
+                                    "id": "one",
+                                    "model": "projects/p/locations/us-central1/models/123",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            )
+        if call["url"].endswith("/reasoningEngines"):
+            return _Response(
+                {
+                    "reasoningEngines": [
+                        {
+                            "name": "projects/p/locations/us-central1/reasoningEngines/789",
+                            "displayName": "Collections Agent",
+                            "revisionId": "11",
+                            "model": "gemini-2.5-pro",
+                            "updateTime": "2026-08-09T00:00:00Z",
+                        }
+                    ]
+                }
+            )
+        raise AssertionError(call)
+
+    transport = _Transport(handler)
+    result = inventory.VertexAIInventoryAdapter(
+        project="p",
+        location="us-central1",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    ).discover()
+
+    assert result.pages == 4
+    assert [asset.metadata["resource_kind"] for asset in result.assets] == [
+        "model",
+        "endpoint",
+        "reasoning_engine",
+    ]
+    assert result.assets[0].binding_strength == "exact_artifact"
+    assert result.assets[0].version_digest == "a" * 64
+    assert result.assets[1].dependencies == (
+        "projects/p/locations/us-central1/models/123",
+    )
+
+
+def test_databricks_lists_registered_models_and_every_version_page():
+    def handler(call):
+        if call["url"].endswith("/api/2.1/unity-catalog/models"):
+            return _Response(
+                {
+                    "registered_models": [
+                        {
+                            "full_name": "main.risk.fraud",
+                            "name": "fraud",
+                            "owner": "risk@example.com",
+                            "updated_at": "1785715200000",
+                        }
+                    ]
+                }
+            )
+        if call["params"].get("page_token") == "versions-2":
+            return _Response(
+                {
+                    "model_versions": [
+                        {
+                            "version": "2",
+                            "source": "dbfs:/models/fraud/2",
+                            "created_at": 1_785_801_600_000,
+                        }
+                    ]
+                }
+            )
+        return _Response(
+            {
+                "model_versions": [
+                    {
+                        "version": "1",
+                        "source": "dbfs:/models/fraud/1",
+                        "created_at": 1_785_715_200_000,
+                    }
+                ],
+                "next_page_token": "versions-2",
+            }
+        )
+
+    transport = _Transport(handler)
+    result = inventory.DatabricksUnityCatalogInventoryAdapter(
+        host="https://workspace.example.databricks.com",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    ).discover()
+
+    assert result.pages == 3
+    assert len(result.assets) == 3
+    assert result.assets[0].binding_strength == "observed_snapshot"
+    assert [asset.metadata["version"] for asset in result.assets[1:]] == ["1", "2"]
+    assert all(
+        asset.binding_strength == "immutable_provider_revision" for asset in result.assets[1:]
+    )
+
+
+def test_copilot_studio_follows_same_origin_odata_nextlink_and_extracts_model():
+    def handler(call):
+        if "skiptoken=page2" in call["url"]:
+            return _Response(
+                {
+                    "value": [
+                        {
+                            "botid": "bot-2",
+                            "name": "Support Copilot",
+                            "versionnumber": 10,
+                            "modifiedon": "2026-08-11T00:00:00Z",
+                            "_ownerid_value": "owner-guid",
+                            "configuration": json.dumps({"modelId": "gpt-4.1"}),
+                        }
+                    ]
+                }
+            )
+        return _Response(
+            {
+                "value": [
+                    {
+                        "botid": "bot-1",
+                        "name": "Finance Copilot",
+                        "versionnumber": 9,
+                        "modifiedon": "2026-08-10T00:00:00Z",
+                        "_ownerid_value@OData.Community.Display.V1.FormattedValue": (
+                            "Finance Owner"
+                        ),
+                        "configuration": json.dumps({"settings": {"gptModel": "gpt-5"}}),
+                    }
+                ],
+                "@odata.nextLink": (
+                    "https://org.crm.dynamics.com/api/data/v9.2/bots?$skiptoken=page2"
+                ),
+            }
+        )
+
+    transport = _Transport(handler)
+    result = inventory.CopilotStudioInventoryAdapter(
+        dataverse_url="https://org.crm.dynamics.com",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    ).discover()
+
+    assert result.pages == 2
+    assert [asset.model for asset in result.assets] == ["gpt-5", "gpt-4.1"]
+    assert result.assets[0].owner == "Finance Owner"
+    assert all(asset.asset_type == "agent" for asset in result.assets)
+
+
+def test_http_retry_honors_retry_after_without_persisting_response_body():
+    sleeps: list[float] = []
+    responses = [
+        _Response({"secret": "must-not-be-read"}, 429, {"Retry-After": "3"}),  # pragma: allowlist secret
+        _Response({"value": []}),
+    ]
+    transport = _Transport(lambda _call: responses.pop(0))
+    adapter = inventory.CopilotStudioInventoryAdapter(
+        dataverse_url="https://org.crm.dynamics.com",
+        transport=transport,
+        limits=_limits(),
+        sleep=sleeps.append,
+    )
+
+    assert adapter.discover().assets == ()
+    assert sleeps == [3.0]
+    assert len(transport.calls) == 2
+
+
+def test_malformed_pages_cycles_and_record_caps_fail_closed():
+    malformed = _Transport(lambda _call: _Response({"data": {"not": "a list"}}))
+    with pytest.raises(inventory.DiscoveryProtocolError, match="array"):
+        inventory.AzureAIFoundryInventoryAdapter(
+            endpoint="https://foundry.services.ai.azure.com/api/projects/p",
+            transport=malformed,
+            limits=_limits(),
+            sleep=lambda _delay: None,
+        ).discover()
+
+    def cycle(call):
+        if call["url"].endswith("/models"):
+            return _Response({"models": [], "nextPageToken": "same"})
+        return _Response({"endpoints": []})
+
+    with pytest.raises(inventory.DiscoveryProtocolError, match="cycle"):
+        inventory.VertexAIInventoryAdapter(
+            project="p",
+            location="us-central1",
+            transport=_Transport(cycle),
+            limits=_limits(),
+            sleep=lambda _delay: None,
+        ).discover()
+
+    control = _BedrockControl()
+    with pytest.raises(inventory.DiscoveryLimitError, match="record cap"):
+        inventory.BedrockInventoryAdapter(
+            control_client=control,
+            agent_client=_BedrockAgent(),
+            region="us-east-1",
+            limits=_limits(record_cap=1),
+            sleep=lambda _delay: None,
+        ).discover()
+
+
+def _asset(label: str) -> inventory.DiscoveredAsset:
+    return inventory.DiscoveredAsset(
+        asset_type="model",
+        source="google_vertex_ai",
+        source_id=f"projects/p/locations/us-central1/models/{label}",
+        display_name=f"Model {label}",
+        version_digest=hashlib.sha256(f"version:{label}".encode()).hexdigest(),
+        binding_strength="immutable_provider_revision",
+        owner="owner@example.com",
+        platform="Google Vertex AI",
+        model=f"model-{label}",
+        last_seen=1_780_000_000.0,
+        source_url=f"https://us-central1-aiplatform.googleapis.com/models/{label}",
+        metadata={"resource_kind": "model"},
+    )
+
+
+class _StaticAdapter:
+    name = "vertex_ai"
+    source = "google_vertex_ai"
+    limits = inventory.DiscoveryLimits(page_cap=5, record_cap=10)
+
+    def __init__(self, assets):
+        self.assets = list(assets)
+
+    def discover(self):
+        return inventory.DiscoveryResult(tuple(self.assets), 1)
+
+
+def test_sync_is_idempotent_and_preserves_source_and_run_lineage():
+    service = inventory.DiscoveryService(clock=lambda: 1_780_000_100.0)
+    adapter = _StaticAdapter([_asset("one")])
+
+    first = service.sync(adapter, actor="inventory-service")
+    state = service.list_asset_states()[0]
+    observation = mra.get_observation(state["asset_id"])
+    second = service.sync(adapter, actor="inventory-service")
+    later_state = service.list_asset_states()[0]
+    later_observation = mra.get_observation(state["asset_id"])
+
+    assert first["completed_sequence"] == 1
+    assert second["completed_sequence"] == 2
+    assert observation["revision"] == later_observation["revision"]
+    assert later_state["last_run_id"] == second["id"]
+    assert later_state["last_seen_sequence"] == 2
+    assert later_observation["metadata"] == {
+        "record_origin": "discovered",
+        "platform": "Google Vertex AI",
+        "model": "model-one",
+        "discovered_owner": "owner@example.com",
+        "source_url": "https://us-central1-aiplatform.googleapis.com/models/one",
+        "binding_strength": "immutable_provider_revision",
+        "resource_kind": "model",
+    }
+    assert later_observation["evidence_node_id"].startswith("EGN-")
+
+
+def test_failed_partial_run_never_advances_completed_missing_sequence():
+    service = inventory.DiscoveryService(clock=lambda: 1_780_000_200.0)
+    adapter = _StaticAdapter([_asset("one"), _asset("two")])
+    complete = service.sync(adapter, actor="inventory-service")
+    assert complete["completed_sequence"] == 1
+
+    class FailSecond:
+        def __init__(self):
+            self.calls = 0
+
+        def get_observation(self, asset_id):
+            return mra.get_observation(asset_id)
+
+        def observe_asset(self, **kwargs):
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("upstream detail must not persist")
+            return mra.observe_asset(**kwargs)
+
+    partial_service = inventory.DiscoveryService(
+        observer=FailSecond(),
+        clock=lambda: 1_780_000_300.0,
+    )
+    with pytest.raises(inventory.DiscoverySyncError, match="did not complete"):
+        partial_service.sync(adapter, actor="inventory-service")
+
+    status = partial_service.status("vertex_ai")
+    states = partial_service.list_asset_states(missing_grace_runs=1)
+    assert status["state"] == "partial"
+    assert status["completed_sequence"] == 1
+    assert {row["missing_count"] for row in states} == {0}
+    failed_run = partial_service.list_runs(limit=1)[0]
+    assert failed_run["error_type"] == "RuntimeError"
+    assert "upstream detail" not in json.dumps(failed_run)
+
+    # The failed run staged "one" at sequence 2. A later complete sequence 2
+    # that sees only "two" must not mistake that failed sighting for success.
+    service.sync(_StaticAdapter([_asset("two")]), actor="inventory-service")
+    by_name = {row["display_name"]: row for row in service.list_asset_states(
+        missing_grace_runs=1
+    )}
+    assert by_name["Model one"]["discovery_status"] == "missing"
+    assert by_name["Model one"]["missing_count"] == 1
+    assert by_name["Model two"]["discovery_status"] == "present"
+
+
+def test_missing_grace_is_derived_only_from_complete_runs_and_never_deletes():
+    service = inventory.DiscoveryService(clock=lambda: 1_780_000_400.0)
+    adapter = _StaticAdapter([_asset("one")])
+    service.sync(adapter, actor="inventory-service")
+    adapter.assets = []
+
+    service.sync(adapter, actor="inventory-service")
+    first_absence = service.list_asset_states()[0]
+    assert first_absence["discovery_status"] == "grace"
+    assert first_absence["missing_count"] == 1
+
+    service.sync(adapter, actor="inventory-service")
+    missing = service.list_asset_states()[0]
+    assert missing["discovery_status"] == "missing"
+    assert missing["missing_count"] == 2
+    assert mra.get_observation(missing["asset_id"]) is not None
+
+
+def test_tenant_state_isolated_and_provider_secrets_are_not_persisted(monkeypatch):
+    secret = "top-secret-copilot-token"  # pragma: allowlist secret
+    monkeypatch.setenv("COPILOT_STUDIO_TOKEN", secret)
+
+    def handler(_call):
+        return _Response(
+            {
+                "value": [
+                    {
+                        "botid": "bot-secret-test",
+                        "name": "Safe Bot",
+                        "versionnumber": 3,
+                        "modifiedon": "2026-08-12T00:00:00Z",
+                        "_ownerid_value": "owner-id",
+                        "configuration": json.dumps(
+                            {"model": "gpt-5", "api_token": secret}
+                        ),
+                    }
+                ]
+            }
+        )
+
+    transport = _Transport(handler)
+    adapter = inventory.CopilotStudioInventoryAdapter(
+        dataverse_url="https://org.crm.dynamics.com",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    service = inventory.DiscoveryService(clock=lambda: 1_780_000_500.0)
+    service.sync(adapter, actor="inventory-service")
+    persisted = {
+        "runs": service.list_runs(),
+        "status": service.status("copilot_studio"),
+        "assets": service.list_asset_states(),
+    }
+    state = persisted["assets"][0]
+    persisted["observation"] = mra.get_observation(state["asset_id"])
+
+    assert secret in transport.calls[0]["headers"]["Authorization"]
+    assert secret not in json.dumps(persisted, default=str)
+    assert "api_token" not in json.dumps(persisted, default=str)
+    with tenant_scope(tenant="tenant-b"):
+        assert service.list_asset_states() == []
+        assert service.status("copilot_studio") is None
+
+
+def test_read_projections_strip_audit_outbox_and_unknown_fields(monkeypatch):
+    from maverick import audit
+
+    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: False)
+    service = inventory.DiscoveryService(clock=lambda: 1_780_000_600.0)
+    service.sync(_StaticAdapter([_asset("projection")]), actor="inventory-service")
+
+    raw_status = service._statuses.get(inventory._status_id("vertex_ai"))
+    raw_asset = service._asset_states.list(limit=2)[0]
+    assert raw_status is not None
+    assert "_audit_pending" in raw_status
+    assert "_audit_pending" in raw_asset
+
+    def add_unexpected(row):
+        row["unexpected_provider_blob"] = {
+            "authorization": "must-not-cross-the-read-boundary"
+        }
+
+    service._statuses.update(
+        raw_status["id"],
+        add_unexpected,
+        expected_revision=raw_status["revision"],
+        action="test_unknown_status_field",
+        actor="inventory-test",
+    )
+    service._asset_states.update(
+        raw_asset["id"],
+        add_unexpected,
+        expected_revision=raw_asset["revision"],
+        action="test_unknown_asset_field",
+        actor="inventory-test",
+    )
+
+    status = service.status("vertex_ai")
+    state = service.list_asset_states()[0]
+    assert set(status) == {
+        "id",
+        "schema",
+        "connector",
+        "source",
+        "state",
+        "completed_sequence",
+        "revision",
+        "created_at",
+        "updated_at",
+        "last_attempt_id",
+        "last_attempt_at",
+        "last_completed_id",
+        "last_completed_at",
+        "last_asset_count",
+        "last_identity_digest",
+        "last_error_type",
+    }
+    assert set(state) == {
+        "id",
+        "schema",
+        "connector",
+        "source",
+        "source_id",
+        "asset_type",
+        "first_seen_at",
+        "revision",
+        "created_at",
+        "updated_at",
+        "asset_id",
+        "display_name",
+        "version_digest",
+        "binding_strength",
+        "owner",
+        "platform",
+        "model",
+        "source_url",
+        "provider_last_seen_at",
+        "last_seen_at",
+        "last_seen_sequence",
+        "last_run_id",
+        "observation_revision",
+        "observation_snapshot_sha256",
+        "missing_count",
+        "discovery_status",
+        "status",
+    }
+    assert "must-not-cross-the-read-boundary" not in json.dumps(
+        {"status": status, "state": state}
+    )
+
+
+def test_read_projections_reject_corrupted_governed_fields():
+    service = inventory.DiscoveryService(clock=lambda: 1_780_000_700.0)
+    service.sync(_StaticAdapter([_asset("corrupt")]), actor="inventory-service")
+
+    raw_status = service._statuses.get(inventory._status_id("vertex_ai"))
+    assert raw_status is not None
+    service._statuses.update(
+        raw_status["id"],
+        lambda row: row.update({"completed_sequence": "1"}),
+        expected_revision=raw_status["revision"],
+        action="test_corrupt_status",
+        actor="inventory-test",
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="completed_sequence"):
+        service.status("vertex_ai")
+
+    corrupted_status = service._statuses.get(raw_status["id"])
+    assert corrupted_status is not None
+    service._statuses.update(
+        raw_status["id"],
+        lambda row: row.update({"completed_sequence": 1}),
+        expected_revision=corrupted_status["revision"],
+        action="test_repair_status",
+        actor="inventory-test",
+    )
+    raw_asset = service._asset_states.list(limit=2)[0]
+    service._asset_states.update(
+        raw_asset["id"],
+        lambda row: row.update({"pending_version_digest": "not-a-digest"}),
+        expected_revision=raw_asset["revision"],
+        action="test_corrupt_asset",
+        actor="inventory-test",
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="version_digest"):
+        service.list_asset_states()
+
+
+def test_config_gate_is_default_off_and_rejects_unknown_connector(tmp_path):
+    from maverick import config
+
+    (tmp_path / "config.toml").write_text("[ai_inventory]\nenable = false\n", encoding="utf-8")
+    config.reset_config_cache()
+    assert inventory.enabled() is False
+    with pytest.raises(inventory.AIInventoryConfigError, match="disabled"):
+        inventory.require_enabled()
+
+    (tmp_path / "config.toml").write_text(
+        '[ai_inventory]\nenable = true\nconnectors = ["made_up"]\n',
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    assert inventory.enabled() is False
+    with pytest.raises(inventory.AIInventoryConfigError, match="unknown"):
+        inventory.get_ai_inventory_config()

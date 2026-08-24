@@ -59,7 +59,25 @@ PACK_SCHEMA = "lightwork.model-risk-assurance-pack.v1"
 PACK_EVENT = "model_risk_assurance_pack"
 _MAX_NAMESPACE_RECORDS = 5_000
 
-_ASSET_TYPES = frozenset({"model", "agent", "tool", "dataset", "provider"})
+_ASSET_TYPES = frozenset({
+    "system",
+    "component",
+    "model",
+    "agent",
+    "tool",
+    "dataset",
+    "provider",
+})
+_ALLOWED_PARENT_TYPES = {
+    "system": frozenset(),
+    "component": frozenset({"system", "component"}),
+    "agent": frozenset({"system", "component"}),
+    "model": frozenset({"system", "component", "agent"}),
+    "tool": frozenset({"system", "component", "agent"}),
+    "dataset": frozenset({"system", "component", "agent"}),
+    "provider": frozenset({"system", "component", "agent"}),
+}
+_MAX_HIERARCHY_DEPTH = 16
 _LIFECYCLES = frozenset({"proposed", "approved", "rejected", "production", "suspended", "retired"})
 _ACTIVE_LIFECYCLES = frozenset({"approved", "production"})
 _RISK_TIERS = frozenset({"low", "medium", "high", "critical"})
@@ -486,6 +504,17 @@ def _record_id(prefix: str, *parts: object) -> str:
     return f"{prefix}-{_sha256([str(part) for part in parts])[:24]}"
 
 
+def _hierarchy_transaction_target() -> Path:
+    """Return the active tenant's strict hierarchy-mutation lock target."""
+
+    from .paths import data_dir
+
+    return data_dir(
+        "model_risk_assurance",
+        "declaration-hierarchy-mutations.transaction",
+    )
+
+
 def _graph_node_id(source_id: str) -> str:
     identity = {"source": "model_risk_assurance", "source_id": source_id}
     return f"EGN-{_sha256(identity)[:24]}"
@@ -521,6 +550,21 @@ def _record_sha(record: Mapping[str, Any]) -> str:
     return _sha256(_public(record))
 
 
+def _red_team_review_is_independent(record: Mapping[str, Any]) -> bool:
+    producer = str(record.get("producer_actor") or "").strip()
+    review = record.get("review")
+    reviewer = (
+        str(review.get("reviewer") or "").strip()
+        if isinstance(review, Mapping)
+        else ""
+    )
+    return bool(
+        producer
+        and reviewer
+        and producer.casefold() != reviewer.casefold()
+    )
+
+
 def _citation(record: Mapping[str, Any], relation: str) -> dict[str, Any]:
     return {
         "record_id": _required_text(record.get("id"), "record id", 64),
@@ -528,6 +572,20 @@ def _citation(record: Mapping[str, Any], relation: str) -> dict[str, Any]:
         "record_sha256": _record_sha(record),
         "relation": _token(relation, "citation relation"),
     }
+
+
+def citation_is_current(
+    citation: Mapping[str, Any],
+    record: Mapping[str, Any] | None,
+) -> bool:
+    """Validate an exact governed citation against a freshly loaded record."""
+
+    return bool(
+        record
+        and citation.get("record_id") == record.get("id")
+        and citation.get("revision") == record.get("revision")
+        and citation.get("record_sha256") == _record_sha(record)
+    )
 
 
 def _eu_assertion(value: object, *, actor: str, now: float) -> dict[str, Any]:
@@ -866,13 +924,47 @@ class ModelRiskAssuranceOfficer:
         lifecycle: str = "proposed",
         risk_context: Mapping[str, Any] | None = None,
         eu_ai_act: Mapping[str, Any] | None = None,
+        parent_asset_id: str | None = None,
     ) -> dict[str, Any]:
         """Create a human declaration bound to the current observed revision."""
+
+        from .file_lock import cross_process_lock
+
+        with cross_process_lock(_hierarchy_transaction_target(), strict=True):
+            return self._declare_asset_locked(
+                asset_id,
+                owner=owner,
+                purpose=purpose,
+                intended_use=intended_use,
+                actor=actor,
+                risk_tier=risk_tier,
+                lifecycle=lifecycle,
+                risk_context=risk_context,
+                eu_ai_act=eu_ai_act,
+                parent_asset_id=parent_asset_id,
+            )
+
+    def _declare_asset_locked(
+        self,
+        asset_id: str,
+        *,
+        owner: str,
+        purpose: str,
+        intended_use: str,
+        actor: str,
+        risk_tier: str,
+        lifecycle: str,
+        risk_context: Mapping[str, Any] | None,
+        eu_ai_act: Mapping[str, Any] | None,
+        parent_asset_id: str | None,
+    ) -> dict[str, Any]:
+        """Create a declaration while hierarchy mutation is serialized."""
 
         asset = _asset_id(asset_id)
         observation = self.get_observation(asset)
         if observation is None:
             raise ModelRiskStateError("an observed asset is required before declaration")
+        parent = self._validated_parent_asset_id(asset, parent_asset_id)
         now = self._now()
         context = _bounded_json(dict(risk_context or {}), "risk_context")
         assert isinstance(context, dict)
@@ -885,6 +977,7 @@ class ModelRiskAssuranceOfficer:
             "id": _record_id("MRD", asset),
             "schema": DECLARATION_SCHEMA,
             "asset_id": asset,
+            "parent_asset_id": parent,
             "owner": _required_text(owner, "owner", 256),
             "purpose": _required_text(purpose, "purpose", 4000),
             "intended_use": _required_text(intended_use, "intended_use", 4000),
@@ -915,6 +1008,99 @@ class ModelRiskAssuranceOfficer:
             key=lambda row: str(row.get("asset_id") or ""),
         )
 
+    def _validated_parent_asset_id(
+        self,
+        asset_id: str,
+        parent_asset_id: object,
+    ) -> str | None:
+        """Validate one tenant-local hierarchy edge and its bounded ancestry."""
+
+        asset = _asset_id(asset_id)
+        observation = self.get_observation(asset)
+        if observation is None:
+            raise ModelRiskStateError("asset observation is missing")
+        child_type = _token(
+            (observation.get("identity") or {}).get("asset_type"),
+            "asset_type",
+            _ASSET_TYPES,
+        )
+        if parent_asset_id is None or parent_asset_id == "":
+            return None
+        parent = _asset_id(parent_asset_id)
+        if parent == asset:
+            raise ValueError("an asset cannot be its own parent")
+        if child_type == "system":
+            raise ValueError("system assets cannot have a parent")
+
+        seen = {asset}
+        current = parent
+        depth = 0
+        previous_type = child_type
+        while current is not None:
+            if current in seen:
+                raise ValueError("asset hierarchy contains a cycle")
+            seen.add(current)
+            depth += 1
+            if depth > _MAX_HIERARCHY_DEPTH:
+                raise ValueError(
+                    f"asset hierarchy exceeds the {_MAX_HIERARCHY_DEPTH}-level limit"
+                )
+            parent_observation = self.get_observation(current)
+            parent_declaration = self.get_declaration(current)
+            if parent_observation is None or parent_declaration is None:
+                raise ModelRiskStateError(
+                    "parent asset must be observed and declared in the active tenant"
+                )
+            parent_type = _token(
+                (parent_observation.get("identity") or {}).get("asset_type"),
+                "parent asset_type",
+                _ASSET_TYPES,
+            )
+            allowed = _ALLOWED_PARENT_TYPES[previous_type]
+            if parent_type not in allowed:
+                raise ValueError(
+                    f"{previous_type} assets cannot be governed by a {parent_type} parent"
+                )
+            next_parent = parent_declaration.get("parent_asset_id")
+            current = None if next_parent in (None, "") else _asset_id(next_parent)
+            previous_type = parent_type
+        return parent
+
+    def _hierarchy_binding(
+        self,
+        asset_id: str,
+        parent_asset_id: object,
+    ) -> dict[str, Any]:
+        """Bind an exact, tenant-local ancestor chain for human review."""
+
+        parent = self._validated_parent_asset_id(asset_id, parent_asset_id)
+        ancestors: list[dict[str, Any]] = []
+        current = parent
+        while current is not None:
+            observation = self.get_observation(current)
+            declaration = self.get_declaration(current)
+            if observation is None or declaration is None:
+                raise ModelRiskStateError("hierarchy authority disappeared")
+            ancestors.append({
+                "asset_id": current,
+                "asset_type": (observation.get("identity") or {}).get("asset_type"),
+                "observation": _citation(observation, "hierarchy_observation"),
+                "declaration": _citation(declaration, "hierarchy_declaration"),
+            })
+            next_parent = declaration.get("parent_asset_id")
+            current = None if next_parent in (None, "") else _asset_id(next_parent)
+        body = {"parent_asset_id": parent, "ancestors": ancestors}
+        return {**body, "hierarchy_sha256": _sha256(body)}
+
+    def hierarchy_binding(self, asset_id: str) -> dict[str, Any]:
+        """Return the exact validated ancestor binding for one declared asset."""
+
+        asset = _asset_id(asset_id)
+        declaration = self.get_declaration(asset)
+        if declaration is None:
+            raise ModelRiskStateError("asset declaration does not exist")
+        return self._hierarchy_binding(asset, declaration.get("parent_asset_id"))
+
     def update_declaration(
         self,
         asset_id: str,
@@ -927,20 +1113,66 @@ class ModelRiskAssuranceOfficer:
         risk_tier: object = _MISSING,
         risk_context: object = _MISSING,
         eu_ai_act: object = _MISSING,
+        parent_asset_id: object = _MISSING,
     ) -> dict[str, Any]:
         """CAS-update human metadata and invalidate any earlier approval."""
+
+        from .file_lock import cross_process_lock
+
+        with cross_process_lock(_hierarchy_transaction_target(), strict=True):
+            return self._update_declaration_locked(
+                asset_id,
+                expected_revision=expected_revision,
+                actor=actor,
+                owner=owner,
+                purpose=purpose,
+                intended_use=intended_use,
+                risk_tier=risk_tier,
+                risk_context=risk_context,
+                eu_ai_act=eu_ai_act,
+                parent_asset_id=parent_asset_id,
+            )
+
+    def _update_declaration_locked(
+        self,
+        asset_id: str,
+        *,
+        expected_revision: int,
+        actor: str,
+        owner: object,
+        purpose: object,
+        intended_use: object,
+        risk_tier: object,
+        risk_context: object,
+        eu_ai_act: object,
+        parent_asset_id: object,
+    ) -> dict[str, Any]:
+        """Update a declaration while hierarchy mutation is serialized."""
 
         asset = _asset_id(asset_id)
         expected = _revision(expected_revision)
         if all(
             item is _MISSING
-            for item in (owner, purpose, intended_use, risk_tier, risk_context, eu_ai_act)
+            for item in (
+                owner,
+                purpose,
+                intended_use,
+                risk_tier,
+                risk_context,
+                eu_ai_act,
+                parent_asset_id,
+            )
         ):
             raise ValueError("at least one declaration field must be updated")
         observation = self.get_observation(asset)
         if observation is None:
             raise ModelRiskStateError("asset observation is missing")
         now = self._now()
+        parent = (
+            _MISSING
+            if parent_asset_id is _MISSING
+            else self._validated_parent_asset_id(asset, parent_asset_id)
+        )
 
         def mutate(row: dict[str, Any]) -> None:
             if row.get("asset_id") != asset:
@@ -962,6 +1194,8 @@ class ModelRiskAssuranceOfficer:
                 row["risk_context"] = value
             if eu_ai_act is not _MISSING:
                 row["eu_ai_act"] = _eu_assertion(eu_ai_act, actor=actor, now=now)
+            if parent is not _MISSING:
+                row["parent_asset_id"] = parent
             row["assurance_profile"] = assurance_profile(
                 row.get("risk_context") or {},
                 row.get("eu_ai_act") or {},
@@ -995,6 +1229,28 @@ class ModelRiskAssuranceOfficer:
     ) -> dict[str, Any]:
         """Record an explicit human approval or rejection over current facts."""
 
+        from .file_lock import cross_process_lock
+
+        with cross_process_lock(_hierarchy_transaction_target(), strict=True):
+            return self._review_declaration_locked(
+                asset_id,
+                decision=decision,
+                rationale=rationale,
+                reviewer=reviewer,
+                expected_revision=expected_revision,
+            )
+
+    def _review_declaration_locked(
+        self,
+        asset_id: str,
+        *,
+        decision: str,
+        rationale: str,
+        reviewer: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """Review a declaration against one serialized hierarchy snapshot."""
+
         asset = _asset_id(asset_id)
         choice = _token(decision, "decision", frozenset({"approved", "rejected"}))
         expected = _revision(expected_revision)
@@ -1020,6 +1276,10 @@ class ModelRiskAssuranceOfficer:
                 "observation": _citation(observation, "reviewed"),
                 "version_digest": observation["version_digest"],
                 "profile_sha256": (row.get("assurance_profile") or {}).get("profile_sha256"),
+                "hierarchy": self._hierarchy_binding(
+                    asset,
+                    row.get("parent_asset_id"),
+                ),
             }
             row["review"] = {
                 "decision": choice,
@@ -1060,6 +1320,7 @@ class ModelRiskAssuranceOfficer:
         observed_at: float,
         valid_until: float,
         evaluator_digest: str | None = None,
+        evaluator_asset_id: str | None = None,
         summary: str = "",
         metrics: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -1076,6 +1337,7 @@ class ModelRiskAssuranceOfficer:
             observed_at=observed_at,
             valid_until=valid_until,
             evaluator_digest=evaluator_digest,
+            evaluator_asset_id=evaluator_asset_id,
             summary=summary,
             metrics=metrics,
             verified_training_commitment=None,
@@ -1095,6 +1357,7 @@ class ModelRiskAssuranceOfficer:
         observed_at: float,
         valid_until: float,
         evaluator_digest: str | None = None,
+        evaluator_asset_id: str | None = None,
         summary: str = "",
         metrics: Mapping[str, Any] | None = None,
         verified_training_commitment: Mapping[str, Any] | None,
@@ -1150,12 +1413,38 @@ class ModelRiskAssuranceOfficer:
         evaluator = (
             None if evaluator_digest is None else _digest(evaluator_digest, "evaluator_digest")
         )
+        evaluator_asset = (
+            None if evaluator_asset_id is None else _asset_id(evaluator_asset_id)
+        )
+        if evaluator_asset is not None and evaluator is None:
+            raise ValueError("evaluator_asset_id requires evaluator_digest")
+        if kind in {"evaluation", "red_team"} and evaluator_asset is None:
+            raise ValueError(
+                f"{kind} evidence requires a governed evaluator_asset_id",
+            )
+        evaluator_binding = None
+        if evaluator_asset is not None:
+            evaluator_observation = self.get_observation(evaluator_asset)
+            if evaluator_observation is None:
+                raise ModelRiskStateError("evaluator asset is not observed")
+            if evaluator_observation.get("version_digest") != evaluator:
+                raise RecordConflict(
+                    "evaluator digest does not match its current observation",
+                )
+            evaluator_binding = _citation(
+                evaluator_observation,
+                "produced_evidence",
+            )
         operator = _required_text(actor, "actor", 256)
         now = self._now()
         observed = _timestamp(observed_at, "observed_at", now=now)
         expiry = _expiry(valid_until, observed)
         note = _optional_text(summary, "summary", 4000)
         measurements = _bounded_json(dict(metrics or {}), "metrics", max_fields=128)
+        # Producer identity is authority metadata, never caller-owned metrics.
+        # Removing a similarly named measurement prevents a spoofed value from
+        # being mistaken for the authenticated actor bound below.
+        measurements.pop("producer_actor", None)
         if training_commitment is not None and measurements != {
             "training_receipt_commitment": training_commitment,
             "training_assurance_commitment": training_assurance,
@@ -1171,11 +1460,15 @@ class ModelRiskAssuranceOfficer:
             "scope_digest": scope,
             "artifact_digest": artifact,
             "evaluator_digest": evaluator,
+            "evaluator_asset_id": evaluator_asset,
+            "evaluator_binding": evaluator_binding,
             "summary": note,
             "metrics": measurements,
             "observed_at": observed,
             "valid_until": expiry,
         }
+        if kind == "red_team":
+            immutable["producer_actor"] = operator
         payload_sha = _sha256(immutable)
         record_id = _record_id("MRE", asset, source)
         graph_source_id = f"evidence:{asset}:{source}"
@@ -1203,6 +1496,18 @@ class ModelRiskAssuranceOfficer:
 
         from . import evidence_graph
 
+        graph_attributes = {
+            "asset_id": asset,
+            "artifact_digest": artifact,
+            "evidence_kind": kind,
+            "evidence_payload_sha256": payload_sha,
+            "result": outcome,
+            "scope_digest": scope,
+        }
+        if evaluator is not None:
+            graph_attributes["evaluator_digest"] = evaluator
+        if evaluator_asset is not None:
+            graph_attributes["evaluator_asset_id"] = evaluator_asset
         node = evidence_graph.ingest(
             source="model_risk_assurance",
             source_id=graph_source_id,
@@ -1210,14 +1515,7 @@ class ModelRiskAssuranceOfficer:
             title=f"{kind.replace('_', ' ').title()} for {observation['display_name']}",
             summary=note or f"Governed {kind.replace('_', ' ')} result: {outcome}.",
             controls=["AI-RMF:MEASURE", "ISO42001:performance_evaluation"],
-            attributes={
-                "asset_id": asset,
-                "artifact_digest": artifact,
-                "evidence_kind": kind,
-                "evidence_payload_sha256": payload_sha,
-                "result": outcome,
-                "scope_digest": scope,
-            },
+            attributes=graph_attributes,
             links=[{
                 "relation": "supports",
                 "target_type": "ai_asset",
@@ -1391,6 +1689,16 @@ class ModelRiskAssuranceOfficer:
         def mutate(row: dict[str, Any]) -> None:
             if row.get("status") == "revoked":
                 raise ValueError("revoked evidence cannot be reviewed again")
+            if row.get("evidence_kind") == "red_team" and choice == "approved":
+                producer = str(row.get("producer_actor") or "").strip()
+                if not producer:
+                    raise ValueError(
+                        "red-team evidence requires a bound producer actor",
+                    )
+                if producer.casefold() == human.casefold():
+                    raise ValueError(
+                        "red-team evidence requires an independent reviewer",
+                    )
             row["review"] = {
                 "decision": choice,
                 "reviewer": human,
@@ -1546,13 +1854,21 @@ class ModelRiskAssuranceOfficer:
         body["finding_sha256"] = _sha256(body)
         return body
 
-    @staticmethod
     def _declaration_is_current(
-        declaration: Mapping[str, Any], observation: Mapping[str, Any],
+        self,
+        declaration: Mapping[str, Any],
+        observation: Mapping[str, Any],
     ) -> bool:
         review = declaration.get("review") or {}
         binding = review.get("binding") or {}
         citation = binding.get("observation") or {}
+        try:
+            hierarchy = self._hierarchy_binding(
+                str(declaration.get("asset_id") or ""),
+                declaration.get("parent_asset_id"),
+            )
+        except (ModelRiskAssuranceError, ValueError, TypeError):
+            return False
         return bool(
             declaration.get("lifecycle") in _ACTIVE_LIFECYCLES
             and review.get("decision") == "approved"
@@ -1562,6 +1878,29 @@ class ModelRiskAssuranceOfficer:
             and binding.get("version_digest") == observation.get("version_digest")
             and binding.get("profile_sha256")
             == (declaration.get("assurance_profile") or {}).get("profile_sha256")
+            and (binding.get("hierarchy") or {}).get("hierarchy_sha256")
+            == hierarchy.get("hierarchy_sha256")
+        )
+
+    def _evidence_evaluator_is_current(
+        self,
+        evidence: Mapping[str, Any],
+    ) -> bool:
+        if evidence.get("evidence_kind") not in {"evaluation", "red_team"}:
+            return True
+        evaluator_asset = evidence.get("evaluator_asset_id")
+        binding = evidence.get("evaluator_binding")
+        if not isinstance(evaluator_asset, str) or not isinstance(binding, Mapping):
+            return False
+        try:
+            observation = self.get_observation(evaluator_asset)
+        except (ModelRiskAssuranceError, ValueError):
+            return False
+        return bool(
+            self._citation_is_current(binding, observation)
+            and observation is not None
+            and observation.get("version_digest")
+            == evidence.get("evaluator_digest")
         )
 
     def findings(self, *, now: float | None = None) -> list[dict[str, Any]]:
@@ -1660,6 +1999,11 @@ class ModelRiskAssuranceOfficer:
                 and row.get("freshness") == "current"
                 and row.get("result") == "passed"
                 and row.get("artifact_digest") == observation.get("version_digest")
+                and self._evidence_evaluator_is_current(row)
+                and (
+                    row.get("evidence_kind") != "red_team"
+                    or _red_team_review_is_independent(row)
+                )
             ]
             usable_kinds = {row.get("evidence_kind") for row in usable}
             for required_kind in ("evaluation", "red_team"):
@@ -1792,19 +2136,35 @@ class ModelRiskAssuranceOfficer:
             raise ModelRiskStateError("risk acceptance disappeared")
         return saved
 
-    def _risk_is_accepted(self, finding: Mapping[str, Any], *, now: float) -> bool:
+    def current_risk_acceptance(
+        self,
+        finding: Mapping[str, Any],
+        *,
+        now: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Return authority for one exact, current, non-critical finding digest."""
+
         if finding.get("severity") == "critical":
-            return False
+            return None
+        current = self._now() if now is None else _timestamp(now, "now", now=float(now))
         record = self._decisions.get(
             _record_id("MRX", "risk_acceptance", finding.get("id")),
         )
-        return bool(
+        if not (
             record
             and record.get("record_kind") == "risk_acceptance"
             and record.get("status") == "accepted"
+            and record.get("finding_id") == finding.get("id")
             and record.get("finding_sha256") == finding.get("finding_sha256")
-            and float(record.get("expires_at") or 0) > now
-        )
+            and record.get("asset_id") == finding.get("asset_id")
+            and record.get("severity") == finding.get("severity")
+            and float(record.get("expires_at") or 0) > current
+        ):
+            return None
+        return record
+
+    def _risk_is_accepted(self, finding: Mapping[str, Any], *, now: float) -> bool:
+        return self.current_risk_acceptance(finding, now=now) is not None
 
     def _authority_binding(
         self,
@@ -1979,12 +2339,7 @@ class ModelRiskAssuranceOfficer:
     def _citation_is_current(
         citation: Mapping[str, Any], record: Mapping[str, Any] | None,
     ) -> bool:
-        return bool(
-            record
-            and citation.get("record_id") == record.get("id")
-            and citation.get("revision") == record.get("revision")
-            and citation.get("record_sha256") == _record_sha(record)
-        )
+        return citation_is_current(citation, record)
 
     def _verify_promotion_authorization(  # noqa: C901 - one fail-closed authority walk
         self,
@@ -2067,13 +2422,55 @@ class ModelRiskAssuranceOfficer:
             if evidence.get("artifact_digest") != authority.get("artifact_digest"):
                 return False, "promotion evidence covers different artifact bytes", authorization
             evidence_kind = str(evidence.get("evidence_kind") or "")
+            if (
+                evidence_kind == "red_team"
+                and not _red_team_review_is_independent(evidence)
+            ):
+                return (
+                    False,
+                    "red-team evidence lacks independent producer review",
+                    authorization,
+                )
             if evidence_kind == "data_assessment":
                 data_assessment_scopes.add(str(evidence.get("scope_digest") or ""))
-            if (
-                evidence_kind in {"evaluation", "red_team"}
-                and evidence.get("evaluator_digest") != authority.get("evaluator_digest")
-            ):
-                return False, "promotion evidence covers a different evaluator", authorization
+            if evidence_kind in {"evaluation", "red_team"}:
+                evidence_evaluator_asset = evidence.get("evaluator_asset_id")
+                evidence_evaluator_binding = evidence.get("evaluator_binding")
+                if evidence_evaluator_asset is not None:
+                    try:
+                        evidence_evaluator = self.get_observation(
+                            str(evidence_evaluator_asset),
+                        )
+                    except (ModelRiskAssuranceError, ValueError):
+                        return (
+                            False,
+                            "promotion evidence evaluator identity is invalid",
+                            authorization,
+                        )
+                    if (
+                        not isinstance(evidence_evaluator_binding, Mapping)
+                        or not self._citation_is_current(
+                            evidence_evaluator_binding,
+                            evidence_evaluator,
+                        )
+                    ) or (
+                        evidence_evaluator is None
+                        or evidence_evaluator.get("version_digest")
+                        != evidence.get("evaluator_digest")
+                    ):
+                        return (
+                            False,
+                            "promotion evidence evaluator authority is stale",
+                            authorization,
+                        )
+                elif evidence.get("evaluator_digest") != authority.get(
+                    "evaluator_digest",
+                ):
+                    return (
+                        False,
+                        "promotion evidence covers a different evaluator",
+                        authorization,
+                    )
             if evidence_kind == "training_run":
                 measurements = evidence.get("metrics")
                 exact_training_fields = {
@@ -2151,7 +2548,12 @@ class ModelRiskAssuranceOfficer:
                 or (
                     evidence_kind in {"evaluation", "red_team"}
                     and attributes.get("evaluator_digest")
-                    != authority.get("evaluator_digest")
+                    != evidence.get("evaluator_digest")
+                )
+                or (
+                    evidence.get("evaluator_asset_id") is not None
+                    and attributes.get("evaluator_asset_id")
+                    != evidence.get("evaluator_asset_id")
                 )
             ):
                 return (
@@ -2362,9 +2764,16 @@ class ModelRiskAssuranceOfficer:
             for row in self.list_declarations()
             if asset is None or row.get("asset_id") == asset
         ]
-        evidence = [
-            _public(row) for row in self.list_evidence(asset_id=asset, now=stamp)
-        ]
+        evidence = []
+        for row in self.list_evidence(asset_id=asset, now=stamp):
+            projected = _public(row)
+            if projected.get("evidence_kind") == "red_team":
+                projected["independent_review_authority"] = (
+                    "current"
+                    if _red_team_review_is_independent(projected)
+                    else "invalid_or_legacy"
+                )
+            evidence.append(projected)
         incidents = [_public(row) for row in self.list_incidents(asset_id=asset)]
         deployments = [_public(row) for row in self.list_deployments(asset_id=asset)]
         decisions = [
@@ -2637,6 +3046,10 @@ def list_declarations() -> list[dict[str, Any]]:
     return _DEFAULT.list_declarations()
 
 
+def hierarchy_binding(asset_id: str) -> dict[str, Any]:
+    return _DEFAULT.hierarchy_binding(asset_id)
+
+
 def update_declaration(asset_id: str, **kwargs: Any) -> dict[str, Any]:
     return _DEFAULT.update_declaration(asset_id, **kwargs)
 
@@ -2690,6 +3103,14 @@ def findings(*, now: float | None = None) -> list[dict[str, Any]]:
 
 def accept_risk(finding_id: str, **kwargs: Any) -> dict[str, Any]:
     return _DEFAULT.accept_risk(finding_id, **kwargs)
+
+
+def current_risk_acceptance(
+    finding: Mapping[str, Any],
+    *,
+    now: float | None = None,
+) -> dict[str, Any] | None:
+    return _DEFAULT.current_risk_acceptance(finding, now=now)
 
 
 def authorize_promotion_candidate(**kwargs: Any) -> dict[str, Any]:
@@ -2757,6 +3178,7 @@ __all__ = [
     "accept_risk",
     "assurance_profile",
     "authorize_promotion_candidate",
+    "citation_is_current",
     "declare_asset",
     "enabled",
     "findings",
