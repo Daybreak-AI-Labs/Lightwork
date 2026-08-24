@@ -94,6 +94,9 @@ def _enable_governance() -> None:
 _PREFIX = "/api/v1/security/governance"
 _ASSURANCE = "/api/v1/security/assurance"
 
+# A fake ServiceNow sys_id returned by the stubbed GRC writer.
+_FAKE_SYS_ID = "abc123def456"  # pragma: allowlist secret
+
 
 # ---------------------------------------------------------------------------
 # Fail-closed wiring and the disabled-state page
@@ -533,7 +536,7 @@ def test_grc_sync_status_and_outbound_surface_on_api_and_page():
     result = grc_sync.run_sync(
         actor="sync-operator",
         writer=lambda _op, _path, _payload: json.dumps(
-            {"result": {"sys_id": "abc123def456"}}
+            {"result": {"sys_id": _FAKE_SYS_ID}}
         ),
     )
     assert result["delivered_count"] == 1
@@ -545,7 +548,7 @@ def test_grc_sync_status_and_outbound_surface_on_api_and_page():
     assert outbound["count"] == 1
     row = outbound["outbound"][0]
     assert row["kind"] == "incident"
-    assert row["remote_id"] == "abc123def456"
+    assert row["remote_id"] == _FAKE_SYS_ID
 
     assert client.get(
         f"{_PREFIX}/grc-sync/outbound", params={"limit": 0}
@@ -553,4 +556,4 @@ def test_grc_sync_status_and_outbound_surface_on_api_and_page():
 
     page = client.get("/security/governance")
     assert page.status_code == 200
-    assert "abc123def456" in page.text
+    assert _FAKE_SYS_ID in page.text
