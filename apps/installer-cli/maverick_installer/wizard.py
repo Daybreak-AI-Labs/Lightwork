@@ -2065,6 +2065,31 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "eu_conformity": _q_confirm(
+            "EU AI Act conformity workflows? Human-gated registers for the "
+            "Art. 27 fundamental-rights impact assessment, the Annex IV "
+            "technical-documentation checklist, and the Art. 43 conformity-"
+            "assessment route with forbidden combinations refused. Drafting "
+            "and tracking assistance, never a conformity assessment or legal "
+            "advice. OFF by default.",
+            default=False,
+        ),
+        "ai_literacy": _q_confirm(
+            "EU AI Act Art. 4 AI-literacy register? Named humans set which "
+            "trainings each role requires, record completions with evidence "
+            "references, and export gap and evidence snapshots for auditors. "
+            "Decision support, never a certification of competence. OFF by "
+            "default.",
+            default=False,
+        ),
+        "grc_sync": _q_confirm(
+            "Outbound GRC synchronization? Idempotently mirror model-risk "
+            "findings, accepted risks, and incidents into your ServiceNow, "
+            "Archer, or other REST GRC system as governed pointer records "
+            "with a round-trip link. Evidence never leaves Lightwork. Paths "
+            "and connector are configured in [grc_sync]. OFF by default.",
+            default=False,
+        ),
         "agent_topology": _q_confirm(
             "Agent dependency and MCP blast-radius governance? Project each "
             "enabled agent's tools, MCP servers, hosts, paths, knowledge, and model "
@@ -4504,6 +4529,18 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("ai_regulatory_feed"):
         lines.append("")
         lines.append("[ai_regulatory_feed]")
+        lines.append("enable = true")
+    if advanced.get("eu_conformity"):
+        lines.append("")
+        lines.append("[eu_conformity]")
+        lines.append("enable = true")
+    if advanced.get("ai_literacy"):
+        lines.append("")
+        lines.append("[ai_literacy]")
+        lines.append("enable = true")
+    if advanced.get("grc_sync"):
+        lines.append("")
+        lines.append("[grc_sync]")
         lines.append("enable = true")
     if advanced.get("agent_topology"):
         lines.append("")

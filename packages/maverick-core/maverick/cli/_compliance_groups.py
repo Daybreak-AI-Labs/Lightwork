@@ -1035,3 +1035,387 @@ def ai_inventory_status() -> None:
         else:
             click.echo(f"  {name}: {row.get('state')}  "
                        f"completed {row.get('completed_sequence', 0)} run(s)")
+
+
+@main.group("grc-sync")
+def grc_sync_group() -> None:
+    """Idempotent outbound sync of governance records into a GRC system.
+
+    `run` maps model-risk findings, accepted risks, and incidents into the
+    configured system of record (ServiceNow IRM tables, Archer, any REST GRC)
+    with a stable outbound ledger: unchanged sources send nothing, changed
+    sources update the same remote record, and an unconfirmed create is
+    surfaced instead of duplicated. Evidence never leaves Lightwork -- each
+    remote record is a governed pointer, not the record of truth.
+    """
+
+
+@grc_sync_group.command("run")
+@click.option("--limit", type=int, default=50, show_default=True,
+              help="Maximum records to deliver this pass.")
+@click.option("--by", "actor", required=True,
+              help="Dispatching human or cron identity.")
+def grc_sync_run(limit: int, actor: str) -> None:
+    """Deliver pending and changed records to the configured GRC system."""
+    from ..grc_sync import GRCSyncError, run_sync
+    try:
+        result = run_sync(actor=actor, limit=limit)
+    except (GRCSyncError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"delivered {result['delivered_count']}  "
+               f"unchanged {result['unchanged_count']}  "
+               f"blocked {result['blocked_count']}  "
+               f"failed {result['failure_count']}  "
+               f"via {result['connector']}")
+    for row in result["blocked"]:
+        click.echo(f"  BLOCKED {row['source_id']}: {row['reason']}")
+    for row in result["failures"]:
+        click.echo(f"  FAILED {row['source_id']}: {row['reason']}")
+    if result["failure_count"]:
+        raise click.ClickException(
+            f"{result['failure_count']} record(s) failed to deliver"
+        )
+
+
+@grc_sync_group.command("status")
+def grc_sync_status() -> None:
+    """Outbound ledger counts by delivery state."""
+    from ..grc_sync import sync_status
+    state = sync_status()
+    counts = state["outbound"]
+    click.echo(f"enabled: {state['enabled']}")
+    for key in ("pending", "delivered", "delivered_unconfirmed", "failed"):
+        click.echo(f"  {key:22s} {counts[key]}")
+
+
+@grc_sync_group.command("outbound")
+@click.option("--limit", type=int, default=100, show_default=True)
+def grc_sync_outbound(limit: int) -> None:
+    """The outbound ledger: every record's remote id and delivery state."""
+    from ..grc_sync import list_outbound
+    try:
+        rows = list_outbound(limit=limit)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    if not rows:
+        click.echo("no outbound GRC records.")
+        return
+    for row in rows:
+        click.echo(f"  {row['id']}  {row['kind']:16s} {row['status']:22s} "
+                   f"{row['source_id']}  ->  {row['remote_id'] or '-'}")
+
+
+@main.group("ai-literacy")
+def ai_literacy_group() -> None:
+    """EU AI Act Art. 4 AI-literacy register.
+
+    Named humans set which trainings each role requires and record who
+    completed what; `gaps` derives who is missing or expired, and `export`
+    emits one bounded JSON evidence snapshot. Decision support for the
+    Art. 4 obligation -- never a certification of competence.
+    """
+
+
+@ai_literacy_group.command("require")
+@click.argument("role")
+@click.option("--training", "trainings", multiple=True, required=True,
+              help="key:title[:validity_days] (repeatable).")
+@click.option("--revision", type=int, default=0, show_default=True,
+              help="Expected revision when updating an existing role (CAS).")
+@click.option("--by", "actor", required=True, help="Requiring human.")
+def ai_literacy_require(role: str, trainings: tuple[str, ...],
+                        revision: int, actor: str) -> None:
+    """Set the training requirement for one role."""
+    from ..ai_literacy import set_role_requirement
+    parsed = []
+    for raw in trainings:
+        parts = raw.split(":", 2)
+        if len(parts) < 2:
+            raise click.ClickException(
+                f"--training must be key:title[:validity_days], got {raw!r}"
+            )
+        entry: dict = {"key": parts[0], "title": parts[1]}
+        if len(parts) == 3 and parts[2]:
+            try:
+                entry["validity_days"] = int(parts[2])
+            except ValueError as e:
+                raise click.ClickException(
+                    f"validity_days must be an integer, got {parts[2]!r}"
+                ) from e
+        else:
+            entry["validity_days"] = None
+        parsed.append(entry)
+    try:
+        record = set_role_requirement(
+            role, parsed, actor=actor, expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{record['role']}: {len(record['trainings'])} training(s) "
+               f"required (rev {record['revision']})")
+
+
+@ai_literacy_group.command("assign")
+@click.argument("person")
+@click.option("--role", "roles", multiple=True, required=True,
+              help="Role with a recorded requirement (repeatable).")
+@click.option("--revision", type=int, default=0, show_default=True,
+              help="Expected revision when updating an assignment (CAS).")
+@click.option("--by", "actor", required=True, help="Assigning human.")
+def ai_literacy_assign(person: str, roles: tuple[str, ...],
+                       revision: int, actor: str) -> None:
+    """Assign one person to one or more required roles."""
+    from ..ai_literacy import assign_roles
+    try:
+        record = assign_roles(
+            person, list(roles), actor=actor, expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{record['person']}: {', '.join(record['roles'])}")
+
+
+@ai_literacy_group.command("complete")
+@click.argument("person")
+@click.argument("training")
+@click.option("--at", "completed_at", type=float, required=True,
+              help="Unix timestamp of the completion.")
+@click.option("--evidence", "evidence_ref", required=True,
+              help="Where the completion evidence lives (LMS ref, ticket).")
+@click.option("--by", "actor", required=True,
+              help="Recording human or feed identity.")
+def ai_literacy_complete(person: str, training: str, completed_at: float,
+                         evidence_ref: str, actor: str) -> None:
+    """Record (or refresh) one training completion."""
+    from ..ai_literacy import record_completion
+    try:
+        record = record_completion(
+            person, training, completed_at=completed_at,
+            evidence_ref=evidence_ref, actor=actor,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{record['person']} completed {record['training']} "
+               f"(history {len(record.get('history') or [])})")
+
+
+@ai_literacy_group.command("gaps")
+def ai_literacy_gaps_cli() -> None:
+    """Who is missing or expired on a required training."""
+    from ..ai_literacy import literacy_gaps
+    try:
+        gaps = literacy_gaps()
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    counts = gaps["counts"]
+    click.echo(f"persons {gaps['person_count']}  current {counts['current']}  "
+               f"expired {counts['expired']}  missing {counts['missing']}")
+    for person in gaps["persons"]:
+        if not person["gap_count"]:
+            continue
+        stale = [row["training"] for row in person["trainings"]
+                 if row["status"] != "current"]
+        click.echo(f"  {person['person']}: {', '.join(stale)}")
+
+
+@ai_literacy_group.command("export")
+@click.option("--output", "-o", type=click.Path(), default=None,
+              help="Write the evidence snapshot here (default stdout).")
+def ai_literacy_export(output) -> None:
+    """Export the bounded JSON evidence snapshot for an auditor."""
+    from ..ai_literacy import export_evidence
+    try:
+        payload = export_evidence()
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    if output:
+        try:
+            fd = os.open(str(output), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload + "\n")
+        except OSError as e:
+            raise click.ClickException(f"could not write {output}: {e}") from e
+        click.echo(f"wrote {output}")
+    else:
+        click.echo(payload)
+
+
+@main.group("eu-conformity")
+def eu_conformity_group() -> None:
+    """EU AI Act conformity workflows: FRIA, Annex IV, Art. 43 route.
+
+    Human-gated registers: the Art. 27 fundamental-rights impact assessment
+    as six named assertions, the Art. 11(1)/Annex IV technical-documentation
+    checklist, and the Art. 43 conformity-assessment route with its
+    forbidden combinations refused at the boundary. Drafting and tracking
+    assistance only -- never a conformity assessment, CE marking, or legal
+    advice.
+    """
+
+
+@eu_conformity_group.command("fria")
+@click.argument("action", type=click.Choice(
+    ["open", "assert", "complete", "outdate", "notify", "render", "list"]))
+@click.option("--asset", "asset_id", default=None, help="Governed asset id.")
+@click.option("--context", default=None, help="Deployment/use context key.")
+@click.option("--record", "record_id", default=None, help="FRIA record id (ECF-...).")
+@click.option("--element", default=None,
+              help="Art. 27(1) element key (see the module's FRIA_ELEMENTS).")
+@click.option("--content", default=None, help="The asserted element text.")
+@click.option("--reason", default=None, help="Why the assessment is outdated.")
+@click.option("--authority", default=None,
+              help="Market surveillance authority notified (Art. 27(3)).")
+@click.option("--reference", default=None, help="The authority's filing reference.")
+@click.option("--at", "submitted_at", type=float, default=None,
+              help="Unix timestamp of the notification filing.")
+@click.option("--revision", type=int, default=0, help="Expected revision (CAS).")
+@click.option("--status", default=None, help="list: filter by lifecycle status.")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def eu_conformity_fria(action, asset_id, context, record_id, element, content,
+                       reason, authority, reference, submitted_at, revision,
+                       status, actor) -> None:
+    """Drive one FRIA record through its Art. 27 lifecycle."""
+    from .. import eu_conformity as euc
+
+    def need(value, name):
+        if value in (None, ""):
+            raise click.ClickException(f"--{name} is required for {action}")
+        return value
+
+    try:
+        if action == "open":
+            record = euc.open_fria(
+                need(asset_id, "asset"), context=need(context, "context"),
+                actor=need(actor, "by"))
+            click.echo(f"{record['id']} {record['status']} (rev {record['revision']})")
+        elif action == "assert":
+            record = euc.assert_fria_element(
+                need(record_id, "record"), need(element, "element"),
+                content=need(content, "content"), actor=need(actor, "by"),
+                expected_revision=revision)
+            done = sum(1 for value in record["elements"].values() if value)
+            click.echo(f"{record['id']}: {done}/6 elements (rev {record['revision']})")
+        elif action == "complete":
+            record = euc.complete_fria(
+                need(record_id, "record"), assessor=need(actor, "by"),
+                expected_revision=revision)
+            click.echo(f"{record['id']} completed by {record['assessor']}")
+        elif action == "outdate":
+            record = euc.mark_fria_outdated(
+                need(record_id, "record"), reason=need(reason, "reason"),
+                actor=need(actor, "by"), expected_revision=revision)
+            click.echo(f"{record['id']} outdated (Art. 27(2))")
+        elif action == "notify":
+            record = euc.record_fria_notification(
+                need(record_id, "record"), authority=need(authority, "authority"),
+                submitted_by=need(actor, "by"),
+                submitted_at=need(submitted_at, "at"),
+                reference=need(reference, "reference"), expected_revision=revision)
+            click.echo(f"{record['id']} notification recorded (Art. 27(3))")
+        elif action == "render":
+            click.echo(euc.render_fria(need(record_id, "record")))
+        else:
+            rows = euc.list_frias(status=status)
+            if not rows:
+                click.echo("no FRIA records.")
+            for row in rows:
+                click.echo(f"  {row['id']}  {row['status']:10s} "
+                           f"{row['asset_id']}  {row['context']}")
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
+@eu_conformity_group.command("annex4")
+@click.argument("action", type=click.Choice(["open", "assert", "status", "render"]))
+@click.option("--asset", "asset_id", default=None, help="Governed asset id.")
+@click.option("--record", "record_id", default=None, help="Checklist id (ECD-...).")
+@click.option("--item", default=None, help="Annex IV item key.")
+@click.option("--reference", default=None,
+              help="Where the item's documentation lives.")
+@click.option("--revision", type=int, default=0, help="Expected revision (CAS).")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def eu_conformity_annex4(action, asset_id, record_id, item, reference,
+                         revision, actor) -> None:
+    """Track the Art. 11(1)/Annex IV technical-documentation checklist."""
+    from .. import eu_conformity as euc
+
+    def need(value, name):
+        if value in (None, ""):
+            raise click.ClickException(f"--{name} is required for {action}")
+        return value
+
+    try:
+        if action == "open":
+            record = euc.open_annex_iv(need(asset_id, "asset"), actor=need(actor, "by"))
+            click.echo(f"{record['id']} 0/9 (rev {record['revision']})")
+        elif action == "assert":
+            record = euc.assert_annex_iv_item(
+                need(record_id, "record"), need(item, "item"),
+                reference=need(reference, "reference"), actor=need(actor, "by"),
+                expected_revision=revision)
+            state = euc.annex_iv_status(record["id"])
+            click.echo(f"{record['id']} {state['asserted']}/{state['total']}")
+        elif action == "status":
+            state = euc.annex_iv_status(need(record_id, "record"))
+            click.echo(f"{state['id']} {state['asserted']}/{state['total']}"
+                       f"{'  COMPLETE' if state['complete'] else ''}")
+            for missing in state["missing"]:
+                click.echo(f"  missing {missing}")
+        else:
+            click.echo(euc.render_annex_iv(need(record_id, "record")))
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
+@eu_conformity_group.command("route")
+@click.argument("action", type=click.Choice(["set", "modify", "show"]))
+@click.option("--asset", "asset_id", required=True, help="Governed asset id.")
+@click.option("--route", default=None,
+              help="internal_control_annex_vi | notified_body_annex_vii | "
+                   "sectoral_annex_i")
+@click.option("--point", "annex_iii_point", type=int, default=None,
+              help="Annex III point (1-8); omit for sectoral Annex I.")
+@click.option("--harmonised-standards", is_flag=True,
+              help="Harmonised standards (Art. 40) applied in full.")
+@click.option("--common-specifications", is_flag=True,
+              help="Common specifications (Art. 41) applied.")
+@click.option("--rationale", default=None, help="Why this route.")
+@click.option("--reason", default=None, help="modify: what changed.")
+@click.option("--predetermined", is_flag=True,
+              help="modify: the change was pre-determined and documented "
+                   "(not a substantial modification).")
+@click.option("--revision", type=int, default=0, help="Expected revision (CAS).")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def eu_conformity_route(action, asset_id, route, annex_iii_point,
+                        harmonised_standards, common_specifications,
+                        rationale, reason, predetermined, revision, actor) -> None:
+    """Record the Art. 43 conformity-assessment route and its changes."""
+    from .. import eu_conformity as euc
+
+    def need(value, name):
+        if value in (None, ""):
+            raise click.ClickException(f"--{name} is required for {action}")
+        return value
+
+    try:
+        if action == "set":
+            record = euc.record_assessment_route(
+                asset_id, route=need(route, "route"),
+                annex_iii_point=annex_iii_point,
+                harmonised_standards_applied=harmonised_standards,
+                common_specifications_applied=common_specifications,
+                rationale=need(rationale, "rationale"), actor=need(actor, "by"))
+            click.echo(f"{record['id']} {record['route']} (rev {record['revision']})")
+        elif action == "modify":
+            record = euc.mark_substantial_modification(
+                asset_id, reason=need(reason, "reason"), actor=need(actor, "by"),
+                expected_revision=revision, predetermined=predetermined)
+            click.echo(f"{record['id']} {record['status']}")
+        else:
+            record = euc.get_assessment_route(asset_id)
+            if record is None:
+                raise click.ClickException(f"no route recorded for {asset_id!r}")
+            click.echo(f"{record['id']}  {record['route']}  {record['status']}  "
+                       f"point {record.get('annex_iii_point') or '-'}")
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e

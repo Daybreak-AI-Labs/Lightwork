@@ -3,7 +3,7 @@
   "counts": {
     "CI_ONLY": 13,
     "CLI_ONLY": 27,
-    "PRODUCTION": 920,
+    "PRODUCTION": 923,
     "TEST_ONLY": 84,
     "UNREACHED": 6
   },
@@ -32,6 +32,7 @@
     "maverick.ai_evidence_ledger": "PRODUCTION",
     "maverick.ai_incident_reporting": "PRODUCTION",
     "maverick.ai_inventory": "PRODUCTION",
+    "maverick.ai_literacy": "PRODUCTION",
     "maverick.ai_regulatory_feed": "PRODUCTION",
     "maverick.ai_vendor_risk": "PRODUCTION",
     "maverick.air_gap": "PRODUCTION",
@@ -235,6 +236,7 @@
     "maverick.env_hunt.tooling": "PRODUCTION",
     "maverick.erasure_receipts": "PRODUCTION",
     "maverick.erasure_verify": "PRODUCTION",
+    "maverick.eu_conformity": "PRODUCTION",
     "maverick.evaluator_evolution": "PRODUCTION",
     "maverick.evidence_graph": "PRODUCTION",
     "maverick.experience": "PRODUCTION",
@@ -294,6 +296,7 @@
     "maverick.governed_repl": "PRODUCTION",
     "maverick.governed_rest": "PRODUCTION",
     "maverick.governed_tools": "PRODUCTION",
+    "maverick.grc_sync": "PRODUCTION",
     "maverick.grpc_api": "PRODUCTION",
     "maverick.grpc_api.__main__": "CLI_ONLY",
     "maverick.grpc_api.contract": "CI_ONLY",
