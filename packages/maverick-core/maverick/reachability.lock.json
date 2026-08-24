@@ -3,7 +3,7 @@
   "counts": {
     "CI_ONLY": 13,
     "CLI_ONLY": 27,
-    "PRODUCTION": 930,
+    "PRODUCTION": 933,
     "TEST_ONLY": 84,
     "UNREACHED": 6
   },
@@ -153,6 +153,7 @@
     "maverick.connections": "PRODUCTION",
     "maverick.connector_previews": "PRODUCTION",
     "maverick.consent_ergonomics": "TEST_ONLY",
+    "maverick.consent_registry": "PRODUCTION",
     "maverick.consequence": "PRODUCTION",
     "maverick.containment": "TEST_ONLY",
     "maverick.content_provenance": "PRODUCTION",
@@ -181,6 +182,7 @@
     "maverick.cross_run_anomaly": "PRODUCTION",
     "maverick.crypto_at_rest": "PRODUCTION",
     "maverick.data_engine": "PRODUCTION",
+    "maverick.data_map": "PRODUCTION",
     "maverick.debate": "PRODUCTION",
     "maverick.deliverable": "PRODUCTION",
     "maverick.demonstration": "PRODUCTION",
@@ -932,6 +934,7 @@
     "maverick.vector_store.pgvector_store": "PRODUCTION",
     "maverick.vector_store.qdrant_store": "PRODUCTION",
     "maverick.vector_store.weaviate_store": "PRODUCTION",
+    "maverick.vendor_management": "PRODUCTION",
     "maverick.verifier": "PRODUCTION",
     "maverick.verifier_head": "PRODUCTION",
     "maverick.vision_click": "TEST_ONLY",

@@ -2077,7 +2077,8 @@ async def spend_page(request: Request) -> HTMLResponse:
 # One assessment engine, one workspace chassis per department: each
 # department page filters the same records/templates to its own types.
 PRIVACY_ASSESSMENT_TYPES = frozenset(
-    {"pia", "dpia", "lia", "ccpa", "aira", "vendor_risk", "tia"})
+    {"pia", "dpia", "lia", "ccpa", "lgpd", "pipeda", "aira", "vendor_risk",
+     "tia"})
 FINANCE_ASSESSMENT_TYPES = frozenset(
     {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"})
 SECURITY_ASSESSMENT_TYPES = frozenset({
@@ -2214,6 +2215,26 @@ async def privacy_page(request: Request) -> HTMLResponse:
         records["incidents_breached"] = sum(
             1 for r in records["incidents"] if r.get("clock_breached"))
     ctx["records"] = records
+    # The privacy estate — vendors, consent, data map. Each register is its
+    # own opt-in; the page renders whatever is on and explains what is off.
+    from maverick import consent_registry, data_map, vendor_management
+    estate = {
+        "vendors_enabled": vendor_management.enabled(),
+        "consent_enabled": consent_registry.enabled(),
+        "data_map_enabled": data_map.enabled(),
+        "vendors": [], "vendor_posture": {},
+        "consent_posture": {},
+        "assets": [], "data_map_posture": {},
+    }
+    if estate["vendors_enabled"]:
+        estate["vendors"] = vendor_management.list_vendors()
+        estate["vendor_posture"] = vendor_management.vendor_posture()
+    if estate["consent_enabled"]:
+        estate["consent_posture"] = consent_registry.consent_posture()
+    if estate["data_map_enabled"]:
+        estate["assets"] = data_map.list_data_assets()
+        estate["data_map_posture"] = data_map.data_map_posture()
+    ctx["estate"] = estate
     return templates.TemplateResponse(request, "privacy.html", ctx)
 
 

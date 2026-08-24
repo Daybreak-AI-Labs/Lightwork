@@ -979,6 +979,40 @@ here.
   `GET /assurance/model-risk/dependency-graph`) — nodes and dependency
   edges over the governed inventory, whole-estate or scoped to one asset's
   direct neighbourhood.
+- **LGPD and PIPEDA assessment templates** (in `assessment.py`) — Brazil's
+  LGPD (legal bases Arts. 7/11, subject rights Art. 18, security/incident
+  Arts. 46/48, DPO Art. 41, transfers Art. 33) and Canada's PIPEDA (fair
+  information principles, valid-consent s.6.1, breach-of-safeguards
+  s.10.1) join the questionnaire chassis; both surface in the dashboard's
+  privacy department. Structured self-assessment, never legal advice.
+- **Third-party vendor register** (`vendor_management.py`, opt-in
+  `[vendor_management] enable`, `maverick vendor`, `/api/v1/vendors`) —
+  governed vendor records with criticality tiers and lifecycle status,
+  hosted-form questionnaire campaigns over the public `/form/{token}`
+  endpoint (any registered assessment template, responses read back
+  in-place), monitoring notes, links to DPA/paper reviews and
+  assessments, a posture rollup, and a OneTrust third-party CSV importer
+  that never overwrites a vendor already registered here. A register and
+  audit trail, never a vendor risk rating service.
+- **Consent receipts and preferences registry** (`consent_registry.py`,
+  opt-in `[consent_registry] enable` + `subject_salt`, `maverick
+  consent`, `/api/v1/consent/*`) — per-subject, per-purpose consent
+  events (status, policy version, channel) with salted one-way subject
+  digests, self-checking per-event receipt hashes, a current-preference
+  projection, bounded audit export, and a OneTrust consent CSV importer.
+  The governed record behind a consent front end — never a cookie
+  banner, IAB TCF CMP, or preference-center UI, and stated so.
+- **Data map and discovery** (`data_map.py`, opt-in `[data_map] enable`,
+  `maverick data-map`, `/api/v1/data-map/*`) — a governed register of
+  data assets with a pure-Python column-name classifier (email, phone,
+  national id, date of birth, health, financial, credentials, and more;
+  health marks the asset special-category), a warehouse
+  `information_schema.columns` CSV importer (stock Snowflake/BigQuery/
+  Redshift/Postgres exports), a bounded SharePoint site census via
+  Microsoft Graph (`Sites.Read.All`, SSRF-pinned, egress-guarded), links
+  from assets to the RoPA/assessment/vendor records that govern them,
+  and an unlinked-flagged-assets posture signal. Name-based triage for a
+  human data-mapping exercise, never a content scanner.
 - **Governance needs-attention digest** (`governance_alerts.py`,
   `maverick governance-alerts due`, `GET /api/v1/security/governance/alerts`)
   — one bounded read-side digest of what compliance must act on: Art. 73

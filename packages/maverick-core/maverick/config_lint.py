@@ -182,6 +182,9 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "max_body_bytes",
     },
     "ai_regulatory_feed": {"enable"},
+    "vendor_management": {"enable"},
+    "consent_registry": {"enable", "subject_salt"},
+    "data_map": {"enable", "graph_token_env"},
     "grc_sync": {"enable", "connector", "findings_path", "acceptances_path",
                  "incidents_path", "backlink_base", "response_field_params"},
     "red_team_assurance": {

@@ -1898,3 +1898,377 @@ def underwriting_pack_export(out_file, asset_id, actor) -> None:
     summary = pack["summary"]
     click.echo(f"{out_file}  assets {summary['inventory_count']}  "
                f"pack {summary['assurance_pack_sha256'][:16]}...")
+
+
+@main.group("vendor")
+def vendor_group() -> None:
+    """The third-party vendor register: records, questionnaires, monitoring.
+
+    Governed vendor rows with criticality tiers, hosted-form questionnaire
+    campaigns, monitoring notes, and links to the specialist records that
+    assess them. A register and audit trail, never a vendor rating service.
+    """
+
+
+@vendor_group.command("register")
+@click.option("--name", required=True, help="Vendor legal or trading name.")
+@click.option("--category", required=True, help="Service category.")
+@click.option("--criticality", required=True,
+              type=click.Choice(["low", "medium", "high", "critical"]))
+@click.option("--owner", required=True, help="Internal relationship owner.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def vendor_register(name, category, criticality, owner, actor) -> None:
+    """Register one vendor in the governed register."""
+    from .. import vendor_management as vm
+
+    try:
+        record = vm.register_vendor(
+            name, category=category, criticality=criticality,
+            owner=owner, actor=actor,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{record['id']}  {record['name']}  {record['criticality']}")
+
+
+@vendor_group.command("questionnaire")
+@click.argument("action", type=click.Choice(["send", "responses"]))
+@click.option("--vendor", "vendor_id", required=True, help="Vendor id (VMR-...).")
+@click.option("--type", "assessment_type", default=None,
+              help="send: registered assessment template type.")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def vendor_questionnaire(action, vendor_id, assessment_type, actor) -> None:
+    """Send a hosted-form questionnaire, or read the responses back."""
+    from .. import vendor_management as vm
+
+    try:
+        if action == "send":
+            if not assessment_type or not actor:
+                raise click.ClickException("--type and --by are required for send")
+            current = vm.get_vendor(vendor_id)
+            if current is None:
+                raise click.ClickException(f"vendor is not registered: {vendor_id}")
+            saved = vm.request_questionnaire(
+                vendor_id, assessment_type=assessment_type, actor=actor,
+                expected_revision=int(current.get("revision") or 0),
+            )
+            click.echo(f"{saved['id']}  form {saved['form_path']}")
+        else:
+            for row in vm.questionnaire_responses(vendor_id):
+                click.echo(f"{row['assessment_type']}  {row['status']}  "
+                           f"submissions {len(row['submissions'])}")
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
+@vendor_group.command("note")
+@click.argument("note")
+@click.option("--vendor", "vendor_id", required=True, help="Vendor id (VMR-...).")
+@click.option("--severity", required=True,
+              type=click.Choice(["info", "warning", "critical"]))
+@click.option("--by", "actor", required=True, help="Acting human.")
+def vendor_note(note, vendor_id, severity, actor) -> None:
+    """Record one monitoring note against a vendor."""
+    from .. import vendor_management as vm
+
+    try:
+        current = vm.get_vendor(vendor_id)
+        if current is None:
+            raise click.ClickException(f"vendor is not registered: {vendor_id}")
+        saved = vm.record_monitoring_note(
+            vendor_id, note, severity=severity, actor=actor,
+            expected_revision=int(current.get("revision") or 0),
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{saved['id']}  notes {len(saved['monitoring_notes'])}")
+
+
+@vendor_group.command("list")
+@click.option("--status", default=None,
+              type=click.Choice(["active", "under_review", "offboarded"]))
+def vendor_list(status) -> None:
+    """List registered vendors, optionally by lifecycle status."""
+    from .. import vendor_management as vm
+
+    try:
+        rows = vm.list_vendors(status=status)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    for row in rows:
+        click.echo(f"{row['id']}  {row['name']}  {row['criticality']}  "
+                   f"{row['status']}")
+    if not rows:
+        click.echo("no vendors registered")
+
+
+@vendor_group.command("status")
+def vendor_status_command() -> None:
+    """Register posture: counts by status, criticality, critical notes."""
+    from .. import vendor_management as vm
+
+    try:
+        posture = vm.vendor_posture()
+    except RuntimeError as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"vendors {posture['vendors']}  critical notes "
+               f"{posture['critical_monitoring_notes']}")
+    for level, count in posture["by_criticality"].items():
+        click.echo(f"  {level}: {count}")
+
+
+@vendor_group.command("import-onetrust")
+@click.option("--file", "csv_file", required=True,
+              help="OneTrust third-party CSV export.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def vendor_import_onetrust(csv_file, actor) -> None:
+    """Import a OneTrust vendor export into the register."""
+    from pathlib import Path
+
+    from .. import vendor_management as vm
+
+    try:
+        text = Path(csv_file).read_text(encoding="utf-8")
+    except OSError as e:
+        raise click.ClickException(f"could not read {csv_file}: {e}") from e
+    try:
+        imported = vm.import_onetrust_vendors(text, imported_by=actor)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"imported {len(imported)} vendors")
+
+
+@main.group("consent")
+def consent_group() -> None:
+    """Consent receipts and preferences: the durable record of choice.
+
+    Per-subject consent receipts with salted subject digests, a
+    current-preference projection, audit export, and a OneTrust consent
+    importer. The governed record behind a consent front end, never a
+    cookie banner or TCF-certified CMP.
+    """
+
+
+@consent_group.command("record")
+@click.option("--subject", "subject_ref", required=True,
+              help="Subject reference (stored only as a salted digest).")
+@click.option("--purpose", required=True, help="Processing purpose.")
+@click.option("--status", required=True,
+              type=click.Choice(["granted", "withdrawn"]))
+@click.option("--policy-version", required=True, help="Notice/policy version.")
+@click.option("--channel", required=True,
+              type=click.Choice(["web", "mobile", "email", "phone",
+                                 "paper", "api", "import"]))
+@click.option("--by", "actor", required=True, help="Acting human.")
+def consent_record(subject_ref, purpose, status, policy_version,
+                   channel, actor) -> None:
+    """Append one consent event to the subject's receipt."""
+    from .. import consent_registry as cr
+
+    try:
+        saved = cr.record_consent(
+            subject_ref, purpose=purpose, status=status,
+            policy_version=policy_version, channel=channel, actor=actor,
+        )
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{saved['id']}  {saved['purpose']}  {saved['current_status']}")
+
+
+@consent_group.command("preferences")
+@click.option("--subject", "subject_ref", required=True,
+              help="Subject reference (looked up by salted digest).")
+def consent_preferences(subject_ref) -> None:
+    """The subject's current per-purpose choices."""
+    from .. import consent_registry as cr
+
+    try:
+        state = cr.subject_preferences(subject_ref)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    for purpose, row in state["purposes"].items():
+        click.echo(f"{purpose}  {row['status']}  v{row['policy_version']}")
+    if not state["purposes"]:
+        click.echo("no consent recorded for this subject")
+
+
+@consent_group.command("status")
+def consent_status_command() -> None:
+    """Registry posture: record count and per-purpose grant/withdraw split."""
+    from .. import consent_registry as cr
+
+    try:
+        posture = cr.consent_posture()
+    except RuntimeError as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"records {posture['records']}")
+    for purpose, split in posture["by_purpose"].items():
+        click.echo(f"  {purpose}: granted {split['granted']} "
+                   f"withdrawn {split['withdrawn']}")
+
+
+@consent_group.command("export")
+@click.option("--out", "out_file", required=True, help="Export path (JSON).")
+@click.option("--limit", type=int, default=500, help="Rows to export (1-2000).")
+def consent_export(out_file, limit) -> None:
+    """Export the digest-only receipt register for audit."""
+    import json as json_module
+    from pathlib import Path
+
+    from .. import consent_registry as cr
+
+    try:
+        rows = cr.export_receipts(limit=limit)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    Path(out_file).write_text(
+        json_module.dumps(rows, indent=2, sort_keys=True), encoding="utf-8",
+    )
+    click.echo(f"{out_file}  receipts {len(rows)}")
+
+
+@consent_group.command("import-onetrust")
+@click.option("--file", "csv_file", required=True,
+              help="OneTrust consent CSV export.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def consent_import_onetrust(csv_file, actor) -> None:
+    """Import a OneTrust consent export into the registry."""
+    from pathlib import Path
+
+    from .. import consent_registry as cr
+
+    try:
+        text = Path(csv_file).read_text(encoding="utf-8")
+    except OSError as e:
+        raise click.ClickException(f"could not read {csv_file}: {e}") from e
+    try:
+        result = cr.import_onetrust_consents(text, imported_by=actor)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"imported {result['imported']}  skipped {result['skipped']}")
+
+
+@main.group("data-map")
+def data_map_group() -> None:
+    """The data map: where personal data actually lives, as governed records.
+
+    A register of data assets with a column-name classifier, a warehouse
+    information_schema importer, and a SharePoint site census via
+    Microsoft Graph. Name-based triage for a human data-mapping exercise,
+    never a content scanner.
+    """
+
+
+@data_map_group.command("classify")
+@click.argument("columns", nargs=-1, required=True)
+def data_map_classify(columns) -> None:
+    """Classify column names; prints only the flagged ones."""
+    from .. import data_map as dm
+
+    flagged = dm.classify_columns(list(columns))
+    for column, categories in sorted(flagged.items()):
+        click.echo(f"{column}: {', '.join(categories)}")
+    if not flagged:
+        click.echo("no columns flagged")
+
+
+@data_map_group.command("register")
+@click.option("--name", required=True, help="Asset name (e.g. schema.table).")
+@click.option("--system", required=True, help="Owning system (e.g. snowflake).")
+@click.option("--kind", required=True,
+              type=click.Choice(["table", "dataset", "file_share", "site",
+                                 "bucket", "other"]))
+@click.option("--owner", required=True, help="Data steward.")
+@click.option("--columns", default="", help="Comma-separated column names.")
+@click.option("--location", default="", help="URL or path of the asset.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def data_map_register(name, system, kind, owner, columns, location,
+                      actor) -> None:
+    """Register or reclassify one data asset."""
+    from .. import data_map as dm
+
+    names = [part.strip() for part in columns.split(",") if part.strip()]
+    try:
+        record = dm.register_data_asset(
+            name, system=system, kind=kind, owner=owner, actor=actor,
+            columns=names, location=location,
+        )
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{record['id']}  categories: "
+               f"{', '.join(record['categories']) or '-'}")
+
+
+@data_map_group.command("import-schema")
+@click.option("--file", "csv_file", required=True,
+              help="information_schema.columns CSV export.")
+@click.option("--system", required=True, help="Warehouse name.")
+@click.option("--owner", required=True, help="Data steward for the assets.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def data_map_import_schema(csv_file, system, owner, actor) -> None:
+    """Import a warehouse schema export as classified table assets."""
+    from pathlib import Path
+
+    from .. import data_map as dm
+
+    try:
+        text = Path(csv_file).read_text(encoding="utf-8")
+    except OSError as e:
+        raise click.ClickException(f"could not read {csv_file}: {e}") from e
+    try:
+        result = dm.import_information_schema_csv(
+            text, system=system, owner=owner, imported_by=actor,
+        )
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"imported {result['imported']}  skipped {result['skipped']}")
+
+
+@data_map_group.command("sync-sharepoint")
+@click.option("--search", default="", help="Site search query (default: all).")
+@click.option("--owner", required=True, help="Data steward for the assets.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def data_map_sync_sharepoint(search, owner, actor) -> None:
+    """Census SharePoint sites into the data map via Microsoft Graph."""
+    from .. import data_map as dm
+
+    try:
+        result = dm.sync_sharepoint_sites(actor=actor, owner=owner,
+                                          search=search)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"imported {result['imported']}  skipped {result['skipped']}")
+
+
+@data_map_group.command("list")
+@click.option("--system", default=None, help="Filter to one system.")
+def data_map_list(system) -> None:
+    """List registered data assets."""
+    from .. import data_map as dm
+
+    try:
+        rows = dm.list_data_assets(system=system)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    for row in rows:
+        click.echo(f"{row['id']}  {row['system']}  {row['name']}  "
+                   f"[{', '.join(row.get('categories') or []) or '-'}]")
+    if not rows:
+        click.echo("no data assets registered")
+
+
+@data_map_group.command("status")
+def data_map_status_command() -> None:
+    """Map posture: totals, flagged and special-category assets."""
+    from .. import data_map as dm
+
+    try:
+        posture = dm.data_map_posture()
+    except RuntimeError as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"assets {posture['assets']}  flagged "
+               f"{posture['flagged_assets']}  special "
+               f"{posture['special_category_assets']}  unlinked flagged "
+               f"{posture['unlinked_flagged_assets']}")
+    for category, count in posture["by_category"].items():
+        click.echo(f"  {category}: {count}")

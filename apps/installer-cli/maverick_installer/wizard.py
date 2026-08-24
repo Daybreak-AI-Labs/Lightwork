@@ -2102,6 +2102,33 @@ def pick_advanced() -> dict[str, Any]:
             "setup. OFF by default.",
             default=False,
         ),
+        "vendor_management": _q_confirm(
+            "Third-party vendor register? Governed vendor records with "
+            "criticality tiers, questionnaire campaigns served over the "
+            "public form endpoint, monitoring notes, links to assessments "
+            "and RoPA entries, and a OneTrust vendor-CSV importer. A "
+            "register and audit trail, never a vendor risk rating service. "
+            "OFF by default.",
+            default=False,
+        ),
+        "consent_registry": _q_confirm(
+            "Consent receipts and preferences registry? Per-subject consent "
+            "receipts (purpose, policy version, channel) with salted "
+            "subject digests, a current-preference projection, audit "
+            "export, and a OneTrust consent-CSV importer. The governed "
+            "record behind a consent front end, never a cookie banner or "
+            "TCF-certified CMP. OFF by default.",
+            default=False,
+        ),
+        "data_map": _q_confirm(
+            "Data map and discovery? A governed register of data assets "
+            "with a column-name classifier that flags likely personal-data "
+            "categories, an information_schema CSV importer for "
+            "warehouses, and a SharePoint site census via Microsoft Graph. "
+            "Name-based triage for a human data-mapping exercise, never a "
+            "content scanner. OFF by default.",
+            default=False,
+        ),
         "ai_literacy": _q_confirm(
             "EU AI Act Art. 4 AI-literacy register? Named humans set which "
             "trainings each role requires, record completions with evidence "
@@ -4575,6 +4602,19 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("[llm_gateway]")
         lines.append("enable = true")
         lines.append('upstream_url = "https://api.openai.com"')
+    if advanced.get("vendor_management"):
+        lines.append("")
+        lines.append("[vendor_management]")
+        lines.append("enable = true")
+    if advanced.get("consent_registry"):
+        lines.append("")
+        lines.append("[consent_registry]")
+        lines.append("enable = true")
+        lines.append(f'subject_salt = "{secrets.token_urlsafe(24)}"')
+    if advanced.get("data_map"):
+        lines.append("")
+        lines.append("[data_map]")
+        lines.append("enable = true")
     if advanced.get("ai_literacy"):
         lines.append("")
         lines.append("[ai_literacy]")

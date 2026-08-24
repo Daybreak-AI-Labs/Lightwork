@@ -303,3 +303,94 @@ def test_content_provenance_sign_and_verify_round_trip(
     assert tampered.exit_code != 0
     assert "INVALID" in tampered.output
     config.reset_config_cache()
+
+
+def _estate_config(tmp_path, monkeypatch, body: str):
+    from maverick import config
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    (tmp_path / "config.toml").write_text(body, encoding="utf-8")
+    config.reset_config_cache()
+    return config
+
+
+def test_vendor_cli_register_questionnaire_and_posture(
+    runner, tmp_path, monkeypatch,
+):
+    config = _estate_config(
+        tmp_path, monkeypatch, "[vendor_management]\nenable = true\n",
+    )
+    registered = runner.invoke(main, [
+        "vendor", "register", "--name", "Acme", "--category", "analytics",
+        "--criticality", "high", "--owner", "procurement", "--by", "ops",
+    ])
+    assert registered.exit_code == 0, registered.output
+    vendor_id = registered.output.split()[0]
+    assert vendor_id.startswith("VMR-")
+
+    sent = runner.invoke(main, [
+        "vendor", "questionnaire", "send", "--vendor", vendor_id,
+        "--type", "vendor_risk", "--by", "ops",
+    ])
+    assert sent.exit_code == 0, sent.output
+    assert "/form/" in sent.output
+
+    posture = runner.invoke(main, ["vendor", "status"])
+    assert posture.exit_code == 0, posture.output
+    assert "vendors 1" in posture.output
+    config.reset_config_cache()
+
+
+def test_consent_cli_record_and_preferences(runner, tmp_path, monkeypatch):
+    config = _estate_config(
+        tmp_path, monkeypatch,
+        '[consent_registry]\nenable = true\n'
+        'subject_salt = "cli-test-salt-0123456789abcd"\n',
+    )
+    recorded = runner.invoke(main, [
+        "consent", "record", "--subject", "alice@example.com",
+        "--purpose", "marketing emails", "--status", "granted",
+        "--policy-version", "2026-01", "--channel", "web", "--by", "ops",
+    ])
+    assert recorded.exit_code == 0, recorded.output
+    assert "alice" not in recorded.output
+
+    prefs = runner.invoke(main, [
+        "consent", "preferences", "--subject", "alice@example.com",
+    ])
+    assert prefs.exit_code == 0, prefs.output
+    assert "marketing_emails  granted" in prefs.output
+    config.reset_config_cache()
+
+
+def test_data_map_cli_classify_import_and_status(
+    runner, tmp_path, monkeypatch,
+):
+    config = _estate_config(
+        tmp_path, monkeypatch, "[data_map]\nenable = true\n",
+    )
+    flagged = runner.invoke(main, [
+        "data-map", "classify", "customer_email", "order_total",
+    ])
+    assert flagged.exit_code == 0, flagged.output
+    assert "customer_email: email" in flagged.output
+    assert "order_total" not in flagged.output
+
+    schema_csv = tmp_path / "columns.csv"
+    schema_csv.write_text(
+        "table_name,column_name\ncontacts,email\ncontacts,id\n",
+        encoding="utf-8",
+    )
+    imported = runner.invoke(main, [
+        "data-map", "import-schema", "--file", str(schema_csv),
+        "--system", "snowflake", "--owner", "data-team", "--by", "ops",
+    ])
+    assert imported.exit_code == 0, imported.output
+    assert "imported 1" in imported.output
+
+    posture = runner.invoke(main, ["data-map", "status"])
+    assert posture.exit_code == 0, posture.output
+    assert "assets 1  flagged 1" in posture.output
+    config.reset_config_cache()

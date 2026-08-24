@@ -2158,6 +2158,169 @@ _CCPA = AssessmentTemplate(
     ),
 )
 
+_LGPD = AssessmentTemplate(
+    type="lgpd",
+    title="LGPD Assessment",
+    framework="LGPD (Brazil, Lei 13.709/2018)",
+    description="Assess a processing activity against Brazil's Lei Geral de "
+    "Proteção de Dados: legal bases, sensitive data, data-subject "
+    "rights, the encarregado, transfers, security, and ANPD "
+    "incident notification.",
+    questions=(
+        _q(
+            "lgpd_legal_basis",
+            "Legal basis",
+            "Is each processing purpose grounded in one of the Art. 7 legal "
+            "bases, recorded per activity?",
+            "no",
+            "high",
+            "Document the Art. 7 basis for every purpose before processing.",
+        ),
+        _q(
+            "lgpd_sensitive",
+            "Sensitive data",
+            "Where sensitive personal data is processed, is an Art. 11 "
+            "condition (specific consent or a listed necessity) satisfied?",
+            "no",
+            "high",
+            "Stop or re-base sensitive-data processing on an Art. 11 condition.",
+        ),
+        _q(
+            "lgpd_rights",
+            "Data-subject rights",
+            "Can data subjects exercise the Art. 18 rights (confirmation, "
+            "access, correction, anonymization, portability, deletion, "
+            "information, revocation) through a working channel?",
+            "no",
+            "high",
+            "Stand up and test the rights channel end to end.",
+        ),
+        _q(
+            "lgpd_encarregado",
+            "Accountability",
+            "Is an encarregado (data protection officer, Art. 41) appointed "
+            "and publicly identified with contact information?",
+            "no",
+            "medium",
+            "Appoint and publish the encarregado's identity and contact.",
+        ),
+        _q(
+            "lgpd_transfers",
+            "International transfers",
+            "Do international transfers rest on an Art. 33 mechanism "
+            "(adequacy, contractual clauses, ANPD-approved safeguards)?",
+            "no",
+            "high",
+            "Put an Art. 33 mechanism in place before transferring abroad.",
+        ),
+        _q(
+            "lgpd_security",
+            "Security",
+            "Are the Art. 46 technical and administrative security measures "
+            "implemented and reviewed for this processing?",
+            "no",
+            "medium",
+            "Implement and evidence the Art. 46 measures.",
+        ),
+        _q(
+            "lgpd_ripd",
+            "Impact report",
+            "Where processing may create relevant risk, is the Art. 38 "
+            "impact report (RIPD) prepared and available to the ANPD?",
+            "unknown",
+            "medium",
+            "Prepare the RIPD for high-risk processing and keep it current.",
+        ),
+        _q(
+            "lgpd_incidents",
+            "Incidents",
+            "Will a security incident with relevant risk be reported to the "
+            "ANPD and affected data subjects per Art. 48?",
+            "no",
+            "high",
+            "Wire incident handling to the Art. 48 notification path.",
+        ),
+    ),
+)
+
+_PIPEDA = AssessmentTemplate(
+    type="pipeda",
+    title="PIPEDA Assessment",
+    framework="PIPEDA (Canada)",
+    description="Assess a processing activity against Canada's Personal "
+    "Information Protection and Electronic Documents Act: the "
+    "fair-information principles, valid consent, safeguards, "
+    "access, and OPC breach reporting.",
+    questions=(
+        _q(
+            "pipeda_purposes",
+            "Purposes",
+            "Are the purposes for collection identified at or before the time "
+            "of collection (Principle 2)?",
+            "no",
+            "high",
+            "Identify and record purposes before collecting.",
+        ),
+        _q(
+            "pipeda_consent",
+            "Consent",
+            "Is consent valid under s. 6.1 — could the individual reasonably "
+            "understand the nature, purpose and consequences of what they "
+            "agreed to?",
+            "no",
+            "high",
+            "Rework the consent flow until s. 6.1 understanding is plausible.",
+        ),
+        _q(
+            "pipeda_limiting",
+            "Limiting collection",
+            "Is collection limited to what is necessary for the identified "
+            "purposes (Principle 4)?",
+            "no",
+            "medium",
+            "Trim collection to the identified purposes.",
+        ),
+        _q(
+            "pipeda_safeguards",
+            "Safeguards",
+            "Are safeguards appropriate to the sensitivity of the information "
+            "in place (Principle 7)?",
+            "no",
+            "high",
+            "Match safeguards to sensitivity and evidence them.",
+        ),
+        _q(
+            "pipeda_access",
+            "Individual access",
+            "Can individuals obtain access to their personal information and "
+            "challenge its accuracy (Principle 9)?",
+            "no",
+            "medium",
+            "Stand up the access-and-correction channel.",
+        ),
+        _q(
+            "pipeda_accountability",
+            "Accountability",
+            "Is an individual designated as accountable for compliance, "
+            "including for information transferred for processing "
+            "(Principle 1)?",
+            "no",
+            "medium",
+            "Designate the accountable individual and cover transfers by contract.",
+        ),
+        _q(
+            "pipeda_breach",
+            "Breach reporting",
+            "Will a breach creating a real risk of significant harm be "
+            "reported to the OPC and affected individuals, with records kept "
+            "(s. 10.1-10.3)?",
+            "no",
+            "high",
+            "Wire breach handling to the s. 10.1 report-and-record path.",
+        ),
+    ),
+)
+
 TEMPLATES: dict[str, AssessmentTemplate] = {
     t.type: t
     for t in (
@@ -2165,6 +2328,8 @@ TEMPLATES: dict[str, AssessmentTemplate] = {
         _DPIA,
         _LIA,
         _CCPA,
+        _LGPD,
+        _PIPEDA,
         _AIRA,
         _VENDOR_RISK,
         _TIA,

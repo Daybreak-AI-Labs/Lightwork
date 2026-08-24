@@ -58,10 +58,15 @@ from .api_schemas import (
     CachePurgeIn,
     CatalogInstallIn,
     ChildIn,
+    ClassifyColumnsIn,
     ClausePlaybookIn,
     ComposeIn,
     ConnectionIn,
+    ConsentIn,
+    ConsentSubjectIn,
     CopilotIn,
+    DataAssetIn,
+    DataAssetLinkIn,
     DeliverableEditIn,
     DgmToggleIn,
     DocDiscoverIn,
@@ -121,6 +126,8 @@ from .api_schemas import (
     RopaIn,
     ScheduleIn,
     ScheduleOut,
+    SchemaImportIn,
+    SharePointSyncIn,
     SignoffIn,
     SkillCreateIn,
     SkillInstallIn,
@@ -139,6 +146,11 @@ from .api_schemas import (
     TrustRevokeIn,
     UserSuitesIn,
     ValueAssumptionsIn,
+    VendorIn,
+    VendorLinkIn,
+    VendorNoteIn,
+    VendorQuestionnaireIn,
+    VendorStatusIn,
     WorkflowDraftIn,
     WorkflowRefineIn,
     WorkflowSaveIn,
@@ -2040,6 +2052,369 @@ async def import_onetrust(request: Request, body: OneTrustImportIn) -> dict:
     )
     return {"imported": len(imported),
             "activities": [e["activity"] for e in imported]}
+
+
+def _vendor_management_or_403():
+    from maverick import vendor_management
+    if not vendor_management.enabled():
+        raise HTTPException(status_code=403,
+                            detail="the vendor register is disabled "
+                                   "([vendor_management] enable)")
+    return vendor_management
+
+
+@router.get("/vendors/posture")
+async def vendor_posture(request: Request) -> dict:
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    return await run_in_threadpool(vm.vendor_posture)
+
+
+@router.post("/vendors/import-onetrust", status_code=201)
+async def import_onetrust_vendors(request: Request,
+                                  body: OneTrustImportIn) -> dict:
+    """Import OneTrust's third-party CSV export -- vendors already
+    registered here stay untouched (this register is the record of truth)."""
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    imported = await run_in_threadpool(
+        vm.import_onetrust_vendors, body.csv_text,
+        imported_by=_request_actor(request),
+    )
+    return {"imported": len(imported),
+            "vendors": [e["name"] for e in imported]}
+
+
+@router.get("/vendors")
+async def list_vendors(request: Request, status: str = "") -> dict:
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    try:
+        rows = await run_in_threadpool(
+            vm.list_vendors, status=status.strip() or None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"vendors": rows}
+
+
+@router.post("/vendors", status_code=201)
+async def register_vendor(request: Request, body: VendorIn) -> dict:
+    """Register one vendor; the same name is one record, never a duplicate."""
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    from maverick.governed_records import RecordConflict
+    try:
+        return await run_in_threadpool(
+            vm.register_vendor, body.name, category=body.category,
+            criticality=body.criticality, owner=body.owner,
+            actor=_request_actor(request),
+        )
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/vendors/{vendor_id}")
+async def get_vendor(request: Request, vendor_id: str) -> dict:
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    try:
+        record = await run_in_threadpool(vm.get_vendor, vendor_id[:64])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such vendor")
+    return record
+
+
+@router.post("/vendors/{vendor_id}/status")
+async def set_vendor_status(request: Request, vendor_id: str,
+                            body: VendorStatusIn) -> dict:
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    from maverick.governed_records import RecordConflict
+    try:
+        return await run_in_threadpool(
+            vm.set_vendor_status, vendor_id[:64], body.status,
+            actor=_request_actor(request), expected_revision=body.revision,
+        )
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="no such vendor") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/vendors/{vendor_id}/links", status_code=201)
+async def link_vendor_record(request: Request, vendor_id: str,
+                             body: VendorLinkIn) -> dict:
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    from maverick.governed_records import RecordConflict
+    try:
+        return await run_in_threadpool(
+            vm.link_vendor_record, vendor_id[:64], kind=body.kind,
+            reference=body.reference, actor=_request_actor(request),
+            expected_revision=body.revision,
+        )
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="no such vendor") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/vendors/{vendor_id}/questionnaires", status_code=201)
+async def request_vendor_questionnaire(request: Request, vendor_id: str,
+                                       body: VendorQuestionnaireIn) -> dict:
+    """Mint a hosted-form questionnaire the vendor answers by link -- the
+    returned form_path is the platform's public /form/{token} endpoint."""
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    from maverick.governed_records import RecordConflict
+    try:
+        return await run_in_threadpool(
+            vm.request_questionnaire, vendor_id[:64],
+            assessment_type=body.assessment_type,
+            actor=_request_actor(request), expected_revision=body.revision,
+        )
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="no such vendor") from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/vendors/{vendor_id}/questionnaires")
+async def vendor_questionnaire_responses(request: Request,
+                                         vendor_id: str) -> dict:
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    try:
+        rows = await run_in_threadpool(
+            vm.questionnaire_responses, vendor_id[:64])
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="no such vendor") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"questionnaires": rows}
+
+
+@router.post("/vendors/{vendor_id}/notes", status_code=201)
+async def record_vendor_note(request: Request, vendor_id: str,
+                             body: VendorNoteIn) -> dict:
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    from maverick.governed_records import RecordConflict
+    try:
+        return await run_in_threadpool(
+            vm.record_monitoring_note, vendor_id[:64], body.note,
+            severity=body.severity, actor=_request_actor(request),
+            expected_revision=body.revision,
+        )
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="no such vendor") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _consent_registry_or_403():
+    from maverick import consent_registry
+    if not consent_registry.enabled():
+        raise HTTPException(status_code=403,
+                            detail="the consent registry is disabled "
+                                   "([consent_registry] enable + "
+                                   "subject_salt)")
+    return consent_registry
+
+
+@router.post("/consent/records", status_code=201)
+async def record_consent(request: Request, body: ConsentIn) -> dict:
+    """Append one consent event; the receipt digest makes the exported
+    record self-checking. Subject references are stored only as salted
+    digests."""
+    require_permission(request, "operate")
+    cr = _consent_registry_or_403()
+    try:
+        return await run_in_threadpool(
+            cr.record_consent, body.subject_ref, purpose=body.purpose,
+            status=body.status, policy_version=body.policy_version,
+            channel=body.channel, actor=_request_actor(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/consent/preferences")
+async def consent_preferences(request: Request,
+                              body: ConsentSubjectIn) -> dict:
+    """The subject's current per-purpose choices (POST keeps the subject
+    reference out of access logs)."""
+    require_permission(request, "operate")
+    cr = _consent_registry_or_403()
+    try:
+        return await run_in_threadpool(
+            cr.subject_preferences, body.subject_ref)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/consent/posture")
+async def consent_posture(request: Request) -> dict:
+    require_permission(request, "operate")
+    cr = _consent_registry_or_403()
+    return await run_in_threadpool(cr.consent_posture)
+
+
+@router.get("/consent/export")
+async def export_consent_receipts(request: Request, limit: int = 500) -> dict:
+    """The digest-only receipt register, bounded, for audit."""
+    require_permission(request, "operate")
+    cr = _consent_registry_or_403()
+    try:
+        rows = await run_in_threadpool(cr.export_receipts, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"receipts": rows}
+
+
+@router.post("/consent/import-onetrust", status_code=201)
+async def import_onetrust_consents(request: Request,
+                                   body: OneTrustImportIn) -> dict:
+    """Import OneTrust's consent CSV export; unknown statuses are skipped
+    rather than guessed at."""
+    require_permission(request, "operate")
+    cr = _consent_registry_or_403()
+    return await run_in_threadpool(
+        cr.import_onetrust_consents, body.csv_text,
+        imported_by=_request_actor(request),
+    )
+
+
+def _data_map_or_403():
+    from maverick import data_map
+    if not data_map.enabled():
+        raise HTTPException(status_code=403,
+                            detail="the data map is disabled "
+                                   "([data_map] enable)")
+    return data_map
+
+
+@router.get("/data-map/posture")
+async def data_map_posture(request: Request) -> dict:
+    require_permission(request, "operate")
+    dm = _data_map_or_403()
+    return await run_in_threadpool(dm.data_map_posture)
+
+
+@router.post("/data-map/classify")
+async def classify_columns(request: Request, body: ClassifyColumnsIn) -> dict:
+    """Run column names through the personal-data classifier -- triage for
+    a human data-mapping exercise, not a content scan."""
+    require_permission(request, "operate")
+    dm = _data_map_or_403()
+    return {"flagged": await run_in_threadpool(
+        dm.classify_columns, body.columns)}
+
+
+@router.get("/data-map/assets")
+async def list_data_assets(request: Request, system: str = "") -> dict:
+    require_permission(request, "operate")
+    dm = _data_map_or_403()
+    rows = await run_in_threadpool(
+        dm.list_data_assets, system=system.strip() or None)
+    return {"assets": rows}
+
+
+@router.post("/data-map/assets", status_code=201)
+async def register_data_asset(request: Request, body: DataAssetIn) -> dict:
+    """Register or reclassify one data asset; columns are classified on
+    the way in."""
+    require_permission(request, "operate")
+    dm = _data_map_or_403()
+    try:
+        return await run_in_threadpool(
+            dm.register_data_asset, body.name, system=body.system,
+            kind=body.kind, owner=body.owner, actor=_request_actor(request),
+            columns=body.columns, location=body.location, source="api",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/data-map/assets/{asset_id}")
+async def get_data_asset(request: Request, asset_id: str) -> dict:
+    require_permission(request, "operate")
+    dm = _data_map_or_403()
+    try:
+        record = await run_in_threadpool(dm.get_data_asset, asset_id[:64])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such data asset")
+    return record
+
+
+@router.post("/data-map/assets/{asset_id}/links", status_code=201)
+async def link_data_asset(request: Request, asset_id: str,
+                          body: DataAssetLinkIn) -> dict:
+    require_permission(request, "operate")
+    dm = _data_map_or_403()
+    from maverick.governed_records import RecordConflict
+    try:
+        return await run_in_threadpool(
+            dm.link_asset_record, asset_id[:64], kind=body.kind,
+            reference=body.reference, actor=_request_actor(request),
+            expected_revision=body.revision,
+        )
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail="no such data asset") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/data-map/import-schema", status_code=201)
+async def import_schema_csv(request: Request, body: SchemaImportIn) -> dict:
+    """Import a warehouse information_schema.columns CSV as classified
+    table assets (stock Snowflake/BigQuery/Redshift/Postgres exports)."""
+    require_permission(request, "operate")
+    dm = _data_map_or_403()
+    try:
+        return await run_in_threadpool(
+            dm.import_information_schema_csv, body.csv_text,
+            system=body.system, owner=body.owner,
+            imported_by=_request_actor(request),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/data-map/sync-sharepoint")
+async def sync_sharepoint(request: Request, body: SharePointSyncIn) -> dict:
+    """Census SharePoint sites into the data map via Microsoft Graph
+    (Sites.Read.All; token from the configured environment variable)."""
+    require_permission(request, "operate")
+    dm = _data_map_or_403()
+    try:
+        return await run_in_threadpool(
+            dm.sync_sharepoint_sites, actor=_request_actor(request),
+            owner=body.owner, search=body.search,
+        )
+    except dm.DataMapConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except dm.DataMapError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _csv_formula_safe(value: object) -> object:

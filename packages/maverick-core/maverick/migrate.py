@@ -74,6 +74,9 @@ KNOWN_SECTIONS = frozenset({
     "explainability",
     "content_provenance",
     "llm_gateway",
+    "vendor_management",
+    "consent_registry",
+    "data_map",
     "ai_regulatory_feed",
     "grc_sync",
     # Registry drift, again: these are all read by real load_config() call sites

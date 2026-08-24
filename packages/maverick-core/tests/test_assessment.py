@@ -27,6 +27,8 @@ def test_templates_registered_and_looked_up():
         "dpia",
         "lia",
         "ccpa",
+        "lgpd",
+        "pipeda",
         "aira",
         "vendor_risk",
         "tia",
