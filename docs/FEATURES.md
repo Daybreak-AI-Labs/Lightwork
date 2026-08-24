@@ -16,6 +16,33 @@ here.
   reflector), run in parallel (`orchestrator.py`, `agent.py`, `swarm.py`).
 - **Durable, resumable execution** — checkpoint / rewind / `maverick resume`
   (`checkpoint.py`), opt-in via `[durable]`.
+- **Workspace mutation journal** (`workspace_journal.py`, opt-in `[workspace]
+  journal`) — every file-tool write (write_file, the str_replace editors,
+  ast_edit share one chokepoint) records the file's PRE-mutation state:
+  existed-or-not, bytes, sha256. `maverick journal list | diff | revert
+  --goal N` then restores a goal's workspace to its pre-run bytes,
+  newest-entry-first, with no snapshot planned in advance — reversibility as
+  a property of the harness, not a habit of the model. Per-goal
+  (tenant-scoped store), byte/entry-capped (`journal_max_*`); an incomplete
+  journal refuses a full revert (`--partial` to restore what was captured),
+  each real revert writes one signed `workspace_revert` audit row and
+  archives the journal so it can't replay, and revert re-validates every
+  recorded path (no traversal, no writes through symlinks) so a tampered
+  journal can't become an arbitrary-write primitive. `journal_strict = true`
+  refuses any write whose pre-image can't be journaled — reversibility as a
+  guarantee for regulated deployments. Shell-driven mutations are out of
+  scope (the audit trail records those commands); default off, wizard step
+  under *Workspace journal*.
+- **Loop-guard suppression tier** — the long-standing repeated-identical-call
+  nudge (`MAVERICK_LOOP_GUARD_THRESHOLD`) now also covers byte-identical
+  *successes* (a poll loop whose output never changes is burning budget on
+  zero information), and past `MAVERICK_LOOP_GUARD_BLOCK` (default 6,
+  clamped above the nudge threshold so advice always precedes enforcement,
+  0 disables) the next byte-identical call is refused WITHOUT executing.
+  Per-call only — changed arguments or a different tool clears it — so
+  legitimate polls that vary anything keep working. Built for the
+  open-weight lanes (ollama / vllm / tgi), where smaller models grind
+  identical retries through the whole tool budget.
 - **Session forking + run tree** (`session_tree.py`, default-on
   `[session_tree] enable`, depth-capped by `max_depth`) — branch a run at one
   decision point so Oversight can read what the agent chose *beside* the
@@ -3473,6 +3500,14 @@ tested without spawning py-spy.
   reduced licensed source archives, checksums, SBOMs, and Sigstore material.
   Tauri/MSI outputs remain authenticated source-bootstrap/build engineering
   artifacts rather than customer product installers.
+- **Container import-path hardening** — the deploy image sets
+  `PYTHONNOUSERSITE=1` for the harness interpreter: system site-packages are
+  root-owned, so the only writable import path a model-driven `pip install
+  --user` could reach was the user site — where a mid-run install shadows any
+  module the harness lazily imports later (poisoning the process that holds
+  credentials and enforces the gates). The sandbox's child-shell env drops
+  the var (`scrub_env`), so packages the agent installs for its OWN scripts
+  keep importing; only the harness process is closed off.
 - **Backwards-compat tooling** — `maverick migrate` (`migrate.py`): walks an
   existing config forward — real migration advisories (Twilio WhatsApp → the
   first-party Cloud API adapter), unknown-section lint with did-you-mean

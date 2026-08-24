@@ -104,6 +104,7 @@ STEPS: list[tuple[str, str]] = [
     ("oauth_vault", "OAuth token vault"),
     ("governed_connectors", "Governed connectors"),
     ("durable", "Durable execution"),
+    ("journal", "Workspace journal"),
     ("finance", "Finance suite"),
     ("value", "Savings assumptions"),
     ("assessments", "Assessment assists"),
@@ -1353,6 +1354,36 @@ def pick_durable() -> dict[str, Any]:
     if not _q_confirm("Enable durable execution (crash-resume)?", default=False):
         return {"enabled": False}
     return {"enabled": True, "keep_last": 5}
+
+
+def pick_workspace_journal() -> dict[str, Any]:
+    """Opt-in workspace mutation journal (pre-images + ``maverick journal
+    revert``).
+
+    Off by default. Returns keys for the ``[workspace]`` table (``journal``,
+    ``journal_strict``); written only when enabled.
+    """
+    console.print()
+    console.print(
+        "[dim]The workspace journal captures every file the agents overwrite "
+        "or create through the file tools — BEFORE the mutation — so "
+        "`maverick journal revert` can restore a goal's workspace to its "
+        "pre-run state without a prior snapshot. Shell-driven mutations "
+        "(rm/mv/redirects) are not covered — the audit trail records those "
+        "commands. Bounded disk per goal; OFF by default.[/dim]"
+    )
+    if not _q_confirm(
+            "Enable the workspace mutation journal (undoable file edits)?",
+            default=False):
+        return {"journal": False}
+    strict = _q_confirm(
+        "Strict mode: REFUSE any write whose pre-image cannot be journaled? "
+        "(makes reversibility a guarantee; a full journal then blocks writes)",
+        default=False)
+    out: dict[str, Any] = {"journal": True}
+    if strict:
+        out["journal_strict"] = True
+    return out
 
 
 def pick_assessments() -> dict[str, Any]:
@@ -3718,6 +3749,18 @@ def _cfg_durable(durable: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _cfg_workspace(workspace: dict[str, Any] | None) -> list[str]:
+    if not (workspace and workspace.get("journal")):
+        return []
+    # Workspace mutation journal: pre-image every file-tool write so
+    # `maverick journal revert` can restore a goal's workspace. Off unless
+    # opted in; journal_strict refuses writes it cannot journal.
+    lines = ["", "[workspace]"]
+    for k, v in workspace.items():
+        _emit_kv(lines, k, v)
+    return lines
+
+
 def _cfg_assessments(assessments: dict[str, Any] | None) -> list[str]:
     if not assessments:
         return []
@@ -4905,6 +4948,7 @@ def write_config(
     oauth: dict[str, Any] | None = None,
     governed_connectors: dict[str, Any] | None = None,
     durable: dict[str, Any] | None = None,
+    workspace: dict[str, Any] | None = None,
     finance: dict[str, Any] | None = None,
     value: dict[str, Any] | None = None,
     assessments: dict[str, Any] | None = None,
@@ -4990,6 +5034,7 @@ def write_config(
     lines += _cfg_oauth(oauth)
     lines += _cfg_governed_connectors(governed_connectors)
     lines += _cfg_durable(durable)
+    lines += _cfg_workspace(workspace)
     lines += _cfg_finance(finance)
     lines += _cfg_value(value)
     lines += _cfg_assessments(assessments)
@@ -5844,6 +5889,11 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     _save_partial(state)
 
     _announce()
+    workspace = state.get("workspace") or pick_workspace_journal()
+    state["workspace"] = workspace
+    _save_partial(state)
+
+    _announce()
     finance = state.get("finance") or pick_finance()
     state["finance"] = finance
     _save_partial(state)
@@ -5891,6 +5941,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "oauth": oauth,
         "governed_connectors": governed_connectors,
         "durable": durable,
+        "workspace": workspace,
         "finance": finance,
         "value": value,
         "assessments": assessments,
@@ -6090,6 +6141,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     oauth = _simple["oauth"]
     governed_connectors = _simple["governed_connectors"]
     durable = _simple["durable"]
+    workspace = _simple["workspace"]
     finance = _simple["finance"]
     value = _simple["value"]
     assessments = _simple["assessments"]
@@ -6206,6 +6258,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         oauth=oauth if oauth.get("vault") else None,
         governed_connectors=governed_connectors if governed_connectors.get("enable") else None,
         durable=durable if durable.get("enabled") else None,
+        workspace=workspace if workspace.get("journal") else None,
         finance=finance if finance.get("enable") else None,
         value=value or None,
         assessments=assessments or None,

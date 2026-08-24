@@ -244,3 +244,80 @@ def local_runtime_plan() -> None:
     for key in sorted(env):
         click.echo(f"{key}={env[key]} \\")
     click.echo(shlex.join(argv))
+
+
+@main.group("journal")
+def journal_group() -> None:
+    """Workspace mutation journal: list, diff, and revert an agent's file
+    edits ([workspace] journal = true; off by default)."""
+
+
+def _journal_goal_arg(goal: int | None):
+    """CLI goal selector: an explicit --goal id, else the ad-hoc bucket."""
+    return goal if goal is not None else "adhoc"
+
+
+@journal_group.command("list")
+@click.option("--goal", type=int, default=None,
+              help="Goal id (default: the ad-hoc bucket).")
+def journal_list_cmd(goal: int | None) -> None:
+    """Show what the journal captured for a goal."""
+    from ..workspace_journal import is_capped, list_entries
+    gid = _journal_goal_arg(goal)
+    entries = list_entries(gid)
+    if not entries:
+        click.echo("(no journal entries; is [workspace] journal enabled?)")
+        return
+    for e in entries:
+        state = "existed" if e.get("existed") else "created"
+        skipped = e.get("skipped_reason")
+        suffix = f"  [pre-image {skipped}]" if skipped else ""
+        click.echo(f"{e.get('seq', 0):6d}  {state:7s}  {e.get('path')}{suffix}")
+    if is_capped(gid):
+        click.echo("NOTE: journal hit its cap; later writes were NOT captured "
+                   "(full revert will refuse; use --partial).")
+    click.echo("Shell-driven mutations (rm/mv/redirects) are not journaled; "
+               "see the audit trail for those commands.")
+
+
+@journal_group.command("diff")
+@click.option("--goal", type=int, default=None,
+              help="Goal id (default: the ad-hoc bucket).")
+def journal_diff_cmd(goal: int | None) -> None:
+    """Unified diff: each journaled file's pre-run state vs the disk now."""
+    from ..workspace_journal import diff_goal
+    click.echo(diff_goal(_journal_goal_arg(goal)))
+
+
+@journal_group.command("revert")
+@click.option("--goal", type=int, default=None,
+              help="Goal id (default: the ad-hoc bucket).")
+@click.option("--partial", is_flag=True,
+              help="Restore what was captured even if the journal is "
+                   "incomplete (cap hit / oversized pre-images).")
+@click.option("--dry-run", is_flag=True, help="Report only; touch nothing.")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+def journal_revert_cmd(goal: int | None, partial: bool, dry_run: bool,
+                       yes: bool) -> None:
+    """Restore every journaled file to its pre-run bytes (newest-first).
+
+    Writes one signed `workspace_revert` audit row and archives the journal
+    directory so the revert cannot be replayed by accident.
+    """
+    from ..workspace_journal import revert_goal
+    gid = _journal_goal_arg(goal)
+    if not (dry_run or yes):
+        click.confirm(
+            f"Revert journaled file mutations for {gid!r}? This rewrites "
+            "workspace files to their pre-run bytes", abort=True)
+    try:
+        res = revert_goal(gid, partial=partial, dry_run=dry_run)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+    verb = "would revert" if dry_run else "reverted"
+    click.echo(f"{verb} {res['reverted']} file(s), deleted {res['deleted']} "
+               f"created file(s), skipped {res['skipped']} "
+               f"({res['entries']} journal entries; "
+               f"{'complete' if res['complete'] else 'PARTIAL'})")
+    if res.get("archived"):
+        click.echo(f"journal archived at {res['archived']}")

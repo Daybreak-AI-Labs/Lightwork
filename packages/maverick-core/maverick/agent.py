@@ -247,6 +247,20 @@ _SPEND_MIRROR_INTERVAL = env_float("MAVERICK_SPEND_MIRROR_INTERVAL", 5.0)
 # call. Default on; MAVERICK_LOOP_GUARD=0 disables it.
 _LOOP_GUARD_ENABLED = os.environ.get("MAVERICK_LOOP_GUARD", "1").strip().lower() not in {"0", "false", "no", "off"}
 _LOOP_GUARD_THRESHOLD = max(2, env_int("MAVERICK_LOOP_GUARD_THRESHOLD", 3))
+# Suppression tier above the nudge: once the SAME call has produced the
+# byte-identical result this many times in a row — success or failure — the
+# next identical attempt is refused WITHOUT executing. Identical output N
+# times is definitionally zero new information, and the smaller open-weight
+# models the ollama/vllm/tgi lanes serve are the ones that ignore the nudge
+# and grind a polling/retry loop through the whole tool budget. Per-call
+# only, never a run abort: changed arguments or a different tool clear it
+# immediately, so a legitimate poll loop that varies anything keeps working.
+# Clamped above the nudge threshold so advice always precedes enforcement,
+# whatever the two env knobs say. 0 disables suppression (nudges continue).
+# MAVERICK_LOOP_GUARD=0 disables the whole guard as before.
+_LOOP_GUARD_BLOCK = env_int("MAVERICK_LOOP_GUARD_BLOCK", 6)
+_LOOP_GUARD_BLOCK = (max(_LOOP_GUARD_BLOCK, _LOOP_GUARD_THRESHOLD + 1)
+                     if _LOOP_GUARD_BLOCK > 0 else 0)
 
 # Step-budget awareness: when only this many tool-using turns remain before
 # max_steps force-stops the run, the loop nudges the agent to synthesize a
@@ -1434,6 +1448,10 @@ class Agent:
         # exact same tool call fails with the same raw error; any intervening
         # different call or success starts a new streak.
         self._tool_fail_streak: dict[str, int] = {}
+        # Loop guard, suppression tier: the last (call key, output sha256,
+        # consecutive count) triple, success or failure. Feeds the identical-
+        # result nudge and, past _LOOP_GUARD_BLOCK, the pre-exec suppression.
+        self._identical_streak: tuple[str, str, int] | None = None
 
     def _resolve_capability(self, explicit):
         """Pick this agent's capability grant.
@@ -2549,6 +2567,13 @@ class Agent:
                     f"({q.reason(self.name)}). No further tools will run."
                 )
         args = _normalize_file_tool_args(name, args, self.ctx.sandbox)
+        # Loop-guard suppression tier: an exact call that has already returned
+        # the byte-identical result _LOOP_GUARD_BLOCK times is refused before
+        # any further spend (the identical bytes cleared the shield and every
+        # gate on each of those executions; re-scanning them adds nothing).
+        suppressed = self._loop_guard_suppression(name, args)
+        if suppressed is not None:
+            return suppressed
         shield = self.ctx.shield
         if shield is not None:
             verdict = shield.scan_tool_call(name, args)
@@ -2727,15 +2752,63 @@ class Agent:
         error_hash = hashlib.sha256((raw_output or "").strip().encode()).hexdigest()
         return f"{Agent._tool_call_key(name, args)}\x00{error_hash}"
 
+    def _track_identical_call(self, name: str, args: dict,
+                              raw_output: str) -> int:
+        """Update the (call, result) identity streak and return its length.
+
+        Byte-identical call AND byte-identical result extends the streak;
+        anything else restarts it at 1. Success/failure is irrelevant here —
+        an identical failure and an identical success are equally zero new
+        information."""
+        key = self._tool_call_key(name, args)
+        out_hash = hashlib.sha256(
+            (raw_output or "").strip().encode()).hexdigest()
+        prev = self._identical_streak
+        streak = prev[2] + 1 if prev and prev[:2] == (key, out_hash) else 1
+        self._identical_streak = (key, out_hash, streak)
+        return streak
+
+    def _loop_guard_suppression(self, name: str, args: dict) -> str | None:
+        """Pre-exec gate: refuse the call (without running it) once the exact
+        same call has returned the byte-identical result ``_LOOP_GUARD_BLOCK``
+        times in a row. Returns the refusal string, or ``None`` to proceed.
+
+        The streak was built from EXECUTED calls, so this fires only after
+        the model has already been nudged (block > nudge threshold) and kept
+        going. A different tool or changed arguments executes normally and
+        replaces the streak, clearing the suppression."""
+        if not (_LOOP_GUARD_ENABLED and _LOOP_GUARD_BLOCK):
+            return None
+        cur = self._identical_streak
+        if (cur is None or cur[2] < _LOOP_GUARD_BLOCK
+                or cur[0] != self._tool_call_key(name, args)):
+            return None
+        return (
+            f"ERROR: [loop-guard] `{name}` call suppressed without executing: "
+            f"this exact call has returned the byte-identical result {cur[2]} "
+            "times in a row, so repeating it cannot add information. Change "
+            "the arguments, switch tools, or proceed with the result you "
+            "already have."
+        )
+
     def _loop_guard_note(self, name: str, args: dict, raw_output: str) -> str:
         """Track this call's outcome; return a nudge when an identical call has
-        failed the same way ``_LOOP_GUARD_THRESHOLD`` times in a row."""
+        failed the same way — or returned the byte-identical success —
+        ``_LOOP_GUARD_THRESHOLD`` times in a row."""
         if not _LOOP_GUARD_ENABLED:
             return ""
+        identical = self._track_identical_call(name, args, raw_output)
         failed = _tool_call_failed(raw_output)
         if not failed:
             self._tool_fail_streak.clear()
-            return ""
+            if identical < _LOOP_GUARD_THRESHOLD:
+                return ""
+            return (
+                f"\n\n[loop-guard] You have issued this exact `{name}` call "
+                f"{identical} times in a row and received the byte-identical "
+                "result each time. Repeating it adds no information — use the "
+                "result you already have, change the arguments, or move on."
+            )
         key = self._tool_failure_key(name, args, raw_output)
         streak = self._tool_fail_streak.get(key, 0) + 1
         self._tool_fail_streak.clear()
