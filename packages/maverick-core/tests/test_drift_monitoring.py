@@ -261,3 +261,58 @@ def test_feature_gate_and_config_are_strict(tmp_path):
     config.reset_config_cache()
     with pytest.raises(drift.DriftMonitoringConfigError, match="unknown"):
         drift.get_drift_config()
+
+
+def test_statistics_battery_known_values():
+    # Identical distributions: everything null, p-values 1.
+    same = drift.chi_squared_two_sample([10, 20, 30], [10, 20, 30])
+    assert same["statistic"] == 0.0
+    assert same["p_value"] == 1.0
+    assert drift.binned_ks_test([10, 20, 30], [10, 20, 30])["p_value"] == 1.0
+    assert drift.jensen_shannon_divergence([1, 1], [1, 1]) == 0.0
+
+    # Disjoint mass: JS reaches its ln(2) bound; KS distance reaches 1.
+    import math
+
+    assert drift.jensen_shannon_divergence([1, 0.0000001], [0.0000001, 1]) == (
+        pytest.approx(math.log(2.0), abs=1e-3)
+    )
+    shifted = drift.binned_ks_test([100, 0, 0], [0, 0, 100])
+    assert shifted["statistic"] == 1.0
+    assert shifted["p_value"] < 1e-6
+
+    # A strongly shifted chi-squared is significant.
+    strong = drift.chi_squared_two_sample([90, 10], [10, 90])
+    assert strong["dof"] == 1
+    assert strong["p_value"] < 1e-6
+
+    # The regularized gamma agrees with known chi-squared tails:
+    # P(chi2_1 > 3.841) ~ 0.05 and P(chi2_2 > 5.991) ~ 0.05.
+    assert drift._regularized_gamma_q(0.5, 3.841 / 2) == pytest.approx(0.05, abs=2e-3)
+    assert drift._regularized_gamma_q(1.0, 5.991 / 2) == pytest.approx(0.05, abs=2e-3)
+
+
+def test_shifted_window_trips_the_new_statistics(monkeypatch):
+    officer = mra.ModelRiskAssuranceOfficer()
+    observation = _observed_and_declared(officer)
+    service = drift.DriftMonitoringService(officer=officer, enforce_feature=False)
+    baseline_values = [float(index % 10) for index in range(200)]
+    baseline = service.capture_baseline(
+        observation["asset_id"],
+        source_id="shifting-window",
+        actor="monitor-operator",
+        feature_samples={"score": baseline_values},
+    )
+    shifted_values = [float(index % 10) + 6.0 for index in range(200)]
+    report = service.evaluate(
+        baseline["id"],
+        run_id="shifted-run",
+        actor="monitor-operator",
+        feature_samples={"score": shifted_values},
+    )
+    assert report["result"] == "failed"
+    battery = report["metrics"]["features"]["score"]
+    assert set(battery) >= {"psi", "kl_divergence", "js_divergence", "chi_squared", "ks"}
+    reasons = set(report["metrics"]["exceeded"])
+    assert {"feature:score:js", "feature:score:chi2", "feature:score:ks"} <= reasons
+    assert report["metrics"]["thresholds"]["js_threshold"] == 0.1

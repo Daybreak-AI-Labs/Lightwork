@@ -1598,3 +1598,132 @@ def governance_alerts_due(due_soon_hours, expiring_days, as_json) -> None:
         click.echo(f"attention items: {report['attention_count']}")
     if report["attention_count"]:
         raise SystemExit(1)
+
+
+@main.group("explainability")
+def explainability_group() -> None:
+    """Model-agnostic explainability over logged feature/score data.
+
+    Spearman global sensitivity and standardized-deviation reason codes run
+    headless over a JSON file; permutation importance and partial dependence
+    take a scoring callable and live in the Python API. Reports can be
+    recorded as governed evidence. Attribution for the operator's own
+    review -- never a fairness certification or legal advice.
+    """
+
+
+def _explainability_payload(data_file: str) -> dict:
+    import json as json_module
+    from pathlib import Path
+
+    try:
+        payload = json_module.loads(Path(data_file).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise click.ClickException(f"could not read {data_file}: {e}") from e
+    if not isinstance(payload, dict):
+        raise click.ClickException("the data file must contain a JSON object")
+    return payload
+
+
+def _explainability_record(report: dict, asset_id, source_id, actor) -> None:
+    from .. import explainability
+
+    if asset_id in (None, ""):
+        return
+    if actor in (None, ""):
+        raise click.ClickException("--by is required when recording evidence")
+    evidence = explainability.record_explainability_evidence(
+        asset_id, report, source_id=source_id, actor=actor,
+    )
+    click.echo(f"evidence {evidence['id']} (rev {evidence['revision']})")
+
+
+@explainability_group.command("sensitivity")
+@click.option("--file", "data_file", required=True,
+              help='JSON file: {"features": {name: [...]}, "scores": [...]}.')
+@click.option("--asset", "asset_id", default=None,
+              help="Record the report as evidence for this governed asset.")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def explainability_sensitivity(data_file, asset_id, actor) -> None:
+    """Rank features by |Spearman| against logged scores."""
+    from .. import explainability
+
+    payload = _explainability_payload(data_file)
+    try:
+        report = explainability.global_sensitivity(
+            payload.get("features") or {}, payload.get("scores") or [],
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    for row in report["features"]:
+        click.echo(f"{row['rank']:>3}  {row['feature']}  spearman {row['spearman']:+.4f}")
+    _explainability_record(report, asset_id, "sensitivity", actor)
+
+
+@explainability_group.command("reasons")
+@click.option("--file", "data_file", required=True,
+              help='JSON file: {"features": {name: [...]}, "instance": {name: value}}.')
+@click.option("--top", "top_k", type=int, default=4, help="Reason codes to emit.")
+@click.option("--asset", "asset_id", default=None,
+              help="Record the report as evidence for this governed asset.")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def explainability_reasons(data_file, top_k, asset_id, actor) -> None:
+    """Standardized-deviation reason codes for one decision."""
+    from .. import explainability
+
+    payload = _explainability_payload(data_file)
+    try:
+        report = explainability.reason_codes(
+            payload.get("features") or {},
+            payload.get("instance") or {},
+            top_k=top_k,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    for row in report["reasons"]:
+        click.echo(row["statement"])
+    _explainability_record(report, asset_id, "reasons", actor)
+
+
+@main.group("gateway")
+def gateway_group() -> None:
+    """The governed LLM gateway: status and the shadow-caller ledger.
+
+    Agents built anywhere point their OpenAI-compatible base URL at the
+    dashboard's /gateway/v1/chat/completions; every call crosses a governed
+    checkpoint and unknown callers land here. Bodies are never stored.
+    """
+
+
+@gateway_group.command("status")
+def gateway_status_command() -> None:
+    """One-line gateway state and aggregate call counts."""
+    from .. import llm_gateway
+
+    state = llm_gateway.gateway_status()
+    click.echo(
+        f"enabled {state['enabled']}  callers {state['callers']}  "
+        f"caller/model pairs {state['caller_model_pairs']}  "
+        f"requests {state['request_count']}"
+    )
+    for status, count in sorted(state["last_status_counts"].items()):
+        click.echo(f"  {status}: {count}")
+
+
+@gateway_group.command("callers")
+@click.option("--limit", type=int, default=50, help="Rows to list (1-500).")
+def gateway_callers(limit) -> None:
+    """The shadow-caller ledger, most recent first."""
+    from .. import llm_gateway
+
+    try:
+        rows = llm_gateway.list_callers(limit=limit)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+    for row in rows:
+        click.echo(
+            f"{row['caller_digest']}  {row['model']}  "
+            f"calls {row['request_count']}  last {row['last_status']}"
+        )
+    if not rows:
+        click.echo("no gateway callers recorded")

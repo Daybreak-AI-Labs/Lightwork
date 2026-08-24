@@ -48,6 +48,8 @@ _CONNECTORS = (
     "databricks_unity_catalog",
     "huggingface",
     "mlflow",
+    "openai",
+    "replicate",
     "sagemaker",
     "snowflake",
     "vertex_ai",
@@ -2298,6 +2300,174 @@ class HuggingFaceInventoryAdapter(_HttpAdapter):
         return DiscoveryResult(tuple(assets), budget.pages)
 
 
+class OpenAIInventoryAdapter(_HttpAdapter):
+    """OpenAI models visible to one organization's API key.
+
+    A single fixed list operation (``GET /v1/models``): the listing carries
+    the organization's fine-tuned models alongside the vendor models it may
+    invoke, and ``owned_by`` distinguishes them. The endpoint documents no
+    pagination; the one page is still budgeted and bounded.
+    """
+
+    name = "openai"
+    source = "openai"
+
+    def __init__(
+        self,
+        *,
+        endpoint: str = "https://api.openai.com",
+        token_env: str = "OPENAI_API_KEY",
+        transport: HttpTransport | None = None,
+        limits: DiscoveryLimits | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        super().__init__(
+            base_url=endpoint,
+            token_env=token_env,
+            transport=transport,
+            limits=limits,
+            sleep=sleep,
+            clock=clock,
+        )
+
+    def _model_asset(self, row: Mapping[str, Any], now: float) -> DiscoveredAsset:
+        model_id = _required_text(row.get("id"), "OpenAI model id", 256)
+        owned_by = _optional_text(row.get("owned_by"), 256)
+        created = row.get("created")
+        return _asset(
+            asset_type="model",
+            source=self.source,
+            source_id=model_id,
+            display_name=model_id,
+            version_authority={"model": model_id, "created": created},
+            binding_strength="observed_snapshot",
+            owner=owned_by,
+            platform="OpenAI",
+            model=model_id,
+            last_seen=created,
+            fallback_time=now,
+            source_url=f"{self.base_url}/v1/models/{model_id}",
+            metadata=_selected_metadata(
+                resource_kind="model",
+                owned_by=owned_by,
+                fine_tuned=model_id.startswith("ft:"),
+                shutdown_date=row.get("shutdown_date"),
+            ),
+        )
+
+    def discover(self) -> DiscoveryResult:
+        budget = _PaginationBudget(self.limits)
+        now = self._clock()
+        budget.page()
+        page = self._get(f"{self.base_url}/v1/models")
+        rows = _items(page, "data")
+        budget.add_records(len(rows))
+        assets = [self._model_asset(row, now) for row in rows]
+        return DiscoveryResult(tuple(assets), budget.pages)
+
+
+class ReplicateInventoryAdapter(_HttpAdapter):
+    """Replicate deployments owned by the current account.
+
+    ``GET /v1/deployments`` is account-scoped by the provider ("deployments
+    associated with the current account"), so the estate never mixes with
+    the public model catalogue. Each row's ``current_release`` pins a
+    64-character model version id — an immutable provider revision. Cursor
+    pagination follows the ``next`` URL, same-origin enforced.
+    """
+
+    name = "replicate"
+    source = "replicate"
+
+    def __init__(
+        self,
+        *,
+        endpoint: str = "https://api.replicate.com",
+        token_env: str = "REPLICATE_API_TOKEN",
+        transport: HttpTransport | None = None,
+        limits: DiscoveryLimits | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        super().__init__(
+            base_url=endpoint,
+            token_env=token_env,
+            transport=transport,
+            limits=limits,
+            sleep=sleep,
+            clock=clock,
+        )
+
+    def _deployment_rows(self, budget: _PaginationBudget) -> list[Mapping[str, Any]]:
+        url = f"{self.base_url}/v1/deployments"
+        seen: set[str] = set()
+        out: list[Mapping[str, Any]] = []
+        while True:
+            if url in seen:
+                raise DiscoveryProtocolError("Replicate pagination cycle detected")
+            seen.add(url)
+            budget.page()
+            page = self._get(url)
+            rows = _items(page, "results")
+            budget.add_records(len(rows))
+            out.extend(rows)
+            next_url = page.get("next")
+            if not next_url:
+                return out
+            url = _same_origin_next(
+                self.base_url,
+                str(next_url),
+                expected_path="/v1/deployments",
+            )
+
+    def _deployment_asset(self, row: Mapping[str, Any], now: float) -> DiscoveredAsset:
+        owner = _required_text(row.get("owner"), "Replicate deployment owner", 256)
+        name = _required_text(row.get("name"), "Replicate deployment name", 256)
+        release = row.get("current_release")
+        release_map: Mapping[str, Any] = release if isinstance(release, Mapping) else {}
+        version = str(release_map.get("version") or "").strip()
+        model = _optional_text(release_map.get("model"), 1_024)
+        deployment_id = f"{owner}/{name}"
+        authority: Mapping[str, Any] = (
+            {"deployment": deployment_id, "version": version}
+            if version
+            else {"deployment": deployment_id, "release": release_map.get("number")}
+        )
+        strength: BindingStrength = (
+            "immutable_provider_revision" if version else "observed_snapshot"
+        )
+        return _asset(
+            asset_type="model",
+            source=self.source,
+            source_id=deployment_id,
+            display_name=deployment_id,
+            version_authority=authority,
+            binding_strength=strength,
+            owner=owner,
+            platform="Replicate",
+            model=model,
+            last_seen=release_map.get("created_at"),
+            fallback_time=now,
+            source_url=f"https://replicate.com/deployments/{deployment_id}",
+            metadata=_selected_metadata(
+                resource_kind="deployment",
+                release_number=release_map.get("number"),
+                model=model,
+                version=version or None,
+            ),
+        )
+
+    def discover(self) -> DiscoveryResult:
+        budget = _PaginationBudget(self.limits)
+        now = self._clock()
+        assets = [
+            self._deployment_asset(row, now)
+            for row in self._deployment_rows(budget)
+        ]
+        return DiscoveryResult(tuple(assets), budget.pages)
+
+
 def _http_post_json(
     transport: HttpSqlTransport,
     url: str,
@@ -3200,6 +3370,8 @@ def build_configured_adapter(
         "databricks_unity_catalog": DatabricksUnityCatalogInventoryAdapter,
         "huggingface": HuggingFaceInventoryAdapter,
         "mlflow": MLflowInventoryAdapter,
+        "openai": OpenAIInventoryAdapter,
+        "replicate": ReplicateInventoryAdapter,
         "snowflake": SnowflakeInventoryAdapter,
         "vertex_ai": VertexAIInventoryAdapter,
     }

@@ -1502,6 +1502,8 @@ def pick_security_suite() -> dict[str, Any]:
             "Microsoft Copilot Studio": "copilot_studio",
             "MLflow tracking server": "mlflow",
             "Hugging Face Hub organization": "huggingface",
+            "OpenAI platform (org models + fine-tunes)": "openai",
+            "Replicate (account deployments)": "replicate",
             "Snowflake Model Registry": "snowflake",
             "Salesforce Agentforce": "agentforce",
         }
@@ -2072,6 +2074,23 @@ def pick_advanced() -> dict[str, Any]:
             "assessment route with forbidden combinations refused. Drafting "
             "and tracking assistance, never a conformity assessment or legal "
             "advice. OFF by default.",
+            default=False,
+        ),
+        "explainability": _q_confirm(
+            "Model-agnostic explainability? Seeded permutation importance, "
+            "partial dependence, Spearman global sensitivity, and "
+            "standardized-deviation reason codes, recordable as governed "
+            "evidence. Attribution for your own review, never a fairness "
+            "certification. OFF by default.",
+            default=False,
+        ),
+        "llm_gateway": _q_confirm(
+            "Governed LLM gateway? Agents built anywhere point their "
+            "OpenAI-compatible base URL at Lightwork; every call crosses a "
+            "governed checkpoint (own bearer, model allowlist, bounded "
+            "bodies, egress-guarded upstream) and unknown callers land in a "
+            "shadow-AI ledger. Requires an upstream URL and token after "
+            "setup. OFF by default.",
             default=False,
         ),
         "ai_literacy": _q_confirm(
@@ -4534,6 +4553,15 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[eu_conformity]")
         lines.append("enable = true")
+    if advanced.get("explainability"):
+        lines.append("")
+        lines.append("[explainability]")
+        lines.append("enable = true")
+    if advanced.get("llm_gateway"):
+        lines.append("")
+        lines.append("[llm_gateway]")
+        lines.append("enable = true")
+        lines.append('upstream_url = "https://api.openai.com"')
     if advanced.get("ai_literacy"):
         lines.append("")
         lines.append("[ai_literacy]")

@@ -799,8 +799,11 @@ here.
   Foundry, Google Vertex AI, Databricks Unity Catalog, Microsoft Copilot
   Studio, MLflow tracking-server, Hugging Face Hub organization, Snowflake
   Model Registry (one fixed read-only `SHOW MODELS IN ACCOUNT` statement;
-  asynchronous execution refused), and Salesforce Agentforce / Einstein Bot
-  definition estates (one fixed SOQL read over `BotDefinition`).
+  asynchronous execution refused), Salesforce Agentforce / Einstein Bot
+  definition estates (one fixed SOQL read over `BotDefinition`), OpenAI
+  platform organizations (`GET /v1/models`, fine-tunes flagged by
+  `owned_by`), and Replicate account deployments (account-scoped listing;
+  each `current_release` binds an immutable provider version).
   Connectors use fixed list operations, bounded pagination/retries/record caps,
   provider revision bindings, missing-asset grace runs, and explicit safe read
   projections. Credentials resolve from the standard provider chain or named
@@ -817,7 +820,10 @@ here.
   not a compliance or legal verdict.
 - **Governed model drift monitoring** (`drift_monitoring.py`, opt-in
   `[drift_monitoring] enable`) — tenant-scoped aggregate baselines and bounded
-  evaluations for feature PSI/KL, prediction drift, embedding-centroid cosine
+  evaluations for the full statistical battery — feature and prediction
+  PSI/KL, Jensen-Shannon divergence, a two-sample chi-squared homogeneity
+  test, and a binned Kolmogorov-Smirnov test with exact-tail p-values
+  computed in-tree (formula v2) — plus prediction drift, embedding-centroid cosine
   distance, and delayed-ground-truth performance decay. Raw feature rows,
   predictions, labels, and embeddings remain transient. Threshold breaches emit
   exact-artifact `drift_monitoring` evidence, a signed aggregate alert, and the
@@ -915,6 +921,32 @@ here.
   FRIA answer bodies stay operate-floor: the view-floor listing carries
   assertion state only. Nothing on the page transmits anything to an
   authority or external system.
+- **Model-agnostic explainability** (`explainability.py`, opt-in
+  `[explainability] enable`, `maverick explainability`) — dependency-free
+  implementations of the technical-evaluation battery: seeded permutation
+  importance (model reliance; accuracy-drop with labels) and partial
+  dependence for any caller-supplied scoring callable, Spearman global
+  sensitivity over logged feature/score pairs, and standardized-deviation
+  reason codes for single decisions (the adverse-action shape regulated
+  verticals expect). Reports record as digest-scoped `explainability`
+  evidence against a governed asset. Attribution for the operator's own
+  review — never a fairness certification, causal claim, or legal advice.
+- **Governed LLM gateway** (`llm_gateway.py`, dashboard
+  `/gateway/v1/chat/completions`, opt-in `[llm_gateway]`, `maverick
+  gateway`) — estate coverage for agents that never enroll: point any
+  OpenAI-compatible agent's base URL at Lightwork and every call crosses a
+  governed checkpoint — the gateway's own bearer, an optional model
+  allowlist, bounded bodies, the SSRF-pinned enterprise-egress-guarded
+  upstream path — while unknown callers land in a shadow-caller ledger
+  (digests, models, counts, token usage; bodies are never stored, upstream
+  error bodies never relayed). v1 is one fixed upstream, the chat-completions
+  shape, no streaming.
+- **Agent identity federation** — a trust-registry entry's `jwks_file` may
+  now be an `https://` JWKS endpoint (Microsoft Entra ID, Okta, any OIDC
+  IdP), fetched with a bounded timeout and cached keys, so platform-issued
+  agent tokens verify without exporting key files; authorization never
+  federates — the agent must still hold an active, inbound-permitted
+  registry entry, and the verified subject must equal the agent id exactly.
 - **Governance needs-attention digest** (`governance_alerts.py`,
   `maverick governance-alerts due`, `GET /api/v1/security/governance/alerts`)
   — one bounded read-side digest of what compliance must act on: Art. 73

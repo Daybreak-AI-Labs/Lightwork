@@ -704,6 +704,11 @@ _AUTH_EXEMPT = {
     # (itself auth-exempt) references it, so an unauthenticated recipient must
     # be able to load it.
     "/static/daybreak-logo.jpg",
+    # The LLM gateway authenticates every call with its OWN bearer inside
+    # maverick.llm_gateway (same rationale as /a2a/v1): callers are foreign
+    # agents that hold the gateway credential, never the dashboard bearer.
+    # Self-gates on [llm_gateway] enable and 403s when off.
+    "/gateway/v1/chat/completions",
 }
 
 
@@ -7094,6 +7099,40 @@ async def plan_tree_3d_page(request: Request) -> HTMLResponse:
         request, "plan_tree_3d.html",
         {"node_count": len(nodes), "fallback_html": forest_html(nodes)},
     )
+
+
+@app.post("/gateway/v1/chat/completions")
+async def llm_gateway_chat_completions(request: Request) -> JSONResponse:
+    """OpenAI-compatible governed pass-through for never-enrolled agents.
+
+    Auth is the gateway's own bearer, verified inside the core module; the
+    body is screened, forwarded over the SSRF-pinned egress path, and the
+    caller ledger updated. Bodies are never stored."""
+    from maverick import llm_gateway
+
+    if not llm_gateway.enabled():
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "message": (
+                        "The LLM gateway is disabled; enable [llm_gateway] "
+                        "in the Lightwork configuration."
+                    ),
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    authorization = request.headers.get("Authorization", "")
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    status_code, payload = await run_in_threadpool(
+        llm_gateway.handle_chat_completion, body, caller_token=token,
+    )
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 @app.get("/livez")

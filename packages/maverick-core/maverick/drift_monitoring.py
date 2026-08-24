@@ -25,7 +25,7 @@ from .privacy_ops import RecordConflict
 
 BASELINE_SCHEMA = "lightwork.model-drift-baseline.v1"
 REPORT_SCHEMA = "lightwork.model-drift-report.v1"
-FORMULA_VERSION = "model-drift-formula-v1"
+FORMULA_VERSION = "model-drift-formula-v2"
 
 _BASELINES = GovernedRecordStore(
     "model_drift_baselines",
@@ -47,6 +47,9 @@ _DEFAULTS: dict[str, object] = {
     "min_samples": 30,
     "psi_threshold": 0.2,
     "kl_threshold": 0.1,
+    "js_threshold": 0.1,
+    "ks_p_value_floor": 0.01,
+    "chi2_p_value_floor": 0.01,
     "embedding_cosine_threshold": 0.1,
     "performance_decay_threshold": 0.05,
     "evidence_validity_seconds": 30 * 24 * 60 * 60,
@@ -173,6 +176,176 @@ def kl_divergence(reference: Sequence[object], current: Sequence[object]) -> flo
     actual = _normalise_distribution(current, "current distribution")
     value = sum(e * math.log(e / a) for e, a in zip(expected, actual, strict=True))
     return round(max(0.0, value), 12)
+
+
+def jensen_shannon_divergence(
+    reference: Sequence[object],
+    current: Sequence[object],
+) -> float:
+    """Return JS divergence (natural log, bounded by ln 2) for aligned vectors."""
+
+    if len(reference) != len(current):
+        raise ValueError("reference and current distributions must align")
+    expected = _normalise_distribution(reference, "reference distribution")
+    actual = _normalise_distribution(current, "current distribution")
+    mixture = [(e + a) / 2.0 for e, a in zip(expected, actual, strict=True)]
+    value = 0.5 * sum(
+        e * math.log(e / m) for e, m in zip(expected, mixture, strict=True)
+    ) + 0.5 * sum(a * math.log(a / m) for a, m in zip(actual, mixture, strict=True))
+    return round(min(max(0.0, value), math.log(2.0)), 12)
+
+
+def _regularized_gamma_q(s: float, x: float) -> float:
+    """Upper regularized incomplete gamma Q(s, x): series below s+1, Lentz above."""
+
+    if s <= 0 or x < 0 or not (math.isfinite(s) and math.isfinite(x)):
+        raise ValueError("gamma arguments are invalid")
+    if x == 0:
+        return 1.0
+    if x < s + 1.0:
+        term = 1.0 / s
+        total = term
+        denominator = s
+        for _ in range(500):
+            denominator += 1.0
+            term *= x / denominator
+            total += term
+            if abs(term) < abs(total) * 1e-15:
+                break
+        lower = total * math.exp(-x + s * math.log(x) - math.lgamma(s))
+        return min(max(0.0, 1.0 - lower), 1.0)
+    tiny = 1e-300
+    b = x + 1.0 - s
+    c = 1.0 / tiny
+    d = 1.0 / b
+    h = d
+    for i in range(1, 500):
+        a_i = -i * (i - s)
+        b += 2.0
+        d = a_i * d + b
+        if abs(d) < tiny:
+            d = tiny
+        c = b + a_i / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-15:
+            break
+    upper = h * math.exp(-x + s * math.log(x) - math.lgamma(s))
+    return min(max(0.0, upper), 1.0)
+
+
+def chi_squared_two_sample(
+    reference: Sequence[object],
+    current: Sequence[object],
+) -> dict[str, Any]:
+    """Two-sample chi-squared homogeneity test over aligned count vectors."""
+
+    if len(reference) != len(current) or not reference:
+        raise ValueError("reference and current counts must align")
+    ref = [max(0.0, _finite_number(value, "reference count")) for value in reference]
+    cur = [max(0.0, _finite_number(value, "current count")) for value in current]
+    n_ref = sum(ref)
+    n_cur = sum(cur)
+    if n_ref <= 0 or n_cur <= 0:
+        raise ValueError("counts must have positive mass")
+    scale_ref = math.sqrt(n_cur / n_ref)
+    scale_cur = math.sqrt(n_ref / n_cur)
+    statistic = 0.0
+    used = 0
+    for r, c in zip(ref, cur, strict=True):
+        if r + c <= 0:
+            continue
+        used += 1
+        statistic += ((scale_ref * r) - (scale_cur * c)) ** 2 / (r + c)
+    dof = max(1, used - 1)
+    return {
+        "statistic": round(statistic, 12),
+        "dof": dof,
+        "p_value": round(_regularized_gamma_q(dof / 2.0, statistic / 2.0), 12),
+    }
+
+
+def binned_ks_test(
+    reference: Sequence[object],
+    current: Sequence[object],
+) -> dict[str, Any]:
+    """Two-sample Kolmogorov-Smirnov approximation over aligned histograms.
+
+    Exact for the binned CDFs the baseline stores; the asymptotic p-value
+    uses the effective sample size of both windows.
+    """
+
+    if len(reference) != len(current) or not reference:
+        raise ValueError("reference and current counts must align")
+    ref = [max(0.0, _finite_number(value, "reference count")) for value in reference]
+    cur = [max(0.0, _finite_number(value, "current count")) for value in current]
+    n_ref = sum(ref)
+    n_cur = sum(cur)
+    if n_ref <= 0 or n_cur <= 0:
+        raise ValueError("counts must have positive mass")
+    distance = 0.0
+    cumulative_ref = 0.0
+    cumulative_cur = 0.0
+    for r, c in zip(ref, cur, strict=True):
+        cumulative_ref += r / n_ref
+        cumulative_cur += c / n_cur
+        distance = max(distance, abs(cumulative_ref - cumulative_cur))
+    effective = (n_ref * n_cur) / (n_ref + n_cur)
+    lam = (math.sqrt(effective) + 0.12 + 0.11 / math.sqrt(effective)) * distance
+    # The asymptotic alternating series only converges for a meaningful
+    # lambda; when it cannot converge the distributions are statistically
+    # indistinguishable and the p-value is 1 (Numerical Recipes' probks).
+    total = 0.0
+    converged = False
+    for k in range(1, 101):
+        term = ((-1.0) ** (k - 1)) * math.exp(-2.0 * (k * lam) ** 2)
+        total += term
+        if abs(term) < 1e-16:
+            converged = True
+            break
+    p_value = min(max(0.0, 2.0 * total), 1.0) if converged else 1.0
+    return {"statistic": round(distance, 12), "p_value": round(p_value, 12)}
+
+
+def _distribution_battery(
+    reference_counts: Sequence[object],
+    current_counts: Sequence[object],
+    *,
+    ordered: bool,
+) -> dict[str, Any]:
+    """Every distribution-shift statistic the report carries for one signal."""
+
+    battery: dict[str, Any] = {
+        "psi": population_stability_index(reference_counts, current_counts),
+        "kl_divergence": kl_divergence(reference_counts, current_counts),
+        "js_divergence": jensen_shannon_divergence(reference_counts, current_counts),
+        "chi_squared": chi_squared_two_sample(reference_counts, current_counts),
+    }
+    if ordered:
+        battery["ks"] = binned_ks_test(reference_counts, current_counts)
+    return battery
+
+
+def _battery_exceeded(
+    prefix: str,
+    metrics: Mapping[str, Any],
+    settings: Mapping[str, Any],
+    exceeded: list[str],
+) -> None:
+    if metrics["psi"] >= settings["psi_threshold"]:
+        exceeded.append(f"{prefix}:psi")
+    if metrics["kl_divergence"] >= settings["kl_threshold"]:
+        exceeded.append(f"{prefix}:kl")
+    if metrics["js_divergence"] >= settings["js_threshold"]:
+        exceeded.append(f"{prefix}:js")
+    if metrics["chi_squared"]["p_value"] <= settings["chi2_p_value_floor"]:
+        exceeded.append(f"{prefix}:chi2")
+    ks = metrics.get("ks")
+    if ks is not None and ks["p_value"] <= settings["ks_p_value_floor"]:
+        exceeded.append(f"{prefix}:ks")
 
 
 def _edges(values: Sequence[float], bins: int) -> list[float]:
@@ -387,6 +560,18 @@ def get_drift_config() -> dict[str, Any]:
         )
         values["kl_threshold"] = _bounded_number(
             values["kl_threshold"], "kl_threshold", minimum=0.0, maximum=100.0
+        )
+        values["js_threshold"] = _bounded_number(
+            values["js_threshold"], "js_threshold", minimum=0.0, maximum=1.0
+        )
+        values["ks_p_value_floor"] = _bounded_number(
+            values["ks_p_value_floor"], "ks_p_value_floor", minimum=0.0, maximum=0.5
+        )
+        values["chi2_p_value_floor"] = _bounded_number(
+            values["chi2_p_value_floor"],
+            "chi2_p_value_floor",
+            minimum=0.0,
+            maximum=0.5,
         )
         values["embedding_cosine_threshold"] = _bounded_number(
             values["embedding_cosine_threshold"],
@@ -633,8 +818,9 @@ class DriftMonitoringService:
                 current_counts = _histogram(values, list(reference.get("edges") or []))
                 reference_counts = list(reference.get("counts") or [])
                 feature_metrics[name] = {
-                    "psi": population_stability_index(reference_counts, current_counts),
-                    "kl_divergence": kl_divergence(reference_counts, current_counts),
+                    **_distribution_battery(
+                        reference_counts, current_counts, ordered=True,
+                    ),
                     "sample_count": len(values),
                 }
         prediction_metrics = None
@@ -647,8 +833,11 @@ class DriftMonitoringService:
             current_counts = _current_prediction_counts(predictions, baseline_prediction)
             reference_counts = list(baseline_prediction.get("counts") or [])
             prediction_metrics = {
-                "psi": population_stability_index(reference_counts, current_counts),
-                "kl_divergence": kl_divergence(reference_counts, current_counts),
+                **_distribution_battery(
+                    reference_counts,
+                    current_counts,
+                    ordered=baseline_prediction.get("kind") == "numeric",
+                ),
                 "sample_count": len(predictions),
             }
         embedding_metrics = None
@@ -692,15 +881,9 @@ class DriftMonitoringService:
 
         exceeded: list[str] = []
         for name, metrics in feature_metrics.items():
-            if metrics["psi"] >= settings["psi_threshold"]:
-                exceeded.append(f"feature:{name}:psi")
-            if metrics["kl_divergence"] >= settings["kl_threshold"]:
-                exceeded.append(f"feature:{name}:kl")
+            _battery_exceeded(f"feature:{name}", metrics, settings, exceeded)
         if prediction_metrics is not None:
-            if prediction_metrics["psi"] >= settings["psi_threshold"]:
-                exceeded.append("prediction:psi")
-            if prediction_metrics["kl_divergence"] >= settings["kl_threshold"]:
-                exceeded.append("prediction:kl")
+            _battery_exceeded("prediction", prediction_metrics, settings, exceeded)
         if (
             embedding_metrics is not None
             and embedding_metrics["cosine_distance"]
@@ -727,6 +910,9 @@ class DriftMonitoringService:
                 for key in (
                     "psi_threshold",
                     "kl_threshold",
+                    "js_threshold",
+                    "ks_p_value_floor",
+                    "chi2_p_value_floor",
                     "embedding_cosine_threshold",
                     "performance_decay_threshold",
                 )

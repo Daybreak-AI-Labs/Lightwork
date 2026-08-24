@@ -1319,3 +1319,132 @@ def test_agentforce_rejects_off_origin_next_and_endless_not_done_pages(
     )
     with pytest.raises(inventory.DiscoveryProtocolError, match="nextRecordsUrl"):
         adapter.discover()
+
+
+def test_openai_lists_models_with_ownership(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    def handler(call):
+        assert call["url"] == "https://api.openai.com/v1/models"
+        assert call["headers"]["Authorization"] == "Bearer sk-test"
+        return _Response(
+            {
+                "object": "list",
+                "data": [
+                    {
+                        "id": "gpt-5.2",
+                        "object": "model",
+                        "created": 1_764_000_000,
+                        "owned_by": "system",
+                    },
+                    {
+                        "id": "ft:gpt-5-mini:acme:triage:9x",
+                        "object": "model",
+                        "created": 1_765_000_000,
+                        "owned_by": "org-acme",
+                    },
+                ],
+            }
+        )
+
+    adapter = inventory.OpenAIInventoryAdapter(
+        transport=_Transport(handler),
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 1
+    vendor, tuned = result.assets
+    assert vendor.source_id == "gpt-5.2"
+    assert vendor.owner == "system"
+    assert vendor.metadata["fine_tuned"] is False
+    assert tuned.owner == "org-acme"
+    assert tuned.metadata["fine_tuned"] is True
+    assert all(
+        asset.binding_strength == "observed_snapshot" for asset in result.assets
+    )
+
+
+def test_openai_rejects_a_malformed_listing(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    adapter = inventory.OpenAIInventoryAdapter(
+        transport=_Transport(lambda call: _Response({"object": "list", "data": "no"})),
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError):
+        adapter.discover()
+
+
+_FAKE_REPLICATE_VERSION = (
+    "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"  # pragma: allowlist secret
+)
+
+
+def test_replicate_pages_account_deployments_and_binds_versions(monkeypatch):
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8-test")
+
+    def handler(call):
+        if "cursor" not in call["url"]:
+            return _Response(
+                {
+                    "results": [
+                        {
+                            "owner": "acme",
+                            "name": "support-triage",
+                            "current_release": {
+                                "number": 7,
+                                "model": "acme/triage-llm",
+                                "version": _FAKE_REPLICATE_VERSION,
+                                "created_at": "2026-08-10T00:00:00Z",
+                            },
+                        }
+                    ],
+                    "next": "https://api.replicate.com/v1/deployments?cursor=abc",
+                }
+            )
+        return _Response(
+            {
+                "results": [
+                    {
+                        "owner": "acme",
+                        "name": "experimental",
+                        "current_release": {"number": 1, "model": "acme/exp"},
+                    }
+                ],
+                "next": None,
+            }
+        )
+
+    adapter = inventory.ReplicateInventoryAdapter(
+        transport=_Transport(handler),
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 2
+    pinned, floating = result.assets
+    assert pinned.source_id == "acme/support-triage"
+    assert pinned.binding_strength == "immutable_provider_revision"
+    assert pinned.metadata["version"] == _FAKE_REPLICATE_VERSION
+    assert floating.binding_strength == "observed_snapshot"
+    assert all(asset.platform == "Replicate" for asset in result.assets)
+
+
+def test_replicate_rejects_an_off_origin_next_url(monkeypatch):
+    monkeypatch.setenv("REPLICATE_API_TOKEN", "r8-test")
+    adapter = inventory.ReplicateInventoryAdapter(
+        transport=_Transport(
+            lambda call: _Response(
+                {"results": [], "next": "https://evil.example/v1/deployments?c=1"}
+            )
+        ),
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError):
+        adapter.discover()
