@@ -839,6 +839,17 @@ here.
   surveillance authority of an EU-27 Member State (73(1)), renders a bounded
   report draft with citations, and never transmits anything itself. Citations
   carry the consolidated basis (2026-07-27) as versioned metadata.
+- **AI regulatory-change impact bridge** (`ai_regulatory_feed.py`, opt-in
+  `[ai_regulatory_feed] enable`, requires finance operations and the AI
+  evidence gateway; `maverick regulatory-feed`) — runs reviewed alerts from
+  the finance regulatory-change engine through explicit operator-configured
+  impact rules to create `ai-regulatory-impact.v1` records for human review,
+  tenant-bound staleness records naming the exact evidence affected, and
+  idempotent customer notices deliverable through the configured notification
+  backends with CAS retry semantics. Only bounded alert metadata and
+  before/after values are retained; full source documents, notification
+  credentials, and delivery receipts are never persisted. Decision support
+  requiring human review — never a legal applicability opinion.
 - **Signed AI policy packs** (`policy_packs.py`, opt-in `[policy_packs]
   enable`) — bounded NIST AI RMF and EU AI Act starter mappings plus
   Ed25519-verified external updates, anti-rollback staging, explicit global

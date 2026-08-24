@@ -2050,6 +2050,15 @@ def pick_advanced() -> dict[str, Any]:
             "only -- nothing is ever transmitted. OFF by default.",
             default=False,
         ),
+        "ai_regulatory_feed": _q_confirm(
+            "AI regulatory-change impact bridge? Run reviewed regulatory "
+            "alerts through explicit operator rules to create policy-impact "
+            "records, exact evidence-staleness flags, and idempotent customer "
+            "notices. Requires finance operations and the AI evidence gateway. "
+            "Decision support, never a legal applicability opinion. OFF by "
+            "default.",
+            default=False,
+        ),
         "agent_topology": _q_confirm(
             "Agent dependency and MCP blast-radius governance? Project each "
             "enabled agent's tools, MCP servers, hosts, paths, knowledge, and model "
@@ -4485,6 +4494,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("ai_incident_reporting"):
         lines.append("")
         lines.append("[ai_incident_reporting]")
+        lines.append("enable = true")
+    if advanced.get("ai_regulatory_feed"):
+        lines.append("")
+        lines.append("[ai_regulatory_feed]")
         lines.append("enable = true")
     if advanced.get("agent_topology"):
         lines.append("")

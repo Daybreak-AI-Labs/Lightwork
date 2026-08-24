@@ -808,3 +808,151 @@ def red_team_cancel_schedule(schedule_id: str, revision: int,
     except (KeyError, ValueError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
     click.echo(f"{record['id']} {record['status']}")
+
+
+@main.group("regulatory-feed")
+def regulatory_feed() -> None:
+    """Bridge reviewed regulatory alerts into AI-governance impact records.
+
+    The finance regulatory-change engine stays the source/version authority
+    and its human review queue stays the disposition authority. `sync` runs
+    reviewed alerts through operator-configured impact rules to create
+    impact, evidence-staleness, and customer-notice records. Decision
+    support only -- never a legal applicability opinion.
+    """
+
+
+@regulatory_feed.command("sync")
+@click.option("--rules", "rules_path", required=True,
+              type=click.Path(exists=True, dir_okay=False),
+              help="JSON file: a list of explicit impact-rule mappings.")
+@click.option("--status", default="accepted", show_default=True,
+              type=click.Choice(["open", "in_review", "accepted"]),
+              help="Which alert queue state feeds the bridge.")
+@click.option("--limit", type=int, default=100, show_default=True,
+              help="Maximum alerts to bridge this pass.")
+@click.option("--deliver", is_flag=True,
+              help="Also deliver each created notice through the configured "
+                   "notification backends.")
+@click.option("--by", "actor", required=True,
+              help="Dispatching human or cron identity.")
+def regulatory_feed_sync(rules_path: str, status: str, limit: int,
+                         deliver: bool, actor: str) -> None:
+    """Run each reviewed alert through the impact bridge, idempotently."""
+    import json
+
+    from ..ai_regulatory_feed import sync_alert
+    from ..finance.regulatory_change import RegulatoryChangeEngine
+    from ..paths import data_dir
+
+    try:
+        rules = json.loads(Path(rules_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise click.ClickException(f"could not load rules: {e}") from e
+    if not isinstance(rules, list) or not rules:
+        raise click.ClickException("rules file must be a non-empty JSON list")
+    try:
+        engine = RegulatoryChangeEngine(
+            data_dir("finance_operations", "regulatory_change.sqlite3")
+        )
+        alerts = engine.list_alerts(status=status, limit=limit)
+    except (OSError, ValueError, RuntimeError) as e:
+        raise click.ClickException(f"could not list alerts: {e}") from e
+    if not alerts:
+        click.echo(f"no {status} regulatory alerts.")
+        return
+    matched = 0
+    failures: list[str] = []
+    for alert in alerts:
+        try:
+            result = sync_alert(alert, rules=rules, actor=actor, deliver=deliver)
+        except (KeyError, ValueError, RuntimeError) as e:
+            failures.append(f"{getattr(alert, 'alert_id', '?')}: {e}")
+            continue
+        impact = result.get("impact")
+        if impact is None:
+            continue
+        matched += 1
+        notice = result.get("notice") or {}
+        staleness = result.get("staleness") or []
+        click.echo(f"  {getattr(alert, 'alert_id', '?')}: impact "
+                   f"{impact.get('id')}  stale-evidence {len(staleness)}  "
+                   f"notice {notice.get('id')} [{notice.get('status')}]")
+    click.echo(f"bridged {matched} of {len(alerts)} {status} alert(s)")
+    if failures:
+        for line in failures:
+            click.echo(f"  FAILED {line}")
+        raise click.ClickException(f"{len(failures)} alert(s) failed to bridge")
+
+
+@regulatory_feed.command("staleness")
+@click.option("--evidence", "evidence_id", default=None,
+              help="Only staleness rows naming this evidence id.")
+@click.option("--limit", type=int, default=100, show_default=True)
+def regulatory_feed_staleness(evidence_id: str | None, limit: int) -> None:
+    """Active evidence-staleness records, oldest first."""
+    from ..ai_regulatory_feed import list_active_staleness
+    try:
+        rows = list_active_staleness(evidence_id=evidence_id, limit=limit)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    if not rows:
+        click.echo("no active regulatory staleness.")
+        return
+    for row in rows:
+        click.echo(f"  {row['id']}  rev {row.get('revision')}  "
+                   f"evidence {row.get('evidence_id')}  "
+                   f"control {row.get('control_id')}  {row.get('created_at')}")
+
+
+@regulatory_feed.command("resolve")
+@click.argument("staleness_id")
+@click.option("--revision", type=int, required=True,
+              help="Expected record revision (CAS).")
+@click.option("--resolution", required=True,
+              help="What was refreshed or re-attested, and why it suffices.")
+@click.option("--by", "actor", required=True, help="Resolving human.")
+def regulatory_feed_resolve(staleness_id: str, revision: int,
+                            resolution: str, actor: str) -> None:
+    """Resolve one staleness record after the evidence was refreshed."""
+    from ..ai_regulatory_feed import resolve_staleness
+    try:
+        row = resolve_staleness(
+            staleness_id, expected_revision=revision,
+            resolution=resolution, actor=actor,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{row['id']} {row.get('status')}")
+
+
+@regulatory_feed.command("notices")
+@click.option("--limit", type=int, default=100, show_default=True)
+def regulatory_feed_notices(limit: int) -> None:
+    """Customer notices with their delivery state."""
+    from ..ai_regulatory_feed import list_notices
+    try:
+        rows = list_notices(limit=limit)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    if not rows:
+        click.echo("no regulatory customer notices.")
+        return
+    for row in rows:
+        click.echo(f"  {row['id']}  {row.get('status'):10s} rev "
+                   f"{row.get('revision')}  {row.get('title')}")
+
+
+@regulatory_feed.command("deliver")
+@click.argument("notice_id")
+@click.option("--revision", type=int, required=True,
+              help="Expected record revision (CAS).")
+@click.option("--by", "actor", required=True, help="Delivering human or cron identity.")
+def regulatory_feed_deliver(notice_id: str, revision: int, actor: str) -> None:
+    """Deliver one notice through the configured notification backends."""
+    from ..ai_regulatory_feed import deliver_notice
+    try:
+        row = deliver_notice(notice_id, expected_revision=revision, actor=actor)
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{row['id']} {row.get('status')}")

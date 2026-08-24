@@ -3,8 +3,8 @@
   "counts": {
     "CI_ONLY": 13,
     "CLI_ONLY": 27,
-    "PRODUCTION": 919,
-    "TEST_ONLY": 85,
+    "PRODUCTION": 920,
+    "TEST_ONLY": 84,
     "UNREACHED": 6
   },
   "modules": {
@@ -32,7 +32,7 @@
     "maverick.ai_evidence_ledger": "PRODUCTION",
     "maverick.ai_incident_reporting": "PRODUCTION",
     "maverick.ai_inventory": "PRODUCTION",
-    "maverick.ai_regulatory_feed": "TEST_ONLY",
+    "maverick.ai_regulatory_feed": "PRODUCTION",
     "maverick.ai_vendor_risk": "PRODUCTION",
     "maverick.air_gap": "PRODUCTION",
     "maverick.annotation_export": "CLI_ONLY",
