@@ -70,6 +70,7 @@ KNOWN_SECTIONS = frozenset({
     "agent_topology", "drift_monitoring", "portfolio_risk", "red_team_assurance",
     "ai_incident_reporting",
     "ai_literacy",
+    "eu_conformity",
     "ai_regulatory_feed",
     "grc_sync",
     # Registry drift, again: these are all read by real load_config() call sites

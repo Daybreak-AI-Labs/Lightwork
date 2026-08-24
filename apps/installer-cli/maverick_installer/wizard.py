@@ -2065,6 +2065,15 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "eu_conformity": _q_confirm(
+            "EU AI Act conformity workflows? Human-gated registers for the "
+            "Art. 27 fundamental-rights impact assessment, the Annex IV "
+            "technical-documentation checklist, and the Art. 43 conformity-"
+            "assessment route with forbidden combinations refused. Drafting "
+            "and tracking assistance, never a conformity assessment or legal "
+            "advice. OFF by default.",
+            default=False,
+        ),
         "ai_literacy": _q_confirm(
             "EU AI Act Art. 4 AI-literacy register? Named humans set which "
             "trainings each role requires, record completions with evidence "
@@ -4520,6 +4529,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("ai_regulatory_feed"):
         lines.append("")
         lines.append("[ai_regulatory_feed]")
+        lines.append("enable = true")
+    if advanced.get("eu_conformity"):
+        lines.append("")
+        lines.append("[eu_conformity]")
         lines.append("enable = true")
     if advanced.get("ai_literacy"):
         lines.append("")

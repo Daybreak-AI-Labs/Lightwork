@@ -857,6 +857,19 @@ here.
   before/after values are retained; full source documents, notification
   credentials, and delivery receipts are never persisted. Decision support
   requiring human review — never a legal applicability opinion.
+- **EU conformity workflows** (`eu_conformity.py`, opt-in `[eu_conformity]
+  enable`, `maverick eu-conformity`) — three human-gated registers: the
+  Art. 27 fundamental-rights impact assessment as six named element
+  assertions with completion, the Art. 27(2) outdate-and-reassess
+  transition, and a recorded (never transmitted) Art. 27(3) authority
+  notification; the Art. 11(1)/Annex IV technical-documentation checklist
+  with per-item references and a cited skeleton render; and the Art. 43
+  conformity-assessment route where forbidden combinations are refused at
+  the boundary (point 1 without harmonised standards or common
+  specifications cannot self-assess; points 2-8 never involve a notified
+  body) and a substantial modification reopens the assessment while
+  provider pre-determined documented changes do not. Drafting and tracking
+  assistance — never a conformity assessment, CE marking, or legal advice.
 - **AI-literacy register** (`ai_literacy.py`, opt-in `[ai_literacy] enable`,
   `maverick ai-literacy`) — the EU AI Act Art. 4 obligation (applicable since
   2025-02-02) made inspectable: named humans set per-role training
