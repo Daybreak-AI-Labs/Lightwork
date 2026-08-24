@@ -863,6 +863,46 @@ async def run_due_red_team_schedules(
     )
 
 
+@router.get("/ai-incidents")
+async def ai_incident_declarations(
+    request: Request,
+    status: str | None = Query(default=None, min_length=1, max_length=32),
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    rows = await _call(reporting.list_declarations, status=status)
+    return {"declarations": rows, "count": len(rows)}
+
+
+@router.get("/ai-incidents/categories")
+async def ai_incident_categories(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    return {
+        "categories": reporting.SERIOUS_INCIDENT_CATEGORIES,
+        "regulation": reporting.REGULATION_METADATA,
+    }
+
+
+@router.get("/ai-incidents/overdue")
+async def ai_incident_overdue(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    rows = await _call(reporting.overdue_declarations)
+    return {"declarations": rows, "count": len(rows)}
+
+
+@router.get("/ai-incidents/{record_id}/report")
+async def ai_incident_report_draft(
+    request: Request,
+    record_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    draft = await _call(reporting.render_report, record_id)
+    return {"record_id": record_id, "draft": draft}
+
+
 @router.get("/portfolio-risk/report")
 async def portfolio_risk_report(request: Request) -> dict[str, Any]:
     require_permission(request, "view")

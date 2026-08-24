@@ -478,3 +478,85 @@ def test_red_team_schedule_dispatch_materializes_a_real_campaign(
         "/api/v1/security/assurance/red-team/schedules/run-due",
         json={},
     ))["count"] == 0
+
+
+def test_ai_incident_clocks_surface_on_api_and_page():
+    """G13 acceptance: declared Art. 73 clocks are visible, drafts gated."""
+    import time as _time
+
+    from maverick import ai_incident_reporting as air
+    from maverick import model_risk_assurance as mra
+
+    # Disabled: the routes fail closed and the page explains the knob.
+    assert client.get(
+        "/api/v1/security/assurance/ai-incidents"
+    ).status_code == 403
+    page = client.get("/security/assurance")
+    assert page.status_code == 200
+    assert "Enable AI incident reporting" in page.text
+
+    _reset_config_with("\n[ai_incident_reporting]\nenable = true\n")
+
+    officer = mra.ModelRiskAssuranceOfficer()
+    now = _time.time()
+    observation = officer.observe_asset(
+        asset_type="model",
+        source="http_acceptance",
+        source_id="triage-model",
+        display_name="Triage model",
+        version_digest=_hex("triage-model-v1"),
+        actor="inventory-operator",
+        observed_at=now,
+        metadata={},
+        dependencies=[],
+    )
+    incident = officer.record_incident(
+        observation["asset_id"],
+        source_id="incident-http-1",
+        severity="high",
+        summary="The triage model misrouted an emergency case.",
+        actor="incident-manager",
+        occurred_at=now - 7_200,
+        evidence_ids=[],
+    )
+    declared = air.declare_serious_incident(
+        incident["id"],
+        category="critical_infrastructure_disruption",
+        widespread=False,
+        became_aware_at=now - 3_600,
+        causal_link="reasonably_likely",
+        member_state="DE",
+        authority="Bundesnetzagentur market surveillance",
+        declared_by="incident-manager",
+    )
+
+    listing = _ok(client.get("/api/v1/security/assurance/ai-incidents"))
+    assert listing["count"] == 1
+    row = listing["declarations"][0]
+    assert row["id"] == declared["id"]
+    assert row["clock"]["overdue"] is False
+    assert row["deadline_citation"] == "Art. 73(3)"
+
+    categories = _ok(client.get(
+        "/api/v1/security/assurance/ai-incidents/categories"
+    ))
+    assert categories["categories"]["death"]["window_days"] == 10
+    assert categories["regulation"]["consolidated"] == "2026-07-27"
+
+    assert _ok(client.get(
+        "/api/v1/security/assurance/ai-incidents/overdue"
+    ))["count"] == 0
+
+    draft = _ok(client.get(
+        f"/api/v1/security/assurance/ai-incidents/{declared['id']}/report"
+    ))
+    assert "Art. 73(3)" in draft["draft"]
+    assert client.get(
+        "/api/v1/security/assurance/ai-incidents/ASI-missing/report"
+    ).status_code == 404
+
+    page = client.get("/security/assurance")
+    assert page.status_code == 200
+    assert "Serious-incident clocks (EU AI Act Art. 73)" in page.text
+    assert declared["id"] in page.text
+    assert "d left" in page.text
