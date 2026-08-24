@@ -1,0 +1,536 @@
+{% extends "base.html" %}
+{% block title %}Governance Workspace - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .gov-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-4); }
+  .gov-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-3); margin:var(--space-3) 0; }
+  .gov-form label { display:flex; flex-direction:column; gap:var(--space-1); font-size:var(--text-sm); }
+  .gov-form__wide { grid-column:1 / -1; }
+  .gov-help { color:var(--muted); font-size:var(--text-sm); margin:var(--space-1) 0 0; }
+  .gov-table { overflow-x:auto; }
+  .gov-table caption { text-align:left; color:var(--muted); padding:0 0 var(--space-2); }
+  .gov-chip { display:inline-block; padding:0.1rem 0.5rem; border-radius:999px; font-size:var(--text-sm); border:1px solid var(--border); }
+  .gov-chip--good { border-color:var(--ok); }
+  .gov-chip--warn { border-color:var(--warn); }
+  .gov-chip--bad { border-color:var(--danger); }
+  .gov-alert { border-left:4px solid var(--danger); padding:var(--space-3); background:var(--surface-2); }
+  .gov-muted { color:var(--muted); }
+  .gov-empty { color:var(--muted); font-style:italic; }
+  .gov-element { margin:var(--space-3) 0; }
+  .gov-element textarea { width:100%; min-height:5rem; }
+  .gov-render { max-height:24rem; overflow:auto; background:var(--surface-2); padding:var(--space-3); border-radius:8px; white-space:pre-wrap; }
+</style>
+
+<section class="panel">
+  <h1>Governance Workspace</h1>
+  <p class="gov-muted">Plain-language workflows for legal, privacy, compliance, and HR:
+    fundamental-rights assessments, technical-documentation checklists, AI-literacy
+    tracking, and serious-incident clocks. Every entry is recorded under your name in
+    the governed ledger. Nothing on this page transmits anything to an authority or
+    external system.</p>
+</section>
+
+<section class="panel">
+  <h2>Fundamental rights impact assessments (EU AI Act Art. 27)</h2>
+  {% if not eu_conformity_enabled %}
+  <p class="gov-alert">Enable EU conformity workflows to run fundamental-rights impact
+    assessments. Ask an administrator to switch on <code>[eu_conformity]</code>.</p>
+  {% else %}
+  <form id="fria-open" class="gov-form">
+    <label>Which AI system is being assessed?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…">
+      <span class="gov-help">The governed asset id from the assurance inventory.</span>
+    </label>
+    <label>Where will it be used?
+      <input name="context" required maxlength="128" placeholder="underwriting-triage">
+      <span class="gov-help">A short name for the deployment context, e.g. a process or team.</span>
+    </label>
+    <div class="gov-form__wide"><button type="submit">Start an assessment</button>
+      <span id="fria-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  {% if fria_error %}<p class="gov-alert">{{ fria_error }}</p>{% endif %}
+  {% if fria_records %}
+  <div class="gov-table"><table>
+    <caption>Assessments in this tenant, with their Art. 27 element progress</caption>
+    <thead><tr><th>Assessment</th><th>System</th><th>Context</th><th>Status</th><th>Progress</th><th>Open</th></tr></thead>
+    <tbody>
+    {% for row in fria_records %}<tr>
+      <td>{{ row.id }}</td><td>{{ row.asset_id }}</td><td>{{ row.context }}</td>
+      <td><span class="gov-chip {% if row.status == 'completed' %}gov-chip--good{% elif row.status == 'outdated' %}gov-chip--warn{% else %}gov-chip--bad{% endif %}">{{ row.status }}</span></td>
+      <td>{{ row.progress }}/6 elements</td>
+      <td><button type="button" data-fria-open-record="{{ row.id }}" data-revision="{{ row.revision }}">Work on it</button></td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="gov-empty">No assessments yet. Starting one takes under a minute.</p>{% endif %}
+  <div id="fria-editor" hidden>
+    <h3 id="fria-editor-title">Assessment</h3>
+    <p class="gov-help">Answer each question in your own words. Each answer is saved
+      under your name with its Article citation. The assessment can only be marked
+      complete once all six are answered.</p>
+    <div id="fria-elements"></div>
+    <div class="gov-form__wide">
+      <button type="button" id="fria-save">Save answers</button>
+      <button type="button" id="fria-complete">Mark assessment complete</button>
+      <button type="button" id="fria-outdate">Something changed — reopen</button>
+      <button type="button" id="fria-notify">Record authority notification</button>
+      <button type="button" id="fria-draft">View the written assessment</button>
+      <span id="fria-editor-status" class="gov-muted" aria-live="polite"></span>
+    </div>
+    <pre id="fria-draft-view" class="gov-render" hidden></pre>
+  </div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Technical documentation checklist (Annex IV)</h2>
+  {% if not eu_conformity_enabled %}
+  <p class="gov-alert">Enable EU conformity workflows to track the Annex IV
+    technical-documentation checklist.</p>
+  {% else %}
+  <form id="annex-open" class="gov-form">
+    <label>Which AI system?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…">
+      <span class="gov-help">Opens (or reopens) the nine-item checklist for this system.</span>
+    </label>
+    <div class="gov-form__wide"><button type="submit">Open the checklist</button>
+      <span id="annex-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  <div id="annex-editor" hidden>
+    <h3 id="annex-editor-title">Checklist</h3>
+    <p class="gov-help">For each item, say where that documentation lives — a document
+      link, wiki page, or file path. You are recording where it is, not writing it here.</p>
+    <div id="annex-items"></div>
+    <div class="gov-form__wide">
+      <button type="button" id="annex-render">View the checklist summary</button>
+      <span id="annex-editor-status" class="gov-muted" aria-live="polite"></span>
+    </div>
+    <pre id="annex-render-view" class="gov-render" hidden></pre>
+  </div>
+  {% endif %}
+</section>
+
+<div class="gov-grid">
+<section class="panel">
+  <h2>AI literacy (Art. 4)</h2>
+  {% if not ai_literacy_enabled %}
+  <p class="gov-alert">Enable the AI-literacy register to track training requirements
+    and completions. Ask an administrator to switch on <code>[ai_literacy]</code>.</p>
+  {% else %}
+  {% if literacy_error %}<p class="gov-alert">{{ literacy_error }}</p>{% endif %}
+  {% if literacy_gaps and literacy_gaps.person_count %}
+  <p>{{ literacy_gaps.person_count }} person(s) tracked —
+    <span class="gov-chip gov-chip--good">{{ literacy_gaps.counts.current }} current</span>
+    <span class="gov-chip gov-chip--warn">{{ literacy_gaps.counts.expired }} expired</span>
+    <span class="gov-chip gov-chip--bad">{{ literacy_gaps.counts.missing }} missing</span></p>
+  <div class="gov-table"><table>
+    <caption>Who still needs training, by person</caption>
+    <thead><tr><th>Person</th><th>Roles</th><th>Needs attention</th></tr></thead>
+    <tbody>
+    {% for person in literacy_gaps.persons %}{% if person.gap_count %}<tr>
+      <td>{{ person.person }}</td><td>{{ person.roles|join(", ") }}</td>
+      <td>{% for training in person.trainings %}{% if training.status != 'current' %}<span class="gov-chip {% if training.status == 'expired' %}gov-chip--warn{% else %}gov-chip--bad{% endif %}">{{ training.training }} ({{ training.status }})</span> {% endif %}{% endfor %}</td>
+    </tr>{% endif %}{% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="gov-empty">No people are assigned to trained roles yet.</p>{% endif %}
+  <form id="literacy-require" class="gov-form">
+    <label>Role name
+      <input name="role" required maxlength="128" placeholder="underwriting_operator">
+    </label>
+    <label class="gov-form__wide">Required trainings, one per line as key:title:valid-days
+      <textarea name="trainings" required rows="2" placeholder="ai-fundamentals:AI fundamentals:365&#10;model-limits:Model limitations briefing:"></textarea>
+      <span class="gov-help">Leave valid-days empty for trainings that never expire.</span>
+    </label>
+    <div class="gov-form__wide"><button type="submit">Set role requirement</button>
+      <span id="literacy-require-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  <form id="literacy-assign" class="gov-form">
+    <label>Person
+      <input name="person" required maxlength="128" placeholder="analyst@example.com">
+    </label>
+    <label>Roles (comma-separated)
+      <input name="roles" required maxlength="512" placeholder="underwriting_operator">
+    </label>
+    <div class="gov-form__wide"><button type="submit">Assign roles</button>
+      <span id="literacy-assign-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  <form id="literacy-complete" class="gov-form">
+    <label>Person
+      <input name="person" required maxlength="128">
+    </label>
+    <label>Training key
+      <input name="training" required maxlength="128">
+    </label>
+    <label>Completed on
+      <input name="completed_at" type="datetime-local" required>
+    </label>
+    <label>Evidence reference
+      <input name="evidence_ref" required maxlength="512" placeholder="lms:course/attempt-1">
+      <span class="gov-help">Where proof of completion lives — an LMS link or ticket.</span>
+    </label>
+    <div class="gov-form__wide"><button type="submit">Record completion</button>
+      <button type="button" id="literacy-export">Export evidence snapshot</button>
+      <span id="literacy-complete-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  <pre id="literacy-export-view" class="gov-render" hidden></pre>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Serious incidents (Art. 73)</h2>
+  {% if not ai_incident_enabled %}
+  <p class="gov-alert">Enable AI incident reporting to declare serious incidents and
+    track the Art. 73 clocks. Ask an administrator to switch on
+    <code>[ai_incident_reporting]</code>.</p>
+  {% else %}
+  {% if ai_incident_error %}<p class="gov-alert">{{ ai_incident_error }}</p>{% endif %}
+  {% if ai_incident_declarations %}
+  <div class="gov-table"><table>
+    <caption>Declared serious incidents, most urgent first</caption>
+    <thead><tr><th>Declaration</th><th>Category</th><th>Status</th><th>Clock</th><th>Actions</th></tr></thead>
+    <tbody>
+    {% for row in ai_incident_declarations %}<tr>
+      <td>{{ row.id }}</td><td>{{ row.category }}</td><td>{{ row.status }}</td>
+      <td>{% if row.overdue %}<strong>{{ row.clock_label }}</strong>{% else %}{{ row.clock_label }}{% endif %} ({{ row.deadline_citation }})</td>
+      <td>{% if row.status in ('declared', 'initial_reported') %}
+        <button type="button" data-incident-submit="{{ row.id }}" data-revision="{{ row.revision }}">Record filing</button>
+        {% if row.status == 'declared' %}<button type="button" data-incident-withdraw="{{ row.id }}" data-revision="{{ row.revision }}">Withdraw</button>{% endif %}
+      {% else %}<span class="gov-muted">—</span>{% endif %}</td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="gov-empty">No serious-incident declarations. The clock starts from
+    awareness the moment one is declared.</p>{% endif %}
+  <form id="incident-declare" class="gov-form">
+    <label>Assurance incident id
+      <input name="incident_id" required maxlength="64" placeholder="MRI-…">
+      <span class="gov-help">The incident already recorded in the assurance cockpit.</span>
+    </label>
+    <label>Category
+      <select name="category" required>
+        {% for token, meta in ai_incident_categories.items() %}
+        <option value="{{ token }}">{{ token.replace("_", " ") }} — {{ meta.window_days }} days ({{ meta.deadline_citation }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>When did you become aware?
+      <input name="became_aware_at" type="datetime-local" required>
+      <span class="gov-help">The reporting clock runs from awareness, not occurrence.</span>
+    </label>
+    <label>Member State (EU-27 code)
+      <input name="member_state" required maxlength="2" minlength="2" placeholder="DE">
+    </label>
+    <label class="gov-form__wide">Market surveillance authority
+      <input name="authority" required maxlength="512" placeholder="Bundesnetzagentur market surveillance">
+    </label>
+    <label>Causal link
+      <select name="causal_link">
+        <option value="under_investigation">under investigation</option>
+        <option value="reasonably_likely">reasonably likely</option>
+        <option value="established">established</option>
+      </select>
+    </label>
+    <label><input type="checkbox" name="widespread"> Widespread infringement (forces the 2-day clock)</label>
+    <div class="gov-form__wide"><button type="submit">Declare serious incident</button>
+      <span id="incident-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  {% endif %}
+</section>
+</div>
+
+<section class="panel">
+  <h2>GRC system sync</h2>
+  {% if not grc_sync_enabled %}
+  <p class="gov-muted">The outbound GRC sync is not configured. When enabled, findings,
+    accepted risks, and incidents mirror into your ServiceNow or other GRC system
+    automatically, with a link back to Lightwork.</p>
+  {% else %}
+  {% if grc_error %}<p class="gov-alert">{{ grc_error }}</p>{% endif %}
+  {% if grc_status and grc_status.outbound %}
+  <p>Outbound records —
+    <span class="gov-chip gov-chip--good">{{ grc_status.outbound.delivered }} delivered</span>
+    <span class="gov-chip gov-chip--warn">{{ grc_status.outbound.delivered_unconfirmed }} unconfirmed</span>
+    <span class="gov-chip gov-chip--bad">{{ grc_status.outbound.failed }} failed</span>
+    <span class="gov-chip">{{ grc_status.outbound.pending }} pending</span></p>
+  {% endif %}
+  {% if grc_outbound %}
+  <div class="gov-table"><table>
+    <caption>Latest outbound ledger entries and their remote record ids</caption>
+    <thead><tr><th>Kind</th><th>Lightwork record</th><th>Status</th><th>Remote id</th></tr></thead>
+    <tbody>
+    {% for row in grc_outbound %}<tr>
+      <td>{{ row.kind }}</td><td>{{ row.source_id }}</td><td>{{ row.status }}</td>
+      <td>{{ row.remote_id or "—" }}</td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="gov-empty">Nothing has been mirrored yet. An operator runs
+    <code>maverick grc-sync run</code> on a schedule.</p>{% endif %}
+  {% endif %}
+</section>
+
+<script>
+(() => {
+  const prefix = "/api/v1/security/governance";
+  const assurance = "/api/v1/security/assurance";
+  const FRIA_ELEMENTS = {{ fria_elements|tojson }};
+  const ANNEX_ITEMS = {{ annex_iv_items|tojson }};
+  const status = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  const detail = async (response, fallback) => {
+    try { const body = await response.json(); return body.detail || fallback; } catch { return fallback; }
+  };
+  const post = async (base, path, body) => {
+    const response = await fetch(base + path, {
+      method: "POST", credentials: "same-origin",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(await detail(response, "Request failed"));
+    return response.json();
+  };
+  const get = async (base, path) => {
+    const response = await fetch(base + path, {credentials: "same-origin"});
+    if (!response.ok) throw new Error(await detail(response, "Request failed"));
+    return response.json();
+  };
+  const epoch = value => Math.floor(new Date(value).getTime() / 1000);
+
+  // ---- FRIA -------------------------------------------------------------
+  let friaRecord = null;
+  const friaOpen = document.getElementById("fria-open");
+  if (friaOpen) friaOpen.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(friaOpen);
+    try {
+      status("fria-status", "Starting the assessment…");
+      await post(prefix, "/fria", {asset_id: String(fields.get("asset_id")), context: String(fields.get("context"))});
+      window.location.reload();
+    } catch (error) { status("fria-status", error instanceof Error ? error.message : "Could not start."); }
+  });
+  const loadFria = async recordId => {
+    const listing = await get(prefix, "/fria");
+    const record = (listing.records || []).find(row => row.id === recordId);
+    if (!record) throw new Error("Assessment not found — refresh the page.");
+    friaRecord = record;
+    document.getElementById("fria-editor").hidden = false;
+    document.getElementById("fria-editor-title").textContent =
+      "Assessment " + record.id + " — " + record.asset_id + " (" + record.status + ")";
+    const holder = document.getElementById("fria-elements"); holder.innerHTML = "";
+    Object.entries(FRIA_ELEMENTS).forEach(([key, meta]) => {
+      const wrap = document.createElement("div"); wrap.className = "gov-element";
+      const label = document.createElement("label");
+      label.textContent = meta.prompt + " (" + meta.citation + ")";
+      const area = document.createElement("textarea");
+      area.dataset.element = key; area.maxLength = 8000;
+      const existing = (record.elements || {})[key];
+      if (existing && existing.content) area.value = existing.content;
+      label.appendChild(area); wrap.appendChild(label); holder.appendChild(wrap);
+    });
+    document.getElementById("fria-draft-view").hidden = true;
+  };
+  document.querySelectorAll("[data-fria-open-record]").forEach(button =>
+    button.addEventListener("click", async () => {
+      try { await loadFria(button.dataset.friaOpenRecord); }
+      catch (error) { status("fria-status", error instanceof Error ? error.message : "Load failed."); }
+    }));
+  const friaSave = document.getElementById("fria-save");
+  if (friaSave) friaSave.addEventListener("click", async () => {
+    if (!friaRecord) return; friaSave.disabled = true;
+    try {
+      let revision = friaRecord.revision; let saved = 0;
+      for (const area of document.querySelectorAll("#fria-elements textarea")) {
+        const key = area.dataset.element; const value = area.value.trim();
+        const existing = (friaRecord.elements || {})[key];
+        if (!value || (existing && existing.content === value)) continue;
+        const updated = await post(prefix, "/fria/" + encodeURIComponent(friaRecord.id) + "/elements",
+          {element: key, content: value, expected_revision: revision});
+        revision = updated.revision; friaRecord = updated; saved += 1;
+      }
+      status("fria-editor-status", saved ? "Saved " + saved + " answer(s) under your name." : "Nothing new to save.");
+    } catch (error) { status("fria-editor-status", error instanceof Error ? error.message : "Save failed."); }
+    finally { friaSave.disabled = false; }
+  });
+  const friaComplete = document.getElementById("fria-complete");
+  if (friaComplete) friaComplete.addEventListener("click", async () => {
+    if (!friaRecord) return;
+    try {
+      await post(prefix, "/fria/" + encodeURIComponent(friaRecord.id) + "/complete",
+        {expected_revision: friaRecord.revision});
+      window.location.reload();
+    } catch (error) { status("fria-editor-status", error instanceof Error ? error.message : "Completion failed."); }
+  });
+  const friaOutdate = document.getElementById("fria-outdate");
+  if (friaOutdate) friaOutdate.addEventListener("click", async () => {
+    if (!friaRecord) return;
+    const reason = window.prompt("What changed? This reopens the assessment (Art. 27(2)):");
+    if (!reason || !reason.trim()) return;
+    try {
+      await post(prefix, "/fria/" + encodeURIComponent(friaRecord.id) + "/outdate",
+        {reason: reason.trim(), expected_revision: friaRecord.revision});
+      window.location.reload();
+    } catch (error) { status("fria-editor-status", error instanceof Error ? error.message : "Reopen failed."); }
+  });
+  const friaNotify = document.getElementById("fria-notify");
+  if (friaNotify) friaNotify.addEventListener("click", async () => {
+    if (!friaRecord) return;
+    const authority = window.prompt("Which market surveillance authority did you notify?");
+    if (!authority || !authority.trim()) return;
+    const reference = window.prompt("Filing reference from the authority:");
+    if (!reference || !reference.trim()) return;
+    try {
+      await post(prefix, "/fria/" + encodeURIComponent(friaRecord.id) + "/notification",
+        {authority: authority.trim(), reference: reference.trim(),
+         submitted_at: Math.floor(Date.now() / 1000), expected_revision: friaRecord.revision});
+      status("fria-editor-status", "Notification recorded (Art. 27(3)). Nothing was transmitted.");
+      friaRecord = null; window.location.reload();
+    } catch (error) { status("fria-editor-status", error instanceof Error ? error.message : "Recording failed."); }
+  });
+  const friaDraft = document.getElementById("fria-draft");
+  if (friaDraft) friaDraft.addEventListener("click", async () => {
+    if (!friaRecord) return;
+    try {
+      const body = await get(prefix, "/fria/" + encodeURIComponent(friaRecord.id) + "/draft");
+      const view = document.getElementById("fria-draft-view");
+      view.hidden = false; view.textContent = body.draft;
+    } catch (error) { status("fria-editor-status", error instanceof Error ? error.message : "Draft failed."); }
+  });
+
+  // ---- Annex IV ---------------------------------------------------------
+  let annexRecord = null;
+  const annexOpen = document.getElementById("annex-open");
+  if (annexOpen) annexOpen.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(annexOpen);
+    try {
+      status("annex-status", "Opening the checklist…");
+      const body = await post(prefix, "/annex-iv", {asset_id: String(fields.get("asset_id"))});
+      annexRecord = body.record;
+      document.getElementById("annex-editor").hidden = false;
+      document.getElementById("annex-editor-title").textContent =
+        "Checklist " + body.record.id + " — " + body.status.asserted + "/" + body.status.total + " documented";
+      const holder = document.getElementById("annex-items"); holder.innerHTML = "";
+      Object.entries(ANNEX_ITEMS).forEach(([key, meta]) => {
+        const wrap = document.createElement("div"); wrap.className = "gov-element";
+        const label = document.createElement("label");
+        label.textContent = meta[0] + " — " + meta[1];
+        const input = document.createElement("input");
+        input.dataset.item = key; input.maxLength = 512;
+        input.placeholder = "Where does this documentation live?";
+        const existing = (body.record.items || {})[key];
+        if (existing && existing.reference) input.value = existing.reference;
+        const save = document.createElement("button");
+        save.type = "button"; save.textContent = "Save";
+        save.addEventListener("click", async () => {
+          if (!input.value.trim()) return; save.disabled = true;
+          try {
+            const current = await get(prefix, "/annex-iv/" + encodeURIComponent(annexRecord.id));
+            const state = await post(prefix, "/annex-iv/" + encodeURIComponent(annexRecord.id) + "/items",
+              {item: key, reference: input.value.trim(), expected_revision: current.status.revision});
+            document.getElementById("annex-editor-title").textContent =
+              "Checklist " + annexRecord.id + " — " + state.asserted + "/" + state.total + " documented";
+            status("annex-editor-status", meta[0] + " recorded under your name.");
+          } catch (error) { status("annex-editor-status", error instanceof Error ? error.message : "Save failed."); }
+          finally { save.disabled = false; }
+        });
+        label.appendChild(input); wrap.appendChild(label); wrap.appendChild(save);
+        holder.appendChild(wrap);
+      });
+      status("annex-status", "");
+    } catch (error) { status("annex-status", error instanceof Error ? error.message : "Could not open."); }
+  });
+  const annexRender = document.getElementById("annex-render");
+  if (annexRender) annexRender.addEventListener("click", async () => {
+    if (!annexRecord) return;
+    try {
+      const body = await get(prefix, "/annex-iv/" + encodeURIComponent(annexRecord.id) + "/render");
+      const view = document.getElementById("annex-render-view");
+      view.hidden = false; view.textContent = body.rendered;
+    } catch (error) { status("annex-editor-status", error instanceof Error ? error.message : "Summary failed."); }
+  });
+
+  // ---- Literacy ---------------------------------------------------------
+  const literacyRequire = document.getElementById("literacy-require");
+  if (literacyRequire) literacyRequire.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(literacyRequire);
+    const trainings = String(fields.get("trainings") || "").split("\n")
+      .map(line => line.trim()).filter(Boolean).map(line => {
+        const [key, title, days] = line.split(":");
+        return {key: (key || "").trim(), title: (title || "").trim(),
+                validity_days: days && days.trim() ? Number(days.trim()) : null};
+      });
+    try {
+      status("literacy-require-status", "Recording the requirement…");
+      await post(prefix, "/literacy/requirements",
+        {role: String(fields.get("role")), trainings, expected_revision: 0});
+      window.location.reload();
+    } catch (error) { status("literacy-require-status", error instanceof Error ? error.message : "Failed — if the role exists, update it from the API with its revision."); }
+  });
+  const literacyAssign = document.getElementById("literacy-assign");
+  if (literacyAssign) literacyAssign.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(literacyAssign);
+    const roles = String(fields.get("roles") || "").split(",").map(role => role.trim()).filter(Boolean);
+    try {
+      status("literacy-assign-status", "Assigning…");
+      await post(prefix, "/literacy/assignments",
+        {person: String(fields.get("person")), roles, expected_revision: 0});
+      window.location.reload();
+    } catch (error) { status("literacy-assign-status", error instanceof Error ? error.message : "Assignment failed."); }
+  });
+  const literacyComplete = document.getElementById("literacy-complete");
+  if (literacyComplete) literacyComplete.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(literacyComplete);
+    try {
+      status("literacy-complete-status", "Recording the completion…");
+      await post(prefix, "/literacy/completions",
+        {person: String(fields.get("person")), training: String(fields.get("training")),
+         completed_at: epoch(String(fields.get("completed_at"))),
+         evidence_ref: String(fields.get("evidence_ref"))});
+      window.location.reload();
+    } catch (error) { status("literacy-complete-status", error instanceof Error ? error.message : "Recording failed."); }
+  });
+  const literacyExport = document.getElementById("literacy-export");
+  if (literacyExport) literacyExport.addEventListener("click", async () => {
+    try {
+      const body = await get(prefix, "/literacy/evidence");
+      const view = document.getElementById("literacy-export-view");
+      view.hidden = false; view.textContent = body.evidence;
+    } catch (error) { status("literacy-complete-status", error instanceof Error ? error.message : "Export failed."); }
+  });
+
+  // ---- Incidents --------------------------------------------------------
+  const incidentDeclare = document.getElementById("incident-declare");
+  if (incidentDeclare) incidentDeclare.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(incidentDeclare);
+    try {
+      status("incident-status", "Declaring — the clock starts from awareness…");
+      await post(assurance, "/ai-incidents",
+        {incident_id: String(fields.get("incident_id")),
+         category: String(fields.get("category")),
+         widespread: fields.get("widespread") === "on",
+         became_aware_at: epoch(String(fields.get("became_aware_at"))),
+         causal_link: String(fields.get("causal_link")),
+         member_state: String(fields.get("member_state")).toUpperCase(),
+         authority: String(fields.get("authority"))});
+      window.location.reload();
+    } catch (error) { status("incident-status", error instanceof Error ? error.message : "Declaration failed."); }
+  });
+  document.querySelectorAll("[data-incident-submit]").forEach(button =>
+    button.addEventListener("click", async () => {
+      const kind = window.prompt("Which filing are you recording? Type initial or complete:");
+      if (kind !== "initial" && kind !== "complete") return;
+      const reference = window.prompt("The authority's filing reference:");
+      if (!reference || !reference.trim()) return;
+      try {
+        await post(assurance, "/ai-incidents/" + encodeURIComponent(button.dataset.incidentSubmit) + "/submissions",
+          {kind, submitted_at: Math.floor(Date.now() / 1000), reference: reference.trim(),
+           expected_revision: Number(button.dataset.revision)});
+        window.location.reload();
+      } catch (error) { status("incident-status", error instanceof Error ? error.message : "Filing failed."); }
+    }));
+  document.querySelectorAll("[data-incident-withdraw]").forEach(button =>
+    button.addEventListener("click", async () => {
+      const rationale = window.prompt("Why is this declaration withdrawn? A reviewer's rationale is required:");
+      if (!rationale || !rationale.trim()) return;
+      try {
+        await post(assurance, "/ai-incidents/" + encodeURIComponent(button.dataset.incidentWithdraw) + "/withdraw",
+          {rationale: rationale.trim(), expected_revision: Number(button.dataset.revision)});
+        window.location.reload();
+      } catch (error) { status("incident-status", error instanceof Error ? error.message : "Withdrawal failed."); }
+    }));
+})();
+</script>
+{% endblock %}

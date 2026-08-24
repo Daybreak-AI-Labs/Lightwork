@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from starlette.concurrency import run_in_threadpool
 
+from . import governance_schemas
 from . import model_risk_schemas as schemas
 from .auth import require_global_permission, require_permission
 
@@ -147,6 +148,14 @@ async def _call(fn: Callable, *args, **kwargs):
         if isinstance(exc, RedTeamDisabled):
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         if isinstance(exc, RedTeamStateError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        from maverick.ai_literacy import AILiteracyConfigError, AILiteracyError
+        from maverick.eu_conformity import EUConformityConfigError, EUConformityError
+        from maverick.grc_sync import GRCSyncConfigError, GRCSyncError
+
+        if isinstance(exc, (AILiteracyConfigError, EUConformityConfigError, GRCSyncConfigError)):
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if isinstance(exc, (AILiteracyError, EUConformityError, GRCSyncError)):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if isinstance(exc, ClosedPortfolioPeriod):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -901,6 +910,62 @@ async def ai_incident_report_draft(
     reporting = _module("ai_incident_reporting", "ai_incident_reporting")
     draft = await _call(reporting.render_report, record_id)
     return {"record_id": record_id, "draft": draft}
+
+
+@router.post("/ai-incidents", status_code=201)
+async def declare_ai_incident(
+    request: Request,
+    body: governance_schemas.IncidentDeclareIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    return await _call(
+        reporting.declare_serious_incident,
+        body.incident_id,
+        category=body.category,
+        widespread=body.widespread,
+        became_aware_at=body.became_aware_at,
+        causal_link=body.causal_link,
+        member_state=body.member_state,
+        authority=body.authority,
+        declared_by=_actor(request),
+    )
+
+
+@router.post("/ai-incidents/{record_id}/submissions")
+async def record_ai_incident_submission(
+    request: Request,
+    record_id: str,
+    body: governance_schemas.IncidentSubmissionIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    return await _call(
+        reporting.record_submission,
+        record_id,
+        kind=body.kind,
+        submitted_by=_actor(request),
+        submitted_at=body.submitted_at,
+        reference=body.reference,
+        expected_revision=body.expected_revision,
+    )
+
+
+@router.post("/ai-incidents/{record_id}/withdraw")
+async def withdraw_ai_incident(
+    request: Request,
+    record_id: str,
+    body: governance_schemas.IncidentWithdrawIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    reporting = _module("ai_incident_reporting", "ai_incident_reporting")
+    return await _call(
+        reporting.withdraw_declaration,
+        record_id,
+        rationale=body.rationale,
+        reviewer=_actor(request),
+        expected_revision=body.expected_revision,
+    )
 
 
 @router.get("/portfolio-risk/report")

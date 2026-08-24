@@ -2487,6 +2487,7 @@ async def _ai_incident_page_data(module: Any) -> dict[str, Any]:
                             else f"{remaining / 86_400:.1f}d left"
                         ),
                         "overdue": is_overdue,
+                        "revision": record.get("revision"),
                     }
                 )
             overdue = sum(1 for row in rows if row["overdue"])
@@ -2889,6 +2890,120 @@ async def model_risk_assurance_page(request: Request) -> HTMLResponse:
             "impact_page": impact_page,
             "gateway_view": view,
             "gateway_admin": has_global_permission(request, "admin"),
+        },
+    )
+
+
+async def _governance_workspace_page_data(
+    conformity: Any,
+    literacy: Any,
+    sync: Any,
+) -> dict[str, Any]:
+    """Bounded context for the legal/privacy governance workspace page.
+
+    Tables carry identifiers, statuses, and progress counts only; assessment
+    content and report drafts stay behind the authenticated governance API.
+    """
+
+    data: dict[str, Any] = {
+        "eu_conformity_enabled": conformity.enabled(),
+        "fria_records": [],
+        "fria_error": "",
+        "ai_literacy_enabled": literacy.enabled(),
+        "literacy_gaps": {},
+        "literacy_error": "",
+        "grc_sync_enabled": sync.enabled(),
+        "grc_status": {},
+        "grc_outbound": [],
+        "grc_error": "",
+    }
+    if data["eu_conformity_enabled"]:
+        try:
+            rows = await run_in_threadpool(conformity.list_frias)
+        except Exception:
+            data["fria_error"] = (
+                "Fundamental-rights assessments are temporarily unavailable."
+            )
+        else:
+            for row in rows[:100]:
+                elements = row.get("elements") or {}
+                data["fria_records"].append(
+                    {
+                        "id": row.get("id"),
+                        "asset_id": row.get("asset_id"),
+                        "context": row.get("context"),
+                        "status": row.get("status"),
+                        "revision": row.get("revision"),
+                        "progress": sum(
+                            1
+                            for value in elements.values()
+                            if isinstance(value, dict)
+                        ),
+                    }
+                )
+    if data["ai_literacy_enabled"]:
+        try:
+            data["literacy_gaps"] = await run_in_threadpool(literacy.literacy_gaps)
+        except Exception:
+            data["literacy_error"] = (
+                "Training assignments and completions are temporarily unavailable."
+            )
+    if data["grc_sync_enabled"]:
+        status_result, outbound_result = await asyncio.gather(
+            run_in_threadpool(sync.sync_status),
+            run_in_threadpool(sync.list_outbound, limit=50),
+            return_exceptions=True,
+        )
+        if isinstance(status_result, Exception):
+            data["grc_error"] = "The GRC sync ledger is temporarily unavailable."
+        else:
+            data["grc_status"] = status_result
+        if isinstance(outbound_result, Exception):
+            data["grc_error"] = (
+                data["grc_error"]
+                or "The GRC sync ledger is temporarily unavailable."
+            )
+        else:
+            data["grc_outbound"] = outbound_result
+    return data
+
+
+@app.get("/security/governance", response_class=HTMLResponse)
+async def governance_workspace_page(request: Request) -> HTMLResponse:
+    """The governance workspace for legal, privacy, compliance, and HR:
+    FRIA, Annex IV checklist, AI-literacy tracking, Art. 73 clocks, and
+    GRC sync visibility, driven by /api/v1/security/governance."""
+    require_permission(request, "operate")
+    from maverick import ai_incident_reporting, ai_literacy, eu_conformity, grc_sync
+
+    workspace = await _governance_workspace_page_data(
+        eu_conformity,
+        ai_literacy,
+        grc_sync,
+    )
+    ai_incident_data = await _ai_incident_page_data(ai_incident_reporting)
+    return templates.TemplateResponse(
+        request,
+        "governance.html",
+        {
+            "eu_conformity_enabled": workspace["eu_conformity_enabled"],
+            "fria_records": workspace["fria_records"],
+            "fria_error": workspace["fria_error"],
+            "fria_elements": eu_conformity.FRIA_ELEMENTS,
+            "annex_iv_items": eu_conformity.ANNEX_IV_ITEMS,
+            "ai_literacy_enabled": workspace["ai_literacy_enabled"],
+            "literacy_gaps": workspace["literacy_gaps"],
+            "literacy_error": workspace["literacy_error"],
+            "ai_incident_enabled": ai_incident_data["enabled"],
+            "ai_incident_declarations": ai_incident_data["declarations"],
+            "ai_incident_error": ai_incident_data["error"],
+            "ai_incident_categories": (
+                ai_incident_reporting.SERIOUS_INCIDENT_CATEGORIES
+            ),
+            "grc_sync_enabled": workspace["grc_sync_enabled"],
+            "grc_status": workspace["grc_status"],
+            "grc_outbound": workspace["grc_outbound"][:50],
+            "grc_error": workspace["grc_error"],
         },
     )
 

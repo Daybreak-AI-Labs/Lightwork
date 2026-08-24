@@ -1,0 +1,276 @@
+"""The governance workspace API: FRIA, Annex IV, AI literacy, GRC sync.
+
+Mounted below ``/api/v1/security`` so the legal / privacy / compliance
+workspace page can drive the governed registers without the CLI. Every
+mutation is an "operate"-permission human action recorded with the caller's
+actor identity; nothing here transmits anything to an authority or external
+system — delivery stays with the operator-invoked GRC dispatcher.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, Query, Request
+
+from . import governance_schemas as schemas
+from .auth import require_permission
+from .model_risk_api import _actor, _call, _module, _record_call
+
+router = APIRouter(prefix="/governance", tags=["governance"])
+
+
+# --------------------------------------------------------------------------
+# FRIA (Art. 27)
+# --------------------------------------------------------------------------
+@router.get("/fria")
+async def list_fria_records(
+    request: Request,
+    status: str | None = Query(default=None, min_length=1, max_length=32),
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    rows = await _call(conformity.list_frias, status=status)
+    return {
+        "records": rows,
+        "count": len(rows),
+        "elements": conformity.FRIA_ELEMENTS,
+    }
+
+
+@router.post("/fria", status_code=201)
+async def open_fria_record(
+    request: Request,
+    body: schemas.FRIAOpenIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.open_fria,
+        body.asset_id,
+        context=body.context,
+        actor=_actor(request),
+    )
+
+
+@router.post("/fria/{record_id}/elements")
+async def assert_fria_element(
+    request: Request,
+    record_id: str,
+    body: schemas.FRIAElementIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.assert_fria_element,
+        record_id,
+        body.element,
+        content=body.content,
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+
+
+@router.post("/fria/{record_id}/complete")
+async def complete_fria_record(
+    request: Request,
+    record_id: str,
+    body: schemas.FRIACompleteIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.complete_fria,
+        record_id,
+        assessor=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+
+
+@router.post("/fria/{record_id}/outdate")
+async def outdate_fria_record(
+    request: Request,
+    record_id: str,
+    body: schemas.FRIAOutdateIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.mark_fria_outdated,
+        record_id,
+        reason=body.reason,
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+
+
+@router.post("/fria/{record_id}/notification")
+async def record_fria_notification(
+    request: Request,
+    record_id: str,
+    body: schemas.FRIANotificationIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.record_fria_notification,
+        record_id,
+        authority=body.authority,
+        submitted_by=_actor(request),
+        submitted_at=body.submitted_at,
+        reference=body.reference,
+        expected_revision=body.expected_revision,
+    )
+
+
+@router.get("/fria/{record_id}/draft")
+async def fria_draft(request: Request, record_id: str) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    draft = await _call(conformity.render_fria, record_id)
+    return {"record_id": record_id, "draft": draft}
+
+
+# --------------------------------------------------------------------------
+# Annex IV checklist (Art. 11(1))
+# --------------------------------------------------------------------------
+@router.post("/annex-iv", status_code=201)
+async def open_annex_iv_record(
+    request: Request,
+    body: schemas.AnnexIVOpenIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    record = await _call(conformity.open_annex_iv, body.asset_id, actor=_actor(request))
+    status = await _call(conformity.annex_iv_status, record["id"])
+    return {"record": record, "status": status, "items": conformity.ANNEX_IV_ITEMS}
+
+
+@router.get("/annex-iv/{record_id}")
+async def annex_iv_record_status(request: Request, record_id: str) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    status = await _record_call(conformity.annex_iv_status, record_id)
+    return {"status": status, "items": conformity.ANNEX_IV_ITEMS}
+
+
+@router.post("/annex-iv/{record_id}/items")
+async def assert_annex_iv_item(
+    request: Request,
+    record_id: str,
+    body: schemas.AnnexIVItemIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    await _call(
+        conformity.assert_annex_iv_item,
+        record_id,
+        body.item,
+        reference=body.reference,
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+    return await _call(conformity.annex_iv_status, record_id)
+
+
+@router.get("/annex-iv/{record_id}/render")
+async def annex_iv_render(request: Request, record_id: str) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    rendered = await _call(conformity.render_annex_iv, record_id)
+    return {"record_id": record_id, "rendered": rendered}
+
+
+# --------------------------------------------------------------------------
+# AI literacy (Art. 4)
+# --------------------------------------------------------------------------
+@router.get("/literacy/gaps")
+async def literacy_gaps(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    literacy = _module("ai_literacy", "ai_literacy")
+    return await _call(literacy.literacy_gaps)
+
+
+@router.get("/literacy/requirements")
+async def literacy_requirements(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    literacy = _module("ai_literacy", "ai_literacy")
+    rows = await _call(literacy.list_requirements)
+    return {"requirements": rows, "count": len(rows)}
+
+
+@router.post("/literacy/requirements")
+async def set_literacy_requirement(
+    request: Request,
+    body: schemas.LiteracyRequirementIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    literacy = _module("ai_literacy", "ai_literacy")
+    return await _call(
+        literacy.set_role_requirement,
+        body.role,
+        [row.model_dump() for row in body.trainings],
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+
+
+@router.post("/literacy/assignments")
+async def assign_literacy_roles(
+    request: Request,
+    body: schemas.LiteracyAssignmentIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    literacy = _module("ai_literacy", "ai_literacy")
+    return await _call(
+        literacy.assign_roles,
+        body.person,
+        body.roles,
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+
+
+@router.post("/literacy/completions")
+async def record_literacy_completion(
+    request: Request,
+    body: schemas.LiteracyCompletionIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    literacy = _module("ai_literacy", "ai_literacy")
+    return await _call(
+        literacy.record_completion,
+        body.person,
+        body.training,
+        completed_at=body.completed_at,
+        evidence_ref=body.evidence_ref,
+        actor=_actor(request),
+    )
+
+
+@router.get("/literacy/evidence")
+async def literacy_evidence(request: Request) -> dict[str, Any]:
+    require_permission(request, "operate")
+    literacy = _module("ai_literacy", "ai_literacy")
+    exported = await _call(literacy.export_evidence)
+    return {"evidence": exported}
+
+
+# --------------------------------------------------------------------------
+# GRC sync visibility (delivery stays with the operator-run dispatcher)
+# --------------------------------------------------------------------------
+@router.get("/grc-sync/status")
+async def grc_sync_status(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    sync = _module("grc_sync", "grc_sync")
+    return await _call(sync.sync_status)
+
+
+@router.get("/grc-sync/outbound")
+async def grc_sync_outbound(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    sync = _module("grc_sync", "grc_sync")
+    rows = await _call(sync.list_outbound, limit=limit)
+    return {"outbound": rows, "count": len(rows)}

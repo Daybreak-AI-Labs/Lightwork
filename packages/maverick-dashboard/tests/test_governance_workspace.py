@@ -1,0 +1,556 @@
+"""HTTP acceptance for the governance workspace: the /security/governance
+page and the /api/v1/security/governance router (FRIA, Annex IV, AI
+literacy, GRC sync visibility) plus the Art. 73 mutation routes on the
+assurance router. The audience is legal/privacy/compliance staff, so the
+page tests also assert the plain-language disabled-state guidance.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import time
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from maverick_dashboard.app import app
+
+client = TestClient(app, headers={"Origin": "http://testserver"})
+
+_BASE_CONFIG = """[evidence_graph]
+enable = true
+
+[model_risk_assurance]
+enable = true
+gate_promotions = false
+"""
+
+_GOVERNANCE_CONFIG = """
+[eu_conformity]
+enable = true
+
+[ai_literacy]
+enable = true
+
+[ai_incident_reporting]
+enable = true
+
+[grc_sync]
+enable = true
+incidents_path = "/api/now/table/incident"
+"""
+
+
+def _hex(label: str) -> str:
+    return hashlib.sha256(label.encode("utf-8")).hexdigest()
+
+
+@pytest.fixture(autouse=True)
+def _isolated(tmp_path, monkeypatch):
+    from maverick import audit, config
+    from maverick.audit import writer as audit_writer
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(_BASE_CONFIG, encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(config_path))
+    for name in (
+        "MAVERICK_DASHBOARD_TOKEN",
+        "MAVERICK_DASHBOARD_REQUIRE_AUTH",
+        "MAVERICK_OIDC_ENABLED",
+        "MAVERICK_PROXY_AUTH",
+        "MAVERICK_TENANT",
+        "MAVERICK_TENANT_BY_USER",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(audit, "record", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(audit, "record_global", lambda *_args, **_kwargs: True)
+    config.reset_config_cache()
+    audit_writer._default = None
+    audit_writer._defaults.clear()
+    yield
+    config.reset_config_cache()
+    audit_writer._default = None
+    audit_writer._defaults.clear()
+
+
+def _ok(response, expected=200):
+    assert response.status_code == expected, response.text
+    return response.json()
+
+
+def _reset_config_with(extra: str) -> None:
+    from maverick import config
+
+    path = Path(config.config_path())
+    path.write_text(_BASE_CONFIG + extra, encoding="utf-8")
+    config.reset_config_cache()
+
+
+def _enable_governance() -> None:
+    _reset_config_with(_GOVERNANCE_CONFIG)
+
+
+_PREFIX = "/api/v1/security/governance"
+_ASSURANCE = "/api/v1/security/assurance"
+
+
+# ---------------------------------------------------------------------------
+# Fail-closed wiring and the disabled-state page
+# ---------------------------------------------------------------------------
+
+def test_disabled_modules_fail_closed_and_page_explains_the_knobs():
+    for path in (
+        f"{_PREFIX}/fria",
+        f"{_PREFIX}/literacy/gaps",
+        f"{_PREFIX}/grc-sync/status",
+    ):
+        assert client.get(path).status_code == 403, path
+    assert client.post(
+        f"{_PREFIX}/fria",
+        json={"asset_id": "MAA-" + "0" * 32, "context": "triage"},
+    ).status_code == 403
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert "Governance Workspace" in page.text
+    assert "Enable EU conformity workflows" in page.text
+    assert "Enable the AI-literacy register" in page.text
+    assert "Enable AI incident reporting" in page.text
+    assert "The outbound GRC sync is not configured" in page.text
+
+
+def test_governance_page_is_registered_for_the_sidebar():
+    from maverick_dashboard import ui_visibility
+
+    page = ui_visibility.page_for("/security/governance")
+    assert page is not None and page["path"] == "/security/governance"
+    assert page["floor"] == "operate"
+    assert page.get("in_nav", True) is True
+
+
+# ---------------------------------------------------------------------------
+# FRIA (Art. 27) end to end through the HTTP surface
+# ---------------------------------------------------------------------------
+
+def test_fria_lifecycle_through_the_api_and_page():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("underwriting-model")[:32]
+
+    opened = _ok(
+        client.post(
+            f"{_PREFIX}/fria",
+            json={"asset_id": asset_id, "context": "underwriting-triage"},
+        ),
+        expected=201,
+    )
+    assert opened["status"] == "draft"
+    assert set(opened["elements"]) == {
+        "process_description",
+        "period_frequency",
+        "affected_categories",
+        "risks_of_harm",
+        "oversight_measures",
+        "materialisation_measures",
+    }
+
+    # Reopening the same asset/context returns the same governed record.
+    again = _ok(
+        client.post(
+            f"{_PREFIX}/fria",
+            json={"asset_id": asset_id, "context": "underwriting-triage"},
+        ),
+        expected=201,
+    )
+    assert again["id"] == opened["id"]
+
+    listing = _ok(client.get(f"{_PREFIX}/fria"))
+    assert listing["count"] == 1
+    assert "process_description" in listing["elements"]
+
+    # An element outside Art. 27(1) is refused before any write.
+    assert client.post(
+        f"{_PREFIX}/fria/{opened['id']}/elements",
+        json={"element": "nope", "content": "x", "expected_revision": 1},
+    ).status_code == 422
+
+    revision = opened["revision"]
+    for element in opened["elements"]:
+        saved = _ok(
+            client.post(
+                f"{_PREFIX}/fria/{opened['id']}/elements",
+                json={
+                    "element": element,
+                    "content": f"Answer for {element} written by counsel.",
+                    "expected_revision": revision,
+                },
+            )
+        )
+        revision = saved["revision"]
+
+    # A stale revision conflicts instead of silently overwriting.
+    assert client.post(
+        f"{_PREFIX}/fria/{opened['id']}/complete",
+        json={"expected_revision": 1},
+    ).status_code == 409
+
+    completed = _ok(
+        client.post(
+            f"{_PREFIX}/fria/{opened['id']}/complete",
+            json={"expected_revision": revision},
+        )
+    )
+    assert completed["status"] == "completed"
+    assert completed["assessor"] == "local:dashboard"
+
+    assert _ok(
+        client.get(f"{_PREFIX}/fria", params={"status": "completed"})
+    )["count"] == 1
+
+    draft = _ok(client.get(f"{_PREFIX}/fria/{opened['id']}/draft"))
+    assert "Art. 27(1)(a)" in draft["draft"]
+    assert "Answer for oversight_measures" in draft["draft"]
+
+    notified = _ok(
+        client.post(
+            f"{_PREFIX}/fria/{opened['id']}/notification",
+            json={
+                "authority": "Market surveillance authority",
+                "reference": "MSA-2026-0042",
+                "submitted_at": time.time(),
+                "expected_revision": completed["revision"],
+            },
+        )
+    )
+    assert notified["notification"]["reference"] == "MSA-2026-0042"
+
+    outdated = _ok(
+        client.post(
+            f"{_PREFIX}/fria/{opened['id']}/outdate",
+            json={
+                "reason": "The deployment context changed to a new market.",
+                "expected_revision": notified["revision"],
+            },
+        )
+    )
+    assert outdated["status"] == "outdated"
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert opened["id"] in page.text
+    assert "6/6 elements" in page.text
+    assert "Work on it" in page.text
+
+
+def test_fria_request_schema_is_closed():
+    _enable_governance()
+    assert client.post(
+        f"{_PREFIX}/fria",
+        json={
+            "asset_id": "MAA-" + "0" * 32,
+            "context": "triage",
+            "extra": "nope",
+        },
+    ).status_code == 422
+    assert client.post(
+        f"{_PREFIX}/fria",
+        json={"asset_id": "not-an-asset", "context": "triage"},
+    ).status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Annex IV checklist (Art. 11(1))
+# ---------------------------------------------------------------------------
+
+def test_annex_iv_checklist_through_the_api():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("credit-model")[:32]
+
+    opened = _ok(
+        client.post(f"{_PREFIX}/annex-iv", json={"asset_id": asset_id}),
+        expected=201,
+    )
+    record = opened["record"]
+    assert opened["status"]["total"] == 9
+    assert opened["status"]["asserted"] == 0
+    assert "general_description" in opened["items"]
+
+    state = _ok(
+        client.post(
+            f"{_PREFIX}/annex-iv/{record['id']}/items",
+            json={
+                "item": "general_description",
+                "reference": "wiki/models/credit#overview",
+                "expected_revision": record["revision"],
+            },
+        )
+    )
+    assert state["asserted"] == 1
+    assert "general_description" not in state["missing"]
+
+    fetched = _ok(client.get(f"{_PREFIX}/annex-iv/{record['id']}"))
+    assert fetched["status"]["asserted"] == 1
+
+    rendered = _ok(client.get(f"{_PREFIX}/annex-iv/{record['id']}/render"))
+    assert "Annex IV(1)" in rendered["rendered"]
+
+    assert client.get(f"{_PREFIX}/annex-iv/ECD-{'0' * 24}").status_code == 404
+    assert client.post(
+        f"{_PREFIX}/annex-iv/{record['id']}/items",
+        json={
+            "item": "not-an-item",
+            "reference": "wiki",
+            "expected_revision": state["revision"],
+        },
+    ).status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# AI literacy (Art. 4)
+# ---------------------------------------------------------------------------
+
+def test_literacy_register_through_the_api_and_page():
+    _enable_governance()
+
+    _ok(
+        client.post(
+            f"{_PREFIX}/literacy/requirements",
+            json={
+                "role": "underwriting_operator",
+                "trainings": [
+                    {"key": "ai-fundamentals", "title": "AI fundamentals",
+                     "validity_days": 365},
+                    {"key": "model-limits", "title": "Model limitations",
+                     "validity_days": None},
+                ],
+                "expected_revision": 0,
+            },
+        )
+    )
+    requirements = _ok(client.get(f"{_PREFIX}/literacy/requirements"))
+    assert requirements["count"] == 1
+    assert len(requirements["requirements"][0]["trainings"]) == 2
+
+    # Duplicate training keys are refused by the request schema itself.
+    assert client.post(
+        f"{_PREFIX}/literacy/requirements",
+        json={
+            "role": "underwriting_operator",
+            "trainings": [
+                {"key": "dup", "title": "One", "validity_days": None},
+                {"key": "dup", "title": "Two", "validity_days": None},
+            ],
+            "expected_revision": 0,
+        },
+    ).status_code == 422
+
+    _ok(
+        client.post(
+            f"{_PREFIX}/literacy/assignments",
+            json={
+                "person": "analyst@example.com",
+                "roles": ["underwriting_operator"],
+                "expected_revision": 0,
+            },
+        )
+    )
+    _ok(
+        client.post(
+            f"{_PREFIX}/literacy/completions",
+            json={
+                "person": "analyst@example.com",
+                "training": "ai-fundamentals",
+                "completed_at": time.time() - 3_600,
+                "evidence_ref": "lms:course-17/attempt-1",
+            },
+        )
+    )
+
+    gaps = _ok(client.get(f"{_PREFIX}/literacy/gaps"))
+    assert gaps["person_count"] == 1
+    assert gaps["counts"] == {"current": 1, "expired": 0, "missing": 1}
+
+    evidence = _ok(client.get(f"{_PREFIX}/literacy/evidence"))
+    exported = json.loads(evidence["evidence"])
+    assert exported["regulation"]["article"] == "Art. 4"
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert "analyst@example.com" in page.text
+    assert "model-limits (missing)" in page.text
+
+
+# ---------------------------------------------------------------------------
+# Serious incidents (Art. 73) mutations on the assurance router
+# ---------------------------------------------------------------------------
+
+def _assurance_incident() -> dict:
+    from maverick import model_risk_assurance as mra
+
+    officer = mra.ModelRiskAssuranceOfficer()
+    now = time.time()
+    observation = officer.observe_asset(
+        asset_type="model",
+        source="http_acceptance",
+        source_id="triage-model",
+        display_name="Triage model",
+        version_digest=_hex("triage-model-v1"),
+        actor="inventory-operator",
+        observed_at=now,
+        metadata={},
+        dependencies=[],
+    )
+    return officer.record_incident(
+        observation["asset_id"],
+        source_id="incident-http-1",
+        severity="high",
+        summary="The triage model misrouted an emergency case.",
+        actor="incident-manager",
+        occurred_at=now - 7_200,
+        evidence_ids=[],
+    )
+
+
+def test_incident_declare_submit_withdraw_through_the_api_and_page():
+    _enable_governance()
+    incident = _assurance_incident()
+
+    declared = _ok(
+        client.post(
+            f"{_ASSURANCE}/ai-incidents",
+            json={
+                "incident_id": incident["id"],
+                "category": "critical_infrastructure_disruption",
+                "widespread": False,
+                "became_aware_at": time.time() - 3_600,
+                "causal_link": "reasonably_likely",
+                "member_state": "DE",
+                "authority": "Bundesnetzagentur market surveillance",
+            },
+        ),
+        expected=201,
+    )
+    assert declared["status"] == "declared"
+    assert declared["declared_by"] == "local:dashboard"
+
+    # A declaration for an unknown assurance incident is a 404, not a write.
+    assert client.post(
+        f"{_ASSURANCE}/ai-incidents",
+        json={
+            "incident_id": "MRI-missing",
+            "category": "death",
+            "became_aware_at": time.time(),
+            "member_state": "FR",
+            "authority": "DGCCRF",
+        },
+    ).status_code == 404
+
+    submitted = _ok(
+        client.post(
+            f"{_ASSURANCE}/ai-incidents/{declared['id']}/submissions",
+            json={
+                "kind": "initial",
+                "submitted_at": time.time(),
+                "reference": "authority-portal/2026-0042",
+                "expected_revision": declared["revision"],
+            },
+        )
+    )
+    assert submitted["status"] == "initial_reported"
+
+    completed = _ok(
+        client.post(
+            f"{_ASSURANCE}/ai-incidents/{declared['id']}/submissions",
+            json={
+                "kind": "complete",
+                "submitted_at": time.time(),
+                "reference": "authority-portal/2026-0042-final",
+                "expected_revision": submitted["revision"],
+            },
+        )
+    )
+    assert completed["status"] == "complete_reported"
+
+    # A fully reported declaration can no longer be withdrawn: the invalid
+    # lifecycle transition is refused as a validation error.
+    refused = client.post(
+        f"{_ASSURANCE}/ai-incidents/{declared['id']}/withdraw",
+        json={
+            "rationale": "Review found no serious incident.",
+            "expected_revision": completed["revision"],
+        },
+    )
+    assert refused.status_code == 422
+    assert "complete_reported -> withdrawn is invalid" in refused.json()["detail"]
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert declared["id"] in page.text
+    assert "Declare serious incident" in page.text
+
+
+def test_incident_withdraw_from_declared_state():
+    _enable_governance()
+    incident = _assurance_incident()
+    declared = _ok(
+        client.post(
+            f"{_ASSURANCE}/ai-incidents",
+            json={
+                "incident_id": incident["id"],
+                "category": "serious_health_harm",
+                "became_aware_at": time.time() - 60,
+                "member_state": "IE",
+                "authority": "Health Products Regulatory Authority",
+            },
+        ),
+        expected=201,
+    )
+    withdrawn = _ok(
+        client.post(
+            f"{_ASSURANCE}/ai-incidents/{declared['id']}/withdraw",
+            json={
+                "rationale": "Counsel review: not a serious incident.",
+                "expected_revision": declared["revision"],
+            },
+        )
+    )
+    assert withdrawn["status"] == "withdrawn"
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert "Record filing" not in page.text
+
+
+# ---------------------------------------------------------------------------
+# GRC sync visibility
+# ---------------------------------------------------------------------------
+
+def test_grc_sync_status_and_outbound_surface_on_api_and_page():
+    _enable_governance()
+    from maverick import grc_sync
+
+    _assurance_incident()
+    result = grc_sync.run_sync(
+        actor="sync-operator",
+        writer=lambda _op, _path, _payload: json.dumps(
+            {"result": {"sys_id": "abc123def456"}}
+        ),
+    )
+    assert result["delivered_count"] == 1
+
+    status = _ok(client.get(f"{_PREFIX}/grc-sync/status"))
+    assert status["outbound"]["delivered"] == 1
+
+    outbound = _ok(client.get(f"{_PREFIX}/grc-sync/outbound"))
+    assert outbound["count"] == 1
+    row = outbound["outbound"][0]
+    assert row["kind"] == "incident"
+    assert row["remote_id"] == "abc123def456"
+
+    assert client.get(
+        f"{_PREFIX}/grc-sync/outbound", params={"limit": 0}
+    ).status_code == 422
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert "abc123def456" in page.text
