@@ -795,8 +795,9 @@ here.
   [`MODEL_RISK_ASSURANCE.md`](./MODEL_RISK_ASSURANCE.md).
 - **External AI estate discovery** (`ai_inventory.py`, the assurance API and
   cockpit, opt-in `[ai_inventory] enable`) — tenant-scoped, read-only inventory
-  synchronization for customer-owned AWS Bedrock, Azure AI Foundry, Google
-  Vertex AI, Databricks Unity Catalog, and Microsoft Copilot Studio estates.
+  synchronization for customer-owned AWS Bedrock, Amazon SageMaker, Azure AI
+  Foundry, Google Vertex AI, Databricks Unity Catalog, Microsoft Copilot
+  Studio, MLflow tracking-server, and Hugging Face Hub organization estates.
   Connectors use fixed list operations, bounded pagination/retries/record caps,
   provider revision bindings, missing-asset grace runs, and explicit safe read
   projections. Credentials resolve from the standard provider chain or named

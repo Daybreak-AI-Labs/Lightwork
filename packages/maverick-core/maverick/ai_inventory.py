@@ -45,6 +45,9 @@ _CONNECTORS = (
     "bedrock",
     "copilot_studio",
     "databricks_unity_catalog",
+    "huggingface",
+    "mlflow",
+    "sagemaker",
     "vertex_ai",
 )
 _RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -517,7 +520,7 @@ def _sleep_delay(
     sleep(delay)
 
 
-def _http_json(
+def _http_json_with_headers(
     transport: HttpTransport,
     url: str,
     *,
@@ -527,7 +530,8 @@ def _http_json(
     now: Callable[[], float],
     params: Mapping[str, Any] | None = None,
     extra_headers: Mapping[str, str] | None = None,
-) -> Mapping[str, Any]:
+) -> tuple[Any, Mapping[str, str]]:
+    """One retried, bearer-authenticated GET; the raw JSON plus headers."""
     token = _credential(token_env)
     headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
     headers.update(dict(extra_headers or {}))
@@ -558,8 +562,32 @@ def _http_json(
             page = response.json()
         except (TypeError, ValueError) as exc:
             raise DiscoveryProtocolError("provider response was not JSON") from exc
-        return _mapping(page, "provider page")
+        return page, {str(key): str(value) for key, value in response.headers.items()}
     raise DiscoveryTransportError("provider retry budget exhausted")
+
+
+def _http_json(
+    transport: HttpTransport,
+    url: str,
+    *,
+    token_env: str,
+    limits: DiscoveryLimits,
+    sleep: Callable[[float], None],
+    now: Callable[[], float],
+    params: Mapping[str, Any] | None = None,
+    extra_headers: Mapping[str, str] | None = None,
+) -> Mapping[str, Any]:
+    page, _headers = _http_json_with_headers(
+        transport,
+        url,
+        token_env=token_env,
+        limits=limits,
+        sleep=sleep,
+        now=now,
+        params=params,
+        extra_headers=extra_headers,
+    )
+    return _mapping(page, "provider page")
 
 
 def _owner_from_tags(value: Any) -> str:
@@ -1745,6 +1773,478 @@ _ASSET_ID = re.compile(r"MAA-[0-9a-f]{32}\Z")
 _MAX_PERSISTED_REVISION = (2**63) - 1
 
 
+class SageMakerClient(Protocol):
+    def list_models(self, **kwargs: Any) -> Mapping[str, Any]: ...
+
+    def list_endpoints(self, **kwargs: Any) -> Mapping[str, Any]: ...
+
+    def list_tags(self, **kwargs: Any) -> Mapping[str, Any]: ...
+
+
+class SageMakerInventoryAdapter:
+    """SageMaker customer-owned models and serving endpoints.
+
+    Fixed list operations only; no describe calls, no artifact downloads.
+    The SDK client is injected in tests and may be omitted in production,
+    where boto3 is imported lazily with its standard credential references.
+    """
+
+    name = "sagemaker"
+    source = "aws_sagemaker"
+
+    def __init__(
+        self,
+        *,
+        sagemaker_client: SageMakerClient | None = None,
+        region: str | None = None,
+        limits: DiscoveryLimits | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self._client = sagemaker_client
+        self.region = (
+            region
+            or os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+            or ""
+        ).strip()
+        if self.region and not re.fullmatch(r"[a-z0-9-]{2,32}", self.region):
+            raise AIInventoryConfigError("AWS region is malformed")
+        self.limits = limits or DiscoveryLimits()
+        self._sleep = sleep
+        self._clock = clock
+
+    def _resolved_client(self) -> SageMakerClient:
+        if self._client is not None:
+            return self._client
+        try:
+            import boto3  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise AIInventoryConfigError(
+                "SageMaker inventory requires boto3 or an injected client"
+            ) from exc
+        profile = os.environ.get("AWS_PROFILE", "").strip() or None
+        session = boto3.Session(profile_name=profile, region_name=self.region or None)
+        self._client = session.client("sagemaker")
+        return self._client
+
+    def _pages(
+        self,
+        method: Callable[..., Mapping[str, Any]],
+        item_key: str,
+        budget: _PaginationBudget,
+    ) -> list[Mapping[str, Any]]:
+        token = ""
+        seen: set[str] = set()
+        out: list[Mapping[str, Any]] = []
+        while True:
+            if token in seen:
+                raise DiscoveryProtocolError("SageMaker pagination token cycle detected")
+            seen.add(token)
+            budget.page()
+            kwargs: dict[str, Any] = {"MaxResults": 100}
+            if token:
+                kwargs["NextToken"] = token
+            page = _sdk_call(
+                method,
+                kwargs,
+                limits=self.limits,
+                sleep=self._sleep,
+                now=self._clock,
+            )
+            rows = _items(page, item_key)
+            budget.add_records(len(rows))
+            out.extend(rows)
+            raw_token = page.get("NextToken")
+            if raw_token in (None, ""):
+                return out
+            token = _required_text(raw_token, "SageMaker NextToken", 4_096)
+
+    def _owner(self, client: SageMakerClient, arn: str) -> str:
+        method = getattr(client, "list_tags", None)
+        if not callable(method):
+            return "unknown"
+        page = _sdk_call(
+            method,
+            {"ResourceArn": arn, "MaxResults": 50},
+            limits=self.limits,
+            sleep=self._sleep,
+            now=self._clock,
+        )
+        tags = page.get("Tags")
+        if not isinstance(tags, list):
+            return "unknown"
+        normalized = [
+            {"key": row.get("Key"), "value": row.get("Value")}
+            for row in tags
+            if isinstance(row, Mapping)
+        ]
+        return _owner_from_tags(normalized)
+
+    def _console_url(self, kind: str, identifier: str) -> str:
+        region = self.region or "us-east-1"
+        safe_id = quote(identifier, safe="")
+        return f"https://console.aws.amazon.com/sagemaker/home/{region}/{kind}/{safe_id}"
+
+    def _model_asset(
+        self, row: Mapping[str, Any], client: SageMakerClient, now: float,
+    ) -> DiscoveredAsset:
+        arn = _required_text(row.get("ModelArn"), "SageMaker model ARN", 2_048)
+        model_name = _required_text(row.get("ModelName"), "SageMaker model name", 256)
+        return _asset(
+            asset_type="model",
+            source=self.source,
+            source_id=arn,
+            display_name=model_name,
+            version_authority={"arn": arn, "created_at": str(row.get("CreationTime"))},
+            binding_strength="observed_snapshot",
+            owner=self._owner(client, arn),
+            platform="Amazon SageMaker",
+            model=model_name,
+            last_seen=row.get("CreationTime"),
+            fallback_time=now,
+            source_url=self._console_url("models", model_name),
+            metadata=_selected_metadata(
+                resource_kind="model",
+                region=self.region,
+            ),
+        )
+
+    def _endpoint_asset(
+        self, row: Mapping[str, Any], client: SageMakerClient, now: float,
+    ) -> DiscoveredAsset:
+        arn = _required_text(row.get("EndpointArn"), "SageMaker endpoint ARN", 2_048)
+        endpoint_name = _required_text(
+            row.get("EndpointName"), "SageMaker endpoint name", 256,
+        )
+        return _asset(
+            asset_type="model",
+            source=self.source,
+            source_id=arn,
+            display_name=endpoint_name,
+            version_authority={
+                "arn": arn,
+                "modified_at": str(row.get("LastModifiedTime")),
+                "status": row.get("EndpointStatus"),
+            },
+            binding_strength="observed_snapshot",
+            owner=self._owner(client, arn),
+            platform="Amazon SageMaker",
+            model="unknown",
+            last_seen=row.get("LastModifiedTime") or row.get("CreationTime"),
+            fallback_time=now,
+            source_url=self._console_url("endpoints", endpoint_name),
+            metadata=_selected_metadata(
+                resource_kind="endpoint",
+                status=row.get("EndpointStatus"),
+                region=self.region,
+            ),
+        )
+
+    def discover(self) -> DiscoveryResult:
+        client = self._resolved_client()
+        budget = _PaginationBudget(self.limits)
+        now = self._clock()
+        assets = [
+            self._model_asset(row, client, now)
+            for row in self._pages(client.list_models, "Models", budget)
+        ]
+        assets.extend(
+            self._endpoint_asset(row, client, now)
+            for row in self._pages(client.list_endpoints, "Endpoints", budget)
+        )
+        return DiscoveryResult(tuple(assets), budget.pages)
+
+
+def _millis_timestamp(value: Any, *, fallback: float) -> Any:
+    """MLflow reports epoch milliseconds; convert without guessing units twice."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return fallback
+    number = float(value)
+    return number / 1_000.0 if number > 1e11 else number
+
+
+class MLflowInventoryAdapter(_HttpAdapter):
+    """MLflow tracking-server registered models and their latest versions."""
+
+    name = "mlflow"
+    source = "mlflow"
+
+    def __init__(
+        self,
+        *,
+        tracking_uri: str | None = None,
+        tracking_uri_env: str = "MLFLOW_TRACKING_URI",
+        token_env: str = "MLFLOW_TRACKING_TOKEN",
+        transport: HttpTransport | None = None,
+        limits: DiscoveryLimits | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        resolved = tracking_uri or os.environ.get(tracking_uri_env, "")
+        if not resolved:
+            raise AIInventoryConfigError(
+                f"MLflow tracking URI reference is unavailable: {tracking_uri_env}"
+            )
+        super().__init__(
+            base_url=resolved,
+            token_env=token_env,
+            transport=transport,
+            limits=limits,
+            sleep=sleep,
+            clock=clock,
+        )
+        self._server_key = _sha256(self.base_url)[:16]
+
+    def _registered_models(self, budget: _PaginationBudget) -> list[Mapping[str, Any]]:
+        url = f"{self.base_url}/api/2.0/mlflow/registered-models/search"
+        token = ""
+        seen: set[str] = set()
+        out: list[Mapping[str, Any]] = []
+        while True:
+            if token in seen:
+                raise DiscoveryProtocolError("MLflow pagination token cycle detected")
+            seen.add(token)
+            budget.page()
+            params: dict[str, Any] = {"max_results": 100}
+            if token:
+                params["page_token"] = token
+            page = self._get(url, params=params)
+            rows = _items(page, "registered_models")
+            budget.add_records(len(rows))
+            out.extend(rows)
+            raw_token = page.get("next_page_token")
+            if raw_token in (None, ""):
+                return out
+            token = _required_text(raw_token, "MLflow next_page_token", 4_096)
+
+    def _root_model(self, row: Mapping[str, Any], now: float) -> DiscoveredAsset:
+        model_name = _required_text(row.get("name"), "MLflow model name", 256)
+        return _asset(
+            asset_type="model",
+            source=self.source,
+            source_id=f"{self._server_key}:{model_name}",
+            display_name=model_name,
+            version_authority={
+                "server": self._server_key,
+                "model": model_name,
+                "updated_at": row.get("last_updated_timestamp"),
+            },
+            binding_strength="observed_snapshot",
+            owner=_owner_from_tags(row.get("tags")) if row.get("tags") else _optional_text(row.get("user_id"), 256),
+            platform="MLflow",
+            model=model_name,
+            last_seen=_millis_timestamp(
+                row.get("last_updated_timestamp") or row.get("creation_timestamp"),
+                fallback=now,
+            ),
+            fallback_time=now,
+            source_url=f"{self.base_url}/models/{quote(model_name, safe='')}",
+            metadata=_selected_metadata(
+                resource_kind="registered_model",
+                server_key=self._server_key,
+            ),
+        )
+
+    def _version(
+        self,
+        row: Mapping[str, Any],
+        *,
+        model_name: str,
+        now: float,
+    ) -> DiscoveredAsset:
+        raw_version = row.get("version")
+        if isinstance(raw_version, bool) or not isinstance(raw_version, (str, int)):
+            raise DiscoveryProtocolError("MLflow model version must be a string or integer")
+        version = _required_text(str(raw_version), "MLflow model version", 32)
+        source_id = f"{self._server_key}:{model_name}:{version}"
+        return _asset(
+            asset_type="model",
+            source=self.source,
+            source_id=source_id,
+            display_name=f"{model_name} v{version}",
+            version_authority={
+                "server": self._server_key,
+                "model": model_name,
+                "version": version,
+                "run_id": row.get("run_id"),
+                "source": row.get("source"),
+            },
+            binding_strength="immutable_provider_revision",
+            owner=_optional_text(row.get("user_id"), 256),
+            platform="MLflow",
+            model=model_name,
+            last_seen=_millis_timestamp(
+                row.get("last_updated_timestamp") or row.get("creation_timestamp"),
+                fallback=now,
+            ),
+            fallback_time=now,
+            source_url=(
+                f"{self.base_url}/models/{quote(model_name, safe='')}/"
+                f"versions/{quote(version, safe='')}"
+            ),
+            metadata=_selected_metadata(
+                resource_kind="model_version",
+                version=version,
+                stage=row.get("current_stage"),
+                status=row.get("status"),
+                server_key=self._server_key,
+            ),
+            dependencies=(f"{self._server_key}:{model_name}",),
+        )
+
+    def discover(self) -> DiscoveryResult:
+        budget = _PaginationBudget(self.limits)
+        now = self._clock()
+        assets: list[DiscoveredAsset] = []
+        for row in self._registered_models(budget):
+            assets.append(self._root_model(row, now))
+            model_name = _required_text(row.get("name"), "MLflow model name", 256)
+            versions = row.get("latest_versions")
+            if isinstance(versions, list):
+                budget.add_records(len(versions))
+                assets.extend(
+                    self._version(item, model_name=model_name, now=now)
+                    for item in versions
+                    if isinstance(item, Mapping)
+                )
+        return DiscoveryResult(tuple(assets), budget.pages)
+
+
+_LINK_NEXT = re.compile(r'<([^>]+)>\s*;\s*rel="next"')
+
+
+class HuggingFaceInventoryAdapter(_HttpAdapter):
+    """Hugging Face Hub models owned by one organization.
+
+    Scoped to the configured author only -- the public Hub catalogue is not
+    the customer's estate. Cursor pagination follows the RFC 5988 ``Link``
+    header and every next URL is same-origin enforced.
+    """
+
+    name = "huggingface"
+    source = "huggingface"
+
+    def __init__(
+        self,
+        *,
+        organization: str | None = None,
+        organization_env: str = "HUGGINGFACE_ORG",
+        endpoint: str = "https://huggingface.co",
+        token_env: str = "HUGGINGFACE_TOKEN",
+        transport: HttpTransport | None = None,
+        limits: DiscoveryLimits | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        resolved = organization or os.environ.get(organization_env, "")
+        if not resolved:
+            raise AIInventoryConfigError(
+                f"Hugging Face organization reference is unavailable: {organization_env}"
+            )
+        super().__init__(
+            base_url=endpoint,
+            token_env=token_env,
+            transport=transport,
+            limits=limits,
+            sleep=sleep,
+            clock=clock,
+        )
+        self.organization = _required_text(resolved, "Hugging Face organization", 96)
+
+    def _model_rows(self, budget: _PaginationBudget) -> list[Mapping[str, Any]]:
+        url = f"{self.base_url}/api/models"
+        params: Mapping[str, Any] | None = {
+            "author": self.organization,
+            "limit": 100,
+            "full": "true",
+        }
+        seen: set[str] = set()
+        out: list[Mapping[str, Any]] = []
+        while True:
+            marker = _sha256({"url": url, "params": params})
+            if marker in seen:
+                raise DiscoveryProtocolError("Hugging Face pagination cycle detected")
+            seen.add(marker)
+            budget.page()
+            page, headers = _http_json_with_headers(
+                self.transport,
+                url,
+                token_env=self.token_env,
+                limits=self.limits,
+                sleep=self._sleep,
+                now=self._clock,
+                params=params,
+            )
+            if not isinstance(page, list):
+                raise DiscoveryProtocolError("Hugging Face model page must be a list")
+            rows = [row for row in page if isinstance(row, Mapping)]
+            if len(rows) != len(page):
+                raise DiscoveryProtocolError("Hugging Face model rows must be objects")
+            budget.add_records(len(rows))
+            out.extend(rows)
+            link_header = next(
+                (value for key, value in headers.items() if key.lower() == "link"),
+                "",
+            )
+            match = _LINK_NEXT.search(link_header)
+            if not match:
+                return out
+            url = _same_origin_next(
+                self.base_url,
+                match.group(1),
+                expected_path="/api/models",
+            )
+            params = None
+
+    def _model_asset(self, row: Mapping[str, Any], now: float) -> DiscoveredAsset:
+        repo_id = _required_text(
+            row.get("id") or row.get("modelId"), "Hugging Face repo id", 256,
+        )
+        owner_prefix = repo_id.split("/", 1)[0] if "/" in repo_id else self.organization
+        if owner_prefix != self.organization:
+            raise DiscoveryProtocolError(
+                "Hugging Face listing returned a repo outside the configured organization"
+            )
+        revision = row.get("sha")
+        authority = (
+            {"repo": repo_id, "sha": revision}
+            if revision
+            else {"repo": repo_id, "last_modified": row.get("lastModified")}
+        )
+        strength: BindingStrength = (
+            "immutable_provider_revision" if revision else "observed_snapshot"
+        )
+        return _asset(
+            asset_type="model",
+            source=self.source,
+            source_id=repo_id,
+            display_name=repo_id,
+            version_authority=authority,
+            binding_strength=strength,
+            owner=self.organization,
+            platform="Hugging Face Hub",
+            model=repo_id,
+            last_seen=row.get("lastModified") or row.get("createdAt"),
+            fallback_time=now,
+            source_url=f"{self.base_url}/{repo_id}",
+            metadata=_selected_metadata(
+                resource_kind="model_repo",
+                pipeline_tag=row.get("pipeline_tag"),
+                private=row.get("private"),
+                library=row.get("library_name"),
+                revision=revision,
+            ),
+        )
+
+    def discover(self) -> DiscoveryResult:
+        budget = _PaginationBudget(self.limits)
+        now = self._clock()
+        assets = [self._model_asset(row, now) for row in self._model_rows(budget)]
+        return DiscoveryResult(tuple(assets), budget.pages)
+
+
 def _persisted_record(value: Any, kind: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise DiscoveryProtocolError(
@@ -2227,6 +2727,7 @@ def build_configured_adapter(
     transport: HttpTransport | None = None,
     control_client: BedrockControlClient | None = None,
     agent_client: BedrockAgentClient | None = None,
+    sagemaker_client: SageMakerClient | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.time,
 ) -> InventoryAdapter:
@@ -2245,10 +2746,19 @@ def build_configured_adapter(
             sleep=sleep,
             clock=clock,
         )
+    if connector == "sagemaker":
+        return SageMakerInventoryAdapter(
+            sagemaker_client=sagemaker_client,
+            limits=limits,
+            sleep=sleep,
+            clock=clock,
+        )
     factories: dict[str, Callable[..., InventoryAdapter]] = {
         "azure_ai_foundry": AzureAIFoundryInventoryAdapter,
         "copilot_studio": CopilotStudioInventoryAdapter,
         "databricks_unity_catalog": DatabricksUnityCatalogInventoryAdapter,
+        "huggingface": HuggingFaceInventoryAdapter,
+        "mlflow": MLflowInventoryAdapter,
         "vertex_ai": VertexAIInventoryAdapter,
     }
     factory = factories.get(connector)
@@ -2912,12 +3422,14 @@ def sync_connector(
     transport: HttpTransport | None = None,
     control_client: BedrockControlClient | None = None,
     agent_client: BedrockAgentClient | None = None,
+    sagemaker_client: SageMakerClient | None = None,
 ) -> dict[str, Any]:
     adapter = build_configured_adapter(
         name,
         transport=transport,
         control_client=control_client,
         agent_client=agent_client,
+        sagemaker_client=sagemaker_client,
     )
     return _DEFAULT.sync(adapter, actor=actor)
 

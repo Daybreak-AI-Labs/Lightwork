@@ -1483,9 +1483,9 @@ def pick_security_suite() -> dict[str, Any]:
         )
     ai_inventory = _q_confirm(
         "Enable read-only discovery of customer-owned AI assets in Bedrock, "
-        "Azure AI Foundry, Vertex AI, Databricks, or Copilot Studio? "
-        "Credentials are configured separately and are never stored in the "
-        "inventory ledger.",
+        "SageMaker, Azure AI Foundry, Vertex AI, Databricks, Copilot Studio, "
+        "MLflow, or Hugging Face? Credentials are configured separately and "
+        "are never stored in the inventory ledger.",
         default=False,
     )
     inventory_connectors: list[str] = []
@@ -1494,10 +1494,13 @@ def pick_security_suite() -> dict[str, Any]:
         model_risk_assurance = True
         connector_labels = {
             "AWS Bedrock": "bedrock",
+            "Amazon SageMaker": "sagemaker",
             "Azure AI Foundry": "azure_ai_foundry",
             "Google Vertex AI": "vertex_ai",
             "Databricks Unity Catalog": "databricks_unity_catalog",
             "Microsoft Copilot Studio": "copilot_studio",
+            "MLflow tracking server": "mlflow",
+            "Hugging Face Hub organization": "huggingface",
         }
         selected = _q_checkbox(
             "Prepare which read-only AI inventory connectors?",
