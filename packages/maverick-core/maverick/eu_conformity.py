@@ -664,6 +664,18 @@ def get_assessment_route(asset_id: str) -> dict[str, Any] | None:
     return None if record is None else dict(record)
 
 
+def list_assessment_routes(*, status: str | None = None) -> list[dict[str, Any]]:
+    _require_enabled()
+    if status is not None and status not in {"recorded", "reassessment_required"}:
+        raise ValueError("status must be recorded or reassessment_required")
+    rows = _ROUTES.list(limit=_MAX_LIST)
+    rows.sort(key=lambda row: (str(row.get("asset_id") or ""), str(row.get("id") or "")))
+    return [
+        dict(row) for row in rows
+        if status is None or row.get("status") == status
+    ]
+
+
 def list_frias(*, status: str | None = None) -> list[dict[str, Any]]:
     _require_enabled()
     if status is not None and status not in {"draft", "completed", "outdated"}:
@@ -691,6 +703,7 @@ __all__ = [
     "enabled",
     "get_assessment_route",
     "get_eu_conformity_config",
+    "list_assessment_routes",
     "list_frias",
     "mark_fria_outdated",
     "mark_substantial_modification",

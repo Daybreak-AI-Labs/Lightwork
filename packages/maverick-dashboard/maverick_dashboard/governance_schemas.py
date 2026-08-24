@@ -58,6 +58,28 @@ class AnnexIVItemIn(BaseModel):
     expected_revision: int = Field(..., ge=1)
 
 
+class RouteRecordIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_ASSET_ID)
+    route: str = Field(
+        ...,
+        pattern=r"^(internal_control_annex_vi|notified_body_annex_vii|sectoral_annex_i)$",
+    )
+    annex_iii_point: int | None = Field(None, ge=1, le=8)
+    harmonised_standards_applied: bool = False
+    common_specifications_applied: bool = False
+    rationale: str = Field(..., min_length=1, max_length=2000)
+
+
+class RouteModificationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    reason: str = Field(..., min_length=1, max_length=2000)
+    predetermined: bool = False
+    expected_revision: int = Field(..., ge=1)
+
+
 class LiteracyTrainingIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

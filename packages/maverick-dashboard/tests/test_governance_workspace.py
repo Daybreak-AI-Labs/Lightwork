@@ -309,6 +309,161 @@ def test_annex_iv_checklist_through_the_api():
 
 
 # ---------------------------------------------------------------------------
+# Art. 43 conformity-assessment routes
+# ---------------------------------------------------------------------------
+
+def test_art43_route_lifecycle_through_the_api_and_page():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("triage-router")[:32]
+
+    # Art. 43(1): a point-1 system without standards cannot self-assess.
+    refused = client.post(
+        f"{_PREFIX}/routes",
+        json={
+            "asset_id": asset_id,
+            "route": "internal_control_annex_vi",
+            "annex_iii_point": 1,
+            "rationale": "Biometric triage without harmonised standards.",
+        },
+    )
+    assert refused.status_code == 409
+    assert "Art. 43(1)" in refused.json()["detail"]
+
+    # Art. 43(2): points 2-8 never involve a notified body.
+    refused = client.post(
+        f"{_PREFIX}/routes",
+        json={
+            "asset_id": asset_id,
+            "route": "notified_body_annex_vii",
+            "annex_iii_point": 4,
+            "rationale": "Point 4 with a notified body.",
+        },
+    )
+    assert refused.status_code == 409
+    assert "Art. 43(2)" in refused.json()["detail"]
+
+    # A sectoral route carries no Annex III point.
+    assert client.post(
+        f"{_PREFIX}/routes",
+        json={
+            "asset_id": asset_id,
+            "route": "sectoral_annex_i",
+            "annex_iii_point": 3,
+            "rationale": "Sectoral with a point.",
+        },
+    ).status_code == 422
+
+    recorded = _ok(
+        client.post(
+            f"{_PREFIX}/routes",
+            json={
+                "asset_id": asset_id,
+                "route": "internal_control_annex_vi",
+                "annex_iii_point": 4,
+                "harmonised_standards_applied": True,
+                "rationale": "Point 4 internal control under harmonised standards.",
+            },
+        ),
+        expected=201,
+    )
+    assert recorded["status"] == "recorded"
+    assert recorded["decided_by"] == "local:dashboard"
+
+    # A second decision for the same asset conflicts instead of overwriting.
+    assert client.post(
+        f"{_PREFIX}/routes",
+        json={
+            "asset_id": asset_id,
+            "route": "internal_control_annex_vi",
+            "annex_iii_point": 4,
+            "rationale": "Recorded twice.",
+        },
+    ).status_code == 409
+
+    fetched = _ok(client.get(f"{_PREFIX}/routes/{asset_id}"))
+    assert fetched["record"]["route"] == "internal_control_annex_vi"
+    assert client.get(f"{_PREFIX}/routes/MAA-{'0' * 32}").status_code == 404
+
+    listing = _ok(client.get(f"{_PREFIX}/routes"))
+    assert listing["count"] == 1
+    assert "internal_control_annex_vi" in listing["routes"]
+
+    modified = _ok(
+        client.post(
+            f"{_PREFIX}/routes/{asset_id}/modification",
+            json={
+                "reason": "The system now serves a new user population.",
+                "expected_revision": fetched["record"]["revision"],
+            },
+        )
+    )
+    assert modified["status"] == "reassessment_required"
+    assert client.post(
+        f"{_PREFIX}/routes/MAA-{'0' * 32}/modification",
+        json={"reason": "Missing asset.", "expected_revision": 1},
+    ).status_code == 404
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert "Conformity assessment route (Art. 43)" in page.text
+    assert "reassessment required" in page.text
+
+
+# ---------------------------------------------------------------------------
+# Role boundaries: a viewer reads, never writes
+# ---------------------------------------------------------------------------
+
+def test_viewer_role_reads_but_never_mutates(monkeypatch):
+    from maverick_dashboard import auth
+
+    _enable_governance()
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:paralegal")
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "viewer")
+
+    assert client.get(f"{_PREFIX}/fria").status_code == 200
+    assert client.get(f"{_PREFIX}/routes").status_code == 200
+    assert client.get(f"{_PREFIX}/literacy/gaps").status_code == 200
+    assert client.get(f"{_PREFIX}/grc-sync/status").status_code == 200
+
+    mutations = (
+        (f"{_PREFIX}/fria", {"asset_id": "MAA-" + "0" * 32, "context": "x"}),
+        (
+            f"{_PREFIX}/routes",
+            {
+                "asset_id": "MAA-" + "0" * 32,
+                "route": "sectoral_annex_i",
+                "rationale": "viewer attempt",
+            },
+        ),
+        (
+            f"{_PREFIX}/literacy/assignments",
+            {"person": "someone", "roles": ["role"], "expected_revision": 0},
+        ),
+    )
+    for path, body in mutations:
+        assert client.post(path, json=body).status_code == 403, path
+    # The evidence export and the workspace page itself are operate-floor.
+    assert client.get(f"{_PREFIX}/literacy/evidence").status_code == 403
+    assert client.get("/security/governance").status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Pickers: nobody pastes raw ids
+# ---------------------------------------------------------------------------
+
+def test_page_offers_asset_and_incident_pickers():
+    _enable_governance()
+    incident = _assurance_incident()
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert 'list="governed-assets"' in page.text
+    assert "Triage model" in page.text
+    assert 'list="assurance-incidents"' in page.text
+    assert incident["id"] in page.text
+
+
+# ---------------------------------------------------------------------------
 # AI literacy (Art. 4)
 # ---------------------------------------------------------------------------
 

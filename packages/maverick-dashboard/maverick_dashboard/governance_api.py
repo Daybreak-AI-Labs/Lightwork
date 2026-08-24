@@ -181,6 +181,65 @@ async def annex_iv_render(request: Request, record_id: str) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
+# Art. 43 conformity-assessment routes
+# --------------------------------------------------------------------------
+@router.get("/routes")
+async def list_assessment_routes(
+    request: Request,
+    status: str | None = Query(default=None, min_length=1, max_length=32),
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    rows = await _call(conformity.list_assessment_routes, status=status)
+    return {"records": rows, "count": len(rows), "routes": conformity.ROUTES}
+
+
+@router.get("/routes/{asset_id}")
+async def get_assessment_route(request: Request, asset_id: str) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    record = await _record_call(conformity.get_assessment_route, asset_id)
+    return {"record": record}
+
+
+@router.post("/routes", status_code=201)
+async def record_assessment_route(
+    request: Request,
+    body: schemas.RouteRecordIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.record_assessment_route,
+        body.asset_id,
+        route=body.route,
+        annex_iii_point=body.annex_iii_point,
+        harmonised_standards_applied=body.harmonised_standards_applied,
+        common_specifications_applied=body.common_specifications_applied,
+        rationale=body.rationale,
+        actor=_actor(request),
+    )
+
+
+@router.post("/routes/{asset_id}/modification")
+async def mark_substantial_modification(
+    request: Request,
+    asset_id: str,
+    body: schemas.RouteModificationIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.mark_substantial_modification,
+        asset_id,
+        reason=body.reason,
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+        predetermined=body.predetermined,
+    )
+
+
+# --------------------------------------------------------------------------
 # AI literacy (Art. 4)
 # --------------------------------------------------------------------------
 @router.get("/literacy/gaps")

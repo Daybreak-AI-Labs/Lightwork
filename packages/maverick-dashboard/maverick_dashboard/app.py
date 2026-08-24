@@ -2909,9 +2909,11 @@ async def _governance_workspace_page_data(
         "eu_conformity_enabled": conformity.enabled(),
         "fria_records": [],
         "fria_error": "",
+        "art43_routes": [],
         "ai_literacy_enabled": literacy.enabled(),
         "literacy_gaps": {},
         "literacy_error": "",
+        "literacy_training_keys": [],
         "grc_sync_enabled": sync.enabled(),
         "grc_status": {},
         "grc_outbound": [],
@@ -2941,6 +2943,24 @@ async def _governance_workspace_page_data(
                         ),
                     }
                 )
+        try:
+            routes = await run_in_threadpool(conformity.list_assessment_routes)
+        except Exception:
+            data["fria_error"] = data["fria_error"] or (
+                "Conformity-route records are temporarily unavailable."
+            )
+        else:
+            data["art43_routes"] = [
+                {
+                    "asset_id": row.get("asset_id"),
+                    "route": row.get("route"),
+                    "annex_iii_point": row.get("annex_iii_point"),
+                    "status": row.get("status"),
+                    "revision": row.get("revision"),
+                    "modifications": len(row.get("modifications") or []),
+                }
+                for row in routes[:100]
+            ]
     if data["ai_literacy_enabled"]:
         try:
             data["literacy_gaps"] = await run_in_threadpool(literacy.literacy_gaps)
@@ -2948,6 +2968,19 @@ async def _governance_workspace_page_data(
             data["literacy_error"] = (
                 "Training assignments and completions are temporarily unavailable."
             )
+        try:
+            requirements = await run_in_threadpool(literacy.list_requirements)
+        except Exception:
+            requirements = []
+        keys: dict[str, str] = {}
+        for requirement in requirements:
+            for training in requirement.get("trainings") or []:
+                keys.setdefault(
+                    str(training.get("key")), str(training.get("title") or "")
+                )
+        data["literacy_training_keys"] = [
+            {"key": key, "title": title} for key, title in sorted(keys.items())
+        ][:200]
     if data["grc_sync_enabled"]:
         status_result, outbound_result = await asyncio.gather(
             run_in_threadpool(sync.sync_status),
@@ -2974,7 +3007,13 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
     FRIA, Annex IV checklist, AI-literacy tracking, Art. 73 clocks, and
     GRC sync visibility, driven by /api/v1/security/governance."""
     require_permission(request, "operate")
-    from maverick import ai_incident_reporting, ai_literacy, eu_conformity, grc_sync
+    from maverick import (
+        ai_incident_reporting,
+        ai_literacy,
+        eu_conformity,
+        grc_sync,
+        model_risk_assurance,
+    )
 
     workspace = await _governance_workspace_page_data(
         eu_conformity,
@@ -2982,6 +3021,36 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
         grc_sync,
     )
     ai_incident_data = await _ai_incident_page_data(ai_incident_reporting)
+
+    # Pickers so nobody has to paste raw MAA-/MRI- ids: the governed asset
+    # inventory and recorded assurance incidents, both fail-soft and bounded.
+    governed_assets: list[dict[str, Any]] = []
+    assurance_incidents: list[dict[str, Any]] = []
+    if model_risk_assurance.enabled():
+        assets_result, incidents_result = await asyncio.gather(
+            run_in_threadpool(model_risk_assurance.list_inventory),
+            run_in_threadpool(model_risk_assurance.list_incidents),
+            return_exceptions=True,
+        )
+        if not isinstance(assets_result, Exception):
+            governed_assets = [
+                {
+                    "asset_id": row.get("asset_id"),
+                    "display_name": row.get("display_name"),
+                    "asset_type": row.get("asset_type"),
+                }
+                for row in assets_result[:500]
+            ]
+        if not isinstance(incidents_result, Exception):
+            assurance_incidents = [
+                {
+                    "id": row.get("id"),
+                    "severity": row.get("severity"),
+                    "summary": str(row.get("summary") or "")[:120],
+                }
+                for row in incidents_result[:100]
+            ]
+
     return templates.TemplateResponse(
         request,
         "governance.html",
@@ -2991,9 +3060,14 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
             "fria_error": workspace["fria_error"],
             "fria_elements": eu_conformity.FRIA_ELEMENTS,
             "annex_iv_items": eu_conformity.ANNEX_IV_ITEMS,
+            "art43_routes": workspace["art43_routes"],
+            "conformity_routes": eu_conformity.ROUTES,
+            "governed_assets": governed_assets,
+            "assurance_incidents": assurance_incidents,
             "ai_literacy_enabled": workspace["ai_literacy_enabled"],
             "literacy_gaps": workspace["literacy_gaps"],
             "literacy_error": workspace["literacy_error"],
+            "literacy_training_keys": workspace["literacy_training_keys"],
             "ai_incident_enabled": ai_incident_data["enabled"],
             "ai_incident_declarations": ai_incident_data["declarations"],
             "ai_incident_error": ai_incident_data["error"],

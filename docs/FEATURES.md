@@ -890,6 +890,20 @@ here.
   duplicate. The payload is a bounded governed pointer — id, type, severity,
   summary, content digest, `correlation_id` round-trip link, optional
   backlink URL; evidence bodies and detail payloads never leave the platform.
+- **Governance workspace** (dashboard `/security/governance` +
+  `/api/v1/security/governance`, `governance_api.py`/`governance_schemas.py`,
+  rides the `[eu_conformity]`/`[ai_literacy]`/`[ai_incident_reporting]`/
+  `[grc_sync]` knobs — no knob of its own) — the plain-language surface for
+  legal, privacy/DPO, compliance, and HR over the governed registers: the
+  Art. 27 FRIA as six answered questions with citations, the Annex IV
+  reference checklist, the Art. 43 route decision and substantial-modification
+  marking, Art. 4 literacy requirements/assignments/completions with gap
+  chips and a downloadable evidence file, Art. 73 declare/file/withdraw with
+  deadline-aware category picking, and the read-only GRC outbound ledger.
+  Inventory-backed pickers replace raw record ids; every mutation is
+  operate-floor, CSRF-checked, CAS-guarded, and recorded under the caller's
+  name. Nothing on the page transmits anything to an authority or external
+  system.
 - **Signed AI policy packs** (`policy_packs.py`, opt-in `[policy_packs]
   enable`) — bounded NIST AI RMF and EU AI Act starter mappings plus
   Ed25519-verified external updates, anti-rollback staging, explicit global

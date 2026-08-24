@@ -242,6 +242,41 @@ def test_substantial_modification_forces_reassessment_unless_predetermined():
     assert reopened["modifications"][-1]["predetermined"] is False
 
 
+def test_list_assessment_routes_filters_by_status():
+    other = "MAA-" + "b" * 32
+    euc.record_assessment_route(
+        _ASSET,
+        route="internal_control_annex_vi",
+        annex_iii_point=4,
+        harmonised_standards_applied=True,
+        common_specifications_applied=False,
+        rationale="Point 4 internal control.",
+        actor="quality-lead",
+    )
+    flagged = euc.record_assessment_route(
+        other,
+        route="internal_control_annex_vi",
+        annex_iii_point=5,
+        harmonised_standards_applied=False,
+        common_specifications_applied=False,
+        rationale="Point 5 internal control.",
+        actor="quality-lead",
+    )
+    euc.mark_substantial_modification(
+        other,
+        reason="A new data source changed the system's behaviour.",
+        actor="quality-lead",
+        expected_revision=flagged["revision"],
+    )
+
+    rows = euc.list_assessment_routes()
+    assert [row["asset_id"] for row in rows] == sorted([_ASSET, other])
+    flagged_rows = euc.list_assessment_routes(status="reassessment_required")
+    assert [row["asset_id"] for row in flagged_rows] == [other]
+    with pytest.raises(ValueError, match="status"):
+        euc.list_assessment_routes(status="nope")
+
+
 def test_registers_are_tenant_scoped():
     with tenant_scope(tenant="alpha"):
         _complete_fria()

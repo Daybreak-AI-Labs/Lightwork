@@ -24,10 +24,12 @@
 <section class="panel">
   <h1>Governance Workspace</h1>
   <p class="gov-muted">Plain-language workflows for legal, privacy, compliance, and HR:
-    fundamental-rights assessments, technical-documentation checklists, AI-literacy
-    tracking, and serious-incident clocks. Every entry is recorded under your name in
-    the governed ledger. Nothing on this page transmits anything to an authority or
-    external system.</p>
+    fundamental-rights assessments, technical-documentation checklists, conformity
+    routes, AI-literacy tracking, and serious-incident clocks. Every entry is recorded
+    under your name in the governed ledger. Nothing on this page transmits anything to
+    an authority or external system. Engineers and risk owners work in the
+    <a href="/security/assurance">technical assurance cockpit</a>; both surfaces share
+    the same governed records.</p>
 </section>
 
 <section class="panel">
@@ -38,8 +40,8 @@
   {% else %}
   <form id="fria-open" class="gov-form">
     <label>Which AI system is being assessed?
-      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…">
-      <span class="gov-help">The governed asset id from the assurance inventory.</span>
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
+      <span class="gov-help">Start typing to pick from the governed asset inventory.</span>
     </label>
     <label>Where will it be used?
       <input name="context" required maxlength="128" placeholder="underwriting-triage">
@@ -74,6 +76,7 @@
       <button type="button" id="fria-outdate">Something changed — reopen</button>
       <button type="button" id="fria-notify">Record authority notification</button>
       <button type="button" id="fria-draft">View the written assessment</button>
+      <button type="button" id="fria-download">Download the assessment</button>
       <span id="fria-editor-status" class="gov-muted" aria-live="polite"></span>
     </div>
     <pre id="fria-draft-view" class="gov-render" hidden></pre>
@@ -89,7 +92,7 @@
   {% else %}
   <form id="annex-open" class="gov-form">
     <label>Which AI system?
-      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…">
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
       <span class="gov-help">Opens (or reopens) the nine-item checklist for this system.</span>
     </label>
     <div class="gov-form__wide"><button type="submit">Open the checklist</button>
@@ -102,10 +105,72 @@
     <div id="annex-items"></div>
     <div class="gov-form__wide">
       <button type="button" id="annex-render">View the checklist summary</button>
+      <button type="button" id="annex-download">Download the summary</button>
       <span id="annex-editor-status" class="gov-muted" aria-live="polite"></span>
     </div>
     <pre id="annex-render-view" class="gov-render" hidden></pre>
   </div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Conformity assessment route (Art. 43)</h2>
+  {% if not eu_conformity_enabled %}
+  <p class="gov-alert">Enable EU conformity workflows to record which
+    conformity-assessment procedure applies to each high-risk system.</p>
+  {% else %}
+  {% if art43_routes %}
+  <div class="gov-table"><table>
+    <caption>Recorded assessment routes and their reassessment status</caption>
+    <thead><tr><th>System</th><th>Procedure</th><th>Annex III point</th><th>Status</th><th>Changes</th></tr></thead>
+    <tbody>
+    {% for row in art43_routes %}<tr>
+      <td>{{ row.asset_id }}</td><td>{{ row.route.replace("_", " ") }}</td>
+      <td>{{ row.annex_iii_point if row.annex_iii_point is not none else "sectoral" }}</td>
+      <td><span class="gov-chip {% if row.status == 'recorded' %}gov-chip--good{% else %}gov-chip--warn{% endif %}">{{ row.status.replace("_", " ") }}</span></td>
+      <td>{{ row.modifications }}</td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="gov-empty">No assessment routes recorded yet. Record which
+    procedure applies before a system goes to market.</p>{% endif %}
+  <form id="route-record" class="gov-form">
+    <label>Which AI system?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
+    </label>
+    <label>Which procedure?
+      <select name="route">
+        <option value="internal_control_annex_vi">Internal control (Annex VI) — no notified body</option>
+        <option value="notified_body_annex_vii">Notified body (Annex VII)</option>
+        <option value="sectoral_annex_i">Sectoral (Annex I Union legislation)</option>
+      </select>
+    </label>
+    <label>Annex III point (1–8)
+      <input name="annex_iii_point" type="number" min="1" max="8" placeholder="Empty for sectoral">
+      <span class="gov-help">Point 1 (biometrics) may use internal control only where
+        harmonised standards or common specifications were applied.</span>
+    </label>
+    <label class="gov-form__wide">Why does this procedure apply?
+      <textarea name="rationale" required rows="2" maxlength="2000"></textarea>
+    </label>
+    <label><input type="checkbox" name="harmonised"> Harmonised standards (Art. 40) were applied</label>
+    <label><input type="checkbox" name="common_specs"> Common specifications (Art. 41) were applied</label>
+    <div class="gov-form__wide"><button type="submit">Record the route</button>
+      <span id="route-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  <form id="route-modify" class="gov-form">
+    <label>Which AI system changed?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
+    </label>
+    <label class="gov-form__wide">What changed?
+      <textarea name="reason" required rows="2" maxlength="2000"></textarea>
+    </label>
+    <label><input type="checkbox" name="predetermined"> This change was pre-determined
+      by the provider and documented in the technical documentation</label>
+    <div class="gov-form__wide"><button type="submit">Mark a substantial modification</button>
+      <span id="route-modify-status" class="gov-muted" aria-live="polite"></span>
+      <span class="gov-help">A change that was not pre-determined flags the system for a
+        new conformity assessment (Art. 43(4)).</span></div>
+  </form>
   {% endif %}
 </section>
 
@@ -158,7 +223,7 @@
       <input name="person" required maxlength="128">
     </label>
     <label>Training key
-      <input name="training" required maxlength="128">
+      <input name="training" required maxlength="128" list="literacy-trainings">
     </label>
     <label>Completed on
       <input name="completed_at" type="datetime-local" required>
@@ -169,6 +234,7 @@
     </label>
     <div class="gov-form__wide"><button type="submit">Record completion</button>
       <button type="button" id="literacy-export">Export evidence snapshot</button>
+      <button type="button" id="literacy-download">Download the evidence file</button>
       <span id="literacy-complete-status" class="gov-muted" aria-live="polite"></span></div>
   </form>
   <pre id="literacy-export-view" class="gov-render" hidden></pre>
@@ -201,8 +267,9 @@
     awareness the moment one is declared.</p>{% endif %}
   <form id="incident-declare" class="gov-form">
     <label>Assurance incident id
-      <input name="incident_id" required maxlength="64" placeholder="MRI-…">
-      <span class="gov-help">The incident already recorded in the assurance cockpit.</span>
+      <input name="incident_id" required maxlength="64" placeholder="MRI-…" list="assurance-incidents">
+      <span class="gov-help">Start typing to pick an incident recorded in the
+        <a href="/security/assurance">assurance cockpit</a>.</span>
     </label>
     <label>Category
       <select name="category" required>
@@ -266,6 +333,19 @@
   {% endif %}
 </section>
 
+<datalist id="governed-assets">
+  {% for asset in governed_assets %}<option value="{{ asset.asset_id }}">{{ asset.display_name }} ({{ asset.asset_type }})</option>
+  {% endfor %}
+</datalist>
+<datalist id="assurance-incidents">
+  {% for incident in assurance_incidents %}<option value="{{ incident.id }}">{{ incident.severity }} — {{ incident.summary }}</option>
+  {% endfor %}
+</datalist>
+<datalist id="literacy-trainings">
+  {% for training in literacy_training_keys %}<option value="{{ training.key }}">{{ training.title }}</option>
+  {% endfor %}
+</datalist>
+
 <script>
 (() => {
   const prefix = "/api/v1/security/governance";
@@ -290,6 +370,14 @@
     return response.json();
   };
   const epoch = value => Math.floor(new Date(value).getTime() / 1000);
+  const download = (filename, text) => {
+    const blob = new Blob([text], {type: "text/plain"});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url; link.download = filename;
+    document.body.appendChild(link); link.click(); link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   // ---- FRIA -------------------------------------------------------------
   let friaRecord = null;
@@ -389,6 +477,14 @@
       view.hidden = false; view.textContent = body.draft;
     } catch (error) { status("fria-editor-status", error instanceof Error ? error.message : "Draft failed."); }
   });
+  const friaDownload = document.getElementById("fria-download");
+  if (friaDownload) friaDownload.addEventListener("click", async () => {
+    if (!friaRecord) return;
+    try {
+      const body = await get(prefix, "/fria/" + encodeURIComponent(friaRecord.id) + "/draft");
+      download(friaRecord.id + "-fria.md", body.draft);
+    } catch (error) { status("fria-editor-status", error instanceof Error ? error.message : "Download failed."); }
+  });
 
   // ---- Annex IV ---------------------------------------------------------
   let annexRecord = null;
@@ -441,6 +537,46 @@
       view.hidden = false; view.textContent = body.rendered;
     } catch (error) { status("annex-editor-status", error instanceof Error ? error.message : "Summary failed."); }
   });
+  const annexDownload = document.getElementById("annex-download");
+  if (annexDownload) annexDownload.addEventListener("click", async () => {
+    if (!annexRecord) return;
+    try {
+      const body = await get(prefix, "/annex-iv/" + encodeURIComponent(annexRecord.id) + "/render");
+      download(annexRecord.id + "-annex-iv.md", body.rendered);
+    } catch (error) { status("annex-editor-status", error instanceof Error ? error.message : "Download failed."); }
+  });
+
+  // ---- Art. 43 route ----------------------------------------------------
+  const routeRecord = document.getElementById("route-record");
+  if (routeRecord) routeRecord.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(routeRecord);
+    const point = String(fields.get("annex_iii_point") || "").trim();
+    try {
+      status("route-status", "Recording the route decision…");
+      await post(prefix, "/routes",
+        {asset_id: String(fields.get("asset_id")).trim(),
+         route: String(fields.get("route")),
+         annex_iii_point: point ? Number(point) : null,
+         harmonised_standards_applied: fields.get("harmonised") === "on",
+         common_specifications_applied: fields.get("common_specs") === "on",
+         rationale: String(fields.get("rationale") || "").trim()});
+      window.location.reload();
+    } catch (error) { status("route-status", error instanceof Error ? error.message : "Recording failed."); }
+  });
+  const routeModify = document.getElementById("route-modify");
+  if (routeModify) routeModify.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(routeModify);
+    const asset = String(fields.get("asset_id") || "").trim();
+    try {
+      status("route-modify-status", "Recording the change…");
+      const current = await get(prefix, "/routes/" + encodeURIComponent(asset));
+      await post(prefix, "/routes/" + encodeURIComponent(asset) + "/modification",
+        {reason: String(fields.get("reason") || "").trim(),
+         predetermined: fields.get("predetermined") === "on",
+         expected_revision: current.record.revision});
+      window.location.reload();
+    } catch (error) { status("route-modify-status", error instanceof Error ? error.message : "Recording failed."); }
+  });
 
   // ---- Literacy ---------------------------------------------------------
   const literacyRequire = document.getElementById("literacy-require");
@@ -489,6 +625,13 @@
       const view = document.getElementById("literacy-export-view");
       view.hidden = false; view.textContent = body.evidence;
     } catch (error) { status("literacy-complete-status", error instanceof Error ? error.message : "Export failed."); }
+  });
+  const literacyDownload = document.getElementById("literacy-download");
+  if (literacyDownload) literacyDownload.addEventListener("click", async () => {
+    try {
+      const body = await get(prefix, "/literacy/evidence");
+      download("ai-literacy-evidence.json", body.evidence);
+    } catch (error) { status("literacy-complete-status", error instanceof Error ? error.message : "Download failed."); }
   });
 
   // ---- Incidents --------------------------------------------------------
