@@ -802,6 +802,9 @@ here.
   projections. Credentials resolve from the standard provider chain or named
   environment references and are never written to discovery records. A sync is
   global-admin initiated; reads require an explicitly selected tenant.
+  Recurring sweeps run through `maverick ai-inventory sync` (cron-able, with
+  per-connector failure isolation) and `maverick ai-inventory status` shows
+  each connector's last outcome.
 - **AI system hierarchy and portfolio risk** (`model_risk_assurance.py`,
   `portfolio_risk.py`, opt-in `[portfolio_risk] enable`) — declarations can
   bind components to governed parent systems with cycle/depth checks and

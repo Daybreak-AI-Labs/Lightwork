@@ -956,3 +956,82 @@ def regulatory_feed_deliver(notice_id: str, revision: int, actor: str) -> None:
     except (KeyError, ValueError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
     click.echo(f"{row['id']} {row.get('status')}")
+
+
+@main.group("ai-inventory")
+def ai_inventory_group() -> None:
+    """Read-only AI asset discovery sweeps across configured providers.
+
+    `sync` runs every configured connector (or the ones named) through the
+    governed discovery service -- credentials stay environment references,
+    listings are bounded, and each discovered asset lands in the model-risk
+    inventory. Cron `sync` for recurring sweeps; `status` shows each
+    connector's last outcome.
+    """
+
+
+@ai_inventory_group.command("sync")
+@click.option("--connector", "connector_names", multiple=True,
+              help="Sync only this connector (repeatable; default: all "
+                   "configured connectors).")
+@click.option("--by", "actor", required=True,
+              help="Dispatching human or cron identity.")
+def ai_inventory_sync(connector_names: tuple[str, ...], actor: str) -> None:
+    """Sweep configured providers into the governed inventory."""
+    from ..ai_inventory import (
+        AIInventoryError,
+        get_ai_inventory_config,
+        sync_connector,
+    )
+    try:
+        config = get_ai_inventory_config()
+    except AIInventoryError as e:
+        raise click.ClickException(str(e)) from e
+    targets = list(connector_names) or list(config.get("connectors") or [])
+    if not targets:
+        raise click.ClickException(
+            "no connectors configured ([ai_inventory] connectors) and none named"
+        )
+    failures: list[str] = []
+    for name in targets:
+        try:
+            run = sync_connector(name, actor=actor)
+        except (AIInventoryError, ValueError, RuntimeError) as e:
+            failures.append(f"{name}: {e}")
+            continue
+        click.echo(f"  {name}: {run.get('status')}  "
+                   f"assets {run.get('asset_count', 0)}")
+    click.echo(f"synced {len(targets) - len(failures)} of {len(targets)} connector(s)")
+    if failures:
+        for line in failures:
+            click.echo(f"  FAILED {line}")
+        raise click.ClickException(f"{len(failures)} connector(s) failed to sync")
+
+
+@ai_inventory_group.command("status")
+def ai_inventory_status() -> None:
+    """Each configured connector's last discovery outcome."""
+    from ..ai_inventory import (
+        AIInventoryError,
+        connector_status,
+        get_ai_inventory_config,
+    )
+    try:
+        config = get_ai_inventory_config()
+    except AIInventoryError as e:
+        raise click.ClickException(str(e)) from e
+    connectors = list(config.get("connectors") or [])
+    if not connectors:
+        click.echo("no connectors configured ([ai_inventory] connectors).")
+        return
+    for name in connectors:
+        try:
+            row = connector_status(name)
+        except (AIInventoryError, ValueError, RuntimeError) as e:
+            click.echo(f"  {name}: status unavailable ({e})")
+            continue
+        if row is None:
+            click.echo(f"  {name}: never synced")
+        else:
+            click.echo(f"  {name}: {row.get('state')}  "
+                       f"completed {row.get('completed_sequence', 0)} run(s)")
