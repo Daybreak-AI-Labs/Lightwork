@@ -991,3 +991,112 @@ def test_red_team_schedule_routes_fail_closed_when_disabled():
         "/api/v1/security/assurance/red-team/schedules/run-due",
         json={},
     ).status_code == 403
+
+
+def test_policy_pack_change_view_and_reattestation_over_http(monkeypatch):
+    from maverick import model_risk_assurance as mra
+    from maverick import policy_packs
+
+    monkeypatch.setenv("MAVERICK_TENANT", "alpha")
+    monkeypatch.setattr(policy_packs, "enabled", lambda: True)
+    monkeypatch.setattr(mra, "enabled", lambda: True)
+
+    changes_view = {
+        "id": "PPS-one",
+        "pack_id": "example-ai-policy",
+        "pack_version": "1.0.0",
+        "active_pack_version": "1.1.0",
+        "needs_refresh": True,
+        "refresh_is_forward": True,
+        "pending_diff": {"requirements_changed": ["CTRL-1"]},
+        "applied_diff": None,
+        "requirements": {"CTRL-1": {"status": "current"}},
+        "retired_requirements": [],
+        "revision": 3,
+    }
+    monkeypatch.setattr(
+        policy_packs,
+        "subscription_changes",
+        lambda pack_id: changes_view if pack_id == "example-ai-policy" else None,
+    )
+
+    calls: dict = {}
+
+    def attest(subscription_id, control_id, **kwargs):
+        calls["attest"] = (subscription_id, control_id, kwargs)
+        resolved = kwargs["evidence_resolver"]("MRE-one")
+        calls["resolved"] = resolved
+        return {
+            "attestation": {"id": "PPA-one"},
+            "subscription": {"id": subscription_id, "revision": 4},
+            "idempotent": False,
+        }
+
+    monkeypatch.setattr(policy_packs, "attest_control", attest)
+    monkeypatch.setattr(
+        mra,
+        "get_evidence",
+        lambda evidence_id: {
+            "id": evidence_id,
+            "revision": 2,
+            "payload_sha256": "b" * 64,
+            "evidence_kind": "evaluation",
+            "schema": "lightwork.model-risk-evidence.v1",
+            "observed_at": 1_700_000_000.0,
+            "status": "pending_review",
+        },
+    )
+
+    view = _ok(client.get(
+        "/api/v1/security/assurance/policy-packs/subscriptions/"
+        "example-ai-policy/changes"
+    ))
+    assert view["pending_diff"]["requirements_changed"] == ["CTRL-1"]
+    assert client.get(
+        "/api/v1/security/assurance/policy-packs/subscriptions/absent/changes"
+    ).status_code == 404
+
+    body = {
+        "control_id": "CTRL-1",
+        "expected_revision": 3,
+        "idempotency_key": "attest-ctrl-1-v2",
+        "evidence_bindings": [
+            {
+                "requirement_id": "REQ-1",
+                "evidence_id": "MRE-one",
+                "evidence_revision": 2,
+                "evidence_sha256": "b" * 64,
+            }
+        ],
+    }
+    result = _ok(client.post(
+        "/api/v1/security/assurance/policy-packs/subscriptions/PPS-one/attest",
+        json=body,
+    ))
+    assert result["attestation"]["id"] == "PPA-one"
+    subscription_id, control_id, kwargs = calls["attest"]
+    assert (subscription_id, control_id) == ("PPS-one", "CTRL-1")
+    assert kwargs["actor"] == "local:dashboard"
+    assert kwargs["evidence_bindings"][0]["evidence_sha256"] == "b" * 64
+    # The route's resolver adapts assurance rows to the attestation contract:
+    # payload digest becomes content digest, the epoch instant becomes ISO.
+    assert calls["resolved"]["content_sha256"] == "b" * 64
+    assert calls["resolved"]["observed_at"].endswith("+00:00")
+    assert calls["resolved"]["evidence_kind"] == "evaluation"
+
+    # A malformed digest never reaches the module.
+    bad = dict(body)
+    bad["evidence_bindings"] = [dict(body["evidence_bindings"][0], evidence_sha256="XYZ")]
+    assert client.post(
+        "/api/v1/security/assurance/policy-packs/subscriptions/PPS-one/attest",
+        json=bad,
+    ).status_code == 422
+
+
+def test_policy_pack_change_and_attest_routes_require_a_tenant(monkeypatch):
+    from maverick import policy_packs
+
+    monkeypatch.setattr(policy_packs, "enabled", lambda: True)
+    assert client.get(
+        "/api/v1/security/assurance/policy-packs/subscriptions/any/changes"
+    ).status_code == 409

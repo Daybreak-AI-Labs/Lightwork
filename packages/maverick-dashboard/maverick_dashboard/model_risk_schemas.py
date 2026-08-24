@@ -271,6 +271,26 @@ class PortfolioSnapshotRefreshIn(BaseModel):
     period_id: str | None = Field(None, pattern=r"^20[0-9]{2}-Q[1-4]$")
 
 
+class PolicyPackEvidenceBindingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    requirement_id: str = Field(..., min_length=1, max_length=64)
+    evidence_id: str = Field(..., min_length=1, max_length=128)
+    evidence_revision: int = Field(..., ge=1, le=2_147_483_647)
+    evidence_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+
+
+class PolicyPackAttestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    control_id: str = Field(..., min_length=1, max_length=64)
+    expected_revision: int = Field(..., ge=1)
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+    evidence_bindings: list[PolicyPackEvidenceBindingIn] = Field(
+        ..., min_length=1, max_length=512,
+    )
+
+
 class PolicyPackActivateIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

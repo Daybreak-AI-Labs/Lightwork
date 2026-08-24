@@ -1096,6 +1096,68 @@ async def refresh_policy_pack_subscription(
     )
 
 
+@router.get("/policy-packs/subscriptions/{pack_id}/changes")
+async def policy_pack_subscription_changes(
+    request: Request,
+    pack_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    _require_active_tenant()
+    packs = _module("policy_packs", "policy_packs")
+    return await _record_call(packs.subscription_changes, pack_id)
+
+
+def _governed_evidence_resolver() -> Callable[[str], Mapping[str, Any] | None]:
+    """Adapt assurance evidence rows to the policy-pack resolver contract."""
+    from datetime import datetime, timezone
+
+    from maverick import model_risk_assurance as mra
+
+    def resolve(evidence_id: str) -> Mapping[str, Any] | None:
+        record = mra.get_evidence(evidence_id)
+        if record is None:
+            return None
+        observed = record.get("observed_at")
+        if isinstance(observed, (int, float)):
+            observed = datetime.fromtimestamp(
+                float(observed), tz=timezone.utc,
+            ).isoformat()
+        return {
+            "id": record.get("id"),
+            "revision": record.get("revision"),
+            "content_sha256": record.get("payload_sha256"),
+            "evidence_kind": record.get("evidence_kind"),
+            "schema": record.get("schema"),
+            "observed_at": observed,
+        }
+
+    return resolve
+
+
+@router.post("/policy-packs/subscriptions/{subscription_id}/attest")
+async def attest_policy_pack_control(
+    request: Request,
+    subscription_id: str,
+    body: schemas.PolicyPackAttestIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    packs = _module("policy_packs", "policy_packs")
+    _module("model_risk_assurance", "model_risk_assurance")
+    return await _record_call(
+        packs.attest_control,
+        subscription_id,
+        body.control_id,
+        evidence_bindings=[
+            binding.model_dump() for binding in body.evidence_bindings
+        ],
+        evidence_resolver=_governed_evidence_resolver(),
+        expected_revision=body.expected_revision,
+        actor=_actor(request),
+        idempotency_key=body.idempotency_key,
+    )
+
+
 @router.post("/model-risk/findings/{finding_id}/risk-acceptance")
 async def accept_model_risk(
     request: Request,

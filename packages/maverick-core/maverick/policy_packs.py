@@ -2012,6 +2012,54 @@ class PolicyPackService:
         views.sort(key=lambda item: (item["pack_id"], item["id"]))
         return _read_page(views, limit=bounded)
 
+    def subscription_changes(self, pack_id: str) -> dict[str, Any] | None:
+        """The exact safe change view: what moved, and what it makes stale.
+
+        Read-only. ``pending_diff`` is the control/requirement delta between
+        the subscription's bound pack version and the currently active channel
+        version; ``applied_diff`` is the delta the last refresh actually
+        applied. Neither carries pack prose or evidence content — control ids,
+        versions, and digests only.
+        """
+
+        _require_tenant_scope()
+        record = self.subscriptions.get(subscription_id(pack_id))
+        if record is None:
+            return None
+        record, pack = self._validate_subscription(
+            record,
+            require_active_channel=False,
+            validate_attestation_links=True,
+        )
+        _, _, active_pack = self._active_triplet(pack["pack_id"])
+        needs_refresh = pack["content_sha256"] != active_pack["content_sha256"]
+        pending = semantic_diff(pack, active_pack) if needs_refresh else None
+        requirements = {
+            control_id: _validate_requirement_state(control_id, value)
+            for control_id, value in record["requirements"].items()
+        }
+        return {
+            "id": record["id"],
+            "pack_id": pack["pack_id"],
+            "pack_version": pack["version"],
+            "pack_sha256": pack["content_sha256"],
+            "active_pack_version": active_pack["version"],
+            "active_pack_sha256": active_pack["content_sha256"],
+            "needs_refresh": needs_refresh,
+            "refresh_is_forward": compare_semver(
+                active_pack["version"], pack["version"]
+            ) > 0,
+            "pending_diff": pending,
+            "applied_diff": copy.deepcopy(record.get("last_diff")),
+            "requirements": requirements,
+            "retired_requirements": copy.deepcopy(
+                record.get("retired_requirements") or []
+            ),
+            "refreshed_by": record.get("refreshed_by"),
+            "refreshed_at": record.get("refreshed_at"),
+            "revision": record.get("revision"),
+        }
+
     def refresh_subscription(
         self,
         subscription_identity: str,
@@ -2367,6 +2415,10 @@ def list_subscriptions(*, limit: int = 100) -> dict[str, Any]:
     return _DEFAULT.list_subscriptions(limit=limit)
 
 
+def subscription_changes(pack_id: str) -> dict[str, Any] | None:
+    return _DEFAULT.subscription_changes(pack_id)
+
+
 def refresh_subscription(
     subscription_identity: str,
     *,
@@ -2447,6 +2499,7 @@ __all__ = [
     "stage_bundled",
     "stage_signed_update",
     "subscribe",
+    "subscription_changes",
     "subscription_id",
     "validate_pack",
     "verify_update",

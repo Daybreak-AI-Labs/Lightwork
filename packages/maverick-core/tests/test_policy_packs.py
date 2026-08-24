@@ -578,3 +578,75 @@ def test_enabled_is_default_off_and_requires_literal_true(tmp_path):
     assert policy_packs.enabled() is False
     config.write_text("[policy_packs]\nenable = true\n", encoding="utf-8")
     assert policy_packs.enabled() is True
+
+
+def test_subscription_changes_view_shows_exact_pending_and_applied_deltas():
+    private_hex, public_hex = _keys()
+    service = policy_packs.PolicyPackService()
+    entry_v1 = _stage(service, _pack(), private_hex, public_hex)
+    active_v1 = _activate(service, entry_v1, 0)
+    evidence_1 = _evidence("ev-one")
+    evidence = {evidence_1["id"]: evidence_1}
+
+    with pytest.raises(policy_packs.PolicyPackTenantRequired):
+        service.subscription_changes("example-ai-policy")
+
+    with tenant_scope(tenant="alpha"):
+        assert service.subscription_changes("example-ai-policy") is None
+        subscription = service.subscribe("example-ai-policy", actor="reviewer")
+        attested = service.attest_control(
+            subscription["id"],
+            "CTRL-1",
+            evidence_bindings=[_binding("REQ-1", evidence_1)],
+            evidence_resolver=evidence.get,
+            expected_revision=subscription["revision"],
+            actor="reviewer",
+            idempotency_key="attest-ctrl-1-v1",
+        )
+
+        aligned = service.subscription_changes("example-ai-policy")
+        assert aligned["needs_refresh"] is False
+        assert aligned["pending_diff"] is None
+        assert aligned["applied_diff"] is None
+        assert aligned["requirements"]["CTRL-1"]["status"] == "current"
+        assert aligned["requirements"]["CTRL-2"]["status"] == "missing"
+
+    entry_v2 = _stage(
+        service,
+        _pack("1.1.0", first_requirement="Keep evaluation and adversarial evidence."),
+        private_hex,
+        public_hex,
+    )
+    _activate(service, entry_v2, active_v1["revision"])
+
+    with tenant_scope(tenant="alpha"):
+        pending = service.subscription_changes("example-ai-policy")
+        assert pending["needs_refresh"] is True
+        assert pending["refresh_is_forward"] is True
+        assert pending["pack_version"] == "1.0.0"
+        assert pending["active_pack_version"] == "1.1.0"
+        # The exact change is named before anything mutates: CTRL-1's
+        # requirements moved, CTRL-2 is untouched.
+        assert pending["pending_diff"]["requirements_changed"] == ["CTRL-1"]
+        assert pending["pending_diff"]["requirements_unchanged"] == ["CTRL-2"]
+        assert pending["pending_diff"]["controls_added"] == []
+        assert pending["applied_diff"] is None
+        # The read-only view moved nothing.
+        assert pending["requirements"]["CTRL-1"]["status"] == "current"
+
+        refreshed = service.refresh_subscription(
+            attested["subscription"]["id"],
+            expected_revision=attested["subscription"]["revision"],
+            actor="reviewer",
+        )
+        applied = service.subscription_changes("example-ai-policy")
+        assert applied["needs_refresh"] is False
+        assert applied["pending_diff"] is None
+        assert applied["applied_diff"]["requirements_changed"] == ["CTRL-1"]
+        assert applied["requirements"]["CTRL-1"]["status"] == "stale"
+        assert applied["requirements"]["CTRL-1"]["stale_reason"]
+        assert applied["revision"] == refreshed["revision"]
+
+    # Tenant isolation: another tenant sees no subscription at all.
+    with tenant_scope(tenant="beta"):
+        assert service.subscription_changes("example-ai-policy") is None
