@@ -711,6 +711,94 @@ def test_needs_attention_digest_on_api_and_page():
 
 
 # ---------------------------------------------------------------------------
+# GPAI provider obligations and four-eyes review
+# ---------------------------------------------------------------------------
+
+def test_gpai_register_through_the_api():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("gpai-model")[:32]
+
+    refused = client.post(
+        f"{_PREFIX}/gpai",
+        json={
+            "asset_id": asset_id,
+            "systemic_risk": True,
+            "open_source_exempt": True,
+        },
+    )
+    assert refused.status_code == 409
+    assert "Art. 53(2)" in refused.json()["detail"]
+
+    opened = _ok(
+        client.post(
+            f"{_PREFIX}/gpai",
+            json={"asset_id": asset_id, "systemic_risk": True},
+        ),
+        expected=201,
+    )
+    assert opened["status"]["total"] == 8
+
+    state = _ok(
+        client.post(
+            f"{_PREFIX}/gpai/{opened['record']['id']}/obligations",
+            json={
+                "obligation": "model_evaluation",
+                "reference": "eval-vault#adversarial-2026Q3",
+                "expected_revision": opened["record"]["revision"],
+            },
+        )
+    )
+    assert state["asserted"] == 1
+    listing = _ok(client.get(f"{_PREFIX}/gpai"))
+    assert listing["count"] == 1
+    assert "technical_documentation" in listing["obligations"]
+    fetched = _ok(client.get(f"{_PREFIX}/gpai/{opened['record']['id']}"))
+    assert fetched["status"]["systemic_risk"] is True
+    assert client.get(f"{_PREFIX}/gpai/ECG-{'0' * 24}").status_code == 404
+
+
+def test_fria_review_is_four_eyes_gated():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("review-model")[:32]
+    opened = _ok(
+        client.post(
+            f"{_PREFIX}/fria",
+            json={"asset_id": asset_id, "context": "triage"},
+        ),
+        expected=201,
+    )
+    record = opened
+    for element in (
+        "process_description", "period_frequency", "affected_categories",
+        "risks_of_harm", "oversight_measures", "materialisation_measures",
+    ):
+        record = _ok(
+            client.post(
+                f"{_PREFIX}/fria/{opened['id']}/elements",
+                json={
+                    "element": element,
+                    "content": f"Assessed: {element}.",
+                    "expected_revision": record["revision"],
+                },
+            )
+        )
+    completed = _ok(
+        client.post(
+            f"{_PREFIX}/fria/{opened['id']}/complete",
+            json={"expected_revision": record["revision"]},
+        )
+    )
+    # The dashboard actor completed the assessment, so the same actor's
+    # review must be refused (four-eyes).
+    denied = client.post(
+        f"{_PREFIX}/fria/{opened['id']}/review",
+        json={"outcome": "concur", "expected_revision": completed["revision"]},
+    )
+    assert denied.status_code == 409
+    assert "other than the assessor" in denied.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
 # Pickers: nobody pastes raw ids
 # ---------------------------------------------------------------------------
 

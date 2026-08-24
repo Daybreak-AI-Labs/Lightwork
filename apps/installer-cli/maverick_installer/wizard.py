@@ -2084,6 +2084,15 @@ def pick_advanced() -> dict[str, Any]:
             "certification. OFF by default.",
             default=False,
         ),
+        "content_provenance": _q_confirm(
+            "Signed content provenance (EU AI Act Art. 50(2), applicable "
+            "2 Dec 2026)? Machine-readable sidecar manifests binding "
+            "generated content to the generating system, Ed25519-signed and "
+            "verifiable against an external key registry. Marking assistance "
+            "only, never a content-authenticity certification. OFF by "
+            "default.",
+            default=False,
+        ),
         "llm_gateway": _q_confirm(
             "Governed LLM gateway? Agents built anywhere point their "
             "OpenAI-compatible base URL at Lightwork; every call crosses a "
@@ -4556,6 +4565,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("explainability"):
         lines.append("")
         lines.append("[explainability]")
+        lines.append("enable = true")
+    if advanced.get("content_provenance"):
+        lines.append("")
+        lines.append("[content_provenance]")
         lines.append("enable = true")
     if advanced.get("llm_gateway"):
         lines.append("")

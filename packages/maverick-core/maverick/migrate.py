@@ -72,6 +72,7 @@ KNOWN_SECTIONS = frozenset({
     "ai_literacy",
     "eu_conformity",
     "explainability",
+    "content_provenance",
     "llm_gateway",
     "ai_regulatory_feed",
     "grc_sync",

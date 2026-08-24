@@ -172,6 +172,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "ai_literacy": {"enable"},
     "eu_conformity": {"enable"},
     "explainability": {"enable"},
+    "content_provenance": {"enable", "claim_generator"},
     "llm_gateway": {
         "enable",
         "upstream_url",

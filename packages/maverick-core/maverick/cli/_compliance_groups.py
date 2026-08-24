@@ -1505,6 +1505,60 @@ def eu_conformity_registration(action, asset_id, basis, registry,
         raise click.ClickException(str(e)) from e
 
 
+@eu_conformity_group.command("gpai")
+@click.argument("action", type=click.Choice(["open", "assert", "status", "list"]))
+@click.option("--asset", "asset_id", default=None, help="Governed asset id.")
+@click.option("--record", "record_id", default=None, help="Register id (ECG-...).")
+@click.option("--systemic-risk", is_flag=True,
+              help="open: the model has systemic risk (adds Art. 55(1)).")
+@click.option("--open-source-exempt", is_flag=True,
+              help="open: apply the Art. 53(2) exemption for (a)/(b).")
+@click.option("--obligation", default=None, help="Art. 53/55 obligation key.")
+@click.option("--reference", default=None,
+              help="Where the obligation's evidence lives.")
+@click.option("--revision", type=int, default=0, help="Expected revision (CAS).")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def eu_conformity_gpai(action, asset_id, record_id, systemic_risk,
+                       open_source_exempt, obligation, reference,
+                       revision, actor) -> None:
+    """Track the Art. 53/55 general-purpose AI provider obligations."""
+    from .. import eu_conformity as euc
+
+    def need(value, name):
+        if value in (None, ""):
+            raise click.ClickException(f"--{name} is required for {action}")
+        return value
+
+    try:
+        if action == "open":
+            record = euc.open_gpai(
+                need(asset_id, "asset"), systemic_risk=systemic_risk,
+                open_source_exempt=open_source_exempt, actor=need(actor, "by"))
+            click.echo(f"{record['id']} systemic {record['systemic_risk']} "
+                       f"(rev {record['revision']})")
+        elif action == "assert":
+            record = euc.assert_gpai_obligation(
+                need(record_id, "record"), need(obligation, "obligation"),
+                reference=need(reference, "reference"), actor=need(actor, "by"),
+                expected_revision=revision)
+            state = euc.gpai_status(record["id"])
+            click.echo(f"{state['asserted']}/{state['total']} evidenced")
+        elif action == "status":
+            state = euc.gpai_status(need(record_id, "record"))
+            click.echo(f"{state['id']}  {state['asserted']}/{state['total']}  "
+                       f"missing: {', '.join(state['missing']) or '-'}"
+                       + (f"  exempt: {', '.join(state['exempt'])}"
+                          if state['exempt'] else ""))
+        else:
+            for record in euc.list_gpai_registers():
+                state = euc.gpai_status(record["id"])
+                click.echo(f"{record['asset_id']}  "
+                           f"{state['asserted']}/{state['total']}  "
+                           f"systemic {state['systemic_risk']}")
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
 @eu_conformity_group.command("ifu")
 @click.argument("action", type=click.Choice(["open", "assert", "status", "list"]))
 @click.option("--asset", "asset_id", default=None, help="Governed asset id.")
@@ -1727,3 +1781,120 @@ def gateway_callers(limit) -> None:
         )
     if not rows:
         click.echo("no gateway callers recorded")
+
+
+@main.group("content-provenance")
+def content_provenance_group() -> None:
+    """Signed, machine-readable provenance manifests (EU AI Act Art. 50(2)).
+
+    Sidecar manifests bind exact content bytes to the generating asset and
+    verify against an EXTERNAL key registry. Marking assistance for the
+    operator's own content -- never a content-authenticity certification.
+    """
+
+
+@content_provenance_group.command("sign")
+@click.option("--file", "content_file", required=True,
+              help="The generated content file to sign.")
+@click.option("--asset", "asset_id", required=True, help="Generating asset id.")
+@click.option("--modality", required=True,
+              type=click.Choice(["text", "image", "audio", "video"]))
+@click.option("--receipt", "receipt_id", default=None,
+              help="Optional delivery receipt id to bind.")
+@click.option("--out", "out_file", default=None,
+              help="Manifest path (default: <file>.provenance.json).")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def content_provenance_sign(content_file, asset_id, modality, receipt_id,
+                            out_file, actor) -> None:
+    """Sign one sidecar provenance manifest for a content file."""
+    import json as json_module
+    from pathlib import Path
+
+    from .. import content_provenance
+
+    if actor in (None, ""):
+        raise click.ClickException("--by is required")
+    try:
+        content = Path(content_file).read_bytes()
+    except OSError as e:
+        raise click.ClickException(f"could not read {content_file}: {e}") from e
+    try:
+        manifest = content_provenance.create_manifest(
+            content, asset_id=asset_id, modality=modality,
+            actor=actor, receipt_id=receipt_id,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    destination = Path(out_file) if out_file else Path(f"{content_file}.provenance.json")
+    destination.write_text(
+        json_module.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8",
+    )
+    click.echo(f"{destination} manifest {manifest['manifest_sha256'][:16]}... "
+               f"key {manifest['attestation']['key_id']}")
+
+
+@content_provenance_group.command("verify")
+@click.option("--file", "content_file", required=True,
+              help="The content file the manifest claims.")
+@click.option("--manifest", "manifest_file", required=True,
+              help="The sidecar manifest to verify.")
+@click.option("--keys", "keys_file", required=True,
+              help='External key registry JSON: {"<key_id>": "<pubkey hex>"}.')
+def content_provenance_verify(content_file, manifest_file, keys_file) -> None:
+    """Verify a manifest and content against an external key registry."""
+    import json as json_module
+    from pathlib import Path
+
+    from .. import content_provenance
+
+    try:
+        content = Path(content_file).read_bytes()
+        manifest = json_module.loads(Path(manifest_file).read_text(encoding="utf-8"))
+        keys = json_module.loads(Path(keys_file).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise click.ClickException(f"could not read inputs: {e}") from e
+    valid = content_provenance.verify_manifest(
+        manifest, trusted_pubkeys=keys, content=content,
+    )
+    click.echo("VALID" if valid else "INVALID")
+    if not valid:
+        raise SystemExit(1)
+
+
+@main.group("underwriting-pack")
+def underwriting_pack_group() -> None:
+    """The AI-insurance underwriting evidence pack.
+
+    A bounded governance-posture summary wrapped around the signed,
+    externally verifiable assurance pack. Decision support for the
+    operator's own submission -- never an insurance application or rating.
+    """
+
+
+@underwriting_pack_group.command("export")
+@click.option("--out", "out_file", required=True, help="Pack output path.")
+@click.option("--asset", "asset_id", default=None,
+              help="Limit the pack to one governed asset.")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def underwriting_pack_export(out_file, asset_id, actor) -> None:
+    """Export one signed underwriting evidence pack."""
+    import json as json_module
+    from pathlib import Path
+
+    from .. import underwriting_pack
+
+    if actor in (None, ""):
+        raise click.ClickException("--by is required")
+    try:
+        pack = underwriting_pack.export_underwriting_pack(
+            actor=actor, asset_id=asset_id,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    Path(out_file).write_text(
+        json_module.dumps(pack, indent=2, sort_keys=True, default=str),
+        encoding="utf-8",
+    )
+    summary = pack["summary"]
+    click.echo(f"{out_file}  assets {summary['inventory_count']}  "
+               f"pack {summary['assurance_pack_sha256'][:16]}...")

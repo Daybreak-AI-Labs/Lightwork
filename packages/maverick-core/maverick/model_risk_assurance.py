@@ -3035,6 +3035,50 @@ def list_inventory() -> list[dict[str, Any]]:
     return _DEFAULT.list_inventory()
 
 
+def dependency_graph(*, asset_id: str | None = None) -> dict[str, Any]:
+    """Nodes and dependency edges over the governed inventory.
+
+    With ``asset_id``, the projection keeps that asset plus its direct
+    dependencies and direct dependents; otherwise the whole estate.
+    """
+
+    rows = _DEFAULT.list_inventory()
+    wanted = None if asset_id is None else str(asset_id).strip()
+    edges = [
+        {"asset_id": str(row.get("asset_id")), "depends_on": str(dependency)}
+        for row in rows
+        for dependency in (row.get("dependencies") or [])
+    ]
+    if wanted is not None:
+        neighbours = {wanted}
+        for edge in edges:
+            if edge["asset_id"] == wanted:
+                neighbours.add(edge["depends_on"])
+            if edge["depends_on"] == wanted:
+                neighbours.add(edge["asset_id"])
+        rows = [row for row in rows if str(row.get("asset_id")) in neighbours]
+        edges = [
+            edge
+            for edge in edges
+            if edge["asset_id"] in neighbours and edge["depends_on"] in neighbours
+        ]
+    nodes = [
+        {
+            "asset_id": row.get("asset_id"),
+            "display_name": row.get("display_name"),
+            "asset_type": row.get("asset_type"),
+            "source": row.get("source"),
+        }
+        for row in rows
+    ]
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+    }
+
+
 def declare_asset(asset_id: str, **kwargs: Any) -> dict[str, Any]:
     return _DEFAULT.declare_asset(asset_id, **kwargs)
 

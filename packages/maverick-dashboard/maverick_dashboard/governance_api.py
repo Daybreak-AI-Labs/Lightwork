@@ -358,6 +358,88 @@ async def literacy_evidence(request: Request) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
+# GPAI provider obligations (Art. 53 / Art. 55)
+# --------------------------------------------------------------------------
+@router.get("/gpai")
+async def list_gpai_registers(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    rows = await _call(conformity.list_gpai_registers)
+    return {
+        "records": rows,
+        "count": len(rows),
+        "obligations": conformity.GPAI_OBLIGATIONS,
+        "systemic_obligations": conformity.GPAI_SYSTEMIC_OBLIGATIONS,
+    }
+
+
+@router.post("/gpai", status_code=201)
+async def open_gpai_register(
+    request: Request,
+    body: schemas.GPAIOpenIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    record = await _call(
+        conformity.open_gpai,
+        body.asset_id,
+        systemic_risk=body.systemic_risk,
+        open_source_exempt=body.open_source_exempt,
+        actor=_actor(request),
+    )
+    status = await _call(conformity.gpai_status, record["id"])
+    return {"record": record, "status": status}
+
+
+@router.get("/gpai/{record_id}")
+async def gpai_register_status(request: Request, record_id: str) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    status = await _record_call(conformity.gpai_status, record_id)
+    return {"status": status}
+
+
+@router.post("/gpai/{record_id}/obligations")
+async def assert_gpai_obligation(
+    request: Request,
+    record_id: str,
+    body: schemas.GPAIObligationIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    await _call(
+        conformity.assert_gpai_obligation,
+        record_id,
+        body.obligation,
+        reference=body.reference,
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+    return await _call(conformity.gpai_status, record_id)
+
+
+# --------------------------------------------------------------------------
+# Independent FRIA review (four-eyes)
+# --------------------------------------------------------------------------
+@router.post("/fria/{record_id}/review")
+async def record_fria_review(
+    request: Request,
+    record_id: str,
+    body: schemas.FRIAReviewIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.record_fria_review,
+        record_id,
+        outcome=body.outcome,
+        reviewer=_actor(request),
+        expected_revision=body.expected_revision,
+        notes=body.notes,
+    )
+
+
+# --------------------------------------------------------------------------
 # Art. 72 post-market monitoring plans
 # --------------------------------------------------------------------------
 @router.get("/pmm")

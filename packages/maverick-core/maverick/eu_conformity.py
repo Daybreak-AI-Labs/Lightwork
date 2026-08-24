@@ -179,9 +179,70 @@ IFU_ITEMS = {
     ),
 }
 
+GPAI_SCHEMA = "lightwork.eu-gpai-register.v1"
+
+#: Art. 53(1) obligations for every general-purpose AI model provider.
+GPAI_OBLIGATIONS = {
+    "technical_documentation": (
+        "Art. 53(1)(a)",
+        "Up-to-date technical documentation of the model, including training "
+        "and testing process and evaluation results (Annex XI minimum), for "
+        "the AI Office and national authorities on request.",
+    ),
+    "downstream_information": (
+        "Art. 53(1)(b)",
+        "Information and documentation for downstream AI system providers to "
+        "understand the model's capabilities and limitations (Annex XII "
+        "minimum).",
+    ),
+    "copyright_policy": (
+        "Art. 53(1)(c)",
+        "A policy to comply with Union copyright law, identifying and "
+        "respecting rights reservations under Art. 4(3) of Directive (EU) "
+        "2019/790.",
+    ),
+    "training_content_summary": (
+        "Art. 53(1)(d)",
+        "A sufficiently detailed public summary of the content used for "
+        "training, per the AI Office template.",
+    ),
+}
+
+#: Art. 55(1) additions for general-purpose AI models with systemic risk.
+GPAI_SYSTEMIC_OBLIGATIONS = {
+    "model_evaluation": (
+        "Art. 55(1)(a)",
+        "State-of-the-art model evaluation, including conducted and "
+        "documented adversarial testing to identify and mitigate systemic "
+        "risks.",
+    ),
+    "systemic_risk_mitigation": (
+        "Art. 55(1)(b)",
+        "Assessment and mitigation of possible Union-level systemic risks, "
+        "including their sources, from development, placing on the market, "
+        "or use.",
+    ),
+    "incident_reporting": (
+        "Art. 55(1)(c)",
+        "Tracking, documenting, and reporting relevant serious-incident "
+        "information to the AI Office and national authorities without "
+        "undue delay.",
+    ),
+    "cybersecurity_protection": (
+        "Art. 55(1)(d)",
+        "An adequate level of cybersecurity protection for the model and "
+        "its physical infrastructure.",
+    ),
+}
+
+#: Art. 53(2): the free and open-source exemption covers only (a) and (b),
+#: and never applies to a model with systemic risk.
+GPAI_OPEN_SOURCE_EXEMPT = ("technical_documentation", "downstream_information")
+
 _FRIA = GovernedRecordStore("eu_fria", "ECF", "eu_fria_assessment")
 _ANNEX_IV = GovernedRecordStore("eu_annex_iv", "ECD", "eu_annex_iv_checklist")
 _ROUTES = GovernedRecordStore("eu_art43_routes", "ECA", "eu_art43_route")
+_GPAI = GovernedRecordStore("eu_gpai", "ECG", "eu_gpai_register")
 _PMM = GovernedRecordStore("eu_pmm_plans", "ECP", "eu_pmm_plan")
 _REGISTRATIONS = GovernedRecordStore("eu_registrations", "ECR", "eu_registration")
 _IFU = GovernedRecordStore("eu_ifu", "ECI", "eu_ifu_checklist")
@@ -720,6 +781,59 @@ def mark_substantial_modification(
     return dict(saved)
 
 
+def record_fria_review(
+    record_id: str,
+    *,
+    outcome: str,
+    reviewer: str,
+    expected_revision: int,
+    notes: str = "",
+) -> dict[str, Any]:
+    """Independent second-person review of a completed FRIA (four-eyes).
+
+    The reviewer must not be the assessor; a review never edits the
+    assessment — objections are recorded and the Art. 27(2) reopen path
+    stays the only way content changes.
+    """
+
+    _require_enabled()
+    if outcome not in {"concur", "objections"}:
+        raise ValueError("outcome must be concur or objections")
+    person = _text(reviewer, "reviewer", 256)
+    remark = str(notes or "").strip()[:2000]
+
+    def mutate(value: dict[str, Any]) -> None:
+        if value.get("status") != "completed":
+            raise EUConformityError(
+                "independent review applies to a completed FRIA only"
+            )
+        if str(value.get("assessor") or "").strip().lower() == person.lower():
+            raise EUConformityError(
+                "independent review requires a reviewer other than the assessor"
+            )
+        reviews = list(value.get("reviews") or [])
+        reviews.append(
+            {
+                "reviewer": person,
+                "outcome": outcome,
+                "notes": remark,
+                "reviewed_at": time.time(),
+            }
+        )
+        value["reviews"] = reviews[-20:]
+
+    saved = _FRIA.update(
+        _text(record_id, "record_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="record_fria_review",
+        actor=person,
+    )
+    if saved is None:
+        raise KeyError(f"FRIA record is not recorded: {record_id}")
+    return dict(saved)
+
+
 def get_assessment_route(asset_id: str) -> dict[str, Any] | None:
     _require_enabled()
     record = _ROUTES.get(_route_id(_text(asset_id, "asset_id", 64)))
@@ -736,6 +850,152 @@ def list_assessment_routes(*, status: str | None = None) -> list[dict[str, Any]]
         dict(row) for row in rows
         if status is None or row.get("status") == status
     ]
+
+
+# --------------------------------------------------------------------------
+# GPAI provider obligations (Art. 53 / Art. 55)
+# --------------------------------------------------------------------------
+def _gpai_id(asset_id: str) -> str:
+    return f"ECG-{_sha256(asset_id)[:24]}"
+
+
+def _gpai_obligation_keys(record: Mapping[str, Any]) -> dict[str, tuple[str, str]]:
+    keys = dict(GPAI_OBLIGATIONS)
+    if record.get("systemic_risk"):
+        keys.update(GPAI_SYSTEMIC_OBLIGATIONS)
+    return keys
+
+
+def open_gpai(
+    asset_id: str,
+    *,
+    systemic_risk: bool,
+    open_source_exempt: bool = False,
+    actor: str,
+) -> dict[str, Any]:
+    """Open (or return) the provider-obligation register for one GPAI model.
+
+    A systemic-risk model carries the Art. 55(1) additions and can never use
+    the Art. 53(2) open-source exemption; an exempt non-systemic model still
+    tracks the copyright policy and the public training-content summary.
+    """
+
+    _require_enabled()
+    if not isinstance(systemic_risk, bool) or not isinstance(open_source_exempt, bool):
+        raise ValueError("systemic_risk and open_source_exempt must be booleans")
+    if systemic_risk and open_source_exempt:
+        raise EUConformityError(
+            "Art. 53(2): the open-source exemption does not apply to a "
+            "general-purpose AI model with systemic risk"
+        )
+    asset = _text(asset_id, "asset_id", 64)
+    operator = _text(actor, "actor", 256)
+    record_id = _gpai_id(asset)
+    current = _GPAI.get(record_id)
+    if current is not None:
+        return dict(current)
+    obligations: dict[str, Any] = dict.fromkeys(GPAI_OBLIGATIONS)
+    if systemic_risk:
+        obligations.update(dict.fromkeys(GPAI_SYSTEMIC_OBLIGATIONS))
+    elif open_source_exempt:
+        for key in GPAI_OPEN_SOURCE_EXEMPT:
+            obligations[key] = {"exempt": True, "citation": "Art. 53(2)"}
+    record = {
+        "id": record_id,
+        "schema": GPAI_SCHEMA,
+        "asset_id": asset,
+        "systemic_risk": systemic_risk,
+        "open_source_exempt": open_source_exempt,
+        "obligations": obligations,
+        "opened_by": operator,
+        "regulation": dict(REGULATION_METADATA),
+        "notice": NON_CERTIFICATION_NOTICE,
+    }
+    return dict(_GPAI.create(record, action="open_gpai", actor=operator))
+
+
+def assert_gpai_obligation(
+    record_id: str,
+    obligation: str,
+    *,
+    reference: str,
+    actor: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """A named human asserts where one obligation's evidence lives."""
+
+    _require_enabled()
+    operator = _text(actor, "actor", 256)
+    where = _text(reference, "reference", 512)
+
+    def mutate(value: dict[str, Any]) -> None:
+        keys = _gpai_obligation_keys(value)
+        if obligation not in keys:
+            raise ValueError(
+                f"obligation must be one of: {', '.join(sorted(keys))}"
+            )
+        obligations = dict(value.get("obligations") or {})
+        obligations[obligation] = {
+            "citation": keys[obligation][0],
+            "reference": where,
+            "asserted_by": operator,
+            "asserted_at": time.time(),
+        }
+        value["obligations"] = obligations
+
+    saved = _GPAI.update(
+        _text(record_id, "record_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="assert_gpai_obligation",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"GPAI register is not recorded: {record_id}")
+    return dict(saved)
+
+
+def gpai_status(record_id: str) -> dict[str, Any]:
+    _require_enabled()
+    record = _GPAI.get(_text(record_id, "record_id", 64))
+    if record is None:
+        raise KeyError(f"GPAI register is not recorded: {record_id}")
+    keys = _gpai_obligation_keys(record)
+    obligations = record.get("obligations") or {}
+    missing = sorted(
+        key
+        for key in keys
+        if not isinstance(obligations.get(key), Mapping)
+    )
+    exempt = sorted(
+        key
+        for key, value in obligations.items()
+        if isinstance(value, Mapping) and value.get("exempt") is True
+    )
+    return {
+        "id": record.get("id"),
+        "asset_id": record.get("asset_id"),
+        "systemic_risk": bool(record.get("systemic_risk")),
+        "asserted": len(keys) - len(missing),
+        "total": len(keys),
+        "missing": missing,
+        "exempt": exempt,
+        "complete": not missing,
+        "revision": record.get("revision"),
+    }
+
+
+def get_gpai(asset_id: str) -> dict[str, Any] | None:
+    _require_enabled()
+    record = _GPAI.get(_gpai_id(_text(asset_id, "asset_id", 64)))
+    return None if record is None else dict(record)
+
+
+def list_gpai_registers() -> list[dict[str, Any]]:
+    _require_enabled()
+    rows = _GPAI.list(limit=_MAX_LIST)
+    rows.sort(key=lambda row: str(row.get("asset_id") or ""))
+    return [dict(row) for row in rows]
 
 
 # --------------------------------------------------------------------------
@@ -1024,21 +1284,30 @@ __all__ = [
     "enabled",
     "get_assessment_route",
     "get_eu_conformity_config",
+    "GPAI_OBLIGATIONS",
+    "GPAI_OPEN_SOURCE_EXEMPT",
+    "GPAI_SYSTEMIC_OBLIGATIONS",
     "IFU_ITEMS",
     "REGISTRATION_BASES",
     "REGISTRIES",
+    "assert_gpai_obligation",
     "assert_ifu_item",
     "get_annex_iv",
+    "get_gpai",
     "get_ifu",
+    "gpai_status",
     "get_pmm_plan",
     "get_registration",
     "ifu_status",
     "list_assessment_routes",
     "list_frias",
+    "list_gpai_registers",
     "list_ifu_checklists",
     "list_pmm_plans",
     "list_registrations",
+    "open_gpai",
     "open_ifu",
+    "record_fria_review",
     "record_pmm_plan",
     "record_pmm_review",
     "record_registration",

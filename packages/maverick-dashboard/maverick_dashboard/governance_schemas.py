@@ -116,6 +116,30 @@ class IFUOpenIn(BaseModel):
     asset_id: str = Field(..., pattern=_ASSET_ID)
 
 
+class GPAIOpenIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_ASSET_ID)
+    systemic_risk: bool = False
+    open_source_exempt: bool = False
+
+
+class GPAIObligationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    obligation: str = Field(..., min_length=1, max_length=64)
+    reference: str = Field(..., min_length=1, max_length=512)
+    expected_revision: int = Field(..., ge=1)
+
+
+class FRIAReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    outcome: str = Field(..., pattern=r"^(concur|objections)$")
+    notes: str = Field("", max_length=2000)
+    expected_revision: int = Field(..., ge=1)
+
+
 class LiteracyTrainingIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

@@ -250,3 +250,56 @@ def test_governance_alerts_due_is_quiet_and_green_when_nothing_is(
     result = runner.invoke(main, ["governance-alerts", "due"])
     assert result.exit_code == 0
     assert "attention items: 0" in result.output
+
+
+def test_content_provenance_sign_and_verify_round_trip(
+    runner, tmp_path, monkeypatch,
+):
+    pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ed25519")
+    from maverick import config
+
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAVERICK_ENTERPRISE", "0")
+    monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY", raising=False)
+    (tmp_path / "config.toml").write_text(
+        "[content_provenance]\nenable = true\n", encoding="utf-8",
+    )
+    config.reset_config_cache()
+
+    content = tmp_path / "summary.txt"
+    content.write_text("An AI-generated summary.", encoding="utf-8")
+    signed = runner.invoke(main, [
+        "content-provenance", "sign",
+        "--file", str(content),
+        "--asset", "MAA-" + "a" * 32,
+        "--modality", "text",
+        "--by", "publisher",
+    ])
+    assert signed.exit_code == 0, signed.output
+    manifest_path = tmp_path / "summary.txt.provenance.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    keys = tmp_path / "keys.json"
+    keys.write_text(json.dumps({
+        manifest["attestation"]["key_id"]: manifest["attestation"]["public_key"],
+    }), encoding="utf-8")
+    verified = runner.invoke(main, [
+        "content-provenance", "verify",
+        "--file", str(content),
+        "--manifest", str(manifest_path),
+        "--keys", str(keys),
+    ])
+    assert verified.exit_code == 0, verified.output
+    assert "VALID" in verified.output
+
+    content.write_text("tampered", encoding="utf-8")
+    tampered = runner.invoke(main, [
+        "content-provenance", "verify",
+        "--file", str(content),
+        "--manifest", str(manifest_path),
+        "--keys", str(keys),
+    ])
+    assert tampered.exit_code != 0
+    assert "INVALID" in tampered.output
+    config.reset_config_cache()

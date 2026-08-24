@@ -947,6 +947,38 @@ here.
   agent tokens verify without exporting key files; authorization never
   federates — the agent must still hold an active, inbound-permitted
   registry entry, and the verified subject must equal the agent id exactly.
+- **Signed content provenance** (`content_provenance.py`, opt-in
+  `[content_provenance] enable`, `maverick content-provenance`) — the
+  Art. 50(2) machine-readable marking obligation (applicable 2026-12-02)
+  made verifiable: bounded sidecar manifests bind exact content bytes to
+  the generating asset, modality, and optional delivery receipt,
+  Ed25519-signed through a dedicated hash-chained attestation ledger
+  (domain-separated from audit rows and assurance packs) and verified
+  against an EXTERNAL key registry with full row-hash and key-id
+  derivation checks. Media-container embedding (C2PA JUMBF) is out of
+  scope and stated so. Never a content-authenticity certification.
+- **Underwriting evidence pack** (`underwriting_pack.py`,
+  `maverick underwriting-pack export`) — governance as premium input: a
+  bounded underwriter-oriented posture summary (evidence coverage by kind
+  and freshness, incident and Art. 73 discipline, EU AI Act register
+  completeness, literacy posture, framework metadata) wrapped around the
+  signed, externally verifiable assurance pack and bound to it by digest.
+  Rides enabled modules; absent ones degrade to `enabled: false`. Never an
+  insurance application, rating, or representation to any insurer.
+- **GPAI provider obligations register** (in `eu_conformity`,
+  `maverick eu-conformity gpai`, `/governance/gpai`) — Art. 53(1)(a)-(d)
+  evidence tracking per general-purpose model, the Art. 55(1)(a)-(d)
+  additions for systemic-risk models, and the Art. 53(2) open-source
+  exemption applied only where the law allows (never to systemic risk,
+  never to the copyright policy or training-content summary).
+- **Independent FRIA review (four-eyes)** — a completed FRIA accepts a
+  concur/objections review only from a reviewer other than the assessor;
+  objections are recorded and the Art. 27(2) reopen path stays the only
+  way content changes.
+- **Asset dependency graph** (`model_risk_assurance.dependency_graph`,
+  `GET /assurance/model-risk/dependency-graph`) — nodes and dependency
+  edges over the governed inventory, whole-estate or scoped to one asset's
+  direct neighbourhood.
 - **Governance needs-attention digest** (`governance_alerts.py`,
   `maverick governance-alerts due`, `GET /api/v1/security/governance/alerts`)
   — one bounded read-side digest of what compliance must act on: Art. 73
