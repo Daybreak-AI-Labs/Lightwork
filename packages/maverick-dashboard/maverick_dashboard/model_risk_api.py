@@ -792,6 +792,77 @@ async def cancel_red_team_campaign(
     )
 
 
+@router.get("/red-team/schedules")
+async def red_team_schedules(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    manager = _module("red_team_assurance", "red_team_assurance")
+    page = await _call(manager.list_schedules, limit=limit)
+    return {
+        "schedules": page["items"],
+        "count": page["count"],
+        "truncated": page["truncated"],
+        "limit": page["limit"],
+    }
+
+
+@router.get("/red-team/schedules/{schedule_id}")
+async def red_team_schedule(
+    request: Request,
+    schedule_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    manager = _module("red_team_assurance", "red_team_assurance")
+    return await _record_call(manager.get_schedule, schedule_id)
+
+
+@router.post("/red-team/schedules", status_code=201)
+async def create_red_team_schedule(
+    request: Request,
+    body: schemas.RedTeamScheduleIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    manager = _module("red_team_assurance", "red_team_assurance")
+    return await _call(
+        manager.create_schedule,
+        **body.model_dump(),
+        actor=_actor(request),
+    )
+
+
+@router.post("/red-team/schedules/{schedule_id}/cancel")
+async def cancel_red_team_schedule(
+    request: Request,
+    schedule_id: str,
+    body: schemas.RedTeamCancelIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    manager = _module("red_team_assurance", "red_team_assurance")
+    return await _record_call(
+        manager.cancel_schedule,
+        schedule_id,
+        expected_revision=body.expected_revision,
+        actor=_actor(request),
+        rationale=body.rationale,
+    )
+
+
+@router.post("/red-team/schedules/run-due")
+async def run_due_red_team_schedules(
+    request: Request,
+    body: schemas.RedTeamRunDueIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    manager = _module("red_team_assurance", "red_team_assurance")
+    return await _call(
+        manager.run_due_schedules,
+        actor=_actor(request),
+        limit=body.limit,
+    )
+
+
 @router.get("/portfolio-risk/report")
 async def portfolio_risk_report(request: Request) -> dict[str, Any]:
     require_permission(request, "view")

@@ -884,3 +884,110 @@ def test_model_risk_assurance_page_is_available():
     response = client.get("/security/assurance")
     assert response.status_code == 200
     assert "Model Risk &amp; AI Assurance Officer" in response.text
+
+
+def test_red_team_schedule_routes_are_admin_and_actor_bound(monkeypatch):
+    from maverick import red_team_assurance as rta
+
+    calls: dict = {}
+    monkeypatch.setattr(rta, "enabled", lambda: True)
+    monkeypatch.setattr(
+        rta,
+        "list_schedules",
+        lambda **_kwargs: {
+            "items": [{"id": "RTS-one", "status": "active"}],
+            "count": 1,
+            "truncated": False,
+            "limit": 100,
+        },
+    )
+    monkeypatch.setattr(
+        rta,
+        "get_schedule",
+        lambda schedule_id: (
+            {"id": schedule_id, "status": "active"}
+            if schedule_id == "RTS-one"
+            else None
+        ),
+    )
+
+    def create(**kwargs):
+        calls["create"] = kwargs
+        return {"id": "RTS-one", "status": "active", "revision": 1}
+
+    def cancel(schedule_id, **kwargs):
+        calls["cancel"] = (schedule_id, kwargs)
+        return {"id": schedule_id, "status": "cancelled", "revision": 2}
+
+    def run_due(**kwargs):
+        calls["run_due"] = kwargs
+        return {
+            "campaigns": [],
+            "failures": [],
+            "count": 0,
+            "failure_count": 0,
+            "due_count": 0,
+            "truncated": False,
+            "limit": kwargs["limit"],
+        }
+
+    monkeypatch.setattr(rta, "create_schedule", create)
+    monkeypatch.setattr(rta, "cancel_schedule", cancel)
+    monkeypatch.setattr(rta, "run_due_schedules", run_due)
+
+    body = {
+        "asset_id": "MAA-" + ("a" * 32),
+        "external_agent_id": "external-one",
+        "idempotency_key": "schedule-one",
+        "safe_target_environment": True,
+        "cadence_seconds": 3600,
+    }
+    created = _ok(client.post(
+        "/api/v1/security/assurance/red-team/schedules",
+        json=body,
+    ), 201)
+    assert created["status"] == "active"
+    assert calls["create"]["actor"] == "local:dashboard"
+    assert calls["create"]["cadence_seconds"] == 3600
+    assert calls["create"]["first_run_at"] is None
+
+    page = _ok(client.get("/api/v1/security/assurance/red-team/schedules"))
+    assert page["schedules"][0]["id"] == "RTS-one"
+    assert _ok(client.get(
+        "/api/v1/security/assurance/red-team/schedules/RTS-one"
+    ))["status"] == "active"
+    assert client.get(
+        "/api/v1/security/assurance/red-team/schedules/RTS-missing"
+    ).status_code == 404
+
+    dispatched = _ok(client.post(
+        "/api/v1/security/assurance/red-team/schedules/run-due",
+        json={"limit": 5},
+    ))
+    assert dispatched["count"] == 0
+    assert calls["run_due"] == {"actor": "local:dashboard", "limit": 5}
+
+    cancelled = _ok(client.post(
+        "/api/v1/security/assurance/red-team/schedules/RTS-one/cancel",
+        json={"expected_revision": 1, "rationale": "Cadence retired."},
+    ))
+    assert cancelled["status"] == "cancelled"
+    assert calls["cancel"][1]["actor"] == "local:dashboard"
+
+    # Schema floors hold at the boundary: a sub-5-minute cadence never
+    # reaches the module.
+    too_fast = dict(body, cadence_seconds=60)
+    assert client.post(
+        "/api/v1/security/assurance/red-team/schedules",
+        json=too_fast,
+    ).status_code == 422
+
+
+def test_red_team_schedule_routes_fail_closed_when_disabled():
+    assert client.get(
+        "/api/v1/security/assurance/red-team/schedules"
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/security/assurance/red-team/schedules/run-due",
+        json={},
+    ).status_code == 403
