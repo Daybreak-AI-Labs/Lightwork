@@ -33,6 +33,34 @@
 </section>
 
 <section class="panel">
+  <h2>Needs attention</h2>
+  {% if attention.attention_count %}
+  <p>
+    {% set incidents = attention.sections.serious_incidents %}
+    {% if incidents and incidents.enabled %}
+    {% if incidents.overdue %}<span class="gov-chip gov-chip--bad">{{ incidents.overdue|length }} incident report(s) OVERDUE</span>{% endif %}
+    {% if incidents.due_soon %}<span class="gov-chip gov-chip--warn">{{ incidents.due_soon|length }} incident report(s) due soon</span>{% endif %}
+    {% endif %}
+    {% set lit = attention.sections.ai_literacy %}
+    {% if lit and lit.enabled %}
+    {% if lit.missing %}<span class="gov-chip gov-chip--bad">{{ lit.missing }} training(s) missing</span>{% endif %}
+    {% if lit.expired %}<span class="gov-chip gov-chip--warn">{{ lit.expired }} training(s) expired</span>{% endif %}
+    {% if lit.expiring_soon %}<span class="gov-chip">{{ lit.expiring_soon }} expiring within 30 days</span>{% endif %}
+    {% endif %}
+    {% set conf = attention.sections.eu_conformity %}
+    {% if conf and conf.enabled %}
+    {% if conf.outdated_frias %}<span class="gov-chip gov-chip--warn">{{ conf.outdated_frias|length }} assessment(s) reopened</span>{% endif %}
+    {% if conf.reassessment_required %}<span class="gov-chip gov-chip--warn">{{ conf.reassessment_required|length }} route(s) need reassessment</span>{% endif %}
+    {% endif %}
+  </p>
+  {% else %}
+  <p class="gov-empty">Nothing needs attention right now.</p>
+  {% endif %}
+  <p class="gov-help">Headless check for schedulers: <code>maverick governance-alerts due</code>
+    prints this digest and exits non-zero when anything is listed.</p>
+</section>
+
+<section class="panel">
   <h2>Fundamental rights impact assessments (EU AI Act Art. 27)</h2>
   {% if not eu_conformity_enabled %}
   <p class="gov-alert">Enable EU conformity workflows to run fundamental-rights impact
@@ -44,8 +72,11 @@
       <span class="gov-help">Start typing to pick from the governed asset inventory.</span>
     </label>
     <label>Where will it be used?
-      <input name="context" required maxlength="128" placeholder="underwriting-triage">
-      <span class="gov-help">A short name for the deployment context, e.g. a process or team.</span>
+      <input name="context" required maxlength="128" placeholder="underwriting-triage"
+             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}"
+             title="Letters, digits, and _.:@+- — no spaces">
+      <span class="gov-help">A short name for the deployment context, e.g. a process or team
+        (no spaces — use dashes).</span>
     </label>
     <div class="gov-form__wide"><button type="submit">Start an assessment</button>
       <span id="fria-status" class="gov-muted" aria-live="polite"></span></div>
@@ -174,6 +205,119 @@
   {% endif %}
 </section>
 
+<section class="panel">
+  <h2>Market obligations (Art. 72, Art. 49, Art. 13)</h2>
+  {% if not eu_conformity_enabled %}
+  <p class="gov-alert">Enable EU conformity workflows to track post-market monitoring
+    plans, registrations, and instructions-for-use.</p>
+  {% else %}
+  <h3>Post-market monitoring plan (Art. 72)</h3>
+  {% if pmm_plans %}
+  <div class="gov-table"><table>
+    <caption>Recorded monitoring plans; the plan itself lives where the reference points</caption>
+    <thead><tr><th>System</th><th>Plan reference</th><th>Reviews</th></tr></thead>
+    <tbody>
+    {% for row in pmm_plans %}<tr>
+      <td>{{ row.asset_id }}</td><td>{{ row.plan_reference }}</td><td>{{ row.reviews }}</td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="gov-empty">No monitoring plans recorded yet. The plan follows the
+    Commission's template (Art. 72(3)).</p>{% endif %}
+  <form id="pmm-record" class="gov-form">
+    <label>Which AI system?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
+    </label>
+    <label>Where does the documented plan live?
+      <input name="plan_reference" required maxlength="512" placeholder="wiki/models/credit/pmm-plan">
+    </label>
+    <div class="gov-form__wide"><button type="submit">Record the plan</button>
+      <span id="pmm-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  <form id="pmm-review" class="gov-form">
+    <label>Which system's plan was reviewed?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
+    </label>
+    <label>Outcome
+      <select name="outcome">
+        <option value="no_change">Reviewed — no change</option>
+        <option value="plan_updated">Reviewed — plan updated</option>
+      </select>
+    </label>
+    <label>New plan reference (only when updated)
+      <input name="plan_reference" maxlength="512">
+    </label>
+    <div class="gov-form__wide"><button type="submit">Record the review</button>
+      <span id="pmm-review-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+
+  <h3>Registration (Art. 49)</h3>
+  {% if registrations %}
+  <div class="gov-table"><table>
+    <caption>Recorded registrations and the registry each basis belongs in</caption>
+    <thead><tr><th>System</th><th>Basis</th><th>Registry</th><th>Reference</th></tr></thead>
+    <tbody>
+    {% for row in registrations %}<tr>
+      <td>{{ row.asset_id }}</td><td>{{ row.basis.replace("_", " ") }} ({{ row.citation }})</td>
+      <td>{{ row.registry.replace("_", " ") }}</td><td>{{ row.reference }}</td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="gov-empty">No registrations recorded yet.</p>{% endif %}
+  <form id="registration-record" class="gov-form">
+    <label>Which AI system?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
+    </label>
+    <label>On what basis?
+      <select name="basis">
+        {% for token, meta in registration_bases.items() %}
+        <option value="{{ token }}">{{ token.replace("_", " ") }} ({{ meta[0] }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Which registry?
+      <select name="registry">
+        <option value="eu_database">EU database</option>
+        <option value="national">National registry (Annex III point 2)</option>
+      </select>
+      <span class="gov-help">The wrong registry for the chosen basis is refused with
+        its citation.</span>
+    </label>
+    <label>Registry reference
+      <input name="reference" required maxlength="512" placeholder="EUDB-2026-…">
+    </label>
+    <div class="gov-form__wide"><button type="submit">Record the registration</button>
+      <span id="registration-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+
+  <h3>Instructions for use (Art. 13)</h3>
+  <form id="ifu-open" class="gov-form">
+    <label>Which AI system?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
+      <span class="gov-help">Opens the six-item Art. 13(3) content checklist: record
+        where each item of the instructions for use is documented.</span>
+    </label>
+    <div class="gov-form__wide"><button type="submit">Open the checklist</button>
+      <span id="ifu-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  <div id="ifu-editor" hidden>
+    <h4 id="ifu-editor-title">Checklist</h4>
+    <div id="ifu-items"></div>
+    <span id="ifu-editor-status" class="gov-muted" aria-live="polite"></span>
+  </div>
+
+  <h3>Audit bundle</h3>
+  <form id="bundle-download" class="gov-form">
+    <label>Which AI system?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
+    </label>
+    <div class="gov-form__wide"><button type="submit">Download the audit bundle</button>
+      <span id="bundle-status" class="gov-muted" aria-live="polite"></span>
+      <span class="gov-help">One JSON file with every governance record for the system:
+        assessments with drafts, checklists, route, monitoring plan, registration, and
+        incident reports.</span></div>
+  </form>
+  {% endif %}
+</section>
+
 <div class="gov-grid">
 <section class="panel">
   <h2>AI literacy (Art. 4)</h2>
@@ -199,7 +343,9 @@
   {% else %}<p class="gov-empty">No people are assigned to trained roles yet.</p>{% endif %}
   <form id="literacy-require" class="gov-form">
     <label>Role name
-      <input name="role" required maxlength="128" placeholder="underwriting_operator">
+      <input name="role" required maxlength="128" placeholder="underwriting_operator"
+             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}"
+             title="Letters, digits, and _.:@+- — no spaces">
     </label>
     <label class="gov-form__wide">Required trainings, one per line as key:title:valid-days
       <textarea name="trainings" required rows="2" placeholder="ai-fundamentals:AI fundamentals:365&#10;model-limits:Model limitations briefing:"></textarea>
@@ -210,7 +356,9 @@
   </form>
   <form id="literacy-assign" class="gov-form">
     <label>Person
-      <input name="person" required maxlength="128" placeholder="analyst@example.com">
+      <input name="person" required maxlength="128" placeholder="analyst@example.com"
+             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}"
+             title="Letters, digits, and _.:@+- — no spaces">
     </label>
     <label>Roles (comma-separated)
       <input name="roles" required maxlength="512" placeholder="underwriting_operator">
@@ -220,7 +368,9 @@
   </form>
   <form id="literacy-complete" class="gov-form">
     <label>Person
-      <input name="person" required maxlength="128">
+      <input name="person" required maxlength="128"
+             pattern="[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}"
+             title="Letters, digits, and _.:@+- — no spaces">
     </label>
     <label>Training key
       <input name="training" required maxlength="128" list="literacy-trainings">
@@ -352,21 +502,37 @@
   const assurance = "/api/v1/security/assurance";
   const FRIA_ELEMENTS = {{ fria_elements|tojson }};
   const ANNEX_ITEMS = {{ annex_iv_items|tojson }};
+  const IFU_ITEMS = {{ ifu_items|tojson }};
   const status = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
   const detail = async (response, fallback) => {
-    try { const body = await response.json(); return body.detail || fallback; } catch { return fallback; }
+    try {
+      const body = await response.json();
+      const raw = body.detail;
+      if (Array.isArray(raw)) {
+        return raw.map(entry => {
+          const field = (entry.loc || []).slice(1).join(".");
+          return (field ? field + ": " : "") + (entry.msg || "invalid value");
+        }).join("; ") || fallback;
+      }
+      return raw || fallback;
+    } catch { return fallback; }
+  };
+  const failure = async response => {
+    const error = new Error(await detail(response, "Request failed"));
+    error.status = response.status;
+    return error;
   };
   const post = async (base, path, body) => {
     const response = await fetch(base + path, {
       method: "POST", credentials: "same-origin",
       headers: {"Content-Type": "application/json"}, body: JSON.stringify(body),
     });
-    if (!response.ok) throw new Error(await detail(response, "Request failed"));
+    if (!response.ok) throw await failure(response);
     return response.json();
   };
   const get = async (base, path) => {
     const response = await fetch(base + path, {credentials: "same-origin"});
-    if (!response.ok) throw new Error(await detail(response, "Request failed"));
+    if (!response.ok) throw await failure(response);
     return response.json();
   };
   const epoch = value => Math.floor(new Date(value).getTime() / 1000);
@@ -376,7 +542,7 @@
     const link = document.createElement("a");
     link.href = url; link.download = filename;
     document.body.appendChild(link); link.click(); link.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
   // ---- FRIA -------------------------------------------------------------
@@ -391,10 +557,10 @@
     } catch (error) { status("fria-status", error instanceof Error ? error.message : "Could not start."); }
   });
   const loadFria = async recordId => {
-    const listing = await get(prefix, "/fria");
-    const record = (listing.records || []).find(row => row.id === recordId);
-    if (!record) throw new Error("Assessment not found — refresh the page.");
+    const body = await get(prefix, "/fria/" + encodeURIComponent(recordId));
+    const record = body.record;
     friaRecord = record;
+    const readOnly = record.status === "completed";
     document.getElementById("fria-editor").hidden = false;
     document.getElementById("fria-editor-title").textContent =
       "Assessment " + record.id + " — " + record.asset_id + " (" + record.status + ")";
@@ -404,11 +570,14 @@
       const label = document.createElement("label");
       label.textContent = meta.prompt + " (" + meta.citation + ")";
       const area = document.createElement("textarea");
-      area.dataset.element = key; area.maxLength = 8000;
+      area.dataset.element = key; area.maxLength = 8000; area.disabled = readOnly;
       const existing = (record.elements || {})[key];
       if (existing && existing.content) area.value = existing.content;
       label.appendChild(area); wrap.appendChild(label); holder.appendChild(wrap);
     });
+    status("fria-editor-status", readOnly
+      ? "Completed. Use 'Something changed — reopen' before editing answers."
+      : "");
     document.getElementById("fria-draft-view").hidden = true;
   };
   document.querySelectorAll("[data-fria-open-record]").forEach(button =>
@@ -418,7 +587,13 @@
     }));
   const friaSave = document.getElementById("fria-save");
   if (friaSave) friaSave.addEventListener("click", async () => {
-    if (!friaRecord) return; friaSave.disabled = true;
+    if (!friaRecord) return;
+    if (friaRecord.status === "completed") {
+      status("fria-editor-status",
+        "Completed. Use 'Something changed — reopen' before editing answers.");
+      return;
+    }
+    friaSave.disabled = true;
     try {
       let revision = friaRecord.revision; let saved = 0;
       for (const area of document.querySelectorAll("#fria-elements textarea")) {
@@ -578,6 +753,101 @@
     } catch (error) { status("route-modify-status", error instanceof Error ? error.message : "Recording failed."); }
   });
 
+  // ---- Market obligations (Art. 72 / 49 / 13) ---------------------------
+  const pmmRecord = document.getElementById("pmm-record");
+  if (pmmRecord) pmmRecord.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(pmmRecord);
+    try {
+      status("pmm-status", "Recording the plan…");
+      await post(prefix, "/pmm",
+        {asset_id: String(fields.get("asset_id")).trim(),
+         plan_reference: String(fields.get("plan_reference") || "").trim()});
+      window.location.reload();
+    } catch (error) { status("pmm-status", error instanceof Error ? error.message : "Recording failed."); }
+  });
+  const pmmReview = document.getElementById("pmm-review");
+  if (pmmReview) pmmReview.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(pmmReview);
+    const asset = String(fields.get("asset_id") || "").trim();
+    const moved = String(fields.get("plan_reference") || "").trim();
+    try {
+      status("pmm-review-status", "Recording the review…");
+      const listing = await get(prefix, "/pmm");
+      const current = (listing.records || []).find(row => row.asset_id === asset);
+      if (!current) throw new Error("No monitoring plan is recorded for that system.");
+      await post(prefix, "/pmm/" + encodeURIComponent(asset) + "/review",
+        {outcome: String(fields.get("outcome")),
+         plan_reference: moved || null,
+         expected_revision: current.revision});
+      window.location.reload();
+    } catch (error) { status("pmm-review-status", error instanceof Error ? error.message : "Recording failed."); }
+  });
+  const registrationRecord = document.getElementById("registration-record");
+  if (registrationRecord) registrationRecord.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(registrationRecord);
+    try {
+      status("registration-status", "Recording the registration…");
+      await post(prefix, "/registrations",
+        {asset_id: String(fields.get("asset_id")).trim(),
+         basis: String(fields.get("basis")),
+         registry: String(fields.get("registry")),
+         reference: String(fields.get("reference") || "").trim()});
+      window.location.reload();
+    } catch (error) { status("registration-status", error instanceof Error ? error.message : "Recording failed."); }
+  });
+  let ifuRecord = null;
+  const ifuOpen = document.getElementById("ifu-open");
+  if (ifuOpen) ifuOpen.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(ifuOpen);
+    try {
+      status("ifu-status", "Opening the checklist…");
+      const body = await post(prefix, "/ifu", {asset_id: String(fields.get("asset_id")).trim()});
+      ifuRecord = body.record;
+      document.getElementById("ifu-editor").hidden = false;
+      document.getElementById("ifu-editor-title").textContent =
+        "Checklist " + body.record.id + " — " + body.status.asserted + "/" + body.status.total + " documented";
+      const holder = document.getElementById("ifu-items"); holder.innerHTML = "";
+      Object.entries(IFU_ITEMS).forEach(([key, meta]) => {
+        const wrap = document.createElement("div"); wrap.className = "gov-element";
+        const label = document.createElement("label");
+        label.textContent = meta[0] + " — " + meta[1];
+        const input = document.createElement("input");
+        input.dataset.item = key; input.maxLength = 512;
+        input.placeholder = "Where is this documented?";
+        const existing = (body.record.items || {})[key];
+        if (existing && existing.reference) input.value = existing.reference;
+        const save = document.createElement("button");
+        save.type = "button"; save.textContent = "Save";
+        save.addEventListener("click", async () => {
+          if (!input.value.trim()) return; save.disabled = true;
+          try {
+            const current = await get(prefix, "/ifu/" + encodeURIComponent(ifuRecord.id));
+            const state = await post(prefix, "/ifu/" + encodeURIComponent(ifuRecord.id) + "/items",
+              {item: key, reference: input.value.trim(), expected_revision: current.status.revision});
+            document.getElementById("ifu-editor-title").textContent =
+              "Checklist " + ifuRecord.id + " — " + state.asserted + "/" + state.total + " documented";
+            status("ifu-editor-status", meta[0] + " recorded under your name.");
+          } catch (error) { status("ifu-editor-status", error instanceof Error ? error.message : "Save failed."); }
+          finally { save.disabled = false; }
+        });
+        label.appendChild(input); wrap.appendChild(label); wrap.appendChild(save);
+        holder.appendChild(wrap);
+      });
+      status("ifu-status", "");
+    } catch (error) { status("ifu-status", error instanceof Error ? error.message : "Could not open."); }
+  });
+  const bundleForm = document.getElementById("bundle-download");
+  if (bundleForm) bundleForm.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(bundleForm);
+    const asset = String(fields.get("asset_id") || "").trim();
+    try {
+      status("bundle-status", "Assembling the bundle…");
+      const bundle = await get(prefix, "/bundle/" + encodeURIComponent(asset));
+      download(asset + "-governance-bundle.json", JSON.stringify(bundle, null, 2));
+      status("bundle-status", "Bundle downloaded.");
+    } catch (error) { status("bundle-status", error instanceof Error ? error.message : "Bundle failed."); }
+  });
+
   // ---- Literacy ---------------------------------------------------------
   const literacyRequire = document.getElementById("literacy-require");
   if (literacyRequire) literacyRequire.addEventListener("submit", async event => {
@@ -588,12 +858,30 @@
         return {key: (key || "").trim(), title: (title || "").trim(),
                 validity_days: days && days.trim() ? Number(days.trim()) : null};
       });
+    const role = String(fields.get("role"));
     try {
       status("literacy-require-status", "Recording the requirement…");
       await post(prefix, "/literacy/requirements",
-        {role: String(fields.get("role")), trainings, expected_revision: 0});
+        {role, trainings, expected_revision: 0});
       window.location.reload();
-    } catch (error) { status("literacy-require-status", error instanceof Error ? error.message : "Failed — if the role exists, update it from the API with its revision."); }
+    } catch (error) {
+      if (error && error.status === 409
+          && window.confirm("This role already has a training list. Replace it?")) {
+        try {
+          const listing = await get(prefix, "/literacy/requirements");
+          const existing = (listing.requirements || []).find(row => row.role === role);
+          if (!existing) throw new Error("Role not found — refresh the page.");
+          await post(prefix, "/literacy/requirements",
+            {role, trainings, expected_revision: existing.revision});
+          window.location.reload(); return;
+        } catch (retryError) {
+          status("literacy-require-status",
+            retryError instanceof Error ? retryError.message : "Update failed.");
+          return;
+        }
+      }
+      status("literacy-require-status", error instanceof Error ? error.message : "Recording failed.");
+    }
   });
   const literacyAssign = document.getElementById("literacy-assign");
   if (literacyAssign) literacyAssign.addEventListener("submit", async event => {
@@ -653,8 +941,13 @@
   });
   document.querySelectorAll("[data-incident-submit]").forEach(button =>
     button.addEventListener("click", async () => {
-      const kind = window.prompt("Which filing are you recording? Type initial or complete:");
-      if (kind !== "initial" && kind !== "complete") return;
+      const typed = window.prompt("Which filing are you recording? Type initial or complete:");
+      if (typed === null) return;
+      const kind = typed.trim().toLowerCase();
+      if (kind !== "initial" && kind !== "complete") {
+        status("incident-status", "Please type exactly 'initial' or 'complete'.");
+        return;
+      }
       const reference = window.prompt("The authority's filing reference:");
       if (!reference || !reference.trim()) return;
       try {

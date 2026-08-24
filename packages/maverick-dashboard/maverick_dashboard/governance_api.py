@@ -8,9 +8,10 @@ system — delivery stays with the operator-invoked GRC dispatcher.
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from . import governance_schemas as schemas
 from .auth import require_permission
@@ -22,6 +23,33 @@ router = APIRouter(prefix="/governance", tags=["governance"])
 # --------------------------------------------------------------------------
 # FRIA (Art. 27)
 # --------------------------------------------------------------------------
+def _projected_fria(record: dict[str, Any]) -> dict[str, Any]:
+    """A view-floor projection: assertion state without the answer bodies.
+
+    Answer text is a tier above viewer summaries (same posture as the
+    privacy workspace); it stays behind the operate-floor record fetch
+    and draft render.
+    """
+
+    elements = record.get("elements") or {}
+    return {
+        **record,
+        "elements": {
+            key: (
+                None
+                if not isinstance(value, dict)
+                else {
+                    "asserted": True,
+                    "citation": value.get("citation"),
+                    "asserted_by": value.get("asserted_by"),
+                    "asserted_at": value.get("asserted_at"),
+                }
+            )
+            for key, value in elements.items()
+        },
+    }
+
+
 @router.get("/fria")
 async def list_fria_records(
     request: Request,
@@ -31,10 +59,25 @@ async def list_fria_records(
     conformity = _module("eu_conformity", "eu_conformity")
     rows = await _call(conformity.list_frias, status=status)
     return {
-        "records": rows,
+        "records": [_projected_fria(row) for row in rows],
         "count": len(rows),
         "elements": conformity.FRIA_ELEMENTS,
     }
+
+
+@router.get("/fria/{record_id}")
+async def get_fria_record(request: Request, record_id: str) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+
+    def _find(wanted: str) -> dict[str, Any] | None:
+        for row in conformity.list_frias():
+            if row.get("id") == wanted:
+                return row
+        return None
+
+    record = await _record_call(_find, record_id)
+    return {"record": record}
 
 
 @router.post("/fria", status_code=201)
@@ -312,6 +355,194 @@ async def literacy_evidence(request: Request) -> dict[str, Any]:
     literacy = _module("ai_literacy", "ai_literacy")
     exported = await _call(literacy.export_evidence)
     return {"evidence": exported}
+
+
+# --------------------------------------------------------------------------
+# Art. 72 post-market monitoring plans
+# --------------------------------------------------------------------------
+@router.get("/pmm")
+async def list_pmm_plans(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    rows = await _call(conformity.list_pmm_plans)
+    return {"records": rows, "count": len(rows)}
+
+
+@router.post("/pmm", status_code=201)
+async def record_pmm_plan(
+    request: Request,
+    body: schemas.PMMPlanIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.record_pmm_plan,
+        body.asset_id,
+        plan_reference=body.plan_reference,
+        actor=_actor(request),
+    )
+
+
+@router.post("/pmm/{asset_id}/review")
+async def record_pmm_review(
+    request: Request,
+    asset_id: str,
+    body: schemas.PMMReviewIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.record_pmm_review,
+        asset_id,
+        outcome=body.outcome,
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+        plan_reference=body.plan_reference,
+    )
+
+
+# --------------------------------------------------------------------------
+# Art. 49 registrations
+# --------------------------------------------------------------------------
+@router.get("/registrations")
+async def list_registrations(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    rows = await _call(conformity.list_registrations)
+    return {"records": rows, "count": len(rows), "bases": conformity.REGISTRATION_BASES}
+
+
+@router.post("/registrations", status_code=201)
+async def record_registration(
+    request: Request,
+    body: schemas.RegistrationIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    return await _call(
+        conformity.record_registration,
+        body.asset_id,
+        basis=body.basis,
+        registry=body.registry,
+        reference=body.reference,
+        actor=_actor(request),
+    )
+
+
+# --------------------------------------------------------------------------
+# Art. 13(3) instructions-for-use checklist
+# --------------------------------------------------------------------------
+@router.post("/ifu", status_code=201)
+async def open_ifu_record(
+    request: Request,
+    body: schemas.IFUOpenIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    record = await _call(conformity.open_ifu, body.asset_id, actor=_actor(request))
+    status = await _call(conformity.ifu_status, record["id"])
+    return {"record": record, "status": status, "items": conformity.IFU_ITEMS}
+
+
+@router.get("/ifu/{record_id}")
+async def ifu_record_status(request: Request, record_id: str) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    status = await _record_call(conformity.ifu_status, record_id)
+    return {"status": status, "items": conformity.IFU_ITEMS}
+
+
+@router.post("/ifu/{record_id}/items")
+async def assert_ifu_item(
+    request: Request,
+    record_id: str,
+    body: schemas.AnnexIVItemIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    await _call(
+        conformity.assert_ifu_item,
+        record_id,
+        body.item,
+        reference=body.reference,
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+    return await _call(conformity.ifu_status, record_id)
+
+
+# --------------------------------------------------------------------------
+# The per-asset audit bundle: every governance record in one download
+# --------------------------------------------------------------------------
+@router.get("/bundle/{asset_id}")
+async def governance_bundle(request: Request, asset_id: str) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    sections: dict[str, Any] = {}
+
+    frias = [
+        row
+        for row in await _call(conformity.list_frias)
+        if row.get("asset_id") == asset_id
+    ]
+    for row in frias:
+        row["draft"] = await _call(conformity.render_fria, row["id"])
+    sections["fria"] = frias
+
+    annex = await _call(conformity.get_annex_iv, asset_id)
+    if annex is not None:
+        sections["annex_iv"] = {
+            "status": await _call(conformity.annex_iv_status, annex["id"]),
+            "rendered": await _call(conformity.render_annex_iv, annex["id"]),
+        }
+    sections["assessment_route"] = await _call(
+        conformity.get_assessment_route, asset_id
+    )
+    sections["pmm_plan"] = await _call(conformity.get_pmm_plan, asset_id)
+    sections["registration"] = await _call(conformity.get_registration, asset_id)
+    ifu = await _call(conformity.get_ifu, asset_id)
+    if ifu is not None:
+        ifu["status"] = await _call(conformity.ifu_status, ifu["id"])
+    sections["instructions_for_use"] = ifu
+
+    try:
+        incidents_module = _module("ai_incident_reporting", "ai_incident_reporting")
+    except HTTPException:
+        sections["serious_incidents"] = {"enabled": False}
+    else:
+        declarations = [
+            row
+            for row in await _call(incidents_module.list_declarations)
+            if row.get("asset_id") == asset_id
+        ]
+        for row in declarations:
+            row["report_draft"] = await _call(
+                incidents_module.render_report, row["id"]
+            )
+        sections["serious_incidents"] = {
+            "enabled": True,
+            "declarations": declarations,
+        }
+
+    return {
+        "asset_id": asset_id,
+        "generated_at": time.time(),
+        "generated_by": _actor(request),
+        "regulation": dict(conformity.REGULATION_METADATA),
+        "notice": conformity.NON_CERTIFICATION_NOTICE,
+        "sections": sections,
+    }
+
+
+# --------------------------------------------------------------------------
+# The needs-attention digest
+# --------------------------------------------------------------------------
+@router.get("/alerts")
+async def needs_attention_digest(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    from maverick import governance_alerts
+
+    return await _call(governance_alerts.digest)
 
 
 # --------------------------------------------------------------------------

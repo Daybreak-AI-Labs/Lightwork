@@ -1419,3 +1419,182 @@ def eu_conformity_route(action, asset_id, route, annex_iii_point,
                        f"point {record.get('annex_iii_point') or '-'}")
     except (KeyError, ValueError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
+
+
+@eu_conformity_group.command("pmm")
+@click.argument("action", type=click.Choice(["record", "review", "show", "list"]))
+@click.option("--asset", "asset_id", default=None, help="Governed asset id.")
+@click.option("--plan", "plan_reference", default=None,
+              help="Where the documented monitoring plan lives.")
+@click.option("--outcome", default=None, help="review: no_change | plan_updated.")
+@click.option("--revision", type=int, default=0, help="Expected revision (CAS).")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def eu_conformity_pmm(action, asset_id, plan_reference, outcome,
+                      revision, actor) -> None:
+    """Track the Art. 72 post-market monitoring plan per asset."""
+    from .. import eu_conformity as euc
+
+    def need(value, name):
+        if value in (None, ""):
+            raise click.ClickException(f"--{name} is required for {action}")
+        return value
+
+    try:
+        if action == "record":
+            record = euc.record_pmm_plan(
+                need(asset_id, "asset"),
+                plan_reference=need(plan_reference, "plan"),
+                actor=need(actor, "by"))
+            click.echo(f"{record['id']} {record['citation']} (rev {record['revision']})")
+        elif action == "review":
+            record = euc.record_pmm_review(
+                need(asset_id, "asset"), outcome=need(outcome, "outcome"),
+                actor=need(actor, "by"), expected_revision=revision,
+                plan_reference=plan_reference)
+            click.echo(f"{record['id']} reviews {len(record['reviews'])}")
+        elif action == "show":
+            record = euc.get_pmm_plan(need(asset_id, "asset"))
+            if record is None:
+                raise click.ClickException(f"no monitoring plan for {asset_id!r}")
+            click.echo(f"{record['id']}  {record['plan_reference']}  "
+                       f"reviews {len(record.get('reviews') or [])}")
+        else:
+            for record in euc.list_pmm_plans():
+                click.echo(f"{record['asset_id']}  {record['plan_reference']}")
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
+@eu_conformity_group.command("registration")
+@click.argument("action", type=click.Choice(["record", "show", "list"]))
+@click.option("--asset", "asset_id", default=None, help="Governed asset id.")
+@click.option("--basis", default=None,
+              help="provider_high_risk | provider_not_high_risk | "
+                   "public_authority_deployer | annex_iii_point_2_national")
+@click.option("--registry", default=None, help="eu_database | national.")
+@click.option("--reference", default=None, help="The registry's reference.")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def eu_conformity_registration(action, asset_id, basis, registry,
+                               reference, actor) -> None:
+    """Record completed Art. 49 registrations; wrong registries are refused."""
+    from .. import eu_conformity as euc
+
+    def need(value, name):
+        if value in (None, ""):
+            raise click.ClickException(f"--{name} is required for {action}")
+        return value
+
+    try:
+        if action == "record":
+            record = euc.record_registration(
+                need(asset_id, "asset"), basis=need(basis, "basis"),
+                registry=need(registry, "registry"),
+                reference=need(reference, "reference"), actor=need(actor, "by"))
+            click.echo(f"{record['id']} {record['citation']} {record['registry']}")
+        elif action == "show":
+            record = euc.get_registration(need(asset_id, "asset"))
+            if record is None:
+                raise click.ClickException(f"no registration for {asset_id!r}")
+            click.echo(f"{record['id']}  {record['basis']}  {record['registry']}  "
+                       f"{record['reference']}")
+        else:
+            for record in euc.list_registrations():
+                click.echo(f"{record['asset_id']}  {record['basis']}  "
+                           f"{record['registry']}")
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
+@eu_conformity_group.command("ifu")
+@click.argument("action", type=click.Choice(["open", "assert", "status", "list"]))
+@click.option("--asset", "asset_id", default=None, help="Governed asset id.")
+@click.option("--record", "record_id", default=None, help="Checklist id (ECI-...).")
+@click.option("--item", default=None, help="Art. 13(3) item key.")
+@click.option("--reference", default=None,
+              help="Where the item's documentation lives.")
+@click.option("--revision", type=int, default=0, help="Expected revision (CAS).")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def eu_conformity_ifu(action, asset_id, record_id, item, reference,
+                      revision, actor) -> None:
+    """Track the Art. 13(3) instructions-for-use content checklist."""
+    from .. import eu_conformity as euc
+
+    def need(value, name):
+        if value in (None, ""):
+            raise click.ClickException(f"--{name} is required for {action}")
+        return value
+
+    try:
+        if action == "open":
+            record = euc.open_ifu(need(asset_id, "asset"), actor=need(actor, "by"))
+            click.echo(f"{record['id']} (rev {record['revision']})")
+        elif action == "assert":
+            record = euc.assert_ifu_item(
+                need(record_id, "record"), need(item, "item"),
+                reference=need(reference, "reference"), actor=need(actor, "by"),
+                expected_revision=revision)
+            state = euc.ifu_status(record["id"])
+            click.echo(f"{state['asserted']}/{state['total']} documented")
+        elif action == "status":
+            state = euc.ifu_status(need(record_id, "record"))
+            click.echo(f"{state['id']}  {state['asserted']}/{state['total']}  "
+                       f"missing: {', '.join(state['missing']) or '-'}")
+        else:
+            for record in euc.list_ifu_checklists():
+                state = euc.ifu_status(record["id"])
+                click.echo(f"{record['asset_id']}  "
+                           f"{state['asserted']}/{state['total']}")
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
+@main.group("governance-alerts")
+def governance_alerts_group() -> None:
+    """The needs-attention digest across the governance registers.
+
+    Read-side aggregation of Art. 73 clocks, Art. 4 literacy gaps, and
+    Art. 27(2)/43(4) staleness. Cron this around your own delivery channel;
+    nothing is transmitted anywhere by the platform.
+    """
+
+
+@governance_alerts_group.command("due")
+@click.option("--due-soon-hours", type=int, default=48,
+              help="Incident clocks within this many hours count as due soon.")
+@click.option("--expiring-days", type=int, default=30,
+              help="Trainings expiring within this many days are flagged.")
+@click.option("--json", "as_json", is_flag=True, help="Emit the digest as JSON.")
+def governance_alerts_due(due_soon_hours, expiring_days, as_json) -> None:
+    """Print what needs attention now; exit 1 when anything does."""
+    import json as json_module
+
+    from .. import governance_alerts
+
+    try:
+        report = governance_alerts.digest(
+            due_soon_seconds=due_soon_hours * 3600.0,
+            expiring_days=expiring_days,
+        )
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+    if as_json:
+        click.echo(json_module.dumps(report, indent=2, sort_keys=True))
+    else:
+        sections = report["sections"]
+        incidents = sections["serious_incidents"]
+        if incidents.get("enabled"):
+            click.echo(f"serious incidents: {len(incidents['overdue'])} overdue, "
+                       f"{len(incidents['due_soon'])} due soon (Art. 73)")
+        literacy = sections["ai_literacy"]
+        if literacy.get("enabled"):
+            click.echo(f"ai literacy: {literacy['missing']} missing, "
+                       f"{literacy['expired']} expired, "
+                       f"{literacy['expiring_soon']} expiring soon (Art. 4)")
+        conformity = sections["eu_conformity"]
+        if conformity.get("enabled"):
+            click.echo(f"eu conformity: {len(conformity['outdated_frias'])} "
+                       f"outdated FRIAs, {len(conformity['reassessment_required'])} "
+                       "routes need reassessment (Art. 27(2)/43(4))")
+        click.echo(f"attention items: {report['attention_count']}")
+    if report["attention_count"]:
+        raise SystemExit(1)

@@ -192,3 +192,61 @@ def test_ai_inventory_sync_requires_a_configured_or_named_connector(
     result = runner.invoke(main, ["ai-inventory", "sync", "--by", "cron:ops"])
     assert result.exit_code != 0
     assert "no connectors configured" in result.output
+
+
+def test_governance_alerts_due_exits_nonzero_when_anything_needs_attention(
+    runner, monkeypatch,
+):
+    from maverick import governance_alerts
+
+    monkeypatch.setattr(
+        governance_alerts,
+        "digest",
+        lambda **kwargs: {
+            "generated_at": 1.0,
+            "attention_count": 3,
+            "sections": {
+                "serious_incidents": {
+                    "enabled": True, "overdue": ["ASI-one"], "due_soon": [],
+                    "citation": "Art. 73",
+                },
+                "ai_literacy": {
+                    "enabled": True, "missing": 2, "expired": 0,
+                    "expiring_soon": 0, "citation": "Art. 4",
+                },
+                "eu_conformity": {"enabled": False},
+            },
+        },
+    )
+    result = runner.invoke(main, ["governance-alerts", "due"])
+    assert result.exit_code != 0
+    assert "1 overdue" in result.output
+    assert "2 missing" in result.output
+    assert "attention items: 3" in result.output
+
+    as_json = runner.invoke(main, ["governance-alerts", "due", "--json"])
+    assert as_json.exit_code != 0
+    assert json.loads(as_json.output)["attention_count"] == 3
+
+
+def test_governance_alerts_due_is_quiet_and_green_when_nothing_is(
+    runner, monkeypatch,
+):
+    from maverick import governance_alerts
+
+    monkeypatch.setattr(
+        governance_alerts,
+        "digest",
+        lambda **kwargs: {
+            "generated_at": 1.0,
+            "attention_count": 0,
+            "sections": {
+                "serious_incidents": {"enabled": False},
+                "ai_literacy": {"enabled": False},
+                "eu_conformity": {"enabled": False},
+            },
+        },
+    )
+    result = runner.invoke(main, ["governance-alerts", "due"])
+    assert result.exit_code == 0
+    assert "attention items: 0" in result.output

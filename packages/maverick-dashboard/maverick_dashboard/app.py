@@ -2910,6 +2910,8 @@ async def _governance_workspace_page_data(
         "fria_records": [],
         "fria_error": "",
         "art43_routes": [],
+        "pmm_plans": [],
+        "registrations": [],
         "ai_literacy_enabled": literacy.enabled(),
         "literacy_gaps": {},
         "literacy_error": "",
@@ -2960,6 +2962,32 @@ async def _governance_workspace_page_data(
                     "modifications": len(row.get("modifications") or []),
                 }
                 for row in routes[:100]
+            ]
+        pmm_result, registration_result = await asyncio.gather(
+            run_in_threadpool(conformity.list_pmm_plans),
+            run_in_threadpool(conformity.list_registrations),
+            return_exceptions=True,
+        )
+        if not isinstance(pmm_result, Exception):
+            data["pmm_plans"] = [
+                {
+                    "asset_id": row.get("asset_id"),
+                    "plan_reference": row.get("plan_reference"),
+                    "reviews": len(row.get("reviews") or []),
+                    "revision": row.get("revision"),
+                }
+                for row in pmm_result[:100]
+            ]
+        if not isinstance(registration_result, Exception):
+            data["registrations"] = [
+                {
+                    "asset_id": row.get("asset_id"),
+                    "basis": row.get("basis"),
+                    "citation": row.get("citation"),
+                    "registry": row.get("registry"),
+                    "reference": row.get("reference"),
+                }
+                for row in registration_result[:100]
             ]
     if data["ai_literacy_enabled"]:
         try:
@@ -3022,6 +3050,13 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
     )
     ai_incident_data = await _ai_incident_page_data(ai_incident_reporting)
 
+    from maverick import governance_alerts
+
+    try:
+        attention = await run_in_threadpool(governance_alerts.digest)
+    except Exception:
+        attention = {"attention_count": 0, "sections": {}}
+
     # Pickers so nobody has to paste raw MAA-/MRI- ids: the governed asset
     # inventory and recorded assurance incidents, both fail-soft and bounded.
     governed_assets: list[dict[str, Any]] = []
@@ -3062,6 +3097,11 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
             "annex_iv_items": eu_conformity.ANNEX_IV_ITEMS,
             "art43_routes": workspace["art43_routes"],
             "conformity_routes": eu_conformity.ROUTES,
+            "pmm_plans": workspace["pmm_plans"],
+            "registrations": workspace["registrations"],
+            "registration_bases": eu_conformity.REGISTRATION_BASES,
+            "ifu_items": eu_conformity.IFU_ITEMS,
+            "attention": attention,
             "governed_assets": governed_assets,
             "assurance_incidents": assurance_incidents,
             "ai_literacy_enabled": workspace["ai_literacy_enabled"],

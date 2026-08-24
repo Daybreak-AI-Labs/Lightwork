@@ -868,7 +868,14 @@ here.
   the boundary (point 1 without harmonised standards or common
   specifications cannot self-assess; points 2-8 never involve a notified
   body) and a substantial modification reopens the assessment while
-  provider pre-determined documented changes do not. Drafting and tracking
+  provider pre-determined documented changes do not. Plus three market-
+  obligation registers: the Art. 72 post-market monitoring plan (where the
+  documented plan lives, with bounded review history; the plan follows the
+  Commission's Art. 72(3) template), the Art. 49 registration record where
+  a basis in the wrong registry is refused with its citation (49(1)-(3) EU
+  database; Annex III point 2 national, 49(5)), and the Art. 13(3)
+  instructions-for-use content checklist (six cited items, reference-only).
+  Drafting and tracking
   assistance — never a conformity assessment, CE marking, or legal advice.
 - **AI-literacy register** (`ai_literacy.py`, opt-in `[ai_literacy] enable`,
   `maverick ai-literacy`) — the EU AI Act Art. 4 obligation (applicable since
@@ -902,8 +909,21 @@ here.
   deadline-aware category picking, and the read-only GRC outbound ledger.
   Inventory-backed pickers replace raw record ids; every mutation is
   operate-floor, CSRF-checked, CAS-guarded, and recorded under the caller's
-  name. Nothing on the page transmits anything to an authority or external
-  system.
+  name. The page opens with the needs-attention digest, adds the Art. 72/49/13
+  market-obligation panels, and can download a per-asset audit bundle — one
+  JSON file with every governance record and rendered draft for a system.
+  FRIA answer bodies stay operate-floor: the view-floor listing carries
+  assertion state only. Nothing on the page transmits anything to an
+  authority or external system.
+- **Governance needs-attention digest** (`governance_alerts.py`,
+  `maverick governance-alerts due`, `GET /api/v1/security/governance/alerts`)
+  — one bounded read-side digest of what compliance must act on: Art. 73
+  clocks overdue or due soon, Art. 4 literacy gaps (missing, expired,
+  expiring soon), Art. 27(2) outdated FRIAs, and Art. 43(4) routes flagged
+  for reassessment. No knob of its own — each section rides its source
+  module's opt-in and degrades to ``enabled: false``. The CLI exits non-zero
+  when anything needs attention, so an operator cron can wrap it with their
+  own delivery channel; the platform itself transmits nothing.
 - **Signed AI policy packs** (`policy_packs.py`, opt-in `[policy_packs]
   enable`) — bounded NIST AI RMF and EU AI Act starter mappings plus
   Ed25519-verified external updates, anti-rollback staging, explicit global

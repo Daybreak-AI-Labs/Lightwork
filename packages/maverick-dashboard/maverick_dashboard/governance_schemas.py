@@ -80,6 +80,42 @@ class RouteModificationIn(BaseModel):
     expected_revision: int = Field(..., ge=1)
 
 
+class PMMPlanIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_ASSET_ID)
+    plan_reference: str = Field(..., min_length=1, max_length=512)
+
+
+class PMMReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    outcome: str = Field(..., pattern=r"^(no_change|plan_updated)$")
+    plan_reference: str | None = Field(None, min_length=1, max_length=512)
+    expected_revision: int = Field(..., ge=1)
+
+
+class RegistrationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_ASSET_ID)
+    basis: str = Field(
+        ...,
+        pattern=(
+            r"^(provider_high_risk|provider_not_high_risk|"
+            r"public_authority_deployer|annex_iii_point_2_national)$"
+        ),
+    )
+    registry: str = Field(..., pattern=r"^(eu_database|national)$")
+    reference: str = Field(..., min_length=1, max_length=512)
+
+
+class IFUOpenIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_ASSET_ID)
+
+
 class LiteracyTrainingIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

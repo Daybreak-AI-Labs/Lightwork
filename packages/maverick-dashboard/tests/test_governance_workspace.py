@@ -171,6 +171,11 @@ def test_fria_lifecycle_through_the_api_and_page():
     assert listing["count"] == 1
     assert "process_description" in listing["elements"]
 
+    # The editor's operate-floor record fetch carries the answer bodies.
+    fetched = _ok(client.get(f"{_PREFIX}/fria/{opened['id']}"))
+    assert fetched["record"]["id"] == opened["id"]
+    assert client.get(f"{_PREFIX}/fria/ECF-{'0' * 24}").status_code == 404
+
     # An element outside Art. 27(1) is refused before any write.
     assert client.post(
         f"{_PREFIX}/fria/{opened['id']}/elements",
@@ -420,10 +425,36 @@ def test_viewer_role_reads_but_never_mutates(monkeypatch):
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:paralegal")
     monkeypatch.setattr(auth, "role_for_principal", lambda principal: "viewer")
 
-    assert client.get(f"{_PREFIX}/fria").status_code == 200
     assert client.get(f"{_PREFIX}/routes").status_code == 200
     assert client.get(f"{_PREFIX}/literacy/gaps").status_code == 200
     assert client.get(f"{_PREFIX}/grc-sync/status").status_code == 200
+    assert client.get(f"{_PREFIX}/pmm").status_code == 200
+    assert client.get(f"{_PREFIX}/registrations").status_code == 200
+    assert client.get(f"{_PREFIX}/alerts").status_code == 200
+
+    # The view-floor FRIA listing never carries answer bodies; the full
+    # record (and therefore the content) is operate-floor.
+    opened = None
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "operator")
+    opened = client.post(
+        f"{_PREFIX}/fria",
+        json={"asset_id": "MAA-" + "1" * 32, "context": "triage"},
+    ).json()
+    client.post(
+        f"{_PREFIX}/fria/{opened['id']}/elements",
+        json={
+            "element": "process_description",
+            "content": "A privileged answer body.",
+            "expected_revision": opened["revision"],
+        },
+    )
+    monkeypatch.setattr(auth, "role_for_principal", lambda principal: "viewer")
+    listing = client.get(f"{_PREFIX}/fria")
+    assert listing.status_code == 200
+    assert "A privileged answer body." not in listing.text
+    row = listing.json()["records"][0]
+    assert row["elements"]["process_description"]["asserted"] is True
+    assert client.get(f"{_PREFIX}/fria/{opened['id']}").status_code == 403
 
     mutations = (
         (f"{_PREFIX}/fria", {"asset_id": "MAA-" + "0" * 32, "context": "x"}),
@@ -445,6 +476,238 @@ def test_viewer_role_reads_but_never_mutates(monkeypatch):
     # The evidence export and the workspace page itself are operate-floor.
     assert client.get(f"{_PREFIX}/literacy/evidence").status_code == 403
     assert client.get("/security/governance").status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Market obligations: Art. 72 / Art. 49 / Art. 13
+# ---------------------------------------------------------------------------
+
+def test_market_obligations_through_the_api_and_page():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("market-model")[:32]
+
+    plan = _ok(
+        client.post(
+            f"{_PREFIX}/pmm",
+            json={"asset_id": asset_id, "plan_reference": "wiki/models/pmm-plan"},
+        ),
+        expected=201,
+    )
+    assert plan["citation"] == "Art. 72(1)"
+    # A second plan for the same asset conflicts instead of overwriting.
+    assert client.post(
+        f"{_PREFIX}/pmm",
+        json={"asset_id": asset_id, "plan_reference": "wiki/other"},
+    ).status_code == 409
+
+    reviewed = _ok(
+        client.post(
+            f"{_PREFIX}/pmm/{asset_id}/review",
+            json={
+                "outcome": "plan_updated",
+                "plan_reference": "wiki/models/pmm-plan-v2",
+                "expected_revision": plan["revision"],
+            },
+        )
+    )
+    assert reviewed["plan_reference"] == "wiki/models/pmm-plan-v2"
+    assert client.post(
+        f"{_PREFIX}/pmm/MAA-{'0' * 32}/review",
+        json={"outcome": "no_change", "expected_revision": 1},
+    ).status_code == 404
+
+    # The wrong registry for a basis is refused with its citation.
+    refused = client.post(
+        f"{_PREFIX}/registrations",
+        json={
+            "asset_id": asset_id,
+            "basis": "provider_high_risk",
+            "registry": "national",
+            "reference": "NAT-1",
+        },
+    )
+    assert refused.status_code == 409
+    assert "Art. 49(1)" in refused.json()["detail"]
+    registered = _ok(
+        client.post(
+            f"{_PREFIX}/registrations",
+            json={
+                "asset_id": asset_id,
+                "basis": "provider_high_risk",
+                "registry": "eu_database",
+                "reference": "EUDB-2026-17",
+            },
+        ),
+        expected=201,
+    )
+    assert registered["citation"] == "Art. 49(1)"
+
+    opened = _ok(
+        client.post(f"{_PREFIX}/ifu", json={"asset_id": asset_id}),
+        expected=201,
+    )
+    assert opened["status"]["total"] == 6
+    state = _ok(
+        client.post(
+            f"{_PREFIX}/ifu/{opened['record']['id']}/items",
+            json={
+                "item": "provider_identity",
+                "reference": "handbook#provider",
+                "expected_revision": opened["record"]["revision"],
+            },
+        )
+    )
+    assert state["asserted"] == 1
+    fetched = _ok(client.get(f"{_PREFIX}/ifu/{opened['record']['id']}"))
+    assert fetched["status"]["missing"] != []
+    assert client.get(f"{_PREFIX}/ifu/ECI-{'0' * 24}").status_code == 404
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert "Post-market monitoring plan (Art. 72)" in page.text
+    assert "wiki/models/pmm-plan-v2" in page.text
+    assert "EUDB-2026-17" in page.text
+    assert "Instructions for use (Art. 13)" in page.text
+    assert "Download the audit bundle" in page.text
+
+
+# ---------------------------------------------------------------------------
+# The per-asset audit bundle
+# ---------------------------------------------------------------------------
+
+def test_audit_bundle_collects_every_register():
+    _enable_governance()
+    incident = _assurance_incident()
+    from maverick import ai_incident_reporting as air
+    from maverick import model_risk_assurance as mra
+
+    asset_id = next(
+        row["asset_id"] for row in mra.list_incidents()
+        if row["id"] == incident["id"]
+    )
+
+    opened = _ok(
+        client.post(
+            f"{_PREFIX}/fria",
+            json={"asset_id": asset_id, "context": "triage"},
+        ),
+        expected=201,
+    )
+    _ok(
+        client.post(
+            f"{_PREFIX}/fria/{opened['id']}/elements",
+            json={
+                "element": "process_description",
+                "content": "Counsel's process answer.",
+                "expected_revision": opened["revision"],
+            },
+        )
+    )
+    annex = _ok(
+        client.post(f"{_PREFIX}/annex-iv", json={"asset_id": asset_id}),
+        expected=201,
+    )
+    _ok(
+        client.post(
+            f"{_PREFIX}/routes",
+            json={
+                "asset_id": asset_id,
+                "route": "internal_control_annex_vi",
+                "annex_iii_point": 4,
+                "harmonised_standards_applied": True,
+                "rationale": "Point 4 internal control.",
+            },
+        ),
+        expected=201,
+    )
+    _ok(
+        client.post(
+            f"{_PREFIX}/pmm",
+            json={"asset_id": asset_id, "plan_reference": "wiki/pmm"},
+        ),
+        expected=201,
+    )
+    air.declare_serious_incident(
+        incident["id"],
+        category="critical_infrastructure_disruption",
+        became_aware_at=time.time() - 3_600,
+        causal_link="reasonably_likely",
+        member_state="DE",
+        authority="Bundesnetzagentur market surveillance",
+        declared_by="incident-manager",
+    )
+
+    bundle = _ok(client.get(f"{_PREFIX}/bundle/{asset_id}"))
+    sections = bundle["sections"]
+    assert sections["fria"][0]["id"] == opened["id"]
+    assert "Art. 27" in sections["fria"][0]["draft"]
+    assert sections["annex_iv"]["status"]["id"] == annex["record"]["id"]
+    assert sections["assessment_route"]["route"] == "internal_control_annex_vi"
+    assert sections["pmm_plan"]["plan_reference"] == "wiki/pmm"
+    assert sections["registration"] is None
+    assert sections["instructions_for_use"] is None
+    declarations = sections["serious_incidents"]["declarations"]
+    assert len(declarations) == 1
+    assert "Art. 73" in declarations[0]["report_draft"]
+    assert bundle["notice"]
+
+
+# ---------------------------------------------------------------------------
+# The needs-attention digest
+# ---------------------------------------------------------------------------
+
+def test_needs_attention_digest_on_api_and_page():
+    _enable_governance()
+    incident = _assurance_incident(occurred_at=time.time() - 30 * 86_400)
+    from maverick import ai_incident_reporting as air
+
+    quiet = _ok(client.get(f"{_PREFIX}/alerts"))
+    assert quiet["attention_count"] == 0
+
+    air.declare_serious_incident(
+        incident["id"],
+        category="critical_infrastructure_disruption",
+        became_aware_at=time.time() - 20 * 86_400,
+        causal_link="under_investigation",
+        member_state="DE",
+        authority="Bundesnetzagentur market surveillance",
+        declared_by="incident-manager",
+    )
+    _ok(
+        client.post(
+            f"{_PREFIX}/literacy/requirements",
+            json={
+                "role": "operator",
+                "trainings": [
+                    {"key": "ai-fundamentals", "title": "AI fundamentals",
+                     "validity_days": None},
+                ],
+                "expected_revision": 0,
+            },
+        )
+    )
+    _ok(
+        client.post(
+            f"{_PREFIX}/literacy/assignments",
+            json={
+                "person": "analyst@example.com",
+                "roles": ["operator"],
+                "expected_revision": 0,
+            },
+        )
+    )
+
+    digest = _ok(client.get(f"{_PREFIX}/alerts"))
+    assert digest["attention_count"] == 2
+    assert len(digest["sections"]["serious_incidents"]["overdue"]) == 1
+    assert digest["sections"]["ai_literacy"]["missing"] == 1
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert "Needs attention" in page.text
+    assert "incident report(s) OVERDUE" in page.text
+    assert "training(s) missing" in page.text
+    assert "governance-alerts due" in page.text
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +805,7 @@ def test_literacy_register_through_the_api_and_page():
 # Serious incidents (Art. 73) mutations on the assurance router
 # ---------------------------------------------------------------------------
 
-def _assurance_incident() -> dict:
+def _assurance_incident(occurred_at: float | None = None) -> dict:
     from maverick import model_risk_assurance as mra
 
     officer = mra.ModelRiskAssuranceOfficer()
@@ -564,7 +827,7 @@ def _assurance_incident() -> dict:
         severity="high",
         summary="The triage model misrouted an emergency case.",
         actor="incident-manager",
-        occurred_at=now - 7_200,
+        occurred_at=now - 7_200 if occurred_at is None else occurred_at,
         evidence_ids=[],
     )
 
