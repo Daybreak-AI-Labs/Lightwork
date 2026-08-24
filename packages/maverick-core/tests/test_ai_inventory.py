@@ -1070,3 +1070,252 @@ def test_huggingface_rejects_off_origin_links_foreign_repos_and_non_lists(
     )
     with pytest.raises(inventory.DiscoveryProtocolError, match="list"):
         adapter.discover()
+
+
+class _SqlTransport:
+    """A transport with both verbs, for the statement-based adapter."""
+
+    def __init__(self, post_handler, get_handler=None):
+        self.post_handler = post_handler
+        self.get_handler = get_handler
+        self.posts: list[dict[str, Any]] = []
+        self.gets: list[dict[str, Any]] = []
+
+    def post(self, url, *, headers, json, timeout):
+        call = {"url": url, "headers": dict(headers), "json": dict(json), "timeout": timeout}
+        self.posts.append(call)
+        return self.post_handler(call)
+
+    def get(self, url, *, headers, params, timeout):
+        call = {"url": url, "headers": dict(headers), "params": dict(params or {}), "timeout": timeout}
+        self.gets.append(call)
+        return self.get_handler(call)
+
+
+_SNOWFLAKE_COLUMNS = [
+    "created_on", "name", "model_type", "database_name", "schema_name",
+    "owner", "comment", "versions", "default_version_name", "aliases",
+]
+
+
+def _snowflake_row(name, versions='["V1"]', default="V1"):
+    return [
+        "2026-08-01T00:00:00+00:00", name, "USER_MODEL", "ML", "REGISTRY",
+        "ML_ADMIN", "", versions, default, "{}",
+    ]
+
+
+def test_snowflake_sends_one_fixed_statement_and_fetches_partitions(monkeypatch):
+    monkeypatch.setenv("SNOWFLAKE_TOKEN", "snowflake-test-token")
+
+    def post_handler(call):
+        assert call["json"]["statement"] == "SHOW MODELS IN ACCOUNT"
+        assert call["headers"]["X-Snowflake-Authorization-Token-Type"] == "OAUTH"
+        return _Response(
+            {
+                "statementHandle": "01b2c3d4-0000-1111-2222-333344445555",
+                "resultSetMetaData": {
+                    "rowType": [{"name": column} for column in _SNOWFLAKE_COLUMNS],
+                    "partitionInfo": [{"rowCount": 1}, {"rowCount": 1}],
+                },
+                "data": [_snowflake_row("churn_scorer")],
+            }
+        )
+
+    def get_handler(call):
+        assert call["params"] == {"partition": 1}
+        assert "01b2c3d4" in call["url"]
+        return _Response({"data": [_snowflake_row("fraud_scorer", '["V1","V2"]', "V2")]})
+
+    transport = _SqlTransport(post_handler, get_handler)
+    adapter = inventory.SnowflakeInventoryAdapter(
+        account_url="https://acme-prod.snowflakecomputing.com",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    names = [asset.display_name for asset in result.assets]
+    assert names == [
+        "ML.REGISTRY.churn_scorer",
+        "ML.REGISTRY.churn_scorer V1",
+        "ML.REGISTRY.fraud_scorer",
+        "ML.REGISTRY.fraud_scorer V1",
+        "ML.REGISTRY.fraud_scorer V2",
+    ]
+    root, version = result.assets[0], result.assets[1]
+    assert root.binding_strength == "observed_snapshot"
+    assert version.binding_strength == "immutable_provider_revision"
+    assert version.dependencies == (root.source_id,)
+    assert all(asset.owner == "ML_ADMIN" for asset in result.assets)
+    # One statement post plus one partition get -- never a second statement.
+    assert len(transport.posts) == 1
+    assert len(transport.gets) == 1
+
+
+def test_snowflake_fails_closed_on_async_shape_drift_and_bad_versions(monkeypatch):
+    monkeypatch.setenv("SNOWFLAKE_TOKEN", "snowflake-test-token")
+
+    deferred = _SqlTransport(lambda call: _Response({}, 202))
+    adapter = inventory.SnowflakeInventoryAdapter(
+        account_url="https://acme-prod.snowflakecomputing.com",
+        transport=deferred,
+        limits=_limits(retry_attempts=1),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryTransportError, match="asynchronous"):
+        adapter.discover()
+
+    ragged = _SqlTransport(
+        lambda call: _Response(
+            {
+                "statementHandle": "01b2c3d4-0000-1111-2222-333344445555",
+                "resultSetMetaData": {
+                    "rowType": [{"name": column} for column in _SNOWFLAKE_COLUMNS],
+                    "partitionInfo": [{"rowCount": 1}],
+                },
+                "data": [["only", "two"]],
+            }
+        )
+    )
+    adapter = inventory.SnowflakeInventoryAdapter(
+        account_url="https://acme-prod.snowflakecomputing.com",
+        transport=ragged,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="row shape"):
+        adapter.discover()
+
+    hostile_versions = _SqlTransport(
+        lambda call: _Response(
+            {
+                "statementHandle": "01b2c3d4-0000-1111-2222-333344445555",
+                "resultSetMetaData": {
+                    "rowType": [{"name": column} for column in _SNOWFLAKE_COLUMNS],
+                    "partitionInfo": [{"rowCount": 1}],
+                },
+                "data": [_snowflake_row("bad_model", "not-json")],
+            }
+        )
+    )
+    adapter = inventory.SnowflakeInventoryAdapter(
+        account_url="https://acme-prod.snowflakecomputing.com",
+        transport=hostile_versions,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="versions"):
+        adapter.discover()
+
+    monkeypatch.setenv("SNOWFLAKE_TOKEN_TYPE", "PASSWORD")
+    with pytest.raises(inventory.AIInventoryConfigError, match="token type"):
+        inventory.SnowflakeInventoryAdapter(
+            account_url="https://acme-prod.snowflakecomputing.com",
+            transport=deferred,
+            limits=_limits(),
+            sleep=lambda _delay: None,
+        )
+
+
+def test_agentforce_fixed_soql_follows_next_records_and_normalizes_instants(
+    monkeypatch,
+):
+    monkeypatch.setenv("SALESFORCE_TOKEN", "salesforce-test-token")
+
+    def handler(call):
+        if call["url"].endswith("/services/data/v61.0/query"):
+            assert "BotDefinition" in call["params"]["q"]
+            return _Response(
+                {
+                    "totalSize": 2,
+                    "done": False,
+                    "nextRecordsUrl": "/services/data/v61.0/query/01gRO-2000",
+                    "records": [
+                        {
+                            "attributes": {"type": "BotDefinition"},
+                            "Id": "0Xx000000000001AAA",
+                            "DeveloperName": "Service_Agent",
+                            "MasterLabel": "Service Agent",
+                            "CreatedDate": "2026-07-01T00:00:00.000+0000",
+                            "LastModifiedDate": "2026-08-01T12:30:00.000+0000",
+                        }
+                    ],
+                }
+            )
+        assert call["url"].endswith("/services/data/v61.0/query/01gRO-2000")
+        return _Response(
+            {
+                "totalSize": 2,
+                "done": True,
+                "records": [
+                    {
+                        "attributes": {"type": "BotDefinition"},
+                        "Id": "0Xx000000000002AAA",
+                        "DeveloperName": "Order_Agent",
+                        "MasterLabel": "Order Agent",
+                        "CreatedDate": "2026-07-02T00:00:00.000+0000",
+                        "LastModifiedDate": "2026-08-02T12:30:00.000+0000",
+                    }
+                ],
+            }
+        )
+
+    transport = _Transport(handler)
+    adapter = inventory.AgentforceInventoryAdapter(
+        instance_url="https://acme.my.salesforce.com",
+        transport=transport,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+
+    result = adapter.discover()
+
+    assert result.pages == 2
+    assert [asset.display_name for asset in result.assets] == [
+        "Service Agent",
+        "Order Agent",
+    ]
+    assert all(asset.asset_type == "agent" for asset in result.assets)
+    # Salesforce's +0000 offset parses on every supported Python.
+    assert result.assets[0].last_seen == datetime(
+        2026, 8, 1, 12, 30, tzinfo=timezone.utc,
+    ).timestamp()
+
+
+def test_agentforce_rejects_off_origin_next_and_endless_not_done_pages(
+    monkeypatch,
+):
+    monkeypatch.setenv("SALESFORCE_TOKEN", "salesforce-test-token")
+
+    hostile = _Transport(
+        lambda call: _Response(
+            {
+                "done": False,
+                "nextRecordsUrl": "https://evil.example.com/services/data/v61.0/query/x",
+                "records": [],
+            }
+        )
+    )
+    adapter = inventory.AgentforceInventoryAdapter(
+        instance_url="https://acme.my.salesforce.com",
+        transport=hostile,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="origin"):
+        adapter.discover()
+
+    missing_cursor = _Transport(
+        lambda call: _Response({"done": False, "records": []})
+    )
+    adapter = inventory.AgentforceInventoryAdapter(
+        instance_url="https://acme.my.salesforce.com",
+        transport=missing_cursor,
+        limits=_limits(),
+        sleep=lambda _delay: None,
+    )
+    with pytest.raises(inventory.DiscoveryProtocolError, match="nextRecordsUrl"):
+        adapter.discover()

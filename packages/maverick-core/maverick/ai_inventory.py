@@ -41,6 +41,7 @@ _BINDING_STRENGTHS = frozenset(
 )
 _ASSET_TYPES = frozenset({"model", "agent", "tool", "dataset", "provider"})
 _CONNECTORS = (
+    "agentforce",
     "azure_ai_foundry",
     "bedrock",
     "copilot_studio",
@@ -48,6 +49,7 @@ _CONNECTORS = (
     "huggingface",
     "mlflow",
     "sagemaker",
+    "snowflake",
     "vertex_ai",
 )
 _RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -176,6 +178,26 @@ class HttpResponse(Protocol):
     def json(self) -> Any: ...
 
 
+class HttpSqlTransport(Protocol):
+    def get(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        params: Mapping[str, Any] | None,
+        timeout: float,
+    ) -> HttpResponse: ...
+
+    def post(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        json: Mapping[str, Any],
+        timeout: float,
+    ) -> HttpResponse: ...
+
+
 class HttpTransport(Protocol):
     def get(
         self,
@@ -262,6 +284,29 @@ class _DefaultHttpTransport:
                         ) from exc
                     if declared_length > _MAX_PAGE_BYTES:
                         raise DiscoveryProtocolError("provider response exceeds its byte bound")
+                if len(response.content) > _MAX_PAGE_BYTES:
+                    raise DiscoveryProtocolError("provider response exceeds its byte bound")
+                return response
+        except BlockedHost as exc:
+            raise DiscoveryTransportError("provider request blocked by SSRF policy") from exc
+
+    def post(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        json: Mapping[str, Any],
+        timeout: float,
+    ) -> HttpResponse:
+        from .enterprise import enterprise_egress_denial
+        from .tools._ssrf import BlockedHost, safe_client
+
+        denial = enterprise_egress_denial(url, tool=f"ai_inventory.{self._connector}")
+        if denial:
+            raise DiscoveryTransportError("provider request blocked by enterprise egress policy")
+        try:
+            with safe_client(url, timeout=timeout) as client:
+                response = client.post(url, headers=dict(headers), json=dict(json))
                 if len(response.content) > _MAX_PAGE_BYTES:
                     raise DiscoveryProtocolError("provider response exceeds its byte bound")
                 return response
@@ -446,8 +491,11 @@ def _same_origin_next(
     base_url: str,
     candidate: Any,
     *,
-    expected_path: str,
+    expected_path: str = "",
+    expected_prefix: str = "",
 ) -> str:
+    if bool(expected_path) == bool(expected_prefix):
+        raise ValueError("provide exactly one of expected_path or expected_prefix")
     raw = _required_text(candidate, "provider next link", 8_192)
     resolved = urljoin(f"{base_url}/", raw)
     base = urlsplit(base_url)
@@ -456,6 +504,11 @@ def _same_origin_next(
         cross_port = parsed.port != base.port
     except ValueError as exc:
         raise DiscoveryProtocolError("provider next link has an invalid port") from exc
+    path_ok = (
+        parsed.path == expected_path
+        if expected_path
+        else parsed.path.startswith(expected_prefix)
+    )
     if (
         parsed.scheme.lower() != "https"
         or parsed.hostname != base.hostname
@@ -463,7 +516,7 @@ def _same_origin_next(
         or parsed.username is not None
         or parsed.password is not None
         or parsed.fragment
-        or parsed.path != expected_path
+        or not path_ok
     ):
         raise DiscoveryProtocolError("provider next link crossed the configured origin")
     return resolved
@@ -2245,6 +2298,393 @@ class HuggingFaceInventoryAdapter(_HttpAdapter):
         return DiscoveryResult(tuple(assets), budget.pages)
 
 
+def _http_post_json(
+    transport: HttpSqlTransport,
+    url: str,
+    *,
+    token_env: str,
+    limits: DiscoveryLimits,
+    sleep: Callable[[float], None],
+    now: Callable[[], float],
+    json_body: Mapping[str, Any],
+    extra_headers: Mapping[str, str] | None = None,
+) -> Mapping[str, Any]:
+    """One retried, bearer-authenticated POST of a fixed JSON body."""
+
+    token = _credential(token_env)
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    headers.update(dict(extra_headers or {}))
+    for attempt in range(limits.retry_attempts):
+        try:
+            response = transport.post(
+                url,
+                headers=headers,
+                json=json_body,
+                timeout=float(limits.timeout_seconds),
+            )
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            if attempt + 1 >= limits.retry_attempts:
+                raise DiscoveryTransportError(
+                    f"provider request failed ({type(exc).__name__})"
+                ) from exc
+            _sleep_delay(attempt, {}, sleep=sleep, now=now)
+            continue
+        status = int(response.status_code)
+        if status in _RETRYABLE_STATUS and attempt + 1 < limits.retry_attempts:
+            _sleep_delay(attempt, response.headers, sleep=sleep, now=now)
+            continue
+        if status == 202:
+            raise DiscoveryTransportError(
+                "provider deferred the statement; asynchronous execution is not supported"
+            )
+        if not 200 <= status < 300:
+            raise DiscoveryTransportError(f"provider request failed with HTTP {status}")
+        try:
+            page = response.json()
+        except (TypeError, ValueError) as exc:
+            raise DiscoveryProtocolError("provider response was not JSON") from exc
+        return _mapping(page, "provider page")
+    raise DiscoveryTransportError("provider retry budget exhausted")
+
+
+_SNOWFLAKE_TOKEN_TYPES = frozenset({"OAUTH", "KEYPAIR_JWT"})
+_STATEMENT_HANDLE_RE = re.compile(r"[0-9a-fA-F-]{8,128}\Z")
+
+
+class SnowflakeInventoryAdapter:
+    """Snowflake Model Registry models via one fixed read-only statement.
+
+    The only statement ever sent is ``SHOW MODELS IN ACCOUNT`` -- no caller
+    input reaches the SQL text. Rows are labeled by the response's own
+    ``resultSetMetaData.rowType`` names, additional result partitions are
+    fetched by handle, and an asynchronous (202) response fails closed.
+    """
+
+    name = "snowflake"
+    source = "snowflake"
+    _STATEMENT = "SHOW MODELS IN ACCOUNT"
+
+    def __init__(
+        self,
+        *,
+        account_url: str | None = None,
+        account_url_env: str = "SNOWFLAKE_ACCOUNT_URL",
+        token_env: str = "SNOWFLAKE_TOKEN",
+        token_type_env: str = "SNOWFLAKE_TOKEN_TYPE",
+        transport: HttpSqlTransport | None = None,
+        limits: DiscoveryLimits | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        resolved = account_url or os.environ.get(account_url_env, "")
+        if not resolved:
+            raise AIInventoryConfigError(
+                f"Snowflake account URL reference is unavailable: {account_url_env}"
+            )
+        self.base_url = _safe_base_url(resolved, "snowflake account URL")
+        self.token_env = _required_text(token_env, "token environment name", 128)
+        token_type = os.environ.get(token_type_env, "OAUTH").strip().upper() or "OAUTH"
+        if token_type not in _SNOWFLAKE_TOKEN_TYPES:
+            raise AIInventoryConfigError(
+                "Snowflake token type must be OAUTH or KEYPAIR_JWT"
+            )
+        self.token_type = token_type
+        self.transport: HttpSqlTransport = transport or _DefaultHttpTransport(self.name)
+        self.limits = limits or DiscoveryLimits()
+        self._sleep = sleep
+        self._clock = clock
+        self._account_key = _sha256(self.base_url)[:16]
+
+    def _headers(self) -> dict[str, str]:
+        return {"X-Snowflake-Authorization-Token-Type": self.token_type}
+
+    def _statement_rows(self, budget: _PaginationBudget) -> list[dict[str, Any]]:
+        url = f"{self.base_url}/api/v2/statements"
+        budget.page()
+        page = _http_post_json(
+            self.transport,
+            url,
+            token_env=self.token_env,
+            limits=self.limits,
+            sleep=self._sleep,
+            now=self._clock,
+            json_body={
+                "statement": self._STATEMENT,
+                "timeout": int(self.limits.timeout_seconds),
+            },
+            extra_headers=self._headers(),
+        )
+        metadata = _mapping(page.get("resultSetMetaData"), "Snowflake result metadata")
+        row_type = metadata.get("rowType")
+        if not isinstance(row_type, list) or not row_type:
+            raise DiscoveryProtocolError("Snowflake result metadata omitted rowType")
+        columns = [
+            _required_text(_mapping(entry, "Snowflake column").get("name"),
+                           "Snowflake column name", 128).lower()
+            for entry in row_type
+        ]
+        partitions = metadata.get("partitionInfo")
+        if not isinstance(partitions, list) or not partitions:
+            raise DiscoveryProtocolError("Snowflake result metadata omitted partitionInfo")
+        rows = self._labeled_rows(page, columns, budget)
+        if len(partitions) > 1:
+            handle = _required_text(
+                page.get("statementHandle"), "Snowflake statement handle", 128,
+            )
+            if not _STATEMENT_HANDLE_RE.fullmatch(handle):
+                raise DiscoveryProtocolError("Snowflake statement handle is malformed")
+            for index in range(1, len(partitions)):
+                budget.page()
+                partition = _http_json(
+                    self.transport,
+                    f"{self.base_url}/api/v2/statements/{quote(handle, safe='')}",
+                    token_env=self.token_env,
+                    limits=self.limits,
+                    sleep=self._sleep,
+                    now=self._clock,
+                    params={"partition": index},
+                    extra_headers=self._headers(),
+                )
+                rows.extend(self._labeled_rows(partition, columns, budget))
+        return rows
+
+    @staticmethod
+    def _labeled_rows(
+        page: Mapping[str, Any],
+        columns: list[str],
+        budget: _PaginationBudget,
+    ) -> list[dict[str, Any]]:
+        data = page.get("data")
+        if not isinstance(data, list):
+            raise DiscoveryProtocolError("Snowflake result omitted its data rows")
+        budget.add_records(len(data))
+        rows: list[dict[str, Any]] = []
+        for entry in data:
+            if not isinstance(entry, list) or len(entry) != len(columns):
+                raise DiscoveryProtocolError("Snowflake result row shape is invalid")
+            rows.append(dict(zip(columns, entry, strict=True)))
+        return rows
+
+    def _versions(self, row: Mapping[str, Any]) -> list[str]:
+        raw = row.get("versions")
+        if raw in (None, ""):
+            return []
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+        except ValueError as exc:
+            raise DiscoveryProtocolError("Snowflake model versions are malformed") from exc
+        if not isinstance(parsed, list):
+            raise DiscoveryProtocolError("Snowflake model versions must be a list")
+        if len(parsed) > 256:
+            raise DiscoveryLimitError("Snowflake model version list exceeds its bound")
+        return [
+            _required_text(item, "Snowflake model version", 128) for item in parsed
+        ]
+
+    def _model_assets(
+        self, row: Mapping[str, Any], now: float, budget: _PaginationBudget,
+    ) -> list[DiscoveredAsset]:
+        model_name = _required_text(row.get("name"), "Snowflake model name", 256)
+        database = _required_text(row.get("database_name"), "Snowflake database", 256)
+        schema = _required_text(row.get("schema_name"), "Snowflake schema", 256)
+        fqn = f"{database}.{schema}.{model_name}"
+        versions = self._versions(row)
+        root = _asset(
+            asset_type="model",
+            source=self.source,
+            source_id=f"{self._account_key}:{fqn}",
+            display_name=fqn,
+            version_authority={
+                "account": self._account_key,
+                "model": fqn,
+                "default_version": row.get("default_version_name"),
+                "versions": versions,
+            },
+            binding_strength="observed_snapshot",
+            owner=row.get("owner"),
+            platform="Snowflake Model Registry",
+            model=fqn,
+            last_seen=row.get("created_on"),
+            fallback_time=now,
+            source_url=f"{self.base_url}/models/{quote(fqn, safe='')}",
+            metadata=_selected_metadata(
+                resource_kind="registered_model",
+                model_type=row.get("model_type"),
+                default_version=row.get("default_version_name"),
+                account_key=self._account_key,
+            ),
+        )
+        out = [root]
+        budget.add_records(len(versions))
+        for version in versions:
+            out.append(
+                _asset(
+                    asset_type="model",
+                    source=self.source,
+                    source_id=f"{self._account_key}:{fqn}:{version}",
+                    display_name=f"{fqn} {version}",
+                    version_authority={
+                        "account": self._account_key,
+                        "model": fqn,
+                        "version": version,
+                    },
+                    binding_strength="immutable_provider_revision",
+                    owner=row.get("owner"),
+                    platform="Snowflake Model Registry",
+                    model=fqn,
+                    last_seen=row.get("created_on"),
+                    fallback_time=now,
+                    source_url=(
+                        f"{self.base_url}/models/{quote(fqn, safe='')}/"
+                        f"versions/{quote(version, safe='')}"
+                    ),
+                    metadata=_selected_metadata(
+                        resource_kind="model_version",
+                        version=version,
+                        account_key=self._account_key,
+                    ),
+                    dependencies=(f"{self._account_key}:{fqn}",),
+                )
+            )
+        return out
+
+    def discover(self) -> DiscoveryResult:
+        budget = _PaginationBudget(self.limits)
+        now = self._clock()
+        assets: list[DiscoveredAsset] = []
+        for row in self._statement_rows(budget):
+            assets.extend(self._model_assets(row, now, budget))
+        return DiscoveryResult(tuple(assets), budget.pages)
+
+
+_SALESFORCE_API_VERSION = "v61.0"
+_AGENTFORCE_SOQL = (
+    "SELECT Id, DeveloperName, MasterLabel, CreatedDate, LastModifiedDate "
+    "FROM BotDefinition ORDER BY Id"
+)
+
+
+def _salesforce_instant(value: Any) -> Any:
+    """Normalize Salesforce's ``+0000`` offset for pre-3.11 fromisoformat."""
+
+    if isinstance(value, str) and re.search(r"[+-][0-9]{4}\Z", value):
+        return f"{value[:-2]}:{value[-2:]}"
+    return value
+
+
+class AgentforceInventoryAdapter(_HttpAdapter):
+    """Salesforce Agentforce / Einstein Bot definitions via one fixed SOQL read.
+
+    ``BotDefinition`` is the standard object for both agent generations
+    (API v60.0+). The query text is a constant -- no caller input reaches
+    SOQL -- and ``nextRecordsUrl`` pages are same-origin enforced.
+    """
+
+    name = "agentforce"
+    source = "salesforce_agentforce"
+
+    def __init__(
+        self,
+        *,
+        instance_url: str | None = None,
+        instance_url_env: str = "SALESFORCE_INSTANCE_URL",
+        token_env: str = "SALESFORCE_TOKEN",
+        transport: HttpTransport | None = None,
+        limits: DiscoveryLimits | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        resolved = instance_url or os.environ.get(instance_url_env, "")
+        if not resolved:
+            raise AIInventoryConfigError(
+                f"Salesforce instance URL reference is unavailable: {instance_url_env}"
+            )
+        super().__init__(
+            base_url=resolved,
+            token_env=token_env,
+            transport=transport,
+            limits=limits,
+            sleep=sleep,
+            clock=clock,
+        )
+        self._org_key = _sha256(self.base_url)[:16]
+
+    def _records(self, budget: _PaginationBudget) -> list[Mapping[str, Any]]:
+        url = f"{self.base_url}/services/data/{_SALESFORCE_API_VERSION}/query"
+        params: Mapping[str, Any] | None = {"q": _AGENTFORCE_SOQL}
+        seen: set[str] = set()
+        out: list[Mapping[str, Any]] = []
+        while True:
+            marker = _sha256({"url": url, "params": params})
+            if marker in seen:
+                raise DiscoveryProtocolError("Salesforce pagination cycle detected")
+            seen.add(marker)
+            budget.page()
+            page = self._get(url, params=params)
+            records = _items(page, "records")
+            budget.add_records(len(records))
+            out.extend(records)
+            if page.get("done") is True:
+                return out
+            next_url = page.get("nextRecordsUrl")
+            if not next_url:
+                raise DiscoveryProtocolError(
+                    "Salesforce page was not done and omitted nextRecordsUrl"
+                )
+            url = _same_origin_next(
+                self.base_url,
+                next_url,
+                expected_prefix=f"/services/data/{_SALESFORCE_API_VERSION}/query/",
+            )
+            params = None
+
+    def _agent(self, row: Mapping[str, Any], now: float) -> DiscoveredAsset:
+        identifier = _required_text(row.get("Id"), "Salesforce agent id", 64)
+        developer_name = _optional_text(row.get("DeveloperName"), 256)
+        modified = _salesforce_instant(
+            row.get("LastModifiedDate") or row.get("CreatedDate")
+        )
+        return _asset(
+            asset_type="agent",
+            source=self.source,
+            source_id=f"{self._org_key}:{identifier}",
+            display_name=row.get("MasterLabel") or developer_name or identifier,
+            version_authority={
+                "org": self._org_key,
+                "id": identifier,
+                "developer_name": developer_name,
+                "modified_at": row.get("LastModifiedDate"),
+            },
+            binding_strength="observed_snapshot",
+            owner="unknown",
+            platform="Salesforce Agentforce",
+            model="unknown",
+            last_seen=modified,
+            fallback_time=now,
+            source_url=(
+                f"{self.base_url}/services/data/{_SALESFORCE_API_VERSION}/"
+                f"sobjects/BotDefinition/{quote(identifier, safe='')}"
+            ),
+            metadata=_selected_metadata(
+                resource_kind="agent_definition",
+                developer_name=developer_name,
+                org_key=self._org_key,
+            ),
+        )
+
+    def discover(self) -> DiscoveryResult:
+        budget = _PaginationBudget(self.limits)
+        now = self._clock()
+        assets = [self._agent(row, now) for row in self._records(budget)]
+        return DiscoveryResult(tuple(assets), budget.pages)
+
+
 def _persisted_record(value: Any, kind: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise DiscoveryProtocolError(
@@ -2754,11 +3194,13 @@ def build_configured_adapter(
             clock=clock,
         )
     factories: dict[str, Callable[..., InventoryAdapter]] = {
+        "agentforce": AgentforceInventoryAdapter,
         "azure_ai_foundry": AzureAIFoundryInventoryAdapter,
         "copilot_studio": CopilotStudioInventoryAdapter,
         "databricks_unity_catalog": DatabricksUnityCatalogInventoryAdapter,
         "huggingface": HuggingFaceInventoryAdapter,
         "mlflow": MLflowInventoryAdapter,
+        "snowflake": SnowflakeInventoryAdapter,
         "vertex_ai": VertexAIInventoryAdapter,
     }
     factory = factories.get(connector)

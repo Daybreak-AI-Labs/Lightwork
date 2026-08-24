@@ -797,7 +797,10 @@ here.
   cockpit, opt-in `[ai_inventory] enable`) — tenant-scoped, read-only inventory
   synchronization for customer-owned AWS Bedrock, Amazon SageMaker, Azure AI
   Foundry, Google Vertex AI, Databricks Unity Catalog, Microsoft Copilot
-  Studio, MLflow tracking-server, and Hugging Face Hub organization estates.
+  Studio, MLflow tracking-server, Hugging Face Hub organization, Snowflake
+  Model Registry (one fixed read-only `SHOW MODELS IN ACCOUNT` statement;
+  asynchronous execution refused), and Salesforce Agentforce / Einstein Bot
+  definition estates (one fixed SOQL read over `BotDefinition`).
   Connectors use fixed list operations, bounded pagination/retries/record caps,
   provider revision bindings, missing-asset grace runs, and explicit safe read
   projections. Credentials resolve from the standard provider chain or named
