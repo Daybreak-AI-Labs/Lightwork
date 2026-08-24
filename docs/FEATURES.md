@@ -857,6 +857,17 @@ here.
   before/after values are retained; full source documents, notification
   credentials, and delivery receipts are never persisted. Decision support
   requiring human review — never a legal applicability opinion.
+- **Outbound GRC synchronization** (`grc_sync.py`, opt-in `[grc_sync] enable`,
+  `maverick grc-sync`) — idempotently mirrors model-risk findings, accepted
+  risks, and incidents into a customer's ServiceNow IRM, Archer, or other
+  REST GRC system through the same SSRF-safe, enterprise-egress-guarded
+  request path every governed connector uses. Each (record, target) pair owns
+  one outbound ledger entry: unchanged sources send nothing, a changed source
+  updates the same remote record, and a create whose response yields no
+  remote id becomes terminal `delivered_unconfirmed` rather than a blind
+  duplicate. The payload is a bounded governed pointer — id, type, severity,
+  summary, content digest, `correlation_id` round-trip link, optional
+  backlink URL; evidence bodies and detail payloads never leave the platform.
 - **Signed AI policy packs** (`policy_packs.py`, opt-in `[policy_packs]
   enable`) — bounded NIST AI RMF and EU AI Act starter mappings plus
   Ed25519-verified external updates, anti-rollback staging, explicit global

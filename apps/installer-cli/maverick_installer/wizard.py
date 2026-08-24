@@ -2065,6 +2065,14 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "grc_sync": _q_confirm(
+            "Outbound GRC synchronization? Idempotently mirror model-risk "
+            "findings, accepted risks, and incidents into your ServiceNow, "
+            "Archer, or other REST GRC system as governed pointer records "
+            "with a round-trip link. Evidence never leaves Lightwork. Paths "
+            "and connector are configured in [grc_sync]. OFF by default.",
+            default=False,
+        ),
         "agent_topology": _q_confirm(
             "Agent dependency and MCP blast-radius governance? Project each "
             "enabled agent's tools, MCP servers, hosts, paths, knowledge, and model "
@@ -4504,6 +4512,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("ai_regulatory_feed"):
         lines.append("")
         lines.append("[ai_regulatory_feed]")
+        lines.append("enable = true")
+    if advanced.get("grc_sync"):
+        lines.append("")
+        lines.append("[grc_sync]")
         lines.append("enable = true")
     if advanced.get("agent_topology"):
         lines.append("")

@@ -3,7 +3,7 @@
   "counts": {
     "CI_ONLY": 13,
     "CLI_ONLY": 27,
-    "PRODUCTION": 920,
+    "PRODUCTION": 921,
     "TEST_ONLY": 84,
     "UNREACHED": 6
   },
@@ -294,6 +294,7 @@
     "maverick.governed_repl": "PRODUCTION",
     "maverick.governed_rest": "PRODUCTION",
     "maverick.governed_tools": "PRODUCTION",
+    "maverick.grc_sync": "PRODUCTION",
     "maverick.grpc_api": "PRODUCTION",
     "maverick.grpc_api.__main__": "CLI_ONLY",
     "maverick.grpc_api.contract": "CI_ONLY",

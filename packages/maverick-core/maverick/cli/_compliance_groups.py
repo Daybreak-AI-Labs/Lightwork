@@ -1035,3 +1035,71 @@ def ai_inventory_status() -> None:
         else:
             click.echo(f"  {name}: {row.get('state')}  "
                        f"completed {row.get('completed_sequence', 0)} run(s)")
+
+
+@main.group("grc-sync")
+def grc_sync_group() -> None:
+    """Idempotent outbound sync of governance records into a GRC system.
+
+    `run` maps model-risk findings, accepted risks, and incidents into the
+    configured system of record (ServiceNow IRM tables, Archer, any REST GRC)
+    with a stable outbound ledger: unchanged sources send nothing, changed
+    sources update the same remote record, and an unconfirmed create is
+    surfaced instead of duplicated. Evidence never leaves Lightwork -- each
+    remote record is a governed pointer, not the record of truth.
+    """
+
+
+@grc_sync_group.command("run")
+@click.option("--limit", type=int, default=50, show_default=True,
+              help="Maximum records to deliver this pass.")
+@click.option("--by", "actor", required=True,
+              help="Dispatching human or cron identity.")
+def grc_sync_run(limit: int, actor: str) -> None:
+    """Deliver pending and changed records to the configured GRC system."""
+    from ..grc_sync import GRCSyncError, run_sync
+    try:
+        result = run_sync(actor=actor, limit=limit)
+    except (GRCSyncError, ValueError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"delivered {result['delivered_count']}  "
+               f"unchanged {result['unchanged_count']}  "
+               f"blocked {result['blocked_count']}  "
+               f"failed {result['failure_count']}  "
+               f"via {result['connector']}")
+    for row in result["blocked"]:
+        click.echo(f"  BLOCKED {row['source_id']}: {row['reason']}")
+    for row in result["failures"]:
+        click.echo(f"  FAILED {row['source_id']}: {row['reason']}")
+    if result["failure_count"]:
+        raise click.ClickException(
+            f"{result['failure_count']} record(s) failed to deliver"
+        )
+
+
+@grc_sync_group.command("status")
+def grc_sync_status() -> None:
+    """Outbound ledger counts by delivery state."""
+    from ..grc_sync import sync_status
+    state = sync_status()
+    counts = state["outbound"]
+    click.echo(f"enabled: {state['enabled']}")
+    for key in ("pending", "delivered", "delivered_unconfirmed", "failed"):
+        click.echo(f"  {key:22s} {counts[key]}")
+
+
+@grc_sync_group.command("outbound")
+@click.option("--limit", type=int, default=100, show_default=True)
+def grc_sync_outbound(limit: int) -> None:
+    """The outbound ledger: every record's remote id and delivery state."""
+    from ..grc_sync import list_outbound
+    try:
+        rows = list_outbound(limit=limit)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    if not rows:
+        click.echo("no outbound GRC records.")
+        return
+    for row in rows:
+        click.echo(f"  {row['id']}  {row['kind']:16s} {row['status']:22s} "
+                   f"{row['source_id']}  ->  {row['remote_id'] or '-'}")
