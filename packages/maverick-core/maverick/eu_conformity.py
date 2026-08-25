@@ -1037,6 +1037,15 @@ def gpai_status(record_id: str) -> dict[str, Any]:
     record = _GPAI.get(_text(record_id, "record_id", 64))
     if record is None:
         raise KeyError(f"GPAI register is not recorded: {record_id}")
+    return gpai_status_from_record(record)
+
+
+def gpai_status_from_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """The obligation posture of one already-loaded GPAI register row.
+
+    Pure projection — list consumers call this with the rows they already
+    hold instead of re-reading each record from the store."""
+
     keys = _gpai_obligation_keys(record)
     obligations = record.get("obligations") or {}
     missing = sorted(
@@ -1265,6 +1274,15 @@ def deployer_status(record_id: str) -> dict[str, Any]:
     record = _DEPLOYER.get(_text(record_id, "record_id", 64))
     if record is None:
         raise KeyError(f"deployer register is not recorded: {record_id}")
+    return deployer_status_from_record(record)
+
+
+def deployer_status_from_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """The obligation posture of one already-loaded deployer register row.
+
+    Pure projection — list consumers call this with the rows they already
+    hold instead of re-reading each record from the store."""
+
     keys = _deployer_obligation_keys(record)
     obligations = record.get("obligations") or {}
     missing = sorted(
@@ -1287,12 +1305,6 @@ def deployer_status(record_id: str) -> dict[str, Any]:
         "complete": not missing,
         "revision": record.get("revision"),
     }
-
-
-def get_deployer_register(asset_id: str) -> dict[str, Any] | None:
-    _require_enabled()
-    record = _DEPLOYER.get(_deployer_id(_text(asset_id, "asset_id", 64)))
-    return None if record is None else dict(record)
 
 
 def list_deployer_registers() -> list[dict[str, Any]]:
@@ -1599,16 +1611,17 @@ __all__ = [
     "assign_deployer_oversight",
     "complete_fria",
     "deployer_status",
+    "deployer_status_from_record",
     "enabled",
     "get_annex_iv",
     "get_assessment_route",
-    "get_deployer_register",
     "get_eu_conformity_config",
     "get_gpai",
     "get_ifu",
     "get_pmm_plan",
     "get_registration",
     "gpai_status",
+    "gpai_status_from_record",
     "ifu_status",
     "list_assessment_routes",
     "list_deployer_registers",

@@ -29,6 +29,11 @@ NOTICE_SCHEMA = "lightwork.privacy-notice.v1"
 _RECEIPTS = GovernedRecordStore("consent_registry", "CCR", "consent_receipt")
 _NOTICES = GovernedRecordStore("consent_notices", "CCN", "privacy_notice")
 _MAX_LIST = 500
+#: Store capacity and the matching full-scan window for the projections
+#: (preferences, posture, coverage): a partial window would silently hide
+#: recorded consents — including withdrawals — from the read-back.
+_MAX_RECORDS = 10_000
+_SCAN_LIMIT = _MAX_RECORDS + 1
 _MAX_HISTORY = 40
 _MAX_NOTICE_BYTES = 200_000
 _SCAN_MAX_BYTES = 2 * 1024 * 1024
@@ -180,9 +185,16 @@ def record_consent(
         history = list(value.get("history") or [])
         history.append(event)
         value["history"] = history[-_MAX_HISTORY:]
-        value["current_status"] = status
-        value["policy_version"] = version
-        value["last_recorded_at"] = stamp
+        # The projection tracks the LATEST event by recorded_at, not the
+        # last-written one: importing a backdated row (OneTrust exports
+        # are commonly newest-first or carry historical backfill) must
+        # never flip a newer withdrawal back to granted.
+        if stamp >= float(value.get("last_recorded_at") or 0.0):
+            value["current_status"] = status
+            value["policy_version"] = version
+            value["last_recorded_at"] = stamp
+        if stamp < float(value.get("first_recorded_at") or stamp):
+            value["first_recorded_at"] = stamp
 
     current = _RECEIPTS.get(record_id)
     if current is None:
@@ -198,7 +210,10 @@ def record_consent(
             "last_recorded_at": stamp,
         }
         return dict(
-            _RECEIPTS.create(record, action="record_consent", actor=operator)
+            _RECEIPTS.create(
+                record, action="record_consent", actor=operator,
+                max_records=_MAX_RECORDS,
+            )
         )
     saved = _RECEIPTS.update(
         record_id,
@@ -236,7 +251,7 @@ def subject_preferences(subject_ref: str) -> dict[str, Any]:
     _require_enabled()
     subject = subject_digest(subject_ref)
     purposes: dict[str, Any] = {}
-    for row in _RECEIPTS.list(limit=_MAX_LIST * 4):
+    for row in _RECEIPTS.list(limit=_SCAN_LIMIT):
         if row.get("subject_digest") != subject:
             continue
         purposes[str(row.get("purpose"))] = {
@@ -249,7 +264,7 @@ def subject_preferences(subject_ref: str) -> dict[str, Any]:
 
 def consent_posture() -> dict[str, Any]:
     _require_enabled()
-    rows = _RECEIPTS.list(limit=_MAX_LIST * 4)
+    rows = _RECEIPTS.list(limit=_SCAN_LIMIT)
     by_purpose: dict[str, dict[str, int]] = {}
     for row in rows:
         purpose = str(row.get("purpose") or "unknown")
@@ -360,7 +375,7 @@ def notice_coverage() -> dict[str, Any]:
         str(row.get("version") or "") for row in _NOTICES.list(limit=_MAX_LIST)
     }
     used: set[str] = set()
-    for row in _RECEIPTS.list(limit=_MAX_LIST * 4):
+    for row in _RECEIPTS.list(limit=_SCAN_LIMIT):
         for event in row.get("history") or []:
             used.add(str(event.get("policy_version") or ""))
     used.discard("")
@@ -458,8 +473,15 @@ def scan_site(
         r"<(?:script|iframe|img)[^>]+src=[\"']([^\"']+)[\"']", _re.IGNORECASE
     )
     for match in pattern.findall(body or "")[:2000]:
-        candidate = urlsplit(match if "//" in match else f"//{match}",
-                             scheme="https")
+        # Only absolute references carry a host: protocol-relative ("//cdn...")
+        # or fully-qualified ("https://cdn..."). A relative path such as
+        # "assets//img/logo.png" must not have its first segment read as one.
+        if match.startswith("//"):
+            candidate = urlsplit(match, scheme="https")
+        elif "://" in match:
+            candidate = urlsplit(match)
+        else:
+            continue
         host = (candidate.hostname or "").lower()
         if host and host != site_host and not host.endswith(f".{site_host}"):
             hosts.add(host)
@@ -509,23 +531,11 @@ def import_onetrust_consents(
     """Import a OneTrust consent export; unknown statuses are skipped."""
 
     _require_enabled()
-    import csv as _csv
-    import io
+    from .csv_alias import alias_rows
 
-    reader = _csv.DictReader(io.StringIO(csv_text or ""))
     imported = 0
     skipped = 0
-    for row in list(reader)[:10_000]:
-        low = {
-            (key or "").strip().lower(): (value or "").strip()
-            for key, value in row.items()
-        }
-        entry: dict[str, str] = {}
-        for field, aliases in _ONETRUST_CONSENT_HEADERS.items():
-            for alias in aliases:
-                if low.get(alias):
-                    entry[field] = low[alias]
-                    break
+    for entry in alias_rows(csv_text, _ONETRUST_CONSENT_HEADERS, limit=10_000):
         status = _STATUS_ALIASES.get(entry.get("status", "").lower())
         if not entry.get("subject") or not entry.get("purpose") or not status:
             skipped += 1

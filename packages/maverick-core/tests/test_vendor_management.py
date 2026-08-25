@@ -234,3 +234,37 @@ def test_questionnaire_for_token_resolves_only_its_own_form():
     assert "risk_answer" not in resolved["questions"][0]
     assert vm.questionnaire_for_token("not-a-token") is None
     assert vm.questionnaire_for_token("") is None
+
+
+def test_questionnaire_refuses_a_template_wider_than_the_form_store():
+    # The hosted form persists one submission per form; a template with
+    # more questions than the store accepts fields must refuse UP FRONT,
+    # not truncate the vendor's answers at submission time.
+    from maverick import form_store
+
+    record = _register()
+    with pytest.raises(ValueError, match="questions"):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(form_store, "_MAX_FIELDS", 3)
+            vm.request_questionnaire(
+                record["id"], assessment_type="vendor_risk", actor="ops",
+                expected_revision=record["revision"],
+            )
+
+
+def test_scoring_mirrors_the_assessment_answer_vocabulary():
+    # "na" clears a question; "unknown" raises an unverified finding at
+    # the question's severity -- the same contract as assessment.evaluate.
+    from maverick.assessment import TEMPLATES
+
+    questions = TEMPLATES["vendor_risk"].questions
+    fields = {}
+    for index, question in enumerate(questions):
+        risky = str(question.risk_answer).strip().lower()
+        safe = "no" if risky == "yes" else "yes"
+        fields[question.id] = {0: "na", 1: "unknown"}.get(index, safe)
+    score = vm._score_submission("vendor_risk", fields)
+    assert score["answered"] == len(questions)
+    assert [f["qid"] for f in score["findings"]] == [questions[1].id]
+    assert score["findings"][0]["kind"] == "unverified"
+    assert score["rating"] == questions[1].severity

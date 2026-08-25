@@ -1448,3 +1448,28 @@ def test_replicate_rejects_an_off_origin_next_url(monkeypatch):
     )
     with pytest.raises(inventory.DiscoveryProtocolError):
         adapter.discover()
+
+
+def test_every_connector_has_a_read_side_source_mapping():
+    # The read-side projections refuse persisted records whose connector
+    # is missing from _CONNECTOR_SOURCES -- one absent entry makes a
+    # connector's successful sync unreadable and poisons the listing.
+    assert set(inventory._CONNECTOR_SOURCES) == set(inventory._CONNECTORS)
+
+
+def test_dependency_token_normalizes_source_native_references():
+    # Source-native references (dotted catalog names, ARNs, dotted model
+    # names) must all normalize to the model-risk token grammar.
+    token = inventory._dependency_token
+    pattern = r"[a-z][a-z0-9_:-]{0,63}"
+    import re as re_mod
+
+    for reference in (
+        "main.support.triage_model",
+        "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-v2",
+        "gpt-3.5-turbo",
+        "  Mixed Case/Name  ",
+        "42-leading-digit",
+        "",
+    ):
+        assert re_mod.fullmatch(pattern, token(reference)), reference

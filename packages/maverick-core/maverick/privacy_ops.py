@@ -2332,19 +2332,10 @@ def import_onetrust_ropa(csv_text: str, *, imported_by: str = "") -> list[dict]:
 
     Tolerant of their column-name drift; rows without a recognizable
     activity name are skipped rather than guessed at."""
-    import csv as _csv
-    import io
-    reader = _csv.DictReader(io.StringIO(csv_text or ""))
+    from .csv_alias import alias_rows
     imported = []
-    for row in list(reader)[:5000]:
-        low = {(k or "").strip().lower(): (v or "").strip()
-               for k, v in row.items()}
-        entry: dict = {}
-        for field, aliases in _ONETRUST_HEADERS.items():
-            for alias in aliases:
-                if low.get(alias):
-                    entry[field] = low[alias]
-                    break
+    for mapped in alias_rows(csv_text, _ONETRUST_HEADERS, limit=5000):
+        entry: dict = dict(mapped)
         if not entry.get("activity"):
             continue
         entry["source"] = "onetrust"
@@ -2634,14 +2625,6 @@ def list_dsars() -> list[dict]:
     return out
 
 
-#: Data-map categories that identify a person — the assets a DSAR search
-#: plan should send a human to.
-_DSAR_IDENTIFYING_CATEGORIES = frozenset({
-    "email", "phone", "name", "address", "national_id",
-    "date_of_birth", "ip_address", "location",
-})
-
-
 def dsar_estate_worksheet(request_id: str) -> dict:
     """Where to look for one subject's data, beyond the platform's holdings.
 
@@ -2677,22 +2660,20 @@ def dsar_estate_worksheet(request_id: str) -> dict:
         from . import data_map as dm
 
         if dm.enabled():
+            # The vocabulary lives with the classifier that produces it.
+            identifying = dm.IDENTIFYING_CATEGORIES
             assets = [
                 {
                     "id": row.get("id"),
                     "system": row.get("system"),
                     "name": row.get("name"),
                     "categories": sorted(
-                        _DSAR_IDENTIFYING_CATEGORIES.intersection(
-                            row.get("categories") or []
-                        )
+                        identifying.intersection(row.get("categories") or [])
                     ),
                     "links": len(row.get("links") or []),
                 }
                 for row in dm.list_data_assets()
-                if _DSAR_IDENTIFYING_CATEGORIES.intersection(
-                    row.get("categories") or []
-                )
+                if identifying.intersection(row.get("categories") or [])
             ]
             estate = {"enabled": True, "assets": assets[:100]}
     except Exception:

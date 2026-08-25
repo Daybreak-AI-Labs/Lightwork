@@ -25,6 +25,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from maverick.governed_records import RecordConflict
 from maverick.runner import (
     DEFAULT_MAX_DEPTH,
     DEFAULT_MAX_DOLLARS,
@@ -2057,6 +2058,24 @@ async def import_onetrust(request: Request, body: OneTrustImportIn) -> dict:
             "activities": [e["activity"] for e in imported]}
 
 
+async def _estate_call(func, *args, not_found: str = "no such record",
+                       **kwargs):
+    """One error contract for the estate registers' endpoints: run the
+    module call in the threadpool and map RecordConflict -> 409,
+    KeyError -> 404, ValueError/RuntimeError -> 422. HTTPExceptions
+    (from nested guards) pass through untouched."""
+    try:
+        return await run_in_threadpool(func, *args, **kwargs)
+    except HTTPException:
+        raise
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=not_found) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def _vendor_management_or_403():
     from maverick import vendor_management
     if not vendor_management.enabled():
@@ -2093,22 +2112,14 @@ async def vendor_contract_renewals(request: Request,
                                    due_days: int = 30) -> dict:
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    try:
-        return await run_in_threadpool(
-            vm.contract_renewals, due_soon_days=due_days)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _estate_call(vm.contract_renewals, due_soon_days=due_days)
 
 
 @router.get("/vendors")
 async def list_vendors(request: Request, status: str = "") -> dict:
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    try:
-        rows = await run_in_threadpool(
-            vm.list_vendors, status=status.strip() or None)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    rows = await _estate_call(vm.list_vendors, status=status.strip() or None)
     return {"vendors": rows}
 
 
@@ -2117,27 +2128,18 @@ async def register_vendor(request: Request, body: VendorIn) -> dict:
     """Register one vendor; the same name is one record, never a duplicate."""
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    from maverick.governed_records import RecordConflict
-    try:
-        return await run_in_threadpool(
-            vm.register_vendor, body.name, category=body.category,
-            criticality=body.criticality, owner=body.owner,
-            actor=_request_actor(request),
-        )
-    except RecordConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _estate_call(
+        vm.register_vendor, body.name, category=body.category,
+        criticality=body.criticality, owner=body.owner,
+        actor=_request_actor(request),
+    )
 
 
 @router.get("/vendors/{vendor_id}")
 async def get_vendor(request: Request, vendor_id: str) -> dict:
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    try:
-        record = await run_in_threadpool(vm.get_vendor, vendor_id[:64])
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    record = await _estate_call(vm.get_vendor, vendor_id[:64])
     if record is None:
         raise HTTPException(status_code=404, detail="no such vendor")
     return record
@@ -2148,18 +2150,11 @@ async def set_vendor_status(request: Request, vendor_id: str,
                             body: VendorStatusIn) -> dict:
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    from maverick.governed_records import RecordConflict
-    try:
-        return await run_in_threadpool(
-            vm.set_vendor_status, vendor_id[:64], body.status,
-            actor=_request_actor(request), expected_revision=body.revision,
-        )
-    except RecordConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="no such vendor") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _estate_call(
+        vm.set_vendor_status, vendor_id[:64], body.status,
+        actor=_request_actor(request), expected_revision=body.revision,
+        not_found="no such vendor",
+    )
 
 
 @router.post("/vendors/{vendor_id}/links", status_code=201)
@@ -2167,19 +2162,11 @@ async def link_vendor_record(request: Request, vendor_id: str,
                              body: VendorLinkIn) -> dict:
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    from maverick.governed_records import RecordConflict
-    try:
-        return await run_in_threadpool(
-            vm.link_vendor_record, vendor_id[:64], kind=body.kind,
-            reference=body.reference, actor=_request_actor(request),
-            expected_revision=body.revision,
-        )
-    except RecordConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="no such vendor") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _estate_call(
+        vm.link_vendor_record, vendor_id[:64], kind=body.kind,
+        reference=body.reference, actor=_request_actor(request),
+        expected_revision=body.revision, not_found="no such vendor",
+    )
 
 
 @router.post("/vendors/{vendor_id}/questionnaires", status_code=201)
@@ -2189,19 +2176,12 @@ async def request_vendor_questionnaire(request: Request, vendor_id: str,
     returned form_path is the platform's public /form/{token} endpoint."""
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    from maverick.governed_records import RecordConflict
-    try:
-        return await run_in_threadpool(
-            vm.request_questionnaire, vendor_id[:64],
-            assessment_type=body.assessment_type,
-            actor=_request_actor(request), expected_revision=body.revision,
-        )
-    except RecordConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="no such vendor") from exc
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _estate_call(
+        vm.request_questionnaire, vendor_id[:64],
+        assessment_type=body.assessment_type,
+        actor=_request_actor(request), expected_revision=body.revision,
+        not_found="no such vendor",
+    )
 
 
 @router.get("/vendors/{vendor_id}/questionnaires")
@@ -2209,13 +2189,10 @@ async def vendor_questionnaire_responses(request: Request,
                                          vendor_id: str) -> dict:
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    try:
-        rows = await run_in_threadpool(
-            vm.questionnaire_responses, vendor_id[:64])
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="no such vendor") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    rows = await _estate_call(
+        vm.questionnaire_responses, vendor_id[:64],
+        not_found="no such vendor",
+    )
     return {"questionnaires": rows}
 
 
@@ -2224,19 +2201,11 @@ async def record_vendor_note(request: Request, vendor_id: str,
                              body: VendorNoteIn) -> dict:
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    from maverick.governed_records import RecordConflict
-    try:
-        return await run_in_threadpool(
-            vm.record_monitoring_note, vendor_id[:64], body.note,
-            severity=body.severity, actor=_request_actor(request),
-            expected_revision=body.revision,
-        )
-    except RecordConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="no such vendor") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _estate_call(
+        vm.record_monitoring_note, vendor_id[:64], body.note,
+        severity=body.severity, actor=_request_actor(request),
+        expected_revision=body.revision, not_found="no such vendor",
+    )
 
 
 @router.post("/vendors/{vendor_id}/contracts", status_code=201)
@@ -2246,19 +2215,12 @@ async def record_vendor_contract(request: Request, vendor_id: str,
     digest watches for 'this DPA lapses in 30 days'."""
     require_permission(request, "operate")
     vm = _vendor_management_or_403()
-    from maverick.governed_records import RecordConflict
-    try:
-        return await run_in_threadpool(
-            vm.record_vendor_contract, vendor_id[:64], kind=body.kind,
-            reference=body.reference, renews_at=body.renews_at,
-            actor=_request_actor(request), expected_revision=body.revision,
-        )
-    except RecordConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="no such vendor") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _estate_call(
+        vm.record_vendor_contract, vendor_id[:64], kind=body.kind,
+        reference=body.reference, renews_at=body.renews_at,
+        actor=_request_actor(request), expected_revision=body.revision,
+        not_found="no such vendor",
+    )
 
 
 def _consent_registry_or_403():
@@ -2286,6 +2248,14 @@ async def record_consent(request: Request, body: ConsentIn) -> dict:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except cr.ConsentRegistryConfigError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except cr.ConsentRegistryError as exc:
+        # Concurrent-write retry exhaustion or capacity: the client can
+        # retry; a 500 would page the operator for a benign race.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/consent/preferences")
@@ -2341,16 +2311,10 @@ async def publish_privacy_notice(request: Request,
     consent receipt's policy_version resolves to."""
     require_permission(request, "operate")
     cr = _consent_registry_or_403()
-    from maverick.governed_records import RecordConflict
-    try:
-        return await run_in_threadpool(
-            cr.publish_notice, body.version, body.text,
-            actor=_request_actor(request),
-        )
-    except RecordConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _estate_call(
+        cr.publish_notice, body.version, body.text,
+        actor=_request_actor(request),
+    )
 
 
 @router.get("/consent/notices")
@@ -2435,14 +2399,11 @@ async def register_data_asset(request: Request, body: DataAssetIn) -> dict:
     the way in."""
     require_permission(request, "operate")
     dm = _data_map_or_403()
-    try:
-        return await run_in_threadpool(
-            dm.register_data_asset, body.name, system=body.system,
-            kind=body.kind, owner=body.owner, actor=_request_actor(request),
-            columns=body.columns, location=body.location, source="api",
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _estate_call(
+        dm.register_data_asset, body.name, system=body.system,
+        kind=body.kind, owner=body.owner, actor=_request_actor(request),
+        columns=body.columns, location=body.location, source="api",
+    )
 
 
 @router.get("/data-map/assets/{asset_id}")
@@ -2463,20 +2424,11 @@ async def link_data_asset(request: Request, asset_id: str,
                           body: DataAssetLinkIn) -> dict:
     require_permission(request, "operate")
     dm = _data_map_or_403()
-    from maverick.governed_records import RecordConflict
-    try:
-        return await run_in_threadpool(
-            dm.link_asset_record, asset_id[:64], kind=body.kind,
-            reference=body.reference, actor=_request_actor(request),
-            expected_revision=body.revision,
-        )
-    except RecordConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except KeyError as exc:
-        raise HTTPException(status_code=404,
-                            detail="no such data asset") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await _estate_call(
+        dm.link_asset_record, asset_id[:64], kind=body.kind,
+        reference=body.reference, actor=_request_actor(request),
+        expected_revision=body.revision, not_found="no such data asset",
+    )
 
 
 @router.post("/data-map/import-schema", status_code=201)

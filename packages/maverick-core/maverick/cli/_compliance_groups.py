@@ -1541,7 +1541,7 @@ def eu_conformity_gpai(action, asset_id, record_id, systemic_risk,
                 need(record_id, "record"), need(obligation, "obligation"),
                 reference=need(reference, "reference"), actor=need(actor, "by"),
                 expected_revision=revision)
-            state = euc.gpai_status(record["id"])
+            state = euc.gpai_status_from_record(record)
             click.echo(f"{state['asserted']}/{state['total']} evidenced")
         elif action == "status":
             state = euc.gpai_status(need(record_id, "record"))
@@ -1551,7 +1551,7 @@ def eu_conformity_gpai(action, asset_id, record_id, systemic_risk,
                           if state['exempt'] else ""))
         else:
             for record in euc.list_gpai_registers():
-                state = euc.gpai_status(record["id"])
+                state = euc.gpai_status_from_record(record)
                 click.echo(f"{record['asset_id']}  "
                            f"{state['asserted']}/{state['total']}  "
                            f"systemic {state['systemic_risk']}")
@@ -1604,7 +1604,7 @@ def eu_conformity_deployer(action, asset_id, record_id, workplace_use,
                 need(record_id, "record"), need(obligation, "obligation"),
                 reference=need(reference, "reference"), actor=need(actor, "by"),
                 expected_revision=revision)
-            state = euc.deployer_status(record["id"])
+            state = euc.deployer_status_from_record(record)
             click.echo(f"{state['asserted']}/{state['total']} evidenced")
         elif action == "oversight":
             if not persons:
@@ -1622,7 +1622,7 @@ def eu_conformity_deployer(action, asset_id, record_id, workplace_use,
                        f"{', '.join(state['oversight_persons']) or 'UNASSIGNED'}")
         else:
             for record in euc.list_deployer_registers():
-                state = euc.deployer_status(record["id"])
+                state = euc.deployer_status_from_record(record)
                 click.echo(f"{record['asset_id']}  "
                            f"{state['asserted']}/{state['total']}  "
                            f"oversight "
@@ -1767,9 +1767,12 @@ def _explainability_record(report: dict, asset_id, source_id, actor) -> None:
         return
     if actor in (None, ""):
         raise click.ClickException("--by is required when recording evidence")
-    evidence = explainability.record_explainability_evidence(
-        asset_id, report, source_id=source_id, actor=actor,
-    )
+    try:
+        evidence = explainability.record_explainability_evidence(
+            asset_id, report, source_id=source_id, actor=actor,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
     click.echo(f"evidence {evidence['id']} (rev {evidence['revision']})")
 
 

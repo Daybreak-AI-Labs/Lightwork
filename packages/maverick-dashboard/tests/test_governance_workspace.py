@@ -47,9 +47,10 @@ def _hex(label: str) -> str:
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import audit, config
+    from maverick import audit, config, world_model
     from maverick.audit import writer as audit_writer
 
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     config_path = tmp_path / "config.toml"
     config_path.write_text(_BASE_CONFIG, encoding="utf-8")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))

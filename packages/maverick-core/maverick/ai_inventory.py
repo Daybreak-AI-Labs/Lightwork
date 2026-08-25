@@ -1814,13 +1814,42 @@ _PENDING_TO_PUBLIC = {
     "observation_revision": "pending_observation_revision",
     "observation_snapshot_sha256": "pending_observation_snapshot_sha256",
 }
+#: Connector name -> the source authority its adapter stamps on records.
+#: EVERY registered connector must appear here: the read-side projections
+#: refuse persisted records whose connector is absent, so a missing entry
+#: makes a connector's successful sync unreadable afterwards (and one such
+#: record poisons the whole inventory listing).
 _CONNECTOR_SOURCES = {
+    "agentforce": "salesforce_agentforce",
     "azure_ai_foundry": "azure_ai_foundry",
     "bedrock": "aws_bedrock",
     "copilot_studio": "microsoft_copilot_studio",
     "databricks_unity_catalog": "databricks_unity_catalog",
+    "huggingface": "huggingface",
+    "mlflow": "mlflow",
+    "openai": "openai",
+    "replicate": "replicate",
+    "sagemaker": "aws_sagemaker",
+    "snowflake": "snowflake",
     "vertex_ai": "google_vertex_ai",
 }
+def _dependency_token(value: object) -> str:
+    """Normalize an adapter dependency reference to a model-risk token.
+
+    Adapters emit source-native references — dotted Unity Catalog names,
+    Bedrock model ARNs, deployment model names — while the model-risk
+    dependency validator accepts only ``[a-z][a-z0-9_:-]{0,63}``. Without
+    this mapping a single realistic dependency string fails the whole
+    sync. Lossy by design; the original reference stays in the asset
+    metadata/source_id, this token only links graph edges.
+    """
+
+    text = re.sub(r"[^a-z0-9_:-]", "_", str(value or "").strip().lower())[:64]
+    if not text or not text[0].isalpha():
+        text = ("d" + text)[:64]
+    return text
+
+
 _STATUS_STATES = frozenset({"running", "complete", "partial", "failed"})
 _ASSET_STATE_STATUSES = frozenset({"staged", "present"})
 _RUN_ID = re.compile(r"AIR-[0-9a-f]{32}\Z")
@@ -3547,7 +3576,9 @@ class DiscoveryService:
                     expected_revision=expected,
                     observed_at=asset.last_seen,
                     metadata=metadata,
-                    dependencies=list(asset.dependencies),
+                    dependencies=[
+                        _dependency_token(item) for item in asset.dependencies
+                    ],
                 )
             except RecordConflict:
                 continue

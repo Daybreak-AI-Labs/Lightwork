@@ -177,3 +177,41 @@ def test_malformed_graph_payload_is_an_error():
         dm.sync_sharepoint_sites(
             actor="ops", owner="it", fetcher=lambda _url: {"value": "nope"},
         )
+
+
+def test_classifier_anchors_stay_quiet_on_lookalike_columns():
+    # Substrings that used to false-positive: the anchored patterns must
+    # leave operational columns alone.
+    assert dm.classify_column("mail_server") == []
+    assert dm.classify_column("microphone_enabled") == []
+    assert dm.classify_column("healthcheck_status") == []
+    assert dm.classify_column("shipment_status") == []
+    # ...while the genuine articles (snake or camel) still flag.
+    assert "email" in dm.classify_column("EmailAddress")
+    assert "phone" in dm.classify_column("telephone_number")
+    assert "health" in dm.classify_column("health_condition")
+
+
+def test_identifying_categories_subset_the_classifier_vocabulary():
+    assert set(dm.CLASSIFIER_CATEGORIES) >= dm.IDENTIFYING_CATEGORIES
+
+
+def test_schema_import_checks_capacity_once_for_the_batch(monkeypatch):
+    dm.register_data_asset(
+        "warehouse.existing", system="snowflake", kind="table",
+        owner="data-team", actor="ops",
+    )
+    monkeypatch.setattr(dm, "_MAX_RECORDS", 1)
+    csv_text = (
+        "table_schema,table_name,column_name\n"
+        "warehouse,existing,email\n"
+        "warehouse,brand_new,order_id\n"
+    )
+    result = dm.import_information_schema_csv(
+        csv_text, system="snowflake", owner="data-team",
+    )
+    # The existing table refreshes in place; the new one has no budget
+    # left and is skipped instead of raising mid-batch.
+    assert result == {"imported": 1, "skipped": 1}
+    names = {row["name"] for row in dm.list_data_assets()}
+    assert names == {"warehouse.existing"}

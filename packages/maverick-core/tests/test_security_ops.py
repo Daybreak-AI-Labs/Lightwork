@@ -1358,3 +1358,13 @@ def test_dashboard_closed_audit_and_poam_states():
         engagement["id"], "closed", "audit-owner", engagement["revision"]
     )
     assert closed is not None and closed["status"] == "closed"
+
+
+def test_program_report_types_cover_every_security_template():
+    # SECURITY_ASSESSMENT_TYPES is the program report's default filter; a
+    # template missing here silently drops its assessments from the
+    # report (iso42001 was the one that slipped).
+    from maverick.assessment import TEMPLATES
+
+    assert "iso42001" in security_ops.SECURITY_ASSESSMENT_TYPES
+    assert set(TEMPLATES) >= security_ops.SECURITY_ASSESSMENT_TYPES

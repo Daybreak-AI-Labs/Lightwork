@@ -74,3 +74,49 @@ def test_bom_requires_model_risk_assurance(tmp_path):
     config.reset_config_cache()
     with pytest.raises(ai_bom.AIBomError, match="model_risk_assurance"):
         ai_bom.export_ai_bom()
+
+
+def test_neighbourhood_projection_reads_identity_and_scans_once():
+    from maverick import model_risk_assurance as mra
+
+    officer = mra.ModelRiskAssuranceOfficer()
+    stamp = time.time()
+    model = officer.observe_asset(
+        asset_type="model", source="bom_test", source_id="ranker",
+        display_name="Ranking model",
+        version_digest=hashlib.sha256(b"ranker-v1").hexdigest(),
+        actor="inventory-operator", observed_at=stamp,
+        metadata={}, dependencies=[],
+    )
+    dataset = officer.observe_asset(
+        asset_type="dataset", source="bom_test", source_id="clicks",
+        display_name="Click log",
+        version_digest=hashlib.sha256(b"clicks-v1").hexdigest(),
+        actor="inventory-operator", observed_at=stamp,
+        metadata={}, dependencies=[model["asset_id"]],
+    )
+    officer.observe_asset(
+        asset_type="model", source="bom_test", source_id="unrelated",
+        display_name="Unrelated model",
+        version_digest=hashlib.sha256(b"other-v1").hexdigest(),
+        actor="inventory-operator", observed_at=stamp,
+        metadata={}, dependencies=[],
+    )
+
+    graph = mra.dependency_graph(asset_id=model["asset_id"])
+    ids = {node["asset_id"] for node in graph["nodes"]}
+    # The neighbourhood keeps the asset plus its direct dependents --
+    # in BOTH directions across the token/id spelling difference.
+    assert ids == {model["asset_id"], dataset["asset_id"]}
+    assert graph["edge_count"] == 1
+    # Node metadata comes from the nested identity sub-dict.
+    for node in graph["nodes"]:
+        assert node["asset_type"] in {"model", "dataset"}
+        assert node["source"] == "bom_test"
+    # The pure projection over already-loaded rows is the same graph.
+    rows = mra.list_inventory()
+    assert mra.dependency_graph_from_rows(
+        rows, asset_id=model["asset_id"]) == graph
+    # A scoped BOM export keeps the neighbourhood only.
+    document = ai_bom.export_ai_bom(asset_id=model["asset_id"])
+    assert {c["bom-ref"] for c in document["components"]} == ids

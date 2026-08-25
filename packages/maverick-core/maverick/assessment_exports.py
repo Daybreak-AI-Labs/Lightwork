@@ -26,8 +26,6 @@ from .assessment import load_saved
 
 OSCAL_VERSION = "1.1.2"
 
-_NAMESPACE = uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")  # NAMESPACE_URL
-
 
 class AssessmentExportError(RuntimeError):
     """Base failure for assessment exports."""
@@ -42,7 +40,7 @@ def _rfc3339(stamp: float) -> str:
 
 
 def _uuid_for(*parts: str) -> str:
-    return str(uuid.uuid5(_NAMESPACE, "lightwork-oscal:" + ":".join(parts)))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "lightwork-oscal:" + ":".join(parts)))
 
 
 def _record_or_raise(assessment_id: str) -> dict[str, Any]:

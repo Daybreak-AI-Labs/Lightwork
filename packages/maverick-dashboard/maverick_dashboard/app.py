@@ -2182,11 +2182,20 @@ async def privacy_page(request: Request) -> HTMLResponse:
     reviewer threads, a tier above viewer summaries.
     """
     require_permission(request, "operate")
+    ctx = _workspace_ctx("privacy", viewer=caller_principal(request) or "")
+    # Every register scan below is synchronous disk I/O; keep it off the
+    # event loop in one threadpool hop.
+    records, estate = await run_in_threadpool(_privacy_page_data)
+    ctx["records"] = records
+    ctx["estate"] = estate
+    return templates.TemplateResponse(request, "privacy.html", ctx)
+
+
+def _privacy_page_data() -> tuple[dict, dict]:
+    """The Privacy workspace's data plane: privacy-ops records plus the
+    estate registers (vendors, consent, data map), each its own opt-in."""
     import time as _time
 
-    ctx = _workspace_ctx("privacy", viewer=caller_principal(request) or "")
-    # The record types — the data plane behind the [privacy_ops] knob. The
-    # page still works without them.
     from maverick import privacy_ops
     records = {"enabled": privacy_ops.enabled(), "kind": "privacy",
                "dpa": [], "ai": [], "ropa": [], "dsar": [], "incidents": [],
@@ -2216,9 +2225,6 @@ async def privacy_page(request: Request) -> HTMLResponse:
             if r.get("status") in ("open", "notify"))
         records["incidents_breached"] = sum(
             1 for r in records["incidents"] if r.get("clock_breached"))
-    ctx["records"] = records
-    # The privacy estate — vendors, consent, data map. Each register is its
-    # own opt-in; the page renders whatever is on and explains what is off.
     from maverick import consent_registry, data_map, vendor_management
     estate = {
         "vendors_enabled": vendor_management.enabled(),
@@ -2227,6 +2233,13 @@ async def privacy_page(request: Request) -> HTMLResponse:
         "vendors": [], "vendor_posture": {},
         "consent_posture": {},
         "assets": [], "data_map_posture": {},
+        # The forms' vocab comes from the modules that enforce it, so a
+        # new kind/status/channel never needs a template edit. "import"
+        # is the importer's channel, not a manual-entry choice.
+        "contract_kinds": vendor_management.CONTRACT_KINDS,
+        "consent_statuses": consent_registry.STATUSES,
+        "consent_channels": tuple(
+            c for c in consent_registry.CHANNELS if c != "import"),
     }
     estate["renewals"] = {"overdue": [], "due_soon": []}
     estate["notices"] = []
@@ -2248,8 +2261,7 @@ async def privacy_page(request: Request) -> HTMLResponse:
     if estate["data_map_enabled"]:
         estate["assets"] = data_map.list_data_assets()
         estate["data_map_posture"] = data_map.data_map_posture()
-    ctx["estate"] = estate
-    return templates.TemplateResponse(request, "privacy.html", ctx)
+    return records, estate
 
 
 @app.get("/privacy/board", response_class=HTMLResponse)
@@ -3097,11 +3109,11 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
             return [], []
         try:
             gpai = [
-                eu_conformity.gpai_status(str(row.get("id")))
+                eu_conformity.gpai_status_from_record(row)
                 for row in eu_conformity.list_gpai_registers()[:100]
             ]
             deployer = [
-                eu_conformity.deployer_status(str(row.get("id")))
+                eu_conformity.deployer_status_from_record(row)
                 for row in eu_conformity.list_deployer_registers()[:100]
             ]
             return gpai, deployer
@@ -7222,9 +7234,29 @@ async def llm_gateway_chat_completions(request: Request) -> JSONResponse:
         )
     authorization = request.headers.get("Authorization", "")
     token = authorization.removeprefix("Bearer ").strip()
+    # Bounded read BEFORE parsing: this path is auth-exempt, so an
+    # unauthenticated caller must never be able to make the dashboard
+    # buffer an unbounded body (request.json() would). The core module
+    # re-checks the same cap post-parse as a second line of defense.
+    settings = llm_gateway.get_llm_gateway_config()
     try:
-        body = await request.json()
-    except Exception:
+        raw = await _read_limited_request_body(
+            request,
+            max_bytes=settings["max_body_bytes"],
+            too_large_detail=(
+                "The request exceeds the gateway's configured size cap."
+            ),
+        )
+    except HTTPException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": {"message": str(exc.detail),
+                               "type": "invalid_request_error"}},
+        )
+    import json as _json
+    try:
+        body = _json.loads(raw or b"{}")
+    except ValueError:
         body = None
     status_code, payload = await run_in_threadpool(
         llm_gateway.handle_chat_completion, body, caller_token=token,
@@ -7250,8 +7282,7 @@ async def llm_gateway_otel(request: Request) -> JSONResponse:
         )
     authorization = request.headers.get("Authorization", "")
     token = authorization.removeprefix("Bearer ").strip()
-    settings = llm_gateway.get_llm_gateway_config()
-    if not llm_gateway._authorized(token, settings):
+    if not llm_gateway.verify_gateway_bearer(token):
         return JSONResponse(
             status_code=401,
             content={"error": {"message": "The gateway bearer is missing or wrong.",

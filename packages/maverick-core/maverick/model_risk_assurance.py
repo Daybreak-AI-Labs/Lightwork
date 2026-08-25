@@ -3043,32 +3043,55 @@ def dependency_graph(*, asset_id: str | None = None) -> dict[str, Any]:
     dependencies and direct dependents; otherwise the whole estate.
     """
 
-    rows = _DEFAULT.list_inventory()
+    return dependency_graph_from_rows(
+        _DEFAULT.list_inventory(), asset_id=asset_id
+    )
+
+
+def dependency_graph_from_rows(
+    rows: list[dict[str, Any]], *, asset_id: str | None = None
+) -> dict[str, Any]:
+    """The same projection over an inventory scan the caller already holds,
+    so consumers that also need the rows (the AI-BOM export) scan once."""
+
     wanted = None if asset_id is None else str(asset_id).strip()
     edges = [
         {"asset_id": str(row.get("asset_id")), "depends_on": str(dependency)}
         for row in rows
         for dependency in (row.get("dependencies") or [])
     ]
+
+    # Dependencies are stored as normalized tokens (lowercase, "-" -> "_"),
+    # while asset ids are "MAA-<hex>": compare in token space or the
+    # neighbourhood filter never matches anything.
+    def _norm(value: str) -> str:
+        return value.lower().replace("-", "_")
+
     if wanted is not None:
-        neighbours = {wanted}
+        neighbours = {_norm(wanted)}
         for edge in edges:
-            if edge["asset_id"] == wanted:
-                neighbours.add(edge["depends_on"])
-            if edge["depends_on"] == wanted:
-                neighbours.add(edge["asset_id"])
-        rows = [row for row in rows if str(row.get("asset_id")) in neighbours]
+            if _norm(edge["asset_id"]) == _norm(wanted):
+                neighbours.add(_norm(edge["depends_on"]))
+            if _norm(edge["depends_on"]) == _norm(wanted):
+                neighbours.add(_norm(edge["asset_id"]))
+        rows = [
+            row for row in rows
+            if _norm(str(row.get("asset_id"))) in neighbours
+        ]
         edges = [
             edge
             for edge in edges
-            if edge["asset_id"] in neighbours and edge["depends_on"] in neighbours
+            if _norm(edge["asset_id"]) in neighbours
+            and _norm(edge["depends_on"]) in neighbours
         ]
     nodes = [
         {
             "asset_id": row.get("asset_id"),
             "display_name": row.get("display_name"),
-            "asset_type": row.get("asset_type"),
-            "source": row.get("source"),
+            # Type and source live under the observation's identity
+            # sub-dict, not at the top level of the row.
+            "asset_type": (row.get("identity") or {}).get("asset_type"),
+            "source": (row.get("identity") or {}).get("source"),
         }
         for row in rows
     ]

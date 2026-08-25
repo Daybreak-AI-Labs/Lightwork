@@ -337,3 +337,49 @@ def test_privacy_page_renders_contracts_notices_and_scan():
     assert "2026-01" in page.text
     assert "Site scan" in page.text
     assert 'id="pe-scan-go"' in page.text
+
+
+def test_consent_write_races_map_to_409_not_500(monkeypatch):
+    # A CAS retry that exhausts (concurrent writers) is a retryable
+    # conflict for the client, never an operator-paging 500.
+    from maverick import consent_registry
+    from maverick.governed_records import RecordConflict
+
+    def racing(*_args, **_kwargs):
+        raise RecordConflict("the consent record changed during save")
+
+    monkeypatch.setattr(consent_registry, "record_consent", racing)
+    response = client.post("/api/v1/consent/records", json={
+        "subject_ref": "alice@example.com", "purpose": "marketing",
+        "status": "granted", "policy_version": "2026-01", "channel": "web",
+    })
+    assert response.status_code == 409
+
+    def exhausted(*_args, **_kwargs):
+        raise consent_registry.ConsentRegistryError(
+            "the consent record changed during save")
+
+    monkeypatch.setattr(consent_registry, "record_consent", exhausted)
+    response = client.post("/api/v1/consent/records", json={
+        "subject_ref": "alice@example.com", "purpose": "marketing",
+        "status": "granted", "policy_version": "2026-01", "channel": "web",
+    })
+    assert response.status_code == 409
+
+
+def test_privacy_page_dropdowns_come_from_module_vocab():
+    # The contract panel renders once at least one vendor exists.
+    created = client.post("/api/v1/vendors", json={
+        "name": "Acme Analytics", "category": "analytics",
+        "criticality": "high", "owner": "procurement",
+    })
+    assert created.status_code == 201, created.text
+    page = client.get("/privacy").text
+    # Contract kinds, consent statuses, and channels render from the
+    # modules that enforce them -- including every CONTRACT_KINDS entry.
+    for kind in ("dpa", "msa", "sla", "addendum", "other"):
+        assert f'value="{kind}"' in page
+    for status in ("granted", "withdrawn"):
+        assert f'value="{status}"' in page
+    # The importer-only channel never shows as a manual-entry choice.
+    assert 'value="import"' not in page

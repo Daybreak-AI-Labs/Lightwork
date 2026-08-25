@@ -375,20 +375,21 @@ def reason_codes(
     }
 
 
-def record_explainability_evidence(
+def _prepare_evidence(
     asset_id: str,
     report: Mapping[str, Any],
     *,
-    source_id: str,
-    actor: str,
-    observed_at: float | None = None,
-    validity_seconds: int = 90 * 24 * 60 * 60,
-) -> dict[str, Any]:
-    """Record one report as digest-scoped ``explainability`` evidence."""
+    expected_schema: str,
+    schema_label: str,
+    observed_at: float | None,
+    validity_seconds: int,
+) -> tuple[Any, dict[str, Any], float, str]:
+    """The recorders' shared gate: schema, validity bounds, an observed
+    asset, a positive timestamp, and the canonical report digest."""
 
     _require_enabled()
-    if not isinstance(report, Mapping) or report.get("schema") != REPORT_SCHEMA:
-        raise ValueError("report must be an explainability report")
+    if not isinstance(report, Mapping) or report.get("schema") != expected_schema:
+        raise ValueError(f"report must be {schema_label}")
     if (
         not isinstance(validity_seconds, int)
         or isinstance(validity_seconds, bool)
@@ -405,6 +406,27 @@ def record_explainability_evidence(
     digest = hashlib.sha256(
         json.dumps(report, sort_keys=True, separators=(",", ":"), default=str).encode()
     ).hexdigest()
+    return officer, observation, now, digest
+
+
+def record_explainability_evidence(
+    asset_id: str,
+    report: Mapping[str, Any],
+    *,
+    source_id: str,
+    actor: str,
+    observed_at: float | None = None,
+    validity_seconds: int = 90 * 24 * 60 * 60,
+) -> dict[str, Any]:
+    """Record one report as digest-scoped ``explainability`` evidence."""
+
+    officer, observation, now, digest = _prepare_evidence(
+        asset_id, report,
+        expected_schema=REPORT_SCHEMA,
+        schema_label="an explainability report",
+        observed_at=observed_at,
+        validity_seconds=validity_seconds,
+    )
     return officer.record_evidence(
         str(asset_id),
         source_id=f"explainability:{str(source_id or '').strip() or 'report'}",
@@ -440,28 +462,14 @@ def record_fairness_evidence(
 
     from .fairness_monitor import FAIRNESS_REPORT_SCHEMA
 
-    _require_enabled()
-    if (
-        not isinstance(report, Mapping)
-        or report.get("schema") != FAIRNESS_REPORT_SCHEMA
-    ):
-        raise ValueError("report must be a fairness metrics report")
-    if (
-        not isinstance(validity_seconds, int)
-        or isinstance(validity_seconds, bool)
-        or not 3600 <= validity_seconds <= 366 * 24 * 60 * 60
-    ):
-        raise ValueError("validity_seconds must be between an hour and a year")
-    officer = mra.ModelRiskAssuranceOfficer()
-    observation = officer.get_observation(str(asset_id or ""))
-    if observation is None:
-        raise ExplainabilityError("evidence requires an observed AI asset")
-    now = time.time() if observed_at is None else _finite(observed_at, "observed_at")
-    if now <= 0:
-        raise ValueError("observed_at must be positive")
-    digest = hashlib.sha256(
-        json.dumps(report, sort_keys=True, separators=(",", ":"), default=str).encode()
-    ).hexdigest()
+    officer, observation, now, digest = _prepare_evidence(
+        asset_id, report,
+        expected_schema=FAIRNESS_REPORT_SCHEMA,
+        schema_label="a fairness metrics report",
+        observed_at=observed_at,
+        validity_seconds=validity_seconds,
+    )
+    ratio = _finite(report.get("min_impact_ratio"), "report min_impact_ratio")
     passed = report.get("passed") is True
     return officer.record_evidence(
         str(asset_id),
@@ -475,11 +483,11 @@ def record_fairness_evidence(
         valid_until=now + validity_seconds,
         summary=(
             "Group-fairness metrics recorded "
-            f"(min impact ratio {report.get('min_impact_ratio'):.3f}, "
+            f"(min impact ratio {ratio:.3f}, "
             f"{'no failing groups' if passed else 'FAILING groups: ' + ', '.join(report.get('failing_groups') or [])})."
         ),
         metrics={
-            "min_impact_ratio": report.get("min_impact_ratio"),
+            "min_impact_ratio": ratio,
             "demographic_parity_diff": report.get("demographic_parity_diff"),
             "samples": report.get("samples"),
             "report_sha256": digest,

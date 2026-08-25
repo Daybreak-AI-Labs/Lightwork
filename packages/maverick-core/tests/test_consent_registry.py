@@ -219,3 +219,40 @@ def test_site_scan_reports_cookies_and_known_trackers():
 def test_site_scan_requires_https():
     with pytest.raises(ValueError, match="https"):
         cr.scan_site("http://www.acme.example/", fetcher=lambda _u: ({}, ""))
+
+
+def test_backdated_event_never_flips_a_newer_withdrawal():
+    # A OneTrust backfill imports an OLD grant after the subject already
+    # withdrew: history keeps both, the projection keeps the withdrawal.
+    cr.record_consent(
+        "alice@example.com", purpose="marketing", status="withdrawn",
+        policy_version="2026-02", channel="web", actor="ops",
+        recorded_at=2_000.0,
+    )
+    saved = cr.record_consent(
+        "alice@example.com", purpose="marketing", status="granted",
+        policy_version="2025-01", channel="import", actor="importer",
+        recorded_at=1_000.0,
+    )
+    assert saved["current_status"] == "withdrawn"
+    assert saved["policy_version"] == "2026-02"
+    assert saved["last_recorded_at"] == 2_000.0
+    assert saved["first_recorded_at"] == 1_000.0
+    assert len(saved["history"]) == 2
+    prefs = cr.subject_preferences("alice@example.com")
+    assert prefs["purposes"]["marketing"]["status"] == "withdrawn"
+
+
+def test_site_scan_ignores_relative_src_paths():
+    # A relative path with a doubled slash must not be read as a host.
+    page = """
+    <script src="assets//img/app.js"></script>
+    <img src="images/logo//large.png">
+    <script src="//cdn.example-partner.io/w.js"></script>
+    <iframe src="https://player.example-video.net/embed/1"></iframe>
+    """
+    report = cr.scan_site(
+        "https://www.acme.example/", fetcher=lambda _u: ({}, page)
+    )
+    assert report["third_party_hosts"] == [
+        "cdn.example-partner.io", "player.example-video.net"]

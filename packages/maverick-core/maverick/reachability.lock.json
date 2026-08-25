@@ -3,7 +3,7 @@
   "counts": {
     "CI_ONLY": 13,
     "CLI_ONLY": 27,
-    "PRODUCTION": 937,
+    "PRODUCTION": 938,
     "TEST_ONLY": 82,
     "UNREACHED": 6
   },
@@ -183,6 +183,7 @@
     "maverick.critic": "TEST_ONLY",
     "maverick.cross_run_anomaly": "PRODUCTION",
     "maverick.crypto_at_rest": "PRODUCTION",
+    "maverick.csv_alias": "PRODUCTION",
     "maverick.data_engine": "PRODUCTION",
     "maverick.data_map": "PRODUCTION",
     "maverick.debate": "PRODUCTION",

@@ -44,6 +44,26 @@ CONFIG_DIR = Path.home() / ".maverick"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 ENV_FILE = CONFIG_DIR / ".env"
 
+
+def _prior_consent_salt() -> str:
+    """The existing consent subject_salt, or a fresh one on first enable.
+
+    Consent subject digests are sha256(salt:subject), so regenerating the
+    salt on a wizard re-run would orphan every stored consent record.
+    Mirror the MAVERICK_RED_TEAM_COMMITMENT_KEY preservation: read the
+    current config.toml (which the wizard is about to rewrite) and keep
+    the salt that the existing records were digested under.
+    """
+
+    try:
+        prior = tomllib.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        salt = str((prior.get("consent_registry") or {}).get("subject_salt") or "")
+        if 16 <= len(salt.strip()) <= 256:
+            return salt.strip()
+    except (OSError, ValueError):
+        pass
+    return secrets.token_urlsafe(24)
+
 console = Console()
 
 
@@ -4610,7 +4630,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
         lines.append("")
         lines.append("[consent_registry]")
         lines.append("enable = true")
-        lines.append(f'subject_salt = "{secrets.token_urlsafe(24)}"')
+        lines.append(f'subject_salt = "{_prior_consent_salt()}"')
     if advanced.get("data_map"):
         lines.append("")
         lines.append("[data_map]")

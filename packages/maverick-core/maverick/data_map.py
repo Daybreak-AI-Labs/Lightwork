@@ -32,9 +32,21 @@ CLASSIFIER_CATEGORIES = (
 )
 #: GDPR Art. 9-adjacent categories that mark an asset special-category.
 SPECIAL_CATEGORIES = frozenset({"health"})
+#: Categories that identify a person — the assets a DSAR search plan
+#: should send a human to. Owned here, next to the classifier vocabulary
+#: it subsets, so a new category is weighed for DSAR relevance in one place.
+IDENTIFYING_CATEGORIES = frozenset({
+    "email", "phone", "name", "address", "national_id",
+    "date_of_birth", "ip_address", "location",
+})
 
 _ASSETS = GovernedRecordStore("data_map", "DMA", "data_asset")
 _MAX_LIST = 500
+#: The register's capacity, and a full-scan window one past it: posture
+#: counts and the DSAR worksheet must see every asset, not an mtime-ranked
+#: subset.
+_MAX_RECORDS = 10_000
+_SCAN_LIMIT = _MAX_RECORDS + 1
 _MAX_LINKS = 50
 _MAX_COLUMNS = 400
 _MAX_IMPORT_ROWS = 10_000
@@ -46,8 +58,9 @@ _GRAPH_TIMEOUT_SECONDS = 20.0
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (category, re.compile(expression))
     for category, expression in (
-        ("email", r"e?[_-]?mail"),
-        ("phone", r"phone|mobile|msisdn|fax"),
+        ("email", r"(?:^|[_-])e[_-]?mail(?:$|[_-])"),
+        ("phone", r"(?:^|[_-])(?:tele[_-]?phone|phone|mobile|msisdn|fax)"
+                  r"(?:$|[_-])"),
         ("name", r"(?:^|_)(?:first|last|middle|full|sur|given|family|maiden)"
                  r"[_-]?name|(?:^|_)name(?:$|_)"),
         ("address", r"address|street|postcode|postal|zip[_-]?code|city"),
@@ -57,8 +70,8 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
                           r"(?:^|_)dob(?:$|_)|birthday)"),
         ("financial", r"iban|swift|account[_-]?number|routing|credit[_-]?card|"
                       r"card[_-]?number|(?:^|_)pan(?:$|_)|salary|payroll"),
-        ("health", r"health|medical|diagnos|prescription|allerg|disabilit|"
-                   r"blood[_-]?type|icd[_-]?10"),
+        ("health", r"(?:^|[_-])health(?:$|[_-])|medical|diagnos|prescription|"
+                   r"allerg|disabilit|blood[_-]?type|icd[_-]?10"),
         ("credentials", r"password|passwd|secret|api[_-]?key|token|"
                         r"private[_-]?key|credential"),
         ("ip_address", r"ip[_-]?addr|(?:^|_)ipv?[46]?(?:$|_)"),
@@ -123,7 +136,13 @@ def _text(value: object, label: str, limit: int) -> str:
 def classify_column(column_name: str) -> list[str]:
     """The categories a column name suggests; empty when nothing matches."""
 
-    lowered = str(column_name or "").strip().lower()
+    # CamelCase carries its word boundaries in case; materialize them as
+    # underscores BEFORE lowering so the anchored patterns still see them
+    # ("MobileNumber" -> "mobile_number"). The anchors are what keep
+    # "mail_server", "microphone_enabled" and "healthcheck_status" clean.
+    lowered = re.sub(
+        r"(?<=[a-z0-9])(?=[A-Z])", "_", str(column_name or "").strip()
+    ).lower()
     if not lowered:
         return []
     return [
@@ -168,8 +187,14 @@ def register_data_asset(
     columns: list[str] | None = None,
     location: str = "",
     source: str = "manual",
+    max_records: int | None = _MAX_RECORDS,
 ) -> dict[str, Any]:
-    """Register or refresh one data asset; re-registration reclassifies."""
+    """Register or refresh one data asset; re-registration reclassifies.
+
+    ``max_records`` is the capacity cap enforced on create; bulk importers
+    that pre-check capacity once for the whole batch pass ``None`` so each
+    row does not repeat the store's full-namespace capacity scan.
+    """
 
     _require_enabled()
     if kind not in ASSET_KINDS:
@@ -211,7 +236,7 @@ def register_data_asset(
                 record,
                 action="register_data_asset",
                 actor=operator,
-                max_records=10_000,
+                max_records=max_records,
             )
         )
 
@@ -278,7 +303,7 @@ def get_data_asset(asset_id: str) -> dict[str, Any] | None:
 
 def list_data_assets(*, system: str | None = None) -> list[dict[str, Any]]:
     _require_enabled()
-    rows = _ASSETS.list(limit=_MAX_LIST)
+    rows = _ASSETS.list(limit=_SCAN_LIMIT)
     if system:
         wanted = str(system).strip().lower()
         rows = [
@@ -291,7 +316,7 @@ def list_data_assets(*, system: str | None = None) -> list[dict[str, Any]]:
 
 def data_map_posture() -> dict[str, Any]:
     _require_enabled()
-    rows = _ASSETS.list(limit=_MAX_LIST * 4)
+    rows = _ASSETS.list(limit=_SCAN_LIMIT)
     by_system: dict[str, int] = {}
     by_category: dict[str, int] = {}
     flagged = 0
@@ -342,23 +367,12 @@ def import_information_schema_csv(
     """
 
     _require_enabled()
-    import csv as _csv
-    import io
+    from .csv_alias import alias_rows
 
-    reader = _csv.DictReader(io.StringIO(csv_text or ""))
     tables: dict[str, list[str]] = {}
     skipped = 0
-    for row in list(reader)[:_MAX_IMPORT_ROWS]:
-        low = {
-            (key or "").strip().lower(): (value or "").strip()
-            for key, value in row.items()
-        }
-        entry: dict[str, str] = {}
-        for field, aliases in _SCHEMA_CSV_HEADERS.items():
-            for alias in aliases:
-                if low.get(alias):
-                    entry[field] = low[alias]
-                    break
+    for entry in alias_rows(csv_text, _SCHEMA_CSV_HEADERS,
+                            limit=_MAX_IMPORT_ROWS):
         if not entry.get("table") or not entry.get("column"):
             skipped += 1
             continue
@@ -368,19 +382,35 @@ def import_information_schema_csv(
         columns = tables.setdefault(qualified, [])
         if len(columns) < _MAX_COLUMNS:
             columns.append(entry["column"])
+    # Capacity is checked ONCE for the whole batch: the store's per-create
+    # capacity check is a full namespace scan, which would turn a 500-table
+    # import into 500 scans. Existing tables refresh in place and consume
+    # no budget; new tables past the cap are skipped, not raised.
+    system_name = _text(system, "system", 256)
+    existing = {
+        str(row.get("id") or "") for row in _ASSETS.list(limit=_SCAN_LIMIT)
+    }
+    budget = _MAX_RECORDS - len(existing)
     imported = 0
     for qualified, columns in list(tables.items())[:_MAX_IMPORT_TABLES]:
+        is_new = _asset_id(system_name, qualified) not in existing
+        if is_new and budget <= 0:
+            skipped += 1
+            continue
         try:
             register_data_asset(
                 qualified,
-                system=system,
+                system=system_name,
                 kind="table",
                 owner=owner,
                 actor=imported_by or "import:information_schema",
                 columns=columns,
                 source="information_schema",
+                max_records=None,
             )
             imported += 1
+            if is_new:
+                budget -= 1
         except Exception:
             skipped += 1
     return {"imported": imported, "skipped": skipped}
@@ -490,6 +520,7 @@ __all__ = [
     "CLASSIFIER_CATEGORIES",
     "DataMapConfigError",
     "DataMapError",
+    "IDENTIFYING_CATEGORIES",
     "LINK_KINDS",
     "SPECIAL_CATEGORIES",
     "classify_column",

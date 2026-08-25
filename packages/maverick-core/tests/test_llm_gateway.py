@@ -249,3 +249,20 @@ def test_otel_spans_land_in_the_caller_ledger():
     assert rows[0]["completion_tokens"] == 40
     with pytest.raises(ValueError, match="JSON object"):
         gw.ingest_otel_spans([1, 2, 3])
+
+
+def test_ledger_failures_never_break_the_proxied_call(monkeypatch):
+    # A full ledger (capacity) or a broken backend is an observability
+    # loss, not an outage: the caller's completion still goes through.
+    from maverick.governed_records import GovernedRecordCapacityError
+
+    def full(*_args, **_kwargs):
+        raise GovernedRecordCapacityError("ledger is at capacity")
+
+    monkeypatch.setattr(gw._LEDGER, "create", full)
+    status, payload = gw.handle_chat_completion(
+        _body(), caller_token="gw-secret", upstream=_ok_upstream, now=1_000.0,
+    )
+    assert status == 200
+    assert payload["choices"][0]["message"]["content"] == "hello"
+    assert gw.list_callers() == []

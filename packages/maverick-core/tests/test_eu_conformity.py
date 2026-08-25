@@ -518,3 +518,24 @@ def test_deployer_assertions_complete_the_register():
     assert state["complete"] is True
     assert state["missing"] == []
     assert euc.list_deployer_registers()[0]["asset_id"] == _ASSET
+
+
+def test_status_projections_from_loaded_rows_match_the_store_reads():
+    # The list surfaces (dashboard panels, CLI lists) project posture from
+    # rows they already hold; the pure helpers must agree byte-for-byte
+    # with the id-addressed reads.
+    gpai = euc.open_gpai(_ASSET, systemic_risk=True, actor="ops")
+    euc.assert_gpai_obligation(
+        gpai["id"], "technical_documentation",
+        reference="doc://gpai/tech.pdf", actor="ops",
+        expected_revision=gpai["revision"],
+    )
+    deployer = euc.open_deployer_register(
+        _ASSET, workplace_use=True, actor="ops",
+    )
+    for row in euc.list_gpai_registers():
+        assert euc.gpai_status_from_record(row) == euc.gpai_status(row["id"])
+    for row in euc.list_deployer_registers():
+        assert (euc.deployer_status_from_record(row)
+                == euc.deployer_status(row["id"]))
+    assert deployer["id"].startswith("ECY-")

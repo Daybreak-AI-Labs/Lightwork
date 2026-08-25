@@ -40,6 +40,12 @@ CONTRACT_KINDS = ("dpa", "msa", "sla", "addendum", "other")
 _SEVERITY_ORDER = ("low", "medium", "high", "critical")
 
 _VENDORS = GovernedRecordStore("vendor_management", "VMR", "vendor_record")
+#: Store capacity and the matching full-scan window. Projections that carry
+#: correctness (token lookup, renewals, posture) must scan the WHOLE store:
+#: a smaller window silently drops exactly the stale vendors most likely to
+#: hold overdue paper, and 404s valid questionnaire links.
+_MAX_RECORDS = 10_000
+_SCAN_LIMIT = _MAX_RECORDS + 1
 _MAX_LIST = 500
 _MAX_LINKS = 50
 _MAX_NOTES = 50
@@ -138,7 +144,10 @@ def register_vendor(
         "registered_at": time.time(),
     }
     return dict(
-        _VENDORS.create(record, action="register_vendor", actor=operator)
+        _VENDORS.create(
+            record, action="register_vendor", actor=operator,
+            max_records=_MAX_RECORDS,
+        )
     )
 
 
@@ -224,6 +233,7 @@ def request_questionnaire(
     """
 
     _require_enabled()
+    from . import form_store
     from .assessment import TEMPLATES
 
     kind = str(assessment_type or "").strip().lower()
@@ -231,6 +241,19 @@ def request_questionnaire(
         raise ValueError(
             f"assessment_type must be a registered template, one of: "
             f"{', '.join(sorted(TEMPLATES))}"
+        )
+    # The hosted form persists through form_store, which keeps at most
+    # _MAX_FIELDS fields per submission (one is reserved for the free-text
+    # note). Minting a questionnaire whose answers would be silently
+    # truncated — and then scored as "clear" on the surviving subset — is
+    # refused outright rather than quietly corrupting an audit record.
+    field_cap = int(getattr(form_store, "_MAX_FIELDS", 50)) - 1
+    questions = len(TEMPLATES[kind].questions)
+    if questions > field_cap:
+        raise ValueError(
+            f"the {kind} template has {questions} questions, but hosted-form "
+            f"submissions keep at most {field_cap} answers; choose a smaller "
+            "template for the questionnaire link"
         )
     operator = _text(actor, "actor", 256)
     token = secrets.token_urlsafe(24)
@@ -414,7 +437,7 @@ def contract_renewals(
     horizon = current + due_soon_days * 86_400.0
     overdue: list[dict[str, Any]] = []
     due_soon: list[dict[str, Any]] = []
-    for row in _VENDORS.list(limit=_MAX_LIST):
+    for row in _VENDORS.list(limit=_SCAN_LIMIT):
         for contract in row.get("contracts") or []:
             renews = float(contract.get("renews_at") or 0.0)
             if renews <= 0:
@@ -446,10 +469,12 @@ def _score_submission(
 ) -> dict[str, Any]:
     """Score one hosted-form submission against its template's risk answers.
 
-    A question counts as a finding when the response matches the
-    template's ``risk_answer`` (case-insensitive). The rating is the worst
-    finding severity, ``clear`` when everything answered came back safe.
-    Deterministic and explainable: every finding names its question.
+    The same answer vocabulary as :meth:`assessment.Assessment.evaluate`:
+    the template's ``risk_answer`` raises a ``risk`` finding, ``unknown``
+    raises an ``unverified`` finding (diligence gap), and ``na`` clears the
+    question. The rating is the worst finding severity, ``clear`` when
+    everything answered came back safe. Deterministic and explainable:
+    every finding names its question.
     """
 
     findings: list[dict[str, Any]] = []
@@ -461,12 +486,24 @@ def _score_submission(
             continue
         answered += 1
         response = str(raw).strip().lower()
+        if response == "na":
+            continue
         if response == str(question.risk_answer).strip().lower():
             findings.append(
                 {
                     "qid": question.id,
                     "section": question.section,
                     "severity": question.severity,
+                    "kind": "risk",
+                }
+            )
+        elif response == "unknown":
+            findings.append(
+                {
+                    "qid": question.id,
+                    "section": question.section,
+                    "severity": question.severity,
+                    "kind": "unverified",
                 }
             )
     rating = "clear"
@@ -495,7 +532,7 @@ def questionnaire_for_token(token: str) -> dict[str, Any] | None:
     needle = str(token or "").strip()
     if not needle:
         return None
-    for row in _VENDORS.list(limit=_MAX_LIST):
+    for row in _VENDORS.list(limit=_SCAN_LIMIT):
         for entry in row.get("questionnaires") or []:
             if str(entry.get("token") or "") != needle:
                 continue
@@ -526,7 +563,7 @@ def list_vendors(*, status: str | None = None) -> list[dict[str, Any]]:
     _require_enabled()
     if status is not None and status not in STATUSES:
         raise ValueError(f"status must be one of: {', '.join(STATUSES)}")
-    rows = _VENDORS.list(limit=_MAX_LIST)
+    rows = _VENDORS.list(limit=_SCAN_LIMIT)
     rows.sort(key=lambda row: str(row.get("name") or "").lower())
     return [
         dict(row) for row in rows
@@ -536,7 +573,7 @@ def list_vendors(*, status: str | None = None) -> list[dict[str, Any]]:
 
 def vendor_posture() -> dict[str, Any]:
     _require_enabled()
-    rows = _VENDORS.list(limit=_MAX_LIST)
+    rows = _VENDORS.list(limit=_SCAN_LIMIT)
     by_status = dict.fromkeys(STATUSES, 0)
     by_criticality = dict.fromkeys(CRITICALITIES, 0)
     critical_alerts = 0
@@ -594,22 +631,10 @@ def import_onetrust_vendors(
     """
 
     _require_enabled()
-    import csv as _csv
-    import io
+    from .csv_alias import alias_rows
 
-    reader = _csv.DictReader(io.StringIO(csv_text or ""))
     imported = []
-    for row in list(reader)[:2000]:
-        low = {
-            (key or "").strip().lower(): (value or "").strip()
-            for key, value in row.items()
-        }
-        entry: dict[str, str] = {}
-        for field, aliases in _ONETRUST_VENDOR_HEADERS.items():
-            for alias in aliases:
-                if low.get(alias):
-                    entry[field] = low[alias]
-                    break
+    for entry in alias_rows(csv_text, _ONETRUST_VENDOR_HEADERS, limit=2000):
         if not entry.get("name"):
             continue
         criticality = _CRITICALITY_ALIASES.get(

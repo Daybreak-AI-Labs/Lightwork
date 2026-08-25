@@ -775,11 +775,9 @@
             </select></label>
           <label><span>Contract</span>
             <select class="ctl" id="pe-contract-kind">
-              <option value="dpa">DPA</option>
-              <option value="msa">MSA</option>
-              <option value="sla">SLA</option>
-              <option value="addendum">Addendum</option>
-              <option value="other">Other</option>
+              {% for k in estate.contract_kinds %}
+              <option value="{{ k }}">{{ k | upper if k | length <= 3 else k | capitalize }}</option>
+              {% endfor %}
             </select></label>
           <label><span>Where the signed paper lives</span>
             <input class="ctl" id="pe-contract-ref" maxlength="512"
@@ -817,20 +815,18 @@
                    placeholder="marketing emails"></label>
           <label><span>Status</span>
             <select class="ctl" name="status">
-              <option value="granted">granted</option>
-              <option value="withdrawn">withdrawn</option>
+              {% for s in estate.consent_statuses %}
+              <option value="{{ s }}">{{ s }}</option>
+              {% endfor %}
             </select></label>
           <label><span>Policy version</span>
             <input class="ctl" name="policy_version" maxlength="64" required
                    placeholder="2026-01"></label>
           <label><span>Channel</span>
             <select class="ctl" name="channel">
-              <option value="web">web</option>
-              <option value="mobile">mobile</option>
-              <option value="email">email</option>
-              <option value="phone">phone</option>
-              <option value="paper">paper</option>
-              <option value="api">api</option>
+              {% for c in estate.consent_channels %}
+              <option value="{{ c }}">{{ c }}</option>
+              {% endfor %}
             </select></label>
         </div>
         <div class="pw-form-actions">
@@ -1016,8 +1012,15 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         }).then(function (r) {
-          return r.json().then(function (d) {
-            if (!r.ok) { throw new Error(d.detail || ('HTTP ' + r.status)); }
+          // Read text first: an error body from a proxy or crash page is
+          // often not JSON, and r.json() would mask the status with a
+          // SyntaxError.
+          return r.text().then(function (t) {
+            var d = null;
+            try { d = JSON.parse(t); } catch (e) { d = null; }
+            if (!r.ok) {
+              throw new Error((d && d.detail) || ('HTTP ' + r.status));
+            }
             return d;
           });
         });

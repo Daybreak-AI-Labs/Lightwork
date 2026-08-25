@@ -27,9 +27,6 @@ _TYPE_MAP = {
     "dataset": "data",
     "data": "data",
 }
-_NAMESPACE = uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")  # uuid.NAMESPACE_URL
-
-
 class AIBomError(RuntimeError):
     """Base failure for the AI-BOM exporter."""
 
@@ -56,13 +53,14 @@ def export_ai_bom(*, asset_id: str | None = None) -> dict[str, Any]:
         raise AIBomError(
             "the AI-BOM export requires [model_risk_assurance] enable = true"
         )
-    graph = mra.dependency_graph(asset_id=asset_id)
+    inventory = mra.list_inventory()
+    graph = mra.dependency_graph_from_rows(inventory, asset_id=asset_id)
     included_ids = {
         str(node.get("asset_id") or "") for node in graph.get("nodes") or []
     }
     edges = graph.get("edges") or []
     rows = [
-        row for row in mra.list_inventory()
+        row for row in inventory
         if str(row.get("asset_id") or "") in included_ids
     ]
     components = []
@@ -108,7 +106,7 @@ def export_ai_bom(*, asset_id: str | None = None) -> dict[str, Any]:
     return {
         "bomFormat": BOM_FORMAT,
         "specVersion": BOM_SPEC_VERSION,
-        "serialNumber": f"urn:uuid:{uuid.uuid5(_NAMESPACE, serial_seed)}",
+        "serialNumber": f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_URL, serial_seed)}",
         "version": 1,
         "metadata": {
             "timestamp": _rfc3339(now),

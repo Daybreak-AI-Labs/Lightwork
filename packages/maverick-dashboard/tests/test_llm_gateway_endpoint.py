@@ -139,3 +139,69 @@ def test_otel_ingestion_endpoint(tmp_path):
 def test_otel_endpoint_off_is_403(tmp_path):
     response = client.post("/gateway/v1/otel", json={})
     assert response.status_code == 403
+
+
+def test_oversized_body_is_413_before_auth(tmp_path):
+    # The body cap applies while READING, pre-auth: an anonymous client
+    # streaming an oversized body gets the OpenAI-style 413 envelope and
+    # never allocates the full payload server-side.
+    (tmp_path / "config.toml").write_text(
+        '[llm_gateway]\nenable = true\n'
+        'upstream_url = "https://api.openai.com"\n'
+        'max_body_bytes = 4096\n',
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    response = client.post(
+        "/gateway/v1/chat/completions",
+        content=b"x" * 8192,
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["type"] == "invalid_request_error"
+
+
+def test_otel_ingestion_skips_malformed_spans(tmp_path):
+    # One good span and two broken ones (a non-mapping span, a span whose
+    # usage attributes are junk strings): the good span ingests, the rest
+    # count as skipped, and nothing 500s.
+    _enable(tmp_path)
+    payload = {
+        "resourceSpans": [{
+            "resource": {"attributes": [
+                {"key": "service.name",
+                 "value": {"stringValue": "crew-planner"}},
+            ]},
+            "scopeSpans": [{"spans": [
+                {"name": "chat", "attributes": [
+                    {"key": "gen_ai.system",
+                     "value": {"stringValue": "openai"}},
+                    {"key": "gen_ai.request.model",
+                     "value": {"stringValue": "gpt-5.2"}},
+                    {"key": "gen_ai.usage.input_tokens",
+                     "value": {"intValue": "7"}},
+                ]},
+                "not-a-span",
+                {"name": "chat", "attributes": [
+                    {"key": "gen_ai.request.model",
+                     "value": {"stringValue": "gpt-5.2"}},
+                    {"key": "gen_ai.usage.input_tokens",
+                     "value": {"intValue": "junk"}},
+                ]},
+            ]}],
+        }]
+    }
+    accepted = client.post(
+        "/gateway/v1/otel", json=payload,
+        headers={"Authorization": "Bearer gw-secret"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    body = accepted.json()
+    assert body["ingested"] == 1
+    assert body["skipped"] == 2
+    from maverick import llm_gateway as gw
+
+    callers = gw.list_callers()
+    assert len(callers) == 1
+    assert callers[0]["model"] == "gpt-5.2"
+    assert callers[0]["prompt_tokens"] == 7

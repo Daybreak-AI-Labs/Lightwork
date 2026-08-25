@@ -13,6 +13,15 @@ v1 scope, stated plainly: one fixed upstream, the ``/v1/chat/completions``
 shape, no streaming (a ``stream`` request is refused with an explanation),
 and no response rewriting. Interception is opt-in per estate: point the
 agents at the gateway; nothing here can see traffic that never arrives.
+
+Kernel rule 3 (budget caps) and this gateway, decided: proxied calls are
+the CALLER's spend on the caller's own provider key, not a kernel agent
+run, so they do not flow through :class:`maverick.budget.Budget` — there
+is no goal, no role, and no platform dollar at stake. The governed limits
+that do apply here are the gateway's own: bearer auth, the model
+allowlist, bounded request/response bodies, and the caller ledger that
+makes the spend visible. Routing a foreign agent's tokens through a
+kernel Budget would cap someone else's bill with the platform's knobs.
 """
 from __future__ import annotations
 
@@ -132,6 +141,24 @@ def _authorized(caller_token: str, settings: Mapping[str, Any]) -> bool:
     )
 
 
+def verify_gateway_bearer(token: str) -> bool:
+    """Whether ``token`` is the configured gateway bearer.
+
+    The one public auth check for every gateway-credentialed surface, so
+    the web layer never reaches into private helpers and a hardening
+    change lands everywhere at once. False when the gateway is disabled
+    or unconfigured.
+    """
+
+    try:
+        settings = get_llm_gateway_config()
+    except LLMGatewayConfigError:
+        return False
+    if settings["enable"] is not True:
+        return False
+    return _authorized(str(token or ""), settings)
+
+
 def _default_upstream(
     url: str, headers: Mapping[str, str], body: Mapping[str, Any],
 ) -> tuple[int, Any]:
@@ -166,15 +193,21 @@ def _record_call(
     prompt_sha256: str,
     usage: Mapping[str, Any] | None,
     now: float,
+    requests: int = 1,
 ) -> None:
-    """Aggregate one call into the caller ledger; never store bodies."""
+    """Aggregate call(s) into the caller ledger; never store bodies.
+
+    ``requests`` lets a pre-aggregated batch (OTel span ingestion) land as
+    one CAS write instead of one per span.
+    """
 
     record_id = f"LGC-{hashlib.sha256(f'{caller}:{model}'.encode()).hexdigest()[:24]}"
     prompt_tokens = int((usage or {}).get("prompt_tokens") or 0)
     completion_tokens = int((usage or {}).get("completion_tokens") or 0)
+    count = max(1, int(requests))
 
     def mutate(row: dict[str, Any]) -> None:
-        row["request_count"] = int(row.get("request_count") or 0) + 1
+        row["request_count"] = int(row.get("request_count") or 0) + count
         row["last_seen"] = now
         row["last_status"] = status
         row["last_prompt_sha256"] = prompt_sha256
@@ -183,6 +216,10 @@ def _record_call(
             int(row.get("completion_tokens") or 0) + completion_tokens
         )
 
+    # Shadow accounting must NEVER fail the call it is accounting for: by
+    # the time this runs the upstream completion may already have been paid
+    # for, and a full or contended ledger is not the caller's problem. Every
+    # store outcome short of success degrades to a logged, dropped row.
     for _ in range(3):
         current = _LEDGER.get(record_id)
         if current is None:
@@ -191,7 +228,7 @@ def _record_call(
                 "schema": LEDGER_SCHEMA,
                 "caller_digest": caller,
                 "model": model,
-                "request_count": 1,
+                "request_count": count,
                 "first_seen": now,
                 "last_seen": now,
                 "last_status": status,
@@ -209,13 +246,33 @@ def _record_call(
                 return
             except RecordConflict:
                 continue
-        saved = _LEDGER.update(
-            record_id,
-            mutate,
-            expected_revision=int(current.get("revision") or 0),
-            action="llm_gateway_call",
-            actor="gateway:llm",
-        )
+            except Exception:
+                # Capacity reached (each blocked_model refusal and each
+                # OTel service/model pair mints a row, so an outsider can
+                # force this) or a backend fault: drop the row, keep the
+                # response.
+                log.warning(
+                    "llm_gateway: caller ledger write dropped (capacity or "
+                    "backend fault); the call itself is unaffected"
+                )
+                return
+        try:
+            saved = _LEDGER.update(
+                record_id,
+                mutate,
+                expected_revision=int(current.get("revision") or 0),
+                action="llm_gateway_call",
+                actor="gateway:llm",
+            )
+        except RecordConflict:
+            # Concurrent same-caller call won the CAS: re-read and retry.
+            continue
+        except Exception:
+            log.warning(
+                "llm_gateway: caller ledger update dropped (backend fault); "
+                "the call itself is unaffected"
+            )
+            return
         if saved is not None:
             return
     log.warning("llm_gateway: caller ledger update lost a CAS race repeatedly")
@@ -306,6 +363,12 @@ def ingest_otel_spans(payload: object) -> dict[str, int]:
     now = time.time()
     ingested = 0
     skipped = 0
+    # Pre-aggregate per (caller, model): a collector batch commonly holds
+    # hundreds of spans for one service+model, and one governed CAS write
+    # per PAIR beats one per span. Any malformed span — wrong shapes,
+    # non-numeric usage values — counts as skipped and never aborts the
+    # batch (a mid-batch abort plus collector retry double-counts).
+    totals: dict[tuple[str, str], dict[str, int]] = {}
     for resource_spans in list(payload.get("resourceSpans") or [])[:100]:
         if not isinstance(resource_spans, Mapping):
             skipped += 1
@@ -315,43 +378,56 @@ def ingest_otel_spans(payload: object) -> dict[str, int]:
             resource.get("attributes") if isinstance(resource, Mapping) else [],
             "service.name",
         ) or "unknown-service"
+        caller = hashlib.sha256(
+            f"otel-service:{service}".encode()
+        ).hexdigest()[:24]
         for scope_spans in list(resource_spans.get("scopeSpans") or [])[:100]:
             if not isinstance(scope_spans, Mapping):
                 continue
             for span in list(scope_spans.get("spans") or [])[:1000]:
-                if not isinstance(span, Mapping):
+                try:
+                    if not isinstance(span, Mapping):
+                        raise ValueError("span must be an object")
+                    attributes = span.get("attributes") or []
+                    system = _otel_attr(attributes, "gen_ai.system")
+                    model = (
+                        _otel_attr(attributes, "gen_ai.request.model")
+                        or _otel_attr(attributes, "gen_ai.response.model")
+                    )
+                    if not system and not model:
+                        raise ValueError("span carries no GenAI identity")
+                    prompt_tokens = int(float(
+                        _otel_attr(attributes, "gen_ai.usage.input_tokens")
+                        or 0
+                    ))
+                    completion_tokens = int(float(
+                        _otel_attr(attributes, "gen_ai.usage.output_tokens")
+                        or 0
+                    ))
+                except Exception:
                     skipped += 1
                     continue
-                attributes = span.get("attributes") or []
-                system = _otel_attr(attributes, "gen_ai.system")
-                model = (
-                    _otel_attr(attributes, "gen_ai.request.model")
-                    or _otel_attr(attributes, "gen_ai.response.model")
+                bucket = totals.setdefault(
+                    (caller, model or f"{system}:unknown"),
+                    {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0},
                 )
-                if not system and not model:
-                    skipped += 1
-                    continue
-                usage = {
-                    "prompt_tokens": int(
-                        float(_otel_attr(attributes, "gen_ai.usage.input_tokens")
-                              or 0)
-                    ),
-                    "completion_tokens": int(
-                        float(_otel_attr(attributes, "gen_ai.usage.output_tokens")
-                              or 0)
-                    ),
-                }
-                _record_call(
-                    caller=hashlib.sha256(
-                        f"otel-service:{service}".encode()
-                    ).hexdigest()[:24],
-                    model=model or f"{system}:unknown",
-                    status="otel",
-                    prompt_sha256="",
-                    usage=usage,
-                    now=now,
-                )
+                bucket["requests"] += 1
+                bucket["prompt_tokens"] += max(0, prompt_tokens)
+                bucket["completion_tokens"] += max(0, completion_tokens)
                 ingested += 1
+    for (caller, model), bucket in totals.items():
+        _record_call(
+            caller=caller,
+            model=model,
+            status="otel",
+            prompt_sha256="",
+            usage={
+                "prompt_tokens": bucket["prompt_tokens"],
+                "completion_tokens": bucket["completion_tokens"],
+            },
+            now=now,
+            requests=bucket["requests"],
+        )
     return {"ingested": ingested, "skipped": skipped}
 
 
@@ -554,4 +630,5 @@ __all__ = [
     "handle_chat_completion",
     "ingest_otel_spans",
     "list_callers",
+    "verify_gateway_bearer",
 ]

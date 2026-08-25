@@ -216,3 +216,36 @@ def test_fairness_reports_record_as_honest_evidence(tmp_path):
             observation["asset_id"], {"schema": "wrong"},
             source_id="q5", actor="model-validator",
         )
+
+
+def test_fairness_evidence_rejects_a_non_numeric_impact_ratio(tmp_path):
+    (tmp_path / "config.toml").write_text(
+        "[evidence_graph]\nenable = true\n\n"
+        "[model_risk_assurance]\nenable = true\ngate_promotions = false\n\n"
+        "[explainability]\nenable = true\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    from maverick import fairness_monitor
+    from maverick import model_risk_assurance as mra
+
+    officer = mra.ModelRiskAssuranceOfficer()
+    observation = officer.observe_asset(
+        asset_type="model", source="xai_test", source_id="screener",
+        display_name="Screening model",
+        version_digest=hashlib.sha256(b"screener-v1").hexdigest(),
+        actor="inventory-operator", observed_at=time.time(),
+        metadata={}, dependencies=[],
+    )
+    report = dict(fairness_monitor.metrics_report({
+        "group_a": {"selected": 8, "total": 10},
+        "group_b": {"selected": 4, "total": 10},
+    }))
+    report["min_impact_ratio"] = None
+    # A doctored/None ratio must be a clean ValueError, never a
+    # TypeError from the summary's :.3f formatting.
+    with pytest.raises(ValueError, match="min_impact_ratio"):
+        xai.record_fairness_evidence(
+            observation["asset_id"], report,
+            source_id="q6", actor="model-validator",
+        )
