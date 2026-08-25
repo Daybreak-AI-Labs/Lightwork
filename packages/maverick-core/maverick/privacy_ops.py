@@ -2596,6 +2596,13 @@ def open_dsar_from_message(text: str, *, channel: str = "",
     )
 
 
+def get_dsar(request_id: str) -> dict | None:
+    """One DSAR request by id, or None — the read the fulfillment
+    pipeline anchors on."""
+
+    return _DSAR.load(str(request_id or "")[:64])
+
+
 def list_dsars() -> list[dict]:
     retry_pending_audits()
     now = time.time()
@@ -2921,6 +2928,13 @@ def close_incident(incident_id: str, *, closed_by: str = "") -> dict | None:
     ):
         saved = _audit_mutation(_INCIDENT, "incident", saved)
     return saved
+
+
+def get_incident(incident_id: str) -> dict | None:
+    """One privacy incident by id, or None — the read the breach planner
+    anchors on."""
+
+    return _INCIDENT.load(str(incident_id or "")[:64])
 
 
 def list_incidents() -> list[dict]:

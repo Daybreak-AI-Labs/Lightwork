@@ -546,7 +546,7 @@
         <tbody>
           {% for r in records.dsar %}
           <tr>
-            <td><code>{{ r.id }}</code></td>
+            <td><a href="/privacy/dsar/{{ r.id }}"><code>{{ r.id }}</code></a></td>
             <td>{{ r.subject_id }}{% if r.intake %}<br><span class="muted" style="font-size:var(--text-xs);" title="matched: {{ r.intake.signals | join('; ') }}">via message intake</span>{% endif %}</td>
             <td>{{ r.kind }}</td>
             <td>
@@ -568,6 +568,7 @@
                 <button class="btn pw-dsar-act" data-id="{{ r.id }}" data-act="close" type="button">Close</button>
               {% endif %}
               <button class="btn" data-pe-worksheet="{{ r.id }}" type="button">Estate worksheet</button>
+              <button class="btn pw-dsar-fulfillment" data-id="{{ r.id }}" type="button">Fulfillment</button>
             </td>
           </tr>
           {% endfor %}
@@ -575,6 +576,8 @@
       </table>
       </div>
       <div id="pe-worksheet-result"></div>
+      <div id="pw-fulfill-out" class="muted" role="status" aria-live="polite"
+           style="font-size:var(--text-sm); white-space:pre-wrap;"></div>
       <p class="muted" style="font-size:var(--text-xs);">Access and portability run the real
         subject-data export. Erasure is never destructive from here — it prepares a structured
         handoff for an authenticated operator workflow and intentionally renders no shell command.
@@ -637,14 +640,19 @@
               {% if r.status != 'closed' %}
                 <button class="btn pw-inc-close" data-id="{{ r.id }}" type="button">Close</button>
               {% endif %}
+              <button class="btn pw-breach-plan" data-id="{{ r.id }}" type="button">Breach plan</button>
             </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
       </div>
+      <div id="pw-breach-out" class="muted" role="status" aria-live="polite"
+           style="font-size:var(--text-sm); white-space:pre-wrap;"></div>
       <p class="muted" style="font-size:var(--text-xs);">The register tracks the Art. 33 clock and
-        documents the decision both ways (Art. 33(5)) — it never notifies anyone itself.</p>
+        documents the decision both ways (Art. 33(5)) — it never notifies anyone itself.
+        The breach planner computes per-regime obligations from verified rules; decision
+        support for counsel, never legal advice.</p>
       {% else %}
         <p class="muted">No incidents recorded. Opening one starts the Art. 33 72-hour clock;
           whether it is a notifiable breach stays a documented human decision.</p>
@@ -707,7 +715,7 @@
         <tbody>
           {% for v in estate.vendors %}
           <tr>
-            <td>{{ v.name }}</td>
+            <td><a href="/privacy/vendors/{{ v.id }}">{{ v.name }}</a></td>
             <td>{{ v.category }}</td>
             <td>{{ v.criticality }}</td>
             <td>{{ v.status }}</td>
@@ -1667,6 +1675,97 @@
       btn.disabled = true;
       post('/api/v1/privacy/incidents/' + encodeURIComponent(btn.dataset.id) +
            '/close').catch(function (e) { btn.disabled = false; window.alert(e.message); });
+    });
+  });
+
+  // JSON fetch that surfaces the API's detail instead of a bare status.
+  function jfetch(url, opts) {
+    return fetch(url, opts).then(function (r) {
+      return r.text().then(function (t) {
+        var d = null;
+        try { d = JSON.parse(t); } catch (e) { d = null; }
+        if (!r.ok) { throw new Error((d && d.detail) || ('HTTP ' + r.status)); }
+        return d;
+      });
+    });
+  }
+
+  // Breach plan: per-regime obligations from the verified rules matrix.
+  document.querySelectorAll('.pw-breach-plan').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var regimes = window.prompt(
+        'Regime ids, comma-separated (eu_gdpr, uk_gdpr, us_hipaa, us_ca, us_tx, ' +
+        'us_co, us_fl, us_ny, br_lgpd, ca_pipeda, au_ndb, sg_pdpa, jp_appi, kr_pipa)',
+        'eu_gdpr,us_ca,us_hipaa');
+      if (!regimes) { return; }
+      var out = document.getElementById('pw-breach-out');
+      out.textContent = 'computing…';
+      jfetch('/api/v1/privacy/incidents/' + encodeURIComponent(btn.dataset.id) +
+             '/notification-plan?jurisdictions=' + encodeURIComponent(regimes))
+        .then(function (plan) {
+          var lines = plan.obligations.map(function (o) {
+            var due = o.authority_due_at
+              ? new Date(o.authority_due_at * 1000).toISOString().slice(0, 16) + 'Z'
+              : 'per statute';
+            return o.regime + '  authority due ' + due + '  — ' + o.authority +
+                   (o.threshold_note ? '\n    note: ' + o.threshold_note : '');
+          });
+          out.textContent = lines.join('\n') + '\n' + plan.notice;
+        })
+        .catch(function (e) { out.textContent = e.message; });
+    });
+  });
+
+  // DSAR fulfillment: open, guided identity verification, mint the link.
+  document.querySelectorAll('.pw-dsar-fulfillment').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var out = document.getElementById('pw-fulfill-out');
+      out.textContent = 'opening fulfillment…';
+      var base = '/api/v1/privacy/dsar/';
+      jfetch(base + encodeURIComponent(btn.dataset.id) + '/fulfillment',
+             { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(function (rec) {
+          var lines = [rec.id + '  identity: ' + rec.identity.status +
+                       '  sources: ' + (rec.sources || []).length];
+          if (rec.identity.status !== 'verified') {
+            var method = window.prompt(
+              'Verify identity now? Method (account_login, document_check, ' +
+              'email_challenge, in_person, verified_by_processor, other) — ' +
+              'cancel to skip', 'email_challenge');
+            if (!method) { out.textContent = lines.join('\n'); return null; }
+            var ref = window.prompt('Where does the verification evidence live?', '');
+            if (!ref) { out.textContent = lines.join('\n'); return null; }
+            return jfetch('/api/v1/privacy/dsar/fulfillment/' +
+                          encodeURIComponent(rec.id) + '/identity', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method: method.trim(), reference: ref.trim(),
+                                     revision: rec.revision })
+            });
+          }
+          return rec;
+        })
+        .then(function (rec) {
+          if (!rec) { return null; }
+          if (rec.identity.status === 'verified' &&
+              window.confirm('Mint the token-gated response link now? ' +
+                             'It is shown ONCE and expires in 72h.')) {
+            return jfetch('/api/v1/privacy/dsar/fulfillment/' +
+                          encodeURIComponent(rec.id) + '/response', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ revision: rec.revision })
+            }).then(function (link) {
+              out.textContent = 'Response link (copy now, shown once):\n' +
+                                window.location.origin + link.response_path;
+              return null;
+            });
+          }
+          out.textContent = rec.id + '  identity: ' + rec.identity.status +
+                            '  sources: ' + (rec.sources || []).length;
+          return null;
+        })
+        .catch(function (e) { out.textContent = e.message; });
     });
   });
 

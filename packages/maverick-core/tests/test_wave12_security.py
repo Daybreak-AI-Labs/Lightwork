@@ -13,6 +13,15 @@ import os
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _shell_consented(monkeypatch):
+    """These tests exercise git-internals BLOCKING through the shell tool;
+    consent to running the shell is a given, stated explicitly so the
+    secure-by-default posture (consent fail-closed for high-risk actions)
+    tests the same behavior the legacy default did."""
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+
+
 @pytest.fixture
 def opaque_mode(monkeypatch):
     monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")

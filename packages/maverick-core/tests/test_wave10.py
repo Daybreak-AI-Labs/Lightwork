@@ -6,6 +6,8 @@ fix so regressions are obvious.
 """
 from __future__ import annotations
 
+import pytest
+
 # ---- D2: extract_unified_diff supports `diff --git` headers + renames ----
 
 class TestExtractUnifiedDiffGitFormat:
@@ -316,6 +318,13 @@ class TestReadFileOpaqueGuard:
 # ---- S2: shell refuses git log -p / git show in opaque mode ----
 
 class TestShellOpaqueGuard:
+    @pytest.fixture(autouse=True)
+    def _shell_consented(self, monkeypatch):
+        # These tests exercise the OPAQUE-mode guard through the shell
+        # tool; consent to running the shell is a given, stated so the
+        # secure posture tests the same guard the legacy default did.
+        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+
     def _make_sandbox(self, tmp_path):
         class _Sandbox:
             workdir = tmp_path

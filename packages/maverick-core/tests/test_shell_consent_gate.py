@@ -13,12 +13,22 @@ from maverick.sandbox import LocalBackend
 from maverick.tools.shell import shell
 
 
-def test_shell_runs_by_default(tmp_path: Path, monkeypatch):
+def test_shell_default_follows_the_posture(tmp_path: Path, monkeypatch):
+    """No MAVERICK_CONSENT_MODE set: the legacy default auto-approves;
+    the secure-by-default posture gates high-risk shell and denies it
+    non-interactively. Both are the DOCUMENTED default for their
+    posture, so this test asserts whichever one is active."""
+    import os
+
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)  # default = auto-approve
+    monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
     out = shell(LocalBackend(workdir=tmp_path)).fn({"cmd": "echo hello-shell"})
-    assert "hello-shell" in out
-    assert "denied by consent policy" not in out
+    if os.environ.get("MAVERICK_SECURE_DEFAULT", "0").lower() in (
+            "1", "true", "yes", "on"):
+        assert "denied by consent policy" in out
+    else:
+        assert "hello-shell" in out
+        assert "denied by consent policy" not in out
 
 
 def test_shell_gated_when_consent_denies(tmp_path: Path, monkeypatch):

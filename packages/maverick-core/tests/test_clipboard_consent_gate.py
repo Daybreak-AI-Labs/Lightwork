@@ -39,15 +39,18 @@ def test_clipboard_write_blocked_under_auto_deny(tmp_path: Path, monkeypatch, _f
 
 
 def test_clipboard_read_allowed_under_auto_approve(tmp_path: Path, monkeypatch, _fake_backends):
+    # The mode is SET, not inherited: under the secure posture an unset
+    # mode gates high-risk clipboard access, which the auto-deny test
+    # below covers; this one tests the approved path.
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)  # default = auto-approve
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
     out = clipboard().fn({"op": "read"})
     assert out == "SECRET"
 
 
 def test_clipboard_write_allowed_under_auto_approve(tmp_path: Path, monkeypatch, _fake_backends):
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
     out = clipboard().fn({"op": "write", "text": "hello"})
     assert "wrote 5 chars" in out
 

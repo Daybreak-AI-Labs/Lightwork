@@ -215,3 +215,130 @@ def test_schema_import_checks_capacity_once_for_the_batch(monkeypatch):
     assert result == {"imported": 1, "skipped": 1}
     names = {row["name"] for row in dm.list_data_assets()}
     assert names == {"warehouse.existing"}
+
+
+def test_content_verification_records_what_was_actually_found():
+    record = dm.register_data_asset(
+        "crm.contacts", system="snowflake", kind="table", owner="data-team",
+        actor="ops", columns=["id", "email"],
+    )
+    saved = dm.classify_asset_content(
+        record["id"],
+        "carol@example.com paid with 4111 1111 1111 1111; "
+        "patient diagnosis code E11.9",
+        actor="ops", expected_revision=record["revision"],
+    )
+    assert saved["content_categories"] == ["email", "financial", "health"]
+    assert saved["content_counts"]["email"] == 1
+    # Content findings merge into the asset's categories and flip the
+    # special-category flag when health shows up in the DATA.
+    assert "financial" in saved["categories"]
+    assert saved["special_category"] is True
+    assert saved["content_verified_by"] == "ops"
+    with pytest.raises(ValueError, match="empty"):
+        dm.classify_asset_content(record["id"], "   ", actor="ops",
+                                  expected_revision=saved["revision"])
+
+
+def test_masking_sql_emits_reviewable_ddl_and_never_more():
+    dm.register_data_asset(
+        "crm.contacts", system="snowflake", kind="table", owner="data-team",
+        actor="ops", columns=["id", "email", "phone"],
+    )
+    sql = dm.masking_policy_sql()
+    assert sql.startswith("-- Lightwork data-map masking policies")
+    assert "never executes" in sql
+    assert 'CREATE MASKING POLICY IF NOT EXISTS "LIGHTWORK_MASK_EMAIL"' in sql
+    assert ('ALTER TABLE "CRM"."CONTACTS" MODIFY COLUMN "EMAIL" '
+            'SET MASKING POLICY "LIGHTWORK_MASK_EMAIL";') in sql
+    # Deterministic output for an unchanged register.
+    assert sql == dm.masking_policy_sql()
+    with pytest.raises(ValueError, match="snowflake"):
+        dm.masking_policy_sql(system="bigquery")
+
+
+def test_masking_sql_role_is_configurable_and_multi_category_is_noted():
+    dm.register_data_asset(
+        "hr.people", system="snowflake", kind="table", owner="hr",
+        actor="ops", columns=["id", "dob"],
+    )
+    sql = dm.masking_policy_sql(unmasked_role="privacy_admin")
+    assert "CURRENT_ROLE() IN ('PRIVACY_ADMIN')" in sql
+    with pytest.raises(ValueError, match="UPPER_SNAKE_CASE"):
+        dm.masking_policy_sql(unmasked_role="bad role;drop")
+    # A column matching several categories carries a comment for the rest.
+    rec = dm.register_data_asset(
+        "crm.leads", system="snowflake", kind="table", owner="sales",
+        actor="ops", columns=["email_and_phone"],
+    )
+    if len((rec["flagged_columns"] or {}).get("email_and_phone", [])) > 1:
+        sql = dm.masking_policy_sql()
+        assert "also flagged:" in sql
+
+
+def test_sharepoint_file_scan_records_evidence_never_content():
+    asset = dm.register_data_asset(
+        "Legal Hub", system="sharepoint", kind="site", owner="it",
+        actor="ops", source="microsoft_graph")
+    listed: list[str] = []
+    downloaded: list[str] = []
+
+    def fetcher(url: str) -> dict:
+        listed.append(url)
+        return {"value": [
+            {"id": "item-1!a", "name": "employees.csv", "size": 120,
+             "file": {}},
+            {"id": "item-2!b", "name": "logo.png", "size": 90, "file": {}},
+            {"id": "item-3!c", "name": "notes", "size": 10, "folder": {}},
+        ]}
+
+    def downloader(url: str) -> str:
+        downloaded.append(url)
+        return "reach me at alice@example.com or +1 415 555 2671"
+
+    saved = dm.scan_sharepoint_site_files(
+        asset["id"], site_id="contoso.sharepoint.com,guid-1,guid-2",
+        actor="ops", expected_revision=asset["revision"],
+        fetcher=fetcher, downloader=downloader)
+
+    assert listed[0].startswith(
+        "https://graph.microsoft.com/v1.0/sites/"
+        "contoso.sharepoint.com,guid-1,guid-2/drive/root/children")
+    # Only the text-format FILE was fetched: the image and folder were not.
+    assert downloaded == [
+        "https://graph.microsoft.com/v1.0/sites/"
+        "contoso.sharepoint.com,guid-1,guid-2/drive/items/item-1!a/content"]
+    assert saved["file_scan"]["files_sampled"] == 1
+    assert saved["file_scan"]["files_skipped"] == 2
+    assert saved["file_scan"]["flagged_files"] == [
+        {"name": "employees.csv", "categories": ["email", "phone"]}]
+    assert set(saved["content_categories"]) == {"email", "phone"}
+    assert "email" in saved["categories"]
+    # Evidence only: no sampled byte lands on the governed record.
+    assert "alice@example.com" not in str(saved)
+
+
+def test_sharepoint_file_scan_validates_identifiers_and_token():
+    asset = dm.register_data_asset(
+        "Ops", system="sharepoint", kind="site", owner="it", actor="ops")
+    with pytest.raises(ValueError, match="site identifier"):
+        dm.scan_sharepoint_site_files(
+            asset["id"], site_id="bad/../id", actor="ops",
+            expected_revision=asset["revision"],
+            fetcher=lambda _u: {"value": []}, downloader=lambda _u: "")
+    with pytest.raises(dm.DataMapConfigError, match="Files.Read.All"):
+        dm.scan_sharepoint_site_files(
+            asset["id"], site_id="contoso.sharepoint.com,g1,g2",
+            actor="ops", expected_revision=asset["revision"])
+    # A hostile item id from the listing is skipped, not URL-spliced.
+    saved = dm.scan_sharepoint_site_files(
+        asset["id"], site_id="contoso.sharepoint.com,g1,g2", actor="ops",
+        expected_revision=asset["revision"],
+        fetcher=lambda _u: {"value": [
+            {"id": "../items/evil", "name": "x.txt", "size": 5,
+             "file": {}}]},
+        downloader=lambda _u: (_ for _ in ()).throw(AssertionError("fetched")),
+    )
+    assert saved["file_scan"] == {
+        "site_id": "contoso.sharepoint.com,g1,g2", "files_listed": 1,
+        "files_sampled": 0, "files_skipped": 1, "flagged_files": []}

@@ -12,7 +12,10 @@ from pathlib import Path
 from maverick.world_model import SCHEMA_VERSION, WorldModel
 
 
-def test_fts_index_is_rebuilt_on_upgrade(tmp_path: Path) -> None:
+def test_fts_index_is_rebuilt_on_upgrade(tmp_path: Path, monkeypatch) -> None:
+    # FTS matches plaintext content only; under the secure default an unset
+    # flag seals messages, so pin encryption explicitly off for this premise.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     db = tmp_path / "w.db"
     w = WorldModel(db)
     gid = w.create_goal("g", "")

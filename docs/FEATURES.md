@@ -1118,6 +1118,13 @@ here.
   information principles, valid-consent s.6.1, breach-of-safeguards
   s.10.1) join the questionnaire chassis; both surface in the dashboard's
   privacy department. Structured self-assessment, never legal advice.
+- **ISO/IEC 27701 PIMS readiness template** (`iso27701` in
+  `assessment.py`) — privacy-information-management readiness on top of
+  an ISO 27001 ISMS: scope and controller/processor roles, PII
+  inventory, legal basis and consent, data-subject requests, processor
+  contracts, transfers, privacy by design, breach response, retention,
+  awareness, the management-system loop, and the SoA. Original
+  paraphrases; completing it is not certification.
 - **Third-party vendor register** (`vendor_management.py`, opt-in
   `[vendor_management] enable`, `maverick vendor`, `/api/v1/vendors`) —
   governed vendor records with criticality tiers and lifecycle status,
@@ -1132,9 +1139,13 @@ here.
   consent`, `/api/v1/consent/*`) — per-subject, per-purpose consent
   events (status, policy version, channel) with salted one-way subject
   digests, self-checking per-event receipt hashes, a current-preference
-  projection, bounded audit export, and a OneTrust consent CSV importer.
-  The governed record behind a consent front end — never a cookie
-  banner, IAB TCF CMP, or preference-center UI, and stated so.
+  projection, bounded audit export, a OneTrust consent CSV importer, and
+  a signed consent WEBHOOK (`POST /consent/webhook`, opt-in
+  `webhook_enable` + an HMAC secret from the environment variable named
+  by `webhook_secret_env`) so any CMP can push events into the durable
+  record — backdated pushes can never flip a newer withdrawal. The
+  governed record behind a consent front end — never a cookie banner,
+  IAB TCF CMP, or preference-center UI, and stated so.
 - **Data map and discovery** (`data_map.py`, opt-in `[data_map] enable`,
   `maverick data-map`, `/api/v1/data-map/*`) — a governed register of
   data assets with a pure-Python column-name classifier (email, phone,
@@ -1144,8 +1155,47 @@ here.
   Redshift/Postgres exports), a bounded SharePoint site census via
   Microsoft Graph (`Sites.Read.All`, SSRF-pinned, egress-guarded), links
   from assets to the RoPA/assessment/vendor records that govern them,
-  and an unlinked-flagged-assets posture signal. Name-based triage for a
-  human data-mapping exercise, never a content scanner.
+  and an unlinked-flagged-assets posture signal. On top of the
+  name-based triage, a deterministic CONTENT classifier
+  (`content_classifier.py`, `maverick data-map classify-content`,
+  `POST /api/v1/data-map/assets/{id}/classify-content`) verifies real
+  data samples with recomputable checks — Luhn for payment cards, mod-97
+  for IBANs, SSA structural rules for SSNs, octet-validated IPs,
+  context-gated DOB/ICD-10 — recording `content_categories` beside the
+  name-suggested ones (an auditor can recompute every finding; no ML
+  scores). A Snowflake masking-policy DDL exporter (`maverick data-map
+  masking-sql`, `GET /api/v1/data-map/masking-sql`) turns flagged
+  columns into reviewable `CREATE MASKING POLICY`/`ALTER TABLE` SQL —
+  emitted, never executed. Sampling and emission, never a crawler.
+- **Deterministic text redaction** (`redaction.py`) — replaces the
+  content classifier's validated findings with typed placeholders
+  (`[REDACTED:email]`); span-exact, idempotent on its own output, text
+  only by design (no OCR — a dependency decision, not a drive-by). Used
+  by the DSAR response path to scrub third-party identifiers.
+- **Breach-notification planner** (`breach_notification.py`, opt-in
+  `[breach_notification] enable`, `maverick breach`,
+  `POST /api/v1/breach/plan`,
+  `GET /api/v1/privacy/incidents/{id}/notification-plan`) — fourteen
+  regimes' verified who/when/whether rules (GDPR/UK 72h; HIPAA 60d with
+  the 500 split; CA/TX/CO/FL/NY state clocks; LGPD 3 business days per
+  ANPD Res. 15/2024; PIPEDA RROSH; Australia NDB 30-day assessment;
+  Singapore 3-day post-determination; Japan two-stage 30/60d; Korea 72h)
+  turned into per-incident obligations with computed due timestamps,
+  threshold notes, and citations. Weekend-aware business-day math
+  (holidays excluded, stated); unverified regimes are absent by design,
+  named in the refusal. Decision support for counsel, never legal
+  advice; nothing is transmitted.
+- **DSAR fulfillment pipeline** (`dsar_fulfillment.py`, opt-in
+  `[dsar_fulfillment] enable`, `maverick dsar-fulfill`,
+  `/api/v1/privacy/dsar/*/fulfillment*`, public
+  `GET /dsar/response/{token}`) — executes a subject request as a
+  governed pipeline: a named human records HOW identity was verified
+  (fixed method vocabulary), collection sources are logged toward a
+  completeness record, and the response ships through a token-gated link
+  (token stored only as a SHA-256 digest, with expiry) assembled at
+  delivery time from the live stores — no second copy of personal data
+  is persisted — with third-party identifiers scrubbed by the
+  deterministic redactor, the subject's own reference preserved.
 - **Governance needs-attention digest** (`governance_alerts.py`,
   `maverick governance-alerts due`, `GET /api/v1/security/governance/alerts`)
   — one bounded read-side digest of what compliance must act on: Art. 73

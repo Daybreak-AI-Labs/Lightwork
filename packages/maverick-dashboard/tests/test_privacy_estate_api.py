@@ -383,3 +383,149 @@ def test_privacy_page_dropdowns_come_from_module_vocab():
         assert f'value="{status}"' in page
     # The importer-only channel never shows as a manual-entry choice.
     assert 'value="import"' not in page
+
+
+def test_breach_plan_endpoints(tmp_path):
+    from maverick import config
+    (tmp_path / "config.toml").write_text(
+        _CONFIG + "\n[breach_notification]\nenable = true\n",
+        encoding="utf-8")
+    config.reset_config_cache()
+    regimes = client.get("/api/v1/breach/regimes")
+    assert regimes.status_code == 200
+    assert len(regimes.json()["regimes"]) == 14
+    plan = client.post("/api/v1/breach/plan", json={
+        "jurisdictions": ["eu_gdpr", "us_tx"], "subjects_affected": 900,
+    })
+    assert plan.status_code == 200, plan.text
+    rows = {row["regime"]: row for row in plan.json()["obligations"]}
+    assert rows["eu_gdpr"]["authority_due_at"] is not None
+    bad = client.post("/api/v1/breach/plan",
+                      json={"jurisdictions": ["narnia"]})
+    assert bad.status_code == 422
+    # Anchored to a real incident's discovery time.
+    opened = client.post("/api/v1/privacy/incidents", json={
+        "title": "Laptop lost", "severity": "high",
+        "affected_estimate": "about 600 people",
+    })
+    assert opened.status_code == 201, opened.text
+    incident = opened.json()
+    anchored = client.get(
+        "/api/v1/privacy/incidents/" + incident["id"]
+        + "/notification-plan?jurisdictions=eu_gdpr,us_co")
+    assert anchored.status_code == 200, anchored.text
+    body = anchored.json()
+    assert body["subjects_affected"] == 600
+    assert body["discovered_at"] == incident["created_at"]
+
+
+def test_dsar_fulfillment_flow_over_the_api(tmp_path):
+    from maverick import config
+    (tmp_path / "config.toml").write_text(
+        _CONFIG + "\n[dsar_fulfillment]\nenable = true\n",
+        encoding="utf-8")
+    config.reset_config_cache()
+    opened = client.post("/api/v1/privacy/dsar", json={
+        "subject_id": "alice@example.com", "kind": "access",
+    })
+    assert opened.status_code == 201, opened.text
+    request_id = opened.json()["id"]
+    fulfillment = client.post(
+        "/api/v1/privacy/dsar/" + request_id + "/fulfillment")
+    assert fulfillment.status_code == 201, fulfillment.text
+    record = fulfillment.json()
+    # The response link refuses before identity verification.
+    early = client.post(
+        "/api/v1/privacy/dsar/fulfillment/" + record["id"] + "/response",
+        json={"revision": record["revision"]})
+    assert early.status_code == 422
+    verified = client.post(
+        "/api/v1/privacy/dsar/fulfillment/" + record["id"] + "/identity",
+        json={"method": "email_challenge", "reference": "challenge-1",
+              "revision": record["revision"]})
+    assert verified.status_code == 200, verified.text
+    minted = client.post(
+        "/api/v1/privacy/dsar/fulfillment/" + record["id"] + "/response",
+        json={"revision": verified.json()["revision"]})
+    assert minted.status_code == 201, minted.text
+    path = minted.json()["response_path"]
+    assert path.startswith("/dsar/response/")
+    # The public link works without any dashboard credential or origin.
+    from fastapi.testclient import TestClient as _TC
+    from maverick_dashboard.app import app as _app
+    anon = _TC(_app)
+    delivered = anon.get(path)
+    assert delivered.status_code == 200, delivered.text
+    assert delivered.json()["request_id"] == request_id
+    assert anon.get("/dsar/response/wrong-token").status_code == 404
+    status = client.get("/api/v1/privacy/dsar/" + request_id + "/fulfillment")
+    assert status.status_code == 200
+    assert "token_sha256" not in (status.json()["response"] or {})
+
+
+def test_consent_webhook_over_http(tmp_path, monkeypatch):
+    import hashlib as _hashlib
+    import hmac as _hmac
+    import json as _json
+
+    from maverick import config
+    (tmp_path / "config.toml").write_text(
+        _CONFIG.replace(
+            "[consent_registry]\nenable = true\n",
+            "[consent_registry]\nenable = true\nwebhook_enable = true\n",
+        ),
+        encoding="utf-8")
+    config.reset_config_cache()
+    monkeypatch.setenv("MAVERICK_CONSENT_WEBHOOK_SECRET",
+                       "whsec-0123456789abcdef")
+    import time as _time
+    ts = int(_time.time())
+    body = _json.dumps({"subject": "alice@example.com",
+                        "purpose": "marketing",
+                        "status": "granted"}).encode()
+    signature = _hmac.new(b"whsec-0123456789abcdef",
+                          f"{ts}.".encode() + body,
+                          _hashlib.sha256).hexdigest()
+    from fastapi.testclient import TestClient as _TC
+    from maverick_dashboard.app import app as _app
+    anon = _TC(_app)  # no Origin, no bearer: the HMAC is the auth
+    accepted = anon.post("/consent/webhook", content=body,
+                         headers={"X-Lightwork-Signature": signature,
+                                  "X-Lightwork-Timestamp": str(ts)})
+    assert accepted.status_code == 202, accepted.text
+    assert accepted.json() == {"imported": 1, "skipped": 0}
+    assert anon.post("/consent/webhook", content=body,
+                     headers={"X-Lightwork-Signature": "0" * 64,
+                              "X-Lightwork-Timestamp": str(ts)}
+                     ).status_code == 401
+    # Stale signed timestamp -> replay guard, same 401.
+    old_ts = ts - 3600
+    old_sig = _hmac.new(b"whsec-0123456789abcdef",
+                        f"{old_ts}.".encode() + body,
+                        _hashlib.sha256).hexdigest()
+    assert anon.post("/consent/webhook", content=body,
+                     headers={"X-Lightwork-Signature": old_sig,
+                              "X-Lightwork-Timestamp": str(old_ts)}
+                     ).status_code == 401
+
+
+def test_consent_webhook_off_is_403():
+    assert client.post("/consent/webhook", content=b"{}").status_code == 403
+
+
+def test_content_classify_and_masking_sql_over_the_api():
+    created = client.post("/api/v1/data-map/assets", json={
+        "name": "crm.contacts", "system": "snowflake", "kind": "table",
+        "owner": "data-team", "columns": ["id", "email"],
+    })
+    assert created.status_code == 201, created.text
+    asset = created.json()
+    verified = client.post(
+        "/api/v1/data-map/assets/" + asset["id"] + "/classify-content",
+        json={"text_sample": "reach carol@example.com",
+              "revision": asset["revision"]})
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["content_categories"] == ["email"]
+    sql = client.get("/api/v1/data-map/masking-sql")
+    assert sql.status_code == 200
+    assert "MASKING POLICY" in sql.text

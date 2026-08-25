@@ -141,6 +141,10 @@ class TestWrap:
 
     def test_write_with_approver_commits(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "ops@corp")
+        # The approver-of-record IS the consent in standard mode; pin the
+        # consent primitive to auto-approve so the secure default (which
+        # demands an interactive decision for high risk) doesn't veto it.
+        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
         calls = []
         wrapped = wrap_connector_tool(_fake_tool(calls))
         out = wrapped.fn({"op": "post", "path": "/accounts"})
@@ -207,6 +211,7 @@ class TestWrap:
 
     def test_graphql_mutation_with_approver_commits(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "ops@corp")
+        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
         calls = []
         wrapped = wrap_connector_tool(_graphql_tool(calls))
         out = wrapped.fn({"op": "query", "query": "mutation { create_item { id } }"})
@@ -277,6 +282,7 @@ class TestThroughRegistryRun:
         # End-to-end through ToolRegistry.run (async), proving the wrapper's sync
         # fn executes correctly in the agent's tool-execution path.
         monkeypatch.setenv("MAVERICK_GOVERNED_APPROVER", "ops")
+        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
         calls = []
         reg = ToolRegistry()
         reg.register(wrap_connector_tool(_fake_tool(calls)))

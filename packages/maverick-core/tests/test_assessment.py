@@ -30,6 +30,7 @@ def test_templates_registered_and_looked_up():
         "lgpd",
         "pipeda",
         "us_state_privacy",
+        "iso27701",
         "cppa_admt",
         "colorado_admt",
         "nyc_ll144",

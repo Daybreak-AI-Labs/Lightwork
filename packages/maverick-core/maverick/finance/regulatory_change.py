@@ -203,6 +203,40 @@ class FeedSource:
             default_domains=("finance",),
         )
 
+    @classmethod
+    def eur_lex_legislation(cls) -> FeedSource:
+        """EUR-Lex predefined RSS: all Parliament and Council legislation.
+
+        One of EUR-Lex's official predefined feeds (rssId=162, verified
+        2026-08-25). Cross-domain by nature -- new EU regulations and
+        directives across every field -- so no default domain is claimed;
+        operators route what matters via scope rules and impact mappings.
+        """
+        return cls(
+            key="eur-lex-legislation",
+            name="EUR-Lex Parliament and Council legislation",
+            jurisdiction="EU",
+            url="https://eur-lex.europa.eu/EN/display-feed.rss?rssId=162",
+            format="rss",
+        )
+
+    @classmethod
+    def edpb_news(cls) -> FeedSource:
+        """European Data Protection Board news RSS (verified 2026-08-25).
+
+        The EDPB publishes guidance, opinions, and binding decisions on
+        GDPR application -- the upstream that most often obsoletes privacy
+        evidence. Issue-level, human-review routed, like the state feeds.
+        """
+        return cls(
+            key="edpb-news",
+            name="EDPB news",
+            jurisdiction="EU",
+            url="https://www.edpb.europa.eu/feed/news_en",
+            format="rss",
+            default_domains=("privacy",),
+        )
+
 
 @dataclass(frozen=True)
 class RegulatoryCitation:

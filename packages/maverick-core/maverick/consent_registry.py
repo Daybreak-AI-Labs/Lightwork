@@ -14,7 +14,10 @@ to and the audit trail a regulator asks for. Never legal advice.
 from __future__ import annotations
 
 import hashlib
+import hmac as hmac_mod
 import json
+import os
+import re
 import time
 from typing import Any
 
@@ -94,7 +97,25 @@ def get_consent_registry_config() -> dict[str, Any]:
             "consent_registry.subject_salt must be 16-256 characters when "
             "the registry is enabled (it pseudonymizes subject identifiers)"
         )
-    return {"enable": flag, "subject_salt": salt}
+    webhook = section.get("webhook_enable", False)
+    if not isinstance(webhook, bool):
+        raise ConsentRegistryConfigError(
+            "consent_registry.webhook_enable must be a boolean"
+        )
+    secret_env = str(
+        section.get("webhook_secret_env") or "MAVERICK_CONSENT_WEBHOOK_SECRET"
+    ).strip()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,63}", secret_env):
+        raise ConsentRegistryConfigError(
+            "consent_registry.webhook_secret_env must name an environment "
+            "variable (UPPER_SNAKE_CASE)"
+        )
+    return {
+        "enable": flag,
+        "subject_salt": salt,
+        "webhook_enable": webhook,
+        "webhook_secret_env": secret_env,
+    }
 
 
 def enabled() -> bool:
@@ -519,8 +540,10 @@ _ONETRUST_CONSENT_HEADERS = {
 
 _STATUS_ALIASES = {
     "granted": "granted", "confirmed": "granted", "active": "granted",
-    "opt-in": "granted", "opt in": "granted", "given": "granted",
+    "opt-in": "granted", "opt in": "granted", "opt_in": "granted",
+    "optin": "granted", "given": "granted",
     "withdrawn": "withdrawn", "opt-out": "withdrawn", "opt out": "withdrawn",
+    "opt_out": "withdrawn", "optout": "withdrawn",
     "expired": "withdrawn", "revoked": "withdrawn",
 }
 
@@ -569,6 +592,123 @@ def import_onetrust_consents(
     return {"imported": imported, "skipped": skipped}
 
 
+_WEBHOOK_MAX_BYTES = 256 * 1024
+_WEBHOOK_MAX_EVENTS = 100
+#: Accepted clock skew between the sender's signed timestamp and now.
+#: Outside this window a delivery is refused — the replay guard.
+_WEBHOOK_TOLERANCE_SECONDS = 300
+
+
+def webhook_enabled() -> bool:
+    try:
+        settings = get_consent_registry_config()
+        return settings["enable"] is True and settings["webhook_enable"] is True
+    except Exception:
+        return False
+
+
+def ingest_consent_webhook(
+    body: bytes, signature: str, timestamp: object, *,
+    actor: str = "webhook",
+) -> dict[str, int]:
+    """Ingest a signed consent-event push from ANY consent front end.
+
+    The durable-record-behind-your-CMP contract, inbound: a front end
+    POSTs ``{"events": [{subject, purpose, status, policy_version?,
+    channel?, recorded_at?}]}`` (or one bare event object) with a unix
+    ``timestamp`` and ``HMAC-SHA256(secret, f"{timestamp}.{body}")`` as
+    a hex digest. The secret comes from the environment variable named
+    by ``consent_registry.webhook_secret_env`` — never from config.
+
+    Replay guard, two layers: the timestamp is INSIDE the signature and
+    must be within ±300s of now, and it becomes the default
+    ``recorded_at`` for events that carry none — so a captured delivery
+    replayed later is refused at the window, and even a replay inside
+    the window re-enters at its ORIGINAL time, where the projection's
+    backdate protection makes it a no-op against any newer withdrawal.
+    Signature failures raise before any parsing beyond byte length;
+    per-event failures skip, they never abort the batch.
+    """
+
+    _require_enabled()
+    settings = get_consent_registry_config()
+    if settings["webhook_enable"] is not True:
+        raise ConsentRegistryConfigError(
+            "the consent webhook requires [consent_registry] "
+            "webhook_enable = true"
+        )
+    secret = os.environ.get(settings["webhook_secret_env"], "")
+    if len(secret) < 16:
+        raise ConsentRegistryConfigError(
+            f"the webhook secret env {settings['webhook_secret_env']} must "
+            "hold at least 16 characters"
+        )
+    if not isinstance(body, (bytes, bytearray)) or len(body) > _WEBHOOK_MAX_BYTES:
+        raise ValueError(
+            f"body must be at most {_WEBHOOK_MAX_BYTES} bytes")
+    try:
+        signed_at = int(str(timestamp or "").strip())
+    except ValueError as exc:
+        raise ValueError(
+            "timestamp must be unix seconds (X-Lightwork-Timestamp)"
+        ) from exc
+    if abs(time.time() - signed_at) > _WEBHOOK_TOLERANCE_SECONDS:
+        raise PermissionError(
+            f"webhook timestamp outside the ±{_WEBHOOK_TOLERANCE_SECONDS}s "
+            "window (replay guard)"
+        )
+    expected = hmac_mod.new(
+        secret.encode(), f"{signed_at}.".encode() + bytes(body),
+        hashlib.sha256,
+    ).hexdigest()
+    provided = str(signature or "").strip().lower().removeprefix("sha256=")
+    if not hmac_mod.compare_digest(expected, provided):
+        raise PermissionError("webhook signature mismatch")
+    try:
+        payload = json.loads(bytes(body) or b"{}")
+    except ValueError as exc:
+        raise ValueError("webhook body is not valid JSON") from exc
+    if isinstance(payload, dict) and isinstance(payload.get("events"), list):
+        events = payload["events"]
+    elif isinstance(payload, dict):
+        events = [payload]
+    else:
+        raise ValueError("webhook body must be an event or {'events': [...]}")
+    if len(events) > _WEBHOOK_MAX_EVENTS:
+        raise ValueError(
+            f"at most {_WEBHOOK_MAX_EVENTS} events per delivery")
+    operator = str(actor or "webhook").strip()[:256] or "webhook"
+    imported = 0
+    skipped = 0
+    for event in events:
+        if not isinstance(event, dict):
+            skipped += 1
+            continue
+        status = _STATUS_ALIASES.get(str(event.get("status") or "").lower())
+        channel = str(event.get("channel") or "api")
+        recorded_at = event.get("recorded_at")
+        try:
+            record_consent(
+                str(event.get("subject") or ""),
+                purpose=str(event.get("purpose") or ""),
+                status=status or "",
+                policy_version=str(event.get("policy_version") or "webhook"),
+                channel=channel if channel in CHANNELS else "api",
+                actor=operator,
+                # An event without its own time anchors to the SIGNED
+                # delivery time, never to ingest time — replays re-enter
+                # at their original position in history.
+                recorded_at=(
+                    float(recorded_at) if recorded_at is not None
+                    else float(signed_at)
+                ),
+            )
+            imported += 1
+        except Exception:
+            skipped += 1
+    return {"imported": imported, "skipped": skipped}
+
+
 __all__ = [
     "CHANNELS",
     "ConsentRegistryConfigError",
@@ -582,6 +722,7 @@ __all__ = [
     "get_consent_registry_config",
     "get_notice",
     "import_onetrust_consents",
+    "ingest_consent_webhook",
     "list_notices",
     "notice_coverage",
     "publish_notice",
@@ -589,5 +730,6 @@ __all__ = [
     "scan_site",
     "subject_digest",
     "subject_preferences",
+    "webhook_enabled",
     "withdraw_consent",
 ]

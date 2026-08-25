@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}{{ vendor.name }} · Lightwork{% endblock %}
+{% block content %}
+  <p class="muted" style="margin-bottom: var(--space-2);"><a href="/privacy">← Privacy workspace</a></p>
+  <h1 class="page-title">{{ vendor.name }}</h1>
+  <p class="page-subtitle">
+    <span class="badge {{ 'done' if vendor.status == 'active' else 'warn' if vendor.status == 'under_review' else '' }}">{{ vendor.status | replace('_', ' ') }}</span>
+    · {{ vendor.category or 'uncategorized' }}
+    · criticality <strong>{{ vendor.criticality }}</strong>
+    {% if vendor.owner %} · owned by {{ vendor.owner }}{% endif %}
+  </p>
+
+  <div class="panel">
+    <p class="muted" style="margin: 0;">
+      Registered {{ vendor.registered_at_date or '—' }} by {{ vendor.registered_by or '—' }}
+      · source <code>{{ vendor.source }}</code>
+      · record <code>{{ vendor.id }}</code> at revision {{ vendor.revision }}
+    </p>
+  </div>
+
+  <div class="section-head"><h2>Contracts</h2></div>
+  <div class="panel{% if not vendor.contracts %} empty{% endif %}">
+    {% if vendor.contracts %}
+      <table>
+        <thead><tr><th scope="col">kind</th><th scope="col">reference</th>
+          <th scope="col">renews</th><th scope="col">recorded by</th></tr></thead>
+        <tbody>
+        {% for c in vendor.contracts %}
+          <tr>
+            <td><code>{{ c.kind }}</code></td>
+            <td>{{ c.reference }}</td>
+            <td {% if c.overdue %}class="pw-due-warn"{% endif %}>{{ c.renews_date }}{% if c.overdue %} — overdue{% endif %}</td>
+            <td class="muted">{{ c.recorded_by }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No contracts on file — record the DPA and MSA from the
+        Privacy workspace so renewals are watched.</p>
+    {% endif %}
+  </div>
+
+  <div class="section-head"><h2>Questionnaires</h2></div>
+  <div class="panel{% if not vendor.questionnaires %} empty{% endif %}">
+    {% if vendor.questionnaires %}
+      <table>
+        <thead><tr><th scope="col">assessment</th><th scope="col">status</th>
+          <th scope="col">requested</th><th scope="col">by</th></tr></thead>
+        <tbody>
+        {% for q in vendor.questionnaires %}
+          <tr>
+            <td><code>{{ q.assessment_type }}</code></td>
+            <td><span class="badge {{ 'done' if q.status == 'answered' else 'info' }}">{{ q.status }}</span></td>
+            <td>{{ q.requested_at_date }}</td>
+            <td class="muted">{{ q.requested_by }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No questionnaires sent yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="section-head"><h2>Linked records</h2></div>
+  <div class="panel{% if not vendor.links %} empty{% endif %}">
+    {% if vendor.links %}
+      <table>
+        <thead><tr><th scope="col">kind</th><th scope="col">reference</th></tr></thead>
+        <tbody>
+        {% for l in vendor.links %}
+          <tr><td><code>{{ l.kind }}</code></td><td>{{ l.reference }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No DPA reviews, assessments, or other specialist records
+        linked to this vendor yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="section-head"><h2>Monitoring notes</h2></div>
+  <div class="panel{% if not vendor.monitoring_notes %} empty{% endif %}">
+    {% if vendor.monitoring_notes %}
+      <table>
+        <thead><tr><th scope="col">severity</th><th scope="col">note</th>
+          <th scope="col">recorded</th><th scope="col">by</th></tr></thead>
+        <tbody>
+        {% for n in vendor.monitoring_notes %}
+          <tr>
+            <td><span class="badge {{ 'warn' if n.severity == 'warning' else 'error' if n.severity == 'critical' else 'info' }}">{{ n.severity }}</span></td>
+            <td>{{ n.note }}</td>
+            <td>{{ n.recorded_at_date }}</td>
+            <td class="muted">{{ n.recorded_by }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No monitoring notes recorded.</p>
+    {% endif %}
+  </div>
+{% endblock %}

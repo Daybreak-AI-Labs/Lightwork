@@ -281,12 +281,16 @@ def _write_one_event(*, sign: bool):
     return log.audit_dir
 
 
-def test_audit_chain_unsigned_when_signing_off():
+def test_audit_chain_unsigned_when_signing_off(monkeypatch):
     """Day-files written with signing OFF report ``unsigned`` (not ``broken``).
 
     ``unsigned`` is a benign configuration state; conflating it with ``broken``
     would falsely alarm an auditor. Works whether or not crypto is installed.
+    The deployment must be CONFIGURED signing-off, not just write unsigned
+    rows: under the secure default signing is otherwise expected, and unsigned
+    rows on a signing host are correctly treated as a strip attack.
     """
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "0")
     _write_one_event(sign=False)
     probe = soc2.collect_soc2_evidence()["audit_log"]
     # With crypto present the per-row "missing hash/sig" maps to ``unsigned``.

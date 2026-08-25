@@ -1073,3 +1073,40 @@ def test_guarded_fetch_enforces_declared_response_limit(monkeypatch):
     monkeypatch.setattr(http_fetch, "guarded_urlopen", lambda *_args, **_kwargs: Response())
     with pytest.raises(FeedFetchError, match="5 MiB"):
         fetch_feed(FeedSource.federal_register())
+
+
+def test_builtin_edpb_news_routes_privacy_guidance(tmp_path):
+    engine = RegulatoryChangeEngine(tmp_path / "edpb.sqlite3")
+    source = FeedSource.edpb_news()
+    payload = b"""<rss version='2.0'><channel>
+      <title>EDPB news</title>
+      <item><title>Guidelines 01/2026 on AI model training under the GDPR</title>
+        <link>https://www.edpb.europa.eu/news/2026/guidelines-ai-training</link>
+        <description>Adopted guidelines on lawful bases for model training</description>
+      </item>
+    </channel></rss>"""
+
+    result = engine.ingest(
+        source, payload, enabled_domains={"privacy"}, fetched_at=_FETCHED_AT)
+    assert result.alerts_created == 1
+    alert = engine.list_alerts()[0]
+    assert alert.matched_domains == ("privacy",)
+    assert alert.citations[0].source_name == "EDPB news"
+    assert alert.citations[0].feed_url.startswith("https://www.edpb.europa.eu/")
+
+
+def test_builtin_eur_lex_source_is_valid_and_unclaimed(tmp_path):
+    source = FeedSource.eur_lex_legislation()
+    assert source.jurisdiction == "EU" and source.format == "rss"
+    # Cross-domain feed: claims no default domain; scope rules decide.
+    assert source.default_domains == ()
+    engine = RegulatoryChangeEngine(tmp_path / "eurlex.sqlite3")
+    payload = b"""<rss version='2.0'><channel><title>legislation</title>
+      <item><title>CELEX:32026R0001: Regulation (EU) 2026/1</title>
+        <link>https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32026R0001</link>
+        <description>A new regulation</description>
+      </item></channel></rss>"""
+    result = engine.ingest(source, payload, enabled_domains=set(),
+                           fetched_at=_FETCHED_AT)
+    # No domain claimed and none enabled: versioned but unmatched, no alert.
+    assert result.items_seen == 1 and result.alerts_created == 0

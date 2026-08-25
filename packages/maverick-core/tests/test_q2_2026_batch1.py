@@ -392,6 +392,9 @@ def test_clipboard_kill_switch(monkeypatch):
 
 def test_clipboard_read_via_pyperclip(monkeypatch):
     monkeypatch.delenv("MAVERICK_CLIPBOARD_DISABLE", raising=False)
+    # Subject is the pyperclip transport, not the consent gate (covered in
+    # test_clipboard_consent_gate); grant consent explicitly for the posture.
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
     fake_pyperclip = MagicMock()
     fake_pyperclip.paste.return_value = "from clipboard"
     with patch.dict("sys.modules", {"pyperclip": fake_pyperclip}):

@@ -29,6 +29,16 @@ from maverick.paths import TenantPolicyError, current_tenant_id, tenant_scope
 from maverick.tools import Tool, ToolRegistry
 
 
+@pytest.fixture(autouse=True)
+def _generation_consented(monkeypatch):
+    """These tests exercise generated-tool ISOLATION and registration
+    semantics; consenting to the generation actions is a given, stated
+    explicitly so the secure-by-default posture (consent fail-closed for
+    high-risk actions) tests the same behavior the legacy default did.
+    The consent gate itself is covered by its own test files."""
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
+
+
 def make_response(text: str = "") -> LLMResponse:
     return LLMResponse(text=text, thinking=None, tool_calls=[], stop_reason="end_turn")
 

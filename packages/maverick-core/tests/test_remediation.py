@@ -38,7 +38,12 @@ def test_auto_fix_off_by_default_and_needs_enterprise_plus_optin(monkeypatch):
     assert auto_fix_enabled() is True                  # both -> enabled
 
 
-def test_plan_separates_auto_fixable_from_gated():
+def test_plan_separates_auto_fixable_from_gated(monkeypatch):
+    # The plan only lists CLOSED gaps as gaps: under the secure default,
+    # signing and sealing are already on and would drop off the list. Pin an
+    # explicitly-hardened-off deployment so the classification stays testable.
+    monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "0")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     gaps = {g.control: g for g in plan().gaps}
     # reversible, in-boundary flips -> auto
     assert gaps["Tamper-evident audit"].auto is True

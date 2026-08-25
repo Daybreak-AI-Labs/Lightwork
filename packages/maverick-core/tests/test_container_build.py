@@ -29,7 +29,10 @@ def _ctx(tmp_path, name="ctx"):
     return name  # workspace-relative
 
 
-def test_build_issues_validated_docker_command(tmp_path):
+def test_build_issues_validated_docker_command(tmp_path, monkeypatch):
+    # This test is about command construction, not the consent gate (covered
+    # below); grant consent explicitly so the secure default can't veto it.
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
     sb = _FakeSandbox(tmp_path)
     out = container_build(sb).fn(
         {
@@ -45,7 +48,8 @@ def test_build_issues_validated_docker_command(tmp_path):
     assert "docker build ok for myapp:dev" in out
 
 
-def test_build_reports_failure(tmp_path):
+def test_build_reports_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
     sb = _FakeSandbox(tmp_path, _Res(code=1, out="step 2/3", err="boom"))
     out = container_build(sb).fn(
         {"op": "build", "context": _ctx(tmp_path), "tag": "x:y"}

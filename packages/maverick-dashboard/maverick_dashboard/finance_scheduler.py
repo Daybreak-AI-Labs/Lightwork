@@ -48,21 +48,31 @@ def _poll_seconds(section: Mapping[str, Any]) -> float:
     return result
 
 
+def _preset_sources(section: Mapping[str, Any]) -> list:
+    """The built-in official feeds, each behind its boolean opt-in."""
+    from maverick.finance.regulatory_change import FeedSource
+
+    presets = (
+        ("federal_register_enable", True, FeedSource.federal_register),
+        ("texas_register_enable", False, FeedSource.texas_register),
+        ("eur_lex_enable", False, FeedSource.eur_lex_legislation),
+        ("edpb_enable", False, FeedSource.edpb_news),
+    )
+    sources = []
+    for knob, default, build in presets:
+        value = section.get(knob, default)
+        if not isinstance(value, bool):
+            raise ValueError(f"{knob} must be boolean")
+        if value:
+            sources.append(build())
+    return sources
+
+
 def configured_sources(section: Mapping[str, Any]):
     """Build bounded explicit sources; malformed state-feed config fails closed."""
     from maverick.finance.regulatory_change import FeedSource
 
-    sources = []
-    federal = section.get("federal_register_enable", True)
-    if not isinstance(federal, bool):
-        raise ValueError("federal_register_enable must be boolean")
-    if federal:
-        sources.append(FeedSource.federal_register())
-    texas = section.get("texas_register_enable", False)
-    if not isinstance(texas, bool):
-        raise ValueError("texas_register_enable must be boolean")
-    if texas:
-        sources.append(FeedSource.texas_register())
+    sources = _preset_sources(section)
     raw_state = section.get("state_feeds", [])
     if not isinstance(raw_state, list) or len(raw_state) > _MAX_STATE_FEEDS:
         raise ValueError(f"state_feeds must be a list of no more than {_MAX_STATE_FEEDS} feeds")

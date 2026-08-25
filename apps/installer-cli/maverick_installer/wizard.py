@@ -1769,6 +1769,14 @@ def pick_finance() -> dict[str, Any]:
             "  Poll the official Texas Register RSS and queue each issue for review?",
             default=False,
         )
+        operations["eur_lex_enable"] = _q_confirm(
+            "  Poll EUR-Lex (all EU Parliament and Council legislation) for review?",
+            default=False,
+        )
+        operations["edpb_enable"] = _q_confirm(
+            "  Poll the EDPB news feed (GDPR guidance and decisions) for review?",
+            default=False,
+        )
         operations["regulatory_domains"] = _q_checkbox(
             "  Regulatory domains to route into the review queue:",
             ["finance", "money_transmitter", "insurance_producer", "lending"],
@@ -2173,11 +2181,30 @@ def pick_advanced() -> dict[str, Any]:
         ),
         "data_map": _q_confirm(
             "Data map and discovery? A governed register of data assets "
-            "with a column-name classifier that flags likely personal-data "
-            "categories, an information_schema CSV importer for "
-            "warehouses, and a SharePoint site census via Microsoft Graph. "
-            "Name-based triage for a human data-mapping exercise, never a "
-            "content scanner. OFF by default.",
+            "with a column-name classifier, a deterministic CONTENT "
+            "classifier for pasted data samples (Luhn/mod-97/structural "
+            "validation, never an ML guess), an information_schema CSV "
+            "importer for warehouses, a SharePoint site census via "
+            "Microsoft Graph, and a Snowflake masking-policy DDL export. "
+            "Triage for a human data-mapping exercise, never a crawler. "
+            "OFF by default.",
+            default=False,
+        ),
+        "breach_notification": _q_confirm(
+            "Breach-notification planner? Fourteen regimes' verified "
+            "who/when/whether rules (GDPR, HIPAA, six US states, LGPD, "
+            "PIPEDA, Australia, Singapore, Japan, Korea) turned into "
+            "per-incident obligations with computed deadlines and "
+            "citations. Decision support for your counsel, never legal "
+            "advice, and nothing is ever transmitted. OFF by default.",
+            default=False,
+        ),
+        "dsar_fulfillment": _q_confirm(
+            "DSAR fulfillment pipeline? Execute subject requests as a "
+            "governed pipeline: recorded identity verification, collection "
+            "logging, deterministic third-party redaction, and a "
+            "token-gated response link assembled at delivery time (no "
+            "second copy of personal data stored). OFF by default.",
             default=False,
         ),
         "ai_literacy": _q_confirm(
@@ -4045,6 +4072,8 @@ def _cfg_finance(finance: dict[str, Any] | None) -> list[str]:
             for key in (
                 "federal_register_enable",
                 "texas_register_enable",
+                "eur_lex_enable",
+                "edpb_enable",
                 "regulatory_domains",
                 "regulatory_poll_seconds",
                 "control_test_interval_seconds",
@@ -4677,6 +4706,14 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("data_map"):
         lines.append("")
         lines.append("[data_map]")
+        lines.append("enable = true")
+    if advanced.get("breach_notification"):
+        lines.append("")
+        lines.append("[breach_notification]")
+        lines.append("enable = true")
+    if advanced.get("dsar_fulfillment"):
+        lines.append("")
+        lines.append("[dsar_fulfillment]")
         lines.append("enable = true")
     if advanced.get("ai_literacy"):
         lines.append("")

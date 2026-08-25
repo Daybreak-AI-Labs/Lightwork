@@ -2324,6 +2324,31 @@ def data_map_sync_sharepoint(search, owner, actor) -> None:
     click.echo(f"imported {result['imported']}  skipped {result['skipped']}")
 
 
+@data_map_group.command("scan-sharepoint-files")
+@click.option("--asset", "asset_id", required=True,
+              help="The site asset to record evidence on.")
+@click.option("--site", "site_id", required=True,
+              help="Microsoft Graph site id (from the census).")
+@click.option("--revision", type=int, required=True,
+              help="The asset's current revision.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def data_map_scan_sharepoint_files(asset_id, site_id, revision, actor) -> None:
+    """Content-scan a site's document library; record evidence, not bytes."""
+    from .. import data_map as dm
+
+    try:
+        saved = dm.scan_sharepoint_site_files(
+            asset_id, site_id=site_id, actor=actor,
+            expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    scan = saved["file_scan"]
+    click.echo(f"sampled {scan['files_sampled']}  skipped "
+               f"{scan['files_skipped']}  categories "
+               f"[{', '.join(saved['content_categories']) or '-'}]")
+
+
 @data_map_group.command("list")
 @click.option("--system", default=None, help="Filter to one system.")
 def data_map_list(system) -> None:
@@ -2611,3 +2636,246 @@ def exports_ai_bom(out_file, asset_id) -> None:
     )
     click.echo(f"{out_file}  components {len(document['components'])}  "
                f"dependencies {len(document['dependencies'])}")
+
+
+@data_map_group.command("classify-content")
+@click.option("--asset", "asset_id", required=True, help="Governed asset id.")
+@click.option("--file", "sample_file", required=True,
+              help="Text file with a data sample from the asset.")
+@click.option("--revision", type=int, required=True,
+              help="Expected revision (CAS).")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def data_map_classify_content(asset_id, sample_file, revision, actor) -> None:
+    """Content-verify one asset from a real data sample."""
+    from pathlib import Path
+
+    from .. import data_map as dm
+
+    try:
+        sample = Path(sample_file).read_text(encoding="utf-8",
+                                             errors="replace")
+    except OSError as e:
+        raise click.ClickException(f"could not read {sample_file}: {e}") from e
+    try:
+        record = dm.classify_asset_content(
+            asset_id, sample, actor=actor, expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    counts = record.get("content_counts") or {}
+    click.echo(f"{record['id']}  content-verified: "
+               + (", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+                  or "nothing found"))
+
+
+@data_map_group.command("masking-sql")
+@click.option("--system", default="snowflake",
+              help="Target engine (v1: snowflake).")
+def data_map_masking_sql(system) -> None:
+    """Emit masking-policy DDL from the register (never executed)."""
+    from .. import data_map as dm
+
+    try:
+        click.echo(dm.masking_policy_sql(system=system), nl=False)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
+@main.group("breach")
+def breach_group() -> None:
+    """The breach-notification planner: verified regimes, computed clocks.
+
+    Fourteen regimes' who/when/whether rules with citations, turned into
+    per-incident obligations. Decision support for your counsel, never
+    legal advice; the platform transmits nothing.
+    """
+
+
+@breach_group.command("regimes")
+def breach_regimes() -> None:
+    """List the verified regimes and their citations."""
+    from .. import breach_notification as bn
+
+    try:
+        rows = bn.list_regimes()
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    for row in rows:
+        click.echo(f"{row['regime']:<10} {row['name']}  "
+                   f"[{'; '.join(row['citations'])}]")
+    click.echo(f"verified {bn.VERIFIED_AT}; absent by design: "
+               + ", ".join(sorted(bn.UNVERIFIED_REGIMES)))
+
+
+@breach_group.command("plan")
+@click.option("--jurisdiction", "jurisdictions", multiple=True, required=True,
+              help="Regime id (repeatable); see 'breach regimes'.")
+@click.option("--subjects", type=int, default=0,
+              help="Affected subject count (0 = unknown).")
+@click.option("--sensitive", is_flag=True, help="Sensitive data involved.")
+@click.option("--malicious", is_flag=True,
+              help="Likely malicious (e.g. cyberattack).")
+@click.option("--discovered", default=None,
+              help="Discovery time (ISO 8601; default now).")
+def breach_plan(jurisdictions, subjects, sensitive, malicious,
+                discovered) -> None:
+    """Compute per-regime notification obligations for one incident."""
+    import time as time_module
+    from datetime import datetime, timezone
+
+    from .. import breach_notification as bn
+
+    discovered_at = None
+    if discovered:
+        try:
+            parsed = datetime.fromisoformat(discovered.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            discovered_at = parsed.timestamp()
+        except ValueError as e:
+            raise click.ClickException(f"bad --discovered: {e}") from e
+    try:
+        plan = bn.assess_breach(
+            list(jurisdictions), subjects_affected=subjects,
+            sensitive=sensitive, malicious=malicious,
+            discovered_at=discovered_at,
+        )
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+    def stamp(value):
+        if value is None:
+            return "—"
+        return time_module.strftime("%Y-%m-%d %H:%MZ",
+                                    time_module.gmtime(value))
+
+    for row in plan["obligations"]:
+        click.echo(f"{row['regime']:<10} authority due {stamp(row['authority_due_at']):<17} "
+                   f"subjects due {stamp(row['subjects_due_at']):<17} "
+                   f"{row['authority']}")
+        if row.get("threshold_note"):
+            click.echo(f"           note: {row['threshold_note']}")
+    click.echo(plan["notice"])
+
+
+@main.group("dsar-fulfill")
+def dsar_fulfill_group() -> None:
+    """DSAR fulfillment: identity, collection, redaction, delivery.
+
+    A governed pipeline over privacy-ops requests. The response link is
+    token-gated, assembled at delivery time, and scrubbed of third-party
+    identifiers by the deterministic redactor.
+    """
+
+
+@dsar_fulfill_group.command("open")
+@click.option("--request", "request_id", required=True, help="DSAR id.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def dsar_fulfill_open(request_id, actor) -> None:
+    """Open (or show) the fulfillment record for one request."""
+    from .. import dsar_fulfillment as df
+
+    try:
+        record = df.open_fulfillment(request_id, actor=actor)
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{record['id']} (rev {record['revision']})  identity "
+               f"{record['identity']['status']}")
+
+
+@dsar_fulfill_group.command("verify-identity")
+@click.option("--fulfillment", "fulfillment_id", required=True)
+@click.option("--method", required=True,
+              # Mirrors dsar_fulfillment.IDENTITY_METHODS; a test pins the
+              # two lists together so they cannot drift.
+              type=click.Choice([
+                  "account_login", "document_check", "email_challenge",
+                  "in_person", "verified_by_processor", "other",
+              ]))
+@click.option("--reference", required=True,
+              help="Where the verification evidence lives.")
+@click.option("--revision", type=int, required=True)
+@click.option("--by", "actor", required=True, help="Acting human.")
+def dsar_fulfill_verify(fulfillment_id, method, reference, revision,
+                        actor) -> None:
+    """Record HOW the requester's identity was verified."""
+    from .. import dsar_fulfillment as df
+
+    try:
+        record = df.record_identity_verification(
+            fulfillment_id, method=method, reference=reference,
+            actor=actor, expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"identity verified via {method} (rev {record['revision']})")
+
+
+@dsar_fulfill_group.command("log-source")
+@click.option("--fulfillment", "fulfillment_id", required=True)
+@click.option("--source", required=True, help="e.g. vendor:acme, mailbox.")
+@click.option("--reference", required=True, help="Ticket/export reference.")
+@click.option("--items", type=int, required=True, help="Items collected.")
+@click.option("--revision", type=int, required=True)
+@click.option("--by", "actor", required=True, help="Acting human.")
+def dsar_fulfill_log_source(fulfillment_id, source, reference, items,
+                            revision, actor) -> None:
+    """Log one collection source for the response's completeness record."""
+    from .. import dsar_fulfillment as df
+
+    try:
+        record = df.record_collection_source(
+            fulfillment_id, source=source, reference=reference,
+            items=items, actor=actor, expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{len(record['sources'])} source(s) logged "
+               f"(rev {record['revision']})")
+
+
+@dsar_fulfill_group.command("collect-graph")
+@click.option("--request", "request_id", required=True, help="DSAR id.")
+@click.option("--revision", type=int, required=True,
+              help="The fulfillment record's current revision.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def dsar_fulfill_collect_graph(request_id, revision, actor) -> None:
+    """Count the subject's Microsoft 365 footprint; move no content."""
+    from .. import dsar_fulfillment as df
+
+    try:
+        out = df.collect_graph_sources(
+            request_id, actor=actor, expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    for probe in out["probes"]:
+        if probe["collected"]:
+            more = " (more exist)" if probe["more"] else ""
+            click.echo(f"{probe['source']}: {probe['items']} item(s){more}")
+        else:
+            click.echo(f"{probe['source']}: not collected — {probe['error']}")
+
+
+@dsar_fulfill_group.command("mint-response")
+@click.option("--fulfillment", "fulfillment_id", required=True)
+@click.option("--expires-hours", type=int, default=72)
+@click.option("--max-reads", type=int, default=None,
+              help="Cap link reads (1 = strict single-use; default unlimited).")
+@click.option("--revision", type=int, required=True)
+@click.option("--by", "actor", required=True, help="Acting human.")
+def dsar_fulfill_mint(fulfillment_id, expires_hours, max_reads, revision,
+                      actor) -> None:
+    """Mint the token-gated response link (shown ONCE; only its hash is kept)."""
+    from .. import dsar_fulfillment as df
+
+    try:
+        link = df.prepare_response(
+            fulfillment_id, actor=actor, expected_revision=revision,
+            expires_hours=expires_hours, max_reads=max_reads,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(link["response_path"])
+
+

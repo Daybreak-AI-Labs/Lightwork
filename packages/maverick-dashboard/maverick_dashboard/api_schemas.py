@@ -1484,3 +1484,43 @@ class CopilotIn(BaseModel):
     message: str
     page: str = ""
     history: list = []
+
+
+class BreachPlanIn(BaseModel):
+    """Facts for a per-regime breach-notification plan."""
+    jurisdictions: list[str] = Field(..., min_length=1, max_length=32)
+    subjects_affected: int = Field(0, ge=0)
+    sensitive: bool = False
+    malicious: bool = False
+    discovered_at: float | None = Field(None, gt=0)
+    determined_at: float | None = Field(None, gt=0)
+
+
+class ContentSampleIn(BaseModel):
+    """A real data sample to content-verify one data-map asset."""
+    text_sample: str = Field(..., min_length=1, max_length=200_000)
+    revision: int = Field(..., ge=1)
+
+
+class FulfillmentIdentityIn(BaseModel):
+    """How the DSAR requester's identity was verified, by a named human."""
+    method: str = Field(..., pattern="^(account_login|document_check|"
+                                     "email_challenge|in_person|"
+                                     "verified_by_processor|other)$")
+    reference: str = Field(..., min_length=1, max_length=512)
+    revision: int = Field(..., ge=1)
+
+
+class FulfillmentSourceIn(BaseModel):
+    """One collection source logged toward the response's completeness."""
+    source: str = Field(..., min_length=1, max_length=128)
+    reference: str = Field(..., min_length=1, max_length=512)
+    items: int = Field(..., ge=0)
+    revision: int = Field(..., ge=1)
+
+
+class FulfillmentResponseIn(BaseModel):
+    """Mint the token-gated response link for a verified requester."""
+    expires_hours: int = Field(72, ge=1, le=336)
+    max_reads: int | None = Field(None, ge=1, le=100)
+    revision: int = Field(..., ge=1)

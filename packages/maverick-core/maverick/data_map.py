@@ -54,6 +54,18 @@ _MAX_IMPORT_TABLES = 500
 _MAX_SITES = 50
 _GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 _GRAPH_TIMEOUT_SECONDS = 20.0
+#: File-content scan bounds: a bounded sample of a site's document library,
+#: not a crawler. Text formats only -- the deterministic classifier reads
+#: characters, not office-binary containers.
+_MAX_FILES_SCANNED = 25
+_MAX_FILE_SAMPLE_CHARS = 100_000
+_MAX_FILE_BYTES = 5_000_000
+_TEXT_FILE_SUFFIXES = (".csv", ".json", ".log", ".md", ".ndjson",
+                       ".tsv", ".txt", ".yaml", ".yml")
+#: Graph identifiers appear inside request paths; refuse anything that could
+#: smuggle path segments or query strings (site ids are hostname,guid,guid
+#: composites; item ids are base64ish and may contain "!").
+_GRAPH_ID_RE = re.compile(r"^[A-Za-z0-9!_.,-]{1,512}$")
 
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (category, re.compile(expression))
@@ -416,6 +428,149 @@ def import_information_schema_csv(
     return {"imported": imported, "skipped": skipped}
 
 
+#: Cap on one content-verification sample; the classifier has its own
+#: global ceiling, this keeps register writes bounded.
+_MAX_CONTENT_SAMPLE = 200_000
+
+
+def classify_asset_content(
+    asset_id: str,
+    text_sample: str,
+    *,
+    actor: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """Content-verify one asset from a bounded sample of its actual data.
+
+    Where :func:`classify_column` reads NAMES, this runs the
+    deterministic content classifier over a real sample (rows the
+    operator pastes or pipes in) and records what was actually FOUND —
+    ``content_categories`` with per-category counts, merged into the
+    asset's categories. A content-verified category is evidence; a
+    name-suggested one is a hint, and the record now distinguishes them.
+    """
+
+    _require_enabled()
+    from .content_classifier import classify_text
+
+    operator = _text(actor, "actor", 256)
+    sample = str(text_sample or "")
+    if not sample.strip():
+        raise ValueError("text_sample must not be empty")
+    if len(sample) > _MAX_CONTENT_SAMPLE:
+        raise ValueError(
+            f"text_sample must be at most {_MAX_CONTENT_SAMPLE} characters")
+    report = classify_text(sample)
+
+    def mutate(value: dict[str, Any]) -> None:
+        merged = sorted(
+            set(value.get("categories") or []) | set(report["categories"])
+        )
+        value["categories"] = merged
+        value["content_categories"] = report["categories"]
+        value["content_counts"] = report["counts"]
+        value["content_verified_at"] = time.time()
+        value["content_verified_by"] = operator
+        value["special_category"] = bool(
+            SPECIAL_CATEGORIES.intersection(merged))
+
+    saved = _ASSETS.update(
+        _text(asset_id, "asset_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="classify_asset_content",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"data asset is not registered: {asset_id}")
+    return dict(saved)
+
+
+def _sql_identifier(part: str) -> str:
+    return '"' + part.replace('"', '""').upper() + '"'
+
+
+def masking_policy_sql(
+    *, system: str = "snowflake", unmasked_role: str = "DATA_STEWARD",
+) -> str:
+    """Deterministic Snowflake masking-policy DDL from the data map.
+
+    The classifier's findings, pushed to where the data lives: one
+    ``CREATE MASKING POLICY IF NOT EXISTS`` per flagged category and one
+    ``ALTER TABLE ... SET MASKING POLICY`` per flagged column, for every
+    ``table`` asset in the named system. ``unmasked_role`` names the
+    Snowflake role that sees clear text. A column flagged with several
+    categories gets the first policy and a comment naming the rest —
+    Snowflake allows one masking policy per column. Emitted as SQL text
+    for the operator's review pipeline — Lightwork never executes it,
+    and the header says so. Snowflake only in v1; other engines are a
+    decision.
+    """
+
+    _require_enabled()
+    engine = str(system or "").strip().lower()
+    if engine != "snowflake":
+        raise ValueError("only system='snowflake' is supported in v1")
+    role = str(unmasked_role or "").strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", role):
+        raise ValueError(
+            "unmasked_role must be an UPPER_SNAKE_CASE identifier")
+    rows = sorted(
+        (
+            row for row in _ASSETS.list(limit=_SCAN_LIMIT)
+            if row.get("kind") == "table" and (row.get("flagged_columns"))
+        ),
+        key=lambda row: str(row.get("name") or ""),
+    )
+    categories_in_use = sorted(
+        {
+            category
+            for row in rows
+            for cols in (row.get("flagged_columns") or {}).values()
+            for category in cols
+        }
+    )
+    lines = [
+        "-- Lightwork data-map masking policies (Snowflake).",
+        "-- Generated from the governed register; REVIEW before applying.",
+        "-- Lightwork emits this DDL and never executes it.",
+        "",
+    ]
+    for category in categories_in_use:
+        policy = _sql_identifier(f"LIGHTWORK_MASK_{category}")
+        lines.append(
+            f"CREATE MASKING POLICY IF NOT EXISTS {policy} AS "
+            "(val string) RETURNS string ->\n"
+            f"  CASE WHEN CURRENT_ROLE() IN ('{role}') THEN val "
+            f"ELSE '[MASKED:{category}]' END;"
+        )
+    for row in rows:
+        table = ".".join(
+            _sql_identifier(part)
+            for part in str(row.get("name") or "").split(".")
+        )
+        for column, cats in sorted(
+            (row.get("flagged_columns") or {}).items()
+        ):
+            if not cats:
+                continue
+            ordered = sorted(cats)
+            policy = _sql_identifier(f"LIGHTWORK_MASK_{ordered[0]}")
+            extra = (
+                f"  -- also flagged: {', '.join(ordered[1:])} "
+                "(Snowflake allows one policy per column)"
+                if len(ordered) > 1 else ""
+            )
+            lines.append(
+                f"ALTER TABLE {table} MODIFY COLUMN "
+                f"{_sql_identifier(column)} SET MASKING POLICY {policy};"
+                + extra
+            )
+    if not rows:
+        lines.append("-- No flagged table assets in the register yet.")
+    return "\n".join(lines) + "\n"
+
+
 def _default_graph_fetch(url: str, token: str) -> dict[str, Any]:
     """GET through the SSRF-pinned, enterprise-egress-guarded client."""
 
@@ -514,6 +669,160 @@ def sync_sharepoint_sites(
     return {"imported": imported, "skipped": skipped}
 
 
+def _default_graph_download(url: str, token: str) -> str:
+    """Download one drive item's text through the SSRF-pinned client.
+
+    ``GET .../content`` answers ``302 Found`` with a preauthenticated
+    download URL in ``Location`` (no Authorization header on that hop --
+    sending the bearer to a non-Graph host would leak it). The pinned
+    client never follows redirects itself; the one expected hop is
+    re-validated through ``safe_client`` like any other URL.
+    """
+
+    from .enterprise import enterprise_egress_denial
+    from .tools._ssrf import BlockedHost, safe_client
+
+    deny = enterprise_egress_denial(url, tool="data_map")
+    if deny:
+        raise DataMapError(deny)
+    try:
+        with safe_client(url, timeout=_GRAPH_TIMEOUT_SECONDS) as client:
+            response = client.get(
+                url, headers={"Authorization": f"Bearer {token}"}
+            )
+        if response.status_code in (301, 302, 307, 308):
+            target = str(response.headers.get("location") or "")
+            if not target.startswith("https://"):
+                raise DataMapError(
+                    "Microsoft Graph redirected to a non-https URL")
+            deny = enterprise_egress_denial(target, tool="data_map")
+            if deny:
+                raise DataMapError(deny)
+            with safe_client(target, timeout=_GRAPH_TIMEOUT_SECONDS) as hop:
+                response = hop.get(target)
+    except BlockedHost as exc:
+        raise DataMapError("blocked host (SSRF guard)") from exc
+    if response.status_code != 200:
+        raise DataMapError(
+            f"file download returned HTTP {response.status_code}")
+    return response.text[:_MAX_FILE_SAMPLE_CHARS]
+
+
+def scan_sharepoint_site_files(
+    asset_id: str,
+    *,
+    site_id: str,
+    actor: str,
+    expected_revision: int,
+    fetcher: Callable[[str], dict[str, Any]] | None = None,
+    downloader: Callable[[str], str] | None = None,
+) -> dict[str, Any]:
+    """Content-scan a SharePoint site's document library into its asset.
+
+    Lists ``GET /sites/{site-id}/drive/root/children`` (application
+    permission ``Files.Read.All``; ``Sites.Read.All`` also grants it), then
+    samples up to ``_MAX_FILES_SCANNED`` text-format files via
+    ``GET .../items/{id}/content`` and runs the deterministic content
+    classifier over each. What lands on the asset is EVIDENCE, not
+    content: per-category counts, which file names were flagged, and the
+    verification stamp -- never a byte of the files themselves.
+
+    ``site_id`` is the Graph site identifier from the census
+    (``sync_sharepoint_sites``). One listing page, bounded -- a sample,
+    not a crawler; ``skipped`` counts what the bounds excluded.
+    """
+
+    settings = _require_enabled()
+    from .content_classifier import classify_text
+
+    operator = _text(actor, "actor", 256)
+    site = str(site_id or "").strip()
+    if not _GRAPH_ID_RE.fullmatch(site):
+        raise ValueError("site_id must be a Microsoft Graph site identifier")
+    if fetcher is None or downloader is None:
+        import os
+
+        token = os.environ.get(settings["graph_token_env"], "")
+        if not token:
+            raise DataMapConfigError(
+                "the SharePoint file scan needs a Microsoft Graph token in "
+                f"${settings['graph_token_env']} (Files.Read.All)"
+            )
+        if fetcher is None:
+            def fetcher(target: str) -> dict[str, Any]:
+                return _default_graph_fetch(target, token)
+        if downloader is None:
+            def downloader(target: str) -> str:
+                return _default_graph_download(target, token)
+
+    listing = fetcher(
+        f"{_GRAPH_ROOT}/sites/{site}/drive/root/children"
+        f"?$top={_MAX_FILES_SCANNED}")
+    rows = listing.get("value")
+    if not isinstance(rows, list):
+        raise DataMapError("Microsoft Graph returned an unexpected shape")
+
+    counts: dict[str, int] = {}
+    flagged_files: list[dict[str, Any]] = []
+    sampled = 0
+    skipped = 0
+    for row in rows[:_MAX_FILES_SCANNED]:
+        if not isinstance(row, dict) or "file" not in row:
+            skipped += 1
+            continue
+        name = str(row.get("name") or "")
+        item_id = str(row.get("id") or "")
+        size = int(row.get("size") or 0)
+        if (not name.lower().endswith(_TEXT_FILE_SUFFIXES)
+                or not _GRAPH_ID_RE.fullmatch(item_id)
+                or size > _MAX_FILE_BYTES):
+            skipped += 1
+            continue
+        try:
+            sample = downloader(
+                f"{_GRAPH_ROOT}/sites/{site}/drive/items/{item_id}/content")
+        except DataMapError:
+            skipped += 1
+            continue
+        sampled += 1
+        report = classify_text(sample[:_MAX_FILE_SAMPLE_CHARS])
+        if report["categories"]:
+            flagged_files.append(
+                {"name": name[:256], "categories": report["categories"]})
+        for category, n in report["counts"].items():
+            counts[category] = counts.get(category, 0) + int(n)
+
+    found = sorted(counts)
+
+    def mutate(value: dict[str, Any]) -> None:
+        merged = sorted(set(value.get("categories") or []) | set(found))
+        value["categories"] = merged
+        value["content_categories"] = found
+        value["content_counts"] = dict(sorted(counts.items()))
+        value["content_verified_at"] = time.time()
+        value["content_verified_by"] = operator
+        value["special_category"] = bool(
+            SPECIAL_CATEGORIES.intersection(merged))
+        value["file_scan"] = {
+            "site_id": site,
+            "files_listed": len(rows),
+            "files_sampled": sampled,
+            "files_skipped": skipped,
+            "flagged_files": flagged_files[:_MAX_FILES_SCANNED],
+        }
+
+    saved = _ASSETS.update(
+        _text(asset_id, "asset_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="scan_sharepoint_site_files",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"data asset is not registered: {asset_id}")
+    return dict(saved)
+
+
 __all__ = [
     "ASSET_KINDS",
     "ASSET_SCHEMA",
@@ -522,6 +831,8 @@ __all__ = [
     "DataMapError",
     "IDENTIFYING_CATEGORIES",
     "LINK_KINDS",
+    "classify_asset_content",
+    "masking_policy_sql",
     "SPECIAL_CATEGORIES",
     "classify_column",
     "classify_columns",
@@ -533,5 +844,6 @@ __all__ = [
     "link_asset_record",
     "list_data_assets",
     "register_data_asset",
+    "scan_sharepoint_site_files",
     "sync_sharepoint_sites",
 ]
