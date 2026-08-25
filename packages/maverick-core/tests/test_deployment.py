@@ -39,12 +39,15 @@ def _isolate(monkeypatch, tmp_path):
 
 def test_bare_deployment_fails_the_boundary_guarantees():
     from maverick.deployment import all_passed, verify_deployment
+    from maverick.security_defaults import secure_by_default
 
     checks = {c.name: c for c in verify_deployment()}
     assert not all_passed(list(checks.values()))
-    # The two load-bearing, actively-probed guarantees are off by default.
+    # The egress lock is enterprise-gated and off in a bare deployment under
+    # either posture; at-rest encryption is off bare only in legacy mode --
+    # under the secure default a bare deployment seals by design.
     assert checks["Egress lock"].passed is False
-    assert checks["At-rest encryption"].passed is False
+    assert checks["At-rest encryption"].passed is secure_by_default()
 
 
 def test_sandbox_isolation_rejects_unknown_backend(monkeypatch):

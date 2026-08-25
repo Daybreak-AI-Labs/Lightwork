@@ -1522,4 +1522,5 @@ class FulfillmentSourceIn(BaseModel):
 class FulfillmentResponseIn(BaseModel):
     """Mint the token-gated response link for a verified requester."""
     expires_hours: int = Field(72, ge=1, le=336)
+    max_reads: int | None = Field(None, ge=1, le=100)
     revision: int = Field(..., ge=1)

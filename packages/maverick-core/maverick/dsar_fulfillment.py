@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import time
+from collections.abc import Callable
 from typing import Any
 
 from .governed_records import GovernedRecordStore
@@ -220,12 +222,16 @@ def prepare_response(
     actor: str,
     expected_revision: int,
     expires_hours: int = 72,
+    max_reads: int | None = None,
 ) -> dict[str, Any]:
     """Mint the token-gated response link. Identity must be verified first.
 
     The token is returned ONCE and stored only as a SHA-256 digest; the
     response itself is assembled at delivery time, so no second copy of
-    the subject's data is persisted by this module.
+    the subject's data is persisted by this module. ``max_reads`` caps
+    how many times the link serves (``1`` = strict single-use;
+    ``None`` = until expiry); the policy is reported in the response
+    itself so the recipient knows the link's lifetime.
     """
 
     _require_enabled()
@@ -237,6 +243,12 @@ def prepare_response(
     ):
         raise ValueError(
             f"expires_hours must be between 1 and {_TOKEN_TTL_MAX_HOURS}")
+    if max_reads is not None and (
+        not isinstance(max_reads, int)
+        or isinstance(max_reads, bool)
+        or not 1 <= max_reads <= 100
+    ):
+        raise ValueError("max_reads must be between 1 and 100, or omitted")
     token = secrets.token_urlsafe(24)
     digest = hashlib.sha256(token.encode()).hexdigest()
     now = time.time()
@@ -251,6 +263,8 @@ def prepare_response(
             "minted_by": operator,
             "minted_at": now,
             "expires_at": now + expires_hours * 3600,
+            "max_reads": max_reads,
+            "reads_used": 0,
             "delivered_at": None,
         }
 
@@ -270,18 +284,35 @@ def prepare_response(
 
 
 def _redact_bundle(bundle: Any, subject_id: str) -> Any:
-    """Scrub third-party identifiers; the subject's own reference stays."""
+    """Scrub third-party identifiers; the subject's own reference stays.
 
-    from .redaction import redact_text
+    Field-aware: each string leaf is redacted individually (no
+    serialize/reparse round trip), with the subject's own reference
+    swapped out under a NUL sentinel first — NUL cannot occur inside a
+    JSON-decoded string, so the sentinel can never collide with data.
+    """
+
+    from .redaction import redact_structured
 
     sentinel = "\x00LIGHTWORK-SUBJECT\x00"
-    text = json.dumps(bundle, default=str)
-    if subject_id:
-        text = text.replace(subject_id, sentinel)
-    redacted = redact_text(
-        text, categories=RESPONSE_REDACTION_CATEGORIES)["text"]
-    redacted = redacted.replace(sentinel, subject_id)
-    return json.loads(redacted)
+    normalized = json.loads(json.dumps(bundle, default=str))
+
+    def swap(node: Any, forward: bool) -> Any:
+        source, target = (
+            (subject_id, sentinel) if forward else (sentinel, subject_id)
+        )
+        if isinstance(node, str):
+            return node.replace(source, target)
+        if isinstance(node, dict):
+            return {key: swap(item, forward) for key, item in node.items()}
+        if isinstance(node, list):
+            return [swap(item, forward) for item in node]
+        return node
+
+    guarded = swap(normalized, True) if subject_id else normalized
+    scrubbed = redact_structured(
+        guarded, categories=RESPONSE_REDACTION_CATEGORIES)["value"]
+    return swap(scrubbed, False) if subject_id else scrubbed
 
 
 def response_for_token(token: str) -> dict[str, Any] | None:
@@ -302,33 +333,170 @@ def response_for_token(token: str) -> dict[str, Any] | None:
             continue
         if time.time() > float(response.get("expires_at") or 0.0):
             return None
+        max_reads = response.get("max_reads")
+        reads_used = int(response.get("reads_used") or 0)
+        if max_reads is not None and reads_used >= int(max_reads):
+            return None
+
+        def mark(value: dict[str, Any]) -> None:
+            inner = dict(value.get("response") or {})
+            if inner.get("delivered_at") is None:
+                inner["delivered_at"] = time.time()
+            inner["reads_used"] = int(inner.get("reads_used") or 0) + 1
+            value["response"] = inner
+
+        # The read is COUNTED before the bundle ships: on a CAS race the
+        # stricter outcome wins (a burned read, never a free one).
+        from .governed_records import RecordConflict
+
+        try:
+            saved = _STORE.update(
+                str(row["id"]), mark,
+                expected_revision=int(row.get("revision") or 0),
+                action="deliver_response", actor="dsar-response-link",
+            )
+        except RecordConflict:
+            return None
+        if saved is None:
+            return None
         from . import dsar as dsar_export
 
         subject = str(row.get("subject_id") or "")
         bundle = dsar_export.export_subject_data(subject)
         scrubbed = _redact_bundle(bundle, subject)
-        if response.get("delivered_at") is None:
-            def mark(value: dict[str, Any]) -> None:
-                inner = dict(value.get("response") or {})
-                inner["delivered_at"] = time.time()
-                value["response"] = inner
-
-            _STORE.update(
-                str(row["id"]), mark,
-                expected_revision=int(row.get("revision") or 0),
-                action="deliver_response", actor="dsar-response-link",
-            )
         return {
             "request_id": row.get("request_id"),
             "subject_id": subject,
             "sources": list(row.get("sources") or []),
             "bundle": scrubbed,
+            "access_policy": {
+                "expires_at": response.get("expires_at"),
+                "max_reads": max_reads,
+                "reads_used": reads_used + 1,
+            },
             "redaction_notice": (
                 "Third-party identifiers were redacted deterministically; "
                 "the subject's own reference is preserved."
             ),
         }
     return None
+
+
+_GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
+_GRAPH_PAGE_TOP = 100
+_GRAPH_TIMEOUT_SECONDS = 20.0
+#: A subject addressable in Microsoft Graph is a userPrincipalName; anything
+#: else (an opaque customer id, free text) cannot be collected this way.
+_UPN_RE = re.compile(r"^[A-Za-z0-9._%+'-]{1,64}@[A-Za-z0-9.-]{1,255}$")
+
+
+def _graph_page(url: str, token: str) -> dict[str, Any]:
+    """One SSRF-pinned Graph GET returning the parsed JSON page."""
+
+    from .enterprise import enterprise_egress_denial
+    from .tools._ssrf import BlockedHost, safe_get
+
+    deny = enterprise_egress_denial(url, tool="dsar_fulfillment")
+    if deny:
+        raise DsarFulfillmentError(deny)
+    try:
+        response = safe_get(
+            url, timeout=_GRAPH_TIMEOUT_SECONDS,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    except BlockedHost as exc:
+        raise DsarFulfillmentError("blocked host (SSRF guard)") from exc
+    if response.status_code != 200:
+        raise DsarFulfillmentError(
+            f"Microsoft Graph returned HTTP {response.status_code}")
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise DsarFulfillmentError(
+            "Microsoft Graph returned a non-JSON body") from exc
+    if not isinstance(payload, dict):
+        raise DsarFulfillmentError(
+            "Microsoft Graph returned an unexpected shape")
+    return payload
+
+
+def collect_graph_sources(
+    request_id: str,
+    *,
+    actor: str,
+    expected_revision: int,
+    fetcher: Callable[[str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Slim Microsoft 365 collection: COUNT the subject's footprint, move no
+    content.
+
+    Probes the subject's Outlook mailbox (``GET /users/{upn}/messages``,
+    application permission ``Mail.ReadBasic.All``) and OneDrive root
+    (``GET /users/{upn}/drive/root/children``, ``Files.Read.All``) with
+    ``$select=id`` — ids only, one bounded page each — and logs each probe
+    through :func:`record_collection_source`. Message bodies and file
+    bytes never transit; a fuller export stays the operator's export
+    pipeline. The token comes from ``$MAVERICK_GRAPH_TOKEN`` (the
+    platform's Graph convention); tests inject ``fetcher``.
+    """
+
+    _require_enabled()
+    operator = _text(actor, "actor", 256)
+    dsar = _dsar_record_or_raise(_text(request_id, "request_id", 64))
+    subject = str(dsar.get("subject_id") or "").strip()
+    if not _UPN_RE.fullmatch(subject):
+        raise ValueError(
+            "the DSAR subject is not a Microsoft 365 userPrincipalName; "
+            "collect this subject's data through the export pipeline instead")
+    if fetcher is None:
+        import os
+
+        token = os.environ.get("MAVERICK_GRAPH_TOKEN", "")
+        if not token:
+            raise DsarFulfillmentConfigError(
+                "Graph collection needs a token in $MAVERICK_GRAPH_TOKEN "
+                "(Mail.ReadBasic.All + Files.Read.All)")
+
+        def fetcher(target: str) -> dict[str, Any]:
+            return _graph_page(target, token)
+
+    from urllib.parse import quote
+
+    upn = quote(subject)
+    probes = (
+        ("graph:outlook_mail",
+         f"{_GRAPH_ROOT}/users/{upn}/messages"
+         f"?$select=id&$top={_GRAPH_PAGE_TOP}"),
+        ("graph:onedrive_files",
+         f"{_GRAPH_ROOT}/users/{upn}/drive/root/children"
+         f"?$select=id&$top={_GRAPH_PAGE_TOP}"),
+    )
+    revision = int(expected_revision)
+    record: dict[str, Any] | None = None
+    results: list[dict[str, Any]] = []
+    for source, url in probes:
+        try:
+            page = fetcher(url)
+        except DsarFulfillmentError as exc:
+            # A subject without a mailbox/drive is a finding, not a crash;
+            # the probe's absence is visible because no source row appears.
+            results.append(
+                {"source": source, "collected": False, "error": str(exc)})
+            continue
+        rows = page.get("value")
+        if not isinstance(rows, list):
+            raise DsarFulfillmentError(
+                "Microsoft Graph returned an unexpected shape")
+        more = bool(page.get("@odata.nextLink"))
+        reference = f"{subject} (first page{', more exist' if more else ''})"
+        record = record_collection_source(
+            _fulfillment_id(dsar["id"]), source=source, reference=reference,
+            items=len(rows), actor=operator, expected_revision=revision)
+        revision = int(record["revision"])
+        results.append(
+            {"source": source, "collected": True, "items": len(rows),
+             "more": more})
+    return {"record": record, "probes": results}
 
 
 def get_fulfillment(request_id: str) -> dict[str, Any] | None:
@@ -352,6 +520,7 @@ __all__ = [
     "SCHEMA",
     "DsarFulfillmentConfigError",
     "DsarFulfillmentError",
+    "collect_graph_sources",
     "enabled",
     "get_dsar_fulfillment_config",
     "get_fulfillment",

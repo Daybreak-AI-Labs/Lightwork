@@ -1769,6 +1769,14 @@ def pick_finance() -> dict[str, Any]:
             "  Poll the official Texas Register RSS and queue each issue for review?",
             default=False,
         )
+        operations["eur_lex_enable"] = _q_confirm(
+            "  Poll EUR-Lex (all EU Parliament and Council legislation) for review?",
+            default=False,
+        )
+        operations["edpb_enable"] = _q_confirm(
+            "  Poll the EDPB news feed (GDPR guidance and decisions) for review?",
+            default=False,
+        )
         operations["regulatory_domains"] = _q_checkbox(
             "  Regulatory domains to route into the review queue:",
             ["finance", "money_transmitter", "insurance_producer", "lending"],
@@ -4064,6 +4072,8 @@ def _cfg_finance(finance: dict[str, Any] | None) -> list[str]:
             for key in (
                 "federal_register_enable",
                 "texas_register_enable",
+                "eur_lex_enable",
+                "edpb_enable",
                 "regulatory_domains",
                 "regulatory_poll_seconds",
                 "control_test_interval_seconds",

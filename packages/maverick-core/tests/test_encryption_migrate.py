@@ -15,7 +15,10 @@ requires_crypto = pytest.mark.skipif(
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch, tmp_path):
-    monkeypatch.delenv("MAVERICK_ENCRYPT_AT_REST", raising=False)
+    # The migration scenario STARTS from a legacy plaintext estate: say so
+    # explicitly ("0"), because under the secure posture an UNSET flag
+    # means encryption on and the plaintext fixtures would never exist.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     monkeypatch.delenv("MAVERICK_ENCRYPTION_KEY", raising=False)
     monkeypatch.delenv("MAVERICK_ENTERPRISE", raising=False)
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})

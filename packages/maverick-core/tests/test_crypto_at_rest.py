@@ -35,8 +35,11 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "keys" / "at_rest.key")
 
 
-def test_off_by_default():
-    assert car.at_rest_enabled() is False
+def test_default_follows_the_posture():
+    # Unset flag: sealed under the secure default, plaintext in legacy mode.
+    from maverick.security_defaults import secure_by_default
+
+    assert car.at_rest_enabled() is secure_by_default()
 
 
 def test_enabled_by_env(monkeypatch):
@@ -472,7 +475,9 @@ def test_world_db_seals_messages(monkeypatch, tmp_path):
     wm = WorldModel(db)
     gid = wm.create_goal("g", "d")
 
-    # A legacy plaintext message (encryption off) is searchable via FTS.
+    # A legacy plaintext message (encryption EXPLICITLY off — under the secure
+    # default an unset flag means sealed) is searchable via FTS.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     wm.append_message(gid, "user", "findable plaintext token")
     assert any("findable" in m["content"] for m in wm.search_messages("findable"))
 

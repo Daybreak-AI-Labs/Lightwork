@@ -117,3 +117,33 @@ def test_unknown_regimes_are_refused_naming_the_absent_set():
         bn.assess_breach(["in_dpdp"], discovered_at=_TUESDAY)
     assert "Absent by design" in str(excinfo.value)
     assert "qc_law25" in str(excinfo.value)
+
+
+def test_notification_contents_where_the_statute_enumerates_them():
+    plan = bn.assess_breach(
+        ["eu_gdpr", "us_hipaa", "us_ca", "br_lgpd"], discovered_at=_TUESDAY)
+    d = {o["regime"]: o for o in plan["obligations"]}
+    gdpr = d["eu_gdpr"]["notification_contents"]
+    assert gdpr["basis"] == "GDPR Art. 33(3)" and len(gdpr["elements"]) == 4
+    hipaa = d["us_hipaa"]["notification_contents"]
+    assert hipaa["basis"].startswith("45 CFR") and len(hipaa["elements"]) == 5
+    ca = d["us_ca"]["notification_contents"]
+    assert "Notice of Data Breach" in ca["elements"][0]
+    # Regimes without an encoded checklist say so instead of guessing.
+    assert d["br_lgpd"]["notification_contents"] is None
+
+
+def test_verified_at_feeds_the_freshness_ratchet():
+    import datetime
+
+    from maverick import deprecations
+
+    # Fresh today: nothing stale.
+    assert deprecations.stale_verified_content() == []
+    # Push "now" past the cap: the matrix must show up by name.
+    anchor = datetime.datetime.strptime(
+        bn.VERIFIED_AT, "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc)
+    future = anchor.timestamp() + (
+        deprecations.VERIFIED_CONTENT_MAX_AGE_DAYS + 2) * 86_400
+    stale = deprecations.stale_verified_content(now=future)
+    assert [row[0] for row in stale] == ["maverick.breach_notification"]

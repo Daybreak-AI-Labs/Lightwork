@@ -478,20 +478,34 @@ def test_consent_webhook_over_http(tmp_path, monkeypatch):
     config.reset_config_cache()
     monkeypatch.setenv("MAVERICK_CONSENT_WEBHOOK_SECRET",
                        "whsec-0123456789abcdef")
+    import time as _time
+    ts = int(_time.time())
     body = _json.dumps({"subject": "alice@example.com",
                         "purpose": "marketing",
                         "status": "granted"}).encode()
-    signature = _hmac.new(b"whsec-0123456789abcdef", body,
+    signature = _hmac.new(b"whsec-0123456789abcdef",
+                          f"{ts}.".encode() + body,
                           _hashlib.sha256).hexdigest()
     from fastapi.testclient import TestClient as _TC
     from maverick_dashboard.app import app as _app
     anon = _TC(_app)  # no Origin, no bearer: the HMAC is the auth
     accepted = anon.post("/consent/webhook", content=body,
-                         headers={"X-Lightwork-Signature": signature})
+                         headers={"X-Lightwork-Signature": signature,
+                                  "X-Lightwork-Timestamp": str(ts)})
     assert accepted.status_code == 202, accepted.text
     assert accepted.json() == {"imported": 1, "skipped": 0}
     assert anon.post("/consent/webhook", content=body,
-                     headers={"X-Lightwork-Signature": "0" * 64}
+                     headers={"X-Lightwork-Signature": "0" * 64,
+                              "X-Lightwork-Timestamp": str(ts)}
+                     ).status_code == 401
+    # Stale signed timestamp -> replay guard, same 401.
+    old_ts = ts - 3600
+    old_sig = _hmac.new(b"whsec-0123456789abcdef",
+                        f"{old_ts}.".encode() + body,
+                        _hashlib.sha256).hexdigest()
+    assert anon.post("/consent/webhook", content=body,
+                     headers={"X-Lightwork-Signature": old_sig,
+                              "X-Lightwork-Timestamp": str(old_ts)}
                      ).status_code == 401
 
 

@@ -337,6 +337,9 @@ def test_postgres_goal_child_reads_join_tenant_scoped_goals(monkeypatch):
     from maverick.paths import reset_tenant, set_tenant
 
     monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "1")
+    # Pin the SQL-LIKE search path: under the secure default sealing is on and
+    # search_messages switches to fetch-then-decrypt, emitting different SQL.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     token = set_tenant("tenant-a")
     try:
         cursor = _CapturingCursor()

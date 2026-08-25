@@ -2622,7 +2622,8 @@ async def dsar_fulfillment_response(request: Request, fulfillment_id: str,
     return await _estate_call(
         df.prepare_response, fulfillment_id[:64],
         actor=_request_actor(request), expected_revision=body.revision,
-        expires_hours=body.expires_hours, not_found="no such fulfillment",
+        expires_hours=body.expires_hours, max_reads=body.max_reads,
+        not_found="no such fulfillment",
     )
 
 

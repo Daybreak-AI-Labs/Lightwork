@@ -1,18 +1,11 @@
-"""The production-posture ratchet.
+"""The production-posture ratchet, at its designed endgame.
 
-19,000 tests pass with ``MAVERICK_SECURE_DEFAULT=0`` — a configuration no
-customer runs. Under the real posture (audit signing on, at-rest encryption
-on, consent fail-closed, tool-risk ceiling applied) **91 of 15,869 fail**.
-
-That number was projected as two to three weeks of work. It is not: none of
-the 91 is a product bug. They are tests asserting a legacy default —
-``test_off_by_default`` for at-rest encryption is *correct* to fail once
-encryption defaults on — or fixtures that never granted consent because
-consent used to auto-approve.
-
-So the posture job records rather than blocks, and the record only shrinks.
-A blocking job that is red on every PR gets switched off, and then nothing
-measures the posture at all.
+The register started at **91 failures** under the real posture (audit
+signing on, at-rest encryption on, consent fail-closed, tool-risk ceiling
+applied) — none a product bug, all tests asserting a legacy default or
+fixtures that never granted consent because consent used to auto-approve.
+The debt has been paid down to **zero**, so the baseline is empty and the
+gate is fully blocking: any posture failure is "new" by definition.
 """
 
 from __future__ import annotations
@@ -49,11 +42,11 @@ def test_a_parametrized_id_with_spaces_survives() -> None:
     assert ids == {"tests/t.py::test_x[first second]"}
 
 
-def test_the_committed_baseline_is_substantial() -> None:
-    """Anti-vacuity: an empty baseline would make every check below pass."""
-    baseline = gate.load_baseline()
-    assert len(baseline) > 50, len(baseline)
-    assert all("::" in node for node in baseline)
+def test_the_committed_baseline_is_paid_off() -> None:
+    """The register's endgame: zero recorded debt, so the gate blocks on ANY
+    posture failure. (Report-vacuity is guarded separately below — an empty
+    baseline never lets a truncated report read as success.)"""
+    assert gate.load_baseline() == set()
 
 
 def test_the_baseline_file_shape() -> None:
@@ -102,8 +95,18 @@ def test_a_missing_report_is_an_error(tmp_path, capsys) -> None:
 def test_a_completed_run_with_zero_failures_is_accepted(tmp_path) -> None:
     """Positive control: refusing every report would also pass the tests above."""
     report = tmp_path / "posture.txt"
-    report.write_text("15869 passed in 800s\n", encoding="utf-8")
-    # Every recorded failure now passes, so this is drift -- but it parsed.
+    report.write_text("17080 passed in 800s\n", encoding="utf-8")
+    # Zero failures against the empty baseline: clean pass.
+    assert gate.main(["--ci", "--report", str(report)]) == 0
+
+
+def test_any_failure_blocks_against_the_empty_baseline(tmp_path) -> None:
+    """The flip this register existed to earn: with zero recorded debt, a
+    single posture failure fails the build as new drift."""
+    report = tmp_path / "posture.txt"
+    report.write_text(
+        "FAILED packages/maverick-core/tests/test_a.py::test_one - boom\n"
+        "1 failed, 17079 passed in 800s\n", encoding="utf-8")
     assert gate.main(["--ci", "--report", str(report)]) == 1
 
 

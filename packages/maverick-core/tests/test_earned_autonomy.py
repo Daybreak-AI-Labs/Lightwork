@@ -652,6 +652,9 @@ async def test_agent_pins_rehearsal_prediction_as_card(
     from maverick.agent import Agent
 
     monkeypatch.setenv("MAVERICK_REHEARSAL", "1")
+    # Subject is the rehearsal→card pipeline; the shell tool must actually
+    # run, so grant its consent explicitly (the posture would deny it).
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
     monkeypatch.setattr(
         "maverick.rehearsal_runtime.gate_tool",
         lambda **kw: rehearsal.RehearsalVerdict(

@@ -625,16 +625,17 @@ jobs:
           packages/maverick-core/tests/test_local_backend_process_reaping.py
 
   posture:
-    # The suite runs with MAVERICK_SECURE_DEFAULT=0, which keeps each control's
-    # explicit on/off mechanics under test but means ~19,000 passing tests
-    # describe a configuration no customer runs. Production ships
-    # secure-by-default: audit signing, at-rest encryption, fail-closed consent
-    # for high-risk actions, and the tool-risk ceiling.
+    # The main suite runs with MAVERICK_SECURE_DEFAULT=0, which keeps each
+    # control's explicit on/off mechanics under test; this job runs the same
+    # maverick-core tree under the PRODUCTION posture (audit signing,
+    # at-rest encryption, fail-closed consent for high-risk actions, the
+    # tool-risk ceiling) -- the configuration customers actually run.
     #
-    # The reviewed 91-test debt register is checked in and ratcheted: a new
-    # failure fails this job, and a fixed failure also fails until the baseline
-    # is deliberately reduced. requirements/ci.txt keeps this measurement
-    # reproducible instead of absorbing dependency drift into the baseline.
+    # The debt register started at 91 tests and has been driven to zero, so
+    # this job is fully blocking: any posture failure is new by definition.
+    # The ratchet mechanics remain -- deliberately re-admitted debt must be
+    # committed to the baseline in the open. requirements/ci.txt keeps the
+    # measurement reproducible instead of absorbing dependency drift.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -673,9 +674,10 @@ jobs:
         # asserting a baseline that was never taken is the defect class this
         # PR exists to close.
         #
-        # Exit code 1 is expected while the debt register is non-empty. Other
-        # pytest exit codes (collection/internal/timeout errors) fail directly;
-        # then --ci compares the completed report with the exact baseline.
+        # With an empty baseline, pytest exit 1 means a real posture failure
+        # and --ci fails on it as "new". Other pytest exit codes
+        # (collection/internal/timeout errors) fail directly; --ci then
+        # compares the completed report with the exact (empty) baseline.
         shell: bash
         run: |
           set +e

@@ -77,6 +77,9 @@ def test_seal_is_idempotent_and_refuses_without_at_rest(monkeypatch, tmp_path):
     audit_dir.mkdir()
     _signed_day(audit_dir, "2020-01-01", [{"kind": "tool_call"}])
 
+    # Explicitly off (under the secure default an unset flag means on):
+    # sealing must refuse rather than leave half-state.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     with pytest.raises(EncryptionUnavailable):                 # off -> refuse, no half-state
         seal_closed_segments(audit_dir, today="2099-12-31")
 

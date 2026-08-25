@@ -17,6 +17,17 @@ from maverick.sandbox import LocalBackend
 from maverick.world_model import WorldModel
 
 
+@pytest.fixture()
+def _unsealed_vector_backend(monkeypatch):
+    """These tests target the ACTIVE qdrant vector path (collection
+    naming, index/search). Under the secure posture, at-rest encryption
+    deliberately disables qdrant (sealing its documents is not
+    implemented) and falls back to lexical recall — that fallback has
+    its own coverage in TestAtRestSealing; here encryption is explicitly
+    off so the vector path under test actually runs."""
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+
+
 class FakeStore:
     """In-memory stand-in for ChromaStore/QdrantStore.
 
@@ -92,6 +103,7 @@ class TestBackendName:
         assert sr.backend_name() == "weaviate"
 
 
+@pytest.mark.usefixtures("_unsealed_vector_backend")
 class TestIndexAndSearch:
     def test_index_then_search_finds_goal(self):
         store = FakeStore()
@@ -179,6 +191,7 @@ class TestOrchestratorRouting:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("_unsealed_vector_backend")
 async def test_run_goal_indexes_on_success(tmp_path: Path, fake_llm, make_llm_response, monkeypatch):
     store = FakeStore()
     monkeypatch.setattr(sr, "build_store", lambda backend=None: store)
@@ -201,6 +214,7 @@ async def test_run_goal_indexes_on_success(tmp_path: Path, fake_llm, make_llm_re
     assert hits[0][1]["goal_id"] == gid
 
 
+@pytest.mark.usefixtures("_unsealed_vector_backend")
 class TestTenantCollectionIsolation:
     """build_store gives each tenant its OWN collection on the shared external
     backends (chroma/qdrant/weaviate) so similarity SEARCH can't cross tenants.

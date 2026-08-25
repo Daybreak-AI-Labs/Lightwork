@@ -76,7 +76,10 @@ def test_recent_event_contents_decrypts_sealed_events(monkeypatch, tmp_path):
 
 
 @requires_crypto
-def test_goal_content_plaintext_when_encryption_off(tmp_path):
+def test_goal_content_plaintext_when_encryption_off(monkeypatch, tmp_path):
+    # Explicit opt-out: under the secure default an UNSET flag means sealed,
+    # so "off" has to be spelled out for the plaintext premise to hold.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     from maverick.world_model import WorldModel
     db = tmp_path / "world.db"
     wm = WorldModel(db)
@@ -94,6 +97,7 @@ def test_strict_mode_withholds_unsealed_value_in_a_sealed_column(monkeypatch, tm
     # served as trusted plaintext once strict is on.
     from maverick.world_model import _UNSEALED_WITHHELD, WorldModel
     db = tmp_path / "world.db"
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")   # write phase: plaintext
     wm = WorldModel(db)
     gid = wm.create_goal("unsealed injected title", "d")   # written plaintext
 
@@ -106,6 +110,7 @@ def test_strict_mode_withholds_unsealed_value_in_a_sealed_column(monkeypatch, tm
 def test_non_strict_passes_through_legacy_plaintext(monkeypatch, tmp_path):
     from maverick.world_model import WorldModel
     db = tmp_path / "world.db"
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")   # write phase: plaintext
     wm = WorldModel(db)
     gid = wm.create_goal("legacy title", "d")      # plaintext, pre-migration
 

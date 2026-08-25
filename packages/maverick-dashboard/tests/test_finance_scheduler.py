@@ -304,3 +304,32 @@ def test_start_and_stop_are_bounded(monkeypatch):
     monkeypatch.setattr(finance_scheduler, "_scheduler_loop", lambda *_args: None)
     assert finance_scheduler.start_finance_scheduler() is True
     assert finance_scheduler.stop_finance_scheduler(timeout=0.1) is True
+
+
+def test_configured_sources_include_eu_presets_when_opted_in():
+    sources = finance_scheduler.configured_sources({
+        "federal_register_enable": False,
+        "eur_lex_enable": True,
+        "edpb_enable": True,
+    })
+    assert [s.key for s in sources] == ["eur-lex-legislation", "edpb-news"]
+    by_key = {s.key: s for s in sources}
+    assert by_key["eur-lex-legislation"].jurisdiction == "EU"
+    assert by_key["eur-lex-legislation"].format == "rss"
+    assert by_key["eur-lex-legislation"].url.startswith(
+        "https://eur-lex.europa.eu/")
+    assert by_key["edpb-news"].default_domains == ("privacy",)
+    assert by_key["edpb-news"].url.startswith("https://www.edpb.europa.eu/")
+    # Off by default: an empty section configures neither.
+    default_keys = [s.key for s in finance_scheduler.configured_sources({})]
+    assert "eur-lex-legislation" not in default_keys
+    assert "edpb-news" not in default_keys
+
+
+def test_eu_preset_flags_must_be_boolean():
+    import pytest
+
+    with pytest.raises(ValueError, match="eur_lex_enable"):
+        finance_scheduler.configured_sources({"eur_lex_enable": "yes"})
+    with pytest.raises(ValueError, match="edpb_enable"):
+        finance_scheduler.configured_sources({"edpb_enable": 1})

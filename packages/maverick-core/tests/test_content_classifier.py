@@ -70,3 +70,43 @@ def test_bounds():
         classify_text("x" * (MAX_TEXT_CHARS + 1))
     empty = classify_text("")
     assert empty["categories"] == [] and empty["findings"] == []
+
+
+def test_aadhaar_verhoeff_and_nhs_mod11_validate_in_context():
+    from maverick.content_classifier import _nhs_ok, _verhoeff_ok
+
+    # Published Verhoeff example: check digit for 236 is 3.
+    assert _verhoeff_ok("2363") is True
+    assert _verhoeff_ok("2364") is False
+    # Published NHS test number 943 476 5919.
+    assert _nhs_ok("9434765919") is True
+    assert _nhs_ok("9434765918") is False
+    ok = classify_text("NHS number 943 476 5919 on file")
+    assert ok["counts"] == {"national_id": 1}
+    assert ok["findings"][0]["kind"] == "nhs_number_mod11"
+    # Without the context word the digits read as phone-shaped, not as a
+    # national id — the validated finding only outranks phone when the
+    # context justifies running the validator at all.
+    assert classify_text("ref 943 476 5919")["counts"] == {"phone": 1}
+    # In context but failing mod-11: no national id, and the id-shaped
+    # digits still fall back to the phone shape.
+    bad = classify_text("NHS number 943 476 5918")
+    assert bad["counts"] == {"phone": 1}
+
+
+def test_roster_names_match_whole_word_case_insensitive():
+    text = "Escalated by Carol Danvers; carbon copy to CAROL DANVERS. Caroline stays."
+    report = classify_text(text, roster=["Carol Danvers"])
+    assert report["counts"] == {"name": 2}
+    assert all(f["kind"] == "roster_match" for f in report["findings"])
+    # Whole-word: 'Caroline' never matches a roster entry 'Carol'.
+    assert classify_text("Caroline stays", roster=["Carol"])["counts"] == {}
+    from maverick.redaction import redact_text
+
+    red = redact_text(text, roster=["Carol Danvers"])
+    assert "Carol Danvers" not in red["text"]
+    assert "Caroline" in red["text"]
+    assert red["counts"]["name"] == 2
+    import pytest as pytest_module
+    with pytest_module.raises(ValueError, match="roster"):
+        classify_text("x", roster=["n"] * 5_001)

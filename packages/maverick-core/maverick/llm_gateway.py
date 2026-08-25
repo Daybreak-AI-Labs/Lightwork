@@ -34,6 +34,7 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from . import runtime_metrics
 from .governed_records import GovernedRecordStore, RecordConflict
 
 log = logging.getLogger(__name__)
@@ -200,6 +201,12 @@ def _record_call(
     ``requests`` lets a pre-aggregated batch (OTel span ingestion) land as
     one CAS write instead of one per span.
     """
+
+    runtime_metrics.increment(
+        "lightwork_gateway_calls_total", status=str(status),
+        amount=float(requests),
+        help_text="LLM gateway calls by ledger status",
+    )
 
     record_id = f"LGC-{hashlib.sha256(f'{caller}:{model}'.encode()).hexdigest()[:24]}"
     prompt_tokens = int((usage or {}).get("prompt_tokens") or 0)

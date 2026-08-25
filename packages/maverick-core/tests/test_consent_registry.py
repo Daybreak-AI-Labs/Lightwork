@@ -258,19 +258,28 @@ def test_site_scan_ignores_relative_src_paths():
         "cdn.example-partner.io", "player.example-video.net"]
 
 
-def _signed(body: bytes, secret: bytes = b"whsec-0123456789abcdef") -> str:
+def _signed(body: bytes, ts: int,
+            secret: bytes = b"whsec-0123456789abcdef") -> str:
     import hmac as hmac_mod
 
-    return hmac_mod.new(secret, body, hashlib.sha256).hexdigest()
+    return hmac_mod.new(secret, f"{ts}.".encode() + body,
+                        hashlib.sha256).hexdigest()
+
+
+def _now() -> int:
+    import time as time_module
+
+    return int(time_module.time())
 
 
 def test_webhook_requires_its_knob_and_a_real_secret(tmp_path, monkeypatch):
     body = b"{}"
+    ts = _now()
     # Enabled registry, webhook knob off -> config refusal.
     monkeypatch.setenv("MAVERICK_CONSENT_WEBHOOK_SECRET",
                        "whsec-0123456789abcdef")
     with pytest.raises(cr.ConsentRegistryConfigError, match="webhook_enable"):
-        cr.ingest_consent_webhook(body, _signed(body))
+        cr.ingest_consent_webhook(body, _signed(body, ts), ts)
     (tmp_path / "config.toml").write_text(
         f'[consent_registry]\nenable = true\nwebhook_enable = true\n'
         f'subject_salt = "{_SALT}"\n', encoding="utf-8")
@@ -278,16 +287,21 @@ def test_webhook_requires_its_knob_and_a_real_secret(tmp_path, monkeypatch):
     # Short secret -> refused before any signature math.
     monkeypatch.setenv("MAVERICK_CONSENT_WEBHOOK_SECRET", "short")
     with pytest.raises(cr.ConsentRegistryConfigError, match="16"):
-        cr.ingest_consent_webhook(body, _signed(body))
+        cr.ingest_consent_webhook(body, _signed(body, ts), ts)
 
 
-def test_webhook_verifies_hmac_then_maps_events(tmp_path, monkeypatch):
+def _enable_webhook(tmp_path, monkeypatch):
     (tmp_path / "config.toml").write_text(
         f'[consent_registry]\nenable = true\nwebhook_enable = true\n'
         f'subject_salt = "{_SALT}"\n', encoding="utf-8")
     config.reset_config_cache()
     monkeypatch.setenv("MAVERICK_CONSENT_WEBHOOK_SECRET",
                        "whsec-0123456789abcdef")
+
+
+def test_webhook_verifies_hmac_then_maps_events(tmp_path, monkeypatch):
+    _enable_webhook(tmp_path, monkeypatch)
+    ts = _now()
     body = json.dumps({"events": [
         {"subject": "alice@example.com", "purpose": "marketing",
          "status": "OPT_IN"},
@@ -295,8 +309,9 @@ def test_webhook_verifies_hmac_then_maps_events(tmp_path, monkeypatch):
          "status": "mystery"},
     ]}).encode()
     with pytest.raises(PermissionError, match="signature"):
-        cr.ingest_consent_webhook(body, "sha256=" + "0" * 64)
-    result = cr.ingest_consent_webhook(body, "sha256=" + _signed(body))
+        cr.ingest_consent_webhook(body, "sha256=" + "0" * 64, ts)
+    result = cr.ingest_consent_webhook(
+        body, "sha256=" + _signed(body, ts), ts)
     assert result == {"imported": 1, "skipped": 1}
     prefs = cr.subject_preferences("alice@example.com")
     assert prefs["purposes"]["marketing"]["status"] == "granted"
@@ -304,27 +319,72 @@ def test_webhook_verifies_hmac_then_maps_events(tmp_path, monkeypatch):
     newer = json.dumps({"subject": "alice@example.com",
                         "purpose": "marketing", "status": "withdrawn",
                         "recorded_at": 2_000_000_000.0}).encode()
-    cr.ingest_consent_webhook(newer, _signed(newer))
+    cr.ingest_consent_webhook(newer, _signed(newer, ts), ts)
     stale = json.dumps({"subject": "alice@example.com",
                         "purpose": "marketing", "status": "granted",
                         "recorded_at": 1_000_000_000.0}).encode()
-    cr.ingest_consent_webhook(stale, _signed(stale))
+    cr.ingest_consent_webhook(stale, _signed(stale, ts), ts)
+    prefs = cr.subject_preferences("alice@example.com")
+    assert prefs["purposes"]["marketing"]["status"] == "withdrawn"
+
+
+def test_webhook_replay_guard(tmp_path, monkeypatch):
+    _enable_webhook(tmp_path, monkeypatch)
+    body = json.dumps({"subject": "alice@example.com",
+                       "purpose": "marketing", "status": "granted"}).encode()
+    # A stale signed timestamp is refused outright.
+    stale_ts = _now() - 3600
+    with pytest.raises(PermissionError, match="replay"):
+        cr.ingest_consent_webhook(body, _signed(body, stale_ts), stale_ts)
+    # The timestamp is INSIDE the signature: shifting it invalidates.
+    ts = _now()
+    with pytest.raises(PermissionError, match="signature"):
+        cr.ingest_consent_webhook(body, _signed(body, ts), ts - 1)
+    # An event with no recorded_at anchors to the SIGNED time -- so a
+    # replay inside the window cannot flip a withdrawal recorded after
+    # the original delivery.
+    cr.ingest_consent_webhook(body, _signed(body, ts), ts)
+    cr.record_consent(
+        "alice@example.com", purpose="marketing", status="withdrawn",
+        policy_version="2026-02", channel="web", actor="ops",
+        recorded_at=float(ts + 1),
+    )
+    cr.ingest_consent_webhook(body, _signed(body, ts), ts)  # the replay
     prefs = cr.subject_preferences("alice@example.com")
     assert prefs["purposes"]["marketing"]["status"] == "withdrawn"
 
 
 def test_webhook_rejects_non_json_and_oversized_batches(tmp_path, monkeypatch):
-    (tmp_path / "config.toml").write_text(
-        f'[consent_registry]\nenable = true\nwebhook_enable = true\n'
-        f'subject_salt = "{_SALT}"\n', encoding="utf-8")
-    config.reset_config_cache()
-    monkeypatch.setenv("MAVERICK_CONSENT_WEBHOOK_SECRET",
-                       "whsec-0123456789abcdef")
+    _enable_webhook(tmp_path, monkeypatch)
+    ts = _now()
     junk = b"not json"
     with pytest.raises(ValueError, match="JSON"):
-        cr.ingest_consent_webhook(junk, _signed(junk))
+        cr.ingest_consent_webhook(junk, _signed(junk, ts), ts)
     big = json.dumps({"events": [
         {"subject": "s", "purpose": "p", "status": "granted"}
     ] * 101}).encode()
     with pytest.raises(ValueError, match="100"):
-        cr.ingest_consent_webhook(big, _signed(big))
+        cr.ingest_consent_webhook(big, _signed(big, ts), ts)
+    with pytest.raises(ValueError, match="timestamp"):
+        cr.ingest_consent_webhook(junk, _signed(junk, ts), "soon")
+
+
+def test_webhook_survives_a_crashing_event(tmp_path, monkeypatch):
+    _enable_webhook(tmp_path, monkeypatch)
+    ts = _now()
+    real = cr.record_consent
+
+    def flaky(subject, **kwargs):
+        if "bob" in subject:
+            raise RuntimeError("backend hiccup")
+        return real(subject, **kwargs)
+
+    monkeypatch.setattr(cr, "record_consent", flaky)
+    body = json.dumps({"events": [
+        {"subject": "alice@example.com", "purpose": "m", "status": "granted"},
+        {"subject": "bob@example.com", "purpose": "m", "status": "granted"},
+        {"subject": "carol@example.com", "purpose": "m", "status": "granted"},
+    ]}).encode()
+    out = cr.ingest_consent_webhook(body, _signed(body, ts), ts)
+    # A crashing event skips; the rest of the batch still lands.
+    assert out == {"imported": 2, "skipped": 1}

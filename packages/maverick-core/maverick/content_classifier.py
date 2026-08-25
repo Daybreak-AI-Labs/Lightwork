@@ -47,6 +47,28 @@ _GPS = re.compile(
     r"(?<![\d.-])(-?(?:90|[0-8]?\d)\.\d{3,8}),\s*"
     r"(-?(?:180|1[0-7]\d|\d{1,2})\.\d{3,8})(?!\d)(?!\.\d)"
 )
+_AADHAAR = re.compile(r"(?<!\d)([2-9]\d{3})[ -]?(\d{4})[ -]?(\d{4})(?!\d)")
+_AADHAAR_CONTEXT = re.compile(r"\b(?:aadhaar|aadhar|uidai)\b", re.IGNORECASE)
+_NHS = re.compile(r"(?<!\d)(\d{3})[ -]?(\d{3})[ -]?(\d{4})(?!\d)")
+_NHS_CONTEXT = re.compile(r"\bnhs\b", re.IGNORECASE)
+#: Roster bounds: matching is deterministic, but unbounded rosters would
+#: turn one call into a regex fleet.
+MAX_ROSTER_NAMES = 5_000
+
+#: Verhoeff dihedral-group tables (the standard published tables).
+_VERHOEFF_D = (
+    (0, 1, 2, 3, 4, 5, 6, 7, 8, 9), (1, 2, 3, 4, 0, 6, 7, 8, 9, 5),
+    (2, 3, 4, 0, 1, 7, 8, 9, 5, 6), (3, 4, 0, 1, 2, 8, 9, 5, 6, 7),
+    (4, 0, 1, 2, 3, 9, 5, 6, 7, 8), (5, 9, 8, 7, 6, 0, 4, 3, 2, 1),
+    (6, 5, 9, 8, 7, 1, 0, 4, 3, 2), (7, 6, 5, 9, 8, 2, 1, 0, 4, 3),
+    (8, 7, 6, 5, 9, 3, 2, 1, 0, 4), (9, 8, 7, 6, 5, 4, 3, 2, 1, 0),
+)
+_VERHOEFF_P = (
+    (0, 1, 2, 3, 4, 5, 6, 7, 8, 9), (1, 5, 7, 6, 2, 8, 3, 0, 9, 4),
+    (5, 8, 0, 3, 7, 9, 6, 1, 4, 2), (8, 9, 1, 6, 0, 4, 3, 5, 2, 7),
+    (9, 4, 5, 3, 1, 2, 6, 8, 7, 0), (4, 2, 8, 6, 5, 7, 3, 9, 0, 1),
+    (2, 7, 9, 3, 8, 0, 6, 4, 1, 5), (7, 0, 4, 6, 9, 1, 3, 2, 5, 8),
+)
 
 
 def _luhn_ok(digits: str) -> bool:
@@ -79,6 +101,28 @@ def _ssn_ok(area: str, group: str, serial: str) -> bool:
     if area in {"000", "666"} or area >= "900":
         return False
     return group != "00" and serial != "0000"
+
+
+def _verhoeff_ok(digits: str) -> bool:
+    """Verhoeff checksum (Aadhaar's check-digit scheme): valid iff 0."""
+
+    check = 0
+    for index, char in enumerate(reversed(digits)):
+        check = _VERHOEFF_D[check][_VERHOEFF_P[index % 8][ord(char) - 48]]
+    return check == 0
+
+
+def _nhs_ok(digits: str) -> bool:
+    """The NHS number's weighted mod-11 check digit."""
+
+    total = sum((10 - index) * (ord(char) - 48)
+                for index, char in enumerate(digits[:9]))
+    check = 11 - (total % 11)
+    if check == 11:
+        check = 0
+    if check == 10:
+        return False
+    return check == ord(digits[9]) - 48
 
 
 def _mask(value: str) -> str:
@@ -136,16 +180,54 @@ def _scan_contextual(sample: str, add: Any) -> None:
             if "." in match.group(1) or match.group(1)[1:3].isdigit():
                 add("health", "icd10_code_in_clinical_context",
                     match.start(), match.group(1))
+    if _AADHAAR_CONTEXT.search(sample):
+        for match in _AADHAAR.finditer(sample):
+            if _verhoeff_ok("".join(match.groups())):
+                add("national_id", "aadhaar_verhoeff",
+                    match.start(), match.group())
+    if _NHS_CONTEXT.search(sample):
+        for match in _NHS.finditer(sample):
+            if _nhs_ok("".join(match.groups())):
+                add("national_id", "nhs_number_mod11",
+                    match.start(), match.group())
     for match in _GPS.finditer(sample):
         add("location", "gps_coordinate_pair", match.start(), match.group())
 
 
-def classify_text(text: object) -> dict[str, Any]:
+def _scan_roster(sample: str, roster: list[str], add: Any) -> None:
+    """Operator-supplied names, matched deterministically, whole-word."""
+
+    if len(roster) > MAX_ROSTER_NAMES:
+        raise ValueError(f"roster must be at most {MAX_ROSTER_NAMES} names")
+    seen: set[str] = set()
+    for raw in roster:
+        entry = str(raw or "").strip()
+        if len(entry) < 2 or len(entry) > 128:
+            continue
+        key = entry.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        pattern = re.compile(
+            r"(?<!\w)" + re.escape(entry).replace(r"\ ", r"\s+") + r"(?!\w)",
+            re.IGNORECASE,
+        )
+        for match in pattern.finditer(sample):
+            add("name", "roster_match", match.start(), match.group())
+
+
+def classify_text(
+    text: object, *, roster: list[str] | None = None,
+) -> dict[str, Any]:
     """Deterministic content findings for one bounded text sample.
 
     Returns ``{"categories": [...], "counts": {category: n},
     "findings": [{category, kind, start, end, sample} ...]}``. Findings
     carry masked samples only — the raw datum never appears in a report.
+    ``roster`` is the deterministic answer to name detection: names have
+    no checksum, so the operator supplies the list to match (an HR or
+    CRM export), and matches are whole-word and recomputable — still
+    never an ML guess.
     """
 
     sample = str(text or "")
@@ -167,6 +249,23 @@ def classify_text(text: object) -> dict[str, Any]:
 
     _scan_validated(sample, add)
     _scan_contextual(sample, add)
+    if roster:
+        _scan_roster(sample, roster, add)
+
+    # A checksum-validated national id (NHS 3-3-4, Aadhaar 4-4-4) also
+    # fits the phone shape; the stronger, validated finding wins.
+    id_spans = [
+        (row["start"], row["end"])
+        for row in findings if row["category"] == "national_id"
+    ]
+    if id_spans:
+        findings[:] = [
+            row for row in findings
+            if row["category"] != "phone" or not any(
+                row["start"] < end and row["end"] > start
+                for start, end in id_spans
+            )
+        ]
 
     findings.sort(key=lambda row: (row["start"], row["category"]))
     counts: dict[str, int] = {}
@@ -181,4 +280,4 @@ def classify_text(text: object) -> dict[str, Any]:
     }
 
 
-__all__ = ["MAX_FINDINGS", "MAX_TEXT_CHARS", "classify_text"]
+__all__ = ["MAX_FINDINGS", "MAX_ROSTER_NAMES", "MAX_TEXT_CHARS", "classify_text"]

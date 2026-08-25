@@ -25,11 +25,13 @@ def redact_text(
     text: object,
     *,
     categories: list[str] | None = None,
+    roster: list[str] | None = None,
 ) -> dict[str, Any]:
     """Replace validated findings with typed placeholders.
 
     ``categories`` limits redaction to those categories; ``None`` redacts
-    every finding. Returns ``{"text", "redactions", "counts"}`` where
+    every finding. ``roster`` adds deterministic name matches (category
+    ``name``). Returns ``{"text", "redactions", "counts"}`` where
     ``counts`` maps category -> replacements made.
     """
 
@@ -37,7 +39,7 @@ def redact_text(
     if len(sample) > MAX_TEXT_CHARS:
         raise ValueError(f"text must be at most {MAX_TEXT_CHARS} characters")
     wanted = None if categories is None else {str(c) for c in categories}
-    report = classify_text(sample)
+    report = classify_text(sample, roster=roster)
     spans = [
         row
         for row in report["findings"]
@@ -66,4 +68,53 @@ def redact_text(
     }
 
 
-__all__ = ["REDACTION_TEMPLATE", "redact_text"]
+#: Bound on nodes walked by :func:`redact_structured`.
+MAX_STRUCTURED_NODES = 200_000
+
+
+def redact_structured(
+    value: Any,
+    *,
+    categories: list[str] | None = None,
+    roster: list[str] | None = None,
+) -> dict[str, Any]:
+    """Field-aware redaction over JSON-shaped data (dict/list/str trees).
+
+    Walks the structure and redacts each STRING leaf individually — no
+    serialize-redact-reparse round trip, so placeholders can never break
+    quoting and non-string leaves (numbers, booleans) pass through
+    untouched. Dict keys are left as-is: keys are schema, values are
+    data. Returns ``{"value", "redactions", "counts"}``.
+    """
+
+    counts: dict[str, int] = {}
+    nodes = 0
+
+    def walk(node: Any) -> Any:
+        nonlocal nodes
+        nodes += 1
+        if nodes > MAX_STRUCTURED_NODES:
+            raise ValueError(
+                f"structure exceeds {MAX_STRUCTURED_NODES} nodes")
+        if isinstance(node, str):
+            result = redact_text(node, categories=categories, roster=roster)
+            for category, count in result["counts"].items():
+                counts[category] = counts.get(category, 0) + count
+            return result["text"]
+        if isinstance(node, dict):
+            return {key: walk(item) for key, item in node.items()}
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        return node
+
+    out = walk(value)
+    return {"value": out, "redactions": sum(counts.values()),
+            "counts": counts}
+
+
+__all__ = [
+    "MAX_STRUCTURED_NODES",
+    "REDACTION_TEMPLATE",
+    "redact_structured",
+    "redact_text",
+]

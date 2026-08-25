@@ -157,6 +157,36 @@ def render() -> str:
     return "\n".join(lines)
 
 
+#: Verified-legal-content freshness gate. Modules that encode statutory
+#: deadlines carry a VERIFIED_AT date stamped when the rules were checked
+#: against primary sources; past this age the CI gate fails until someone
+#: re-verifies — turning "we check the law by habit" into a ratchet.
+VERIFIED_CONTENT_MAX_AGE_DAYS = 270
+_VERIFIED_CONTENT_MODULES = ("maverick.breach_notification",)
+
+
+def stale_verified_content(
+    *, now: float | None = None,
+) -> list[tuple[str, str, int]]:
+    """(module, verified_at, age_days) for stale legal-content matrices."""
+
+    import datetime
+    import importlib
+    import time as time_module
+
+    stamp = time_module.time() if now is None else float(now)
+    out: list[tuple[str, str, int]] = []
+    for name in _VERIFIED_CONTENT_MODULES:
+        module = importlib.import_module(name)
+        verified = str(getattr(module, "VERIFIED_AT", "")).strip()
+        parsed = datetime.datetime.strptime(verified, "%Y-%m-%d").replace(
+            tzinfo=datetime.timezone.utc)
+        age_days = int((stamp - parsed.timestamp()) // 86_400)
+        if age_days > VERIFIED_CONTENT_MAX_AGE_DAYS:
+            out.append((name, verified, age_days))
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     import argparse
     p = argparse.ArgumentParser(prog="maverick.deprecations",
@@ -170,12 +200,19 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
         for d in due:
             print(f"PAST DUE: {d.name} was to be removed in {d.remove_in} — "
                   "delete the old path and its registry entry")
-        return 1 if due else 0
+        stale = stale_verified_content()
+        for name, verified, age in stale:
+            print(f"STALE LEGAL CONTENT: {name} was verified {verified} "
+                  f"({age} days ago; cap {VERIFIED_CONTENT_MAX_AGE_DAYS}) — "
+                  "re-verify the matrix against primary sources and bump "
+                  "VERIFIED_AT")
+        return 1 if (due or stale) else 0
     return 0
 
 
-__all__ = ["Deprecation", "REGISTRY", "get", "warn_once", "reset_warned",
-           "check_config", "past_due", "current_version", "render"]
+__all__ = ["Deprecation", "REGISTRY", "VERIFIED_CONTENT_MAX_AGE_DAYS",
+           "get", "warn_once", "reset_warned", "check_config", "past_due",
+           "current_version", "render", "stale_verified_content"]
 
 
 if __name__ == "__main__":  # pragma: no cover

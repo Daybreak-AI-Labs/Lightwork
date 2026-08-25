@@ -57,6 +57,17 @@ REGIMES: dict[str, dict[str, Any]] = {
             "Without undue delay when the breach is likely to result in a "
             "HIGH risk to rights and freedoms (Art. 34)."),
         "records_duty": "Document every breach, notified or not (Art. 33(5)).",
+        "notification_contents": {
+            "audience": "supervisory authority",
+            "basis": "GDPR Art. 33(3)",
+            "elements": [
+                "Nature of the breach: categories and approximate numbers "
+                "of data subjects and records concerned",
+                "Name and contact details of the DPO or other contact point",
+                "Likely consequences of the breach",
+                "Measures taken or proposed, including mitigation",
+            ],
+        },
         "citations": ["GDPR Art. 33", "GDPR Art. 34"],
     },
     "uk_gdpr": {
@@ -71,6 +82,17 @@ REGIMES: dict[str, dict[str, Any]] = {
             "Without undue delay when likely to result in a high risk "
             "(UK GDPR Art. 34)."),
         "records_duty": "Document every breach (UK GDPR Art. 33(5)).",
+        "notification_contents": {
+            "audience": "ICO",
+            "basis": "UK GDPR Art. 33(3)",
+            "elements": [
+                "Nature of the breach: categories and approximate numbers "
+                "of data subjects and records concerned",
+                "DPO / contact point details",
+                "Likely consequences",
+                "Measures taken or proposed, including mitigation",
+            ],
+        },
         "citations": ["UK GDPR Art. 33", "UK GDPR Art. 34"],
     },
     "us_hipaa": {
@@ -89,6 +111,21 @@ REGIMES: dict[str, dict[str, Any]] = {
         ),
         "media_rule": "Prominent media outlets in the state when 500+ "
                       "residents of one state/jurisdiction are affected.",
+        "notification_contents": {
+            "audience": "individuals",
+            "basis": "45 CFR § 164.404(c)(1)",
+            "elements": [
+                "Brief description of what happened, with breach and "
+                "discovery dates where known",
+                "Types of unsecured PHI involved (name, SSN, DOB, "
+                "address, account number, diagnosis, ...)",
+                "Steps individuals should take to protect themselves",
+                "What the covered entity is doing to investigate, "
+                "mitigate, and prevent recurrence",
+                "Contact procedures: toll-free number, email, website, "
+                "or postal address",
+            ],
+        },
         "citations": ["45 CFR §§ 164.400–414"],
     },
     "us_ca": {
@@ -101,6 +138,26 @@ REGIMES: dict[str, dict[str, Any]] = {
         "subjects_deadline": _standard(
             "In the most expedient time possible and without unreasonable "
             "delay."),
+        "notification_contents": {
+            "audience": "individuals",
+            "basis": "Cal. Civ. Code § 1798.82(d)",
+            "elements": [
+                "Titled 'Notice of Data Breach', plain language, >=10pt, "
+                "with the five prescribed headings (What Happened? / What "
+                "Information Was Involved? / What We Are Doing / What You "
+                "Can Do / For More Information)",
+                "Name and contact information of the reporting entity",
+                "Types of personal information involved",
+                "Breach date, estimated date, or range, when determinable",
+                "Whether notification was delayed by a law-enforcement "
+                "investigation",
+                "General description of the incident, when available",
+                "Toll-free numbers and addresses of the major credit "
+                "reporting agencies when SSN or ID numbers were exposed "
+                "(and no-cost identity-theft services >=12 months where "
+                "(d)(2)(G) applies)",
+            ],
+        },
         "citations": ["Cal. Civ. Code §§ 1798.29, 1798.82"],
     },
     "us_tx": {
@@ -442,9 +499,12 @@ def assess_breach(
                 "Sensitive data is an independent reporting trigger here "
                 "regardless of subject count."
             )
-        for key in ("assessment_window", "records_duty", "media_rule"):
+        for key in ("assessment_window", "records_duty", "media_rule",
+                    "notification_contents"):
             if key in rule:
                 entry[key] = rule[key]
+        if "notification_contents" not in rule:
+            entry["notification_contents"] = None  # not yet encoded here
         if "assessment_window" in rule:
             entry["assessment_due_at"] = _due_at(
                 rule["assessment_window"],

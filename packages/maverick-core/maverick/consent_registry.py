@@ -594,6 +594,9 @@ def import_onetrust_consents(
 
 _WEBHOOK_MAX_BYTES = 256 * 1024
 _WEBHOOK_MAX_EVENTS = 100
+#: Accepted clock skew between the sender's signed timestamp and now.
+#: Outside this window a delivery is refused — the replay guard.
+_WEBHOOK_TOLERANCE_SECONDS = 300
 
 
 def webhook_enabled() -> bool:
@@ -605,20 +608,26 @@ def webhook_enabled() -> bool:
 
 
 def ingest_consent_webhook(
-    body: bytes, signature: str, *, actor: str = "webhook",
+    body: bytes, signature: str, timestamp: object, *,
+    actor: str = "webhook",
 ) -> dict[str, int]:
     """Ingest a signed consent-event push from ANY consent front end.
 
     The durable-record-behind-your-CMP contract, inbound: a front end
     POSTs ``{"events": [{subject, purpose, status, policy_version?,
-    channel?, recorded_at?}]}`` (or one bare event object) signed with
-    ``HMAC-SHA256(secret, raw_body)`` sent as a hex digest. The secret
-    comes from the environment variable named by
-    ``consent_registry.webhook_secret_env`` — never from config values.
-    Signature failures raise before ANY parsing beyond byte length;
-    per-event failures skip, they never abort the batch. Backdated events
-    cannot flip a newer withdrawal (the registry's projection guarantees
-    it).
+    channel?, recorded_at?}]}`` (or one bare event object) with a unix
+    ``timestamp`` and ``HMAC-SHA256(secret, f"{timestamp}.{body}")`` as
+    a hex digest. The secret comes from the environment variable named
+    by ``consent_registry.webhook_secret_env`` — never from config.
+
+    Replay guard, two layers: the timestamp is INSIDE the signature and
+    must be within ±300s of now, and it becomes the default
+    ``recorded_at`` for events that carry none — so a captured delivery
+    replayed later is refused at the window, and even a replay inside
+    the window re-enters at its ORIGINAL time, where the projection's
+    backdate protection makes it a no-op against any newer withdrawal.
+    Signature failures raise before any parsing beyond byte length;
+    per-event failures skip, they never abort the batch.
     """
 
     _require_enabled()
@@ -637,8 +646,20 @@ def ingest_consent_webhook(
     if not isinstance(body, (bytes, bytearray)) or len(body) > _WEBHOOK_MAX_BYTES:
         raise ValueError(
             f"body must be at most {_WEBHOOK_MAX_BYTES} bytes")
+    try:
+        signed_at = int(str(timestamp or "").strip())
+    except ValueError as exc:
+        raise ValueError(
+            "timestamp must be unix seconds (X-Lightwork-Timestamp)"
+        ) from exc
+    if abs(time.time() - signed_at) > _WEBHOOK_TOLERANCE_SECONDS:
+        raise PermissionError(
+            f"webhook timestamp outside the ±{_WEBHOOK_TOLERANCE_SECONDS}s "
+            "window (replay guard)"
+        )
     expected = hmac_mod.new(
-        secret.encode(), bytes(body), hashlib.sha256
+        secret.encode(), f"{signed_at}.".encode() + bytes(body),
+        hashlib.sha256,
     ).hexdigest()
     provided = str(signature or "").strip().lower().removeprefix("sha256=")
     if not hmac_mod.compare_digest(expected, provided):
@@ -674,8 +695,12 @@ def ingest_consent_webhook(
                 policy_version=str(event.get("policy_version") or "webhook"),
                 channel=channel if channel in CHANNELS else "api",
                 actor=operator,
+                # An event without its own time anchors to the SIGNED
+                # delivery time, never to ingest time — replays re-enter
+                # at their original position in history.
                 recorded_at=(
-                    float(recorded_at) if recorded_at is not None else None
+                    float(recorded_at) if recorded_at is not None
+                    else float(signed_at)
                 ),
             )
             imported += 1

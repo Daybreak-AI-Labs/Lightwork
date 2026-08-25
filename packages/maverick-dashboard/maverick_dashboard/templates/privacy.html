@@ -546,7 +546,7 @@
         <tbody>
           {% for r in records.dsar %}
           <tr>
-            <td><code>{{ r.id }}</code></td>
+            <td><a href="/privacy/dsar/{{ r.id }}"><code>{{ r.id }}</code></a></td>
             <td>{{ r.subject_id }}{% if r.intake %}<br><span class="muted" style="font-size:var(--text-xs);" title="matched: {{ r.intake.signals | join('; ') }}">via message intake</span>{% endif %}</td>
             <td>{{ r.kind }}</td>
             <td>
@@ -715,7 +715,7 @@
         <tbody>
           {% for v in estate.vendors %}
           <tr>
-            <td>{{ v.name }}</td>
+            <td><a href="/privacy/vendors/{{ v.id }}">{{ v.name }}</a></td>
             <td>{{ v.category }}</td>
             <td>{{ v.criticality }}</td>
             <td>{{ v.status }}</td>

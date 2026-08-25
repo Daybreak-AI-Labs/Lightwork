@@ -2324,6 +2324,31 @@ def data_map_sync_sharepoint(search, owner, actor) -> None:
     click.echo(f"imported {result['imported']}  skipped {result['skipped']}")
 
 
+@data_map_group.command("scan-sharepoint-files")
+@click.option("--asset", "asset_id", required=True,
+              help="The site asset to record evidence on.")
+@click.option("--site", "site_id", required=True,
+              help="Microsoft Graph site id (from the census).")
+@click.option("--revision", type=int, required=True,
+              help="The asset's current revision.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def data_map_scan_sharepoint_files(asset_id, site_id, revision, actor) -> None:
+    """Content-scan a site's document library; record evidence, not bytes."""
+    from .. import data_map as dm
+
+    try:
+        saved = dm.scan_sharepoint_site_files(
+            asset_id, site_id=site_id, actor=actor,
+            expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    scan = saved["file_scan"]
+    click.echo(f"sampled {scan['files_sampled']}  skipped "
+               f"{scan['files_skipped']}  categories "
+               f"[{', '.join(saved['content_categories']) or '-'}]")
+
+
 @data_map_group.command("list")
 @click.option("--system", default=None, help="Filter to one system.")
 def data_map_list(system) -> None:
@@ -2809,20 +2834,48 @@ def dsar_fulfill_log_source(fulfillment_id, source, reference, items,
                f"(rev {record['revision']})")
 
 
+@dsar_fulfill_group.command("collect-graph")
+@click.option("--request", "request_id", required=True, help="DSAR id.")
+@click.option("--revision", type=int, required=True,
+              help="The fulfillment record's current revision.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def dsar_fulfill_collect_graph(request_id, revision, actor) -> None:
+    """Count the subject's Microsoft 365 footprint; move no content."""
+    from .. import dsar_fulfillment as df
+
+    try:
+        out = df.collect_graph_sources(
+            request_id, actor=actor, expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    for probe in out["probes"]:
+        if probe["collected"]:
+            more = " (more exist)" if probe["more"] else ""
+            click.echo(f"{probe['source']}: {probe['items']} item(s){more}")
+        else:
+            click.echo(f"{probe['source']}: not collected — {probe['error']}")
+
+
 @dsar_fulfill_group.command("mint-response")
 @click.option("--fulfillment", "fulfillment_id", required=True)
 @click.option("--expires-hours", type=int, default=72)
+@click.option("--max-reads", type=int, default=None,
+              help="Cap link reads (1 = strict single-use; default unlimited).")
 @click.option("--revision", type=int, required=True)
 @click.option("--by", "actor", required=True, help="Acting human.")
-def dsar_fulfill_mint(fulfillment_id, expires_hours, revision, actor) -> None:
+def dsar_fulfill_mint(fulfillment_id, expires_hours, max_reads, revision,
+                      actor) -> None:
     """Mint the token-gated response link (shown ONCE; only its hash is kept)."""
     from .. import dsar_fulfillment as df
 
     try:
         link = df.prepare_response(
             fulfillment_id, actor=actor, expected_revision=revision,
-            expires_hours=expires_hours,
+            expires_hours=expires_hours, max_reads=max_reads,
         )
     except (KeyError, ValueError, RuntimeError) as e:
         raise click.ClickException(str(e)) from e
     click.echo(link["response_path"])
+
+

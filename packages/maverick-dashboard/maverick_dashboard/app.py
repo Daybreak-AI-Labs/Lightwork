@@ -1067,6 +1067,33 @@ def _configured_oidc_bearer_present(request: Request) -> bool:
 
 
 @app.middleware("http")
+async def http_metrics(request: Request, call_next):
+    """Count every request into the always-on runtime metrics registry.
+
+    Route TEMPLATES, never raw paths, keep label cardinality bounded;
+    a request that matches no route counts under "unmatched"."""
+    import time as _time
+
+    from maverick import runtime_metrics
+
+    started = _time.monotonic()
+    response = await call_next(request)
+    route = request.scope.get("route")
+    template = getattr(route, "path", None) or "unmatched"
+    runtime_metrics.increment(
+        "lightwork_http_requests_total", method=request.method,
+        route=template, status=str(response.status_code),
+        help_text="Dashboard HTTP requests by route template",
+    )
+    runtime_metrics.increment(
+        "lightwork_http_request_seconds_total", route=template,
+        amount=_time.monotonic() - started,
+        help_text="Total request wall time by route template",
+    )
+    return response
+
+
+@app.middleware("http")
 async def bearer_auth(request: Request, call_next):
     expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN")
     if (request.url.path in _AUTH_EXEMPT or request.url.path.startswith("/share/")
@@ -2270,6 +2297,79 @@ def _privacy_page_data() -> tuple[dict, dict]:
         estate["assets"] = data_map.list_data_assets()
         estate["data_map_posture"] = data_map.data_map_posture()
     return records, estate
+
+
+def _date(stamp) -> str:
+    import time as _time
+
+    try:
+        value = float(stamp or 0)
+    except (TypeError, ValueError):
+        return "—"
+    return _time.strftime("%Y-%m-%d", _time.localtime(value)) if value else "—"
+
+
+@app.get("/privacy/vendors/{vendor_id}", response_class=HTMLResponse)
+async def vendor_detail_page(request: Request, vendor_id: str) -> HTMLResponse:
+    """One vendor's full governed record: lifecycle, contracts and their
+    renewal state, questionnaires (never their live form tokens), linked
+    specialist records, and monitoring notes."""
+    require_permission(request, "operate")
+    import time as _time
+
+    from maverick import vendor_management
+    if not vendor_management.enabled():
+        raise HTTPException(status_code=403,
+                            detail="vendor_management is not enabled")
+    record = vendor_management.get_vendor(vendor_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such vendor")
+    record["registered_at_date"] = _date(record.get("registered_at"))
+    now = _time.time()
+    for c in record.get("contracts") or []:
+        c["renews_date"] = _date(c.get("renews_at"))
+        c["overdue"] = float(c.get("renews_at") or 0) < now
+    for q in record.get("questionnaires") or []:
+        q.pop("token", None)   # the live form token never reaches a page
+        q["requested_at_date"] = _date(q.get("requested_at"))
+    for n in record.get("monitoring_notes") or []:
+        n["recorded_at_date"] = _date(n.get("recorded_at"))
+    return templates.TemplateResponse(
+        request, "vendor_detail.html", {"vendor": record})
+
+
+@app.get("/privacy/dsar/{request_id}", response_class=HTMLResponse)
+async def dsar_detail_page(request: Request, request_id: str) -> HTMLResponse:
+    """One DSAR with its fulfillment trail: the SLA clock, identity
+    verification, collection sources, and the response link's delivery
+    state (reads used against the cap; never the token itself)."""
+    require_permission(request, "operate")
+    import time as _time
+
+    from maverick import dsar_fulfillment, privacy_ops
+    if not privacy_ops.enabled():
+        raise HTTPException(status_code=403, detail="privacy_ops is not enabled")
+    record = privacy_ops.get_dsar(request_id[:64])
+    if record is None or "status" not in record:
+        raise HTTPException(status_code=404, detail="no such DSAR")
+    record = dict(record)
+    now = _time.time()
+    record["days_left"] = int((float(record.get("due_at", now)) - now) // 86400)
+    record["overdue"] = (record["days_left"] < 0
+                         and record.get("status") in ("open", "awaiting_erasure"))
+    record["created_date"] = _date(record.get("created_at"))
+    record["due_date"] = _date(record.get("due_at"))
+    fulfillment = None
+    fulfillment_enabled = dsar_fulfillment.enabled()
+    if fulfillment_enabled:
+        fulfillment = dsar_fulfillment.get_fulfillment(record["id"])
+        if fulfillment and fulfillment.get("response"):
+            fulfillment["response"]["expires_date"] = _date(
+                fulfillment["response"].get("expires_at"))
+    return templates.TemplateResponse(
+        request, "dsar_detail.html",
+        {"dsar": record, "fulfillment": fulfillment,
+         "fulfillment_enabled": fulfillment_enabled})
 
 
 @app.get("/privacy/board", response_class=HTMLResponse)
@@ -5902,11 +6002,12 @@ async def dsar_response_page(request: Request, token: str) -> JSONResponse:
 async def consent_webhook(request: Request) -> JSONResponse:
     """Signed consent-event push from any consent front end (CMP).
 
-    Authenticated by the HMAC-SHA256 signature over the raw body
-    (X-Lightwork-Signature, hex, optional sha256= prefix) — external CMPs
-    hold the webhook secret, never a dashboard credential. Bounded body;
-    per-event failures skip rather than abort; a backdated event can
-    never flip a newer withdrawal."""
+    Authenticated by HMAC-SHA256 over ``{timestamp}.{body}``
+    (X-Lightwork-Signature hex + X-Lightwork-Timestamp unix seconds,
+    ±300s replay window) — external CMPs hold the webhook secret, never
+    a dashboard credential. Bounded body; per-event failures skip rather
+    than abort; a backdated or replayed event can never flip a newer
+    withdrawal."""
     from maverick import consent_registry
     if not consent_registry.webhook_enabled():
         raise HTTPException(
@@ -5915,9 +6016,11 @@ async def consent_webhook(request: Request) -> JSONResponse:
                    "webhook_enable)")
     body = await _read_limited_webhook_body(request)
     signature = request.headers.get("x-lightwork-signature", "")
+    timestamp = request.headers.get("x-lightwork-timestamp", "")
     try:
         result = await run_in_threadpool(
             consent_registry.ingest_consent_webhook, body, signature,
+            timestamp,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc

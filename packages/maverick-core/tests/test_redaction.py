@@ -39,3 +39,21 @@ def test_category_filter():
 def test_bounds():
     with pytest.raises(ValueError, match="characters"):
         redact_text("x" * 2_000_001)
+
+
+def test_structured_redaction_walks_fields_not_blobs():
+    from maverick.redaction import redact_structured
+
+    payload = {
+        "subject": "alice@example.com",
+        "meta": {"count": 3, "flag": True},
+        "notes": ["call +1 415-555-2671.", "clean line"],
+    }
+    result = redact_structured(payload)
+    assert result["value"]["subject"] == "[REDACTED:email]"
+    assert result["value"]["meta"] == {"count": 3, "flag": True}
+    assert result["value"]["notes"][0] == "call [REDACTED:phone]."
+    assert result["value"]["notes"][1] == "clean line"
+    assert result["counts"] == {"email": 1, "phone": 1}
+    with pytest.raises(ValueError, match="nodes"):
+        redact_structured([["x"] * 1000] * 300)

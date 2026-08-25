@@ -86,7 +86,10 @@ def test_reclaim_under_strict_mode_preserves_legacy_plaintext_result(monkeypatch
     leave the stored result untouched."""
     from maverick.world_model import WorldModel
     db = tmp_path / "world.db"
-    wm = WorldModel(db)                     # encryption off: result is plaintext
+    # Write phase: encryption EXPLICITLY off (under the secure default an
+    # unset flag seals, which would break the legacy-plaintext premise).
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
+    wm = WorldModel(db)
     gid = wm.create_goal("g", "")
     wm.set_goal_status(gid, "active", result="IMPORTANT pre-encryption result")
 
@@ -105,8 +108,9 @@ def test_reclaim_under_strict_mode_preserves_legacy_plaintext_result(monkeypatch
     assert raw == "IMPORTANT pre-encryption result"
 
 
-def test_reclaim_plaintext_concat_unchanged_without_encryption(tmp_path):
+def test_reclaim_plaintext_concat_unchanged_without_encryption(tmp_path, monkeypatch):
     """Encryption off: the fast SQL-concat path is preserved (marker appended)."""
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "0")
     from maverick.world_model import WorldModel
     wm = WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("g", "")

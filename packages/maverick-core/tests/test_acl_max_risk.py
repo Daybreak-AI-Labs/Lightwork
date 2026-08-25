@@ -81,11 +81,15 @@ read_file = "high"
 
 # ---------- resolve_max_risk: most restrictive wins ----------
 
-def test_resolve_max_risk_unset_is_none(tmp_path, monkeypatch):
+def test_resolve_max_risk_unset_follows_the_posture(tmp_path, monkeypatch):
+    # No configured ceiling: uncapped in legacy mode, capped at "high" under
+    # the secure default (critical-risk tools need an explicit opt-in).
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_config(tmp_path, '[security]\ndenied_tools = ["computer"]\n')
     from maverick.safety.tool_acl import resolve_max_risk
-    assert resolve_max_risk(user_id="tg:1") is None
+    from maverick.security_defaults import secure_by_default
+    expected = "high" if secure_by_default() else None
+    assert resolve_max_risk(user_id="tg:1") == expected
 
 
 def test_resolve_max_risk_tightest_layer_wins(tmp_path, monkeypatch):
