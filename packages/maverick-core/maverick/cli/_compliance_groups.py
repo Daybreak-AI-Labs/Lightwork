@@ -2349,6 +2349,31 @@ def data_map_scan_sharepoint_files(asset_id, site_id, revision, actor) -> None:
                f"[{', '.join(saved['content_categories']) or '-'}]")
 
 
+@data_map_group.command("scan-s3-objects")
+@click.option("--asset", "asset_id", required=True,
+              help="The bucket asset to record evidence on.")
+@click.option("--bucket", required=True, help="S3 bucket name.")
+@click.option("--prefix", default="", help="Key prefix to sample.")
+@click.option("--revision", type=int, required=True,
+              help="The asset's current revision.")
+@click.option("--by", "actor", required=True, help="Acting human.")
+def data_map_scan_s3_objects(asset_id, bucket, prefix, revision, actor) -> None:
+    """Content-scan one bounded page of an S3 prefix; evidence, not bytes."""
+    from .. import data_map as dm
+
+    try:
+        saved = dm.scan_s3_bucket_objects(
+            asset_id, bucket=bucket, prefix=prefix, actor=actor,
+            expected_revision=revision,
+        )
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    scan = saved["file_scan"]
+    click.echo(f"sampled {scan['files_sampled']}  skipped "
+               f"{scan['files_skipped']}  categories "
+               f"[{', '.join(saved['content_categories']) or '-'}]")
+
+
 @data_map_group.command("list")
 @click.option("--system", default=None, help="Filter to one system.")
 def data_map_list(system) -> None:

@@ -23,10 +23,12 @@ posture is "new" and fails the build. The mechanics stay a ratchet -- if debt
 is ever deliberately re-admitted (it should not be), it must be committed to
 the baseline where everyone can see it, and fixed entries must be removed.
 
-It is scoped to maverick-core because that is where every control the posture
-flips lives, and because that is the tree the baseline was actually measured
-over -- widening the claim to the whole workspace without measuring it would
-be the defect this repo keeps finding.
+Scope: the WHOLE workspace. The gate began scoped to maverick-core -- where
+every control the posture flips lives -- because that was the only tree the
+baseline had actually been measured over; widening a claim past its
+measurement is the defect this repo keeps finding. The workspace-wide
+measurement has since been taken (20,899 passed, zero posture failures), so
+the gate now covers everything the suite covers.
 
 Usage in CI::
 

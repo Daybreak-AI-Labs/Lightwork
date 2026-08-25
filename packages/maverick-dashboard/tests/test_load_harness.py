@@ -53,3 +53,23 @@ def test_guarantees_hold_under_concurrent_clients(tmp_path):
 def test_refuses_a_mispinned_world():
     with pytest.raises(RuntimeError, match="pin the environment"):
         load_harness.run_load(load_harness.Path("/nowhere/world.db"))
+
+
+def test_guarantees_hold_over_a_real_loopback_socket(tmp_path):
+    """The same assertions across a real HTTP parser and socket. A claim
+    that only survives without a socket is not a claim about production —
+    this transport is what caught the harness sending a stale Origin that
+    the app's CSRF check (correctly) refused."""
+    proof = load_harness.run_load(
+        tmp_path / "world.db", workers=2, requests=2, transport="http")
+    assert proof["ok"] is True, proof
+    assert proof["transport"] == "http"
+    assert proof["requests_issued"] == 2 * 2 * 5
+    assert set(proof["statuses"]) <= {"200", "201", "409"}
+    assert proof["checks"]["no_5xx"] is True
+    assert proof["checks"]["world_db_integrity_ok"] is True
+
+
+def test_unknown_transport_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="transport"):
+        load_harness.run_load(tmp_path / "world.db", transport="carrier-pigeon")

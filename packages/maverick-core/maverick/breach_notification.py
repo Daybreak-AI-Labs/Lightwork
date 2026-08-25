@@ -1,6 +1,6 @@
 """Jurisdiction-aware breach-notification obligations, verified at source.
 
-Fourteen regimes' who/when/whether rules as data, every deadline checked
+Fifteen regimes' who/when/whether rules as data, every deadline checked
 against the primary source or the regulator's own guidance on the
 verification date below — the discipline that already caught a repealed
 statute elsewhere in this platform. :func:`assess_breach` turns one
@@ -11,13 +11,17 @@ it does not.
 
 Honest boundaries, stated plainly: this is DECISION SUPPORT for the
 operator's counsel, never legal advice or a notification service — the
-platform transmits nothing. Business-day math skips weekends only (public
-holidays vary by jurisdiction and are excluded, noted per obligation).
-Regimes not yet verified against primary sources (e.g. India's DPDP
-rules, Quebec Law 25) are deliberately absent rather than guessed at.
+platform transmits nothing. Business-day math skips weekends plus the
+FIXED-date national holidays of jurisdictions with a verified calendar;
+movable and optional holidays stay working days, so a computed date can
+only fall at or before the true deadline, never after it. Regimes not yet
+verified against primary sources (e.g. India's DPDP rules, whose official
+sources were unreachable from this build environment) are deliberately
+absent rather than guessed at.
 """
 from __future__ import annotations
 
+import datetime
 import time
 from typing import Any
 
@@ -237,7 +241,10 @@ REGIMES: dict[str, dict[str, Any]] = {
             condition="Affected subjects on the same 3-business-day clock "
                       "as the ANPD notice.",
         ),
-        "citations": ["LGPD Art. 48", "ANPD Resolution CD/ANPD 15/2024"],
+        "holiday_calendar": "BR",
+        "citations": ["LGPD Art. 48", "ANPD Resolution CD/ANPD 15/2024",
+                      "Lei 662/1949 (as amended by Lei 10.607/2002), "
+                      "Lei 6.802/1980, Lei 14.759/2023 — feriados nacionais"],
     },
     "ca_pipeda": {
         "name": "Canada — PIPEDA",
@@ -252,6 +259,30 @@ REGIMES: dict[str, dict[str, Any]] = {
                         "24 months.",
         "citations": ["PIPEDA ss. 10.1–10.3", "Breach of Security "
                       "Safeguards Regulations"],
+    },
+    "ca_quebec": {
+        "name": "Canada (Quebec) — Law 25",
+        "authority": "Commission d'acces a l'information (CAI)",
+        "authority_deadline": _standard(
+            "Promptly -- the Commission's own wording is \"s'empresser d'en "
+            "aviser la Commission\" -- once the incident presents a risk "
+            "that serious injury be caused. No fixed clock in the text."),
+        "subjects_deadline": _standard(
+            "Every person whose personal information is concerned must be "
+            "notified; the Commission may ORDER the enterprise to do so. "
+            "Notice may be withheld where it would hinder an investigation "
+            "to prevent, detect or repress crime or statutory offences."),
+        "records_duty": (
+            "Maintain a register of confidentiality incidents; each entry "
+            "is kept for at least FIVE years after the date, or the period, "
+            "the incident became known."),
+        "citations": [
+            "Act respecting the protection of personal information in the "
+            "private sector (Law 25) -- confidentiality incidents",
+            "Reglement sur les incidents de confidentialite",
+            "CAI guidance for enterprises, 'Incidents de confidentialite et "
+            "mesures de securite', verified 2026-08-25",
+        ],
     },
     "au_ndb": {
         "name": "Australia — Notifiable Data Breaches",
@@ -375,21 +406,55 @@ def _require_enabled() -> None:
         )
 
 
-def _add_business_days(start: float, count: int) -> float:
-    """Weekend-skipping day math; public holidays deliberately excluded."""
+#: Fixed-date national holidays, per jurisdiction, verified at the primary
+#: source. Only statutory FIXED dates are modelled: movable religious
+#: observances and optional "pontos facultativos" (Carnival, Corpus Christi)
+#: are not national holidays by statute, so they are left in as working
+#: days. That errs in the safe direction -- a computed deadline can only
+#: land at or BEFORE the true one, never after it.
+_FIXED_HOLIDAYS: dict[str, frozenset[tuple[int, int]]] = {
+    # Brazil: Lei 662/1949 (as amended by Lei 10.607/2002), Lei 6.802/1980
+    # (12 Oct), Lei 14.759/2023 (20 Nov). Verified 2026-08-25 at planalto.gov.br.
+    "BR": frozenset({
+        (1, 1), (4, 21), (5, 1), (9, 7), (10, 12),
+        (11, 2), (11, 15), (11, 20), (12, 25),
+    }),
+}
+
+
+def _is_working_day(stamp: float, calendar: str) -> bool:
+    """Monday-Friday, minus the jurisdiction's fixed national holidays."""
+
+    # Epoch day 0 (1970-01-01) was a Thursday: weekday = (day + 3) % 7 with
+    # Monday = 0, so Monday-Friday is < 5.
+    if (int(stamp // _DAY) + 3) % 7 >= 5:
+        return False
+    holidays = _FIXED_HOLIDAYS.get(calendar)
+    if not holidays:
+        return True
+    moment = datetime.datetime.fromtimestamp(stamp, tz=datetime.timezone.utc)
+    return (moment.month, moment.day) not in holidays
+
+
+def _add_business_days(start: float, count: int, *, calendar: str = "") -> float:
+    """Business-day math over weekends and fixed national holidays.
+
+    ``calendar`` selects a verified holiday set; an unknown or empty one
+    skips weekends only, which is what every regime without a modelled
+    calendar honestly gets.
+    """
 
     stamp = start
     remaining = count
     while remaining > 0:
         stamp += _DAY
-        # Epoch day 0 (1970-01-01) was a Thursday: weekday = (day + 3) % 7
-        # with Monday = 0, so Monday-Friday is < 5.
-        if (int(stamp // _DAY) + 3) % 7 < 5:
+        if _is_working_day(stamp, calendar):
             remaining -= 1
     return stamp
 
 
-def _due_at(spec: dict, *, discovered_at: float, determined_at: float) -> float | None:
+def _due_at(spec: dict, *, discovered_at: float, determined_at: float,
+            calendar: str = "") -> float | None:
     if spec.get("basis") != "fixed":
         return None
     anchor = determined_at if spec["anchor"] == "determination" else discovered_at
@@ -399,7 +464,7 @@ def _due_at(spec: dict, *, discovered_at: float, determined_at: float) -> float 
     if unit == "days":
         return anchor + value * _DAY
     if unit == "business_days":
-        return _add_business_days(anchor, value)
+        return _add_business_days(anchor, value, calendar=calendar)
     raise ValueError(f"unknown deadline unit: {unit}")
 
 
@@ -471,23 +536,26 @@ def assess_breach(
         below_threshold = (
             minimum is not None and subjects_affected and subjects_affected < minimum
         )
+        calendar = str(rule.get("holiday_calendar") or "")
         entry: dict[str, Any] = {
             "regime": regime_id,
             "name": rule["name"],
             "authority": rule["authority"],
             "authority_deadline": authority_spec,
             "authority_due_at": _due_at(
-                authority_spec,
+                authority_spec, calendar=calendar,
                 discovered_at=discovery, determined_at=determination,
             ),
             "authority_below_threshold": bool(below_threshold),
             "subjects_deadline": rule["subjects_deadline"],
             "subjects_due_at": _due_at(
-                rule["subjects_deadline"],
+                rule["subjects_deadline"], calendar=calendar,
                 discovered_at=discovery, determined_at=determination,
             ),
             "citations": list(rule["citations"]),
         }
+        if calendar in _FIXED_HOLIDAYS:
+            entry["holiday_calendar"] = calendar
         if below_threshold:
             entry["threshold_note"] = (
                 f"Reported subject count ({subjects_affected}) is below "
@@ -507,7 +575,7 @@ def assess_breach(
             entry["notification_contents"] = None  # not yet encoded here
         if "assessment_window" in rule:
             entry["assessment_due_at"] = _due_at(
-                rule["assessment_window"],
+                rule["assessment_window"], calendar=calendar,
                 discovered_at=discovery, determined_at=determination,
             )
         obligations.append(entry)
@@ -529,8 +597,12 @@ def assess_breach(
         "malicious": bool(malicious),
         "obligations": obligations,
         "business_day_note": (
-            "Business-day math skips weekends only; public holidays vary "
-            "by jurisdiction and are not modelled."
+            "Business-day math skips weekends, plus the FIXED-date national "
+            "holidays of the jurisdictions with a verified calendar "
+            f"({', '.join(sorted(_FIXED_HOLIDAYS))}). Movable religious "
+            "observances and optional/municipal holidays are treated as "
+            "working days, so a computed date can only fall at or before "
+            "the true deadline, never after it."
         ),
         "notice": NON_LEGAL_ADVICE,
     }

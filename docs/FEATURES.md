@@ -626,7 +626,13 @@ here.
   safeguards, incident 72h clock, DPA clause coverage — never a synthetic
   score); and a drill-through of the records behind the numbers. One
   aggregate round trip; hand-rolled SVG (no chart deps); auto-refreshes
-  every 60s; Present mode for a full-screen pitch.
+  every 60s; Present mode for a full-screen pitch. Estate rows drill
+  through to the record behind them (`/privacy/vendors/{id}`,
+  `/privacy/dsar/{id}`, operate-gated): a vendor's contracts with renewal
+  state, questionnaires, linked specialist records and monitoring notes;
+  a request's SLA clock, identity verification, collection sources, and
+  delivery state with reads used against the cap. Neither page can render
+  a questionnaire form token or a response-link token — tests assert it.
 - **Privacy ops record types** (`privacy_ops.py`, `/api/v1/privacy/*`,
   tabs on `/privacy`; `[privacy_ops] enable`, wizard step) — the "nimble
   OneTrust" data plane, every engine deterministic and explainable:
@@ -1166,7 +1172,17 @@ here.
   scores). A Snowflake masking-policy DDL exporter (`maverick data-map
   masking-sql`, `GET /api/v1/data-map/masking-sql`) turns flagged
   columns into reviewable `CREATE MASKING POLICY`/`ALTER TABLE` SQL —
-  emitted, never executed. Sampling and emission, never a crawler.
+  emitted, never executed. Live file scanning closes the sample-only
+  gap: `maverick data-map scan-sharepoint-files` lists a site's document
+  library through Graph (`Files.Read.All`) and runs the classifier over
+  bounded samples of the formats the platform reads **with the stdlib
+  alone** — plain text plus docx/xlsx/pptx OOXML parts and untrusted PDF
+  content streams — recording EVIDENCE (per-category counts and which
+  file NAMES were flagged), never a byte of content. Item ids that could
+  smuggle path segments are refused, and an unreadable container (a
+  scanned PDF, an encrypted or bomb-shaped archive) counts as SKIPPED so
+  the record never implies coverage the scan did not have. Sampling and
+  emission, never a crawler.
 - **Deterministic text redaction** (`redaction.py`) — replaces the
   content classifier's validated findings with typed placeholders
   (`[REDACTED:email]`); span-exact, idempotent on its own output, text
@@ -1183,8 +1199,14 @@ here.
   turned into per-incident obligations with computed due timestamps,
   threshold notes, and citations. Weekend-aware business-day math
   (holidays excluded, stated); unverified regimes are absent by design,
-  named in the refusal. Decision support for counsel, never legal
-  advice; nothing is transmitted.
+  named in the refusal. Four regimes also carry the statutory element
+  list a notice must CONTAIN, each with its citation (GDPR Art. 33(3),
+  HIPAA 164.404(c)(1), Cal. Civ. Code 1798.82(d) including the required
+  "Notice of Data Breach" headings). Time-sensitive legal content is
+  ratcheted: `python -m maverick.deprecations --ci` fails the build once
+  a `VERIFIED_AT` stamp passes 270 days, so an encoded deadline cannot
+  quietly rot. Decision support for counsel, never legal advice;
+  nothing is transmitted.
 - **DSAR fulfillment pipeline** (`dsar_fulfillment.py`, opt-in
   `[dsar_fulfillment] enable`, `maverick dsar-fulfill`,
   `/api/v1/privacy/dsar/*/fulfillment*`, public
@@ -1196,6 +1218,12 @@ here.
   delivery time from the live stores — no second copy of personal data
   is persisted — with third-party identifiers scrubbed by the
   deterministic redactor, the subject's own reference preserved.
+  Slim Microsoft 365 collection (`maverick dsar-fulfill collect-graph`)
+  counts the subject's mailbox and drive footprint (`$select=id`,
+  `Mail.ReadBasic.All` + `Files.Read.All`) and logs each probe as a
+  collection source while moving NO content; a subject that is not a
+  userPrincipalName is refused rather than guessed at, and a missing
+  mailbox is recorded as a finding, not a crash.
 - **Governance needs-attention digest** (`governance_alerts.py`,
   `maverick governance-alerts due`, `GET /api/v1/security/governance/alerts`)
   — one bounded read-side digest of what compliance must act on: Art. 73
@@ -2920,7 +2948,9 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   DORA, Basel III final reforms, and IFRS 17; strictest-wins), and the
   `maverick finance status` posture report (`maverick/finance/`). The opt-in
   `[finance_operations]` control plane adds: SSRF-guarded Federal Register,
-  opt-in official Texas Register RSS, and configured state-register polling;
+  opt-in official Texas Register RSS, opt-in EU feeds (EUR-Lex
+  Parliament/Council legislation and EDPB news, both verified live at
+  source before encoding), and configured state-register polling;
   atomic deterministic content versioning,
   enabled-scope matching, field diffs, and a citation-bearing review queue;
   versioned 50-state money-transmitter and insurance-producer source-routing
@@ -3031,7 +3061,22 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   `control_data_plane_e2e.py` (one goal provably runs out-of-process, with a JSON
   evidence artifact) and `control_data_plane_soak.py` (many goals under
   concurrent workers reach `done` zero-loss and **exactly-once** — the contention
-  test of `JobQueue.claim`'s `WHERE status='pending'` guard).
+  test of `JobQueue.claim`'s `WHERE status='pending'` guard). The HTTP
+  plane has its own proof: `maverick_dashboard.load_harness` drives the
+  real app with concurrent clients and asserts no 5xx, that admission
+  holds under contention (N clients racing one vendor name end with
+  exactly one record, losers seeing the governed-record 409), a clean
+  `PRAGMA integrity_check`, and that every issued request was metered.
+  Latency percentiles are recorded and never asserted — a wall-clock
+  gate in CI is a flake generator.
+- **The production security posture is CI-enforced** (`posture_gate.py`,
+  `posture.baseline.json`) — the suite runs with secure defaults off so
+  each control's on/off mechanics stay under test, which once meant
+  ~19,000 green tests describing a configuration no customer runs. The
+  same tree under the real posture (audit signing on, at-rest encryption
+  on, consent fail-closed for high-risk actions, tool-risk ceiling
+  applied) is measured every build; the debt register went 91 → **0**
+  and the job now BLOCKS on any posture failure.
 - **Process table** — `maverick ps` (unified view of runs/workers).
 - **Scheduling** — recurring autonomous goals from a prompt; `worker --once`
   cron-friendly drain (`scheduler.py`, `job_queue.py`, `worker.py`).
@@ -3133,7 +3178,12 @@ attribute set** — `gen_ai.operation.name` / `system` / `request.model` /
 `execute_tool` tool-span attributes AND the `invoke_agent` agent-span leg
 (`gen_ai.agent.name/id` around every `Agent.run`) with semconv `error.type`
 stamped on failed spans — so any OTel-native backend reads them
-with no custom mapping), Prometheus `/metrics`, and a **Sentry performance
+with no custom mapping), Prometheus `/metrics` — which serves the
+platform series **and** Lightwork's own always-on counters from a
+dependency-free registry (`runtime_metrics.py`: dashboard requests by
+route TEMPLATE never raw path, request wall time, gateway calls,
+governed-record ops, with a per-metric series cap and a dropped-series
+counter so cardinality cannot run away silently) in one scrape — and a **Sentry performance
 tab** (all opt-in) (`observability.py`): `MAVERICK_SENTRY_DSN` (or
 `[observability] sentry_dsn`) initializes Sentry tracing and every existing
 `trace_span` call feeds it — a transaction at the root (episodes), child spans

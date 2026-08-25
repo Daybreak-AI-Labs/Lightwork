@@ -292,9 +292,9 @@ def test_sharepoint_file_scan_records_evidence_never_content():
             {"id": "item-3!c", "name": "notes", "size": 10, "folder": {}},
         ]}
 
-    def downloader(url: str) -> str:
+    def downloader(url: str) -> bytes:
         downloaded.append(url)
-        return "reach me at alice@example.com or +1 415 555 2671"
+        return b"reach me at alice@example.com or +1 415 555 2671"
 
     saved = dm.scan_sharepoint_site_files(
         asset["id"], site_id="contoso.sharepoint.com,guid-1,guid-2",
@@ -325,7 +325,7 @@ def test_sharepoint_file_scan_validates_identifiers_and_token():
         dm.scan_sharepoint_site_files(
             asset["id"], site_id="bad/../id", actor="ops",
             expected_revision=asset["revision"],
-            fetcher=lambda _u: {"value": []}, downloader=lambda _u: "")
+            fetcher=lambda _u: {"value": []}, downloader=lambda _u: b"")
     with pytest.raises(dm.DataMapConfigError, match="Files.Read.All"):
         dm.scan_sharepoint_site_files(
             asset["id"], site_id="contoso.sharepoint.com,g1,g2",
@@ -342,3 +342,112 @@ def test_sharepoint_file_scan_validates_identifiers_and_token():
     assert saved["file_scan"] == {
         "site_id": "contoso.sharepoint.com,g1,g2", "files_listed": 1,
         "files_sampled": 0, "files_skipped": 1, "flagged_files": []}
+
+
+def _ooxml(members: dict) -> bytes:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, body in members.items():
+            archive.writestr(name, body)
+    return buffer.getvalue()
+
+
+def test_sharepoint_file_scan_reads_office_documents_without_a_parser_dep():
+    asset = dm.register_data_asset(
+        "Policies", system="sharepoint", kind="site", owner="it", actor="ops")
+    docx = _ooxml({"word/document.xml":
+                   "<w:document><w:body><w:p><w:r><w:t>"
+                   "contact a&amp;b&#64;example.com</w:t></w:r></w:p>"
+                   "</w:body></w:document>"})
+    xlsx = _ooxml({"xl/sharedStrings.xml":
+                   "<sst><si><t>4111 1111 1111 1111</t></si></sst>"})
+    bodies = {"handbook.docx": docx, "roster.xlsx": xlsx}
+
+    def fetcher(_url: str) -> dict:
+        return {"value": [
+            {"id": "d1", "name": "handbook.docx", "size": len(docx),
+             "file": {}},
+            {"id": "x1", "name": "roster.xlsx", "size": len(xlsx),
+             "file": {}},
+            {"id": "s1", "name": "scan.pdf", "size": 40, "file": {}},
+        ]}
+
+    def downloader(url: str) -> bytes:
+        if url.endswith("d1/content"):
+            return docx
+        if url.endswith("x1/content"):
+            return xlsx
+        return b"%PDF-1.4 not really extractable"
+
+    saved = dm.scan_sharepoint_site_files(
+        asset["id"], site_id="contoso.sharepoint.com,g1,g2", actor="ops",
+        expected_revision=asset["revision"],
+        fetcher=fetcher, downloader=downloader)
+
+    scan = saved["file_scan"]
+    # Both OOXML documents were read; the unreadable PDF counts as SKIPPED --
+    # never as a clean file.
+    assert scan["files_sampled"] == 2
+    assert scan["files_skipped"] == 1
+    flagged = {row["name"]: row["categories"] for row in scan["flagged_files"]}
+    # The escaped "&#64;" would have hidden this email before unescaping.
+    assert flagged["handbook.docx"] == ["email"]
+    assert flagged["roster.xlsx"] == ["financial"]
+    assert "example.com" not in str(saved)  # evidence only, never content
+    assert bodies  # the fixture bodies never reach the record
+
+
+def test_s3_object_scan_records_evidence_and_needs_no_cloud_account():
+    asset = dm.register_data_asset(
+        "exports", system="s3", kind="bucket", owner="it", actor="ops")
+    fetched: list[str] = []
+
+    def lister(bucket: str, prefix: str) -> list[dict]:
+        assert (bucket, prefix) == ("corp-exports", "hr/")
+        return [
+            {"Key": "hr/roster.csv", "Size": 64},
+            {"Key": "hr/photo.png", "Size": 900},      # not a readable format
+            {"Key": "hr/", "Size": 0},                 # folder marker
+            {"Key": "hr/big.csv", "Size": 99_000_000},  # over the byte cap
+        ]
+
+    def getter(key: str) -> bytes:
+        fetched.append(key)
+        return b"name,email\nAda,ada@example.com\n"
+
+    saved = dm.scan_s3_bucket_objects(
+        asset["id"], bucket="corp-exports", prefix="hr/", actor="ops",
+        expected_revision=asset["revision"], lister=lister, getter=getter)
+
+    assert fetched == ["hr/roster.csv"]     # only the readable, in-bounds one
+    scan = saved["file_scan"]
+    assert scan["bucket"] == "corp-exports" and scan["prefix"] == "hr/"
+    assert (scan["files_listed"], scan["files_sampled"],
+            scan["files_skipped"]) == (4, 1, 3)
+    assert scan["flagged_files"] == [
+        {"name": "hr/roster.csv", "categories": ["email"]}]
+    assert "ada@example.com" not in str(saved)   # evidence, never content
+
+
+def test_s3_object_scan_validates_the_bucket_and_survives_unreadable_objects():
+    asset = dm.register_data_asset(
+        "exports2", system="s3", kind="bucket", owner="it", actor="ops")
+    with pytest.raises(ValueError, match="bucket"):
+        dm.scan_s3_bucket_objects(
+            asset["id"], bucket="Not A Bucket", actor="ops",
+            expected_revision=asset["revision"],
+            lister=lambda *_a: [], getter=lambda _k: b"")
+
+    def boom(_key: str) -> bytes:
+        raise RuntimeError("AccessDenied")
+
+    saved = dm.scan_s3_bucket_objects(
+        asset["id"], bucket="corp-exports", actor="ops",
+        expected_revision=asset["revision"],
+        lister=lambda *_a: [{"Key": "a.txt", "Size": 10}], getter=boom)
+    # A denied object is skipped, never counted as a clean sample.
+    assert saved["file_scan"]["files_sampled"] == 0
+    assert saved["file_scan"]["files_skipped"] == 1

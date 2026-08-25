@@ -47,7 +47,7 @@ def test_off_by_default(tmp_path):
 
 def test_all_fourteen_regimes_list_with_citations():
     rows = bn.list_regimes()
-    assert len(rows) == 14
+    assert len(rows) == 15
     assert all(row["citations"] for row in rows)
 
 
@@ -147,3 +147,49 @@ def test_verified_at_feeds_the_freshness_ratchet():
         deprecations.VERIFIED_CONTENT_MAX_AGE_DAYS + 2) * 86_400
     stale = deprecations.stale_verified_content(now=future)
     assert [row[0] for row in stale] == ["maverick.breach_notification"]
+
+
+def test_quebec_law25_is_verified_and_standard_based():
+    """Added only after the regulator's own guidance was read: the CAI
+    fixes no clock, so no clock is invented."""
+    plan = bn.assess_breach(
+        jurisdictions=["ca_quebec"], subjects_affected=10,
+        discovered_at=1_700_000_000.0)
+    entry = plan["obligations"][0]
+    assert entry["authority"].startswith("Commission")
+    assert entry["authority_due_at"] is None      # no invented deadline
+    assert entry["subjects_due_at"] is None
+    assert "five years" in entry["records_duty"].lower()
+    assert any("CAI guidance" in c for c in entry["citations"])
+
+
+def test_brazil_business_days_skip_verified_national_holidays():
+    """LGPD counts business days; a computed date must step over Brazil's
+    fixed national holidays, not just weekends."""
+    import datetime
+
+    # Thursday 2026-12-24 09:00Z; 25 Dec is a feriado nacional.
+    discovered = datetime.datetime(
+        2026, 12, 24, 9, 0, tzinfo=datetime.timezone.utc).timestamp()
+    plan = bn.assess_breach(
+        jurisdictions=["br_lgpd"], subjects_affected=10,
+        discovered_at=discovered)
+    entry = plan["obligations"][0]
+    due = datetime.datetime.fromtimestamp(
+        entry["authority_due_at"], tz=datetime.timezone.utc)
+    assert entry["holiday_calendar"] == "BR"
+    assert due.strftime("%Y-%m-%d") == "2026-12-30"
+    # Weekends-only math would have said the 29th.
+    assert bn._add_business_days(discovered, 3) < entry["authority_due_at"]
+    assert "at or before the true deadline" in plan["business_day_note"]
+
+
+def test_unmodelled_calendars_fall_back_to_weekends_only():
+    assert bn._is_working_day(
+        __import__("datetime").datetime(
+            2026, 12, 25, 12, 0,
+            tzinfo=__import__("datetime").timezone.utc).timestamp(), "") is True
+    assert bn._is_working_day(
+        __import__("datetime").datetime(
+            2026, 12, 25, 12, 0,
+            tzinfo=__import__("datetime").timezone.utc).timestamp(), "BR") is False
