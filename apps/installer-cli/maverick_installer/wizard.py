@@ -44,6 +44,26 @@ CONFIG_DIR = Path.home() / ".maverick"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 ENV_FILE = CONFIG_DIR / ".env"
 
+
+def _prior_consent_salt() -> str:
+    """The existing consent subject_salt, or a fresh one on first enable.
+
+    Consent subject digests are sha256(salt:subject), so regenerating the
+    salt on a wizard re-run would orphan every stored consent record.
+    Mirror the MAVERICK_RED_TEAM_COMMITMENT_KEY preservation: read the
+    current config.toml (which the wizard is about to rewrite) and keep
+    the salt that the existing records were digested under.
+    """
+
+    try:
+        prior = tomllib.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        salt = str((prior.get("consent_registry") or {}).get("subject_salt") or "")
+        if 16 <= len(salt.strip()) <= 256:
+            return salt.strip()
+    except (OSError, ValueError):
+        pass
+    return secrets.token_urlsafe(24)
+
 console = Console()
 
 
@@ -1533,6 +1553,8 @@ def pick_security_suite() -> dict[str, Any]:
             "Microsoft Copilot Studio": "copilot_studio",
             "MLflow tracking server": "mlflow",
             "Hugging Face Hub organization": "huggingface",
+            "OpenAI platform (org models + fine-tunes)": "openai",
+            "Replicate (account deployments)": "replicate",
             "Snowflake Model Registry": "snowflake",
             "Salesforce Agentforce": "agentforce",
         }
@@ -2103,6 +2125,59 @@ def pick_advanced() -> dict[str, Any]:
             "assessment route with forbidden combinations refused. Drafting "
             "and tracking assistance, never a conformity assessment or legal "
             "advice. OFF by default.",
+            default=False,
+        ),
+        "explainability": _q_confirm(
+            "Model-agnostic explainability? Seeded permutation importance, "
+            "partial dependence, Spearman global sensitivity, and "
+            "standardized-deviation reason codes, recordable as governed "
+            "evidence. Attribution for your own review, never a fairness "
+            "certification. OFF by default.",
+            default=False,
+        ),
+        "content_provenance": _q_confirm(
+            "Signed content provenance (EU AI Act Art. 50(2), applicable "
+            "2 Dec 2026)? Machine-readable sidecar manifests binding "
+            "generated content to the generating system, Ed25519-signed and "
+            "verifiable against an external key registry. Marking assistance "
+            "only, never a content-authenticity certification. OFF by "
+            "default.",
+            default=False,
+        ),
+        "llm_gateway": _q_confirm(
+            "Governed LLM gateway? Agents built anywhere point their "
+            "OpenAI-compatible base URL at Lightwork; every call crosses a "
+            "governed checkpoint (own bearer, model allowlist, bounded "
+            "bodies, egress-guarded upstream) and unknown callers land in a "
+            "shadow-AI ledger. Requires an upstream URL and token after "
+            "setup. OFF by default.",
+            default=False,
+        ),
+        "vendor_management": _q_confirm(
+            "Third-party vendor register? Governed vendor records with "
+            "criticality tiers, questionnaire campaigns served over the "
+            "public form endpoint, monitoring notes, links to assessments "
+            "and RoPA entries, and a OneTrust vendor-CSV importer. A "
+            "register and audit trail, never a vendor risk rating service. "
+            "OFF by default.",
+            default=False,
+        ),
+        "consent_registry": _q_confirm(
+            "Consent receipts and preferences registry? Per-subject consent "
+            "receipts (purpose, policy version, channel) with salted "
+            "subject digests, a current-preference projection, audit "
+            "export, and a OneTrust consent-CSV importer. The governed "
+            "record behind a consent front end, never a cookie banner or "
+            "TCF-certified CMP. OFF by default.",
+            default=False,
+        ),
+        "data_map": _q_confirm(
+            "Data map and discovery? A governed register of data assets "
+            "with a column-name classifier that flags likely personal-data "
+            "categories, an information_schema CSV importer for "
+            "warehouses, and a SharePoint site census via Microsoft Graph. "
+            "Name-based triage for a human data-mapping exercise, never a "
+            "content scanner. OFF by default.",
             default=False,
         ),
         "ai_literacy": _q_confirm(
@@ -4576,6 +4651,32 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent feature toggles
     if advanced.get("eu_conformity"):
         lines.append("")
         lines.append("[eu_conformity]")
+        lines.append("enable = true")
+    if advanced.get("explainability"):
+        lines.append("")
+        lines.append("[explainability]")
+        lines.append("enable = true")
+    if advanced.get("content_provenance"):
+        lines.append("")
+        lines.append("[content_provenance]")
+        lines.append("enable = true")
+    if advanced.get("llm_gateway"):
+        lines.append("")
+        lines.append("[llm_gateway]")
+        lines.append("enable = true")
+        lines.append('upstream_url = "https://api.openai.com"')
+    if advanced.get("vendor_management"):
+        lines.append("")
+        lines.append("[vendor_management]")
+        lines.append("enable = true")
+    if advanced.get("consent_registry"):
+        lines.append("")
+        lines.append("[consent_registry]")
+        lines.append("enable = true")
+        lines.append(f'subject_salt = "{_prior_consent_salt()}"')
+    if advanced.get("data_map"):
+        lines.append("")
+        lines.append("[data_map]")
         lines.append("enable = true")
     if advanced.get("ai_literacy"):
         lines.append("")

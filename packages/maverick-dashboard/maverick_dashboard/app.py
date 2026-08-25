@@ -704,6 +704,12 @@ _AUTH_EXEMPT = {
     # (itself auth-exempt) references it, so an unauthenticated recipient must
     # be able to load it.
     "/static/daybreak-logo.jpg",
+    # The LLM gateway authenticates every call with its OWN bearer inside
+    # maverick.llm_gateway (same rationale as /a2a/v1): callers are foreign
+    # agents that hold the gateway credential, never the dashboard bearer.
+    # Self-gates on [llm_gateway] enable and 403s when off.
+    "/gateway/v1/chat/completions",
+    "/gateway/v1/otel",
 }
 
 
@@ -2072,11 +2078,13 @@ async def spend_page(request: Request) -> HTMLResponse:
 # One assessment engine, one workspace chassis per department: each
 # department page filters the same records/templates to its own types.
 PRIVACY_ASSESSMENT_TYPES = frozenset(
-    {"pia", "dpia", "lia", "ccpa", "aira", "vendor_risk", "tia"})
+    {"pia", "dpia", "lia", "ccpa", "lgpd", "pipeda", "us_state_privacy",
+     "cppa_admt", "colorado_admt", "nyc_ll144", "texas_traiga",
+     "illinois_hb3773", "aira", "vendor_risk", "tia"})
 FINANCE_ASSESSMENT_TYPES = frozenset(
     {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"})
 SECURITY_ASSESSMENT_TYPES = frozenset({
-    "soc2", "iso27001", "nist_csf", "nist_800_53", "cis_v8",
+    "soc2", "iso27001", "iso42001", "nist_csf", "nist_800_53", "cis_v8",
     "pci_dss", "hipaa", "cmmc_l2", "fedramp_moderate",
 })
 
@@ -2174,11 +2182,20 @@ async def privacy_page(request: Request) -> HTMLResponse:
     reviewer threads, a tier above viewer summaries.
     """
     require_permission(request, "operate")
+    ctx = _workspace_ctx("privacy", viewer=caller_principal(request) or "")
+    # Every register scan below is synchronous disk I/O; keep it off the
+    # event loop in one threadpool hop.
+    records, estate = await run_in_threadpool(_privacy_page_data)
+    ctx["records"] = records
+    ctx["estate"] = estate
+    return templates.TemplateResponse(request, "privacy.html", ctx)
+
+
+def _privacy_page_data() -> tuple[dict, dict]:
+    """The Privacy workspace's data plane: privacy-ops records plus the
+    estate registers (vendors, consent, data map), each its own opt-in."""
     import time as _time
 
-    ctx = _workspace_ctx("privacy", viewer=caller_principal(request) or "")
-    # The record types — the data plane behind the [privacy_ops] knob. The
-    # page still works without them.
     from maverick import privacy_ops
     records = {"enabled": privacy_ops.enabled(), "kind": "privacy",
                "dpa": [], "ai": [], "ropa": [], "dsar": [], "incidents": [],
@@ -2208,8 +2225,43 @@ async def privacy_page(request: Request) -> HTMLResponse:
             if r.get("status") in ("open", "notify"))
         records["incidents_breached"] = sum(
             1 for r in records["incidents"] if r.get("clock_breached"))
-    ctx["records"] = records
-    return templates.TemplateResponse(request, "privacy.html", ctx)
+    from maverick import consent_registry, data_map, vendor_management
+    estate = {
+        "vendors_enabled": vendor_management.enabled(),
+        "consent_enabled": consent_registry.enabled(),
+        "data_map_enabled": data_map.enabled(),
+        "vendors": [], "vendor_posture": {},
+        "consent_posture": {},
+        "assets": [], "data_map_posture": {},
+        # The forms' vocab comes from the modules that enforce it, so a
+        # new kind/status/channel never needs a template edit. "import"
+        # is the importer's channel, not a manual-entry choice.
+        "contract_kinds": vendor_management.CONTRACT_KINDS,
+        "consent_statuses": consent_registry.STATUSES,
+        "consent_channels": tuple(
+            c for c in consent_registry.CHANNELS if c != "import"),
+    }
+    estate["renewals"] = {"overdue": [], "due_soon": []}
+    estate["notices"] = []
+    estate["notice_coverage"] = {}
+    if estate["vendors_enabled"]:
+        estate["vendors"] = vendor_management.list_vendors()
+        estate["vendor_posture"] = vendor_management.vendor_posture()
+        try:
+            estate["renewals"] = vendor_management.contract_renewals()
+        except Exception:
+            pass
+    if estate["consent_enabled"]:
+        estate["consent_posture"] = consent_registry.consent_posture()
+        try:
+            estate["notices"] = consent_registry.list_notices()[:20]
+            estate["notice_coverage"] = consent_registry.notice_coverage()
+        except Exception:
+            pass
+    if estate["data_map_enabled"]:
+        estate["assets"] = data_map.list_data_assets()
+        estate["data_map_posture"] = data_map.data_map_posture()
+    return records, estate
 
 
 @app.get("/privacy/board", response_class=HTMLResponse)
@@ -3050,6 +3102,27 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
     )
     ai_incident_data = await _ai_incident_page_data(ai_incident_reporting)
 
+    # The two per-model registers: GPAI provider obligations and Art. 26
+    # deployer duties, as status rows the page can render and act on.
+    def _register_states() -> tuple[list, list]:
+        if not workspace["eu_conformity_enabled"]:
+            return [], []
+        try:
+            gpai = [
+                eu_conformity.gpai_status_from_record(row)
+                for row in eu_conformity.list_gpai_registers()[:100]
+            ]
+            deployer = [
+                eu_conformity.deployer_status_from_record(row)
+                for row in eu_conformity.list_deployer_registers()[:100]
+            ]
+            return gpai, deployer
+        except Exception:
+            return [], []
+
+    gpai_registers, deployer_registers = await run_in_threadpool(
+        _register_states)
+
     from maverick import governance_alerts
 
     try:
@@ -3101,6 +3174,13 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
             "registrations": workspace["registrations"],
             "registration_bases": eu_conformity.REGISTRATION_BASES,
             "ifu_items": eu_conformity.IFU_ITEMS,
+            "gpai_registers": gpai_registers,
+            "gpai_obligations": eu_conformity.GPAI_OBLIGATIONS,
+            "gpai_systemic_obligations": eu_conformity.GPAI_SYSTEMIC_OBLIGATIONS,
+            "deployer_registers": deployer_registers,
+            "deployer_obligations": eu_conformity.DEPLOYER_OBLIGATIONS,
+            "deployer_conditional_obligations":
+                eu_conformity.DEPLOYER_CONDITIONAL_OBLIGATIONS,
             "attention": attention,
             "governed_assets": governed_assets,
             "assurance_incidents": assurance_incidents,
@@ -5724,16 +5804,50 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
                               f"you can close this page.")
 
 
+def _vendor_questionnaire_for(token: str) -> dict | None:
+    """The vendor questionnaire this token addresses, or None. Never raises —
+    the form endpoints must stay usable when the register is off."""
+    try:
+        from maverick import vendor_management
+        return vendor_management.questionnaire_for_token(token)
+    except Exception:
+        return None
+
+
+@app.get("/form/{token}", response_class=HTMLResponse)
+async def form_page(request: Request, token: str) -> HTMLResponse:
+    """The public questionnaire page a vendor lands on from their link.
+
+    Renders the questionnaire's template questions as a plain yes/no form
+    that posts back to the same token — no account, no auth; the
+    unguessable token is the addressing secret, exactly as for POST.
+    Only vendor-questionnaire tokens render a page; automation-form
+    tokens stay POST-only and 404 here."""
+    questionnaire = await run_in_threadpool(_vendor_questionnaire_for, token)
+    if questionnaire is None:
+        raise HTTPException(status_code=404, detail="no such form")
+    return templates.TemplateResponse(
+        request, "form_questionnaire.html",
+        {"questionnaire": questionnaire, "token": token},
+    )
+
+
 @app.post("/form/{token}")
 async def form_submit(request: Request, token: str) -> JSONResponse:
     """Record a hosted-form submission under ``token`` so a ``form`` event trigger
     fires a flow with the submitted fields as data. Public by design (a form is
     meant to be filled by anyone with the link); the unguessable ``token`` in the
     path is the addressing secret, the body is size/field-bounded, and firing is
-    rate-limited. Gated on event triggers being enabled (404 otherwise)."""
+    rate-limited. Gated on event triggers being enabled — except a vendor
+    questionnaire token, which stays answerable while only the vendor
+    register is on (404 otherwise)."""
     from maverick import automation_events
     if not automation_events.enabled():
-        raise HTTPException(status_code=404, detail="event triggers are disabled")
+        questionnaire = await run_in_threadpool(
+            _vendor_questionnaire_for, token)
+        if questionnaire is None:
+            raise HTTPException(status_code=404,
+                                detail="event triggers are disabled")
     fields: dict = {}
     ctype = request.headers.get("content-type", "")
     if "application/json" in ctype:
@@ -7094,6 +7208,105 @@ async def plan_tree_3d_page(request: Request) -> HTMLResponse:
         request, "plan_tree_3d.html",
         {"node_count": len(nodes), "fallback_html": forest_html(nodes)},
     )
+
+
+@app.post("/gateway/v1/chat/completions")
+async def llm_gateway_chat_completions(request: Request) -> JSONResponse:
+    """OpenAI-compatible governed pass-through for never-enrolled agents.
+
+    Auth is the gateway's own bearer, verified inside the core module; the
+    body is screened, forwarded over the SSRF-pinned egress path, and the
+    caller ledger updated. Bodies are never stored."""
+    from maverick import llm_gateway
+
+    if not llm_gateway.enabled():
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "message": (
+                        "The LLM gateway is disabled; enable [llm_gateway] "
+                        "in the Lightwork configuration."
+                    ),
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    authorization = request.headers.get("Authorization", "")
+    token = authorization.removeprefix("Bearer ").strip()
+    # Bounded read BEFORE parsing: this path is auth-exempt, so an
+    # unauthenticated caller must never be able to make the dashboard
+    # buffer an unbounded body (request.json() would). The core module
+    # re-checks the same cap post-parse as a second line of defense.
+    settings = llm_gateway.get_llm_gateway_config()
+    try:
+        raw = await _read_limited_request_body(
+            request,
+            max_bytes=settings["max_body_bytes"],
+            too_large_detail=(
+                "The request exceeds the gateway's configured size cap."
+            ),
+        )
+    except HTTPException as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": {"message": str(exc.detail),
+                               "type": "invalid_request_error"}},
+        )
+    import json as _json
+    try:
+        body = _json.loads(raw or b"{}")
+    except ValueError:
+        body = None
+    status_code, payload = await run_in_threadpool(
+        llm_gateway.handle_chat_completion, body, caller_token=token,
+    )
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.post("/gateway/v1/otel")
+async def llm_gateway_otel(request: Request) -> JSONResponse:
+    """OTLP/JSON GenAI span ingestion into the shadow-caller ledger.
+
+    Point any OpenTelemetry collector's HTTP exporter here (same gateway
+    bearer as the chat endpoint): spans carrying the GenAI semantic
+    conventions become governed telemetry — model identity and token
+    counts only, never prompts or completions."""
+    from maverick import llm_gateway
+
+    if not llm_gateway.enabled():
+        return JSONResponse(
+            status_code=403,
+            content={"error": {"message": "The LLM gateway is disabled.",
+                               "type": "invalid_request_error"}},
+        )
+    authorization = request.headers.get("Authorization", "")
+    token = authorization.removeprefix("Bearer ").strip()
+    if not llm_gateway.verify_gateway_bearer(token):
+        return JSONResponse(
+            status_code=401,
+            content={"error": {"message": "The gateway bearer is missing or wrong.",
+                               "type": "invalid_request_error"}},
+        )
+    body = await _read_limited_webhook_body(request)
+    import json as _json
+    try:
+        payload = _json.loads(body or b"{}")
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": "The OTLP payload must be JSON.",
+                               "type": "invalid_request_error"}},
+        )
+    try:
+        result = await run_in_threadpool(llm_gateway.ingest_otel_spans, payload)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": str(exc),
+                               "type": "invalid_request_error"}},
+        )
+    return JSONResponse(status_code=200, content=result)
 
 
 @app.get("/livez")

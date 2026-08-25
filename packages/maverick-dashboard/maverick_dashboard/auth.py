@@ -72,7 +72,14 @@ SELF_AUTH_WEBHOOK_PATHS = frozenset(
 )
 
 _SELF_AUTH_EXEMPT_PATHS = _OIDC_EXEMPT_PATHS | frozenset(
-    {"/a2a/v1", "/static/daybreak-logo.jpg"}
+    {
+        "/a2a/v1",
+        "/static/daybreak-logo.jpg",
+        # The LLM gateway authenticates every call with its own bearer inside
+        # maverick.llm_gateway (same trust-domain rationale as /a2a/v1).
+        "/gateway/v1/chat/completions",
+        "/gateway/v1/otel",
+    }
 ) | SELF_AUTH_WEBHOOK_PATHS
 
 

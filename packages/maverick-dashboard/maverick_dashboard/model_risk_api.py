@@ -310,6 +310,16 @@ async def model_risk_inventory(request: Request) -> dict[str, Any]:
     return {"assets": await _call(officer.list_inventory)}
 
 
+@router.get("/model-risk/dependency-graph")
+async def model_risk_dependency_graph(
+    request: Request,
+    asset_id: str | None = Query(default=None, min_length=1, max_length=64),
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    officer = _module("model_risk_assurance", "model_risk_assurance")
+    return await _call(officer.dependency_graph, asset_id=asset_id)
+
+
 @router.post("/model-risk/observations")
 async def observe_model_risk_asset(
     request: Request,

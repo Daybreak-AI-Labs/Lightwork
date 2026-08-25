@@ -776,6 +776,114 @@ class OneTrustImportIn(BaseModel):
     csv_text: str = Field(..., min_length=1, max_length=2_000_000)
 
 
+class VendorIn(BaseModel):
+    """Register one third-party vendor in the governed register."""
+    name: str = Field(..., min_length=1, max_length=256)
+    category: str = Field(..., min_length=1, max_length=128)
+    criticality: str = Field(..., pattern="^(low|medium|high|critical)$")
+    owner: str = Field(..., min_length=1, max_length=256)
+
+
+class VendorStatusIn(BaseModel):
+    """Move a vendor through its lifecycle (CAS on revision)."""
+    status: str = Field(..., pattern="^(active|under_review|offboarded)$")
+    revision: int = Field(..., ge=1)
+
+
+class VendorLinkIn(BaseModel):
+    """Attach one specialist record reference to a vendor row."""
+    kind: str = Field(..., pattern="^(dpa_review|paper_review|"
+                                   "ai_vendor_assessment|assessment|contract|"
+                                   "other)$")
+    reference: str = Field(..., min_length=1, max_length=512)
+    revision: int = Field(..., ge=1)
+
+
+class VendorQuestionnaireIn(BaseModel):
+    """Send a hosted-form questionnaire built from a registered template."""
+    assessment_type: str = Field(..., min_length=1, max_length=64)
+    revision: int = Field(..., ge=1)
+
+
+class VendorNoteIn(BaseModel):
+    """Record one monitoring note against a vendor."""
+    note: str = Field(..., min_length=1, max_length=2000)
+    severity: str = Field(..., pattern="^(info|warning|critical)$")
+    revision: int = Field(..., ge=1)
+
+
+class ConsentIn(BaseModel):
+    """Append one consent event; the subject reference is stored only as a
+    salted digest."""
+    subject_ref: str = Field(..., min_length=1, max_length=512)
+    purpose: str = Field(..., min_length=1, max_length=128)
+    status: str = Field(..., pattern="^(granted|withdrawn)$")
+    policy_version: str = Field(..., min_length=1, max_length=64)
+    channel: str = Field(..., pattern="^(web|mobile|email|phone|paper|api|"
+                                      "import)$")
+
+
+class VendorContractIn(BaseModel):
+    """Record one vendor contract with its renewal date (epoch seconds)."""
+    kind: str = Field(..., pattern="^(dpa|msa|sla|addendum|other)$")
+    reference: str = Field(..., min_length=1, max_length=512)
+    renews_at: float = Field(..., gt=0)
+    revision: int = Field(..., ge=1)
+
+
+class NoticePublishIn(BaseModel):
+    """Publish one immutable privacy-notice version."""
+    version: str = Field(..., min_length=1, max_length=64)
+    text: str = Field(..., min_length=1, max_length=200_000)
+
+
+class SiteScanIn(BaseModel):
+    """Scan one page of the operator's own site for cookies and trackers."""
+    url: str = Field(..., min_length=9, max_length=2048)
+
+
+class ConsentSubjectIn(BaseModel):
+    """Look up one subject's preferences; POSTed so the subject reference
+    never lands in an access log's query string."""
+    subject_ref: str = Field(..., min_length=1, max_length=512)
+
+
+class ClassifyColumnsIn(BaseModel):
+    """Column names to run through the personal-data classifier."""
+    columns: list[str] = Field(..., min_length=1, max_length=400)
+
+
+class DataAssetIn(BaseModel):
+    """Register or reclassify one data asset in the data map."""
+    name: str = Field(..., min_length=1, max_length=512)
+    system: str = Field(..., min_length=1, max_length=256)
+    kind: str = Field(..., pattern="^(table|dataset|file_share|site|bucket|"
+                                   "other)$")
+    owner: str = Field(..., min_length=1, max_length=256)
+    columns: list[str] = Field(default_factory=list, max_length=400)
+    location: str = Field("", max_length=1024)
+
+
+class DataAssetLinkIn(BaseModel):
+    """Attach one specialist record reference to a data asset."""
+    kind: str = Field(..., pattern="^(ropa|assessment|vendor|ai_system)$")
+    reference: str = Field(..., min_length=1, max_length=512)
+    revision: int = Field(..., ge=1)
+
+
+class SchemaImportIn(BaseModel):
+    """Warehouse information_schema.columns CSV to import as table assets."""
+    csv_text: str = Field(..., min_length=1, max_length=2_000_000)
+    system: str = Field(..., min_length=1, max_length=256)
+    owner: str = Field(..., min_length=1, max_length=256)
+
+
+class SharePointSyncIn(BaseModel):
+    """Census SharePoint sites into the data map via Microsoft Graph."""
+    search: str = Field("", max_length=256)
+    owner: str = Field(..., min_length=1, max_length=256)
+
+
 class DsarIn(BaseModel):
     """Open a data-subject request with its statutory due date."""
     subject_id: str = Field(..., min_length=1, max_length=200)

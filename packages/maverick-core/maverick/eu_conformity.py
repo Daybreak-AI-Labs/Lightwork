@@ -179,9 +179,147 @@ IFU_ITEMS = {
     ),
 }
 
+GPAI_SCHEMA = "lightwork.eu-gpai-register.v1"
+
+#: Art. 53(1) obligations for every general-purpose AI model provider.
+GPAI_OBLIGATIONS = {
+    "technical_documentation": (
+        "Art. 53(1)(a)",
+        "Up-to-date technical documentation of the model, including training "
+        "and testing process and evaluation results (Annex XI minimum), for "
+        "the AI Office and national authorities on request.",
+    ),
+    "downstream_information": (
+        "Art. 53(1)(b)",
+        "Information and documentation for downstream AI system providers to "
+        "understand the model's capabilities and limitations (Annex XII "
+        "minimum).",
+    ),
+    "copyright_policy": (
+        "Art. 53(1)(c)",
+        "A policy to comply with Union copyright law, identifying and "
+        "respecting rights reservations under Art. 4(3) of Directive (EU) "
+        "2019/790.",
+    ),
+    "training_content_summary": (
+        "Art. 53(1)(d)",
+        "A sufficiently detailed public summary of the content used for "
+        "training, per the AI Office template.",
+    ),
+}
+
+#: Art. 55(1) additions for general-purpose AI models with systemic risk.
+GPAI_SYSTEMIC_OBLIGATIONS = {
+    "model_evaluation": (
+        "Art. 55(1)(a)",
+        "State-of-the-art model evaluation, including conducted and "
+        "documented adversarial testing to identify and mitigate systemic "
+        "risks.",
+    ),
+    "systemic_risk_mitigation": (
+        "Art. 55(1)(b)",
+        "Assessment and mitigation of possible Union-level systemic risks, "
+        "including their sources, from development, placing on the market, "
+        "or use.",
+    ),
+    "incident_reporting": (
+        "Art. 55(1)(c)",
+        "Tracking, documenting, and reporting relevant serious-incident "
+        "information to the AI Office and national authorities without "
+        "undue delay.",
+    ),
+    "cybersecurity_protection": (
+        "Art. 55(1)(d)",
+        "An adequate level of cybersecurity protection for the model and "
+        "its physical infrastructure.",
+    ),
+}
+
+#: Art. 53(2): the free and open-source exemption covers only (a) and (b),
+#: and never applies to a model with systemic risk.
+GPAI_OPEN_SOURCE_EXEMPT = ("technical_documentation", "downstream_information")
+
+DEPLOYER_SCHEMA = "lightwork.eu-deployer-register.v1"
+
+#: Art. 26 deployer obligations for high-risk AI systems. Always-applicable
+#: duties; the conditional ones below join the register only when the
+#: deployment's flags say the condition holds. Art. 26(3) is a savings
+#: clause, not a duty, and the Art. 26(10) post-remote-biometric
+#: law-enforcement regime is out of scope for this register and stated so.
+DEPLOYER_OBLIGATIONS = {
+    "use_per_instructions": (
+        "Art. 26(1)",
+        "The system is used in accordance with the provider's instructions "
+        "for use, under appropriate technical and organisational measures.",
+    ),
+    "operation_monitoring": (
+        "Art. 26(5)",
+        "Operation is monitored on the basis of the instructions for use; "
+        "the provider (and, where required, authorities) are informed "
+        "without undue delay of Art. 79(1) risks and serious incidents, "
+        "and use is suspended where required.",
+    ),
+    "log_retention": (
+        "Art. 26(6)",
+        "Automatically generated logs under the deployer's control are "
+        "kept for a period appropriate to the intended purpose — at least "
+        "six months, unless Union or national law provides otherwise.",
+    ),
+    "affected_person_information": (
+        "Art. 26(11)",
+        "Natural persons subject to the use of the high-risk AI system "
+        "are informed that they are subject to its use, where required.",
+    ),
+    "authority_cooperation": (
+        "Art. 26(12)",
+        "The deployer cooperates with the competent authorities in any "
+        "action those authorities take in relation to the system.",
+    ),
+}
+
+#: Conditional Art. 26 duties, included when the matching flag is set at open.
+DEPLOYER_CONDITIONAL_OBLIGATIONS = {
+    "input_data_control": (
+        "Art. 26(4)",
+        "To the extent the deployer exercises control over input data, "
+        "that data is relevant and sufficiently representative in view of "
+        "the system's intended purpose.",
+        "controls_input_data",
+    ),
+    "worker_information": (
+        "Art. 26(7)",
+        "Before putting the system into service or use at the workplace, "
+        "affected workers and their representatives are informed, per "
+        "applicable Union/national law and practice.",
+        "workplace_use",
+    ),
+    "registration_check": (
+        "Art. 26(8)",
+        "As a public authority (or Union body), the system's registration "
+        "in the EU database under Art. 49 has been verified; an "
+        "unregistered system is not used and the provider or distributor "
+        "is informed.",
+        "public_authority",
+    ),
+    "dpia_information": (
+        "Art. 26(9)",
+        "The information under Art. 13 is used to carry out the data "
+        "protection impact assessment where GDPR Art. 35 / Directive (EU) "
+        "2016/680 Art. 27 requires one.",
+        "requires_dpia",
+    ),
+}
+
+#: Art. 26(2): the one obligation that must name natural persons.
+DEPLOYER_OVERSIGHT_KEY = "human_oversight_assignment"
+DEPLOYER_OVERSIGHT_CITATION = "Art. 26(2)"
+_MAX_OVERSIGHT_PERSONS = 20
+
 _FRIA = GovernedRecordStore("eu_fria", "ECF", "eu_fria_assessment")
 _ANNEX_IV = GovernedRecordStore("eu_annex_iv", "ECD", "eu_annex_iv_checklist")
 _ROUTES = GovernedRecordStore("eu_art43_routes", "ECA", "eu_art43_route")
+_GPAI = GovernedRecordStore("eu_gpai", "ECG", "eu_gpai_register")
+_DEPLOYER = GovernedRecordStore("eu_deployer", "ECY", "eu_deployer_register")
 _PMM = GovernedRecordStore("eu_pmm_plans", "ECP", "eu_pmm_plan")
 _REGISTRATIONS = GovernedRecordStore("eu_registrations", "ECR", "eu_registration")
 _IFU = GovernedRecordStore("eu_ifu", "ECI", "eu_ifu_checklist")
@@ -720,6 +858,59 @@ def mark_substantial_modification(
     return dict(saved)
 
 
+def record_fria_review(
+    record_id: str,
+    *,
+    outcome: str,
+    reviewer: str,
+    expected_revision: int,
+    notes: str = "",
+) -> dict[str, Any]:
+    """Independent second-person review of a completed FRIA (four-eyes).
+
+    The reviewer must not be the assessor; a review never edits the
+    assessment — objections are recorded and the Art. 27(2) reopen path
+    stays the only way content changes.
+    """
+
+    _require_enabled()
+    if outcome not in {"concur", "objections"}:
+        raise ValueError("outcome must be concur or objections")
+    person = _text(reviewer, "reviewer", 256)
+    remark = str(notes or "").strip()[:2000]
+
+    def mutate(value: dict[str, Any]) -> None:
+        if value.get("status") != "completed":
+            raise EUConformityError(
+                "independent review applies to a completed FRIA only"
+            )
+        if str(value.get("assessor") or "").strip().lower() == person.lower():
+            raise EUConformityError(
+                "independent review requires a reviewer other than the assessor"
+            )
+        reviews = list(value.get("reviews") or [])
+        reviews.append(
+            {
+                "reviewer": person,
+                "outcome": outcome,
+                "notes": remark,
+                "reviewed_at": time.time(),
+            }
+        )
+        value["reviews"] = reviews[-20:]
+
+    saved = _FRIA.update(
+        _text(record_id, "record_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="record_fria_review",
+        actor=person,
+    )
+    if saved is None:
+        raise KeyError(f"FRIA record is not recorded: {record_id}")
+    return dict(saved)
+
+
 def get_assessment_route(asset_id: str) -> dict[str, Any] | None:
     _require_enabled()
     record = _ROUTES.get(_route_id(_text(asset_id, "asset_id", 64)))
@@ -736,6 +927,391 @@ def list_assessment_routes(*, status: str | None = None) -> list[dict[str, Any]]
         dict(row) for row in rows
         if status is None or row.get("status") == status
     ]
+
+
+# --------------------------------------------------------------------------
+# GPAI provider obligations (Art. 53 / Art. 55)
+# --------------------------------------------------------------------------
+def _gpai_id(asset_id: str) -> str:
+    return f"ECG-{_sha256(asset_id)[:24]}"
+
+
+def _gpai_obligation_keys(record: Mapping[str, Any]) -> dict[str, tuple[str, str]]:
+    keys = dict(GPAI_OBLIGATIONS)
+    if record.get("systemic_risk"):
+        keys.update(GPAI_SYSTEMIC_OBLIGATIONS)
+    return keys
+
+
+def open_gpai(
+    asset_id: str,
+    *,
+    systemic_risk: bool,
+    open_source_exempt: bool = False,
+    actor: str,
+) -> dict[str, Any]:
+    """Open (or return) the provider-obligation register for one GPAI model.
+
+    A systemic-risk model carries the Art. 55(1) additions and can never use
+    the Art. 53(2) open-source exemption; an exempt non-systemic model still
+    tracks the copyright policy and the public training-content summary.
+    """
+
+    _require_enabled()
+    if not isinstance(systemic_risk, bool) or not isinstance(open_source_exempt, bool):
+        raise ValueError("systemic_risk and open_source_exempt must be booleans")
+    if systemic_risk and open_source_exempt:
+        raise EUConformityError(
+            "Art. 53(2): the open-source exemption does not apply to a "
+            "general-purpose AI model with systemic risk"
+        )
+    asset = _text(asset_id, "asset_id", 64)
+    operator = _text(actor, "actor", 256)
+    record_id = _gpai_id(asset)
+    current = _GPAI.get(record_id)
+    if current is not None:
+        return dict(current)
+    obligations: dict[str, Any] = dict.fromkeys(GPAI_OBLIGATIONS)
+    if systemic_risk:
+        obligations.update(dict.fromkeys(GPAI_SYSTEMIC_OBLIGATIONS))
+    elif open_source_exempt:
+        for key in GPAI_OPEN_SOURCE_EXEMPT:
+            obligations[key] = {"exempt": True, "citation": "Art. 53(2)"}
+    record = {
+        "id": record_id,
+        "schema": GPAI_SCHEMA,
+        "asset_id": asset,
+        "systemic_risk": systemic_risk,
+        "open_source_exempt": open_source_exempt,
+        "obligations": obligations,
+        "opened_by": operator,
+        "regulation": dict(REGULATION_METADATA),
+        "notice": NON_CERTIFICATION_NOTICE,
+    }
+    return dict(_GPAI.create(record, action="open_gpai", actor=operator))
+
+
+def assert_gpai_obligation(
+    record_id: str,
+    obligation: str,
+    *,
+    reference: str,
+    actor: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """A named human asserts where one obligation's evidence lives."""
+
+    _require_enabled()
+    operator = _text(actor, "actor", 256)
+    where = _text(reference, "reference", 512)
+
+    def mutate(value: dict[str, Any]) -> None:
+        keys = _gpai_obligation_keys(value)
+        if obligation not in keys:
+            raise ValueError(
+                f"obligation must be one of: {', '.join(sorted(keys))}"
+            )
+        obligations = dict(value.get("obligations") or {})
+        obligations[obligation] = {
+            "citation": keys[obligation][0],
+            "reference": where,
+            "asserted_by": operator,
+            "asserted_at": time.time(),
+        }
+        value["obligations"] = obligations
+
+    saved = _GPAI.update(
+        _text(record_id, "record_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="assert_gpai_obligation",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"GPAI register is not recorded: {record_id}")
+    return dict(saved)
+
+
+def gpai_status(record_id: str) -> dict[str, Any]:
+    _require_enabled()
+    record = _GPAI.get(_text(record_id, "record_id", 64))
+    if record is None:
+        raise KeyError(f"GPAI register is not recorded: {record_id}")
+    return gpai_status_from_record(record)
+
+
+def gpai_status_from_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """The obligation posture of one already-loaded GPAI register row.
+
+    Pure projection — list consumers call this with the rows they already
+    hold instead of re-reading each record from the store."""
+
+    keys = _gpai_obligation_keys(record)
+    obligations = record.get("obligations") or {}
+    missing = sorted(
+        key
+        for key in keys
+        if not isinstance(obligations.get(key), Mapping)
+    )
+    exempt = sorted(
+        key
+        for key, value in obligations.items()
+        if isinstance(value, Mapping) and value.get("exempt") is True
+    )
+    return {
+        "id": record.get("id"),
+        "asset_id": record.get("asset_id"),
+        "systemic_risk": bool(record.get("systemic_risk")),
+        "asserted": len(keys) - len(missing),
+        "total": len(keys),
+        "missing": missing,
+        "exempt": exempt,
+        "complete": not missing,
+        "revision": record.get("revision"),
+    }
+
+
+def get_gpai(asset_id: str) -> dict[str, Any] | None:
+    _require_enabled()
+    record = _GPAI.get(_gpai_id(_text(asset_id, "asset_id", 64)))
+    return None if record is None else dict(record)
+
+
+def list_gpai_registers() -> list[dict[str, Any]]:
+    _require_enabled()
+    rows = _GPAI.list(limit=_MAX_LIST)
+    rows.sort(key=lambda row: str(row.get("asset_id") or ""))
+    return [dict(row) for row in rows]
+
+
+# --------------------------------------------------------------------------
+# Art. 26 deployer obligations register
+# --------------------------------------------------------------------------
+def _deployer_id(asset_id: str) -> str:
+    return f"ECY-{_sha256(asset_id)[:24]}"
+
+
+def _deployer_obligation_keys(record: Mapping[str, Any]) -> dict[str, Any]:
+    keys: dict[str, Any] = dict(DEPLOYER_OBLIGATIONS)
+    keys[DEPLOYER_OVERSIGHT_KEY] = (
+        DEPLOYER_OVERSIGHT_CITATION,
+        "Human oversight is assigned to named natural persons with the "
+        "necessary competence, training, authority, and support.",
+    )
+    flags = record.get("flags") or {}
+    for key, (citation, text, flag) in DEPLOYER_CONDITIONAL_OBLIGATIONS.items():
+        if flags.get(flag) is True:
+            keys[key] = (citation, text)
+    return keys
+
+
+def open_deployer_register(
+    asset_id: str,
+    *,
+    workplace_use: bool = False,
+    public_authority: bool = False,
+    controls_input_data: bool = False,
+    requires_dpia: bool = False,
+    actor: str,
+) -> dict[str, Any]:
+    """Open (or return) the Art. 26 deployer-obligations register for one
+    high-risk system.
+
+    The always-applicable duties (26(1), (2), (5), (6), (11), (12)) are
+    tracked for every deployment; the conditional duties join only when the
+    matching flag is set — input-data control (26(4)), workplace use
+    (26(7)), public-authority registration (26(8)), and the DPIA
+    information duty (26(9)). The Art. 26(10) law-enforcement biometric
+    regime is out of this register's scope and stated so. A record of the
+    deployer's own compliance work — never legal advice.
+    """
+
+    _require_enabled()
+    for name, value in (
+        ("workplace_use", workplace_use),
+        ("public_authority", public_authority),
+        ("controls_input_data", controls_input_data),
+        ("requires_dpia", requires_dpia),
+    ):
+        if not isinstance(value, bool):
+            raise ValueError(f"{name} must be a boolean")
+    asset = _text(asset_id, "asset_id", 64)
+    operator = _text(actor, "actor", 256)
+    record_id = _deployer_id(asset)
+    current = _DEPLOYER.get(record_id)
+    if current is not None:
+        return dict(current)
+    flags = {
+        "workplace_use": workplace_use,
+        "public_authority": public_authority,
+        "controls_input_data": controls_input_data,
+        "requires_dpia": requires_dpia,
+    }
+    obligations: dict[str, Any] = dict.fromkeys(DEPLOYER_OBLIGATIONS)
+    obligations[DEPLOYER_OVERSIGHT_KEY] = None
+    for key, (_citation, _unused, flag) in DEPLOYER_CONDITIONAL_OBLIGATIONS.items():
+        if flags[flag]:
+            obligations[key] = None
+    record = {
+        "id": record_id,
+        "schema": DEPLOYER_SCHEMA,
+        "asset_id": asset,
+        "flags": flags,
+        "obligations": obligations,
+        "opened_by": operator,
+        "regulation": dict(REGULATION_METADATA),
+        "notice": NON_CERTIFICATION_NOTICE,
+    }
+    return dict(
+        _DEPLOYER.create(record, action="open_deployer_register", actor=operator)
+    )
+
+
+def assert_deployer_obligation(
+    record_id: str,
+    obligation: str,
+    *,
+    reference: str,
+    actor: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """A named human asserts where one Art. 26 duty's evidence lives.
+
+    The Art. 26(2) oversight duty is deliberately NOT assertable here — it
+    must name natural persons, via :func:`assign_deployer_oversight`.
+    """
+
+    _require_enabled()
+    if obligation == DEPLOYER_OVERSIGHT_KEY:
+        raise EUConformityError(
+            "Art. 26(2) human oversight must name natural persons — use "
+            "assign_deployer_oversight"
+        )
+    operator = _text(actor, "actor", 256)
+    where = _text(reference, "reference", 512)
+
+    def mutate(value: dict[str, Any]) -> None:
+        keys = _deployer_obligation_keys(value)
+        keys.pop(DEPLOYER_OVERSIGHT_KEY, None)
+        if obligation not in keys:
+            raise ValueError(
+                f"obligation must be one of: {', '.join(sorted(keys))}"
+            )
+        obligations = dict(value.get("obligations") or {})
+        obligations[obligation] = {
+            "citation": keys[obligation][0],
+            "reference": where,
+            "asserted_by": operator,
+            "asserted_at": time.time(),
+        }
+        value["obligations"] = obligations
+
+    saved = _DEPLOYER.update(
+        _text(record_id, "record_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="assert_deployer_obligation",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"deployer register is not recorded: {record_id}")
+    return dict(saved)
+
+
+def assign_deployer_oversight(
+    record_id: str,
+    *,
+    persons: list[str],
+    reference: str,
+    actor: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """Assign Art. 26(2) human oversight to named natural persons.
+
+    At least one named person; the reference records where their
+    competence, training, authority, and support are evidenced.
+    """
+
+    _require_enabled()
+    operator = _text(actor, "actor", 256)
+    where = _text(reference, "reference", 512)
+    named = [
+        _text(person, "person", 256)
+        for person in list(persons or [])[:_MAX_OVERSIGHT_PERSONS]
+    ]
+    if not named:
+        raise ValueError(
+            "Art. 26(2) oversight needs at least one named natural person"
+        )
+    if len(set(name.lower() for name in named)) != len(named):
+        raise ValueError("oversight persons must be distinct")
+
+    def mutate(value: dict[str, Any]) -> None:
+        obligations = dict(value.get("obligations") or {})
+        obligations[DEPLOYER_OVERSIGHT_KEY] = {
+            "citation": DEPLOYER_OVERSIGHT_CITATION,
+            "persons": named,
+            "reference": where,
+            "asserted_by": operator,
+            "asserted_at": time.time(),
+        }
+        value["obligations"] = obligations
+
+    saved = _DEPLOYER.update(
+        _text(record_id, "record_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="assign_deployer_oversight",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"deployer register is not recorded: {record_id}")
+    return dict(saved)
+
+
+def deployer_status(record_id: str) -> dict[str, Any]:
+    _require_enabled()
+    record = _DEPLOYER.get(_text(record_id, "record_id", 64))
+    if record is None:
+        raise KeyError(f"deployer register is not recorded: {record_id}")
+    return deployer_status_from_record(record)
+
+
+def deployer_status_from_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    """The obligation posture of one already-loaded deployer register row.
+
+    Pure projection — list consumers call this with the rows they already
+    hold instead of re-reading each record from the store."""
+
+    keys = _deployer_obligation_keys(record)
+    obligations = record.get("obligations") or {}
+    missing = sorted(
+        key for key in keys if not isinstance(obligations.get(key), Mapping)
+    )
+    oversight = obligations.get(DEPLOYER_OVERSIGHT_KEY)
+    persons = (
+        list(oversight.get("persons") or [])
+        if isinstance(oversight, Mapping)
+        else []
+    )
+    return {
+        "id": record.get("id"),
+        "asset_id": record.get("asset_id"),
+        "flags": dict(record.get("flags") or {}),
+        "asserted": len(keys) - len(missing),
+        "total": len(keys),
+        "missing": missing,
+        "oversight_persons": persons,
+        "complete": not missing,
+        "revision": record.get("revision"),
+    }
+
+
+def list_deployer_registers() -> list[dict[str, Any]]:
+    _require_enabled()
+    rows = _DEPLOYER.list(limit=_MAX_LIST)
+    rows.sort(key=lambda row: str(row.get("asset_id") or ""))
+    return [dict(row) for row in rows]
 
 
 # --------------------------------------------------------------------------
@@ -1011,43 +1587,62 @@ def list_frias(*, status: str | None = None) -> list[dict[str, Any]]:
 
 __all__ = [
     "ANNEX_IV_ITEMS",
+    "DEPLOYER_CONDITIONAL_OBLIGATIONS",
+    "DEPLOYER_OBLIGATIONS",
+    "DEPLOYER_OVERSIGHT_KEY",
     "EUConformityConfigError",
     "EUConformityError",
     "FRIA_ELEMENTS",
+    "GPAI_OBLIGATIONS",
+    "GPAI_OPEN_SOURCE_EXEMPT",
+    "GPAI_SYSTEMIC_OBLIGATIONS",
+    "IFU_ITEMS",
     "NON_CERTIFICATION_NOTICE",
+    "REGISTRATION_BASES",
+    "REGISTRIES",
     "REGULATION_METADATA",
     "ROUTES",
     "annex_iv_status",
     "assert_annex_iv_item",
+    "assert_deployer_obligation",
     "assert_fria_element",
+    "assert_gpai_obligation",
+    "assert_ifu_item",
+    "assign_deployer_oversight",
     "complete_fria",
+    "deployer_status",
+    "deployer_status_from_record",
     "enabled",
+    "get_annex_iv",
     "get_assessment_route",
     "get_eu_conformity_config",
-    "IFU_ITEMS",
-    "REGISTRATION_BASES",
-    "REGISTRIES",
-    "assert_ifu_item",
-    "get_annex_iv",
+    "get_gpai",
     "get_ifu",
     "get_pmm_plan",
     "get_registration",
+    "gpai_status",
+    "gpai_status_from_record",
     "ifu_status",
     "list_assessment_routes",
+    "list_deployer_registers",
     "list_frias",
+    "list_gpai_registers",
     "list_ifu_checklists",
     "list_pmm_plans",
     "list_registrations",
-    "open_ifu",
-    "record_pmm_plan",
-    "record_pmm_review",
-    "record_registration",
     "mark_fria_outdated",
     "mark_substantial_modification",
     "open_annex_iv",
+    "open_deployer_register",
     "open_fria",
+    "open_gpai",
+    "open_ifu",
     "record_assessment_route",
     "record_fria_notification",
+    "record_fria_review",
+    "record_pmm_plan",
+    "record_pmm_review",
+    "record_registration",
     "render_annex_iv",
     "render_fria",
 ]

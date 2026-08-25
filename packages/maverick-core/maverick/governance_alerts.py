@@ -101,6 +101,52 @@ def _conformity_section(now: float) -> tuple[dict[str, Any], int]:
     return section, len(outdated) + len(reassess)
 
 
+def _vendor_section(now: float, renewal_days: int) -> tuple[dict[str, Any], int]:
+    try:
+        from . import vendor_management as vm
+
+        if not vm.enabled():
+            return {"enabled": False}, 0
+        renewals = vm.contract_renewals(now=now, due_soon_days=renewal_days)
+    except Exception:
+        return {"enabled": False, "error": "unavailable"}, 0
+    overdue = [
+        f"{entry['vendor_id']}:{entry['kind']}"
+        for entry in renewals["overdue"]
+    ]
+    due_soon = [
+        f"{entry['vendor_id']}:{entry['kind']}"
+        for entry in renewals["due_soon"]
+    ]
+    section = {
+        "enabled": True,
+        "contracts_overdue": overdue[:_MAX_IDS],
+        "contracts_due_soon": due_soon[:_MAX_IDS],
+    }
+    return section, len(overdue) + len(due_soon)
+
+
+def _data_map_section(now: float) -> tuple[dict[str, Any], int]:
+    del now
+    try:
+        from . import data_map as dm
+
+        if not dm.enabled():
+            return {"enabled": False}, 0
+        posture = dm.data_map_posture()
+    except Exception:
+        return {"enabled": False, "error": "unavailable"}, 0
+    unlinked = int(posture.get("unlinked_flagged_assets") or 0)
+    section = {
+        "enabled": True,
+        "unlinked_flagged_assets": unlinked,
+        "special_category_assets": int(
+            posture.get("special_category_assets") or 0
+        ),
+    }
+    return section, unlinked
+
+
 def digest(
     *,
     now: float | None = None,
@@ -127,13 +173,20 @@ def digest(
     incidents, incident_count = _incident_section(current, float(due_soon_seconds))
     literacy, literacy_count = _literacy_section(current, expiring_days)
     conformity, conformity_count = _conformity_section(current)
+    vendors, vendor_count = _vendor_section(current, expiring_days)
+    estate, estate_count = _data_map_section(current)
     return {
         "generated_at": current,
-        "attention_count": incident_count + literacy_count + conformity_count,
+        "attention_count": (
+            incident_count + literacy_count + conformity_count
+            + vendor_count + estate_count
+        ),
         "sections": {
             "serious_incidents": incidents,
             "ai_literacy": literacy,
             "eu_conformity": conformity,
+            "vendors": vendors,
+            "data_map": estate,
         },
     }
 

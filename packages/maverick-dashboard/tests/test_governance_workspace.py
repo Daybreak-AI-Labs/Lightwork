@@ -47,9 +47,10 @@ def _hex(label: str) -> str:
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import audit, config
+    from maverick import audit, config, world_model
     from maverick.audit import writer as audit_writer
 
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     config_path = tmp_path / "config.toml"
     config_path.write_text(_BASE_CONFIG, encoding="utf-8")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
@@ -711,6 +712,94 @@ def test_needs_attention_digest_on_api_and_page():
 
 
 # ---------------------------------------------------------------------------
+# GPAI provider obligations and four-eyes review
+# ---------------------------------------------------------------------------
+
+def test_gpai_register_through_the_api():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("gpai-model")[:32]
+
+    refused = client.post(
+        f"{_PREFIX}/gpai",
+        json={
+            "asset_id": asset_id,
+            "systemic_risk": True,
+            "open_source_exempt": True,
+        },
+    )
+    assert refused.status_code == 409
+    assert "Art. 53(2)" in refused.json()["detail"]
+
+    opened = _ok(
+        client.post(
+            f"{_PREFIX}/gpai",
+            json={"asset_id": asset_id, "systemic_risk": True},
+        ),
+        expected=201,
+    )
+    assert opened["status"]["total"] == 8
+
+    state = _ok(
+        client.post(
+            f"{_PREFIX}/gpai/{opened['record']['id']}/obligations",
+            json={
+                "obligation": "model_evaluation",
+                "reference": "eval-vault#adversarial-2026Q3",
+                "expected_revision": opened["record"]["revision"],
+            },
+        )
+    )
+    assert state["asserted"] == 1
+    listing = _ok(client.get(f"{_PREFIX}/gpai"))
+    assert listing["count"] == 1
+    assert "technical_documentation" in listing["obligations"]
+    fetched = _ok(client.get(f"{_PREFIX}/gpai/{opened['record']['id']}"))
+    assert fetched["status"]["systemic_risk"] is True
+    assert client.get(f"{_PREFIX}/gpai/ECG-{'0' * 24}").status_code == 404
+
+
+def test_fria_review_is_four_eyes_gated():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("review-model")[:32]
+    opened = _ok(
+        client.post(
+            f"{_PREFIX}/fria",
+            json={"asset_id": asset_id, "context": "triage"},
+        ),
+        expected=201,
+    )
+    record = opened
+    for element in (
+        "process_description", "period_frequency", "affected_categories",
+        "risks_of_harm", "oversight_measures", "materialisation_measures",
+    ):
+        record = _ok(
+            client.post(
+                f"{_PREFIX}/fria/{opened['id']}/elements",
+                json={
+                    "element": element,
+                    "content": f"Assessed: {element}.",
+                    "expected_revision": record["revision"],
+                },
+            )
+        )
+    completed = _ok(
+        client.post(
+            f"{_PREFIX}/fria/{opened['id']}/complete",
+            json={"expected_revision": record["revision"]},
+        )
+    )
+    # The dashboard actor completed the assessment, so the same actor's
+    # review must be refused (four-eyes).
+    denied = client.post(
+        f"{_PREFIX}/fria/{opened['id']}/review",
+        json={"outcome": "concur", "expected_revision": completed["revision"]},
+    )
+    assert denied.status_code == 409
+    assert "other than the assessor" in denied.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
 # Pickers: nobody pastes raw ids
 # ---------------------------------------------------------------------------
 
@@ -975,3 +1064,88 @@ def test_grc_sync_status_and_outbound_surface_on_api_and_page():
     page = client.get("/security/governance")
     assert page.status_code == 200
     assert _FAKE_SYS_ID in page.text
+
+
+# ---------------------------------------------------------------------------
+# Art. 26 deployer obligations
+# ---------------------------------------------------------------------------
+
+def test_deployer_register_through_the_api():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("deployed-model")[:32]
+
+    opened = _ok(
+        client.post(
+            f"{_PREFIX}/deployer",
+            json={"asset_id": asset_id, "workplace_use": True},
+        ),
+        expected=201,
+    )
+    # 5 always-applicable + oversight + the flagged workplace duty.
+    assert opened["status"]["total"] == 7
+    assert opened["status"]["oversight_persons"] == []
+    record_id = opened["record"]["id"]
+
+    # Oversight cannot be asserted like an ordinary obligation.
+    refused = client.post(
+        f"{_PREFIX}/deployer/{record_id}/obligations",
+        json={
+            "obligation": "human_oversight_assignment",
+            "reference": "doc://oversight",
+            "expected_revision": opened["record"]["revision"],
+        },
+    )
+    assert refused.status_code == 409
+    assert "26(2)" in refused.json()["detail"]
+
+    state = _ok(
+        client.post(
+            f"{_PREFIX}/deployer/{record_id}/oversight",
+            json={
+                "persons": ["Ada Lovelace", "Grace Hopper"],
+                "reference": "doc://oversight-competence",
+                "expected_revision": opened["record"]["revision"],
+            },
+        )
+    )
+    assert state["oversight_persons"] == ["Ada Lovelace", "Grace Hopper"]
+
+    asserted = _ok(
+        client.post(
+            f"{_PREFIX}/deployer/{record_id}/obligations",
+            json={
+                "obligation": "log_retention",
+                "reference": "runbook://log-retention-183d",
+                "expected_revision": state["revision"],
+            },
+        )
+    )
+    assert asserted["asserted"] == 2
+
+    listing = _ok(client.get(f"{_PREFIX}/deployer"))
+    assert listing["count"] == 1
+    assert "use_per_instructions" in listing["obligations"]
+    assert "worker_information" in listing["conditional_obligations"]
+    fetched = _ok(client.get(f"{_PREFIX}/deployer/{record_id}"))
+    assert fetched["status"]["flags"]["workplace_use"] is True
+    assert client.get(f"{_PREFIX}/deployer/ECY-{'0' * 24}").status_code == 404
+
+
+def test_workspace_page_renders_the_gpai_and_deployer_panels():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("panel-model")[:32]
+    _ok(client.post(f"{_PREFIX}/gpai",
+                    json={"asset_id": asset_id, "systemic_risk": True}),
+        expected=201)
+    _ok(client.post(f"{_PREFIX}/deployer",
+                    json={"asset_id": asset_id, "workplace_use": True}),
+        expected=201)
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert "General-purpose AI obligations (Art. 53 / Art. 55)" in page.text
+    assert "Deployer duties (Art. 26)" in page.text
+    assert "UNASSIGNED" in page.text          # oversight not yet named
+    assert 'id="gpai-assert"' in page.text
+    assert 'id="deployer-oversight"' in page.text
+    assert asset_id in page.text

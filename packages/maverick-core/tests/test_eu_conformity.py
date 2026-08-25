@@ -365,3 +365,177 @@ def test_registers_are_tenant_scoped():
     with tenant_scope(tenant="beta"):
         assert euc.list_frias() == []
         assert euc.get_assessment_route(_ASSET) is None
+
+
+def test_gpai_register_tracks_provider_obligations():
+    record = euc.open_gpai(_ASSET, systemic_risk=False, actor="counsel")
+    assert euc.open_gpai(_ASSET, systemic_risk=False, actor="counsel")["id"] == record["id"]
+    state = euc.gpai_status(record["id"])
+    assert state["total"] == 4
+    assert state["exempt"] == []
+
+    revision = record["revision"]
+    for obligation in euc.GPAI_OBLIGATIONS:
+        saved = euc.assert_gpai_obligation(
+            record["id"], obligation,
+            reference=f"vault#{obligation}", actor="counsel",
+            expected_revision=revision,
+        )
+        revision = saved["revision"]
+    complete = euc.gpai_status(record["id"])
+    assert complete["complete"] is True
+
+    with pytest.raises(ValueError, match="obligation"):
+        euc.assert_gpai_obligation(
+            record["id"], "model_evaluation",
+            reference="vault", actor="counsel", expected_revision=revision,
+        )
+
+
+def test_gpai_systemic_risk_adds_art55_and_blocks_the_exemption():
+    other = "MAA-" + "d" * 32
+    with pytest.raises(euc.EUConformityError, match=r"Art\. 53\(2\)"):
+        euc.open_gpai(
+            other, systemic_risk=True, open_source_exempt=True, actor="counsel",
+        )
+    record = euc.open_gpai(other, systemic_risk=True, actor="counsel")
+    state = euc.gpai_status(record["id"])
+    assert state["total"] == 8
+    assert "model_evaluation" in state["missing"]
+
+    exempt_asset = "MAA-" + "e" * 32
+    exempted = euc.open_gpai(
+        exempt_asset, systemic_risk=False, open_source_exempt=True,
+        actor="counsel",
+    )
+    exempt_state = euc.gpai_status(exempted["id"])
+    assert exempt_state["exempt"] == sorted(euc.GPAI_OPEN_SOURCE_EXEMPT)
+    assert exempt_state["missing"] == ["copyright_policy", "training_content_summary"]
+    assert len(euc.list_gpai_registers()) >= 2
+    assert euc.get_gpai(exempt_asset)["open_source_exempt"] is True
+
+
+def test_fria_four_eyes_review_requires_a_different_completed_reviewer():
+    completed = _complete_fria()
+    with pytest.raises(euc.EUConformityError, match="other than the assessor"):
+        euc.record_fria_review(
+            completed["id"], outcome="concur", reviewer="dpo",
+            expected_revision=completed["revision"],
+        )
+    reviewed = euc.record_fria_review(
+        completed["id"], outcome="objections", reviewer="second-counsel",
+        expected_revision=completed["revision"],
+        notes="The affected-categories answer omits contractors.",
+    )
+    assert reviewed["reviews"][-1]["outcome"] == "objections"
+    assert reviewed["status"] == "completed"
+
+    draft = euc.open_fria("MAA-" + "b" * 32, context="draft-only", actor="dpo")
+    with pytest.raises(euc.EUConformityError, match="completed FRIA only"):
+        euc.record_fria_review(
+            draft["id"], outcome="concur", reviewer="second-counsel",
+            expected_revision=draft["revision"],
+        )
+
+
+def test_deployer_register_tracks_the_applicable_art26_duties():
+    record = euc.open_deployer_register(
+        _ASSET, workplace_use=True, requires_dpia=True, actor="ops",
+    )
+    keys = set(record["obligations"])
+    # Always-applicable + oversight + the two flagged conditionals.
+    assert "use_per_instructions" in keys
+    assert "log_retention" in keys
+    assert "human_oversight_assignment" in keys
+    assert "worker_information" in keys
+    assert "dpia_information" in keys
+    # Unflagged conditionals stay out of the register entirely.
+    assert "registration_check" not in keys
+    assert "input_data_control" not in keys
+    # Idempotent open.
+    assert euc.open_deployer_register(_ASSET, actor="ops")["id"] == record["id"]
+
+    state = euc.deployer_status(record["id"])
+    assert state["total"] == 8
+    assert state["asserted"] == 0
+    assert state["oversight_persons"] == []
+
+
+def test_deployer_oversight_must_name_natural_persons():
+    record = euc.open_deployer_register(_ASSET, actor="ops")
+    # The oversight duty cannot be asserted with a bare reference.
+    with pytest.raises(euc.EUConformityError, match="26\\(2\\)"):
+        euc.assert_deployer_obligation(
+            record["id"], "human_oversight_assignment",
+            reference="doc://oversight", actor="ops",
+            expected_revision=record["revision"],
+        )
+    with pytest.raises(ValueError, match="named natural person"):
+        euc.assign_deployer_oversight(
+            record["id"], persons=[], reference="doc://oversight",
+            actor="ops", expected_revision=record["revision"],
+        )
+    with pytest.raises(ValueError, match="distinct"):
+        euc.assign_deployer_oversight(
+            record["id"], persons=["Ada", "ada"], reference="doc://oversight",
+            actor="ops", expected_revision=record["revision"],
+        )
+    saved = euc.assign_deployer_oversight(
+        record["id"], persons=["Ada Lovelace", "Grace Hopper"],
+        reference="doc://oversight-competence", actor="ops",
+        expected_revision=record["revision"],
+    )
+    state = euc.deployer_status(saved["id"])
+    assert state["oversight_persons"] == ["Ada Lovelace", "Grace Hopper"]
+
+
+def test_deployer_assertions_complete_the_register():
+    record = euc.open_deployer_register(_ASSET, actor="ops")
+    with pytest.raises(ValueError, match="obligation must be one of"):
+        euc.assert_deployer_obligation(
+            record["id"], "vibes", reference="x", actor="ops",
+            expected_revision=record["revision"],
+        )
+    # Conditional duty not flagged at open: refused.
+    with pytest.raises(ValueError, match="obligation must be one of"):
+        euc.assert_deployer_obligation(
+            record["id"], "worker_information", reference="x", actor="ops",
+            expected_revision=record["revision"],
+        )
+    current = record
+    for key in ("use_per_instructions", "operation_monitoring",
+                "log_retention", "affected_person_information",
+                "authority_cooperation"):
+        current = euc.assert_deployer_obligation(
+            current["id"], key, reference=f"doc://{key}", actor="ops",
+            expected_revision=current["revision"],
+        )
+    current = euc.assign_deployer_oversight(
+        current["id"], persons=["Ada Lovelace"], reference="doc://oversight",
+        actor="ops", expected_revision=current["revision"],
+    )
+    state = euc.deployer_status(current["id"])
+    assert state["complete"] is True
+    assert state["missing"] == []
+    assert euc.list_deployer_registers()[0]["asset_id"] == _ASSET
+
+
+def test_status_projections_from_loaded_rows_match_the_store_reads():
+    # The list surfaces (dashboard panels, CLI lists) project posture from
+    # rows they already hold; the pure helpers must agree byte-for-byte
+    # with the id-addressed reads.
+    gpai = euc.open_gpai(_ASSET, systemic_risk=True, actor="ops")
+    euc.assert_gpai_obligation(
+        gpai["id"], "technical_documentation",
+        reference="doc://gpai/tech.pdf", actor="ops",
+        expected_revision=gpai["revision"],
+    )
+    deployer = euc.open_deployer_register(
+        _ASSET, workplace_use=True, actor="ops",
+    )
+    for row in euc.list_gpai_registers():
+        assert euc.gpai_status_from_record(row) == euc.gpai_status(row["id"])
+    for row in euc.list_deployer_registers():
+        assert (euc.deployer_status_from_record(row)
+                == euc.deployer_status(row["id"]))
+    assert deployer["id"].startswith("ECY-")
