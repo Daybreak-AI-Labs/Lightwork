@@ -416,6 +416,132 @@ def import_information_schema_csv(
     return {"imported": imported, "skipped": skipped}
 
 
+#: Cap on one content-verification sample; the classifier has its own
+#: global ceiling, this keeps register writes bounded.
+_MAX_CONTENT_SAMPLE = 200_000
+
+
+def classify_asset_content(
+    asset_id: str,
+    text_sample: str,
+    *,
+    actor: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """Content-verify one asset from a bounded sample of its actual data.
+
+    Where :func:`classify_column` reads NAMES, this runs the
+    deterministic content classifier over a real sample (rows the
+    operator pastes or pipes in) and records what was actually FOUND —
+    ``content_categories`` with per-category counts, merged into the
+    asset's categories. A content-verified category is evidence; a
+    name-suggested one is a hint, and the record now distinguishes them.
+    """
+
+    _require_enabled()
+    from .content_classifier import classify_text
+
+    operator = _text(actor, "actor", 256)
+    sample = str(text_sample or "")
+    if not sample.strip():
+        raise ValueError("text_sample must not be empty")
+    if len(sample) > _MAX_CONTENT_SAMPLE:
+        raise ValueError(
+            f"text_sample must be at most {_MAX_CONTENT_SAMPLE} characters")
+    report = classify_text(sample)
+
+    def mutate(value: dict[str, Any]) -> None:
+        merged = sorted(
+            set(value.get("categories") or []) | set(report["categories"])
+        )
+        value["categories"] = merged
+        value["content_categories"] = report["categories"]
+        value["content_counts"] = report["counts"]
+        value["content_verified_at"] = time.time()
+        value["content_verified_by"] = operator
+        value["special_category"] = bool(
+            SPECIAL_CATEGORIES.intersection(merged))
+
+    saved = _ASSETS.update(
+        _text(asset_id, "asset_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="classify_asset_content",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"data asset is not registered: {asset_id}")
+    return dict(saved)
+
+
+def _sql_identifier(part: str) -> str:
+    return '"' + part.replace('"', '""').upper() + '"'
+
+
+def masking_policy_sql(*, system: str = "snowflake") -> str:
+    """Deterministic Snowflake masking-policy DDL from the data map.
+
+    The classifier's findings, pushed to where the data lives: one
+    ``CREATE MASKING POLICY IF NOT EXISTS`` per flagged category and one
+    ``ALTER TABLE ... SET MASKING POLICY`` per flagged column, for every
+    ``table`` asset in the named system. Emitted as SQL text for the
+    operator's review pipeline — Lightwork never executes it, and the
+    header says so. Snowflake only in v1; other engines are a decision.
+    """
+
+    _require_enabled()
+    engine = str(system or "").strip().lower()
+    if engine != "snowflake":
+        raise ValueError("only system='snowflake' is supported in v1")
+    rows = sorted(
+        (
+            row for row in _ASSETS.list(limit=_SCAN_LIMIT)
+            if row.get("kind") == "table" and (row.get("flagged_columns"))
+        ),
+        key=lambda row: str(row.get("name") or ""),
+    )
+    categories_in_use = sorted(
+        {
+            category
+            for row in rows
+            for cols in (row.get("flagged_columns") or {}).values()
+            for category in cols
+        }
+    )
+    lines = [
+        "-- Lightwork data-map masking policies (Snowflake).",
+        "-- Generated from the governed register; REVIEW before applying.",
+        "-- Lightwork emits this DDL and never executes it.",
+        "",
+    ]
+    for category in categories_in_use:
+        policy = _sql_identifier(f"LIGHTWORK_MASK_{category}")
+        lines.append(
+            f"CREATE MASKING POLICY IF NOT EXISTS {policy} AS "
+            "(val string) RETURNS string ->\n"
+            "  CASE WHEN CURRENT_ROLE() IN ('DATA_STEWARD') THEN val "
+            f"ELSE '[MASKED:{category}]' END;"
+        )
+    for row in rows:
+        table = ".".join(
+            _sql_identifier(part)
+            for part in str(row.get("name") or "").split(".")
+        )
+        for column, cats in sorted(
+            (row.get("flagged_columns") or {}).items()
+        ):
+            if not cats:
+                continue
+            policy = _sql_identifier(f"LIGHTWORK_MASK_{sorted(cats)[0]}")
+            lines.append(
+                f"ALTER TABLE {table} MODIFY COLUMN "
+                f"{_sql_identifier(column)} SET MASKING POLICY {policy};"
+            )
+    if not rows:
+        lines.append("-- No flagged table assets in the register yet.")
+    return "\n".join(lines) + "\n"
+
+
 def _default_graph_fetch(url: str, token: str) -> dict[str, Any]:
     """GET through the SSRF-pinned, enterprise-egress-guarded client."""
 
@@ -522,6 +648,8 @@ __all__ = [
     "DataMapError",
     "IDENTIFYING_CATEGORIES",
     "LINK_KINDS",
+    "classify_asset_content",
+    "masking_policy_sql",
     "SPECIAL_CATEGORIES",
     "classify_column",
     "classify_columns",

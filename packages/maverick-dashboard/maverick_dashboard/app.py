@@ -710,6 +710,11 @@ _AUTH_EXEMPT = {
     # Self-gates on [llm_gateway] enable and 403s when off.
     "/gateway/v1/chat/completions",
     "/gateway/v1/otel",
+    # The consent webhook authenticates every delivery with its OWN HMAC
+    # signature inside maverick.consent_registry (external CMPs hold the
+    # webhook secret, never the dashboard bearer). Self-gates on
+    # [consent_registry] webhook_enable and 403s when off.
+    "/consent/webhook",
 }
 
 
@@ -1067,6 +1072,9 @@ async def bearer_auth(request: Request, call_next):
     if (request.url.path in _AUTH_EXEMPT or request.url.path.startswith("/share/")
             or request.url.path.startswith("/scim/")
             or request.url.path.startswith("/form/")
+            # DSAR response links are addressed by their unguessable token,
+            # exactly like /form/ — the requester has no dashboard bearer.
+            or request.url.path.startswith("/dsar/response/")
             or request.url.path.startswith("/saml/")
             or request.url.path.startswith("/auth/invite/")
             # BYOA gateway: per-agent rest bearer from the trust registry is
@@ -5868,6 +5876,56 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
     from maverick import form_store
     seq = form_store.append(token, fields)
     return JSONResponse({"ok": True, "seq": seq}, status_code=201)
+
+
+@app.get("/dsar/response/{token}")
+async def dsar_response_page(request: Request, token: str) -> JSONResponse:
+    """The subject's DSAR response, addressed by its unguessable token.
+
+    Public by design, exactly like /form/{token}: the token (stored
+    server-side only as a SHA-256 digest, with expiry) is the addressing
+    secret. The bundle is assembled at delivery time and scrubbed of
+    third-party identifiers by the deterministic redactor before anything
+    leaves. Unknown, expired, or disabled all read as the same 404."""
+    from maverick import dsar_fulfillment
+    if not dsar_fulfillment.enabled():
+        raise HTTPException(status_code=404, detail="no such response")
+    check_goal_rate_limit(request, source="dsar-response")
+    response = await run_in_threadpool(
+        dsar_fulfillment.response_for_token, token)
+    if response is None:
+        raise HTTPException(status_code=404, detail="no such response")
+    return JSONResponse(response)
+
+
+@app.post("/consent/webhook")
+async def consent_webhook(request: Request) -> JSONResponse:
+    """Signed consent-event push from any consent front end (CMP).
+
+    Authenticated by the HMAC-SHA256 signature over the raw body
+    (X-Lightwork-Signature, hex, optional sha256= prefix) — external CMPs
+    hold the webhook secret, never a dashboard credential. Bounded body;
+    per-event failures skip rather than abort; a backdated event can
+    never flip a newer withdrawal."""
+    from maverick import consent_registry
+    if not consent_registry.webhook_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="the consent webhook is disabled ([consent_registry] "
+                   "webhook_enable)")
+    body = await _read_limited_webhook_body(request)
+    signature = request.headers.get("x-lightwork-signature", "")
+    try:
+        result = await run_in_threadpool(
+            consent_registry.ingest_consent_webhook, body, signature,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except consent_registry.ConsentRegistryConfigError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return JSONResponse(result, status_code=202)
 
 
 @app.post("/webhook/linear")

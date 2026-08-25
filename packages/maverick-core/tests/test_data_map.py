@@ -215,3 +215,43 @@ def test_schema_import_checks_capacity_once_for_the_batch(monkeypatch):
     assert result == {"imported": 1, "skipped": 1}
     names = {row["name"] for row in dm.list_data_assets()}
     assert names == {"warehouse.existing"}
+
+
+def test_content_verification_records_what_was_actually_found():
+    record = dm.register_data_asset(
+        "crm.contacts", system="snowflake", kind="table", owner="data-team",
+        actor="ops", columns=["id", "email"],
+    )
+    saved = dm.classify_asset_content(
+        record["id"],
+        "carol@example.com paid with 4111 1111 1111 1111; "
+        "patient diagnosis code E11.9",
+        actor="ops", expected_revision=record["revision"],
+    )
+    assert saved["content_categories"] == ["email", "financial", "health"]
+    assert saved["content_counts"]["email"] == 1
+    # Content findings merge into the asset's categories and flip the
+    # special-category flag when health shows up in the DATA.
+    assert "financial" in saved["categories"]
+    assert saved["special_category"] is True
+    assert saved["content_verified_by"] == "ops"
+    with pytest.raises(ValueError, match="empty"):
+        dm.classify_asset_content(record["id"], "   ", actor="ops",
+                                  expected_revision=saved["revision"])
+
+
+def test_masking_sql_emits_reviewable_ddl_and_never_more():
+    dm.register_data_asset(
+        "crm.contacts", system="snowflake", kind="table", owner="data-team",
+        actor="ops", columns=["id", "email", "phone"],
+    )
+    sql = dm.masking_policy_sql()
+    assert sql.startswith("-- Lightwork data-map masking policies")
+    assert "never executes" in sql
+    assert 'CREATE MASKING POLICY IF NOT EXISTS "LIGHTWORK_MASK_EMAIL"' in sql
+    assert ('ALTER TABLE "CRM"."CONTACTS" MODIFY COLUMN "EMAIL" '
+            'SET MASKING POLICY "LIGHTWORK_MASK_EMAIL";') in sql
+    # Deterministic output for an unchanged register.
+    assert sql == dm.masking_policy_sql()
+    with pytest.raises(ValueError, match="snowflake"):
+        dm.masking_policy_sql(system="bigquery")

@@ -2941,6 +2941,141 @@ _ISO42001 = AssessmentTemplate(
     questions=_control_questions("iso42001", _ISO42001_ENTRIES),
 )
 
+_ISO27701 = AssessmentTemplate(
+    type="iso27701",
+    title="ISO/IEC 27701 PIMS Readiness",
+    framework="ISO/IEC 27701 (Privacy Information Management System)",
+    description="Readiness self-assessment for a privacy information "
+    "management system extending an ISO 27001 ISMS: scope and roles, PII "
+    "inventory, legal-basis and consent records, data-subject requests, "
+    "processor contracts, transfers, breach response, retention, and the "
+    "management-system loop. Original paraphrases; no standards text is "
+    "reproduced, and completing this is not certification.",
+    questions=(
+        _q(
+            "p27701_scope",
+            "PIMS scope",
+            "Is the PIMS scope defined on top of an operating ISO 27001 "
+            "ISMS, stating whether the organization acts as PII "
+            "controller, PII processor, or both?",
+            "no",
+            "high",
+            "Define the PIMS scope and controller/processor roles before "
+            "anything else; every other control inherits it.",
+        ),
+        _q(
+            "p27701_inventory",
+            "PII inventory",
+            "Is there a maintained inventory of PII categories, processing "
+            "purposes, storage locations, and flows in scope?",
+            "no",
+            "high",
+            "Build the PII inventory (the data map) and keep it current.",
+        ),
+        _q(
+            "p27701_legal_basis",
+            "Legal basis & consent",
+            "Is the legal basis for each processing purpose recorded, with "
+            "consent captured and withdrawable where consent is the basis?",
+            "no",
+            "high",
+            "Record a basis per purpose and operate a durable consent "
+            "record with withdrawal.",
+        ),
+        _q(
+            "p27701_rights",
+            "Data-subject requests",
+            "Is there a working, tested process to receive, verify, and "
+            "fulfill PII principals' requests (access, correction, "
+            "deletion) within applicable deadlines?",
+            "no",
+            "high",
+            "Stand up the request pipeline with identity verification and "
+            "deadline tracking.",
+        ),
+        _q(
+            "p27701_processors",
+            "Processor contracts",
+            "Do written contracts with PII processors and subprocessors "
+            "cover processing instructions, confidentiality, breach "
+            "notice, and return-or-deletion at termination?",
+            "no",
+            "medium",
+            "Close DPA gaps with every processor; track renewals.",
+        ),
+        _q(
+            "p27701_transfers",
+            "Transfers",
+            "Are cross-border PII transfers identified, with their "
+            "safeguards and destinations documented and available to "
+            "principals on request?",
+            "no",
+            "medium",
+            "Map transfers and document the safeguard behind each.",
+        ),
+        _q(
+            "p27701_privacy_by_design",
+            "Privacy by design",
+            "Do new products and changes in scope run a documented privacy "
+            "impact review (necessity, minimization, defaults) before "
+            "release?",
+            "no",
+            "medium",
+            "Gate releases on a recorded privacy review.",
+        ),
+        _q(
+            "p27701_breach",
+            "Breach response",
+            "Is there a tested PII breach response process with roles, "
+            "regulator/principal notification criteria, and records of "
+            "every incident, notified or not?",
+            "no",
+            "high",
+            "Adopt a breach runbook with jurisdiction deadlines and a "
+            "complete incident record.",
+        ),
+        _q(
+            "p27701_retention",
+            "Retention & deletion",
+            "Are retention periods defined per PII category and enforced "
+            "with actual deletion or anonymization at end of life?",
+            "no",
+            "medium",
+            "Define and enforce retention schedules; prove deletion.",
+        ),
+        _q(
+            "p27701_awareness",
+            "Awareness",
+            "Have staff who touch PII received privacy training relevant "
+            "to their roles, with completion recorded?",
+            "no",
+            "low",
+            "Run role-based privacy training and record completion.",
+        ),
+        _q(
+            "p27701_audit",
+            "Audit & review",
+            "Does the PIMS run the management-system loop — internal "
+            "audits, management review, and corrective actions — on a "
+            "schedule?",
+            "no",
+            "medium",
+            "Schedule internal PIMS audits and management reviews; track "
+            "findings to closure.",
+        ),
+        _q(
+            "p27701_applicability",
+            "Control applicability",
+            "Is there a statement of applicability for the privacy "
+            "control set, with justified exclusions?",
+            "no",
+            "medium",
+            "Produce the SoA for the privacy controls; justify every "
+            "exclusion in writing.",
+        ),
+    ),
+)
+
 TEMPLATES: dict[str, AssessmentTemplate] = {
     t.type: t
     for t in (
@@ -2951,6 +3086,7 @@ TEMPLATES: dict[str, AssessmentTemplate] = {
         _LGPD,
         _PIPEDA,
         _US_STATE_PRIVACY,
+        _ISO27701,
         _CPPA_ADMT,
         _COLORADO_ADMT,
         _NYC_LL144,

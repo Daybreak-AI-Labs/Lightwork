@@ -55,6 +55,7 @@ from .api_schemas import (
     AssessmentRefreshIn,
     AssessmentReviewIn,
     AttachmentOut,
+    BreachPlanIn,
     BulkAssessmentImportIn,
     CachePurgeIn,
     CatalogInstallIn,
@@ -65,6 +66,7 @@ from .api_schemas import (
     ConnectionIn,
     ConsentIn,
     ConsentSubjectIn,
+    ContentSampleIn,
     CopilotIn,
     DataAssetIn,
     DataAssetLinkIn,
@@ -96,6 +98,9 @@ from .api_schemas import (
     FlowRunIn,
     FlowSaveIn,
     FollowupsIn,
+    FulfillmentIdentityIn,
+    FulfillmentResponseIn,
+    FulfillmentSourceIn,
     GoalEventOut,
     GoalEventsResponse,
     GoalIn,
@@ -2464,6 +2469,161 @@ async def sync_sharepoint(request: Request, body: SharePointSyncIn) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/data-map/assets/{asset_id}/classify-content")
+async def classify_asset_content(request: Request, asset_id: str,
+                                 body: ContentSampleIn) -> dict:
+    """Content-verify one asset from a pasted data sample -- deterministic
+    detectors (Luhn, mod-97, structural rules), never an ML guess."""
+    require_permission(request, "operate")
+    dm = _data_map_or_403()
+    return await _estate_call(
+        dm.classify_asset_content, asset_id[:64], body.text_sample,
+        actor=_request_actor(request), expected_revision=body.revision,
+        not_found="no such data asset",
+    )
+
+
+@router.get("/data-map/masking-sql")
+async def data_map_masking_sql(request: Request,
+                               system: str = "snowflake") -> Response:
+    """Masking-policy DDL generated from the register; review before
+    applying -- Lightwork never executes it."""
+    require_permission(request, "operate")
+    dm = _data_map_or_403()
+    sql = await _estate_call(dm.masking_policy_sql, system=system)
+    return Response(content=sql, media_type="text/plain; charset=utf-8")
+
+
+def _breach_notification_or_403():
+    from maverick import breach_notification
+    if not breach_notification.enabled():
+        raise HTTPException(status_code=403,
+                            detail="the breach planner is disabled "
+                                   "([breach_notification] enable)")
+    return breach_notification
+
+
+@router.get("/breach/regimes")
+async def breach_regimes(request: Request) -> dict:
+    require_permission(request, "operate")
+    bn = _breach_notification_or_403()
+    rows = await _estate_call(bn.list_regimes)
+    return {"regimes": rows, "verified_at": bn.VERIFIED_AT,
+            "absent_by_design": bn.UNVERIFIED_REGIMES}
+
+
+@router.post("/breach/plan")
+async def breach_plan(request: Request, body: BreachPlanIn) -> dict:
+    """Per-regime notification obligations for one incident's facts."""
+    require_permission(request, "operate")
+    bn = _breach_notification_or_403()
+    return await _estate_call(
+        bn.assess_breach, body.jurisdictions,
+        subjects_affected=body.subjects_affected,
+        sensitive=body.sensitive, malicious=body.malicious,
+        discovered_at=body.discovered_at, determined_at=body.determined_at,
+    )
+
+
+@router.get("/privacy/incidents/{incident_id}/notification-plan")
+async def incident_notification_plan(request: Request, incident_id: str,
+                                     jurisdictions: str = "") -> dict:
+    """The breach plan anchored to one privacy incident's discovery time.
+
+    ``jurisdictions`` is a comma-separated regime list; the incident's
+    numeric ``affected_estimate`` (when it parses) supplies the subject
+    count."""
+    require_permission(request, "operate")
+    bn = _breach_notification_or_403()
+    ops = _privacy_ops_or_403()
+
+    def build() -> dict:
+        record = ops.get_incident(incident_id[:64])
+        if record is None:
+            raise KeyError("no such incident")
+        wanted = [part for part in
+                  (jurisdictions or "").split(",") if part.strip()]
+        raw_estimate = str(record.get("affected_estimate") or "")
+        digits = "".join(ch for ch in raw_estimate if ch.isdigit())
+        return bn.assess_breach(
+            wanted,
+            subjects_affected=int(digits) if digits else 0,
+            discovered_at=float(record.get("created_at") or 0.0) or None,
+        )
+
+    return await _estate_call(build, not_found="no such incident")
+
+
+def _dsar_fulfillment_or_403():
+    from maverick import dsar_fulfillment
+    if not dsar_fulfillment.enabled():
+        raise HTTPException(status_code=403,
+                            detail="DSAR fulfillment is disabled "
+                                   "([dsar_fulfillment] enable)")
+    return dsar_fulfillment
+
+
+@router.post("/privacy/dsar/{request_id}/fulfillment", status_code=201)
+async def open_dsar_fulfillment(request: Request, request_id: str) -> dict:
+    require_permission(request, "operate")
+    df = _dsar_fulfillment_or_403()
+    return await _estate_call(
+        df.open_fulfillment, request_id[:64], actor=_request_actor(request),
+        not_found="no such DSAR request",
+    )
+
+
+@router.get("/privacy/dsar/{request_id}/fulfillment")
+async def get_dsar_fulfillment(request: Request, request_id: str) -> dict:
+    require_permission(request, "operate")
+    df = _dsar_fulfillment_or_403()
+    record = await _estate_call(df.get_fulfillment, request_id[:64])
+    if record is None:
+        raise HTTPException(status_code=404, detail="no fulfillment opened")
+    return record
+
+
+@router.post("/privacy/dsar/fulfillment/{fulfillment_id}/identity")
+async def dsar_fulfillment_identity(request: Request, fulfillment_id: str,
+                                    body: FulfillmentIdentityIn) -> dict:
+    require_permission(request, "operate")
+    df = _dsar_fulfillment_or_403()
+    return await _estate_call(
+        df.record_identity_verification, fulfillment_id[:64],
+        method=body.method, reference=body.reference,
+        actor=_request_actor(request), expected_revision=body.revision,
+        not_found="no such fulfillment",
+    )
+
+
+@router.post("/privacy/dsar/fulfillment/{fulfillment_id}/sources",
+             status_code=201)
+async def dsar_fulfillment_source(request: Request, fulfillment_id: str,
+                                  body: FulfillmentSourceIn) -> dict:
+    require_permission(request, "operate")
+    df = _dsar_fulfillment_or_403()
+    return await _estate_call(
+        df.record_collection_source, fulfillment_id[:64],
+        source=body.source, reference=body.reference, items=body.items,
+        actor=_request_actor(request), expected_revision=body.revision,
+        not_found="no such fulfillment",
+    )
+
+
+@router.post("/privacy/dsar/fulfillment/{fulfillment_id}/response",
+             status_code=201)
+async def dsar_fulfillment_response(request: Request, fulfillment_id: str,
+                                    body: FulfillmentResponseIn) -> dict:
+    """Mint the token-gated response link; the token appears once, here."""
+    require_permission(request, "operate")
+    df = _dsar_fulfillment_or_403()
+    return await _estate_call(
+        df.prepare_response, fulfillment_id[:64],
+        actor=_request_actor(request), expected_revision=body.revision,
+        expires_hours=body.expires_hours, not_found="no such fulfillment",
+    )
 
 
 def _csv_formula_safe(value: object) -> object:

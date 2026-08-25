@@ -92,8 +92,8 @@ def _self_authenticated_path(path: str) -> bool:
     dashboard credential. The trailing slash matters: the ADMIN surface at
     ``/api/v1/external-agents`` stays under normal dashboard auth."""
     return path in _SELF_AUTH_EXEMPT_PATHS or path.startswith(
-        ("/share/", "/scim/", "/form/", "/saml/", "/auth/invite/",
-         "/api/v1/external/")
+        ("/share/", "/scim/", "/form/", "/dsar/response/", "/saml/",
+         "/auth/invite/", "/api/v1/external/")
     )
 
 
