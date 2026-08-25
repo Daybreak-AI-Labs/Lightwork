@@ -393,7 +393,12 @@ def test_breach_plan_endpoints(tmp_path):
     config.reset_config_cache()
     regimes = client.get("/api/v1/breach/regimes")
     assert regimes.status_code == 200
-    assert len(regimes.json()["regimes"]) == 14
+    # Pinned to the module's own vocabulary, not a copied literal: a
+    # verified regime added there must not require a dashboard-test edit.
+    from maverick import breach_notification
+
+    assert len(regimes.json()["regimes"]) == len(breach_notification.REGIMES)
+    assert "ca_quebec" in {r["regime"] for r in regimes.json()["regimes"]}
     plan = client.post("/api/v1/breach/plan", json={
         "jurisdictions": ["eu_gdpr", "us_tx"], "subjects_affected": 900,
     })
