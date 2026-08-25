@@ -39,11 +39,17 @@ def test_unparseable_csv_raises_a_clean_value_error():
         alias_rows(f"name,owner\nAcme,{huge}\n", _ALIASES, limit=10)
 
 
-def test_nul_bytes_are_tolerated_as_data():
-    # Python >= 3.11 parses NUL bytes as ordinary characters; they must
-    # flow through as data rather than crash the importer.
-    rows = alias_rows("name,owner\nAcme,\x00Dana\n", _ALIASES, limit=10)
-    assert rows[0]["name"] == "Acme"
+def test_nul_bytes_never_leak_a_raw_csv_error():
+    # Python 3.10's csv module raises "line contains NUL"; 3.11+ parses
+    # NUL as ordinary data. Either way the importer's contract holds:
+    # data flows through, or the failure is our clean ValueError -- never
+    # a bare csv.Error surfacing as a 500.
+    try:
+        rows = alias_rows("name,owner\nAcme,\x00Dana\n", _ALIASES, limit=10)
+    except ValueError as exc:
+        assert "not parseable" in str(exc)
+    else:
+        assert rows[0]["name"] == "Acme"
 
 
 def test_rows_beyond_the_limit_are_dropped():

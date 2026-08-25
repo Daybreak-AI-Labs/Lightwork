@@ -115,6 +115,14 @@ def write_text_contained(sandbox, target: Path, content: str) -> None:
     ``ValueError`` on escape; ``OSError`` propagates.
     """
     workdir = Path(sandbox.workdir).resolve()
+    # Workspace journal chokepoint: every file-tool write (write_file, the
+    # str_replace editors, ast_edit) funnels through here, so the pre-image is
+    # captured BEFORE the O_CREAT below can create the file — a created file
+    # must be journaled as "did not exist" for revert to delete it. No-op
+    # unless [workspace] journal is on; strict mode raises ValueError, which
+    # every caller already maps to the standard tool ERROR contract.
+    from ..workspace_journal import record_pre_image
+    record_pre_image(workdir, target)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd = _open_contained(workdir, target, os.O_WRONLY | os.O_CREAT)
     # fdopen takes ownership of fd; close fd ourselves only if it (or ftruncate)

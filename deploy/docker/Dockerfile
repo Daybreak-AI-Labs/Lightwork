@@ -48,8 +48,18 @@ RUN python -m pip install --upgrade 'pip==26.2.1' \
 
 FROM python:3.12-slim${PYTHON_DIGEST} AS runtime
 
+# PYTHONNOUSERSITE: the harness interpreter must never import from the user
+# site-packages. System site-packages are root-owned (installed below, before
+# USER maverick), so the only writable import path a model-driven `pip
+# install --user` can reach at runtime is ~/.local/lib/pythonX/site-packages —
+# with user-site honored, a mid-run install there shadows any module the
+# harness lazily imports later (import-path poisoning of the process that
+# holds credentials and enforces the gates). The sandbox's child-shell env
+# drops this var (sandbox/local.py scrub_env), so packages the agent installs
+# for its OWN scripts keep working; only the harness process is closed off.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONNOUSERSITE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 

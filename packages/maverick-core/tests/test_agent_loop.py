@@ -466,6 +466,81 @@ class TestLoopGuard:
         for _ in range(agent_mod._LOOP_GUARD_THRESHOLD + 2):
             assert a._loop_guard_note("shell", {"cmd": "x"}, "ERROR") == ""
 
+    # ---- identical-result tier (success nudges + pre-exec suppression) ----
+
+    def test_identical_success_nudges_at_threshold(self, ctx):
+        from maverick import agent as agent_mod
+        a = Agent(ctx=ctx, role="researcher", brief="x")
+        thr = agent_mod._LOOP_GUARD_THRESHOLD
+        notes = [a._loop_guard_note("shell", {"cmd": "poll"}, "same output")
+                 for _ in range(thr)]
+        assert all(n == "" for n in notes[:thr - 1])
+        assert "byte-identical" in notes[-1]
+
+    def test_changing_success_output_never_nudges(self, ctx):
+        # A poll whose output CHANGES is progress, not a loop.
+        from maverick import agent as agent_mod
+        a = Agent(ctx=ctx, role="researcher", brief="x")
+        for i in range(agent_mod._LOOP_GUARD_THRESHOLD + 3):
+            assert a._loop_guard_note("shell", {"cmd": "poll"}, f"tick {i}") == ""
+
+    def test_suppression_fires_after_block_threshold(self, ctx, monkeypatch):
+        from maverick import agent as agent_mod
+        monkeypatch.setattr(agent_mod, "_LOOP_GUARD_BLOCK", 4)
+        a = Agent(ctx=ctx, role="researcher", brief="x")
+        for _ in range(4):
+            a._loop_guard_note("shell", {"cmd": "poll"}, "same output")
+        refusal = a._loop_guard_suppression("shell", {"cmd": "poll"})
+        assert refusal is not None and refusal.startswith("ERROR: [loop-guard]")
+        # A different call is untouched by the suppression...
+        assert a._loop_guard_suppression("shell", {"cmd": "other"}) is None
+        # ...and once it executes, the streak (and the suppression) resets.
+        a._loop_guard_note("shell", {"cmd": "other"}, "fresh")
+        assert a._loop_guard_suppression("shell", {"cmd": "poll"}) is None
+
+    def test_identical_failures_also_reach_suppression(self, ctx, monkeypatch):
+        from maverick import agent as agent_mod
+        monkeypatch.setattr(agent_mod, "_LOOP_GUARD_BLOCK", 4)
+        a = Agent(ctx=ctx, role="researcher", brief="x")
+        for _ in range(4):
+            a._loop_guard_note("shell", {"cmd": "boom"}, "ERROR: nope")
+        assert a._loop_guard_suppression("shell", {"cmd": "boom"}) is not None
+
+    def test_suppression_disabled_at_zero(self, ctx, monkeypatch):
+        from maverick import agent as agent_mod
+        monkeypatch.setattr(agent_mod, "_LOOP_GUARD_BLOCK", 0)
+        a = Agent(ctx=ctx, role="researcher", brief="x")
+        for _ in range(10):
+            a._loop_guard_note("shell", {"cmd": "poll"}, "same output")
+        assert a._loop_guard_suppression("shell", {"cmd": "poll"}) is None
+
+    def test_block_clamps_above_nudge_threshold(self):
+        # Advice must precede enforcement whatever the env knobs say.
+        from maverick import agent as agent_mod
+        assert (agent_mod._LOOP_GUARD_BLOCK == 0
+                or agent_mod._LOOP_GUARD_BLOCK > agent_mod._LOOP_GUARD_THRESHOLD)
+
+    @pytest.mark.asyncio
+    async def test_run_tool_returns_suppression_without_executing(
+            self, ctx, monkeypatch):
+        from maverick import agent as agent_mod
+        monkeypatch.setattr(agent_mod, "_LOOP_GUARD_BLOCK", 4)
+        calls = []
+
+        async def _same(name, args):
+            calls.append(1)
+            return "same output"
+
+        a = Agent(ctx=ctx, role="researcher", brief="x")
+        monkeypatch.setattr(a.tools, "run", _same)
+        for _ in range(4):
+            out = await a._run_tool("shell", {"cmd": "poll"})
+            assert "same output" in out
+        executed_before = len(calls)
+        out = await a._run_tool("shell", {"cmd": "poll"})
+        assert out.startswith("ERROR: [loop-guard]")
+        assert len(calls) == executed_before, "suppressed call must not execute"
+
     @pytest.mark.asyncio
     async def test_run_tool_appends_note_after_the_framed_block(self, ctx, monkeypatch):
         from maverick import agent as agent_mod

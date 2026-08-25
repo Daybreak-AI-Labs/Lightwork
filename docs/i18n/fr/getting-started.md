@@ -89,6 +89,23 @@ maverick resume
 
 Les objectifs survivent aux redémarrages. Vous pouvez fermer votre ordinateur portable et revenir demain.
 
+## Annuler les modifications de fichiers d'une exécution
+
+Avec le journal de l'espace de travail activé (`[workspace] journal = true`,
+ou en répondant oui à l'étape *Workspace journal* de l'assistant), chaque
+fichier que les agents écrasent ou créent via les outils de fichiers est
+capturé avant la mutation :
+
+```bash
+maverick journal list --goal 12     # ce qui a été touché
+maverick journal diff --goal 12     # état d'avant l'exécution vs le disque maintenant
+maverick journal revert --goal 12   # restaure chaque fichier, du plus récent au plus ancien
+```
+
+La restauration écrit une ligne d'audit signée `workspace_revert` et archive
+le journal. Les mutations faites par le shell (`rm`, `mv`, redirections) ne
+sont pas journalisées — la piste d'audit enregistre ces commandes.
+
 ## Construire votre propre spécialiste à partir d'une tâche observée
 
 Vous n'êtes pas obligé de décrire un travail avec des mots — vous pouvez le
