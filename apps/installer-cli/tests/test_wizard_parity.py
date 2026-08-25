@@ -388,6 +388,27 @@ def test_write_config_omits_durable_when_disabled(tmp_path: Path, monkeypatch):
     assert "durable" not in parsed
 
 
+def test_write_config_emits_workspace_journal_when_enabled(tmp_path: Path,
+                                                           monkeypatch):
+    parsed = _write_full_config(
+        tmp_path, monkeypatch,
+        workspace={"journal": True, "journal_strict": True},
+    )
+    assert parsed["workspace"]["journal"] is True
+    assert parsed["workspace"]["journal_strict"] is True
+
+
+def test_write_config_omits_workspace_journal_when_declined(tmp_path: Path,
+                                                            monkeypatch):
+    # Off by default: declining writes no [workspace] section at all — the
+    # kernel's journal default is off, so the config stays minimal.
+    parsed = _write_full_config(
+        tmp_path, monkeypatch,
+        workspace={"journal": False},
+    )
+    assert "workspace" not in parsed
+
+
 def test_write_config_roundtrips_backslash_paths_and_allowlist(tmp_path: Path, monkeypatch):
     """A Windows backslash workdir must round-trip (escaped TOML basic string)
     and a channel allowed_user_ids must emit as an ARRAY. Regression: the raw

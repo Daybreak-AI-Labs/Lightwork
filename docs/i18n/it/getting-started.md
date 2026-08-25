@@ -89,6 +89,23 @@ maverick resume
 
 Gli obiettivi sopravvivono ai riavvii. Puoi chiudere il portatile e tornare domani.
 
+## Annullare le modifiche ai file di un'esecuzione
+
+Con il journal dello spazio di lavoro attivo (`[workspace] journal = true`, o
+rispondendo sì al passaggio *Workspace journal* della procedura guidata),
+ogni file che gli agenti sovrascrivono o creano tramite gli strumenti file
+viene catturato prima della modifica:
+
+```bash
+maverick journal list --goal 12     # cosa è stato toccato
+maverick journal diff --goal 12     # stato pre-esecuzione vs il disco adesso
+maverick journal revert --goal 12   # ripristina ogni file, dal più recente
+```
+
+Il ripristino scrive una riga di audit firmata `workspace_revert` e archivia
+il journal. Le modifiche fatte dalla shell (`rm`, `mv`, redirezioni) non
+vengono registrate nel journal — la traccia di audit registra quei comandi.
+
 ## Costruire il tuo specialista da un'attività osservata
 
 Non sei obbligato a descrivere un lavoro a parole: puoi mostrarlo. Cattura una

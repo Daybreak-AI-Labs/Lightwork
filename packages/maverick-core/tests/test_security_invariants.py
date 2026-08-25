@@ -72,6 +72,17 @@ def test_scrub_env_strips_secret_shaped_vars():
     assert out["PLAIN_SETTING"] == "keep"
 
 
+def test_scrub_env_drops_harness_only_nousersite():
+    """PYTHONNOUSERSITE hardens the HARNESS import path (deploy image sets it
+    so a `pip install --user` can't shadow modules the harness lazily imports).
+    The agent's own shell must NOT inherit it, or agent-installed user-site
+    packages silently stop importing in the agent's own scripts."""
+    from maverick.sandbox.local import scrub_env
+    out = scrub_env({"PYTHONNOUSERSITE": "1", "PATH": "/usr/bin"})
+    assert "PYTHONNOUSERSITE" not in out
+    assert out["PATH"] == "/usr/bin"
+
+
 def test_scrub_env_strips_github_cross_step_command_files():
     """Model-driven shells must not mutate later trusted Actions steps."""
     from maverick.sandbox.local import scrub_env

@@ -93,6 +93,22 @@ maverick resume
 
 Goals survive restarts. You can shut your laptop and come back tomorrow.
 
+## Undoing a run's file edits
+
+With the workspace journal enabled (`[workspace] journal = true`, or say yes
+at the wizard's *Workspace journal* step), every file the agents overwrite or
+create through the file tools is captured before the mutation:
+
+```bash
+maverick journal list --goal 12     # what was touched
+maverick journal diff --goal 12     # pre-run state vs the disk now
+maverick journal revert --goal 12   # restore every file, newest-first
+```
+
+Reverting writes a signed `workspace_revert` audit row and archives the
+journal. Shell-driven mutations (`rm`, `mv`, redirects) are not journaled —
+the audit trail records those commands instead.
+
 ## Building your own specialist from a watched task
 
 You don't have to describe a job in words — you can show it. Capture an ordered

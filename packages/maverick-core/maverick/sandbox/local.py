@@ -112,6 +112,15 @@ def scrub_env(source: dict | None = None) -> dict:
     if git_family - out.keys():  # at least one member was scrubbed
         for k in git_family:
             out.pop(k, None)
+    # PYTHONNOUSERSITE is a HARNESS-process hardening knob (the deploy image
+    # sets it so a model-driven `pip install --user` can't shadow modules the
+    # harness later imports). It must not leak into the agent's own shell:
+    # there the agent legitimately `pip install --user`s a package and then
+    # runs a script that imports it — inheriting the knob would break that
+    # with no visible cause. Dropping an env var here protects nothing anyway
+    # (the child could always re-set its own env); the import-path boundary
+    # being defended is the harness process, whose env this never touches.
+    out.pop("PYTHONNOUSERSITE", None)
     return out
 
 
