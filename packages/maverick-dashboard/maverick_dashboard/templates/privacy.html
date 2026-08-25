@@ -567,15 +567,19 @@
               {% if r.status != 'closed' %}
                 <button class="btn pw-dsar-act" data-id="{{ r.id }}" data-act="close" type="button">Close</button>
               {% endif %}
+              <button class="btn" data-pe-worksheet="{{ r.id }}" type="button">Estate worksheet</button>
             </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
       </div>
+      <div id="pe-worksheet-result"></div>
       <p class="muted" style="font-size:var(--text-xs);">Access and portability run the real
         subject-data export. Erasure is never destructive from here — it prepares a structured
-        handoff for an authenticated operator workflow and intentionally renders no shell command.</p>
+        handoff for an authenticated operator workflow and intentionally renders no shell command.
+        The estate worksheet is the search plan beyond the platform: identifying data-map
+        assets, active processors, and connected-source documents.</p>
       {% else %}
         <p class="muted">No subject requests tracked. Open one above — the statutory 30-day
           clock and the fulfillment machinery (real exports, deliberate erasure) are wired in.</p>
@@ -743,6 +747,52 @@
           <span class="muted" id="pe-vendor-import-msg" role="status" aria-live="polite" style="font-size:var(--text-sm);"></span>
         </div>
       </div>
+      {% if estate.vendors %}
+      <div class="pw-form">
+        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-2);">
+          <strong>Contracts &amp; renewals.</strong> Record each vendor's
+          current paper with its renewal date — the needs-attention digest
+          then warns before anything lapses.
+          {% if estate.renewals.overdue %}<span class="badge blocked">{{ estate.renewals.overdue | length }} past renewal</span>{% endif %}
+          {% if estate.renewals.due_soon %}<span class="badge warn">{{ estate.renewals.due_soon | length }} renewing within 30 days</span>{% endif %}
+        </p>
+        {% if estate.renewals.overdue or estate.renewals.due_soon %}
+        <ul class="muted" style="font-size:var(--text-sm);margin:0 0 var(--sp-2) 1.2em;">
+          {% for entry in estate.renewals.overdue %}
+          <li>OVERDUE — {{ entry.vendor }} ({{ entry.kind | upper }})</li>
+          {% endfor %}
+          {% for entry in estate.renewals.due_soon %}
+          <li>due soon — {{ entry.vendor }} ({{ entry.kind | upper }})</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="pw-form-row">
+          <label><span>Vendor</span>
+            <select class="ctl" id="pe-contract-vendor">
+              {% for v in estate.vendors %}
+              <option value="{{ v.id }}" data-revision="{{ v.revision }}">{{ v.name }}</option>
+              {% endfor %}
+            </select></label>
+          <label><span>Contract</span>
+            <select class="ctl" id="pe-contract-kind">
+              <option value="dpa">DPA</option>
+              <option value="msa">MSA</option>
+              <option value="sla">SLA</option>
+              <option value="addendum">Addendum</option>
+              <option value="other">Other</option>
+            </select></label>
+          <label><span>Where the signed paper lives</span>
+            <input class="ctl" id="pe-contract-ref" maxlength="512"
+                   placeholder="doc://contracts/acme-dpa-2026.pdf"></label>
+          <label><span>Renews on</span>
+            <input class="ctl" id="pe-contract-date" type="date"></label>
+        </div>
+        <div class="pw-form-actions">
+          <button class="btn" id="pe-contract-record" type="button">Record contract</button>
+          <span class="muted" id="pe-contract-msg" role="status" aria-live="polite" style="font-size:var(--text-sm);"></span>
+        </div>
+      </div>
+      {% endif %}
       {% else %}
       <p class="muted">The vendor register is off. Enable it with
         <code>[vendor_management] enable = true</code> or re-run the installer
@@ -823,6 +873,51 @@
           <button class="btn" id="pe-consent-import" type="button">Import consents</button>
           <span class="muted" id="pe-consent-import-msg" role="status" aria-live="polite" style="font-size:var(--text-sm);"></span>
         </div>
+      </div>
+      <div class="pw-form">
+        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-2);">
+          <strong>Privacy notices.</strong> Publish each notice version the
+          receipts bind to — versions are immutable, so a receipt always
+          resolves to the exact wording the person was shown.
+          {% if estate.notice_coverage and not estate.notice_coverage.covered %}
+          <span class="badge blocked">uncovered versions: {{ estate.notice_coverage.uncovered_versions | join(', ') }}</span>
+          {% elif estate.notice_coverage %}
+          <span class="badge ok">all receipt versions covered</span>
+          {% endif %}
+        </p>
+        {% if estate.notices %}
+        <ul class="muted" style="font-size:var(--text-sm);margin:0 0 var(--sp-2) 1.2em;">
+          {% for notice in estate.notices %}
+          <li>{{ notice.version }} — sha {{ notice.text_sha256[:16] }}…</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="pw-form-row">
+          <label><span>Version label</span>
+            <input class="ctl" id="pe-notice-version" maxlength="64"
+                   placeholder="2026-02"></label>
+        </div>
+        <label><span>Notice text</span>
+          <textarea class="ctl" id="pe-notice-text" rows="4"
+                    placeholder="We process your personal data to ..."></textarea></label>
+        <div class="pw-form-actions">
+          <button class="btn" id="pe-notice-publish" type="button">Publish notice version</button>
+          <span class="muted" id="pe-notice-msg" role="status" aria-live="polite" style="font-size:var(--text-sm);"></span>
+        </div>
+      </div>
+      <div class="pw-form">
+        <p class="muted" style="font-size:var(--text-sm);margin-bottom:var(--sp-2);">
+          <strong>Site scan.</strong> One bounded fetch of your own page:
+          cookies set, third-party hosts loaded, and well-known trackers —
+          feeds the purpose inventory. Not a crawler, never a CMP.
+        </p>
+        <div class="pw-form-actions">
+          <input class="ctl" id="pe-scan-url" maxlength="2048" style="flex:1;min-width:16rem;"
+                 placeholder="https://www.example.com/" aria-label="Your site's https URL">
+          <button class="btn" id="pe-scan-go" type="button">Scan page</button>
+          <span class="muted" id="pe-scan-msg" role="status" aria-live="polite" style="font-size:var(--text-sm);"></span>
+        </div>
+        <div id="pe-scan-result"></div>
       </div>
       {% else %}
       <p class="muted">The consent registry is off. Enable it with
@@ -1027,6 +1122,111 @@
             });
         });
       }
+      var contractBtn = document.getElementById('pe-contract-record');
+      if (contractBtn) {
+        contractBtn.addEventListener('click', function () {
+          var msg = document.getElementById('pe-contract-msg');
+          var vendorSel = document.getElementById('pe-contract-vendor');
+          var ref = (document.getElementById('pe-contract-ref').value || '').trim();
+          var when = document.getElementById('pe-contract-date').value;
+          if (!ref || !when) { msg.textContent = 'Reference and renewal date are both needed.'; return; }
+          var option = vendorSel.selectedOptions[0];
+          contractBtn.disabled = true; msg.textContent = 'Recording…';
+          post('/api/v1/vendors/' + vendorSel.value + '/contracts', {
+            kind: document.getElementById('pe-contract-kind').value,
+            reference: ref,
+            renews_at: Math.floor(new Date(when + 'T00:00:00Z').getTime() / 1000),
+            revision: parseInt(option ? option.dataset.revision : '0', 10)
+          }).then(function () { location.reload(); })
+            .catch(function (e) {
+              contractBtn.disabled = false;
+              msg.textContent = String(e.message || e);
+            });
+        });
+      }
+
+      var noticeBtn = document.getElementById('pe-notice-publish');
+      if (noticeBtn) {
+        noticeBtn.addEventListener('click', function () {
+          var msg = document.getElementById('pe-notice-msg');
+          var version = (document.getElementById('pe-notice-version').value || '').trim();
+          var text = (document.getElementById('pe-notice-text').value || '').trim();
+          if (!version || !text) { msg.textContent = 'Version and text are both needed.'; return; }
+          noticeBtn.disabled = true; msg.textContent = 'Publishing…';
+          post('/api/v1/consent/notices', { version: version, text: text })
+            .then(function () { location.reload(); })
+            .catch(function (e) {
+              noticeBtn.disabled = false;
+              msg.textContent = String(e.message || e);
+            });
+        });
+      }
+
+      var scanBtn = document.getElementById('pe-scan-go');
+      if (scanBtn) {
+        scanBtn.addEventListener('click', function () {
+          var msg = document.getElementById('pe-scan-msg');
+          var box = document.getElementById('pe-scan-result');
+          var url = (document.getElementById('pe-scan-url').value || '').trim();
+          if (!url) { msg.textContent = 'Enter your site’s https URL first.'; return; }
+          scanBtn.disabled = true; msg.textContent = 'Scanning…'; box.textContent = '';
+          post('/api/v1/consent/site-scan', { url: url })
+            .then(function (d) {
+              scanBtn.disabled = false; msg.textContent = '';
+              box.textContent =
+                d.cookies.length + ' cookie(s) · ' +
+                d.third_party_hosts.length + ' third-party host(s)' +
+                (d.known_trackers.length
+                  ? ' · trackers: ' + d.known_trackers.join(', ')
+                  : ' · no known trackers');
+            })
+            .catch(function (e) {
+              scanBtn.disabled = false;
+              msg.textContent = String(e.message || e);
+            });
+        });
+      }
+
+      document.querySelectorAll('[data-pe-worksheet]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var box = document.getElementById('pe-worksheet-result');
+          box.textContent = 'Building the worksheet…';
+          fetch('/api/v1/privacy/dsar/' + btn.dataset.peWorksheet + '/estate-worksheet')
+            .then(function (r) {
+              if (!r.ok) { throw new Error('HTTP ' + r.status); }
+              return r.json();
+            })
+            .then(function (d) {
+              var parts = [];
+              var holdings = d.platform_holdings || {};
+              if (holdings.sections) {
+                var total = 0;
+                Object.keys(holdings.sections).forEach(function (k) { total += holdings.sections[k]; });
+                parts.push('Platform holdings: ' + total + ' record(s) across ' +
+                           Object.keys(holdings.sections).length + ' section(s).');
+              }
+              var dmap = d.data_map || {};
+              if (dmap.enabled && dmap.assets) {
+                parts.push('Data-map assets to search: ' + (dmap.assets.map(function (a) {
+                  return a.system + '/' + a.name + ' [' + a.categories.join(', ') + ']';
+                }).join(' · ') || 'none flagged'));
+              } else { parts.push('Data map: off.'); }
+              var proc = d.processors || {};
+              if (proc.enabled && proc.vendors) {
+                parts.push('Processors to contact: ' + (proc.vendors.map(function (v) {
+                  return v.name;
+                }).join(', ') || 'none active'));
+              } else { parts.push('Vendor register: off.'); }
+              var docs = d.documents || {};
+              parts.push(docs.hits && docs.hits.length
+                ? 'Document hits: ' + docs.hits.length
+                : 'Document search: no hits (or no sources connected).');
+              box.textContent = d.request_id + ' — ' + parts.join(' ');
+            })
+            .catch(function (e) { box.textContent = String(e.message || e); });
+        });
+      });
+
       var dmSync = document.getElementById('pe-dm-sharepoint');
       if (dmSync) {
         dmSync.addEventListener('click', function () {

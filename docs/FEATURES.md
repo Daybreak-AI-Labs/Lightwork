@@ -979,6 +979,51 @@ here.
   `GET /assurance/model-risk/dependency-graph`) — nodes and dependency
   edges over the governed inventory, whole-estate or scoped to one asset's
   direct neighbourhood.
+- **California ADMT & risk-assessment readiness template** (in
+  `assessment.py`) — the finalized CPPA CCPA regulations (OAL-approved
+  2025-09-23): the ADMT significant-decision inventory, the enumerated
+  pre-use notice, the opt-out and its two exceptions, plain-language
+  access responses, the five risk-assessment triggers (including
+  TRAINING ADMT/biometric technologies, required since 2026-01-01), the
+  April 1 CPPA submission calendar, and the staggered cybersecurity-audit
+  certifications. Regulation text verified before drafting.
+- **Governance workspace panels for the per-model registers** — the GPAI
+  (Art. 53/55) and deployer (Art. 26) registers now have real screens on
+  `/security/governance`: open a register, record evidence per duty, and
+  assign named human oversight (the page renders UNASSIGNED in red until
+  people are named). The `/privacy` workspace gains contracts & renewals
+  (with overdue/due-soon badges), privacy-notice publishing with the
+  coverage badge, the one-click site scan, and an Estate worksheet
+  button on every DSAR row.
+- **OSCAL assessment-results export** (`assessment_exports.py`,
+  `maverick exports oscal`) — any saved assessment as an OSCAL 1.1.2
+  ``assessment-results`` JSON document: one observation per answered
+  question, findings with honest satisfied/not-satisfied targets, and a
+  deterministic rendering for an unchanged record. A minimal,
+  self-assessment OSCAL profile — stated, and never a certification.
+- **Statement of Applicability generator** (`maverick exports soa`) —
+  control-style assessments (ISO 42001/27001, SOC 2, ...) render as the
+  SoA a certification audit starts from: per-control applicability
+  (``na`` answers become justified exclusions), implementation status,
+  and the assessor's notes, as markdown or JSON.
+- **CycloneDX ML-BOM export** (`ai_bom.py`, `maverick exports ai-bom`) —
+  the governed inventory as a CycloneDX 1.6 bill of materials: model
+  components typed ``machine-learning-model`` with full SHA-256 version
+  digests, datasets typed ``data``, dependency edges resolved back to
+  governed asset ids, and a deterministic serial number for an unchanged
+  estate.
+- **Gateway prompt screening** (`[llm_gateway] screen_prompts`) — the
+  in-kernel deny-wins detector ensemble (injection, exfiltration, PII)
+  now screens chat-completion messages before they leave: a firing
+  detector blocks with named reason codes and ledgers as
+  ``screened_blocked``; the screen itself fails open if it errors, and
+  never stores content.
+- **OpenTelemetry GenAI ingestion** (`POST /gateway/v1/otel`) — point
+  any OTel collector at the gateway (same bearer): spans carrying the
+  GenAI semantic conventions (``gen_ai.system``, ``gen_ai.request.model``,
+  token usage) aggregate into the shadow-caller ledger per service and
+  model. Any agent framework's standard traces become governed telemetry
+  without an SDK; prompts and completions are never read.
 - **Art. 26 deployer-obligations register** (in `eu_conformity`,
   `maverick eu-conformity deployer`, `/governance/deployer`) — the EU AI
   Act's deployer side made trackable: the always-applicable duties

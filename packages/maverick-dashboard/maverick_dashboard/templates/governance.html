@@ -327,6 +327,141 @@
   {% endif %}
 </section>
 
+<section class="panel">
+  <h2>General-purpose AI obligations (Art. 53 / Art. 55)</h2>
+  {% if not eu_conformity_enabled %}
+  <p class="gov-alert">Enable EU conformity workflows to track GPAI provider
+    obligations. Ask an administrator to switch on <code>[eu_conformity]</code>.</p>
+  {% else %}
+  <form id="gpai-open" class="gov-form">
+    <label>Which general-purpose model?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
+      <span class="gov-help">Pick from the governed asset inventory.</span>
+    </label>
+    <label><input type="checkbox" name="systemic_risk"> Systemic risk (adds the Art. 55(1) duties)</label>
+    <label><input type="checkbox" name="open_source_exempt"> Free and open-source (Art. 53(2) — never with systemic risk)</label>
+    <div class="gov-form__wide"><button type="submit">Open the register</button>
+      <span id="gpai-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  {% if gpai_registers %}
+  <div class="gov-table"><table>
+    <caption>GPAI registers: how many Art. 53/55 duties carry evidence</caption>
+    <thead><tr><th>Model</th><th>Systemic</th><th>Evidenced</th><th>Missing</th></tr></thead>
+    <tbody>
+    {% for row in gpai_registers %}<tr>
+      <td>{{ row.asset_id }}</td>
+      <td>{{ 'yes' if row.systemic_risk else 'no' }}</td>
+      <td><span class="gov-chip {% if row.complete %}gov-chip--good{% else %}gov-chip--warn{% endif %}">{{ row.asserted }}/{{ row.total }}</span></td>
+      <td>{{ row.missing | join(', ') or '—' }}</td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+  <form id="gpai-assert" class="gov-form">
+    <label>Register
+      <select name="record_id" required>
+        {% for row in gpai_registers %}
+        <option value="{{ row.id }}" data-revision="{{ row.revision }}">{{ row.asset_id }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Obligation
+      <select name="obligation" required>
+        {% for key, pair in gpai_obligations.items() %}
+        <option value="{{ key }}">{{ key }} ({{ pair[0] }})</option>
+        {% endfor %}
+        {% for key, pair in gpai_systemic_obligations.items() %}
+        <option value="{{ key }}">{{ key }} ({{ pair[0] }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Where the evidence lives
+      <input name="reference" required maxlength="512" placeholder="doc://model-card#training">
+    </label>
+    <div class="gov-form__wide"><button type="submit">Record the evidence</button>
+      <span id="gpai-assert-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  {% else %}<p class="gov-empty">No GPAI registers yet — open one above for each
+    general-purpose model you provide.</p>{% endif %}
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Deployer duties (Art. 26)</h2>
+  {% if not eu_conformity_enabled %}
+  <p class="gov-alert">Enable EU conformity workflows to track the Art. 26
+    deployer duties. Ask an administrator to switch on <code>[eu_conformity]</code>.</p>
+  {% else %}
+  <form id="deployer-open" class="gov-form">
+    <label>Which high-risk system do you deploy?
+      <input name="asset_id" required pattern="MAA-[0-9a-f]{32}" placeholder="MAA-…" list="governed-assets">
+      <span class="gov-help">The conditional duties join the register only when
+        checked here.</span>
+    </label>
+    <label><input type="checkbox" name="workplace_use"> Used at the workplace (Art. 26(7))</label>
+    <label><input type="checkbox" name="public_authority"> We are a public authority (Art. 26(8))</label>
+    <label><input type="checkbox" name="controls_input_data"> We control the input data (Art. 26(4))</label>
+    <label><input type="checkbox" name="requires_dpia"> A GDPR Art. 35 DPIA applies (Art. 26(9))</label>
+    <div class="gov-form__wide"><button type="submit">Open the register</button>
+      <span id="deployer-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  {% if deployer_registers %}
+  <div class="gov-table"><table>
+    <caption>Deployer registers: duty progress and the named oversight persons</caption>
+    <thead><tr><th>System</th><th>Evidenced</th><th>Human oversight (Art. 26(2))</th><th>Missing</th></tr></thead>
+    <tbody>
+    {% for row in deployer_registers %}<tr>
+      <td>{{ row.asset_id }}</td>
+      <td><span class="gov-chip {% if row.complete %}gov-chip--good{% else %}gov-chip--warn{% endif %}">{{ row.asserted }}/{{ row.total }}</span></td>
+      <td>{% if row.oversight_persons %}{{ row.oversight_persons | join(', ') }}{% else %}<span class="gov-chip gov-chip--bad">UNASSIGNED</span>{% endif %}</td>
+      <td>{{ row.missing | join(', ') or '—' }}</td>
+    </tr>{% endfor %}
+    </tbody></table></div>
+  <form id="deployer-oversight" class="gov-form">
+    <label>Register
+      <select name="record_id" required>
+        {% for row in deployer_registers %}
+        <option value="{{ row.id }}" data-revision="{{ row.revision }}">{{ row.asset_id }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Named natural persons (comma-separated)
+      <input name="persons" required maxlength="1000" placeholder="Ada Lovelace, Grace Hopper">
+      <span class="gov-help">Art. 26(2) needs people, not a document reference.</span>
+    </label>
+    <label>Where their competence and authority are evidenced
+      <input name="reference" required maxlength="512" placeholder="doc://oversight-roster">
+    </label>
+    <div class="gov-form__wide"><button type="submit">Assign oversight</button>
+      <span id="deployer-oversight-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  <form id="deployer-assert" class="gov-form">
+    <label>Register
+      <select name="record_id" required>
+        {% for row in deployer_registers %}
+        <option value="{{ row.id }}" data-revision="{{ row.revision }}">{{ row.asset_id }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Duty
+      <select name="obligation" required>
+        {% for key, pair in deployer_obligations.items() %}
+        <option value="{{ key }}">{{ key }} ({{ pair[0] }})</option>
+        {% endfor %}
+        {% for key, triple in deployer_conditional_obligations.items() %}
+        <option value="{{ key }}">{{ key }} ({{ triple[0] }}, conditional)</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Where the evidence lives
+      <input name="reference" required maxlength="512" placeholder="runbook://log-retention-183d">
+    </label>
+    <div class="gov-form__wide"><button type="submit">Record the evidence</button>
+      <span id="deployer-assert-status" class="gov-muted" aria-live="polite"></span></div>
+  </form>
+  {% else %}<p class="gov-empty">No deployer registers yet — open one above for
+    each high-risk system you deploy.</p>{% endif %}
+  {% endif %}
+</section>
+
 <div class="gov-grid">
 <section class="panel">
   <h2>AI literacy (Art. 4)</h2>
@@ -976,6 +1111,82 @@
         window.location.reload();
       } catch (error) { status("incident-status", error instanceof Error ? error.message : "Withdrawal failed."); }
     }));
+
+  // ---- GPAI (Art. 53/55) and deployer (Art. 26) registers ----------------
+  const revisionOf = select =>
+    Number(select.selectedOptions[0] ? select.selectedOptions[0].dataset.revision : 0);
+  const gpaiOpen = document.getElementById("gpai-open");
+  if (gpaiOpen) gpaiOpen.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(gpaiOpen);
+    try {
+      status("gpai-status", "Opening the register…");
+      await post(prefix, "/gpai", {
+        asset_id: String(fields.get("asset_id")),
+        systemic_risk: fields.get("systemic_risk") !== null,
+        open_source_exempt: fields.get("open_source_exempt") !== null,
+      });
+      window.location.reload();
+    } catch (error) { status("gpai-status", error instanceof Error ? error.message : "Could not open."); }
+  });
+  const gpaiAssert = document.getElementById("gpai-assert");
+  if (gpaiAssert) gpaiAssert.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(gpaiAssert);
+    const select = gpaiAssert.querySelector("select[name=record_id]");
+    try {
+      status("gpai-assert-status", "Recording…");
+      await post(prefix, "/gpai/" + encodeURIComponent(String(fields.get("record_id"))) + "/obligations", {
+        obligation: String(fields.get("obligation")),
+        reference: String(fields.get("reference")),
+        expected_revision: revisionOf(select),
+      });
+      window.location.reload();
+    } catch (error) { status("gpai-assert-status", error instanceof Error ? error.message : "Could not record."); }
+  });
+  const deployerOpen = document.getElementById("deployer-open");
+  if (deployerOpen) deployerOpen.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(deployerOpen);
+    try {
+      status("deployer-status", "Opening the register…");
+      await post(prefix, "/deployer", {
+        asset_id: String(fields.get("asset_id")),
+        workplace_use: fields.get("workplace_use") !== null,
+        public_authority: fields.get("public_authority") !== null,
+        controls_input_data: fields.get("controls_input_data") !== null,
+        requires_dpia: fields.get("requires_dpia") !== null,
+      });
+      window.location.reload();
+    } catch (error) { status("deployer-status", error instanceof Error ? error.message : "Could not open."); }
+  });
+  const deployerOversight = document.getElementById("deployer-oversight");
+  if (deployerOversight) deployerOversight.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(deployerOversight);
+    const select = deployerOversight.querySelector("select[name=record_id]");
+    const persons = String(fields.get("persons") || "").split(",")
+      .map(part => part.trim()).filter(Boolean);
+    try {
+      status("deployer-oversight-status", "Assigning…");
+      await post(prefix, "/deployer/" + encodeURIComponent(String(fields.get("record_id"))) + "/oversight", {
+        persons,
+        reference: String(fields.get("reference")),
+        expected_revision: revisionOf(select),
+      });
+      window.location.reload();
+    } catch (error) { status("deployer-oversight-status", error instanceof Error ? error.message : "Could not assign."); }
+  });
+  const deployerAssert = document.getElementById("deployer-assert");
+  if (deployerAssert) deployerAssert.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(deployerAssert);
+    const select = deployerAssert.querySelector("select[name=record_id]");
+    try {
+      status("deployer-assert-status", "Recording…");
+      await post(prefix, "/deployer/" + encodeURIComponent(String(fields.get("record_id"))) + "/obligations", {
+        obligation: String(fields.get("obligation")),
+        reference: String(fields.get("reference")),
+        expected_revision: revisionOf(select),
+      });
+      window.location.reload();
+    } catch (error) { status("deployer-assert-status", error instanceof Error ? error.message : "Could not record."); }
+  });
 })();
 </script>
 {% endblock %}

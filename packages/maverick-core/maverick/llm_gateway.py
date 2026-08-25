@@ -63,6 +63,7 @@ def get_llm_gateway_config() -> dict[str, Any]:
         "gateway_token_env",
         "allowed_models",
         "max_body_bytes",
+        "screen_prompts",
     }
     unknown = set(section) - known
     if unknown:
@@ -97,6 +98,9 @@ def get_llm_gateway_config() -> dict[str, Any]:
         raise LLMGatewayConfigError(
             f"llm_gateway.max_body_bytes must be between 4096 and {_ABS_MAX_BODY}"
         )
+    screen = section.get("screen_prompts", False)
+    if not isinstance(screen, bool):
+        raise LLMGatewayConfigError("llm_gateway.screen_prompts must be a boolean")
     return {
         "enable": flag,
         "upstream_url": upstream,
@@ -104,6 +108,7 @@ def get_llm_gateway_config() -> dict[str, Any]:
         "gateway_token_env": gateway_token_env,
         "allowed_models": [model.strip() for model in models],
         "max_body_bytes": max_body,
+        "screen_prompts": screen,
     }
 
 
@@ -216,6 +221,140 @@ def _record_call(
     log.warning("llm_gateway: caller ledger update lost a CAS race repeatedly")
 
 
+_SCREEN_MAX_CHARS = 200_000
+
+
+def _screen_messages(body: Mapping[str, Any]):
+    """Deny-wins content screen over the request's message texts.
+
+    Uses the in-kernel deterministic detector ensemble (injection, exfil,
+    PII) — never the optional agent-shield SDK, so the gateway works
+    without it (kernel rule: fail open on absence, but a FIRING detector
+    still blocks). Returns the verdict, or None when there is no text.
+    """
+
+    from .shield_ensemble import ShieldEnsemble
+
+    parts: list[str] = []
+    total = 0
+    for message in body.get("messages") or []:
+        if not isinstance(message, Mapping):
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            chunks = [content]
+        elif isinstance(content, list):
+            chunks = [
+                str(part.get("text") or "")
+                for part in content
+                if isinstance(part, Mapping) and part.get("type") == "text"
+            ]
+        else:
+            continue
+        for chunk in chunks:
+            if not chunk:
+                continue
+            take = chunk[: max(0, _SCREEN_MAX_CHARS - total)]
+            parts.append(take)
+            total += len(take)
+            if total >= _SCREEN_MAX_CHARS:
+                break
+        if total >= _SCREEN_MAX_CHARS:
+            break
+    if not parts:
+        return None
+    try:
+        return ShieldEnsemble().evaluate("\n".join(parts))
+    except Exception:  # pragma: no cover -- screen must never break the path
+        log.warning("llm_gateway: content screen errored; failing open")
+        return None
+
+
+def _otel_attr(attributes: list, key: str) -> str:
+    for attribute in attributes or []:
+        if not isinstance(attribute, Mapping):
+            continue
+        if str(attribute.get("key") or "") != key:
+            continue
+        value = attribute.get("value")
+        if isinstance(value, Mapping):
+            for kind in ("stringValue", "intValue", "doubleValue", "boolValue"):
+                if kind in value:
+                    return str(value[kind])
+    return ""
+
+
+def ingest_otel_spans(payload: object) -> dict[str, int]:
+    """Ingest OTLP/JSON GenAI spans into the shadow-caller ledger.
+
+    Reads the OpenTelemetry GenAI semantic conventions — ``gen_ai.system``,
+    ``gen_ai.request.model``, ``gen_ai.usage.input_tokens`` /
+    ``output_tokens`` — from ``resourceSpans[].scopeSpans[].spans[]`` and
+    aggregates one ledger row per (service, model). Span bodies, prompts,
+    and completions are never read or stored; only the model identity and
+    token counts. Any agent framework exporting standard OTel traces
+    becomes governed telemetry without an SDK.
+    """
+
+    settings = get_llm_gateway_config()
+    if settings["enable"] is not True:
+        raise LLMGatewayConfigError(
+            "the LLM gateway requires [llm_gateway] enable = true"
+        )
+    if not isinstance(payload, Mapping):
+        raise ValueError("the OTLP payload must be a JSON object")
+    now = time.time()
+    ingested = 0
+    skipped = 0
+    for resource_spans in list(payload.get("resourceSpans") or [])[:100]:
+        if not isinstance(resource_spans, Mapping):
+            skipped += 1
+            continue
+        resource = resource_spans.get("resource") or {}
+        service = _otel_attr(
+            resource.get("attributes") if isinstance(resource, Mapping) else [],
+            "service.name",
+        ) or "unknown-service"
+        for scope_spans in list(resource_spans.get("scopeSpans") or [])[:100]:
+            if not isinstance(scope_spans, Mapping):
+                continue
+            for span in list(scope_spans.get("spans") or [])[:1000]:
+                if not isinstance(span, Mapping):
+                    skipped += 1
+                    continue
+                attributes = span.get("attributes") or []
+                system = _otel_attr(attributes, "gen_ai.system")
+                model = (
+                    _otel_attr(attributes, "gen_ai.request.model")
+                    or _otel_attr(attributes, "gen_ai.response.model")
+                )
+                if not system and not model:
+                    skipped += 1
+                    continue
+                usage = {
+                    "prompt_tokens": int(
+                        float(_otel_attr(attributes, "gen_ai.usage.input_tokens")
+                              or 0)
+                    ),
+                    "completion_tokens": int(
+                        float(_otel_attr(attributes, "gen_ai.usage.output_tokens")
+                              or 0)
+                    ),
+                }
+                _record_call(
+                    caller=hashlib.sha256(
+                        f"otel-service:{service}".encode()
+                    ).hexdigest()[:24],
+                    model=model or f"{system}:unknown",
+                    status="otel",
+                    prompt_sha256="",
+                    usage=usage,
+                    now=now,
+                )
+                ingested += 1
+    return {"ingested": ingested, "skipped": skipped}
+
+
 def handle_chat_completion(
     body: object,
     *,
@@ -290,6 +429,26 @@ def handle_chat_completion(
                 "type": "invalid_request_error",
             }
         }
+    if settings["screen_prompts"]:
+        verdict = _screen_messages(body)
+        if verdict is not None and not verdict.allowed:
+            _record_call(
+                caller=caller, model=model, status="screened_blocked",
+                prompt_sha256=prompt_sha, usage=None, now=current,
+            )
+            return 403, {
+                "error": {
+                    "message": (
+                        "The gateway's content screen blocked this request "
+                        f"(severity {verdict.severity}; detectors: "
+                        + ", ".join(
+                            code["detector"] for code in verdict.reason_codes
+                        )
+                        + "). Contact your platform operator."
+                    ),
+                    "type": "invalid_request_error",
+                }
+            }
     upstream_token = os.environ.get(settings["upstream_token_env"], "")
     if not upstream_token:
         return 503, {
@@ -393,5 +552,6 @@ __all__ = [
     "gateway_status",
     "get_llm_gateway_config",
     "handle_chat_completion",
+    "ingest_otel_spans",
     "list_callers",
 ]

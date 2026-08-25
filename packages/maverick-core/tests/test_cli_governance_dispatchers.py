@@ -499,3 +499,58 @@ def test_fairness_cli_computes_and_fails_on_disparity(
     assert result.exit_code == 0, result.output
     assert "PASS" in result.output
     config.reset_config_cache()
+
+
+def test_exports_cli_oscal_soa_and_ai_bom(runner, tmp_path, monkeypatch):
+    import hashlib
+    import time as time_module
+
+    config = _estate_config(
+        tmp_path, monkeypatch,
+        "[evidence_graph]\nenable = true\n\n"
+        "[model_risk_assurance]\nenable = true\ngate_promotions = false\n",
+    )
+    from maverick import model_risk_assurance as mra
+    from maverick.assessment import AssessmentSession, save_session
+
+    session = AssessmentSession()
+    session.restart("iso42001", "ai-platform")
+    for question in session.template().questions:
+        risky = str(question.risk_answer).strip().lower()
+        session.record(question.id, "no" if risky == "yes" else "yes")
+    save_session(session)
+
+    oscal_path = tmp_path / "results.oscal.json"
+    result = runner.invoke(main, [
+        "exports", "oscal", "--assessment", session.id,
+        "--out", str(oscal_path),
+    ])
+    assert result.exit_code == 0, result.output
+    assert "observations 22" in result.output
+    assert json.loads(oscal_path.read_text(encoding="utf-8"))[
+        "assessment-results"]["metadata"]["oscal-version"] == "1.1.2"
+
+    soa_path = tmp_path / "soa.md"
+    result = runner.invoke(main, [
+        "exports", "soa", "--assessment", session.id, "--out", str(soa_path),
+    ])
+    assert result.exit_code == 0, result.output
+    assert "implemented 22" in result.output
+    assert "Statement of Applicability" in soa_path.read_text(encoding="utf-8")
+
+    officer = mra.ModelRiskAssuranceOfficer()
+    officer.observe_asset(
+        asset_type="model", source="cli_test", source_id="m",
+        display_name="M", version_digest=hashlib.sha256(b"m").hexdigest(),
+        actor="op", observed_at=time_module.time(),
+        metadata={}, dependencies=[],
+    )
+    bom_path = tmp_path / "ai-bom.json"
+    result = runner.invoke(main, [
+        "exports", "ai-bom", "--out", str(bom_path),
+    ])
+    assert result.exit_code == 0, result.output
+    assert "components 1" in result.output
+    assert json.loads(bom_path.read_text(encoding="utf-8"))[
+        "specVersion"] == "1.6"
+    config.reset_config_cache()

@@ -180,6 +180,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "gateway_token_env",
         "allowed_models",
         "max_body_bytes",
+        "screen_prompts",
     },
     "ai_regulatory_feed": {"enable"},
     "vendor_management": {"enable"},

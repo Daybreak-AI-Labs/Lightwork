@@ -313,3 +313,27 @@ def test_dsar_estate_worksheet_over_the_api():
     assert client.get(
         "/api/v1/privacy/dsar/DSAR-none/estate-worksheet"
     ).status_code == 404
+
+
+def test_privacy_page_renders_contracts_notices_and_scan():
+    import time as time_module
+
+    vendor = client.post("/api/v1/vendors", json={
+        "name": "Vandelay", "category": "import-export",
+        "criticality": "low", "owner": "ops"}).json()
+    client.post(
+        f"/api/v1/vendors/{vendor['id']}/contracts",
+        json={"kind": "dpa", "reference": "doc://dpa",
+              "renews_at": time_module.time() + 3 * 86400,
+              "revision": vendor["revision"]})
+    client.post("/api/v1/consent/notices", json={
+        "version": "2026-01", "text": "We process personal data to ..."})
+
+    page = client.get("/privacy")
+    assert page.status_code == 200
+    assert "Contracts &amp; renewals" in page.text
+    assert "renewing within 30 days" in page.text
+    assert "Privacy notices" in page.text
+    assert "2026-01" in page.text
+    assert "Site scan" in page.text
+    assert 'id="pe-scan-go"' in page.text

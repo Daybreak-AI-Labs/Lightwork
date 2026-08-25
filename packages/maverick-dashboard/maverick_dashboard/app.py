@@ -709,6 +709,7 @@ _AUTH_EXEMPT = {
     # agents that hold the gateway credential, never the dashboard bearer.
     # Self-gates on [llm_gateway] enable and 403s when off.
     "/gateway/v1/chat/completions",
+    "/gateway/v1/otel",
 }
 
 
@@ -2078,8 +2079,8 @@ async def spend_page(request: Request) -> HTMLResponse:
 # department page filters the same records/templates to its own types.
 PRIVACY_ASSESSMENT_TYPES = frozenset(
     {"pia", "dpia", "lia", "ccpa", "lgpd", "pipeda", "us_state_privacy",
-     "colorado_admt", "nyc_ll144", "texas_traiga", "illinois_hb3773",
-     "aira", "vendor_risk", "tia"})
+     "cppa_admt", "colorado_admt", "nyc_ll144", "texas_traiga",
+     "illinois_hb3773", "aira", "vendor_risk", "tia"})
 FINANCE_ASSESSMENT_TYPES = frozenset(
     {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"})
 SECURITY_ASSESSMENT_TYPES = frozenset({
@@ -2227,11 +2228,23 @@ async def privacy_page(request: Request) -> HTMLResponse:
         "consent_posture": {},
         "assets": [], "data_map_posture": {},
     }
+    estate["renewals"] = {"overdue": [], "due_soon": []}
+    estate["notices"] = []
+    estate["notice_coverage"] = {}
     if estate["vendors_enabled"]:
         estate["vendors"] = vendor_management.list_vendors()
         estate["vendor_posture"] = vendor_management.vendor_posture()
+        try:
+            estate["renewals"] = vendor_management.contract_renewals()
+        except Exception:
+            pass
     if estate["consent_enabled"]:
         estate["consent_posture"] = consent_registry.consent_posture()
+        try:
+            estate["notices"] = consent_registry.list_notices()[:20]
+            estate["notice_coverage"] = consent_registry.notice_coverage()
+        except Exception:
+            pass
     if estate["data_map_enabled"]:
         estate["assets"] = data_map.list_data_assets()
         estate["data_map_posture"] = data_map.data_map_posture()
@@ -3077,6 +3090,27 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
     )
     ai_incident_data = await _ai_incident_page_data(ai_incident_reporting)
 
+    # The two per-model registers: GPAI provider obligations and Art. 26
+    # deployer duties, as status rows the page can render and act on.
+    def _register_states() -> tuple[list, list]:
+        if not workspace["eu_conformity_enabled"]:
+            return [], []
+        try:
+            gpai = [
+                eu_conformity.gpai_status(str(row.get("id")))
+                for row in eu_conformity.list_gpai_registers()[:100]
+            ]
+            deployer = [
+                eu_conformity.deployer_status(str(row.get("id")))
+                for row in eu_conformity.list_deployer_registers()[:100]
+            ]
+            return gpai, deployer
+        except Exception:
+            return [], []
+
+    gpai_registers, deployer_registers = await run_in_threadpool(
+        _register_states)
+
     from maverick import governance_alerts
 
     try:
@@ -3128,6 +3162,13 @@ async def governance_workspace_page(request: Request) -> HTMLResponse:
             "registrations": workspace["registrations"],
             "registration_bases": eu_conformity.REGISTRATION_BASES,
             "ifu_items": eu_conformity.IFU_ITEMS,
+            "gpai_registers": gpai_registers,
+            "gpai_obligations": eu_conformity.GPAI_OBLIGATIONS,
+            "gpai_systemic_obligations": eu_conformity.GPAI_SYSTEMIC_OBLIGATIONS,
+            "deployer_registers": deployer_registers,
+            "deployer_obligations": eu_conformity.DEPLOYER_OBLIGATIONS,
+            "deployer_conditional_obligations":
+                eu_conformity.DEPLOYER_CONDITIONAL_OBLIGATIONS,
             "attention": attention,
             "governed_assets": governed_assets,
             "assurance_incidents": assurance_incidents,
@@ -7189,6 +7230,52 @@ async def llm_gateway_chat_completions(request: Request) -> JSONResponse:
         llm_gateway.handle_chat_completion, body, caller_token=token,
     )
     return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.post("/gateway/v1/otel")
+async def llm_gateway_otel(request: Request) -> JSONResponse:
+    """OTLP/JSON GenAI span ingestion into the shadow-caller ledger.
+
+    Point any OpenTelemetry collector's HTTP exporter here (same gateway
+    bearer as the chat endpoint): spans carrying the GenAI semantic
+    conventions become governed telemetry — model identity and token
+    counts only, never prompts or completions."""
+    from maverick import llm_gateway
+
+    if not llm_gateway.enabled():
+        return JSONResponse(
+            status_code=403,
+            content={"error": {"message": "The LLM gateway is disabled.",
+                               "type": "invalid_request_error"}},
+        )
+    authorization = request.headers.get("Authorization", "")
+    token = authorization.removeprefix("Bearer ").strip()
+    settings = llm_gateway.get_llm_gateway_config()
+    if not llm_gateway._authorized(token, settings):
+        return JSONResponse(
+            status_code=401,
+            content={"error": {"message": "The gateway bearer is missing or wrong.",
+                               "type": "invalid_request_error"}},
+        )
+    body = await _read_limited_webhook_body(request)
+    import json as _json
+    try:
+        payload = _json.loads(body or b"{}")
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": "The OTLP payload must be JSON.",
+                               "type": "invalid_request_error"}},
+        )
+    try:
+        result = await run_in_threadpool(llm_gateway.ingest_otel_spans, payload)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": str(exc),
+                               "type": "invalid_request_error"}},
+        )
+    return JSONResponse(status_code=200, content=result)
 
 
 @app.get("/livez")

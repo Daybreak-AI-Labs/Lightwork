@@ -98,3 +98,44 @@ def test_malformed_json_is_a_client_error(tmp_path):
         },
     )
     assert response.status_code == 400
+
+
+def test_otel_ingestion_endpoint(tmp_path):
+    _enable(tmp_path)
+    payload = {
+        "resourceSpans": [{
+            "resource": {"attributes": [
+                {"key": "service.name",
+                 "value": {"stringValue": "crew-planner"}},
+            ]},
+            "scopeSpans": [{"spans": [
+                {"name": "chat", "attributes": [
+                    {"key": "gen_ai.system",
+                     "value": {"stringValue": "openai"}},
+                    {"key": "gen_ai.request.model",
+                     "value": {"stringValue": "gpt-5.2"}},
+                ]},
+            ]}],
+        }]
+    }
+    unauthorized = client.post("/gateway/v1/otel", json=payload)
+    assert unauthorized.status_code == 401
+
+    accepted = client.post(
+        "/gateway/v1/otel", json=payload,
+        headers={"Authorization": "Bearer gw-secret"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json() == {"ingested": 1, "skipped": 0}
+
+    malformed = client.post(
+        "/gateway/v1/otel", content=b"not-json",
+        headers={"Authorization": "Bearer gw-secret",
+                 "Content-Type": "application/json"},
+    )
+    assert malformed.status_code == 400
+
+
+def test_otel_endpoint_off_is_403(tmp_path):
+    response = client.post("/gateway/v1/otel", json={})
+    assert response.status_code == 403

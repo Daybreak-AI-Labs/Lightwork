@@ -1128,3 +1128,23 @@ def test_deployer_register_through_the_api():
     fetched = _ok(client.get(f"{_PREFIX}/deployer/{record_id}"))
     assert fetched["status"]["flags"]["workplace_use"] is True
     assert client.get(f"{_PREFIX}/deployer/ECY-{'0' * 24}").status_code == 404
+
+
+def test_workspace_page_renders_the_gpai_and_deployer_panels():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("panel-model")[:32]
+    _ok(client.post(f"{_PREFIX}/gpai",
+                    json={"asset_id": asset_id, "systemic_risk": True}),
+        expected=201)
+    _ok(client.post(f"{_PREFIX}/deployer",
+                    json={"asset_id": asset_id, "workplace_use": True}),
+        expected=201)
+
+    page = client.get("/security/governance")
+    assert page.status_code == 200
+    assert "General-purpose AI obligations (Art. 53 / Art. 55)" in page.text
+    assert "Deployer duties (Art. 26)" in page.text
+    assert "UNASSIGNED" in page.text          # oversight not yet named
+    assert 'id="gpai-assert"' in page.text
+    assert 'id="deployer-oversight"' in page.text
+    assert asset_id in page.text

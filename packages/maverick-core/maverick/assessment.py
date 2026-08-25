@@ -2822,6 +2822,114 @@ _ISO42001_ENTRIES = (
      "across the AI supply chain", "medium"),
 )
 
+_CPPA_ADMT = AssessmentTemplate(
+    type="cppa_admt",
+    title="California ADMT & Risk Assessment Readiness",
+    framework="CPPA CCPA regulations (OAL-approved 2025-09-23)",
+    description="Readiness for California's finalized ADMT, risk-assessment, "
+    "and cybersecurity-audit regulations: risk assessments required since "
+    "2026-01-01 (CPPA submission by 2028-04-01), ADMT opt-out and notice "
+    "duties by 2027-01-01, audit certifications staggered from 2028. "
+    "Structured self-assessment, never legal advice.",
+    questions=(
+        _q(
+            "cppadmt_inventory",
+            "Scope",
+            "Is every ADMT used for significant decisions (financial or "
+            "lending services, housing, education, employment or "
+            "compensation, healthcare) inventoried for California "
+            "consumers?",
+            "no",
+            "high",
+            "The duties attach per technology; include vendor tools that "
+            "replace or substantially replace human judgment.",
+        ),
+        _q(
+            "cppadmt_pre_notice",
+            "ADMT notices",
+            "Does the pre-use notice cover the ADMT's purpose, the opt-out "
+            "and how to exercise it, the access right, how the ADMT works "
+            "and what data affects outputs, the alternative process, and "
+            "the anti-retaliation statement?",
+            "no",
+            "high",
+            "All elements are enumerated in the regulation; a generic "
+            "privacy-policy mention does not satisfy them.",
+        ),
+        _q(
+            "cppadmt_opt_out",
+            "ADMT rights",
+            "Can consumers opt out of ADMT for significant decisions — or "
+            "does the business properly fit an exception (human-review "
+            "appeal with overturn authority, or the narrow "
+            "hiring/admissions assessment exception with demonstrated "
+            "non-discrimination)?",
+            "no",
+            "high",
+            "Document which path each ADMT relies on; the exceptions have "
+            "conditions that must be evidenced.",
+        ),
+        _q(
+            "cppadmt_access",
+            "ADMT rights",
+            "On request, can the business explain in plain language the "
+            "ADMT's purpose, its logic and parameters, the decision "
+            "outcome, and how it will be used going forward?",
+            "no",
+            "medium",
+            "Wire the access response into the DSAR intake; the "
+            "explanation must be decision-specific.",
+        ),
+        _q(
+            "cppadmt_risk_assessments",
+            "Risk assessments",
+            "Are risk assessments performed for every triggering activity "
+            "— selling/sharing, sensitive personal information, ADMT "
+            "significant decisions, automated trait inference, and "
+            "TRAINING ADMT or facial-recognition/biometric technologies?",
+            "no",
+            "high",
+            "Required since 2026-01-01. The training trigger catches AI "
+            "development, not just deployment.",
+        ),
+        _q(
+            "cppadmt_assessment_content",
+            "Risk assessments",
+            "Does each assessment record purpose, data categories, "
+            "operational elements, benefits, consumer privacy impacts, "
+            "safeguards, the go/no-go decision, and who participated and "
+            "approved?",
+            "no",
+            "medium",
+            "The content list is prescriptive; retain for the processing "
+            "duration or five years.",
+        ),
+        _q(
+            "cppadmt_submission",
+            "Risk assessments",
+            "Is the annual CPPA submission (by April 1, first due "
+            "2028-04-01) calendared with an owner?",
+            "no",
+            "medium",
+            "Submission is to the agency, not just a file: assign the "
+            "April 1 obligation now.",
+        ),
+        _q(
+            "cppadmt_cyber_audit",
+            "Cybersecurity audits",
+            "If the thresholds apply (50%+ revenue from selling/sharing, "
+            "or $25M+ revenue with 250K+ consumers or 50K+ sensitive "
+            "records), is the independent annual audit scheduled against "
+            "the staggered certification deadlines (2028/2029/2030 by "
+            "revenue)?",
+            "no",
+            "medium",
+            "The auditor must be independent and sign a qualification "
+            "and independence certification.",
+        ),
+    ),
+)
+
 _ISO42001 = AssessmentTemplate(
     type="iso42001",
     title="ISO/IEC 42001 AIMS Readiness",
@@ -2843,6 +2951,7 @@ TEMPLATES: dict[str, AssessmentTemplate] = {
         _LGPD,
         _PIPEDA,
         _US_STATE_PRIVACY,
+        _CPPA_ADMT,
         _COLORADO_ADMT,
         _NYC_LL144,
         _TEXAS_TRAIGA,
@@ -3537,6 +3646,7 @@ def template_department(assessment_type: str) -> str:
     if assessment_type in {
         "soc2",
         "iso27001",
+        "iso42001",
         "nist_csf",
         "nist_800_53",
         "cis_v8",

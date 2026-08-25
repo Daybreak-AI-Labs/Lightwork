@@ -2517,3 +2517,94 @@ def explainability_fairness(data_file, threshold, asset_id, source_id,
         click.echo(f"evidence recorded: {evidence.get('result')}")
     if not report["passed"]:
         raise SystemExit(1)
+
+
+@main.group("exports")
+def exports_group() -> None:
+    """Machine-readable governance exports: OSCAL, the SoA, and the AI-BOM.
+
+    Faithful projections of governed records into the formats auditors and
+    supply-chain tooling read — nothing re-scored, nothing invented, and
+    never a certification.
+    """
+
+
+@exports_group.command("oscal")
+@click.option("--assessment", "assessment_id", required=True,
+              help="Saved assessment id.")
+@click.option("--out", "out_file", required=True, help="Output path (JSON).")
+def exports_oscal(assessment_id, out_file) -> None:
+    """Export one assessment as OSCAL assessment-results JSON."""
+    import json as json_module
+    from pathlib import Path
+
+    from .. import assessment_exports
+
+    try:
+        document = assessment_exports.render_oscal_assessment_results(
+            assessment_id)
+    except KeyError as e:
+        raise click.ClickException(str(e)) from e
+    Path(out_file).write_text(
+        json_module.dumps(document, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    results = document["assessment-results"]["results"][0]
+    click.echo(f"{out_file}  observations {len(results['observations'])}  "
+               f"findings {len(results['findings'])}")
+
+
+@exports_group.command("soa")
+@click.option("--assessment", "assessment_id", required=True,
+              help="Saved assessment id (a control-style template).")
+@click.option("--out", "out_file", required=True, help="Output path.")
+@click.option("--json", "as_json", is_flag=True,
+              help="Write JSON instead of markdown.")
+def exports_soa(assessment_id, out_file, as_json) -> None:
+    """Export one assessment as a Statement of Applicability."""
+    import json as json_module
+    from pathlib import Path
+
+    from .. import assessment_exports
+
+    try:
+        soa = assessment_exports.render_statement_of_applicability(
+            assessment_id)
+    except KeyError as e:
+        raise click.ClickException(str(e)) from e
+    if as_json:
+        Path(out_file).write_text(
+            json_module.dumps(soa, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    else:
+        Path(out_file).write_text(
+            assessment_exports.soa_markdown(soa), encoding="utf-8",
+        )
+    counts = soa["counts"]
+    click.echo(f"{out_file}  implemented {counts['implemented']}  "
+               f"not implemented {counts['not_implemented']}  "
+               f"excluded {counts['excluded']}")
+
+
+@exports_group.command("ai-bom")
+@click.option("--out", "out_file", required=True, help="Output path (JSON).")
+@click.option("--asset", "asset_id", default=None,
+              help="Limit the BOM to one asset's neighbourhood.")
+def exports_ai_bom(out_file, asset_id) -> None:
+    """Export the governed inventory as a CycloneDX 1.6 ML-BOM."""
+    import json as json_module
+    from pathlib import Path
+
+    from .. import ai_bom
+
+    try:
+        document = ai_bom.export_ai_bom(asset_id=asset_id)
+    except RuntimeError as e:
+        raise click.ClickException(str(e)) from e
+    Path(out_file).write_text(
+        json_module.dumps(document, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    click.echo(f"{out_file}  components {len(document['components'])}  "
+               f"dependencies {len(document['dependencies'])}")
