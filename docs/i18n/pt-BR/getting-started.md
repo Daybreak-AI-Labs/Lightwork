@@ -89,6 +89,23 @@ maverick resume
 
 Os objetivos sobrevivem a reinicializações. Você pode fechar o notebook e voltar amanhã.
 
+## Desfazendo as edições de arquivos de uma execução
+
+Com o diário do espaço de trabalho ativado (`[workspace] journal = true`, ou
+respondendo sim na etapa *Workspace journal* do assistente), cada arquivo que
+os agentes sobrescrevem ou criam pelas ferramentas de arquivo é capturado
+antes da mutação:
+
+```bash
+maverick journal list --goal 12     # o que foi tocado
+maverick journal diff --goal 12     # estado pré-execução vs o disco agora
+maverick journal revert --goal 12   # restaura cada arquivo, do mais recente ao mais antigo
+```
+
+Reverter grava uma linha de auditoria assinada `workspace_revert` e arquiva o
+diário. Mutações feitas pelo shell (`rm`, `mv`, redirecionamentos) não são
+registradas no diário — a trilha de auditoria registra esses comandos.
+
 ## Crie seu próprio especialista a partir de uma tarefa observada
 
 Você não precisa descrever um trabalho com palavras — você pode demonstrá-lo.

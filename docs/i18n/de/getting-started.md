@@ -89,6 +89,23 @@ maverick resume
 
 Ziele überleben Neustarts. Sie können Ihren Laptop zuklappen und morgen weitermachen.
 
+## Dateiänderungen eines Laufs rückgängig machen
+
+Mit aktiviertem Workspace-Journal (`[workspace] journal = true`, oder mit Ja
+im Assistenten-Schritt *Workspace journal*) wird jede Datei, die die Agenten
+über die Datei-Tools überschreiben oder anlegen, vor der Änderung
+festgehalten:
+
+```bash
+maverick journal list --goal 12     # was angefasst wurde
+maverick journal diff --goal 12     # Zustand vor dem Lauf vs. Festplatte jetzt
+maverick journal revert --goal 12   # stellt jede Datei wieder her, neueste zuerst
+```
+
+Ein Revert schreibt eine signierte `workspace_revert`-Auditzeile und
+archiviert das Journal. Änderungen über die Shell (`rm`, `mv`, Umleitungen)
+werden nicht journaliert — der Audit-Trail zeichnet diese Befehle auf.
+
 ## Aus einer beobachteten Aufgabe einen eigenen Spezialisten bauen
 
 Sie müssen eine Aufgabe nicht in Worten beschreiben — Sie können sie auch
