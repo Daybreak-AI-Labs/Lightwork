@@ -164,3 +164,55 @@ def test_reports_record_as_governed_evidence(tmp_path):
             observation["asset_id"], {"schema": "wrong"},
             source_id="quarterly", actor="model-validator",
         )
+
+
+def test_fairness_reports_record_as_honest_evidence(tmp_path):
+    (tmp_path / "config.toml").write_text(
+        "[evidence_graph]\nenable = true\n\n"
+        "[model_risk_assurance]\nenable = true\ngate_promotions = false\n\n"
+        "[explainability]\nenable = true\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    from maverick import fairness_monitor
+    from maverick import model_risk_assurance as mra
+
+    officer = mra.ModelRiskAssuranceOfficer()
+    observation = officer.observe_asset(
+        asset_type="model",
+        source="xai_test",
+        source_id="screener",
+        display_name="Screening model",
+        version_digest=hashlib.sha256(b"screener-v1").hexdigest(),
+        actor="inventory-operator",
+        observed_at=time.time(),
+        metadata={},
+        dependencies=[],
+    )
+    failing = fairness_monitor.metrics_report({
+        "group_a": {"selected": 8, "total": 10},
+        "group_b": {"selected": 4, "total": 10},
+    })
+    evidence = xai.record_fairness_evidence(
+        observation["asset_id"], failing,
+        source_id="q3", actor="model-validator",
+    )
+    # A failing report records as FAILED evidence -- never suppressed.
+    assert evidence["evidence_kind"] == "fairness"
+    assert evidence["result"] == "failed"
+    assert evidence["metrics"]["min_impact_ratio"] == 0.5
+
+    passing = fairness_monitor.metrics_report({
+        "group_a": {"selected": 8, "total": 10},
+        "group_b": {"selected": 7, "total": 10},
+    })
+    evidence = xai.record_fairness_evidence(
+        observation["asset_id"], passing,
+        source_id="q4", actor="model-validator",
+    )
+    assert evidence["result"] == "passed"
+    with pytest.raises(ValueError, match="fairness metrics report"):
+        xai.record_fairness_evidence(
+            observation["asset_id"], {"schema": "wrong"},
+            source_id="q5", actor="model-validator",
+        )

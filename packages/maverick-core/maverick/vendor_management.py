@@ -35,11 +35,16 @@ LINK_KINDS = (
     "other",
 )
 
+CONTRACT_KINDS = ("dpa", "msa", "sla", "addendum", "other")
+#: Severity ladder for questionnaire scoring; "clear" = no risk findings.
+_SEVERITY_ORDER = ("low", "medium", "high", "critical")
+
 _VENDORS = GovernedRecordStore("vendor_management", "VMR", "vendor_record")
 _MAX_LIST = 500
 _MAX_LINKS = 50
 _MAX_NOTES = 50
 _MAX_QUESTIONNAIRES = 20
+_MAX_CONTRACTS = 20
 
 
 class VendorManagementError(RuntimeError):
@@ -278,14 +283,21 @@ def questionnaire_responses(vendor_id: str) -> list[dict[str, Any]]:
             submissions, _cursor = form_store.since(token, "0")
         except Exception:
             submissions = []
+        kind = str(row.get("assessment_type") or "")
         out.append(
             {
-                "assessment_type": row.get("assessment_type"),
+                "assessment_type": kind,
                 "status": "answered" if submissions else row.get("status"),
                 "requested_at": row.get("requested_at"),
                 "requested_by": row.get("requested_by"),
                 "form_path": f"/form/{token}",
                 "submissions": submissions[:10],
+                # Latest submission scored against the template's risk
+                # answers -- the questionnaire's inherent-risk read-back.
+                "score": (
+                    _score_submission(kind, submissions[-1])
+                    if submissions else None
+                ),
             }
         )
     return out
@@ -327,6 +339,181 @@ def record_monitoring_note(
     if saved is None:
         raise KeyError(f"vendor is not registered: {vendor_id}")
     return dict(saved)
+
+
+def record_vendor_contract(
+    vendor_id: str,
+    *,
+    kind: str,
+    reference: str,
+    renews_at: float,
+    actor: str,
+    expected_revision: int,
+) -> dict[str, Any]:
+    """Record one contract (DPA, MSA, ...) with its renewal date.
+
+    The renewal date is what the governance-alerts digest watches: a
+    contract past ``renews_at`` is overdue, one inside the horizon is due
+    soon. Recording the same kind again replaces that kind's row — the
+    register keeps the current paper, not a history.
+    """
+
+    _require_enabled()
+    if kind not in CONTRACT_KINDS:
+        raise ValueError(f"kind must be one of: {', '.join(CONTRACT_KINDS)}")
+    operator = _text(actor, "actor", 256)
+    where = _text(reference, "reference", 512)
+    if (
+        isinstance(renews_at, bool)
+        or not isinstance(renews_at, (int, float))
+        or not float(renews_at) > 0
+    ):
+        raise ValueError("renews_at must be a positive epoch timestamp")
+
+    def mutate(value: dict[str, Any]) -> None:
+        rows = [
+            row for row in (value.get("contracts") or [])
+            if row.get("kind") != kind
+        ]
+        rows.append(
+            {
+                "kind": kind,
+                "reference": where,
+                "renews_at": float(renews_at),
+                "recorded_by": operator,
+                "recorded_at": time.time(),
+            }
+        )
+        value["contracts"] = rows[-_MAX_CONTRACTS:]
+
+    saved = _VENDORS.update(
+        _text(vendor_id, "vendor_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action="record_vendor_contract",
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"vendor is not registered: {vendor_id}")
+    return dict(saved)
+
+
+def contract_renewals(
+    *, now: float | None = None, due_soon_days: int = 30,
+) -> dict[str, list[dict[str, Any]]]:
+    """Contracts past renewal and inside the due-soon horizon, register-wide."""
+
+    _require_enabled()
+    if (
+        isinstance(due_soon_days, bool)
+        or not isinstance(due_soon_days, int)
+        or not 1 <= due_soon_days <= 365
+    ):
+        raise ValueError("due_soon_days must be between 1 and 365")
+    current = time.time() if now is None else float(now)
+    horizon = current + due_soon_days * 86_400.0
+    overdue: list[dict[str, Any]] = []
+    due_soon: list[dict[str, Any]] = []
+    for row in _VENDORS.list(limit=_MAX_LIST):
+        for contract in row.get("contracts") or []:
+            renews = float(contract.get("renews_at") or 0.0)
+            if renews <= 0:
+                continue
+            entry = {
+                "vendor_id": row.get("id"),
+                "vendor": row.get("name"),
+                "kind": contract.get("kind"),
+                "renews_at": renews,
+            }
+            if renews < current:
+                overdue.append(entry)
+            elif renews <= horizon:
+                due_soon.append(entry)
+    overdue.sort(key=lambda entry: entry["renews_at"])
+    due_soon.sort(key=lambda entry: entry["renews_at"])
+    return {"overdue": overdue[:50], "due_soon": due_soon[:50]}
+
+
+def _template_questions(assessment_type: str):
+    from .assessment import TEMPLATES
+
+    template = TEMPLATES.get(str(assessment_type or "").strip().lower())
+    return () if template is None else template.questions
+
+
+def _score_submission(
+    assessment_type: str, fields: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Score one hosted-form submission against its template's risk answers.
+
+    A question counts as a finding when the response matches the
+    template's ``risk_answer`` (case-insensitive). The rating is the worst
+    finding severity, ``clear`` when everything answered came back safe.
+    Deterministic and explainable: every finding names its question.
+    """
+
+    findings: list[dict[str, Any]] = []
+    answered = 0
+    questions = _template_questions(assessment_type)
+    for question in questions:
+        raw = fields.get(question.id)
+        if raw is None or str(raw).strip() == "":
+            continue
+        answered += 1
+        response = str(raw).strip().lower()
+        if response == str(question.risk_answer).strip().lower():
+            findings.append(
+                {
+                    "qid": question.id,
+                    "section": question.section,
+                    "severity": question.severity,
+                }
+            )
+    rating = "clear"
+    for severity in _SEVERITY_ORDER:
+        if any(finding["severity"] == severity for finding in findings):
+            rating = severity
+    return {
+        "answered": answered,
+        "total_questions": len(questions),
+        "findings": findings,
+        "rating": rating,
+    }
+
+
+def questionnaire_for_token(token: str) -> dict[str, Any] | None:
+    """Resolve a hosted-form token to its vendor questionnaire, or None.
+
+    Powers the public questionnaire page: given only the unguessable
+    token, return the template's questions so the vendor can answer
+    without an account. Never returns other vendors' data — one token,
+    one questionnaire.
+    """
+
+    if not enabled():
+        return None
+    needle = str(token or "").strip()
+    if not needle:
+        return None
+    for row in _VENDORS.list(limit=_MAX_LIST):
+        for entry in row.get("questionnaires") or []:
+            if str(entry.get("token") or "") != needle:
+                continue
+            kind = str(entry.get("assessment_type") or "")
+            return {
+                "vendor_id": row.get("id"),
+                "vendor": row.get("name"),
+                "assessment_type": kind,
+                "questions": [
+                    {
+                        "qid": question.id,
+                        "section": question.section,
+                        "text": question.text,
+                    }
+                    for question in _template_questions(kind)
+                ],
+            }
+    return None
 
 
 def get_vendor(vendor_id: str) -> dict[str, Any] | None:
@@ -444,20 +631,24 @@ def import_onetrust_vendors(
 
 
 __all__ = [
+    "CONTRACT_KINDS",
     "CRITICALITIES",
     "LINK_KINDS",
     "STATUSES",
     "VENDOR_SCHEMA",
     "VendorManagementConfigError",
     "VendorManagementError",
+    "contract_renewals",
     "enabled",
     "get_vendor",
     "get_vendor_management_config",
     "import_onetrust_vendors",
     "link_vendor_record",
     "list_vendors",
+    "questionnaire_for_token",
     "questionnaire_responses",
     "record_monitoring_note",
+    "record_vendor_contract",
     "register_vendor",
     "request_questionnaire",
     "set_vendor_status",

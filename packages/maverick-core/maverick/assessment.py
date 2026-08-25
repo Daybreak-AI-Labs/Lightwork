@@ -1003,6 +1003,12 @@ FRAMEWORK_SOURCES: dict[str, dict[str, str]] = {
         "source_url": "https://www.fedramp.gov/2026/",
         "access_note": "Current Class C identifiers; the rules, transition timeline, parameters, and agency scope remain authoritative.",
     },
+    "iso42001": {
+        "title": "ISO/IEC 42001 Artificial intelligence management system",
+        "version": "ISO/IEC 42001:2023, Edition 1",
+        "source_url": "https://www.iso.org/standard/42001",
+        "access_note": "Licensed ISO text is not reproduced; clause/control identifiers and original outcome paraphrases only.",
+    },
 }
 
 # The generated, static catalog module pins exact artifacts and hashes.  Merge
@@ -2321,6 +2327,512 @@ _PIPEDA = AssessmentTemplate(
     ),
 )
 
+_US_STATE_PRIVACY = AssessmentTemplate(
+    type="us_state_privacy",
+    title="US State Privacy Applicability & Readiness",
+    framework="US state comprehensive privacy laws (20 states, 2026)",
+    description="Applicability and readiness across the US state "
+    "comprehensive privacy laws in effect in 2026 (California, Virginia, "
+    "Colorado, Connecticut, Utah, Texas, Oregon, Montana, Florida, "
+    "Delaware, Iowa, Nebraska, New Hampshire, New Jersey, Tennessee, "
+    "Minnesota, Maryland, Indiana, Kentucky, Rhode Island). A structured "
+    "self-assessment of the common obligations — never a state-by-state "
+    "legal opinion.",
+    questions=(
+        _q(
+            "ussp_applicability",
+            "Applicability",
+            "Has the organization determined which state laws apply to it, "
+            "against each law's residency and processing thresholds?",
+            "no",
+            "high",
+            "Map consumer counts and revenue per state against each "
+            "statute's applicability thresholds; record the analysis.",
+        ),
+        _q(
+            "ussp_rights_intake",
+            "Consumer rights",
+            "Can consumers exercise access, deletion, correction, and "
+            "portability through a documented intake with statutory "
+            "deadlines tracked?",
+            "no",
+            "high",
+            "Stand up one intake covering the strictest deadline; track "
+            "due dates per request.",
+        ),
+        _q(
+            "ussp_appeals",
+            "Consumer rights",
+            "Is there a documented appeal process for refused requests, "
+            "with the state-required appeal disclosures?",
+            "no",
+            "medium",
+            "Most 2026 state laws require an appeal path; document it in "
+            "the privacy notice.",
+        ),
+        _q(
+            "ussp_opt_outs",
+            "Opt-outs",
+            "Are opt-outs of sale, targeted advertising, and significant "
+            "profiling honored across every applicable state?",
+            "no",
+            "high",
+            "Wire the opt-out signal into the ad/analytics stack; keep "
+            "evidence of suppression.",
+        ),
+        _q(
+            "ussp_universal_signal",
+            "Opt-outs",
+            "Are universal opt-out signals (e.g. Global Privacy Control) "
+            "recognized where required (California, Colorado, Connecticut, "
+            "Texas, and others)?",
+            "no",
+            "high",
+            "Honor GPC as a valid opt-out where a statute or rule "
+            "requires it.",
+        ),
+        _q(
+            "ussp_sensitive_consent",
+            "Sensitive data",
+            "Is consent obtained before processing sensitive data where "
+            "required, and is the Maryland-style restriction (no sale of "
+            "sensitive data) respected?",
+            "no",
+            "high",
+            "Inventory sensitive-data flows; Maryland's MODPA is the "
+            "strictest floor — no sensitive-data sale, strict necessity.",
+        ),
+        _q(
+            "ussp_assessments",
+            "Assessments",
+            "Are data protection assessments performed and retained for "
+            "targeted advertising, sale, sensitive data, and profiling "
+            "with significant effects?",
+            "no",
+            "medium",
+            "Several states can demand these assessments; retain them.",
+        ),
+        _q(
+            "ussp_contracts",
+            "Processors",
+            "Do processor contracts carry the state-required clauses "
+            "(purpose limits, confidentiality, deletion, audit, "
+            "subcontractor flow-down)?",
+            "no",
+            "medium",
+            "One processor addendum can satisfy the state common core; "
+            "review against the strictest applicable law.",
+        ),
+        _q(
+            "ussp_minors",
+            "Minors",
+            "Are heightened minor-data duties met where applicable (no "
+            "targeted advertising or sale for known minors in several "
+            "states)?",
+            "no",
+            "high",
+            "Suppress targeted advertising and sale for known minors; "
+            "verify age-knowledge handling.",
+        ),
+        _q(
+            "ussp_notice",
+            "Notices",
+            "Does the privacy notice disclose categories, purposes, "
+            "sharing, rights, and opt-out methods as the applicable "
+            "states require?",
+            "no",
+            "medium",
+            "Keep one notice covering the union of state disclosure "
+            "requirements; version it.",
+        ),
+    ),
+)
+
+_COLORADO_ADMT = AssessmentTemplate(
+    type="colorado_admt",
+    title="Colorado ADMT Act Readiness",
+    framework="Colorado SB 26-189 (C.R.S. § 6-1-1701 ff., eff. 2027-01-01)",
+    description="Readiness for Colorado's automated-decision-making "
+    "technology act (the 2026 replacement of SB 24-205), covering ADMT "
+    "used in consequential decisions: developer documentation, "
+    "pre-decision and adverse-decision disclosures, correction and human "
+    "review rights, and three-year record-keeping. Never legal advice.",
+    questions=(
+        _q(
+            "coadmt_inventory",
+            "Scope",
+            "Is every ADMT used in consequential decisions (housing, "
+            "employment, education, financial, government services, "
+            "healthcare, insurance, legal) inventoried for Colorado "
+            "consumers?",
+            "no",
+            "high",
+            "Inventory ADMT against the consequential-decision list; the "
+            "act's duties attach per system (§ 6-1-1701).",
+        ),
+        _q(
+            "coadmt_developer_docs",
+            "Documentation",
+            "Is the developer's statement in hand (intended and harmful or "
+            "inappropriate uses, data categories, known limitations and "
+            "risks, instructions for use, monitoring, meaningful human "
+            "review)?",
+            "no",
+            "high",
+            "Obtain (or as developer, provide) the § 6-1-1702 statement; "
+            "track material updates.",
+        ),
+        _q(
+            "coadmt_pre_notice",
+            "Disclosures",
+            "Is a clear and conspicuous pre-decision notice given that "
+            "ADMT is or will be used, with instructions for accessing "
+            "more information?",
+            "no",
+            "high",
+            "A prominent public notice at consumer touchpoints satisfies "
+            "§ 6-1-1704(1)-(2).",
+        ),
+        _q(
+            "coadmt_adverse_notice",
+            "Disclosures",
+            "After an adverse decision, does the consumer receive within "
+            "30 days a plain-language description of the decision and the "
+            "ADMT's role, plus a path to request system name, version, "
+            "developer, and data types?",
+            "no",
+            "high",
+            "Wire the § 6-1-1704(3) adverse-outcome disclosure into the "
+            "decision workflow.",
+        ),
+        _q(
+            "coadmt_correction",
+            "Consumer rights",
+            "Can consumers correct factually incorrect or materially "
+            "inaccurate personal data used in the decision, on request?",
+            "no",
+            "high",
+            "§ 6-1-1705(1): provide access and correction after an "
+            "adverse outcome.",
+        ),
+        _q(
+            "coadmt_human_review",
+            "Consumer rights",
+            "Is meaningful human review and reconsideration of the "
+            "decision offered to the extent commercially reasonable?",
+            "no",
+            "high",
+            "Name the reviewers and document the reconsideration path.",
+        ),
+        _q(
+            "coadmt_records",
+            "Records",
+            "Are compliance records kept for at least three years, "
+            "including ADMT version identifiers, changelogs, and material "
+            "mitigation changes?",
+            "no",
+            "medium",
+            "§ 6-1-1703: retain versioned records demonstrating "
+            "compliance for three years.",
+        ),
+    ),
+)
+
+_NYC_LL144 = AssessmentTemplate(
+    type="nyc_ll144",
+    title="NYC Local Law 144 AEDT Readiness",
+    framework="NYC Local Law 144 (AEDT; DCWP-enforced since 2023-07-05)",
+    description="Readiness for New York City's automated employment "
+    "decision tool law: the annual independent bias audit, the published "
+    "results summary, and the candidate notices. A readiness check of the "
+    "employer's own program — never a bias audit itself.",
+    questions=(
+        _q(
+            "ll144_inventory",
+            "Scope",
+            "Is every AEDT used to substantially assist employment "
+            "decisions for NYC candidates or employees inventoried?",
+            "no",
+            "high",
+            "The duties attach per tool; include vendor tools used in "
+            "screening and promotion.",
+        ),
+        _q(
+            "ll144_audit_current",
+            "Bias audit",
+            "Has each AEDT had a bias audit within the last year, "
+            "computing impact ratios across the required "
+            "sex/race-ethnicity categories?",
+            "no",
+            "high",
+            "No audit within one year means the tool may not be used; "
+            "schedule the annual audit.",
+        ),
+        _q(
+            "ll144_auditor_independent",
+            "Bias audit",
+            "Was the auditor independent — not involved in using, "
+            "developing, or distributing the AEDT, and free of "
+            "compromising employment or financial ties?",
+            "no",
+            "high",
+            "Independence is definitional; an internal team that uses "
+            "the tool does not qualify.",
+        ),
+        _q(
+            "ll144_published_summary",
+            "Publication",
+            "Is a summary of the most recent audit public on the careers "
+            "site — audit date, tool first-use date, and the impact "
+            "ratios for every category tested?",
+            "no",
+            "high",
+            "Post the summary in a clear and conspicuous location before "
+            "continued use.",
+        ),
+        _q(
+            "ll144_advance_notice",
+            "Notices",
+            "Do NYC candidates and employees receive notice at least 10 "
+            "business days before the AEDT is used on them?",
+            "no",
+            "high",
+            "Notice may be on the careers page or sent directly; keep "
+            "evidence of timing.",
+        ),
+        _q(
+            "ll144_notice_content",
+            "Notices",
+            "Does the notice state the job qualifications and "
+            "characteristics the AEDT uses, and how to request an "
+            "alternative selection process or accommodation?",
+            "no",
+            "medium",
+            "Include data categories, sources, and the retention policy "
+            "or where to request them.",
+        ),
+    ),
+)
+
+_TEXAS_TRAIGA = AssessmentTemplate(
+    type="texas_traiga",
+    title="Texas TRAIGA Attestation",
+    framework="Texas TRAIGA (HB 149, eff. 2026-01-01)",
+    description="Attestation against the Texas Responsible AI Governance "
+    "Act's intent-based prohibited practices, plus the government-context "
+    "disclosure duties. Questions where 'yes' flags risk are deliberate: "
+    "they name the prohibited conduct. Never legal advice.",
+    questions=(
+        _q(
+            "traiga_manipulation",
+            "Prohibited practices",
+            "Could any AI system be found to intentionally incite or "
+            "encourage self-harm, violence, or criminal activity through "
+            "behavioral manipulation?",
+            "yes",
+            "critical",
+            "TRAIGA prohibits AI developed or deployed with that intent; "
+            "document intended use and safeguards.",
+        ),
+        _q(
+            "traiga_discrimination",
+            "Prohibited practices",
+            "Could any AI system be found to have been developed or "
+            "deployed with the intent to unlawfully discriminate against "
+            "a protected class?",
+            "yes",
+            "critical",
+            "Intent is the trigger; retain design intent and testing "
+            "records that evidence lawful purpose.",
+        ),
+        _q(
+            "traiga_social_scoring",
+            "Prohibited practices",
+            "Is any AI system used for social scoring of natural persons "
+            "by or for a government entity?",
+            "yes",
+            "critical",
+            "Social scoring is prohibited; withdraw or re-scope any such "
+            "use.",
+        ),
+        _q(
+            "traiga_biometrics",
+            "Prohibited practices",
+            "Does any system capture or use biometric identifiers of "
+            "individuals without consent where TRAIGA requires it?",
+            "yes",
+            "high",
+            "Review the biometric provisions with counsel and record the "
+            "consent basis.",
+        ),
+        _q(
+            "traiga_explicit_content",
+            "Prohibited practices",
+            "Could any system be used to produce or distribute unlawful "
+            "sexually explicit content, including deepfakes or CSAM?",
+            "yes",
+            "critical",
+            "Prohibited outright; enforce generation and distribution "
+            "safeguards and takedown paths.",
+        ),
+        _q(
+            "traiga_gov_disclosure",
+            "Disclosures",
+            "Where the organization acts for a Texas government agency, "
+            "are individuals told when they are interacting with an AI "
+            "system?",
+            "no",
+            "high",
+            "Government-context interactions carry disclosure duties; "
+            "confirm scope with counsel.",
+        ),
+        _q(
+            "traiga_intent_records",
+            "Records",
+            "Are intended-purpose and design-intent records retained for "
+            "each system, given TRAIGA's intent-based liability framing?",
+            "no",
+            "medium",
+            "Intent records are the practical defense; keep purpose "
+            "statements and testing evidence.",
+        ),
+    ),
+)
+
+_ILLINOIS_HB3773 = AssessmentTemplate(
+    type="illinois_hb3773",
+    title="Illinois AI Employment (HB 3773) Readiness",
+    framework="Illinois HB 3773 / IHRA (eff. 2026-01-01)",
+    description="Readiness for the Illinois Human Rights Act amendments on "
+    "AI in employment: discriminatory-effect testing across covered "
+    "decisions, the zip-code proxy prohibition, and employee and "
+    "applicant notice. Never legal advice.",
+    questions=(
+        _q(
+            "ilhb_inventory",
+            "Scope",
+            "Is every use of AI in covered employment decisions "
+            "(recruitment, hiring, promotion, renewal, training or "
+            "apprenticeship selection, discharge, discipline, tenure, "
+            "terms and privileges) inventoried for Illinois employees "
+            "and applicants?",
+            "no",
+            "high",
+            "The IHRA amendment covers the full employment lifecycle; "
+            "include vendor tools.",
+        ),
+        _q(
+            "ilhb_effect_testing",
+            "Discrimination",
+            "Is each system tested for discriminatory effect on IHRA "
+            "protected classes, with results and remediation recorded?",
+            "no",
+            "high",
+            "Liability attaches to discriminatory EFFECT, not intent — "
+            "test outcomes, not intentions.",
+        ),
+        _q(
+            "ilhb_zip_proxy",
+            "Discrimination",
+            "Is zip code excluded from use as a proxy for protected "
+            "classes in any employment decision model?",
+            "no",
+            "high",
+            "HB 3773 prohibits zip-code proxying explicitly; verify "
+            "features and correlated inputs.",
+        ),
+        _q(
+            "ilhb_notice",
+            "Notices",
+            "Are employees and applicants notified that AI is used in "
+            "covered employment decisions, per the IDHR notice rules?",
+            "no",
+            "high",
+            "Failure to notify is itself a violation; follow the IDHR "
+            "rules on timing and means.",
+        ),
+        _q(
+            "ilhb_remediation",
+            "Remediation",
+            "When testing finds disparity, is there a documented "
+            "remediation path (model change, human review, or "
+            "discontinuation)?",
+            "no",
+            "medium",
+            "Record what was found, what changed, and when it was "
+            "re-tested.",
+        ),
+        _q(
+            "ilhb_vendor_diligence",
+            "Vendors",
+            "For vendor-supplied employment AI, has the vendor's own "
+            "bias testing been obtained and reviewed?",
+            "no",
+            "medium",
+            "Employer liability does not transfer to the vendor; review "
+            "their evidence yourself.",
+        ),
+    ),
+)
+
+_ISO42001_ENTRIES = (
+    ("4.1", "Context", "understands its role as an AI provider, deployer, or "
+     "user and the internal and external issues bearing on the AIMS", "medium"),
+    ("4.4", "Context", "has established and continually improves an AI "
+     "management system with the needed processes", "high"),
+    ("5.2", "Leadership", "maintains a top-management-approved AI policy "
+     "aligned with organizational objectives", "high"),
+    ("5.3", "Leadership", "assigns and communicates AI governance roles, "
+     "responsibilities, and authorities", "high"),
+    ("6.1", "Planning", "assesses AI risks against defined criteria and "
+     "treats the risks it identifies", "high"),
+    ("6.1.4", "Planning", "assesses the potential impacts of its AI systems "
+     "on individuals, groups, and society", "high"),
+    ("7.2", "Support", "ensures the people doing AIMS work are competent, "
+     "with evidence retained", "medium"),
+    ("7.5", "Support", "creates and controls the documented information the "
+     "AIMS requires", "medium"),
+    ("8.1", "Operation", "plans and controls the AI life-cycle processes "
+     "needed to meet AIMS requirements", "high"),
+    ("9.1", "Evaluation", "monitors, measures, analyses, and evaluates the "
+     "AIMS's performance and effectiveness", "medium"),
+    ("9.2", "Evaluation", "conducts internal AIMS audits at planned "
+     "intervals", "medium"),
+    ("9.3", "Evaluation", "reviews the AIMS at top-management level at "
+     "planned intervals", "medium"),
+    ("10.1", "Improvement", "corrects nonconformities and continually "
+     "improves the AIMS", "medium"),
+    ("A.2", "Annex A", "keeps management-approved AI policies current and "
+     "consistent with other organizational policies", "medium"),
+    ("A.3", "Annex A", "defines the internal organization for AI, including "
+     "roles and the reporting of AI concerns", "medium"),
+    ("A.4", "Annex A", "manages the resources AI systems need — data, "
+     "tooling, human, and computing", "medium"),
+    ("A.5", "Annex A", "performs and documents AI system impact assessments "
+     "for affected individuals and societies", "high"),
+    ("A.6", "Annex A", "governs the AI system life cycle from requirements "
+     "through operation and retirement", "high"),
+    ("A.7", "Annex A", "manages data for AI systems, including provenance, "
+     "quality, and preparation", "high"),
+    ("A.8", "Annex A", "provides interested parties the information they "
+     "need about its AI systems", "medium"),
+    ("A.9", "Annex A", "governs the responsible use of AI systems within "
+     "intended-purpose limits", "medium"),
+    ("A.10", "Annex A", "manages third-party and customer relationships "
+     "across the AI supply chain", "medium"),
+)
+
+_ISO42001 = AssessmentTemplate(
+    type="iso42001",
+    title="ISO/IEC 42001 AIMS Readiness",
+    framework="ISO/IEC 42001:2023",
+    description="Readiness against the AI management system standard: the "
+    "clause 4-10 management loop and the Annex A control themes, as "
+    "original outcome paraphrases. A readiness self-assessment — never a "
+    "certification audit, and no standards text is reproduced.",
+    questions=_control_questions("iso42001", _ISO42001_ENTRIES),
+)
+
 TEMPLATES: dict[str, AssessmentTemplate] = {
     t.type: t
     for t in (
@@ -2330,6 +2842,11 @@ TEMPLATES: dict[str, AssessmentTemplate] = {
         _CCPA,
         _LGPD,
         _PIPEDA,
+        _US_STATE_PRIVACY,
+        _COLORADO_ADMT,
+        _NYC_LL144,
+        _TEXAS_TRAIGA,
+        _ILLINOIS_HB3773,
         _AIRA,
         _VENDOR_RISK,
         _TIA,
@@ -2341,6 +2858,7 @@ TEMPLATES: dict[str, AssessmentTemplate] = {
         _HIPAA,
         _SOC2,
         _ISO27001,
+        _ISO42001,
         _NIST_CSF,
         _NIST_800_53,
         _CIS_V8,
@@ -2500,6 +3018,7 @@ def _builtin_record(assessment_type: str) -> dict | None:
     elif assessment_type in {
         "soc2",
         "iso27001",
+        "iso42001",
         "nist_csf",
         "nist_800_53",
         "cis_v8",

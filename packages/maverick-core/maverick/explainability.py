@@ -420,6 +420,73 @@ def record_explainability_evidence(
     )
 
 
+def record_fairness_evidence(
+    asset_id: str,
+    report: Mapping[str, Any],
+    *,
+    source_id: str,
+    actor: str,
+    observed_at: float | None = None,
+    validity_seconds: int = 90 * 24 * 60 * 60,
+) -> dict[str, Any]:
+    """Record one fairness-metrics report as digest-scoped evidence.
+
+    The report comes from :func:`maverick.fairness_monitor.metrics_report`
+    (four-fifths impact ratios, demographic parity, equal opportunity).
+    The evidence result is honest: ``passed`` only when no group fails
+    the threshold — a failing report records as ``failed`` evidence, it
+    is never suppressed. A screening record, not a fairness certification.
+    """
+
+    from .fairness_monitor import FAIRNESS_REPORT_SCHEMA
+
+    _require_enabled()
+    if (
+        not isinstance(report, Mapping)
+        or report.get("schema") != FAIRNESS_REPORT_SCHEMA
+    ):
+        raise ValueError("report must be a fairness metrics report")
+    if (
+        not isinstance(validity_seconds, int)
+        or isinstance(validity_seconds, bool)
+        or not 3600 <= validity_seconds <= 366 * 24 * 60 * 60
+    ):
+        raise ValueError("validity_seconds must be between an hour and a year")
+    officer = mra.ModelRiskAssuranceOfficer()
+    observation = officer.get_observation(str(asset_id or ""))
+    if observation is None:
+        raise ExplainabilityError("evidence requires an observed AI asset")
+    now = time.time() if observed_at is None else _finite(observed_at, "observed_at")
+    if now <= 0:
+        raise ValueError("observed_at must be positive")
+    digest = hashlib.sha256(
+        json.dumps(report, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
+    passed = report.get("passed") is True
+    return officer.record_evidence(
+        str(asset_id),
+        source_id=f"fairness:{str(source_id or '').strip() or 'report'}",
+        evidence_kind="fairness",
+        result="passed" if passed else "failed",
+        scope_digest=digest,
+        artifact_digest=observation["version_digest"],
+        actor=str(actor or ""),
+        observed_at=now,
+        valid_until=now + validity_seconds,
+        summary=(
+            "Group-fairness metrics recorded "
+            f"(min impact ratio {report.get('min_impact_ratio'):.3f}, "
+            f"{'no failing groups' if passed else 'FAILING groups: ' + ', '.join(report.get('failing_groups') or [])})."
+        ),
+        metrics={
+            "min_impact_ratio": report.get("min_impact_ratio"),
+            "demographic_parity_diff": report.get("demographic_parity_diff"),
+            "samples": report.get("samples"),
+            "report_sha256": digest,
+        },
+    )
+
+
 __all__ = [
     "ExplainabilityConfigError",
     "ExplainabilityError",
@@ -432,5 +499,6 @@ __all__ = [
     "permutation_importance",
     "reason_codes",
     "record_explainability_evidence",
+    "record_fairness_evidence",
     "spearman_correlation",
 ]

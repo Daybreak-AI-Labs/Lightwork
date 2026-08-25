@@ -979,6 +979,67 @@ here.
   `GET /assurance/model-risk/dependency-graph`) — nodes and dependency
   edges over the governed inventory, whole-estate or scoped to one asset's
   direct neighbourhood.
+- **Art. 26 deployer-obligations register** (in `eu_conformity`,
+  `maverick eu-conformity deployer`, `/governance/deployer`) — the EU AI
+  Act's deployer side made trackable: the always-applicable duties
+  (use-per-IFU 26(1), monitoring and incident escalation 26(5), the
+  ≥6-month log-retention duty 26(6), informing affected persons 26(11),
+  authority cooperation 26(12)) plus flag-conditional duties
+  (input-data control 26(4), workplace worker-information 26(7),
+  public-authority registration checks 26(8), the DPIA information duty
+  26(9)). Art. 26(2) human oversight is deliberately un-assertable with
+  a bare reference — it must name natural persons. The 26(10)
+  law-enforcement biometric regime is out of scope and stated so.
+- **US AI-law and multi-state privacy templates** (in `assessment.py`) —
+  Colorado's replacement ADMT Act (SB 26-189, eff. 2027-01-01: developer
+  documentation, pre-decision and 30-day adverse-decision disclosures,
+  correction and human-review rights, 3-year records), NYC Local Law 144
+  (annual independent bias audit, published impact ratios, 10-business-day
+  notices), Texas TRAIGA (intent-based prohibited practices,
+  government-context disclosure), Illinois HB 3773 (discriminatory-effect
+  testing, the zip-code proxy ban, IDHR notice), and a 20-state US
+  privacy applicability/readiness questionnaire. Statute status verified
+  against live sources before drafting (including SB 24-205's repeal).
+- **ISO/IEC 42001 AIMS readiness template** (in `assessment.py`,
+  security department) — the clause 4-10 management loop and Annex A
+  control themes as original outcome paraphrases; no standards text
+  reproduced.
+- **Vendor questionnaire auto-scoring and the public questionnaire page**
+  — hosted-form submissions now score deterministically against the
+  template's risk answers (per-question findings, worst-severity rating,
+  "clear" when everything answered came back safe), and the minted
+  `/form/{token}` link now renders a public questionnaire page the vendor
+  answers in the browser; questionnaire tokens stay answerable even when
+  automation events are off (previously the POST 404'd — fixed).
+- **Vendor contract renewal tracking** (`maverick vendor contract`,
+  `/api/v1/vendors/{id}/contracts`) — one current contract per kind
+  (DPA/MSA/SLA/addendum) with its renewal date; the governance-alerts
+  digest, CLI, and workspace chips now surface contracts past renewal
+  and renewing soon, alongside new data-map attention chips for flagged
+  assets not yet linked to a governing record.
+- **Privacy notice register** (in `consent_registry`, `maverick consent
+  notice`, `/api/v1/consent/notices`) — immutable, digest-bound notice
+  versions that consent receipts' `policy_version` resolves to, with a
+  coverage check that names any receipt version the register cannot
+  produce.
+- **First-party site scan** (`maverick consent scan-site`,
+  `/api/v1/consent/site-scan`) — one bounded, SSRF-pinned,
+  egress-guarded fetch of the operator's own page reporting Set-Cookie
+  attributes, third-party script/iframe/img hosts, and well-known
+  trackers. Header- and markup-level on a single page — not a crawler,
+  not a browser, never a CMP.
+- **DSAR estate worksheet** (`maverick dsar worksheet`,
+  `GET /api/v1/privacy/dsar/{id}/estate-worksheet`) — the human search
+  plan beyond the platform's own holdings: platform export counts, the
+  data-map assets whose flagged columns identify people, active vendors
+  as processors to contact, and a bounded connected-source document
+  search; absent modules degrade to `enabled: false`.
+- **Fairness metrics as governed evidence** (`maverick explainability
+  fairness`, `record_fairness_evidence`) — the existing four-fifths /
+  demographic-parity / equal-opportunity monitor now records
+  digest-scoped `fairness` evidence against a governed asset, honestly:
+  a failing report records as FAILED evidence, never suppressed. A
+  screening record, not a fairness certification.
 - **LGPD and PIPEDA assessment templates** (in `assessment.py`) — Brazil's
   LGPD (legal bases Arts. 7/11, subject rights Art. 18, security/incident
   Arts. 46/48, DPO Art. 41, transfers Art. 33) and Canada's PIPEDA (fair

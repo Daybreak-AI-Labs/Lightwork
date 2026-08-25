@@ -1063,3 +1063,68 @@ def test_grc_sync_status_and_outbound_surface_on_api_and_page():
     page = client.get("/security/governance")
     assert page.status_code == 200
     assert _FAKE_SYS_ID in page.text
+
+
+# ---------------------------------------------------------------------------
+# Art. 26 deployer obligations
+# ---------------------------------------------------------------------------
+
+def test_deployer_register_through_the_api():
+    _enable_governance()
+    asset_id = "MAA-" + _hex("deployed-model")[:32]
+
+    opened = _ok(
+        client.post(
+            f"{_PREFIX}/deployer",
+            json={"asset_id": asset_id, "workplace_use": True},
+        ),
+        expected=201,
+    )
+    # 5 always-applicable + oversight + the flagged workplace duty.
+    assert opened["status"]["total"] == 7
+    assert opened["status"]["oversight_persons"] == []
+    record_id = opened["record"]["id"]
+
+    # Oversight cannot be asserted like an ordinary obligation.
+    refused = client.post(
+        f"{_PREFIX}/deployer/{record_id}/obligations",
+        json={
+            "obligation": "human_oversight_assignment",
+            "reference": "doc://oversight",
+            "expected_revision": opened["record"]["revision"],
+        },
+    )
+    assert refused.status_code == 409
+    assert "26(2)" in refused.json()["detail"]
+
+    state = _ok(
+        client.post(
+            f"{_PREFIX}/deployer/{record_id}/oversight",
+            json={
+                "persons": ["Ada Lovelace", "Grace Hopper"],
+                "reference": "doc://oversight-competence",
+                "expected_revision": opened["record"]["revision"],
+            },
+        )
+    )
+    assert state["oversight_persons"] == ["Ada Lovelace", "Grace Hopper"]
+
+    asserted = _ok(
+        client.post(
+            f"{_PREFIX}/deployer/{record_id}/obligations",
+            json={
+                "obligation": "log_retention",
+                "reference": "runbook://log-retention-183d",
+                "expected_revision": state["revision"],
+            },
+        )
+    )
+    assert asserted["asserted"] == 2
+
+    listing = _ok(client.get(f"{_PREFIX}/deployer"))
+    assert listing["count"] == 1
+    assert "use_per_instructions" in listing["obligations"]
+    assert "worker_information" in listing["conditional_obligations"]
+    fetched = _ok(client.get(f"{_PREFIX}/deployer/{record_id}"))
+    assert fetched["status"]["flags"]["workplace_use"] is True
+    assert client.get(f"{_PREFIX}/deployer/ECY-{'0' * 24}").status_code == 404

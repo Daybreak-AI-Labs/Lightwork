@@ -436,3 +436,85 @@ def test_fria_four_eyes_review_requires_a_different_completed_reviewer():
             draft["id"], outcome="concur", reviewer="second-counsel",
             expected_revision=draft["revision"],
         )
+
+
+def test_deployer_register_tracks_the_applicable_art26_duties():
+    record = euc.open_deployer_register(
+        _ASSET, workplace_use=True, requires_dpia=True, actor="ops",
+    )
+    keys = set(record["obligations"])
+    # Always-applicable + oversight + the two flagged conditionals.
+    assert "use_per_instructions" in keys
+    assert "log_retention" in keys
+    assert "human_oversight_assignment" in keys
+    assert "worker_information" in keys
+    assert "dpia_information" in keys
+    # Unflagged conditionals stay out of the register entirely.
+    assert "registration_check" not in keys
+    assert "input_data_control" not in keys
+    # Idempotent open.
+    assert euc.open_deployer_register(_ASSET, actor="ops")["id"] == record["id"]
+
+    state = euc.deployer_status(record["id"])
+    assert state["total"] == 8
+    assert state["asserted"] == 0
+    assert state["oversight_persons"] == []
+
+
+def test_deployer_oversight_must_name_natural_persons():
+    record = euc.open_deployer_register(_ASSET, actor="ops")
+    # The oversight duty cannot be asserted with a bare reference.
+    with pytest.raises(euc.EUConformityError, match="26\\(2\\)"):
+        euc.assert_deployer_obligation(
+            record["id"], "human_oversight_assignment",
+            reference="doc://oversight", actor="ops",
+            expected_revision=record["revision"],
+        )
+    with pytest.raises(ValueError, match="named natural person"):
+        euc.assign_deployer_oversight(
+            record["id"], persons=[], reference="doc://oversight",
+            actor="ops", expected_revision=record["revision"],
+        )
+    with pytest.raises(ValueError, match="distinct"):
+        euc.assign_deployer_oversight(
+            record["id"], persons=["Ada", "ada"], reference="doc://oversight",
+            actor="ops", expected_revision=record["revision"],
+        )
+    saved = euc.assign_deployer_oversight(
+        record["id"], persons=["Ada Lovelace", "Grace Hopper"],
+        reference="doc://oversight-competence", actor="ops",
+        expected_revision=record["revision"],
+    )
+    state = euc.deployer_status(saved["id"])
+    assert state["oversight_persons"] == ["Ada Lovelace", "Grace Hopper"]
+
+
+def test_deployer_assertions_complete_the_register():
+    record = euc.open_deployer_register(_ASSET, actor="ops")
+    with pytest.raises(ValueError, match="obligation must be one of"):
+        euc.assert_deployer_obligation(
+            record["id"], "vibes", reference="x", actor="ops",
+            expected_revision=record["revision"],
+        )
+    # Conditional duty not flagged at open: refused.
+    with pytest.raises(ValueError, match="obligation must be one of"):
+        euc.assert_deployer_obligation(
+            record["id"], "worker_information", reference="x", actor="ops",
+            expected_revision=record["revision"],
+        )
+    current = record
+    for key in ("use_per_instructions", "operation_monitoring",
+                "log_retention", "affected_person_information",
+                "authority_cooperation"):
+        current = euc.assert_deployer_obligation(
+            current["id"], key, reference=f"doc://{key}", actor="ops",
+            expected_revision=current["revision"],
+        )
+    current = euc.assign_deployer_oversight(
+        current["id"], persons=["Ada Lovelace"], reference="doc://oversight",
+        actor="ops", expected_revision=current["revision"],
+    )
+    state = euc.deployer_status(current["id"])
+    assert state["complete"] is True
+    assert state["missing"] == []
+    assert euc.list_deployer_registers()[0]["asset_id"] == _ASSET

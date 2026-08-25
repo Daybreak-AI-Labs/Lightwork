@@ -148,3 +148,74 @@ def test_onetrust_import_maps_statuses_and_skips_the_unmappable():
     # The export timestamp survived the import (2026-02-01T10:00:00Z).
     record_time = granted["purposes"]["newsletters"]["last_recorded_at"]
     assert abs(record_time - 1769940000.0) < 1.0
+
+
+def test_notices_are_immutable_versions_receipts_can_resolve():
+    saved = cr.publish_notice("2026-01", "We process your data to ...",
+                              actor="dpo")
+    assert saved["version"] == "2026-01"
+    assert saved["text_sha256"] == hashlib.sha256(
+        b"We process your data to ...").hexdigest()
+    # Published versions never change -- a revision is a new version.
+    from maverick.governed_records import RecordConflict
+    with pytest.raises(RecordConflict):
+        cr.publish_notice("2026-01", "Different wording", actor="dpo")
+    with pytest.raises(ValueError, match="empty"):
+        cr.publish_notice("2026-02", "   ", actor="dpo")
+
+    assert cr.get_notice("2026-01")["text"].startswith("We process")
+    assert cr.get_notice("nope") is None
+    listing = cr.list_notices()
+    assert listing[0]["version"] == "2026-01"
+    assert "text" not in listing[0]
+
+    _grant()  # binds policy_version 2026-01
+    cr.record_consent(
+        "bob@example.com", purpose="analytics", status="granted",
+        policy_version="2026-99", channel="web", actor="ops",
+    )
+    coverage = cr.notice_coverage()
+    assert coverage["covered"] is False
+    assert coverage["uncovered_versions"] == ["2026-99"]
+    cr.publish_notice("2026-99", "Newer notice text.", actor="dpo")
+    assert cr.notice_coverage()["covered"] is True
+
+
+def test_site_scan_reports_cookies_and_known_trackers():
+    page = """
+    <html><head>
+      <script src="https://www.googletagmanager.com/gtag/js?id=G-1"></script>
+      <script src="/static/app.js"></script>
+      <script src="https://cdn.example-partner.io/widget.js"></script>
+      <img src="https://www.acme.example/logo.png">
+      <iframe src="https://player.example-video.net/embed/1"></iframe>
+    </head><body></body></html>
+    """
+
+    def fetcher(url):
+        assert url == "https://www.acme.example/"
+        return (
+            {"set-cookie": [
+                "session=abc; Secure; HttpOnly; SameSite=Lax",
+                "tracker_id=xyz; Domain=.acme.example",
+            ]},
+            page,
+        )
+
+    report = cr.scan_site("https://www.acme.example/", fetcher=fetcher)
+    assert [row["name"] for row in report["cookies"]] == [
+        "session", "tracker_id"]
+    assert report["cookies"][0]["secure"] is True
+    assert report["cookies"][0]["same_site"] == "Lax"
+    assert report["cookies"][1]["secure"] is False
+    assert "www.googletagmanager.com" in report["third_party_hosts"]
+    assert "cdn.example-partner.io" in report["third_party_hosts"]
+    assert "player.example-video.net" in report["third_party_hosts"]
+    # Same-site loads are not third-party.
+    assert "www.acme.example" not in report["third_party_hosts"]
+    assert report["known_trackers"] == ["www.googletagmanager.com"]
+
+
+def test_site_scan_requires_https():
+    with pytest.raises(ValueError, match="https"):
+        cr.scan_site("http://www.acme.example/", fetcher=lambda _u: ({}, ""))

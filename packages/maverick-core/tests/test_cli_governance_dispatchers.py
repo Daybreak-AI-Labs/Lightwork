@@ -394,3 +394,108 @@ def test_data_map_cli_classify_import_and_status(
     assert posture.exit_code == 0, posture.output
     assert "assets 1  flagged 1" in posture.output
     config.reset_config_cache()
+
+
+def test_deployer_cli_tracks_art26_with_named_oversight(
+    runner, tmp_path, monkeypatch,
+):
+    config = _estate_config(
+        tmp_path, monkeypatch, "[eu_conformity]\nenable = true\n",
+    )
+    opened = runner.invoke(main, [
+        "eu-conformity", "deployer", "open", "--asset", "MAA-" + "a" * 32,
+        "--workplace", "--by", "ops",
+    ])
+    assert opened.exit_code == 0, opened.output
+    record_id = opened.output.split()[0]
+
+    status = runner.invoke(main, [
+        "eu-conformity", "deployer", "status", "--record", record_id,
+    ])
+    assert status.exit_code == 0, status.output
+    assert "oversight: UNASSIGNED" in status.output
+
+    oversight = runner.invoke(main, [
+        "eu-conformity", "deployer", "oversight", "--record", record_id,
+        "--person", "Ada Lovelace", "--reference", "doc://oversight",
+        "--revision", "1", "--by", "ops",
+    ])
+    assert oversight.exit_code == 0, oversight.output
+    assert "Ada Lovelace" in oversight.output
+    config.reset_config_cache()
+
+
+def test_vendor_contract_cli_records_and_lists_renewals(
+    runner, tmp_path, monkeypatch,
+):
+    import time as time_module
+
+    config = _estate_config(
+        tmp_path, monkeypatch, "[vendor_management]\nenable = true\n",
+    )
+    registered = runner.invoke(main, [
+        "vendor", "register", "--name", "Acme", "--category", "analytics",
+        "--criticality", "high", "--owner", "procurement", "--by", "ops",
+    ])
+    vendor_id = registered.output.split()[0]
+    recorded = runner.invoke(main, [
+        "vendor", "contract", "record", "--vendor", vendor_id,
+        "--kind", "dpa", "--ref", "doc://dpa",
+        "--renews-at", str(time_module.time() + 5 * 86400), "--by", "ops",
+    ])
+    assert recorded.exit_code == 0, recorded.output
+    renewals = runner.invoke(main, ["vendor", "contract", "renewals"])
+    assert renewals.exit_code == 0, renewals.output
+    assert "due soon  Acme  dpa" in renewals.output
+    config.reset_config_cache()
+
+
+def test_consent_notice_cli_publish_and_coverage(
+    runner, tmp_path, monkeypatch,
+):
+    config = _estate_config(
+        tmp_path, monkeypatch,
+        '[consent_registry]\nenable = true\n'
+        'subject_salt = "cli-test-salt-0123456789abcd"\n',
+    )
+    notice = tmp_path / "notice.txt"
+    notice.write_text("We process personal data to ...", encoding="utf-8")
+    published = runner.invoke(main, [
+        "consent", "notice", "publish", "--version", "2026-01",
+        "--file", str(notice), "--by", "dpo",
+    ])
+    assert published.exit_code == 0, published.output
+    coverage = runner.invoke(main, ["consent", "notice", "coverage"])
+    assert coverage.exit_code == 0, coverage.output
+    assert "covered True" in coverage.output
+    config.reset_config_cache()
+
+
+def test_fairness_cli_computes_and_fails_on_disparity(
+    runner, tmp_path, monkeypatch,
+):
+    config = _estate_config(
+        tmp_path, monkeypatch, "[explainability]\nenable = true\n",
+    )
+    data = tmp_path / "counts.json"
+    data.write_text(json.dumps({"groups": {
+        "group_a": {"selected": 8, "total": 10},
+        "group_b": {"selected": 4, "total": 10},
+    }}), encoding="utf-8")
+    result = runner.invoke(main, [
+        "explainability", "fairness", "--data-file", str(data),
+    ])
+    assert result.exit_code == 1, result.output
+    assert "FAIL: group_b" in result.output
+    assert "min impact ratio 0.500" in result.output
+
+    data.write_text(json.dumps({"groups": {
+        "group_a": {"selected": 8, "total": 10},
+        "group_b": {"selected": 7, "total": 10},
+    }}), encoding="utf-8")
+    result = runner.invoke(main, [
+        "explainability", "fairness", "--data-file", str(data),
+    ])
+    assert result.exit_code == 0, result.output
+    assert "PASS" in result.output
+    config.reset_config_cache()

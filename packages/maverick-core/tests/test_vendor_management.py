@@ -7,6 +7,8 @@ overwrites a vendor already registered here.
 """
 from __future__ import annotations
 
+import time
+
 import pytest
 from maverick import config
 from maverick import vendor_management as vm
@@ -144,3 +146,91 @@ def test_onetrust_import_maps_tiers_and_never_overwrites():
     # The record already here stays the record of truth.
     assert by_name["Globex"]["criticality"] == "critical"
     assert by_name["Globex"]["id"] == existing["id"]
+
+
+def test_contracts_track_renewals_for_the_alert_digest():
+    record = _register()
+    with pytest.raises(ValueError, match="kind"):
+        vm.record_vendor_contract(
+            record["id"], kind="handshake", reference="x", renews_at=1.0,
+            actor="ops", expected_revision=record["revision"],
+        )
+    past = time.time() - 5 * 86400
+    soon = time.time() + 10 * 86400
+    far = time.time() + 300 * 86400
+    saved = vm.record_vendor_contract(
+        record["id"], kind="dpa", reference="doc://dpa", renews_at=past,
+        actor="ops", expected_revision=record["revision"],
+    )
+    saved = vm.record_vendor_contract(
+        saved["id"], kind="msa", reference="doc://msa", renews_at=soon,
+        actor="ops", expected_revision=saved["revision"],
+    )
+    saved = vm.record_vendor_contract(
+        saved["id"], kind="sla", reference="doc://sla", renews_at=far,
+        actor="ops", expected_revision=saved["revision"],
+    )
+    renewals = vm.contract_renewals(due_soon_days=30)
+    assert [entry["kind"] for entry in renewals["overdue"]] == ["dpa"]
+    assert [entry["kind"] for entry in renewals["due_soon"]] == ["msa"]
+    # Re-recording a kind replaces it, never duplicates.
+    saved = vm.record_vendor_contract(
+        saved["id"], kind="dpa", reference="doc://dpa-renewed",
+        renews_at=far, actor="ops", expected_revision=saved["revision"],
+    )
+    assert vm.contract_renewals(due_soon_days=30)["overdue"] == []
+
+
+def test_questionnaire_responses_are_scored_against_risk_answers():
+    record = _register()
+    saved = vm.request_questionnaire(
+        record["id"], assessment_type="vendor_risk", actor="ops",
+        expected_revision=record["revision"],
+    )
+    token = saved["form_path"].removeprefix("/form/")
+    from maverick.assessment import TEMPLATES
+
+    questions = TEMPLATES["vendor_risk"].questions
+    # Answer every question SAFELY except the first, answered with its
+    # risk answer -- the scored rating must be that question's severity.
+    fields = {}
+    for index, question in enumerate(questions):
+        risky = str(question.risk_answer).strip().lower()
+        safe = "no" if risky == "yes" else "yes"
+        fields[question.id] = risky if index == 0 else safe
+    from maverick import form_store
+
+    form_store.append(token, fields)
+    row = vm.questionnaire_responses(record["id"])[0]
+    assert row["status"] == "answered"
+    score = row["score"]
+    assert score["answered"] == len(questions)
+    assert [finding["qid"] for finding in score["findings"]] == [
+        questions[0].id
+    ]
+    assert score["rating"] == questions[0].severity
+    # All-safe answers score clear.
+    form_store.append(token, {
+        question.id: ("no" if str(question.risk_answer).lower() == "yes"
+                       else "yes")
+        for question in questions
+    })
+    row = vm.questionnaire_responses(record["id"])[0]
+    assert row["score"]["rating"] == "clear"
+    assert row["score"]["findings"] == []
+
+
+def test_questionnaire_for_token_resolves_only_its_own_form():
+    record = _register()
+    saved = vm.request_questionnaire(
+        record["id"], assessment_type="vendor_risk", actor="ops",
+        expected_revision=record["revision"],
+    )
+    token = saved["form_path"].removeprefix("/form/")
+    resolved = vm.questionnaire_for_token(token)
+    assert resolved["vendor_id"] == record["id"]
+    assert resolved["assessment_type"] == "vendor_risk"
+    assert resolved["questions"][0]["qid"]
+    assert "risk_answer" not in resolved["questions"][0]
+    assert vm.questionnaire_for_token("not-a-token") is None
+    assert vm.questionnaire_for_token("") is None

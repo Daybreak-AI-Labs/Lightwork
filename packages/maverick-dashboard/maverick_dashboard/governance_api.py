@@ -419,6 +419,93 @@ async def assert_gpai_obligation(
 
 
 # --------------------------------------------------------------------------
+# Art. 26 deployer obligations
+# --------------------------------------------------------------------------
+@router.get("/deployer")
+async def list_deployer_registers(request: Request) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    rows = await _call(conformity.list_deployer_registers)
+    return {
+        "records": rows,
+        "count": len(rows),
+        "obligations": conformity.DEPLOYER_OBLIGATIONS,
+        "conditional_obligations": {
+            key: value[:2]
+            for key, value in conformity.DEPLOYER_CONDITIONAL_OBLIGATIONS.items()
+        },
+    }
+
+
+@router.post("/deployer", status_code=201)
+async def open_deployer_register(
+    request: Request,
+    body: schemas.DeployerOpenIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    record = await _call(
+        conformity.open_deployer_register,
+        body.asset_id,
+        workplace_use=body.workplace_use,
+        public_authority=body.public_authority,
+        controls_input_data=body.controls_input_data,
+        requires_dpia=body.requires_dpia,
+        actor=_actor(request),
+    )
+    status = await _call(conformity.deployer_status, record["id"])
+    return {"record": record, "status": status}
+
+
+@router.get("/deployer/{record_id}")
+async def deployer_register_status(
+    request: Request, record_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    conformity = _module("eu_conformity", "eu_conformity")
+    status = await _record_call(conformity.deployer_status, record_id)
+    return {"status": status}
+
+
+@router.post("/deployer/{record_id}/obligations")
+async def assert_deployer_obligation(
+    request: Request,
+    record_id: str,
+    body: schemas.DeployerObligationIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    await _call(
+        conformity.assert_deployer_obligation,
+        record_id,
+        body.obligation,
+        reference=body.reference,
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+    return await _call(conformity.deployer_status, record_id)
+
+
+@router.post("/deployer/{record_id}/oversight")
+async def assign_deployer_oversight(
+    request: Request,
+    record_id: str,
+    body: schemas.DeployerOversightIn,
+) -> dict[str, Any]:
+    require_permission(request, "operate")
+    conformity = _module("eu_conformity", "eu_conformity")
+    await _call(
+        conformity.assign_deployer_oversight,
+        record_id,
+        persons=body.persons,
+        reference=body.reference,
+        actor=_actor(request),
+        expected_revision=body.expected_revision,
+    )
+    return await _call(conformity.deployer_status, record_id)
+
+
+# --------------------------------------------------------------------------
 # Independent FRIA review (four-eyes)
 # --------------------------------------------------------------------------
 @router.post("/fria/{record_id}/review")

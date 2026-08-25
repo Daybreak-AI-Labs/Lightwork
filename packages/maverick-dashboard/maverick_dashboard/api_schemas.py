@@ -823,6 +823,25 @@ class ConsentIn(BaseModel):
                                       "import)$")
 
 
+class VendorContractIn(BaseModel):
+    """Record one vendor contract with its renewal date (epoch seconds)."""
+    kind: str = Field(..., pattern="^(dpa|msa|sla|addendum|other)$")
+    reference: str = Field(..., min_length=1, max_length=512)
+    renews_at: float = Field(..., gt=0)
+    revision: int = Field(..., ge=1)
+
+
+class NoticePublishIn(BaseModel):
+    """Publish one immutable privacy-notice version."""
+    version: str = Field(..., min_length=1, max_length=64)
+    text: str = Field(..., min_length=1, max_length=200_000)
+
+
+class SiteScanIn(BaseModel):
+    """Scan one page of the operator's own site for cookies and trackers."""
+    url: str = Field(..., min_length=9, max_length=2048)
+
+
 class ConsentSubjectIn(BaseModel):
     """Look up one subject's preferences; POSTed so the subject reference
     never lands in an access log's query string."""

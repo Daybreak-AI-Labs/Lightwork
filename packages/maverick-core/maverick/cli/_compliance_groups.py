@@ -1559,6 +1559,78 @@ def eu_conformity_gpai(action, asset_id, record_id, systemic_risk,
         raise click.ClickException(str(e)) from e
 
 
+@eu_conformity_group.command("deployer")
+@click.argument("action", type=click.Choice(
+    ["open", "assert", "oversight", "status", "list"]))
+@click.option("--asset", "asset_id", default=None, help="Governed asset id.")
+@click.option("--record", "record_id", default=None, help="Register id (ECY-...).")
+@click.option("--workplace", "workplace_use", is_flag=True,
+              help="open: the system is used at the workplace (Art. 26(7)).")
+@click.option("--public-authority", is_flag=True,
+              help="open: deployer is a public authority (Art. 26(8)).")
+@click.option("--controls-input-data", is_flag=True,
+              help="open: deployer controls input data (Art. 26(4)).")
+@click.option("--requires-dpia", is_flag=True,
+              help="open: GDPR Art. 35 DPIA applies (Art. 26(9)).")
+@click.option("--obligation", default=None, help="Art. 26 obligation key.")
+@click.option("--reference", default=None,
+              help="Where the obligation's evidence lives.")
+@click.option("--person", "persons", multiple=True,
+              help="oversight: named natural person (repeatable).")
+@click.option("--revision", type=int, default=0, help="Expected revision (CAS).")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def eu_conformity_deployer(action, asset_id, record_id, workplace_use,
+                           public_authority, controls_input_data,
+                           requires_dpia, obligation, reference, persons,
+                           revision, actor) -> None:
+    """Track the Art. 26 deployer obligations for a high-risk system."""
+    from .. import eu_conformity as euc
+
+    def need(value, name):
+        if value in (None, ""):
+            raise click.ClickException(f"--{name} is required for {action}")
+        return value
+
+    try:
+        if action == "open":
+            record = euc.open_deployer_register(
+                need(asset_id, "asset"), workplace_use=workplace_use,
+                public_authority=public_authority,
+                controls_input_data=controls_input_data,
+                requires_dpia=requires_dpia, actor=need(actor, "by"))
+            click.echo(f"{record['id']} (rev {record['revision']})")
+        elif action == "assert":
+            record = euc.assert_deployer_obligation(
+                need(record_id, "record"), need(obligation, "obligation"),
+                reference=need(reference, "reference"), actor=need(actor, "by"),
+                expected_revision=revision)
+            state = euc.deployer_status(record["id"])
+            click.echo(f"{state['asserted']}/{state['total']} evidenced")
+        elif action == "oversight":
+            if not persons:
+                raise click.ClickException("--person is required for oversight")
+            record = euc.assign_deployer_oversight(
+                need(record_id, "record"), persons=list(persons),
+                reference=need(reference, "reference"), actor=need(actor, "by"),
+                expected_revision=revision)
+            click.echo(f"oversight: {', '.join(persons)} (Art. 26(2))")
+        elif action == "status":
+            state = euc.deployer_status(need(record_id, "record"))
+            click.echo(f"{state['id']}  {state['asserted']}/{state['total']}  "
+                       f"missing: {', '.join(state['missing']) or '-'}  "
+                       f"oversight: "
+                       f"{', '.join(state['oversight_persons']) or 'UNASSIGNED'}")
+        else:
+            for record in euc.list_deployer_registers():
+                state = euc.deployer_status(record["id"])
+                click.echo(f"{record['asset_id']}  "
+                           f"{state['asserted']}/{state['total']}  "
+                           f"oversight "
+                           f"{'set' if state['oversight_persons'] else 'UNASSIGNED'}")
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
 @eu_conformity_group.command("ifu")
 @click.argument("action", type=click.Choice(["open", "assert", "status", "list"]))
 @click.option("--asset", "asset_id", default=None, help="Governed asset id.")
@@ -1649,6 +1721,15 @@ def governance_alerts_due(due_soon_hours, expiring_days, as_json) -> None:
             click.echo(f"eu conformity: {len(conformity['outdated_frias'])} "
                        f"outdated FRIAs, {len(conformity['reassessment_required'])} "
                        "routes need reassessment (Art. 27(2)/43(4))")
+        vendors = sections.get("vendors") or {}
+        if vendors.get("enabled"):
+            click.echo(f"vendor contracts: "
+                       f"{len(vendors['contracts_overdue'])} past renewal, "
+                       f"{len(vendors['contracts_due_soon'])} due soon")
+        estate = sections.get("data_map") or {}
+        if estate.get("enabled"):
+            click.echo(f"data map: {estate['unlinked_flagged_assets']} flagged "
+                       "assets not yet linked to a governing record")
         click.echo(f"attention items: {report['attention_count']}")
     if report["attention_count"]:
         raise SystemExit(1)
@@ -2272,3 +2353,167 @@ def data_map_status_command() -> None:
                f"{posture['unlinked_flagged_assets']}")
     for category, count in posture["by_category"].items():
         click.echo(f"  {category}: {count}")
+
+
+@vendor_group.command("contract")
+@click.argument("action", type=click.Choice(["record", "renewals"]))
+@click.option("--vendor", "vendor_id", default=None, help="Vendor id (VMR-...).")
+@click.option("--kind", default=None,
+              type=click.Choice(["dpa", "msa", "sla", "addendum", "other"]))
+@click.option("--ref", "reference", default=None,
+              help="Where the signed paper lives.")
+@click.option("--renews-at", "renews_at", type=float, default=None,
+              help="Renewal date as an epoch timestamp.")
+@click.option("--due-days", "due_days", type=int, default=30,
+              help="renewals: due-soon horizon in days.")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def vendor_contract(action, vendor_id, kind, reference, renews_at,
+                    due_days, actor) -> None:
+    """Record a vendor contract's renewal date, or list what's due."""
+    from .. import vendor_management as vm
+
+    try:
+        if action == "record":
+            for name, value in (("vendor", vendor_id), ("kind", kind),
+                                ("ref", reference), ("renews-at", renews_at),
+                                ("by", actor)):
+                if value in (None, ""):
+                    raise click.ClickException(f"--{name} is required for record")
+            current = vm.get_vendor(vendor_id)
+            if current is None:
+                raise click.ClickException(f"vendor is not registered: {vendor_id}")
+            saved = vm.record_vendor_contract(
+                vendor_id, kind=kind, reference=reference,
+                renews_at=renews_at, actor=actor,
+                expected_revision=int(current.get("revision") or 0),
+            )
+            click.echo(f"{saved['id']}  contracts {len(saved['contracts'])}")
+        else:
+            renewals = vm.contract_renewals(due_soon_days=due_days)
+            for entry in renewals["overdue"]:
+                click.echo(f"OVERDUE  {entry['vendor']}  {entry['kind']}")
+            for entry in renewals["due_soon"]:
+                click.echo(f"due soon  {entry['vendor']}  {entry['kind']}")
+            if not renewals["overdue"] and not renewals["due_soon"]:
+                click.echo("no contract renewals due")
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
+@consent_group.command("notice")
+@click.argument("action", type=click.Choice(["publish", "list", "coverage"]))
+@click.option("--version", default=None, help="Notice version label.")
+@click.option("--file", "text_file", default=None,
+              help="publish: file with the notice text.")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def consent_notice(action, version, text_file, actor) -> None:
+    """Versioned privacy notices the consent receipts bind to."""
+    from pathlib import Path
+
+    from .. import consent_registry as cr
+
+    try:
+        if action == "publish":
+            for name, value in (("version", version), ("file", text_file),
+                                ("by", actor)):
+                if value in (None, ""):
+                    raise click.ClickException(f"--{name} is required for publish")
+            text = Path(text_file).read_text(encoding="utf-8")
+            saved = cr.publish_notice(version, text, actor=actor)
+            click.echo(f"{saved['version']}  sha {saved['text_sha256'][:16]}...")
+        elif action == "list":
+            rows = cr.list_notices()
+            for row in rows:
+                click.echo(f"{row['version']}  sha {row['text_sha256'][:16]}...")
+            if not rows:
+                click.echo("no notices published")
+        else:
+            state = cr.notice_coverage()
+            click.echo(f"covered {state['covered']}  uncovered: "
+                       f"{', '.join(state['uncovered_versions']) or '-'}")
+            if state["uncovered_versions"]:
+                raise SystemExit(1)
+    except OSError as e:
+        raise click.ClickException(f"could not read {text_file}: {e}") from e
+    except (KeyError, ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+
+
+@consent_group.command("scan-site")
+@click.option("--url", required=True, help="Your own site's https URL.")
+def consent_scan_site(url) -> None:
+    """Scan one page of your own site for cookies and known trackers."""
+    from .. import consent_registry as cr
+
+    try:
+        report = cr.scan_site(url)
+    except (ValueError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"cookies {len(report['cookies'])}  third-party hosts "
+               f"{len(report['third_party_hosts'])}  known trackers "
+               f"{len(report['known_trackers'])}")
+    for host in report["known_trackers"]:
+        click.echo(f"  tracker: {host}")
+
+
+@dsar_group.command("worksheet")
+@click.argument("request_id")
+def dsar_worksheet(request_id: str) -> None:
+    """The estate search plan for one DSAR: where a human should look."""
+    import json as json_module
+
+    from .. import privacy_ops
+
+    try:
+        plan = privacy_ops.dsar_estate_worksheet(request_id)
+    except KeyError as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(json_module.dumps(plan, indent=2, sort_keys=True, default=str))
+
+
+@explainability_group.command("fairness")
+@click.option("--data-file", required=True,
+              help='JSON: {"groups": {"a": {"selected": 8, "total": 10}}}.')
+@click.option("--threshold", type=float, default=0.8,
+              help="Four-fifths threshold (default 0.8).")
+@click.option("--asset", "asset_id", default=None,
+              help="Record as governed evidence against this asset.")
+@click.option("--source", "source_id", default=None, help="Evidence source id.")
+@click.option("--by", "actor", default=None, help="Acting human.")
+def explainability_fairness(data_file, threshold, asset_id, source_id,
+                            actor) -> None:
+    """Compute group-fairness metrics; optionally record them as evidence."""
+    import json as json_module
+    from pathlib import Path
+
+    from .. import fairness_monitor
+
+    try:
+        payload = json_module.loads(
+            Path(data_file).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise click.ClickException(f"could not read {data_file}: {e}") from e
+    groups = payload.get("groups") if isinstance(payload, dict) else None
+    if not isinstance(groups, dict):
+        raise click.ClickException('the data file needs a "groups" object')
+    report = fairness_monitor.metrics_report(groups, threshold=threshold)
+    if report is None:
+        raise click.ClickException(
+            "need at least two groups with outcomes to measure disparity")
+    click.echo(f"min impact ratio {report['min_impact_ratio']:.3f}  "
+               f"parity diff {report['demographic_parity_diff']:.3f}  "
+               f"{'PASS' if report['passed'] else 'FAIL: ' + ', '.join(report['failing_groups'])}")
+    if asset_id:
+        if not actor:
+            raise click.ClickException("--by is required to record evidence")
+        from .. import explainability
+
+        try:
+            evidence = explainability.record_fairness_evidence(
+                asset_id, report, source_id=source_id or "cli", actor=actor,
+            )
+        except (KeyError, ValueError, RuntimeError) as e:
+            raise click.ClickException(str(e)) from e
+        click.echo(f"evidence recorded: {evidence.get('result')}")
+    if not report["passed"]:
+        raise SystemExit(1)

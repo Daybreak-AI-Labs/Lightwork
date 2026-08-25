@@ -2634,6 +2634,112 @@ def list_dsars() -> list[dict]:
     return out
 
 
+#: Data-map categories that identify a person — the assets a DSAR search
+#: plan should send a human to.
+_DSAR_IDENTIFYING_CATEGORIES = frozenset({
+    "email", "phone", "name", "address", "national_id",
+    "date_of_birth", "ip_address", "location",
+})
+
+
+def dsar_estate_worksheet(request_id: str) -> dict:
+    """Where to look for one subject's data, beyond the platform's holdings.
+
+    The fulfillment machinery exports what Lightwork itself holds; this
+    worksheet is the human search plan for the rest of the estate: the
+    data-map assets whose flagged columns identify people, the active
+    vendors who process on the organization's behalf, and (when document
+    sources are connected) a bounded document search for the subject.
+    Every section degrades to ``enabled: false`` when its module is off —
+    the worksheet never fails because part of the estate is unmapped.
+    """
+
+    record = _DSAR.load(str(request_id or "")[:64])
+    if record is None:
+        raise KeyError(f"no such request: {request_id}")
+    subject = str(record.get("subject_id") or "")
+
+    platform: dict = {"enabled": True}
+    try:
+        from . import dsar as dsar_export
+
+        bundle = dsar_export.export_subject_data(subject)
+        platform["sections"] = {
+            key: len(value)
+            for key, value in bundle.items()
+            if isinstance(value, list)
+        }
+    except Exception:
+        platform = {"enabled": False, "error": "unavailable"}
+
+    estate: dict = {"enabled": False}
+    try:
+        from . import data_map as dm
+
+        if dm.enabled():
+            assets = [
+                {
+                    "id": row.get("id"),
+                    "system": row.get("system"),
+                    "name": row.get("name"),
+                    "categories": sorted(
+                        _DSAR_IDENTIFYING_CATEGORIES.intersection(
+                            row.get("categories") or []
+                        )
+                    ),
+                    "links": len(row.get("links") or []),
+                }
+                for row in dm.list_data_assets()
+                if _DSAR_IDENTIFYING_CATEGORIES.intersection(
+                    row.get("categories") or []
+                )
+            ]
+            estate = {"enabled": True, "assets": assets[:100]}
+    except Exception:
+        estate = {"enabled": False, "error": "unavailable"}
+
+    processors: dict = {"enabled": False}
+    try:
+        from . import vendor_management as vm
+
+        if vm.enabled():
+            processors = {
+                "enabled": True,
+                "vendors": [
+                    {"id": row.get("id"), "name": row.get("name")}
+                    for row in vm.list_vendors(status="active")
+                ][:100],
+            }
+    except Exception:
+        processors = {"enabled": False, "error": "unavailable"}
+
+    documents: dict = {"enabled": False}
+    try:
+        from . import doc_discovery
+
+        if doc_discovery.enabled():
+            hits = doc_discovery.discover(
+                subject, keywords=("dsar", "request", "consent", "contract"),
+                limit=8,
+            )
+            documents = {
+                "enabled": True,
+                "hits": [hit.to_dict() for hit in hits],
+            }
+    except Exception:
+        documents = {"enabled": False, "error": "unavailable"}
+
+    return {
+        "request_id": record.get("id"),
+        "kind": record.get("kind"),
+        "status": record.get("status"),
+        "platform_holdings": platform,
+        "data_map": estate,
+        "processors": processors,
+        "documents": documents,
+    }
+
+
 def fulfill_dsar(request_id: str, *, fulfilled_by: str = "") -> dict | None:
     """Fulfill an open request through the REAL machinery.
 
@@ -2965,7 +3071,8 @@ __all__ = [
     "list_incidents", "open_incident", "program_report",
     "ROPA_FIELDS", "RecordConflict", "classify_ai_system", "close_dsar",
     "draft_ropa_from_assessment", "enabled", "export_ropa_art30",
-    "detect_dsar", "fulfill_dsar", "get_ai_system", "get_dpa_review",
+    "detect_dsar", "dsar_estate_worksheet", "fulfill_dsar",
+    "get_ai_system", "get_dpa_review",
     "import_onetrust_ropa", "list_ai_systems", "open_dsar_from_message",
     "list_dpa_reviews", "list_dsars", "list_ropa", "open_dsar",
     "register_ai_system", "register_ai_system_from_assessment",

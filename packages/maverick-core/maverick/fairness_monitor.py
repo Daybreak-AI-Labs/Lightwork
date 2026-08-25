@@ -33,6 +33,8 @@ DEFAULT_WINDOW = 1000          # max outcomes retained (rolling)
 DEFAULT_MIN_SAMPLES = 30       # don't evaluate below this (noise floor)
 DEFAULT_DRIFT_TOLERANCE = 0.1  # alert if min impact ratio falls this far below baseline
 
+FAIRNESS_REPORT_SCHEMA = "lightwork.fairness-report.v1"
+
 
 @dataclass(frozen=True)
 class Observation:
@@ -113,6 +115,32 @@ def compute_metrics(counts: dict, *, threshold: float = DEFAULT_THRESHOLD
         samples=sum(int(g.get("total", 0) or 0) for g in counts.values() if isinstance(g, dict)),
         threshold=threshold,
     )
+
+
+def metrics_report(counts: dict, *, threshold: float = DEFAULT_THRESHOLD
+                   ) -> dict | None:
+    """:func:`compute_metrics` as a schema'd, evidence-recordable dict.
+
+    ``None`` when the counts cannot support a disparity measure (fewer
+    than two populated groups) — record no evidence rather than empty
+    evidence.
+    """
+
+    metrics = compute_metrics(counts, threshold=threshold)
+    if metrics is None:
+        return None
+    return {
+        "schema": FAIRNESS_REPORT_SCHEMA,
+        "rates": dict(metrics.rates),
+        "impact_ratios": dict(metrics.impact_ratios),
+        "min_impact_ratio": metrics.min_impact_ratio,
+        "demographic_parity_diff": metrics.demographic_parity_diff,
+        "equal_opportunity_diff": metrics.equal_opportunity_diff,
+        "failing_groups": list(metrics.failing_groups),
+        "passed": metrics.passed,
+        "samples": metrics.samples,
+        "threshold": metrics.threshold,
+    }
 
 
 class FairnessMonitor:

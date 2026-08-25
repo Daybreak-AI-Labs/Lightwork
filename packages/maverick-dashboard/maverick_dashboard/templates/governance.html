@@ -52,6 +52,15 @@
     {% if conf.outdated_frias %}<span class="gov-chip gov-chip--warn">{{ conf.outdated_frias|length }} assessment(s) reopened</span>{% endif %}
     {% if conf.reassessment_required %}<span class="gov-chip gov-chip--warn">{{ conf.reassessment_required|length }} route(s) need reassessment</span>{% endif %}
     {% endif %}
+    {% set vend = attention.sections.vendors %}
+    {% if vend and vend.enabled %}
+    {% if vend.contracts_overdue %}<span class="gov-chip gov-chip--bad">{{ vend.contracts_overdue|length }} vendor contract(s) past renewal</span>{% endif %}
+    {% if vend.contracts_due_soon %}<span class="gov-chip gov-chip--warn">{{ vend.contracts_due_soon|length }} vendor contract(s) renewing soon</span>{% endif %}
+    {% endif %}
+    {% set dmap = attention.sections.data_map %}
+    {% if dmap and dmap.enabled and dmap.unlinked_flagged_assets %}
+    <span class="gov-chip gov-chip--warn">{{ dmap.unlinked_flagged_assets }} flagged data asset(s) unlinked</span>
+    {% endif %}
   </p>
   {% else %}
   <p class="gov-empty">Nothing needs attention right now.</p>

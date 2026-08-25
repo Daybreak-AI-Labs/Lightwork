@@ -110,6 +110,7 @@ from .api_schemas import (
     LicenseIn,
     LicenseNoteIn,
     ModelCostTierIn,
+    NoticePublishIn,
     OAuthAuthorizeIn,
     OAuthExchangeIn,
     OneTrustImportIn,
@@ -129,6 +130,7 @@ from .api_schemas import (
     SchemaImportIn,
     SharePointSyncIn,
     SignoffIn,
+    SiteScanIn,
     SkillCreateIn,
     SkillInstallIn,
     SkillOut,
@@ -146,6 +148,7 @@ from .api_schemas import (
     TrustRevokeIn,
     UserSuitesIn,
     ValueAssumptionsIn,
+    VendorContractIn,
     VendorIn,
     VendorLinkIn,
     VendorNoteIn,
@@ -2085,6 +2088,18 @@ async def import_onetrust_vendors(request: Request,
             "vendors": [e["name"] for e in imported]}
 
 
+@router.get("/vendors/contracts/renewals")
+async def vendor_contract_renewals(request: Request,
+                                   due_days: int = 30) -> dict:
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    try:
+        return await run_in_threadpool(
+            vm.contract_renewals, due_soon_days=due_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/vendors")
 async def list_vendors(request: Request, status: str = "") -> dict:
     require_permission(request, "operate")
@@ -2224,6 +2239,28 @@ async def record_vendor_note(request: Request, vendor_id: str,
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/vendors/{vendor_id}/contracts", status_code=201)
+async def record_vendor_contract(request: Request, vendor_id: str,
+                                 body: VendorContractIn) -> dict:
+    """Record a contract's renewal date — what the governance-alerts
+    digest watches for 'this DPA lapses in 30 days'."""
+    require_permission(request, "operate")
+    vm = _vendor_management_or_403()
+    from maverick.governed_records import RecordConflict
+    try:
+        return await run_in_threadpool(
+            vm.record_vendor_contract, vendor_id[:64], kind=body.kind,
+            reference=body.reference, renews_at=body.renews_at,
+            actor=_request_actor(request), expected_revision=body.revision,
+        )
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="no such vendor") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 def _consent_registry_or_403():
     from maverick import consent_registry
     if not consent_registry.enabled():
@@ -2295,6 +2332,66 @@ async def import_onetrust_consents(request: Request,
         cr.import_onetrust_consents, body.csv_text,
         imported_by=_request_actor(request),
     )
+
+
+@router.post("/consent/notices", status_code=201)
+async def publish_privacy_notice(request: Request,
+                                 body: NoticePublishIn) -> dict:
+    """Publish one immutable privacy-notice version -- the exact wording a
+    consent receipt's policy_version resolves to."""
+    require_permission(request, "operate")
+    cr = _consent_registry_or_403()
+    from maverick.governed_records import RecordConflict
+    try:
+        return await run_in_threadpool(
+            cr.publish_notice, body.version, body.text,
+            actor=_request_actor(request),
+        )
+    except RecordConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/consent/notices")
+async def list_privacy_notices(request: Request) -> dict:
+    require_permission(request, "operate")
+    cr = _consent_registry_or_403()
+    return {"notices": await run_in_threadpool(cr.list_notices)}
+
+
+@router.get("/consent/notices/coverage")
+async def privacy_notice_coverage(request: Request) -> dict:
+    require_permission(request, "operate")
+    cr = _consent_registry_or_403()
+    return await run_in_threadpool(cr.notice_coverage)
+
+
+@router.get("/consent/notices/{version}")
+async def get_privacy_notice(request: Request, version: str) -> dict:
+    require_permission(request, "operate")
+    cr = _consent_registry_or_403()
+    try:
+        record = await run_in_threadpool(cr.get_notice, version[:64])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such notice")
+    return record
+
+
+@router.post("/consent/site-scan")
+async def consent_site_scan(request: Request, body: SiteScanIn) -> dict:
+    """Scan one page of the operator's own site for cookies and known
+    trackers -- header- and markup-level, never a crawler or a CMP."""
+    require_permission(request, "operate")
+    cr = _consent_registry_or_403()
+    try:
+        return await run_in_threadpool(cr.scan_site, body.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 def _data_map_or_403():
@@ -2449,6 +2546,20 @@ async def list_dsar_requests(request: Request) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     return {"requests": await run_in_threadpool(ops.list_dsars)}
+
+
+@router.get("/privacy/dsar/{request_id}/estate-worksheet")
+async def dsar_estate_worksheet(request: Request, request_id: str) -> dict:
+    """The estate search plan for one DSAR: the platform's own holdings,
+    the identifying data-map assets, the active processors, and (when
+    document sources are connected) a bounded document search."""
+    require_permission(request, "operate")
+    ops = _privacy_ops_or_403()
+    try:
+        return await run_in_threadpool(
+            ops.dsar_estate_worksheet, request_id[:64])
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="no such request") from exc
 
 
 def _dsar_aging_payload(rows: list[dict]) -> dict:

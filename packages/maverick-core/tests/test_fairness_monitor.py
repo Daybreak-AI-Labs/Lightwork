@@ -129,3 +129,23 @@ class TestMonitorAlerting:
         mon = fm.FairnessMonitor(min_samples=4)
         mon.record_batch([("A", True)] * 4 + [("B", False)] * 4)  # min impact 0.0
         assert mon.set_baseline() == 0.0
+
+
+def test_metrics_report_is_schemad_and_evidence_ready():
+    from maverick.fairness_monitor import (
+        FAIRNESS_REPORT_SCHEMA,
+        metrics_report,
+    )
+
+    counts = {
+        "group_a": {"selected": 8, "total": 10},
+        "group_b": {"selected": 4, "total": 10},
+    }
+    report = metrics_report(counts)
+    assert report["schema"] == FAIRNESS_REPORT_SCHEMA
+    assert report["min_impact_ratio"] == 0.5
+    assert report["failing_groups"] == ["group_b"]
+    assert report["passed"] is False
+    assert report["samples"] == 20
+    # One populated group: no disparity to measure, no report.
+    assert metrics_report({"only": {"selected": 1, "total": 2}}) is None

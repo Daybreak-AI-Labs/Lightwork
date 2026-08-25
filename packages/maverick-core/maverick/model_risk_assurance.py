@@ -92,6 +92,7 @@ _EVIDENCE_KINDS = frozenset({
     "incident_analysis",
     "human_oversight_test",
     "explainability",
+    "fairness",
 })
 _EVIDENCE_RESULTS = frozenset({"passed", "failed", "inconclusive"})
 _REVIEW_DECISIONS = frozenset({"approved", "rejected", "revoked"})

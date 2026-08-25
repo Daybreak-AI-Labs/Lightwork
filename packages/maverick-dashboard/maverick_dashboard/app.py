@@ -2077,12 +2077,13 @@ async def spend_page(request: Request) -> HTMLResponse:
 # One assessment engine, one workspace chassis per department: each
 # department page filters the same records/templates to its own types.
 PRIVACY_ASSESSMENT_TYPES = frozenset(
-    {"pia", "dpia", "lia", "ccpa", "lgpd", "pipeda", "aira", "vendor_risk",
-     "tia"})
+    {"pia", "dpia", "lia", "ccpa", "lgpd", "pipeda", "us_state_privacy",
+     "colorado_admt", "nyc_ll144", "texas_traiga", "illinois_hb3773",
+     "aira", "vendor_risk", "tia"})
 FINANCE_ASSESSMENT_TYPES = frozenset(
     {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"})
 SECURITY_ASSESSMENT_TYPES = frozenset({
-    "soc2", "iso27001", "nist_csf", "nist_800_53", "cis_v8",
+    "soc2", "iso27001", "iso42001", "nist_csf", "nist_800_53", "cis_v8",
     "pci_dss", "hipaa", "cmmc_l2", "fedramp_moderate",
 })
 
@@ -5750,16 +5751,50 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
                               f"you can close this page.")
 
 
+def _vendor_questionnaire_for(token: str) -> dict | None:
+    """The vendor questionnaire this token addresses, or None. Never raises —
+    the form endpoints must stay usable when the register is off."""
+    try:
+        from maverick import vendor_management
+        return vendor_management.questionnaire_for_token(token)
+    except Exception:
+        return None
+
+
+@app.get("/form/{token}", response_class=HTMLResponse)
+async def form_page(request: Request, token: str) -> HTMLResponse:
+    """The public questionnaire page a vendor lands on from their link.
+
+    Renders the questionnaire's template questions as a plain yes/no form
+    that posts back to the same token — no account, no auth; the
+    unguessable token is the addressing secret, exactly as for POST.
+    Only vendor-questionnaire tokens render a page; automation-form
+    tokens stay POST-only and 404 here."""
+    questionnaire = await run_in_threadpool(_vendor_questionnaire_for, token)
+    if questionnaire is None:
+        raise HTTPException(status_code=404, detail="no such form")
+    return templates.TemplateResponse(
+        request, "form_questionnaire.html",
+        {"questionnaire": questionnaire, "token": token},
+    )
+
+
 @app.post("/form/{token}")
 async def form_submit(request: Request, token: str) -> JSONResponse:
     """Record a hosted-form submission under ``token`` so a ``form`` event trigger
     fires a flow with the submitted fields as data. Public by design (a form is
     meant to be filled by anyone with the link); the unguessable ``token`` in the
     path is the addressing secret, the body is size/field-bounded, and firing is
-    rate-limited. Gated on event triggers being enabled (404 otherwise)."""
+    rate-limited. Gated on event triggers being enabled — except a vendor
+    questionnaire token, which stays answerable while only the vendor
+    register is on (404 otherwise)."""
     from maverick import automation_events
     if not automation_events.enabled():
-        raise HTTPException(status_code=404, detail="event triggers are disabled")
+        questionnaire = await run_in_threadpool(
+            _vendor_questionnaire_for, token)
+        if questionnaire is None:
+            raise HTTPException(status_code=404,
+                                detail="event triggers are disabled")
     fields: dict = {}
     ctype = request.headers.get("content-type", "")
     if "application/json" in ctype:

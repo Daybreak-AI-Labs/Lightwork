@@ -15,7 +15,8 @@ _CONFIG = (
     "[vendor_management]\nenable = true\n\n"
     "[consent_registry]\nenable = true\n"
     'subject_salt = "dashboard-test-salt-0123456789"\n\n'
-    "[data_map]\nenable = true\n"
+    "[data_map]\nenable = true\n\n"
+    "[privacy_ops]\nenable = true\n"
 )
 
 
@@ -219,3 +220,96 @@ def test_sharepoint_sync_without_a_token_is_503():
                        json={"owner": "it"})
     assert resp.status_code == 503
     assert "Sites.Read.All" in resp.json()["detail"]
+
+
+def test_vendor_contracts_and_renewals_over_the_api():
+    import time as time_module
+
+    vendor = client.post("/api/v1/vendors", json={
+        "name": "Hooli", "category": "cloud",
+        "criticality": "high", "owner": "it"}).json()
+    recorded = client.post(
+        f"/api/v1/vendors/{vendor['id']}/contracts",
+        json={"kind": "dpa", "reference": "doc://dpa",
+              "renews_at": time_module.time() + 5 * 86400,
+              "revision": vendor["revision"]})
+    assert recorded.status_code == 201, recorded.text
+    renewals = client.get("/api/v1/vendors/contracts/renewals")
+    assert renewals.status_code == 200
+    assert [entry["kind"] for entry in renewals.json()["due_soon"]] == ["dpa"]
+    assert renewals.json()["overdue"] == []
+
+
+def test_privacy_notices_and_site_scan_validation():
+    published = client.post("/api/v1/consent/notices", json={
+        "version": "2026-01", "text": "We process personal data to ..."})
+    assert published.status_code == 201, published.text
+    dup = client.post("/api/v1/consent/notices", json={
+        "version": "2026-01", "text": "Other wording"})
+    assert dup.status_code == 409
+
+    listing = client.get("/api/v1/consent/notices")
+    assert listing.json()["notices"][0]["version"] == "2026-01"
+    single = client.get("/api/v1/consent/notices/2026-01")
+    assert single.status_code == 200
+    assert single.json()["text"].startswith("We process")
+    assert client.get("/api/v1/consent/notices/nope").status_code == 404
+
+    coverage = client.get("/api/v1/consent/notices/coverage")
+    assert coverage.status_code == 200
+    assert coverage.json()["covered"] is True
+
+    scan = client.post("/api/v1/consent/site-scan",
+                       json={"url": "http://insecure.example/"})
+    assert scan.status_code == 422
+    assert "https" in scan.json()["detail"]
+
+
+def test_questionnaire_page_and_submission_without_automation_events():
+    vendor = client.post("/api/v1/vendors", json={
+        "name": "Pied Piper", "category": "compression",
+        "criticality": "medium", "owner": "it"}).json()
+    sent = client.post(
+        f"/api/v1/vendors/{vendor['id']}/questionnaires",
+        json={"assessment_type": "vendor_risk",
+              "revision": vendor["revision"]}).json()
+    form_path = sent["form_path"]
+
+    # The vendor's link renders the questionnaire -- no account, no auth.
+    page = client.get(form_path)
+    assert page.status_code == 200
+    assert "Pied Piper" in page.text
+    assert "Submit answers" in page.text
+    assert client.get("/form/not-a-real-token").status_code == 404
+
+    # Submissions land even though automation events are disabled: the
+    # questionnaire token itself authorizes the POST.
+    posted = client.post(form_path, json={"vr_q1": "yes"})
+    assert posted.status_code == 201, posted.text
+    back = client.get(f"/api/v1/vendors/{vendor['id']}/questionnaires")
+    assert back.json()["questionnaires"][0]["status"] == "answered"
+    assert back.json()["questionnaires"][0]["score"] is not None
+
+    # A non-questionnaire token stays gated on automation events.
+    assert client.post("/form/other-token", json={"x": "1"}).status_code == 404
+
+
+def test_dsar_estate_worksheet_over_the_api():
+    opened = client.post("/api/v1/privacy/dsar", json={
+        "subject_id": "alice@example.com", "kind": "access"})
+    assert opened.status_code == 201, opened.text
+    request_id = opened.json()["id"]
+
+    client.post("/api/v1/data-map/assets", json={
+        "name": "crm.contacts", "system": "snowflake", "kind": "table",
+        "owner": "data-team", "columns": ["id", "email"]})
+
+    plan = client.get(f"/api/v1/privacy/dsar/{request_id}/estate-worksheet")
+    assert plan.status_code == 200, plan.text
+    body = plan.json()
+    assert body["platform_holdings"]["enabled"] is True
+    assert [asset["name"] for asset in body["data_map"]["assets"]] == [
+        "crm.contacts"]
+    assert client.get(
+        "/api/v1/privacy/dsar/DSAR-none/estate-worksheet"
+    ).status_code == 404
