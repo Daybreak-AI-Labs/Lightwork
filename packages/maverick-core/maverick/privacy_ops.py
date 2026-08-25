@@ -1759,6 +1759,11 @@ def _ooxml_parts(data: bytes, matcher, *, max_parts: int) -> list[str]:
     make "which entry wins" ambiguous), and a bounded read so
     ``ZipFile.read`` can never allocate a forged body -- now applies to
     every OOXML format instead of living in one branch.
+
+    All or nothing: if any wanted part breaches a bound this returns no
+    parts at all, so the caller reports "could not read" rather than
+    silently handing back a truncated document. A partial read that looks
+    complete is how a scan reports "clean" on a file it never finished.
     """
     import io
     import zipfile
