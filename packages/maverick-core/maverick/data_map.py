@@ -55,13 +55,26 @@ _MAX_SITES = 50
 _GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 _GRAPH_TIMEOUT_SECONDS = 20.0
 #: File-content scan bounds: a bounded sample of a site's document library,
-#: not a crawler. Text formats only -- the deterministic classifier reads
-#: characters, not office-binary containers.
+#: not a crawler.
 _MAX_FILES_SCANNED = 25
 _MAX_FILE_SAMPLE_CHARS = 100_000
 _MAX_FILE_BYTES = 5_000_000
 _TEXT_FILE_SUFFIXES = (".csv", ".json", ".log", ".md", ".ndjson",
                        ".tsv", ".txt", ".yaml", ".yml")
+#: Document formats the platform reads with the STDLIB ALONE, via the same
+#: hardened extractor the DPA/vendor-paper pipelines use (OOXML containers
+#: and untrusted PDF content streams). Legacy .doc/.xls and images stay off
+#: this list: reading them needs a third-party parser, which is a decision
+#: to take deliberately, not to smuggle in through a scanner.
+_DOCUMENT_FILE_MIMES = {
+    ".docx": ("application/vnd.openxmlformats-officedocument"
+              ".wordprocessingml.document"),
+    ".pptx": ("application/vnd.openxmlformats-officedocument"
+              ".presentationml.presentation"),
+    ".xlsx": ("application/vnd.openxmlformats-officedocument"
+              ".spreadsheetml.sheet"),
+    ".pdf": "application/pdf",
+}
 #: Graph identifiers appear inside request paths; refuse anything that could
 #: smuggle path segments or query strings (site ids are hostname,guid,guid
 #: composites; item ids are base64ish and may contain "!").
@@ -669,8 +682,11 @@ def sync_sharepoint_sites(
     return {"imported": imported, "skipped": skipped}
 
 
-def _default_graph_download(url: str, token: str) -> str:
-    """Download one drive item's text through the SSRF-pinned client.
+def _default_graph_download(url: str, token: str) -> bytes:
+    """Download one drive item's BYTES through the SSRF-pinned client.
+
+    Bytes, not text: an OOXML container or PDF has to reach the extractor
+    intact, and a text file is decoded by the caller that knows its kind.
 
     ``GET .../content`` answers ``302 Found`` with a preauthenticated
     download URL in ``Location`` (no Authorization header on that hop --
@@ -705,7 +721,109 @@ def _default_graph_download(url: str, token: str) -> str:
     if response.status_code != 200:
         raise DataMapError(
             f"file download returned HTTP {response.status_code}")
-    return response.text[:_MAX_FILE_SAMPLE_CHARS]
+    return response.content[:_MAX_FILE_BYTES]
+
+
+def _classify_files(
+    candidates,
+    fetch,
+    *,
+    listed: int,
+) -> dict[str, Any]:
+    """Sample listed files, classify each, and return EVIDENCE only.
+
+    ``candidates`` yields ``(name, key, size)``; ``fetch(key)`` returns the
+    file's bytes or raises :class:`DataMapError`. Shared by every backing
+    store so the sampling bounds, the routing between plain text and the
+    stdlib document extractor, and the "unreadable is NOT clean" rule are
+    written once and cannot drift apart per connector.
+    """
+
+    from .content_classifier import classify_text
+
+    # The same hardened extractor the DPA and vendor-paper pipelines use --
+    # imported at call time to keep the module graph acyclic.
+    from .privacy_ops import _document_text
+
+    counts: dict[str, int] = {}
+    flagged_files: list[dict[str, Any]] = []
+    sampled = 0
+    skipped = 0
+    for name, key, size in candidates:
+        lowered = str(name or "").lower()
+        suffix = f".{lowered.rsplit('.', 1)[-1]}" if "." in lowered else ""
+        document_mime = _DOCUMENT_FILE_MIMES.get(suffix)
+        if ((suffix not in _TEXT_FILE_SUFFIXES and document_mime is None)
+                or size > _MAX_FILE_BYTES):
+            skipped += 1
+            continue
+        try:
+            payload = fetch(key)
+        except DataMapError:
+            skipped += 1
+            continue
+        if document_mime is None:
+            sample = payload.decode("utf-8", errors="replace")
+        else:
+            sample = _document_text(payload, document_mime)
+            if not sample.strip():
+                # An unreadable container (a scanned PDF, an encrypted or
+                # bomb-shaped OOXML) is NOT evidence that the file is clean.
+                # Count it as skipped so the record can never imply coverage
+                # the scan did not actually have.
+                skipped += 1
+                continue
+        sampled += 1
+        report = classify_text(sample[:_MAX_FILE_SAMPLE_CHARS])
+        if report["categories"]:
+            flagged_files.append(
+                {"name": str(name)[:256], "categories": report["categories"]})
+        for category, n in report["counts"].items():
+            counts[category] = counts.get(category, 0) + int(n)
+    return {
+        "counts": counts,
+        "categories": sorted(counts),
+        "files_listed": listed,
+        "files_sampled": sampled,
+        "files_skipped": skipped,
+        "flagged_files": flagged_files[:_MAX_FILES_SCANNED],
+    }
+
+
+def _record_file_scan(asset_id: str, evidence: dict[str, Any], *,
+                      scope: dict[str, Any], action: str,
+                      operator: str, expected_revision: int) -> dict[str, Any]:
+    """Merge one scan's evidence into the asset under CAS."""
+
+    found = evidence["categories"]
+
+    def mutate(value: dict[str, Any]) -> None:
+        merged = sorted(set(value.get("categories") or []) | set(found))
+        value["categories"] = merged
+        value["content_categories"] = found
+        value["content_counts"] = dict(sorted(evidence["counts"].items()))
+        value["content_verified_at"] = time.time()
+        value["content_verified_by"] = operator
+        value["special_category"] = bool(
+            SPECIAL_CATEGORIES.intersection(merged))
+        value["file_scan"] = {
+            **scope,
+            "files_listed": evidence["files_listed"],
+            "files_sampled": evidence["files_sampled"],
+            "files_skipped": evidence["files_skipped"],
+            "flagged_files": evidence["flagged_files"],
+        }
+
+    saved = _ASSETS.update(
+        _text(asset_id, "asset_id", 64),
+        mutate,
+        expected_revision=int(expected_revision),
+        action=action,
+        actor=operator,
+    )
+    if saved is None:
+        raise KeyError(f"data asset is not registered: {asset_id}")
+    return dict(saved)
 
 
 def scan_sharepoint_site_files(
@@ -715,17 +833,21 @@ def scan_sharepoint_site_files(
     actor: str,
     expected_revision: int,
     fetcher: Callable[[str], dict[str, Any]] | None = None,
-    downloader: Callable[[str], str] | None = None,
+    downloader: Callable[[str], bytes] | None = None,
 ) -> dict[str, Any]:
     """Content-scan a SharePoint site's document library into its asset.
 
     Lists ``GET /sites/{site-id}/drive/root/children`` (application
     permission ``Files.Read.All``; ``Sites.Read.All`` also grants it), then
-    samples up to ``_MAX_FILES_SCANNED`` text-format files via
+    samples up to ``_MAX_FILES_SCANNED`` readable files via
     ``GET .../items/{id}/content`` and runs the deterministic content
-    classifier over each. What lands on the asset is EVIDENCE, not
-    content: per-category counts, which file names were flagged, and the
-    verification stamp -- never a byte of the files themselves.
+    classifier over each. Readable means plain-text formats plus the
+    documents the stdlib extractor handles -- docx, xlsx, pptx and PDF
+    content streams -- so the register covers the formats a policy
+    document, an HR roster or an export actually arrives in. What lands on
+    the asset is EVIDENCE, not content: per-category counts, which file
+    names were flagged, and the verification stamp -- never a byte of the
+    files themselves.
 
     ``site_id`` is the Graph site identifier from the census
     (``sync_sharepoint_sites``). One listing page, bounded -- a sample,
@@ -733,8 +855,6 @@ def scan_sharepoint_site_files(
     """
 
     settings = _require_enabled()
-    from .content_classifier import classify_text
-
     operator = _text(actor, "actor", 256)
     site = str(site_id or "").strip()
     if not _GRAPH_ID_RE.fullmatch(site):
@@ -752,7 +872,7 @@ def scan_sharepoint_site_files(
             def fetcher(target: str) -> dict[str, Any]:
                 return _default_graph_fetch(target, token)
         if downloader is None:
-            def downloader(target: str) -> str:
+            def downloader(target: str) -> bytes:
                 return _default_graph_download(target, token)
 
     listing = fetcher(
@@ -762,65 +882,111 @@ def scan_sharepoint_site_files(
     if not isinstance(rows, list):
         raise DataMapError("Microsoft Graph returned an unexpected shape")
 
-    counts: dict[str, int] = {}
-    flagged_files: list[dict[str, Any]] = []
-    sampled = 0
-    skipped = 0
-    for row in rows[:_MAX_FILES_SCANNED]:
-        if not isinstance(row, dict) or "file" not in row:
-            skipped += 1
-            continue
-        name = str(row.get("name") or "")
-        item_id = str(row.get("id") or "")
-        size = int(row.get("size") or 0)
-        if (not name.lower().endswith(_TEXT_FILE_SUFFIXES)
-                or not _GRAPH_ID_RE.fullmatch(item_id)
-                or size > _MAX_FILE_BYTES):
-            skipped += 1
-            continue
-        try:
-            sample = downloader(
-                f"{_GRAPH_ROOT}/sites/{site}/drive/items/{item_id}/content")
-        except DataMapError:
-            skipped += 1
-            continue
-        sampled += 1
-        report = classify_text(sample[:_MAX_FILE_SAMPLE_CHARS])
-        if report["categories"]:
-            flagged_files.append(
-                {"name": name[:256], "categories": report["categories"]})
-        for category, n in report["counts"].items():
-            counts[category] = counts.get(category, 0) + int(n)
+    def candidates():
+        for row in rows[:_MAX_FILES_SCANNED]:
+            if not isinstance(row, dict) or "file" not in row:
+                yield "", "", _MAX_FILE_BYTES + 1      # counted as skipped
+                continue
+            item_id = str(row.get("id") or "")
+            if not _GRAPH_ID_RE.fullmatch(item_id):
+                # A hostile id must never be spliced into a request path.
+                yield "", "", _MAX_FILE_BYTES + 1
+                continue
+            yield (str(row.get("name") or ""), item_id,
+                   int(row.get("size") or 0))
 
-    found = sorted(counts)
-
-    def mutate(value: dict[str, Any]) -> None:
-        merged = sorted(set(value.get("categories") or []) | set(found))
-        value["categories"] = merged
-        value["content_categories"] = found
-        value["content_counts"] = dict(sorted(counts.items()))
-        value["content_verified_at"] = time.time()
-        value["content_verified_by"] = operator
-        value["special_category"] = bool(
-            SPECIAL_CATEGORIES.intersection(merged))
-        value["file_scan"] = {
-            "site_id": site,
-            "files_listed": len(rows),
-            "files_sampled": sampled,
-            "files_skipped": skipped,
-            "flagged_files": flagged_files[:_MAX_FILES_SCANNED],
-        }
-
-    saved = _ASSETS.update(
-        _text(asset_id, "asset_id", 64),
-        mutate,
-        expected_revision=int(expected_revision),
-        action="scan_sharepoint_site_files",
-        actor=operator,
+    evidence = _classify_files(
+        candidates(),
+        lambda item_id: downloader(
+            f"{_GRAPH_ROOT}/sites/{site}/drive/items/{item_id}/content"),
+        listed=len(rows),
     )
-    if saved is None:
-        raise KeyError(f"data asset is not registered: {asset_id}")
-    return dict(saved)
+    return _record_file_scan(
+        asset_id, evidence, scope={"site_id": site},
+        action="scan_sharepoint_site_files",
+        operator=operator, expected_revision=expected_revision)
+
+
+def scan_s3_bucket_objects(
+    asset_id: str,
+    *,
+    bucket: str,
+    prefix: str = "",
+    actor: str,
+    expected_revision: int,
+    lister: Callable[[str, str], list[dict[str, Any]]] | None = None,
+    getter: Callable[[str], bytes] | None = None,
+) -> dict[str, Any]:
+    """Content-scan one bounded page of an S3 prefix into its asset.
+
+    Same contract as the SharePoint scan and the same shared core: one
+    listing page (``ListObjectsV2``, ``MaxKeys`` bounded), bounded samples
+    of the readable formats, and EVIDENCE only on the record -- category
+    counts and flagged object KEYS, never object bytes. Reads only:
+    ``s3:ListBucket`` and ``s3:GetObject``.
+
+    The AWS client is the platform's existing optional ``[s3]`` extra,
+    imported lazily; tests inject ``lister``/``getter`` instead, so the
+    scan is exercised with no cloud account and no credentials.
+    """
+
+    _require_enabled()
+    operator = _text(actor, "actor", 256)
+    bucket_name = _text(bucket, "bucket", 255)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,253}[a-z0-9]", bucket_name):
+        raise ValueError("bucket must be a valid S3 bucket name")
+    key_prefix = str(prefix or "")[:512]
+    if "\x00" in key_prefix:
+        raise ValueError("prefix must not contain NUL")
+
+    if lister is None or getter is None:
+        try:
+            import boto3
+        except ImportError as exc:      # pragma: no cover - optional extra
+            raise DataMapConfigError(
+                "the S3 object scan needs the [s3] extra (boto3); install it "
+                "or inject a lister/getter"
+            ) from exc
+        client = boto3.client("s3")
+        if lister is None:
+            def lister(name: str, where: str) -> list[dict[str, Any]]:
+                page = client.list_objects_v2(
+                    Bucket=name, Prefix=where, MaxKeys=_MAX_FILES_SCANNED)
+                return list(page.get("Contents") or [])
+        if getter is None:
+            def getter(key: str) -> bytes:
+                body = client.get_object(Bucket=bucket_name, Key=key)["Body"]
+                return body.read(_MAX_FILE_BYTES)
+
+    objects = lister(bucket_name, key_prefix)
+    if not isinstance(objects, list):
+        raise DataMapError("the S3 listing returned an unexpected shape")
+
+    def candidates():
+        for row in objects[:_MAX_FILES_SCANNED]:
+            if not isinstance(row, dict):
+                yield "", "", _MAX_FILE_BYTES + 1
+                continue
+            key = str(row.get("Key") or "")
+            if not key or key.endswith("/"):        # a folder marker
+                yield "", "", _MAX_FILE_BYTES + 1
+                continue
+            yield key, key, int(row.get("Size") or 0)
+
+    def fetch(key: str) -> bytes:
+        try:
+            return getter(key)
+        except DataMapError:
+            raise
+        except Exception as exc:        # an unreadable object is a skip
+            raise DataMapError(f"s3 object unreadable: {type(exc).__name__}") from exc
+
+    evidence = _classify_files(candidates(), fetch, listed=len(objects))
+    return _record_file_scan(
+        asset_id, evidence,
+        scope={"bucket": bucket_name, "prefix": key_prefix},
+        action="scan_s3_bucket_objects",
+        operator=operator, expected_revision=expected_revision)
 
 
 __all__ = [
@@ -844,6 +1010,7 @@ __all__ = [
     "link_asset_record",
     "list_data_assets",
     "register_data_asset",
+    "scan_s3_bucket_objects",
     "scan_sharepoint_site_files",
     "sync_sharepoint_sites",
 ]

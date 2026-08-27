@@ -637,7 +637,7 @@ jobs:
     # committed to the baseline in the open. requirements/ci.txt keeps the
     # measurement reproducible instead of absorbing dependency drift.
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -667,12 +667,13 @@ jobs:
         env:
           MAVERICK_TEST_SECURE_DEFAULT: "1"
           PYTHONFAULTHANDLER: "1"
-        # Scoped to maverick-core because that is where the baseline was
-        # measured and where every control the posture flips lives (audit
-        # signing, at-rest encryption, consent, the tool-risk ceiling).
-        # Widening it to the whole workspace needs a measurement first --
-        # asserting a baseline that was never taken is the defect class this
-        # PR exists to close.
+        # Scope: the WHOLE workspace. It began scoped to maverick-core --
+        # where every control the posture flips lives -- because that was
+        # the only tree the baseline had actually been measured over, and
+        # asserting a baseline nobody took is the defect class this gate
+        # exists to close. The measurement has since been taken across the
+        # workspace (20,899 passed, zero posture failures), so the claim
+        # and the coverage now match.
         #
         # With an empty baseline, pytest exit 1 means a real posture failure
         # and --ci fails on it as "new". Other pytest exit codes
@@ -682,8 +683,8 @@ jobs:
         run: |
           set +e
           set -o pipefail
-          timeout --verbose --signal=ABRT --kill-after=30s 25m \
-            python -m pytest packages/maverick-core/tests -q -p no:randomly \
+          timeout --verbose --signal=ABRT --kill-after=30s 40m \
+            python -m pytest -q -p no:randomly \
               --tb=no --timeout=180 --timeout-method=signal \
             2>&1 | tee posture-report.txt
           pytest_status=${PIPESTATUS[0]}
