@@ -10,8 +10,8 @@ Publication target: origin/claude/aigov-gap-buildout
 
 Commit message: wip: AI governance gap buildout (G1-G27) - handoff state
 
-Current state: the follow-on additions described in this revision are local
-working-tree changes and are not yet committed or pushed.
+Current state: the follow-on additions described in this revision are committed
+and pushed to `origin/claude/aigov-gap-buildout`; main remains untouched.
 
 ## Executive result
 
