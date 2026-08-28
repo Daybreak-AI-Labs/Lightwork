@@ -454,6 +454,34 @@ def require_enabled() -> None:
         )
 
 
+def _configured_verification_adapter_name() -> str | None:
+    """Return the one closed, explicitly selected verification adapter."""
+
+    try:
+        from .config import load_config
+
+        config = load_config()
+    except Exception:
+        raise MediaProvenanceConfigError(
+            "AI media provenance configuration is unavailable"
+        ) from None
+    if not isinstance(config, Mapping):
+        raise MediaProvenanceConfigError(
+            "AI media provenance configuration is malformed"
+        )
+    section = config.get("ai_media_provenance")
+    if not isinstance(section, Mapping):
+        return None
+    selected = section.get("verification_adapter")
+    if selected is None:
+        return None
+    if selected != "c2patool":
+        raise MediaProvenanceConfigError(
+            "ai_media_provenance.verification_adapter must be exactly c2patool"
+        )
+    return selected
+
+
 def _assertions(value: object) -> tuple[str, ...]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise ValueError("assertion_codes must be an array")
@@ -638,28 +666,51 @@ class MediaProvenanceService:
         signing_configured = self._signer is not None
         verification_available = _adapter_available(self._verifier)
         signing_available = _adapter_available(self._signer)
+
+        def capability(
+            adapter: C2PAVerifier | C2PASigner | None,
+            *,
+            configured: bool,
+            available: bool,
+        ) -> dict[str, Any]:
+            adapter_id: str | None = None
+            adapter_version: str | None = None
+            if adapter is not None:
+                try:
+                    adapter_id = _token(adapter.adapter_id, "adapter_id")
+                except (AttributeError, TypeError, ValueError):
+                    pass
+                if available:
+                    try:
+                        adapter_id, adapter_version = _adapter_identity(adapter)
+                    except MediaProvenanceUnavailable:
+                        available = False
+            return {
+                "configured": configured,
+                "available": available,
+                "status": (
+                    "available"
+                    if available
+                    else "unavailable" if configured else "unsupported"
+                ),
+                "adapter_id": adapter_id,
+                "adapter_version": adapter_version,
+            }
+
         return {
             "enabled": enabled() if self._enforce_feature else True,
             "standard": "C2PA",
             "implementation": "external_adapter_required",
-            "verification": {
-                "configured": verification_configured,
-                "available": verification_available,
-                "status": (
-                    "available"
-                    if verification_available
-                    else "unavailable" if verification_configured else "unsupported"
-                ),
-            },
-            "signing": {
-                "configured": signing_configured,
-                "available": signing_available,
-                "status": (
-                    "available"
-                    if signing_available
-                    else "unavailable" if signing_configured else "unsupported"
-                ),
-            },
+            "verification": capability(
+                self._verifier,
+                configured=verification_configured,
+                available=verification_available,
+            ),
+            "signing": capability(
+                self._signer,
+                configured=signing_configured,
+                available=signing_available,
+            ),
             "limitations": list(STANDARDS_LIMITATIONS),
         }
 
@@ -1558,10 +1609,15 @@ default_service = MediaProvenanceService()
 
 
 def configured_media_provenance() -> MediaProvenanceService:
-    """Return the feature-gated service; adapter status remains explicit."""
+    """Build the explicitly selected verifier; never infer signing custody."""
 
     require_enabled()
-    return default_service
+    selected = _configured_verification_adapter_name()
+    if selected is None:
+        return default_service
+    from .ai_media_provenance_c2pa import C2PAToolVerifier
+
+    return MediaProvenanceService(verifier=C2PAToolVerifier())
 
 
 __all__ = [

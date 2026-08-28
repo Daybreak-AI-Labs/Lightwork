@@ -184,6 +184,47 @@ def _module(name: str, knob: str):
     return module
 
 
+def _vendor_portal_module():
+    """Resolve the separately opted-in external vendor collaboration plane."""
+
+    portal = importlib.import_module("maverick.ai_vendor_portal")
+    if portal.enabled():
+        return portal
+    try:
+        from maverick.config import config_source_errors, load_global_config
+
+        errors = config_source_errors(include_tenant=False)
+        config = load_global_config()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="AI vendor portal configuration is unavailable",
+        ) from exc
+    if errors or not isinstance(config, Mapping):
+        raise HTTPException(
+            status_code=503,
+            detail="AI vendor portal configuration is unreadable",
+        )
+    section = config.get("ai_vendor_risk")
+    if not isinstance(section, Mapping) or section.get("enable") is not True:
+        raise HTTPException(
+            status_code=403,
+            detail="AI vendor risk is disabled ([ai_vendor_risk] enable)",
+        )
+    if section.get("portal_enable") is not True:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "external AI vendor responses are disabled "
+                "([ai_vendor_risk] portal_enable)"
+            ),
+        )
+    raise HTTPException(
+        status_code=503,
+        detail="AI vendor portal dependency is unavailable",
+    )
+
+
 def _raise_ai_cost_collector_http_error(exc: Exception) -> None:
     from maverick.ai_cost_collectors import (
         AICostCollectorConfigError,
@@ -199,6 +240,54 @@ def _raise_ai_cost_collector_http_error(exc: Exception) -> None:
     if isinstance(
         exc,
         (AICostCollectorProtocolError, AICostCollectorTransportError),
+    ):
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+def _raise_vendor_portal_http_error(exc: Exception) -> None:
+    from maverick.ai_vendor_portal import (
+        AIVendorPortalAuthError,
+        AIVendorPortalConfigError,
+        AIVendorPortalConflict,
+        AIVendorPortalStateError,
+    )
+
+    if isinstance(exc, AIVendorPortalConfigError):
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if isinstance(exc, AIVendorPortalAuthError):
+        raise HTTPException(status_code=401, detail="invalid invitation") from exc
+    if isinstance(exc, AIVendorPortalConflict):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, AIVendorPortalStateError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _raise_benchmark_transport_http_error(exc: Exception) -> None:
+    from maverick.ai_benchmark_exchange_transport import (
+        BenchmarkCoordinatorAmbiguousDelivery,
+        BenchmarkCoordinatorConfigError,
+        BenchmarkCoordinatorConsentError,
+        BenchmarkCoordinatorDefinitiveTransportError,
+        BenchmarkCoordinatorIdempotencyConflict,
+        BenchmarkCoordinatorProtocolError,
+        BenchmarkTrustRootError,
+    )
+
+    if isinstance(exc, (BenchmarkCoordinatorConfigError, BenchmarkTrustRootError)):
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if isinstance(exc, BenchmarkCoordinatorConsentError):
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if isinstance(exc, BenchmarkCoordinatorIdempotencyConflict):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, BenchmarkCoordinatorAmbiguousDelivery):
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+            headers={"Retry-After": "1"},
+        ) from exc
+    if isinstance(
+        exc,
+        (BenchmarkCoordinatorDefinitiveTransportError, BenchmarkCoordinatorProtocolError),
     ):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -447,6 +536,7 @@ async def _call(fn: Callable, *args, **kwargs):
         if isinstance(exc, RecordConflict):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         _raise_ai_cost_collector_http_error(exc)
+        _raise_benchmark_transport_http_error(exc)
         _raise_identity_governance_http_error(exc)
         _raise_policy_and_dynamic_risk_http_error(exc)
         if isinstance(
@@ -481,6 +571,7 @@ async def _call(fn: Callable, *args, **kwargs):
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         if isinstance(exc, AIRegulatoryFeedStateError):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        _raise_vendor_portal_http_error(exc)
         if isinstance(exc, RedTeamDisabled):
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         if isinstance(exc, RedTeamStateError):
@@ -932,6 +1023,110 @@ async def project_ai_vendor_assessment(
         valid_until=body.valid_until,
         officer=officer.ModelRiskAssuranceOfficer(),
     )
+
+
+# AI vendor external-response portal ----------------------------------------
+
+
+@router.get("/ai-vendor/portal/invitations")
+async def list_ai_vendor_portal_invitations(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=100),
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    _require_active_tenant()
+    portal = _vendor_portal_module()
+    return {"items": await _call(portal.list_invitations, limit=limit)}
+
+
+@router.post("/ai-vendor/portal/invitations", status_code=201)
+async def create_ai_vendor_portal_invitation(
+    request: Request,
+    body: schemas.VendorPortalInvitationIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    tenant_ref = _require_active_tenant()
+    portal = _vendor_portal_module()
+    result = await _call(
+        portal.create_invitation,
+        vendor=body.vendor,
+        actor=_human_principal(request),
+        expires_in_seconds=body.expires_in_seconds,
+    )
+    return {**result, "tenant_ref": tenant_ref}
+
+
+@router.get("/ai-vendor/portal/invitations/{invitation_id}")
+async def get_ai_vendor_portal_invitation(
+    request: Request,
+    invitation_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    _require_active_tenant()
+    portal = _vendor_portal_module()
+    return await _record_call(portal.get_invitation, invitation_id)
+
+
+@router.post("/ai-vendor/portal/invitations/{invitation_id}/revoke")
+async def revoke_ai_vendor_portal_invitation(
+    request: Request,
+    invitation_id: str,
+    body: schemas.VendorPortalRevocationIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    portal = _vendor_portal_module()
+    return await _call(
+        portal.revoke_invitation,
+        invitation_id,
+        reason=body.reason,
+        actor=_human_principal(request),
+        expected_revision=body.expected_revision,
+    )
+
+
+@router.get("/ai-vendor/portal/submissions")
+async def list_ai_vendor_portal_submissions(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=100),
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    _require_active_tenant()
+    portal = _vendor_portal_module()
+    return {"items": await _call(portal.list_submissions, limit=limit)}
+
+
+@router.get("/ai-vendor/portal/submissions/{submission_id}")
+async def get_ai_vendor_portal_submission(
+    request: Request,
+    submission_id: str,
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    _require_active_tenant()
+    portal = _vendor_portal_module()
+    return await _record_call(portal.get_submission, submission_id)
+
+
+@router.post("/ai-vendor/portal/submissions/{submission_id}/import")
+async def import_ai_vendor_portal_submission(
+    request: Request,
+    submission_id: str,
+    body: schemas.VendorPortalImportIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    portal = _vendor_portal_module()
+    result = await _call(
+        portal.import_submission,
+        submission_id,
+        actor=_human_principal(request),
+        expected_revision=body.expected_revision,
+    )
+    return {
+        "submission": result["submission"],
+        "assessment": _safe_vendor_assessment(result["assessment"]),
+        "idempotent_replay": bool(result["idempotent_replay"]),
+    }
 
 
 # Drift monitoring -----------------------------------------------------------
@@ -2254,6 +2449,25 @@ async def export_ai_benchmark_contribution(
     return await _call(service.export_contribution, contribution_id, version=version)
 
 
+@router.post("/ai-benchmark/contributions/{contribution_id}/submit")
+async def submit_ai_benchmark_contribution(
+    request: Request,
+    contribution_id: str,
+    body: schemas.AIBenchmarkCoordinatorSubmitIn,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    _human_principal(request)
+    _benchmark, service = await _configured_benchmark_exchange()
+    return await _call(
+        service.submit_contribution_to_coordinator,
+        contribution_id,
+        explicit_consent=body.explicit_consent,
+        idempotency_key=body.idempotency_key,
+        version=body.version,
+    )
+
+
 @router.get("/ai-benchmark/cohort-reports")
 async def list_ai_benchmark_cohort_reports(
     request: Request,
@@ -2711,10 +2925,14 @@ def _identity_governance_section() -> Mapping[str, Any]:
 async def get_identity_governance_connectors(request: Request) -> dict[str, Any]:
     require_permission(request, "view")
     _require_active_tenant()
-    from . import identity_governance_runtime
+    from . import identity_governance_runtime, identity_governance_scheduler
 
     section = _identity_governance_section()
-    return await _call(identity_governance_runtime.connector_status, section)
+    return await _call(
+        identity_governance_runtime.connector_status,
+        section,
+        scheduler_factory=identity_governance_scheduler.default_scheduler,
+    )
 
 
 @router.post("/identity-governance/connectors/{provider}/collect")
@@ -2732,6 +2950,37 @@ async def collect_identity_governance_connector(
         identity_governance_runtime.collect_connector,
         section,
         provider,
+    )
+
+
+@router.get("/identity-governance/scheduler/status")
+async def get_identity_governance_scheduler_status(
+    request: Request,
+) -> dict[str, Any]:
+    require_permission(request, "view")
+    _require_active_tenant()
+    from . import identity_governance_scheduler
+
+    section = _identity_governance_section()
+    return await _call(
+        identity_governance_scheduler.configured_scheduler_status,
+        section,
+    )
+
+
+@router.post("/identity-governance/scheduler/run")
+async def run_identity_governance_scheduler_once(
+    request: Request,
+) -> dict[str, Any]:
+    require_global_permission(request, "admin")
+    _require_active_tenant()
+    from . import identity_governance_scheduler
+
+    section = _identity_governance_section()
+    return await _call(
+        identity_governance_scheduler.run_configured_collection,
+        section,
+        actor=_human_principal(request),
     )
 
 

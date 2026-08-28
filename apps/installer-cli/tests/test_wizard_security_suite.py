@@ -25,6 +25,7 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "ai_inventory": False,
         "inventory_connectors": [],
         "ai_vendor_risk": False,
+        "ai_vendor_risk_portal": False,
         "portfolio_risk": False,
         "policy_packs": False,
         "ai_regulatory_feed": False,
@@ -45,7 +46,9 @@ def test_pick_security_suite_safe_defaults(monkeypatch):
         "ai_benchmark_exchange": False,
         "ai_discovery_sensors": False,
         "ai_media_provenance": False,
+        "ai_media_provenance_c2patool": False,
         "ai_identity_governance_connectors": False,
+        "ai_identity_governance_scheduler": False,
         "threat_hunt": False,
         "env_hunt": False,
         "response_execution": False,
@@ -75,6 +78,7 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["allow_hosted_training"] is True
     assert picked["inventory_connectors"] == ["bedrock", "vertex_ai"]
     assert picked["ai_vendor_risk"] is True
+    assert picked["ai_vendor_risk_portal"] is True
     assert picked["portfolio_risk"] is True
     assert picked["policy_packs"] is True
     assert picked["ai_regulatory_feed"] is True
@@ -95,7 +99,9 @@ def test_pick_security_suite_response_is_separate_opt_in(monkeypatch):
     assert picked["ai_benchmark_exchange"] is True
     assert picked["ai_discovery_sensors"] is True
     assert picked["ai_media_provenance"] is True
+    assert picked["ai_media_provenance_c2patool"] is True
     assert picked["ai_identity_governance_connectors"] is True
+    assert picked["ai_identity_governance_scheduler"] is True
     assert picked["env_hunt"] is True
     assert picked["response_execution"] is True
     assert picked["connectors"]["cloudtrail"] == {
@@ -188,7 +194,7 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
         "missing_grace_runs": 2,
         "poll_seconds": 900,
     }
-    assert parsed["ai_vendor_risk"] == {"enable": True}
+    assert parsed["ai_vendor_risk"] == {"enable": True, "portal_enable": False}
     assert parsed["portfolio_risk"] == {"enable": True}
     assert parsed["policy_packs"] == {"enable": True}
     assert parsed["ai_regulatory_feed"] == {"enable": True}
@@ -267,6 +273,45 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
             "base_url": "https://replace-me.purview.azure.com",
             "credential_secret_ref": "PURVIEW_IDENTITY_GOVERNANCE_TOKEN",
         },
+        "scheduler": {
+            "enable": False,
+            "poll_seconds": 60,
+            "providers": {
+                "entra": {
+                    "enable": False,
+                    "interval_seconds": 3600,
+                    "retry_base_seconds": 30,
+                    "retry_max_seconds": 900,
+                    "max_attempts_per_slot": 3,
+                    "lease_seconds": 3600,
+                    "history_limit": 8,
+                    "max_snapshot_items": 5000,
+                    "max_delta_digests": 256,
+                },
+                "okta": {
+                    "enable": False,
+                    "interval_seconds": 3600,
+                    "retry_base_seconds": 30,
+                    "retry_max_seconds": 900,
+                    "max_attempts_per_slot": 3,
+                    "lease_seconds": 3600,
+                    "history_limit": 8,
+                    "max_snapshot_items": 5000,
+                    "max_delta_digests": 256,
+                },
+                "purview": {
+                    "enable": False,
+                    "interval_seconds": 3600,
+                    "retry_base_seconds": 30,
+                    "retry_max_seconds": 900,
+                    "max_attempts_per_slot": 3,
+                    "lease_seconds": 3600,
+                    "history_limit": 8,
+                    "max_snapshot_items": 5000,
+                    "max_delta_digests": 256,
+                },
+            },
+        },
     }
     environment = (tmp_path / ".env").read_text(encoding="utf-8")
     commitment_line = next(
@@ -302,6 +347,49 @@ def test_write_config_emits_independent_security_knobs(tmp_path, monkeypatch):
             "entra": {"enable": False, "push_enable": False, "pivot_enable": False},
         },
     }
+
+
+def test_security_suite_high_trust_adapters_require_separate_opt_ins():
+    from maverick_installer import wizard
+
+    defaults = tomllib.loads("\n".join(wizard._cfg_security_suite({
+        "ai_vendor_risk": True,
+        "ai_media_provenance": True,
+        "ai_identity_governance_connectors": True,
+        "ai_benchmark_exchange": True,
+    })))
+    assert defaults["ai_vendor_risk"]["portal_enable"] is False
+    assert defaults["ai_media_provenance"] == {"enable": True}
+    assert defaults["ai_identity_governance_connectors"]["scheduler"][
+        "enable"
+    ] is False
+    assert all(
+        provider["enable"] is False
+        for provider in defaults["ai_identity_governance_connectors"][
+            "scheduler"
+        ]["providers"].values()
+    )
+    assert defaults["ai_benchmark_exchange"] == {"enable": True}
+
+    selected = tomllib.loads("\n".join(wizard._cfg_security_suite({
+        "ai_vendor_risk": True,
+        "ai_vendor_risk_portal": True,
+        "ai_media_provenance": True,
+        "ai_media_provenance_c2patool": True,
+        "ai_identity_governance_connectors": True,
+        "ai_identity_governance_scheduler": True,
+    })))
+    assert selected["ai_vendor_risk"]["portal_enable"] is True
+    assert selected["ai_media_provenance"] == {
+        "enable": True,
+        "verification_adapter": "c2patool",
+    }
+    identity = selected["ai_identity_governance_connectors"]
+    assert identity["scheduler"]["enable"] is True
+    assert all(
+        provider["enable"] is False
+        for provider in identity["scheduler"]["providers"].values()
+    )
 
 
 def test_evidence_gateway_enables_assurance_dependencies(monkeypatch):

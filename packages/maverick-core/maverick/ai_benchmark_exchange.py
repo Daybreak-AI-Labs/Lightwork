@@ -2,8 +2,11 @@
 
 This module is an intentionally small, default-off control plane.  It creates
 human-approved aggregate contribution packets and admits externally produced
-cohort reports after an injected signature verifier accepts them.  It has no
-network transport and no operation that pools records across tenants.
+cohort reports after an injected signature verifier accepts them.  Its default
+service has no network transport.  An operator may configure, or a caller may
+explicitly inject, a trust-root verifier and an opt-in coordinator, but
+transmission remains a separate, consent-bearing operation and no operation
+pools records across tenants.
 
 Only closed, bounded aggregate schemas are admitted.  Raw examples, prompts,
 outputs, feature values, personal data, secrets, free-form customer labels,
@@ -27,7 +30,7 @@ import math
 import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 
 from .governed_records import GovernedRecordStore
 from .privacy_ops import RecordConflict
@@ -47,6 +50,16 @@ PRIVACY_NOTICE = (
     "signature verification do not prove re-identification resistance. "
     "Differential privacy is not independently verified by Lightwork."
 )
+
+
+class _CoordinatorSubmitter(Protocol):
+    def submit(
+        self,
+        export_package: Mapping[str, Any],
+        *,
+        explicit_consent: bool,
+        idempotency_key: str,
+    ) -> Mapping[str, Any]: ...
 
 SUPPORTED_METRICS = frozenset(
     {
@@ -189,6 +202,16 @@ _PRIVACY_FIELDS = frozenset(
     {"state", "epsilon", "delta", "noise_mechanism"}
 )
 _SIGNATURE_FIELDS = frozenset({"algorithm", "key_id", "value"})
+_INTEGRATION_CONFIG_FIELDS = frozenset({"enable", "trust_roots", "coordinator"})
+_COORDINATOR_CONFIG_FIELDS = frozenset(
+    {
+        "enable",
+        "origin",
+        "timeout_seconds",
+        "max_request_bytes",
+        "max_response_bytes",
+    }
+)
 _REPORT_INPUT_FIELDS = _REPORT_BODY_FIELDS | frozenset({"report_sha256", "signature"})
 _REPORT_RECORD_FIELDS = frozenset(
     {
@@ -577,13 +600,20 @@ class AIBenchmarkExchangeService:
         reports: GovernedRecordStore | None = None,
         evidence_resolver: Callable[[str], Mapping[str, Any] | None] | None = None,
         signature_verifier: Callable[[bytes, Mapping[str, str]], bool] | None = None,
+        trust_roots: Callable[[bytes, Mapping[str, str]], bool] | None = None,
+        coordinator: _CoordinatorSubmitter | None = None,
         pseudonymizer: Callable[[str, str], str] | None = None,
         clock: Callable[[], float] | None = None,
         enforce_feature: bool = True,
     ) -> None:
+        if signature_verifier is not None and trust_roots is not None:
+            raise ValueError(
+                "signature_verifier and trust_roots are mutually exclusive"
+            )
         for callback, label in (
             (evidence_resolver, "evidence_resolver"),
             (signature_verifier, "signature_verifier"),
+            (trust_roots, "trust_roots"),
             (pseudonymizer, "pseudonymizer"),
             (clock, "clock"),
         ):
@@ -591,10 +621,17 @@ class AIBenchmarkExchangeService:
                 raise ValueError(f"{label} must be callable")
         if not isinstance(enforce_feature, bool):
             raise ValueError("enforce_feature must be a boolean")
+        if coordinator is not None and (
+            not hasattr(coordinator, "submit") or not callable(coordinator.submit)
+        ):
+            raise ValueError("coordinator must provide a callable submit method")
         self._contributions = contributions or _CONTRIBUTIONS
         self._reports = reports or _REPORTS
         self._evidence_resolver = evidence_resolver
-        self._signature_verifier = signature_verifier
+        self._signature_verifier = (
+            trust_roots if trust_roots is not None else signature_verifier
+        )
+        self._coordinator = coordinator
         self._pseudonymizer = pseudonymizer or _default_pseudonym
         self._clock = clock
         self._enforce_feature = enforce_feature
@@ -1159,6 +1196,50 @@ class AIBenchmarkExchangeService:
         }
         return {**packet, "packet_sha256": _sha256(packet)}
 
+    def submit_contribution_to_coordinator(
+        self,
+        contribution_id: str,
+        *,
+        explicit_consent: bool,
+        idempotency_key: str,
+        version: int | None = None,
+    ) -> dict[str, Any]:
+        """Explicitly submit one already-approved aggregate export.
+
+        This method never discovers or constructs a coordinator.  The injected
+        coordinator remains responsible for HTTPS policy, response validation,
+        and ambiguous-delivery handling.
+        """
+
+        self._require_active()
+        if explicit_consent is not True:
+            raise AIBenchmarkExchangeConsentError(
+                "literal consent is required for coordinator submission"
+            )
+        coordinator = self._coordinator
+        if coordinator is None:
+            raise AIBenchmarkExchangeConfigError(
+                "AI benchmark coordinator is not configured"
+            )
+        operation = _token(idempotency_key, "idempotency_key")
+        package = self.export_contribution(contribution_id, version=version)
+        receipt = coordinator.submit(
+            copy.deepcopy(package),
+            explicit_consent=True,
+            idempotency_key=operation,
+        )
+        if not isinstance(receipt, Mapping):
+            raise AIBenchmarkExchangeStateError(
+                "benchmark coordinator returned a malformed receipt"
+            )
+        try:
+            _canonical(receipt)
+        except ValueError as exc:
+            raise AIBenchmarkExchangeStateError(
+                "benchmark coordinator returned a malformed receipt"
+            ) from exc
+        return copy.deepcopy(dict(receipt))
+
     def _validate_report_record(
         self, value: object, *, tenant_ref: str
     ) -> dict[str, Any]:
@@ -1347,9 +1428,133 @@ class AIBenchmarkExchangeService:
 _DEFAULT = AIBenchmarkExchangeService()
 
 
-def configured_benchmark_exchange() -> AIBenchmarkExchangeService:
-    require_enabled()
-    return _DEFAULT
+def _operator_configured_integrations() -> tuple[
+    Callable[[bytes, Mapping[str, str]], bool] | None,
+    _CoordinatorSubmitter | None,
+]:
+    """Parse the closed deployment-global benchmark integration section."""
+
+    try:
+        from .config import config_source_errors, load_global_config
+
+        config = load_global_config()
+        source_errors = config_source_errors(include_tenant=False)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        raise AIBenchmarkExchangeConfigError(
+            "AI benchmark exchange operator configuration is unavailable"
+        ) from exc
+    if source_errors:
+        raise AIBenchmarkExchangeConfigError(
+            "AI benchmark exchange operator configuration is unreadable"
+        )
+    if not isinstance(config, Mapping):
+        raise AIBenchmarkExchangeConfigError(
+            "AI benchmark exchange operator configuration is malformed"
+        )
+    section = config.get("ai_benchmark_exchange")
+    if not isinstance(section, Mapping):
+        raise AIBenchmarkExchangeConfigError(
+            "AI benchmark exchange is disabled; set "
+            "[ai_benchmark_exchange] enable = true"
+        )
+    if set(section) - _INTEGRATION_CONFIG_FIELDS:
+        raise AIBenchmarkExchangeConfigError(
+            "AI benchmark exchange configuration contains unknown fields"
+        )
+    feature_enabled = section.get("enable")
+    if feature_enabled is not True and feature_enabled is not False:
+        raise AIBenchmarkExchangeConfigError(
+            "ai_benchmark_exchange.enable must be a boolean"
+        )
+    if feature_enabled is not True:
+        raise AIBenchmarkExchangeConfigError(
+            "AI benchmark exchange is disabled; set "
+            "[ai_benchmark_exchange] enable = true"
+        )
+
+    has_trust_roots = "trust_roots" in section
+    has_coordinator = "coordinator" in section
+    if not has_trust_roots and not has_coordinator:
+        return None, None
+
+    from .ai_benchmark_exchange_transport import (
+        BenchmarkCoordinatorClient,
+        BenchmarkExchangeTransportError,
+        CoordinatorTransportLimits,
+        VersionedEd25519TrustRoots,
+        validated_coordinator_origin,
+    )
+
+    trust_roots = None
+    coordinator = None
+    try:
+        if has_trust_roots:
+            trust_roots = VersionedEd25519TrustRoots.from_document(
+                section["trust_roots"]
+            )
+        if has_coordinator:
+            table = section["coordinator"]
+            if not isinstance(table, Mapping):
+                raise AIBenchmarkExchangeConfigError(
+                    "ai_benchmark_exchange.coordinator must be a table"
+                )
+            if set(table) - _COORDINATOR_CONFIG_FIELDS:
+                raise AIBenchmarkExchangeConfigError(
+                    "AI benchmark coordinator configuration contains unknown fields"
+                )
+            if "enable" not in table or not isinstance(table["enable"], bool):
+                raise AIBenchmarkExchangeConfigError(
+                    "ai_benchmark_exchange.coordinator.enable must be a boolean"
+                )
+            limits = CoordinatorTransportLimits(
+                timeout_seconds=table.get("timeout_seconds", 15.0),
+                max_request_bytes=table.get("max_request_bytes", 128 * 1024),
+                max_response_bytes=table.get("max_response_bytes", 128 * 1024),
+            )
+            origin = None
+            if "origin" in table:
+                origin = validated_coordinator_origin(table["origin"])
+            if table["enable"] is True:
+                if origin is None:
+                    raise AIBenchmarkExchangeConfigError(
+                        "enabled AI benchmark coordinator requires origin"
+                    )
+                coordinator = BenchmarkCoordinatorClient(
+                    coordinator_origin=origin,
+                    enabled=True,
+                    limits=limits,
+                )
+    except AIBenchmarkExchangeConfigError:
+        raise
+    except BenchmarkExchangeTransportError as exc:
+        raise AIBenchmarkExchangeConfigError(
+            "AI benchmark exchange integration configuration is invalid"
+        ) from exc
+    return trust_roots, coordinator
+
+
+def configured_benchmark_exchange(
+    *,
+    trust_roots: Callable[[bytes, Mapping[str, str]], bool] | None = None,
+    coordinator: _CoordinatorSubmitter | None = None,
+) -> AIBenchmarkExchangeService:
+    """Return the local default or a bounded configured/injected integration."""
+
+    if trust_roots is not None or coordinator is not None:
+        require_enabled()
+        return AIBenchmarkExchangeService(
+            trust_roots=trust_roots,
+            coordinator=coordinator,
+        )
+    configured_roots, configured_coordinator = _operator_configured_integrations()
+    if configured_roots is None and configured_coordinator is None:
+        return _DEFAULT
+    return AIBenchmarkExchangeService(
+        trust_roots=configured_roots,
+        coordinator=configured_coordinator,
+    )
 
 
 __all__ = [

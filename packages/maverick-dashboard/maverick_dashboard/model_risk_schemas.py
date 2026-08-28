@@ -545,6 +545,30 @@ class VendorAssessmentProjectionIn(BaseModel):
     valid_until: float = Field(..., gt=0)
 
 
+class VendorPortalInvitationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    vendor: str = Field(..., min_length=1, max_length=300)
+    expires_in_seconds: int = Field(
+        default=14 * 24 * 60 * 60,
+        ge=60 * 60,
+        le=90 * 24 * 60 * 60,
+    )
+
+
+class VendorPortalRevocationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    reason: str = Field(..., min_length=1, max_length=500)
+    expected_revision: int = Field(..., ge=1)
+
+
+class VendorPortalImportIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+
+
 class DriftBaselineIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -2126,6 +2150,19 @@ class AIBenchmarkContributionApproveIn(BaseModel):
 
     version: int = Field(..., ge=1, le=50)
     expected_revision: int = Field(..., ge=1)
+
+
+class AIBenchmarkCoordinatorSubmitIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    explicit_consent: Literal[True]
+    idempotency_key: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$",
+    )
+    version: int | None = Field(default=None, ge=1, le=50)
 
 
 class AIBenchmarkPrivacyIn(BaseModel):

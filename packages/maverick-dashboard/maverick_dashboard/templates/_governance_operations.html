@@ -694,11 +694,12 @@
   <section id="ai-benchmark-panel" aria-labelledby="ai-benchmark-title">
     <h3 id="ai-benchmark-title">Voluntary aggregate benchmark exchange</h3>
     <p class="assurance-muted">Prepare and inspect voluntary, aggregate-only
-      benchmark contributions backed by exact evidence. This local control plane
-      has no exchange network or cohort coordinator. Pseudonymous exports do not
-      establish anonymity. Accepted differential-privacy parameters are not an independently verified differential-privacy claim. A separately
-      configured signature verifier is required before any cohort report can be
-      admitted.</p>
+      benchmark contributions backed by exact evidence. An operator may pin
+      versioned Ed25519 report trust roots and an HTTPS coordinator, but every
+      transmission remains a separate human action with literal consent and an
+      idempotency key. Pseudonymous export, transport, and signatures do not
+      establish cohort inclusion, anonymity, representative methodology, or
+      independently verified differential privacy.</p>
     <form id="ai-benchmark-list" class="assurance-form">
       <label>Maximum contributions<input name="limit" type="number" min="1" max="100" value="100" required></label>
       <div class="assurance-actions"><button class="btn btn--ghost" type="submit">Load contributions</button><span id="ai-benchmark-list-status" role="status" aria-live="polite"></span></div>
@@ -743,6 +744,16 @@
         <label>Version<input name="version" type="number" min="1" max="50" required></label>
         <label>Expected revision<input name="expected_revision" type="number" min="1" required></label>
         <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Record four-eyes opt-in approval</button><span id="ai-benchmark-approve-status" role="status" aria-live="polite"></span></div>
+      </form>
+    </details>
+    <details>
+      <summary>Explicit coordinator submission</summary>
+      <form id="ai-benchmark-submit" class="assurance-form">
+        <label>Approved contribution ID<input name="contribution_id" required maxlength="36" pattern="BCI-[0-9a-f]{32}"></label>
+        <label>Approved version (optional)<input name="version" type="number" min="1" max="50"></label>
+        <label class="assurance-form__wide">Idempotency key<input name="idempotency_key" required maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}"></label>
+        <label class="assurance-form__wide"><input type="checkbox" name="explicit_consent" required> I explicitly consent to transmitting this exact approved aggregate export to the configured coordinator</label>
+        <div class="assurance-form__wide assurance-actions"><button class="btn" type="submit">Submit exact approved export</button><span id="ai-benchmark-submit-status" role="status" aria-live="polite"></span></div>
       </form>
     </details>
     {% endif %}
@@ -856,13 +867,12 @@
 
   <section id="ai-identity-governance-panel" aria-labelledby="ai-identity-governance-title">
     <h3 id="ai-identity-governance-title">Read-only identity and data-governance connectors</h3>
-    <p class="assurance-muted">Run an explicit one-shot, read-only bounded
-      snapshot from a configured Microsoft Entra, Okta, or Microsoft Purview
-      connector. This panel performs no provider writes. Raw IDs, names,
-      emails, and tokens are discarded before the normalized pseudonymous
-      projection is returned. Lightwork does not verify live provider
-      acceptance or claim a complete identity, grant, classification, or AI
-      inventory.</p>
+    <p class="assurance-muted">Run an explicit one-shot or opt-in scheduled,
+      read-only bounded snapshot from a configured Microsoft Entra, Okta, or
+      Microsoft Purview connector. Scheduler history retains bounded digests,
+      counts, deltas, and health—not raw provider rows. This panel performs no
+      provider writes and makes no live-acceptance, complete-inventory, or
+      automatic-risk claim.</p>
     <form id="ai-identity-governance-status" class="assurance-form">
       <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Check connector status</button><span id="ai-identity-governance-status-message" role="status" aria-live="polite"></span></div>
     </form>
@@ -875,6 +885,10 @@
       <label>Configured provider<select name="provider"><option value="entra">Microsoft Entra</option><option value="okta">Okta</option><option value="purview">Microsoft Purview</option></select></label>
       <div class="assurance-actions"><button class="btn" type="submit">Collect one read-only snapshot</button><span id="ai-identity-governance-collect-status" role="status" aria-live="polite"></span></div>
     </form>
+    <form id="ai-identity-governance-scheduler" class="assurance-form">
+      <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Check continuous collection</button>{% if gateway_admin %}<button id="ai-identity-governance-scheduler-run" class="btn" type="button">Run one configured cycle</button>{% endif %}<span id="ai-identity-governance-scheduler-status" role="status" aria-live="polite"></span></div>
+    </form>
+    <pre id="ai-identity-governance-scheduler-result" class="assurance-table assurance-muted" hidden></pre>
     <p id="ai-identity-governance-snapshot" class="assurance-muted" role="status" aria-live="polite">No bounded snapshot has been collected in this browser session.</p>
     <details open>
       <summary>Normalized pseudonymous identities</summary>
@@ -906,11 +920,13 @@
     <h3 id="ai-media-provenance-title">C2PA media-provenance evidence</h3>
     <p class="assurance-muted">Inspect digest-only provenance records, admit
       detached adapter receipts, and send media transiently to an explicitly
-      configured external C2PA adapter. The default verification and signing
-      capabilities are unsupported; a configured adapter can also be
-      unavailable. Media bytes are not persisted. Adapter-reported validation
-      and trust-chain states are not Lightwork certification, proof of
-      authorship or truth, or regulatory acceptance.</p>
+      selected local <code>c2patool</code> verifier or an injected C2PA adapter.
+      The default verification and signing capabilities are unsupported; a
+      selected verifier can also be unavailable, and signing still requires
+      separately injected credential and manifest custody. Media bytes are not
+      persisted. Adapter-reported validation and trust-chain states are not
+      Lightwork certification, proof of authorship or truth, or regulatory
+      acceptance.</p>
     <form id="ai-media-provenance-capabilities" class="assurance-form">
       <div class="assurance-form__wide assurance-actions"><button class="btn btn--ghost" type="submit">Check adapter status</button><span id="ai-media-provenance-capabilities-status" role="status" aria-live="polite"></span></div>
     </form>
@@ -2231,6 +2247,24 @@
       await loadBenchmarkContributions();
     });
   });
+  const benchmarkSubmit = byId("ai-benchmark-submit");
+  if (benchmarkSubmit) benchmarkSubmit.addEventListener("submit", event => {
+    event.preventDefault();
+    withButton(benchmarkSubmit, "ai-benchmark-submit-status", "Transmitting the exact approved aggregate through the configured coordinator…", async () => {
+      const fields = formBody(benchmarkSubmit);
+      const contributionId = String(fields.get("contribution_id") || "").trim();
+      if (fields.get("explicit_consent") !== "on") throw new Error("Explicit transmission consent is required.");
+      const versionValue = String(fields.get("version") || "").trim();
+      const payload = {
+        explicit_consent: true,
+        idempotency_key: String(fields.get("idempotency_key") || "").trim(),
+        version: versionValue ? Number(versionValue) : null
+      };
+      const result = await sendJson(`/ai-benchmark/contributions/${encodeURIComponent(contributionId)}/submit`, "POST", payload);
+      showProjection("ai-benchmark-result", result);
+      setStatus("ai-benchmark-submit-status", "The configured transport accepted this explicit request. This is not proof of cohort inclusion, anonymity, differential privacy, or external acceptance.");
+    });
+  });
   {% endif %}
   const loadBenchmarkReports = async (limit = 100) => {
     const target = byId("ai-benchmark-reports"); if (!target) return;
@@ -2498,11 +2532,52 @@
     });
   });
 
+  const loadIdentityGovernanceScheduler = async () => {
+    try {
+      const result = await request("/identity-governance/scheduler/status");
+      showProjection("ai-identity-governance-scheduler-result", result);
+      const providers = Array.isArray(result.configured_providers) ? result.configured_providers : [];
+      setStatus(
+        "ai-identity-governance-scheduler-status",
+        result.enabled === true
+          ? `${providers.length} provider schedule(s) configured; only bounded digests, counts, deltas, and health are retained. No completeness, live-acceptance, or automatic-risk conclusion is implied.`
+          : "Continuous collection is disabled. No scheduled provider collection is occurring."
+      );
+    } catch (error) {
+      setStatus("ai-identity-governance-scheduler-status", error instanceof Error ? error.message : "Identity-governance scheduler status unavailable.");
+    }
+  };
+  const identityGovernanceScheduler = byId("ai-identity-governance-scheduler");
+  if (identityGovernanceScheduler) identityGovernanceScheduler.addEventListener("submit", event => {
+    event.preventDefault(); loadIdentityGovernanceScheduler();
+  });
+  {% if gateway_admin %}
+  const identityGovernanceSchedulerRun = byId("ai-identity-governance-scheduler-run");
+  if (identityGovernanceSchedulerRun) identityGovernanceSchedulerRun.addEventListener("click", async () => {
+    identityGovernanceSchedulerRun.disabled = true;
+    identityGovernanceSchedulerRun.setAttribute("aria-busy", "true");
+    setStatus("ai-identity-governance-scheduler-status", "Running one cycle for each explicitly configured schedule…");
+    try {
+      const result = await request("/identity-governance/scheduler/run", {method: "POST"});
+      showProjection("ai-identity-governance-scheduler-result", result);
+      const failures = Array.isArray(result.failures) ? result.failures.length : 0;
+      setStatus("ai-identity-governance-scheduler-status", `${Number(result.provider_count) || 0} configured provider cycle(s) evaluated; ${failures} safe failure(s). No provider write, completeness, live-acceptance, or automatic-risk conclusion is implied.`);
+    } catch (error) {
+      setStatus("ai-identity-governance-scheduler-status", error instanceof Error ? error.message : "Identity-governance scheduler cycle failed safely.");
+    } finally {
+      identityGovernanceSchedulerRun.disabled = false;
+      identityGovernanceSchedulerRun.removeAttribute("aria-busy");
+    }
+  });
+  {% endif %}
+
   const loadMediaProvenanceCapabilities = async () => {
     try {
       const result = await request("/ai-media-provenance/capabilities");
       showProjection("ai-media-provenance-result", result);
-      setStatus("ai-media-provenance-capabilities-status", `Verification: ${asText(result.verification?.status)}; signing: ${asText(result.signing?.status)}. A real external adapter is required.`);
+      const verifier = asText(result.verification?.adapter_id || "no adapter selected");
+      const signer = asText(result.signing?.adapter_id || "no signer selected");
+      setStatus("ai-media-provenance-capabilities-status", `Verification: ${asText(result.verification?.status)} (${verifier}); signing: ${asText(result.signing?.status)} (${signer}). Adapter-reported capability is not live interoperability or certification.`);
     } catch (error) {
       setStatus("ai-media-provenance-capabilities-status", error instanceof Error ? error.message : "Media-provenance capability status unavailable.");
     }

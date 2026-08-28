@@ -169,3 +169,148 @@ def test_new_operational_ai_governance_gates_are_closed_and_boolean(section):
         and finding.severity == "error"
         for finding in wrong_type
     )
+
+
+def test_vendor_portal_and_c2patool_are_closed_separate_opt_ins():
+    assert lint_config(
+        {
+            "ai_vendor_risk": {"enable": True, "portal_enable": False},
+            "ai_media_provenance": {
+                "enable": True,
+                "verification_adapter": "c2patool",
+            },
+        }
+    ) == []
+
+    portal_type = lint_config(
+        {"ai_vendor_risk": {"enable": True, "portal_enable": "true"}}
+    )
+    assert any(
+        finding.section == "ai_vendor_risk"
+        and finding.key == "portal_enable"
+        and finding.severity == "error"
+        for finding in portal_type
+    )
+
+    unsupported = lint_config(
+        {
+            "ai_media_provenance": {
+                "enable": True,
+                "verification_adapter": "custom",
+            }
+        }
+    )
+    assert any(
+        finding.section == "ai_media_provenance"
+        and finding.key == "verification_adapter"
+        and finding.severity == "error"
+        for finding in unsupported
+    )
+
+
+def test_identity_scheduler_nested_tables_are_closed_and_bounded():
+    provider_schedule = {
+        "enable": False,
+        "interval_seconds": 3600,
+        "retry_base_seconds": 30,
+        "retry_max_seconds": 900,
+        "max_attempts_per_slot": 3,
+        "lease_seconds": 3600,
+        "history_limit": 8,
+        "max_snapshot_items": 5000,
+        "max_delta_digests": 256,
+    }
+    config = {
+        "ai_identity_governance_connectors": {
+            "enable": True,
+            "scheduler": {
+                "enable": False,
+                "poll_seconds": 60,
+                "providers": {
+                    "entra": dict(provider_schedule),
+                    "okta": dict(provider_schedule),
+                    "purview": dict(provider_schedule),
+                },
+            },
+        }
+    }
+    assert lint_config(config) == []
+
+    typo = config["ai_identity_governance_connectors"]["scheduler"]["providers"]
+    typo["entra"]["interval_second"] = typo["entra"].pop("interval_seconds")
+    findings = lint_config(config)
+    assert any(
+        finding.section
+        == "ai_identity_governance_connectors.scheduler.providers.entra"
+        and finding.key == "interval_second"
+        and "unknown" in finding.message.lower()
+        for finding in findings
+    )
+
+    out_of_bounds = {
+        "ai_identity_governance_connectors": {
+            "enable": True,
+            "scheduler": {
+                "enable": True,
+                "poll_seconds": 1,
+                "providers": {
+                    "entra": {"enable": True, "max_snapshot_items": 10001}
+                },
+            },
+        }
+    }
+    errors = lint_config(out_of_bounds)
+    assert any(finding.key == "poll_seconds" for finding in errors)
+    assert any(finding.key == "max_snapshot_items" for finding in errors)
+
+
+def test_benchmark_trust_and_coordinator_tables_are_known_but_closed():
+    config = {
+        "ai_benchmark_exchange": {
+            "enable": True,
+            "trust_roots": {
+                "schema": "lightwork.ai-benchmark-ed25519-trust-roots.v1",
+                "version": 1,
+                "keys": [
+                    {
+                        "key_id": "KEY-" + "a" * 32,
+                        "public_key_hex": "b" * 64,
+                        "introduced_in": 1,
+                    }
+                ],
+            },
+            "coordinator": {
+                "enable": False,
+                "timeout_seconds": 15,
+                "max_request_bytes": 131072,
+                "max_response_bytes": 131072,
+            },
+        }
+    }
+    assert lint_config(config) == []
+
+    config["ai_benchmark_exchange"]["coordinator"]["endpont"] = (
+        "https://benchmark.example.com"
+    )
+    findings = lint_config(config)
+    assert any(
+        finding.section == "ai_benchmark_exchange.coordinator"
+        and finding.key == "endpont"
+        and "unknown" in finding.message.lower()
+        for finding in findings
+    )
+
+    enabled_without_origin = lint_config(
+        {
+            "ai_benchmark_exchange": {
+                "enable": True,
+                "coordinator": {"enable": True},
+            }
+        }
+    )
+    assert any(
+        finding.section == "ai_benchmark_exchange.coordinator"
+        and finding.key == "origin"
+        and finding.severity == "error"
+        for finding in enabled_without_origin
+    )

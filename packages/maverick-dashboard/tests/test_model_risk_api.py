@@ -2739,6 +2739,15 @@ def test_ai_benchmark_http_is_voluntary_aggregate_only_and_human_bound(monkeypat
                 },
             }
 
+        def submit_contribution_to_coordinator(self, selected_id, **kwargs):
+            captured.append(("submit", selected_id, kwargs))
+            return {
+                "schema": "lightwork.ai-benchmark-coordinator-receipt.v1",
+                "status": "accepted",
+                "receipt_id": "BCR-" + ("9" * 32),
+                "packet_sha256": "d" * 64,
+            }
+
         def list_cohort_reports(self, *, limit):
             return [{"report_id": report_id, "limit": limit}]
 
@@ -2761,6 +2770,7 @@ def test_ai_benchmark_http_is_voluntary_aggregate_only_and_human_bound(monkeypat
             "user:benchmark-preparer",
             "user:benchmark-versioner",
             "user:benchmark-approver",
+            "user:benchmark-submitter",
             "user:benchmark-report-admitter",
         ]
     )
@@ -2808,6 +2818,15 @@ def test_ai_benchmark_http_is_voluntary_aggregate_only_and_human_bound(monkeypat
         "anonymous": False,
         "differential_privacy_verified": False,
     }
+    submitted = _ok(client.post(
+        f"{base}/contributions/{contribution_id}/submit",
+        json={
+            "explicit_consent": True,
+            "idempotency_key": "benchmark-submit-v2",
+            "version": 2,
+        },
+    ))
+    assert submitted["status"] == "accepted"
     report = {
         "schema": "lightwork.ai-benchmark-cohort-report.v1",
         "report_id": report_id,
@@ -2841,6 +2860,11 @@ def test_ai_benchmark_http_is_voluntary_aggregate_only_and_human_bound(monkeypat
     assert next(item for item in captured if item[0] == "approve")[3]["actor"] == (
         "user:benchmark-approver"
     )
+    assert next(item for item in captured if item[0] == "submit")[2] == {
+        "explicit_consent": True,
+        "idempotency_key": "benchmark-submit-v2",
+        "version": 2,
+    }
     assert next(item for item in captured if item[0] == "report")[2] == (
         "user:benchmark-report-admitter"
     )
@@ -3165,7 +3189,11 @@ def test_ai_media_provenance_http_keeps_bytes_transient_and_c2pa_external(monkey
 
 
 def test_identity_governance_http_exposes_read_only_bounded_snapshots(monkeypatch):
-    from maverick_dashboard import identity_governance_runtime, model_risk_api
+    from maverick_dashboard import (
+        identity_governance_runtime,
+        identity_governance_scheduler,
+        model_risk_api,
+    )
 
     monkeypatch.setenv("MAVERICK_TENANT", "alpha")
     section = {"enable": True, "entra": {"enable": True}}
@@ -3183,7 +3211,7 @@ def test_identity_governance_http_exposes_read_only_bounded_snapshots(monkeypatc
     monkeypatch.setattr(
         identity_governance_runtime,
         "connector_status",
-        lambda selected: {
+        lambda selected, **_kwargs: {
             "enabled": selected is section,
             "supported_providers": ["entra", "okta", "purview"],
             "configured_providers": ["entra"],
@@ -3191,6 +3219,32 @@ def test_identity_governance_http_exposes_read_only_bounded_snapshots(monkeypatc
             "live_acceptance_verified": False,
             "complete_inventory_claimed": False,
         },
+    )
+    monkeypatch.setattr(
+        identity_governance_scheduler,
+        "configured_scheduler_status",
+        lambda selected: {
+            "enabled": selected is section,
+            "providers": [{"provider": "entra", "health": "never_run"}],
+            "source_complete": False,
+            "risk_generated": False,
+        },
+    )
+
+    def scheduled(selected, *, actor):
+        captured.append((selected, "scheduled", actor))
+        return {
+            "provider_count": 1,
+            "results": [],
+            "failures": [],
+            "source_complete": False,
+            "live_acceptance_verified": False,
+        }
+
+    monkeypatch.setattr(
+        identity_governance_scheduler,
+        "run_configured_collection",
+        scheduled,
     )
 
     def collect(selected, provider):
@@ -3220,3 +3274,13 @@ def test_identity_governance_http_exposes_read_only_bounded_snapshots(monkeypatc
     assert snapshot["complete_inventory_claimed"] is False
     assert captured == [(section, "entra")]
     assert client.post(f"{base}/unknown/collect").status_code == 422
+    scheduler_base = "/api/v1/security/assurance/identity-governance/scheduler"
+    scheduler_status = _ok(client.get(f"{scheduler_base}/status"))
+    assert scheduler_status["source_complete"] is False
+    scheduled_result = _ok(client.post(f"{scheduler_base}/run"))
+    assert scheduled_result["provider_count"] == 1
+    assert captured[-1] == (
+        section,
+        "scheduled",
+        "user:identity-governance-operator",
+    )

@@ -191,6 +191,23 @@
       {% for row in ai_vendor_items %}<tr><td>{{ row.vendor }}</td><td>{{ row.risk_rating }}</td><td>{{ row.status }}</td><td>{% if gateway_admin and row.status == 'pending_review' %}<button type="button" data-vendor-review="{{ row.id }}" data-revision="{{ row.revision }}">Review</button>{% elif gateway_admin and row.status == 'approved' %}<button type="button" data-vendor-project="{{ row.id }}">Project to asset</button>{% else %}{{ row.revision }}{% endif %}</td></tr>{% endfor %}
       </tbody></table></div>
       {% else %}<p class="assurance-empty">No vendor assessments are available for this tenant.</p>{% endif %}
+      {% if gateway_admin %}
+      <details>
+        <summary>External vendor response portal</summary>
+        <p class="assurance-muted">This separately enabled portal issues an
+          expiring opaque credential once. Vendor answers remain attestations
+          pending internal import and independent review.</p>
+        <form id="ai-vendor-portal-invite" class="assurance-form">
+          <label>Vendor name<input name="vendor" required maxlength="300"></label>
+          <label>Expires in days<input name="expires_days" type="number" min="1" max="90" value="14" required></label>
+          <div class="assurance-form__wide"><button type="submit">Create one-time invitation</button> <span id="ai-vendor-portal-status" class="assurance-muted" aria-live="polite"></span></div>
+        </form>
+        <pre id="ai-vendor-portal-credential" class="assurance-table assurance-muted" hidden></pre>
+        <div class="assurance-table"><table><caption>External invitations</caption><thead><tr><th>Vendor</th><th>Status</th><th>Expires</th><th>Action</th></tr></thead><tbody id="ai-vendor-portal-invitations"><tr><td colspan="4">Portal records have not been loaded.</td></tr></tbody></table></div>
+        <div class="assurance-table"><table><caption>Vendor-attested submissions</caption><thead><tr><th>Vendor</th><th>Status</th><th>Submitted</th><th>Action</th></tr></thead><tbody id="ai-vendor-portal-submissions"><tr><td colspan="4">Portal records have not been loaded.</td></tr></tbody></table></div>
+        <button id="ai-vendor-portal-refresh" type="button">Refresh portal records</button>
+      </details>
+      {% endif %}
     </section>
     <section>
       <h3>Aggregate drift monitoring</h3>
@@ -1281,6 +1298,61 @@
     try { await post("/ai-vendor/assessments/" + encodeURIComponent(button.dataset.vendorProject) + "/project", {asset_id, valid_until}); status("ai-vendor-status", "Projected for independent model-risk review."); }
     catch (error) { status("ai-vendor-status", error instanceof Error ? error.message : "Projection failed."); button.disabled = false; }
   }));
+  const portalInvitations = document.getElementById("ai-vendor-portal-invitations");
+  const portalSubmissions = document.getElementById("ai-vendor-portal-submissions");
+  const portalCredential = document.getElementById("ai-vendor-portal-credential");
+  const portalCell = (row, value) => { const cell = document.createElement("td"); cell.textContent = String(value ?? "—"); row.appendChild(cell); return cell; };
+  const portalDate = value => { const date = new Date(Number(value) * 1000); return Number.isFinite(date.getTime()) ? date.toISOString() : "unknown"; };
+  const portalGet = async path => {
+    const response = await fetch(prefix + path, {credentials: "same-origin"});
+    if (!response.ok) throw new Error(await detail(response, "Vendor portal request failed"));
+    return response.json();
+  };
+  const loadVendorPortal = async () => {
+    if (!portalInvitations || !portalSubmissions) return;
+    try {
+      status("ai-vendor-portal-status", "Loading bounded vendor portal records…");
+      const [invitationPage, submissionPage] = await Promise.all([
+        portalGet("/ai-vendor/portal/invitations?limit=50"),
+        portalGet("/ai-vendor/portal/submissions?limit=50")
+      ]);
+      portalInvitations.replaceChildren(); portalSubmissions.replaceChildren();
+      const invitations = Array.isArray(invitationPage.items) ? invitationPage.items : [];
+      invitations.forEach(item => {
+        const row = document.createElement("tr"); portalCell(row, item.vendor); portalCell(row, item.status); portalCell(row, portalDate(item.expires_at)); const action = portalCell(row, "");
+        if (item.status === "active") {
+          const revoke = document.createElement("button"); revoke.type = "button"; revoke.textContent = "Revoke";
+          revoke.addEventListener("click", async () => { const reason = window.prompt("Revocation reason:"); if (!reason || !reason.trim()) return; revoke.disabled = true; try { await post("/ai-vendor/portal/invitations/" + encodeURIComponent(item.invitation_id) + "/revoke", {reason: reason.trim(), expected_revision: Number(item.revision)}); await loadVendorPortal(); } catch (error) { status("ai-vendor-portal-status", error instanceof Error ? error.message : "Revocation failed."); revoke.disabled = false; } });
+          action.appendChild(revoke);
+        } else { action.textContent = item.submission_id || "—"; }
+        portalInvitations.appendChild(row);
+      });
+      if (!invitations.length) { const row = document.createElement("tr"); const cell = portalCell(row, "No invitations recorded."); cell.colSpan = 4; portalInvitations.appendChild(row); }
+      const submissions = Array.isArray(submissionPage.items) ? submissionPage.items : [];
+      submissions.forEach(item => {
+        const row = document.createElement("tr"); portalCell(row, item.vendor); portalCell(row, item.status); portalCell(row, portalDate(item.submitted_at)); const action = portalCell(row, "");
+        if (item.status === "pending_import") {
+          const importButton = document.createElement("button"); importButton.type = "button"; importButton.textContent = "Import for review";
+          importButton.addEventListener("click", async () => { importButton.disabled = true; try { const result = await post("/ai-vendor/portal/submissions/" + encodeURIComponent(item.submission_id) + "/import", {expected_revision: Number(item.revision)}); status("ai-vendor-portal-status", "Imported as review-required assessment " + result.assessment.id + "."); window.location.reload(); } catch (error) { status("ai-vendor-portal-status", error instanceof Error ? error.message : "Import failed."); importButton.disabled = false; } });
+          action.appendChild(importButton);
+        } else { action.textContent = item.imported_assessment?.assessment_id || "—"; }
+        portalSubmissions.appendChild(row);
+      });
+      if (!submissions.length) { const row = document.createElement("tr"); const cell = portalCell(row, "No submissions recorded."); cell.colSpan = 4; portalSubmissions.appendChild(row); }
+      status("ai-vendor-portal-status", `${invitations.length} invitation(s); ${submissions.length} submission(s).`);
+    } catch (error) { status("ai-vendor-portal-status", error instanceof Error ? error.message : "Vendor portal unavailable."); }
+  };
+  const portalInvite = document.getElementById("ai-vendor-portal-invite");
+  if (portalInvite) portalInvite.addEventListener("submit", async event => {
+    event.preventDefault(); const fields = new FormData(portalInvite); const button = portalInvite.querySelector("button"); button.disabled = true;
+    try {
+      const created = await post("/ai-vendor/portal/invitations", {vendor: fields.get("vendor"), expires_in_seconds: Number(fields.get("expires_days")) * 86400});
+      if (portalCredential) { portalCredential.hidden = false; portalCredential.textContent = "Store and transmit this credential securely; it will not be shown again.\nX-Lightwork-Tenant: " + created.tenant_ref + "\nAuthorization: VendorPortal " + created.token; }
+      portalInvite.reset(); await loadVendorPortal();
+    } catch (error) { status("ai-vendor-portal-status", error instanceof Error ? error.message : "Invitation failed."); } finally { button.disabled = false; }
+  });
+  const portalRefresh = document.getElementById("ai-vendor-portal-refresh");
+  if (portalRefresh) portalRefresh.addEventListener("click", loadVendorPortal);
   const baseline = document.getElementById("drift-baseline-create");
   if (baseline) baseline.addEventListener("submit", async event => {
     event.preventDefault(); const fields = new FormData(baseline); const button = baseline.querySelector("button"); button.disabled = true;

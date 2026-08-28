@@ -1,4 +1,4 @@
-"""The agent-facing half of the bring-your-own-agent gateway.
+"""Self-authenticating integrations for agents, sensors, and vendor invitees.
 
 Agents that run on OTHER platforms (Agentforce, Bedrock, Copilot Studio,
 LangChain, custom runtimes) call these routes to be governed and accounted by
@@ -10,32 +10,37 @@ Lightwork while doing their work elsewhere:
   a first-class Operating Record goal owned by ``agent:<id>``.
 * ``GET  /api/v1/external/approvals/{id}`` — poll a parked high-risk action.
 * ``GET  /api/v1/external/openapi.json``  — the importable description of the
-  three routes above (drops into Agentforce External Services / Bedrock
-  action groups as-is).
+  agent routes (drops into Agentforce External Services / Bedrock action
+  groups as-is).
+* ``POST /api/v1/external/discovery/observations`` — admit a bounded,
+  tenant-scoped observation from a registered Ed25519 discovery sensor.
+* ``GET/POST /api/v1/external/ai-vendor/...`` — issue a questionnaire to an
+  invited vendor and accept one complete, explicitly attested response.
 
-Auth is the per-agent ``rest`` bearer minted on the /external-agents page —
-or a platform-native credential pinned on the trust entry (signed Ed25519
-request envelope, webhook-format HMAC, or platform JWT; see
-``maverick.external_identity``) — NOT the dashboard session/bearer. The
+Each route authenticates with a credential scoped to its integration family:
+an external-agent trust entry, a registered signed discovery-sensor identity,
+or a one-time vendor-portal invitation — NOT the dashboard session/bearer. The
 ``/api/v1/external/`` prefix is
 therefore registered as self-authenticating (see ``auth.py`` and the
 dashboard-token middleware in ``app.py``), same pattern as ``/a2a/v1`` and
 the HMAC webhooks: an external platform has no dashboard credential, and
 pressuring operators to share one across two trust domains would be worse.
-Every route self-gates on ``[external_agents] enable`` (404 when off) and the
-Gold entitlement (403), so including the router unconditionally is inert.
+Each route family self-gates on its own configuration, so including the router
+unconditionally is inert.
 """
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import threading
 import time
 from collections import deque
+from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import model_risk_schemas as schemas
 
@@ -49,10 +54,13 @@ router = APIRouter(prefix="/api/v1/external", tags=["external-agents"])
 # which keys by client address.
 _RATE_LIMITS = {"screen": 120, "runs": 60, "approvals": 120, "openapi": 30,
                 "heartbeat": 240, "memory": 60, "execute": 30,
-                "executions": 120, "red_team": 120, "runtime": 120}
+                "executions": 120, "red_team": 120, "runtime": 120,
+                "discovery_sensor": 240, "vendor_portal": 60}
 _RATE_BUCKET_CAP = 10_000
 _MAX_RED_TEAM_HTTP_BODY_BYTES = 2 * 1024 * 1024
 _MAX_RUNTIME_HTTP_BODY_BYTES = 512 * 1024
+_MAX_DISCOVERY_SENSOR_HTTP_BODY_BYTES = 64 * 1024
+_MAX_VENDOR_PORTAL_HTTP_BODY_BYTES = 128 * 1024
 _rate_times: dict[tuple[str, str], deque[float]] = {}
 _rate_lock = threading.Lock()
 
@@ -191,6 +199,44 @@ class ExternalRedTeamResultIn(BaseModel):
     transport_status: str = Field(
         default="completed",
         pattern="^(completed|timeout|error|cancelled)$",
+    )
+
+
+class ExternalDiscoveryObservationIn(BaseModel):
+    """Closed machine-sensor payload; the signed body selects its tenant."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_ref: str = Field(min_length=1, max_length=256)
+    sensor_revision: int = Field(ge=1)
+    config_sha256: str = Field(pattern=r"^(?:sha256:)?[0-9a-fA-F]{64}$")
+    event_sha256: str = Field(pattern=r"^(?:sha256:)?[0-9a-fA-F]{64}$")
+    observed_at: float = Field(gt=0)
+    ai_service_code: str = Field(min_length=1, max_length=64)
+    ai_product_code: str = Field(min_length=1, max_length=64)
+    provider_code: str = Field(min_length=1, max_length=64)
+    domain_category: str = Field(min_length=1, max_length=64)
+    deployment_type: str = Field(min_length=1, max_length=64)
+    environment_code: str = Field(min_length=1, max_length=64)
+    context_codes: list[str] = Field(default_factory=list, max_length=16)
+
+
+class ExternalVendorPortalSubmissionIn(BaseModel):
+    """Closed vendor-attestation request; all answers are revalidated in core."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    answers: dict[str, object] = Field(min_length=1, max_length=32)
+    respondent_ref: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[a-z0-9][a-z0-9_.:-]{0,127}$",
+    )
+    attested: bool
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$",
     )
 
 
@@ -343,6 +389,170 @@ async def _require_runtime_agent(request: Request) -> str:
             raise HTTPException(status_code=413, detail="request body too large")
     request._body = bytes(body)  # noqa: SLF001 - cache for auth and model parsing
     return await _require_agent(request)
+
+
+async def _cache_limited_discovery_sensor_body(request: Request) -> bytes:
+    """Cache a bounded signed body before selecting its tenant trust floor."""
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            declared = int(content_length)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid Content-Length") from None
+        if declared < 0:
+            raise HTTPException(status_code=400, detail="invalid Content-Length")
+        if declared > _MAX_DISCOVERY_SENSOR_HTTP_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="request body too large")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > _MAX_DISCOVERY_SENSOR_HTTP_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="request body too large")
+    request._body = bytes(body)  # noqa: SLF001 - cache for signature and parsing
+    return request._body  # noqa: SLF001 - exact cached signature authority
+
+
+async def _require_discovery_sensor(
+    request: Request,
+) -> AsyncIterator[tuple[str, str]]:
+    """Verify a tenant-bound Ed25519 sensor identity and durable nonce claim.
+
+    Tenant selection comes from the signed body. The selected tenant's trust
+    registry must contain a currently active inbound agent with a pinned key
+    and the explicit ai_discovery_observation capability. Only the Ed25519
+    envelope is accepted on this route; bearer, JWT, and HMAC fallback are
+    intentionally unavailable.
+    """
+
+    from maverick import ai_discovery_sensors as discovery
+
+    if not discovery.enabled():
+        raise HTTPException(status_code=404, detail="not found")
+    body = await _cache_limited_discovery_sensor_body(request)
+    try:
+        decoded = json.loads(body)
+        tenant_value = decoded.get("tenant_ref") if isinstance(decoded, dict) else None
+        from maverick.paths import canonical_tenant_id, reset_tenant, set_tenant
+
+        tenant = canonical_tenant_id(tenant_value)
+    except (TypeError, UnicodeError, ValueError):
+        raise HTTPException(status_code=401, detail="invalid credentials") from None
+
+    tenant_token = set_tenant(tenant)
+    try:
+        from maverick import external_identity
+        from maverick.agent_trust import AgentTrustError, load_trust_state
+
+        try:
+            _, registry = load_trust_state()
+        except AgentTrustError as exc:
+            log.warning(
+                "discovery sensor ingress: tenant trust state unreadable"
+            )
+            raise HTTPException(
+                status_code=401, detail="invalid credentials"
+            ) from exc
+        agent_id = request.headers.get("x-lightwork-agent-id", "")
+        timestamp = request.headers.get("x-maverick-timestamp", "")
+        nonce = request.headers.get("x-lightwork-nonce", "")
+        signature = request.headers.get("x-lightwork-request-signature", "")
+        if not all((agent_id, timestamp, nonce, signature)):
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        agent, rule = external_identity.verify_agent_envelope(
+            agent_id,
+            body,
+            timestamp,
+            nonce,
+            signature,
+            registry=registry,
+        )
+        if (
+            agent is None
+            or "ai_discovery_observation" not in agent.allow_tools
+        ):
+            log.info(
+                "discovery sensor ingress: signed identity refused (%s)",
+                rule if agent is None else "missing_sensor_capability",
+            )
+            raise HTTPException(status_code=401, detail="invalid credentials")
+        yield agent.id, tenant
+    finally:
+        reset_tenant(tenant_token)
+
+
+async def _cache_limited_vendor_portal_body(request: Request) -> None:
+    if request.method == "GET":
+        return
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            declared = int(content_length)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid Content-Length") from None
+        if declared < 0:
+            raise HTTPException(status_code=400, detail="invalid Content-Length")
+        if declared > _MAX_VENDOR_PORTAL_HTTP_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="request body too large")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > _MAX_VENDOR_PORTAL_HTTP_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="request body too large")
+    request._body = bytes(body)  # noqa: SLF001 - bounded cache for model parsing
+
+
+async def _require_vendor_portal(
+    request: Request,
+) -> AsyncIterator[tuple[str, dict]]:
+    """Authenticate one opaque invitation without dashboard or agent fallback."""
+
+    from maverick import ai_vendor_portal as portal
+
+    tenant_value = request.headers.get("x-lightwork-tenant", "")
+    authorization = request.headers.get("authorization", "")
+    scheme, separator, token = authorization.partition(" ")
+    if (
+        not separator
+        or scheme.lower() != "vendorportal"
+        or not token
+        or len(token) > 96
+    ):
+        raise HTTPException(status_code=401, detail="invalid invitation")
+    try:
+        from maverick.paths import canonical_tenant_id, reset_tenant, set_tenant
+
+        tenant = canonical_tenant_id(tenant_value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="invalid invitation") from None
+    client = request.client.host if request.client else "unknown"
+    throttle_key = hashlib.sha256(
+        f"{client}\0{tenant}".encode()
+    ).hexdigest()
+    _rate_limit(throttle_key, "vendor_portal")
+    await _cache_limited_vendor_portal_body(request)
+    tenant_token = set_tenant(tenant)
+    try:
+        if not portal.enabled():
+            raise HTTPException(status_code=404, detail="not found")
+        try:
+            questionnaire = portal.questionnaire_for_token(token)
+        except portal.AIVendorPortalAuthError as exc:
+            raise HTTPException(
+                status_code=401, detail="invalid invitation"
+            ) from exc
+        except portal.AIVendorPortalConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except portal.AIVendorPortalConfigError as exc:
+            raise HTTPException(status_code=404, detail="not found") from exc
+        except portal.AIVendorPortalStateError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="vendor response authority is unavailable",
+            ) from exc
+        yield token, questionnaire
+    finally:
+        reset_tenant(tenant_token)
 
 
 def _shield():
@@ -519,6 +729,129 @@ async def external_approval_status(
     # any enrolled agent may poll only external_agents approvals.
     log.debug("external approval poll by %s: %s", agent_id, out["status"])
     return out
+
+
+@router.post(
+    "/discovery-sensors/{sensor_id}/observations",
+    status_code=201,
+)
+async def external_discovery_sensor_observation(
+    sensor_id: str,
+    payload: ExternalDiscoveryObservationIn,
+    sensor_authority: tuple[str, str] = Depends(_require_discovery_sensor),
+) -> dict:
+    """Admit one exact signed observation from an approved machine sensor."""
+
+    from maverick import ai_discovery_sensors as discovery
+
+    agent_id, tenant = sensor_authority
+    _rate_limit(f"{tenant}:{agent_id}", "discovery_sensor")
+    service = discovery.default_service()
+    try:
+        sensor = service.get_sensor(sensor_id)
+        if (
+            sensor is None
+            or sensor.get("status") != "active"
+            or sensor.get("sensor_name") != agent_id
+            or sensor.get("sensor_type") != payload.domain_category
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="sensor identity is not authorized for this binding",
+            )
+        observation = discovery.NormalizedDiscoveryObservation(
+            event_sha256=payload.event_sha256,
+            observed_at=payload.observed_at,
+            ai_service_code=payload.ai_service_code,
+            ai_product_code=payload.ai_product_code,
+            provider_code=payload.provider_code,
+            domain_category=payload.domain_category,
+            deployment_type=payload.deployment_type,
+            environment_code=payload.environment_code,
+            context_codes=tuple(payload.context_codes),
+        )
+        result = service.ingest_observation(
+            sensor_id,
+            sensor_revision=payload.sensor_revision,
+            config_sha256=payload.config_sha256,
+            observation=observation,
+        )
+    except HTTPException:
+        raise
+    except discovery.AIDiscoverySensorsBindingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except discovery.AIDiscoverySensorsIdempotencyConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except discovery.AIDiscoverySensorsConfigError as exc:
+        raise HTTPException(status_code=404, detail="not found") from exc
+    except discovery.AIDiscoverySensorsStateError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="discovery sensor authority is unavailable",
+        ) from exc
+    return {
+        "observation": result,
+        "machine_authenticated": True,
+        "sensor_agent_id": agent_id,
+    }
+
+
+@router.get("/ai-vendor/questionnaire")
+async def external_ai_vendor_questionnaire(
+    response: Response,
+    authority: tuple[str, dict] = Depends(_require_vendor_portal),
+) -> dict:
+    """Return one invitation's exact digest-bound questionnaire."""
+
+    _token, questionnaire = authority
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return questionnaire
+
+
+@router.post("/ai-vendor/submissions", status_code=201)
+async def external_ai_vendor_submission(
+    payload: ExternalVendorPortalSubmissionIn,
+    response: Response,
+    authority: tuple[str, dict] = Depends(_require_vendor_portal),
+) -> dict:
+    """Consume one invitation with a complete vendor-attested response."""
+
+    from maverick import ai_vendor_portal as portal
+
+    token, _questionnaire = authority
+    try:
+        submitted = portal.submit_response(
+            token,
+            answers=payload.answers,
+            respondent_ref=payload.respondent_ref,
+            attested=payload.attested,
+            idempotency_key=payload.idempotency_key,
+        )
+    except portal.AIVendorPortalAuthError as exc:
+        raise HTTPException(status_code=401, detail="invalid invitation") from exc
+    except portal.AIVendorPortalConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (portal.AIVendorPortalConfigError, portal.AIVendorPortalStateError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="vendor response authority is unavailable",
+        ) from exc
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return {
+        "submission_id": submitted["submission_id"],
+        "invitation_id": submitted["invitation_id"],
+        "vendor": submitted["vendor"],
+        "status": submitted["status"],
+        "response_sha256": submitted["response_sha256"],
+        "submitted_at": submitted["submitted_at"],
+        "notice": submitted["notice"],
+    }
 
 
 async def _external_execute_runtime_gate(payload: ExternalExecuteIn):

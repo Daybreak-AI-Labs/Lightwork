@@ -7,8 +7,16 @@ import json
 
 import pytest
 from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from maverick import ai_benchmark_exchange as exchange
+from maverick.ai_benchmark_exchange_transport import (
+    COORDINATOR_RECEIPT_SCHEMA,
+    BenchmarkCoordinatorClient,
+    CoordinatorHTTPResponse,
+    Ed25519TrustKey,
+    VersionedEd25519TrustRoots,
+)
 from maverick.governed_records import GovernedRecordStore
 from maverick.paths import tenant_scope
 from maverick.privacy_ops import RecordConflict
@@ -81,6 +89,66 @@ class Verifier:
         return True
 
 
+class RecordingCoordinatorTransport:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def post(
+        self,
+        url,
+        *,
+        headers,
+        body,
+        timeout,
+        allow_redirects,
+        max_response_bytes,
+    ):
+        self.calls.append(
+            {
+                "url": url,
+                "headers": dict(headers),
+                "body": body,
+                "timeout": timeout,
+                "allow_redirects": allow_redirects,
+                "max_response_bytes": max_response_bytes,
+            }
+        )
+        submission = json.loads(body)
+        receipt = {
+            "schema": COORDINATOR_RECEIPT_SCHEMA,
+            "status": "accepted",
+            "receipt_id": "BCR-" + "c" * 32,
+            "idempotency_key": submission["idempotency_key"],
+            "packet_sha256": submission["contribution"]["packet_sha256"],
+            "accepted_at": NOW,
+        }
+        encoded = _canonical(receipt)
+        return CoordinatorHTTPResponse(
+            200,
+            {
+                "Content-Type": "application/json",
+                "Content-Length": str(len(encoded)),
+            },
+            encoded,
+        )
+
+
+def _trust_roots() -> VersionedEd25519TrustRoots:
+    public_key = VERIFYING_KEY.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return VersionedEd25519TrustRoots(
+        version=1,
+        keys=(
+            Ed25519TrustKey(
+                key_id=KEY_ID,
+                public_key_hex=public_key.hex(),
+            ),
+        ),
+    )
+
+
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -105,7 +173,13 @@ def _store(namespace: str, prefix: str, record_type: str) -> GovernedRecordStore
     return GovernedRecordStore(namespace, prefix, record_type)
 
 
-def _service(label: str = "main", *, verifier=True):
+def _service(
+    label: str = "main",
+    *,
+    verifier=True,
+    trust_roots=None,
+    coordinator=None,
+):
     evidence = Evidence()
     signature_verifier = Verifier() if verifier else None
     clock = Clock()
@@ -127,6 +201,8 @@ def _service(label: str = "main", *, verifier=True):
         ),
         evidence_resolver=evidence,
         signature_verifier=signature_verifier,
+        trust_roots=trust_roots,
+        coordinator=coordinator,
         pseudonymizer=pseudonymizer,
         clock=clock,
     )
@@ -442,6 +518,312 @@ def test_signed_not_dp_report_ingest_is_idempotent_and_honest():
         assert KEY_ID not in json.dumps(result, sort_keys=True)
 
 
+def test_versioned_trust_roots_integrate_with_report_ingest_and_revocation():
+    roots = _trust_roots()
+    service, *_ = _service("trust-roots", verifier=False, trust_roots=roots)
+    with tenant_scope(tenant="acme"):
+        result = service.ingest_cohort_report(_report(), actor="user:analyst")
+    assert result["verification"]["signature_verified"] is True
+    assert service._signature_verifier is roots
+
+    revoked = roots.advance(version=2, revocations=(KEY_ID,))
+    service, *_ = _service("revoked-root", verifier=False, trust_roots=revoked)
+    with tenant_scope(tenant="acme"):
+        with pytest.raises(exchange.AIBenchmarkExchangeVerificationError, match="not valid"):
+            service.ingest_cohort_report(_report(), actor="user:analyst")
+
+
+def test_coordinator_submission_is_explicit_and_uses_only_approved_export():
+    transport = RecordingCoordinatorTransport()
+    coordinator = BenchmarkCoordinatorClient(
+        coordinator_origin="https://benchmark.example.com",
+        enabled=True,
+        transport=transport,
+    )
+    service, _, _, evidence, *_ = _service(
+        "coordinator",
+        coordinator=coordinator,
+    )
+    with tenant_scope(tenant="acme-customer-name"):
+        draft = _create(service, evidence)
+        service.approve_contribution(
+            CONTRIBUTION,
+            1,
+            expected_revision=draft["revision"],
+            actor="user:approver",
+        )
+        assert transport.calls == []
+        with pytest.raises(exchange.AIBenchmarkExchangeConsentError, match="literal consent"):
+            service.submit_contribution_to_coordinator(
+                CONTRIBUTION,
+                explicit_consent=False,
+                idempotency_key="coordinator-submit-001",
+            )
+        assert transport.calls == []
+
+        receipt = service.submit_contribution_to_coordinator(
+            CONTRIBUTION,
+            explicit_consent=True,
+            idempotency_key="coordinator-submit-001",
+        )
+        repeated = service.submit_contribution_to_coordinator(
+            CONTRIBUTION,
+            explicit_consent=True,
+            idempotency_key="coordinator-submit-001",
+        )
+
+    assert receipt == repeated
+    assert receipt["limitations"] == {
+        "cohort_inclusion_verified": False,
+        "anonymity_verified": False,
+        "differential_privacy_verified": False,
+    }
+    assert len(transport.calls) == 1
+    call = transport.calls[0]
+    assert call["allow_redirects"] is False
+    assert call["url"] == "https://benchmark.example.com/v1/benchmark/contributions"
+    serialized = call["body"].decode()
+    assert CONTRIBUTION not in serialized
+    assert "acme-customer-name" not in serialized
+    assert '"tenant_ref"' not in serialized
+
+
+def test_default_service_and_factory_remain_local_only_until_injected():
+    assert exchange.configured_benchmark_exchange() is exchange._DEFAULT
+    assert exchange._DEFAULT._signature_verifier is None
+    assert exchange._DEFAULT._coordinator is None
+
+    roots = _trust_roots()
+    transport = RecordingCoordinatorTransport()
+    coordinator = BenchmarkCoordinatorClient(
+        coordinator_origin="https://benchmark.example.com",
+        enabled=True,
+        transport=transport,
+    )
+    configured = exchange.configured_benchmark_exchange(
+        trust_roots=roots,
+        coordinator=coordinator,
+    )
+
+    assert configured is not exchange._DEFAULT
+    assert configured._signature_verifier is roots
+    assert configured._coordinator is coordinator
+    assert transport.calls == []
+
+
+def test_operator_factory_loads_toml_trust_roots_without_network(_isolate):
+    from maverick import config
+
+    roots = _trust_roots()
+    document = roots.as_document()
+    key = document["keys"][0]
+    (_isolate / "config.toml").write_text(
+        "\n".join(
+            [
+                "[ai_benchmark_exchange]",
+                "enable = true",
+                "",
+                "[ai_benchmark_exchange.trust_roots]",
+                f'schema = "{document["schema"]}"',
+                f'version = {document["version"]}',
+                "",
+                "[[ai_benchmark_exchange.trust_roots.keys]]",
+                f'key_id = "{key["key_id"]}"',
+                f'public_key_hex = "{key["public_key_hex"]}"',
+                f'introduced_in = {key["introduced_in"]}',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+
+    configured = exchange.configured_benchmark_exchange()
+    report = _report()
+    body = {field: report[field] for field in exchange._REPORT_BODY_FIELDS}
+
+    assert configured is not exchange._DEFAULT
+    assert configured._coordinator is None
+    assert configured._signature_verifier(
+        _canonical(body), report["signature"]
+    ) is True
+
+
+def test_operator_factory_constructs_enabled_coordinator_without_contacting_it(
+    _isolate,
+    monkeypatch,
+):
+    from maverick import config
+
+    network_called = False
+
+    def unsafe_client(*_args, **_kwargs):
+        nonlocal network_called
+        network_called = True
+        raise AssertionError("factory construction must not contact the network")
+
+    monkeypatch.setattr("maverick.tools._ssrf.safe_client", unsafe_client)
+    (_isolate / "config.toml").write_text(
+        "\n".join(
+            [
+                "[ai_benchmark_exchange]",
+                "enable = true",
+                "",
+                "[ai_benchmark_exchange.coordinator]",
+                "enable = true",
+                'origin = "https://benchmark.example.com"',
+                "timeout_seconds = 7.5",
+                "max_request_bytes = 4096",
+                "max_response_bytes = 8192",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+
+    configured = exchange.configured_benchmark_exchange()
+    coordinator = configured._coordinator
+
+    assert isinstance(coordinator, BenchmarkCoordinatorClient)
+    assert coordinator.coordinator_origin == "https://benchmark.example.com"
+    assert coordinator._enabled is True
+    assert coordinator._limits.timeout_seconds == 7.5
+    assert coordinator._limits.max_request_bytes == 4096
+    assert coordinator._limits.max_response_bytes == 8192
+    assert network_called is False
+
+
+def test_operator_factory_does_not_construct_disabled_coordinator(
+    _isolate,
+    monkeypatch,
+):
+    from maverick import ai_benchmark_exchange_transport, config
+
+    def forbidden_client(*_args, **_kwargs):
+        raise AssertionError("disabled coordinator must not be constructed")
+
+    monkeypatch.setattr(
+        ai_benchmark_exchange_transport,
+        "BenchmarkCoordinatorClient",
+        forbidden_client,
+    )
+    (_isolate / "config.toml").write_text(
+        "\n".join(
+            [
+                "[ai_benchmark_exchange]",
+                "enable = true",
+                "",
+                "[ai_benchmark_exchange.coordinator]",
+                "enable = false",
+                'origin = "https://benchmark.example.com"',
+                "timeout_seconds = 7.5",
+                "max_request_bytes = 4096",
+                "max_response_bytes = 8192",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+
+    assert exchange.configured_benchmark_exchange() is exchange._DEFAULT
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        {"enable": True, "unexpected": True},
+        {
+            "enable": True,
+            "trust_roots": {"schema": "unsupported", "version": 1, "keys": []},
+        },
+        {"enable": True, "coordinator": []},
+        {"enable": True, "coordinator": {"enable": "true"}},
+        {"enable": True, "coordinator": {"enable": True}},
+        {
+            "enable": True,
+            "coordinator": {
+                "enable": False,
+                "origin": "http://benchmark.example.com",
+            },
+        },
+        {
+            "enable": True,
+            "coordinator": {"enable": False, "max_request_bytes": 2},
+        },
+        {
+            "enable": True,
+            "coordinator": {"enable": False, "unexpected": True},
+        },
+    ],
+)
+def test_operator_factory_rejects_unknown_or_malformed_integration_config(
+    section,
+    monkeypatch,
+):
+    from maverick import config
+
+    monkeypatch.setattr(
+        config,
+        "load_global_config",
+        lambda: {"ai_benchmark_exchange": section},
+    )
+    monkeypatch.setattr(
+        config,
+        "config_source_errors",
+        lambda *, include_tenant=True: {},
+    )
+
+    with pytest.raises(exchange.AIBenchmarkExchangeConfigError):
+        exchange.configured_benchmark_exchange()
+
+
+def test_operator_factory_fails_closed_when_global_config_is_unreadable(monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(
+        config,
+        "load_global_config",
+        lambda: {"ai_benchmark_exchange": {"enable": True}},
+    )
+    monkeypatch.setattr(
+        config,
+        "config_source_errors",
+        lambda *, include_tenant=True: {"config.toml": "malformed"},
+    )
+
+    with pytest.raises(exchange.AIBenchmarkExchangeConfigError, match="unreadable"):
+        exchange.configured_benchmark_exchange()
+
+
+def test_service_rejects_ambiguous_or_malformed_integration_dependencies():
+    roots = _trust_roots()
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        exchange.AIBenchmarkExchangeService(
+            signature_verifier=lambda _payload, _signature: True,
+            trust_roots=roots,
+        )
+    with pytest.raises(ValueError, match="submit"):
+        exchange.AIBenchmarkExchangeService(coordinator=object())
+
+    service, _, _, evidence, *_ = _service("no-coordinator")
+    with tenant_scope(tenant="acme"):
+        draft = _create(service, evidence)
+        service.approve_contribution(
+            CONTRIBUTION,
+            1,
+            expected_revision=draft["revision"],
+            actor="user:approver",
+        )
+        with pytest.raises(exchange.AIBenchmarkExchangeConfigError, match="not configured"):
+            service.submit_contribution_to_coordinator(
+                CONTRIBUTION,
+                explicit_consent=True,
+                idempotency_key="coordinator-submit-001",
+            )
+
+
 def test_report_requires_real_injected_verifier_and_exact_digest():
     service, _, _, _, _, _ = _service("no-verifier", verifier=False)
     with tenant_scope(tenant="acme"):
@@ -561,6 +943,7 @@ def test_no_raw_fields_or_cross_tenant_pooling_operations_exist():
         "add_version",
         "approve_contribution",
         "export_contribution",
+        "submit_contribution_to_coordinator",
         "ingest_cohort_report",
         "get_cohort_report",
         "list_cohort_reports",

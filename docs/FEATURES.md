@@ -867,11 +867,16 @@ here.
   provenance, safe feature projections, revision-CAS review and independent
   approval. Provider adapters and adverse-action or legal acceptance are not
   implied.
-- **AI vendor diligence** (`ai_vendor_risk.py`, assurance API/cockpit, opt-in
-  `[ai_vendor_risk] enable`) — AI-specific questionnaires, bounded cited
-  document extraction, approved-prior-answer reuse, deterministic scoring,
-  independent review and approved evidence projection. Raw documents are not
-  persisted; a vendor portal and live document/vendor acceptance do not ship.
+- **AI vendor diligence and response portal** (`ai_vendor_risk.py`,
+  `ai_vendor_portal.py`, assurance and external APIs/cockpit, opt-in
+  `[ai_vendor_risk] enable` plus `portal_enable`) — AI-specific questionnaires,
+  bounded cited document extraction, approved-prior and vendor-attested answer
+  precedence, deterministic scoring, independent review and approved evidence
+  projection. The tenant-scoped portal returns an opaque invitation credential
+  once, stores only its hash, supports expiry/revocation and idempotent response,
+  binds the exact questionnaire, requires explicit vendor attestation and
+  imports submissions as pending human review. Raw documents are not persisted;
+  live document/vendor, portal-operations and ecosystem acceptance do not ship.
 - **AI regulatory-impact bridge and Article 73 incidents**
   (`ai_regulatory_feed.py`, `eu_ai_incidents.py`, assurance API/cockpit,
   opt-in feature sections) — maps reviewed regulatory changes to exact affected
@@ -905,34 +910,46 @@ here.
   API/cockpit, opt-in `[ai_insurability] enable`) — exact-evidence profile
   versions, measurements, limitations, verifier guidance and four-eyes export.
   Coverage, underwriting, pricing and insurer acceptance are external outcomes.
-- **Media provenance control plane** (`ai_media_provenance.py`, assurance
-  API/cockpit, opt-in `[ai_media_provenance] enable`) — typed external C2PA
-  verifier and signer adapter interfaces, digest-only receipts, transient media processing, exact
-  asset/deployment/context bindings and four-eyes release. No C2PA engine or
-  production key-custody implementation is bundled by default, so the stock
-  runtime reports verification and signing as unsupported.
-- **Voluntary benchmark exchange** (`ai_benchmark_exchange.py`, assurance
-  API/cockpit, opt-in `[ai_benchmark_exchange] enable`) — aggregate-only,
-  pseudonymous contribution packages, exact methodology/revision binding,
-  four-eyes export and fail-closed cohort-report admission through an injected
-  signature verifier, with minimum cohort and explicit differential-privacy
-  parameters. The stock service has no verifier or coordinator network and
-  ships no cross-tenant raw pooling, anonymity proof or privacy-budget
-  accounting.
-- **Discovery sensor control plane** (`ai_discovery_sensors.py`, assurance
-  API/cockpit, opt-in `[ai_discovery_sensors] enable`) — registers, approves,
-  configures and revokes browser-extension, network-egress, OAuth-grant,
-  SaaS-posture, identity-directory and data-catalog sensors and accepts bounded
-  normalized observations. The six deployed sensor agents are not included,
-  and the current observation route is human-principal authenticated rather
-  than a dedicated machine-sensor ingress, so this is not an
-  enterprise-discovery-completeness claim.
+- **Media provenance control plane** (`ai_media_provenance.py`,
+  `ai_media_provenance_c2pa.py`, assurance API/cockpit, opt-in
+  `[ai_media_provenance] enable`) — typed C2PA interfaces plus a concrete
+  optional verifier/signer backed by the official `c2patool` CLI, with bounded
+  process I/O, protected transient workspaces, strict report normalization,
+  digest-only receipts, exact asset/deployment/context bindings and four-eyes
+  release. `verification_adapter = "c2patool"` explicitly selects the verifier;
+  the executable is not bundled or live-tested here, and signing still requires
+  injected credential/manifest/trust providers rather than factory key custody.
+- **Voluntary benchmark exchange** (`ai_benchmark_exchange.py`,
+  `ai_benchmark_exchange_transport.py`, assurance API/cockpit, opt-in
+  `[ai_benchmark_exchange] enable`) — aggregate-only, pseudonymous contribution
+  packages, exact methodology/revision binding, four-eyes export, versioned
+  Ed25519 report-trust roots with rotation/revocation, and an explicitly enabled
+  fixed-origin HTTPS coordinator client with bounded transport, idempotent
+  submission and literal manual consent. The default remains local and does not
+  contact a coordinator. No operated cross-tenant network, inclusion proof,
+  anonymity/differential-privacy guarantee or privacy-budget accounting ships.
+- **Discovery sensor control plane and signed ingress**
+  (`ai_discovery_sensors.py`, `ai_discovery_sensor_clients.py`, assurance and
+  external APIs/cockpit, opt-in `[ai_discovery_sensors] enable`) — registers,
+  approves, configures and revokes browser-extension, network-egress,
+  OAuth-grant, SaaS-posture, identity-directory and data-catalog sensors and
+  accepts bounded normalized observations. The external route admits only
+  tenant-scoped Ed25519 machine envelopes with exact sensor/configuration
+  binding and durable replay protection; network-egress and browser/OAuth
+  reference normalizers plus a signed client are included. The six deployed
+  sensor agents and enterprise completeness, privacy and scale acceptance are
+  not included.
 - **Identity and data-governance discovery adapters**
   (`ai_identity_governance_connectors.py`, `identity_governance_runtime.py`,
-  assurance API/cockpit, opt-in `[ai_identity_governance_connectors] enable`) — bounded,
-  read-only Entra, Okta and Purview collection through pinned-host,
-  redirect-disabled enterprise egress, with pseudonymous normalized snapshots.
-  Live tenant and continuous-collection acceptance remain unverified.
+  `identity_governance_scheduler.py`, assurance API/cockpit, opt-in
+  `[ai_identity_governance_connectors] enable`) — bounded, read-only Entra,
+  Okta and Purview collection through pinned-host, redirect-disabled enterprise
+  egress, with pseudonymous normalized snapshots. The separately opt-in
+  scheduler uses per-provider CAS leases, bounded retry/backoff, digest-only
+  history, bounded hash deltas and safe callbacks. Live tenant/operating
+  acceptance, agent-principal federation, conditional-access enforcement,
+  identity-to-capability mapping and Purview writeback remain unverified or
+  unimplemented.
 - **Regulated-industry decision-support packages**
   (`ai_regulated_verticals.py`, assurance API/cockpit, opt-in
   `[ai_regulated_verticals] enable`) — governed credit-reason, aggregate

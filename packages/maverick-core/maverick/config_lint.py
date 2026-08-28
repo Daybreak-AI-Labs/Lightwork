@@ -153,7 +153,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "missing_grace_runs",
         "poll_seconds",
     },
-    "ai_vendor_risk": {"enable"},
+    "ai_vendor_risk": {"enable", "portal_enable"},
     "policy_packs": {"enable"},
     "portfolio_risk": {"enable"},
     "drift_monitoring": {
@@ -205,10 +205,16 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     "ai_insurability": {"enable"},
     "ai_regulated_verticals": {"enable"},
     "ai_bank_mrm": {"enable"},
-    "ai_benchmark_exchange": {"enable"},
+    "ai_benchmark_exchange": {"enable", "trust_roots", "coordinator"},
     "ai_discovery_sensors": {"enable"},
-    "ai_media_provenance": {"enable"},
-    "ai_identity_governance_connectors": {"enable", "entra", "okta", "purview"},
+    "ai_media_provenance": {"enable", "verification_adapter"},
+    "ai_identity_governance_connectors": {
+        "enable",
+        "entra",
+        "okta",
+        "purview",
+        "scheduler",
+    },
     # --- dynamic / open-ended sections (any subkey accepted) ---
     "providers": None,
     "models": None,
@@ -331,6 +337,7 @@ _BOOL_KEYS: dict[str, set[str]] = {
         "require_signed_receipt",
     },
     "automation_import": {"enable", "create_schedules"},
+    "ai_vendor_risk": {"portal_enable"},
     "models": {"cascade"},
     "routing": {"cost_aware"},
 }
@@ -338,6 +345,54 @@ _BOOL_KEYS: dict[str, set[str]] = {
 _UNIVERSAL_BOOL_KEYS = ("enabled", "enable")
 _MODEL_IMPROVEMENT_FAMILY_MIN = 20
 _MODEL_IMPROVEMENT_FAMILY_MAX = 1_000_000
+
+_IDENTITY_SCHEDULE_KEYS = {
+    "enable",
+    "interval_seconds",
+    "retry_base_seconds",
+    "retry_max_seconds",
+    "max_attempts_per_slot",
+    "lease_seconds",
+    "history_limit",
+    "max_snapshot_items",
+    "max_delta_digests",
+}
+_NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
+    ("ai_benchmark_exchange", "trust_roots"): {"schema", "version", "keys"},
+    ("ai_benchmark_exchange", "coordinator"): {
+        "enable",
+        "origin",
+        "timeout_seconds",
+        "max_request_bytes",
+        "max_response_bytes",
+    },
+    ("ai_identity_governance_connectors", "scheduler"): {
+        "enable",
+        "poll_seconds",
+        "providers",
+    },
+    ("ai_identity_governance_connectors", "scheduler", "providers"): {
+        "entra",
+        "okta",
+        "purview",
+    },
+}
+for _provider in ("entra", "okta", "purview"):
+    _NESTED_GOVERNANCE_SCHEMA[
+        ("ai_identity_governance_connectors", "scheduler", "providers", _provider)
+    ] = _IDENTITY_SCHEDULE_KEYS
+
+_IDENTITY_SCHEDULE_INTEGER_BOUNDS = {
+    "interval_seconds": (60, 86_400),
+    "retry_base_seconds": (1, 3_600),
+    "retry_max_seconds": (1, 86_400),
+    "max_attempts_per_slot": (1, 10),
+    "lease_seconds": (60, 86_400),
+    "history_limit": (1, 32),
+    "max_snapshot_items": (1, 10_000),
+    "max_delta_digests": (0, 512),
+}
+_MISSING = object()
 
 
 # Key names that carry secrets. A literal (non-``${ENV}``) string under one of
@@ -410,12 +465,311 @@ def _is_valid_numeric_cap(v: int | float) -> bool:
     return math.isfinite(v) and v >= 0
 
 
+def _number_between(value: object, lower: float, upper: float) -> bool:
+    """Bound a number without coercing arbitrarily large integers to float."""
+    if not _is_number(value):
+        return False
+    if isinstance(value, int):
+        return lower <= value <= upper
+    return math.isfinite(value) and lower <= value <= upper
+
+
 def _suggest(name: str, candidates: list[str]) -> str:
     """Return ' (did you mean "X"?)' for the closest candidate, else ''."""
     matches = difflib.get_close_matches(name, candidates, n=1, cutoff=0.6)
     if matches:
         return f' (did you mean "{matches[0]}"?)'
     return ""
+
+
+def _at_path(cfg: dict, path: tuple[str, ...]) -> object:
+    current: object = cfg
+    for part in path:
+        if not isinstance(current, dict) or part not in current:
+            return _MISSING
+        current = current[part]
+    return current
+
+
+def _nested_error(
+    section: str,
+    key: str,
+    message: str,
+    *,
+    severity: str = "error",
+) -> Finding:
+    return Finding(section=section, key=key, severity=severity, message=message)
+
+
+def _lint_identity_schedule_table(
+    path: tuple[str, ...], value: dict
+) -> list[Finding]:
+    findings: list[Finding] = []
+    section = ".".join(path)
+    enabled = value.get("enable", _MISSING)
+    if enabled is not _MISSING and not isinstance(enabled, bool):
+        findings.append(
+            _nested_error(
+                section,
+                "enable",
+                f"{section}.enable must be true or false, got "
+                f"{type(enabled).__name__}",
+            )
+        )
+    for key, bounds in _IDENTITY_SCHEDULE_INTEGER_BOUNDS.items():
+        item = value.get(key, _MISSING)
+        if item is _MISSING:
+            continue
+        lower, upper = bounds
+        if (
+            isinstance(item, bool)
+            or not isinstance(item, int)
+            or not lower <= item <= upper
+        ):
+            findings.append(
+                _nested_error(
+                    section,
+                    key,
+                    f"{section}.{key} must be an integer between "
+                    f"{lower} and {upper}, got {item!r}",
+                )
+            )
+    retry_base = value.get("retry_base_seconds")
+    retry_max = value.get("retry_max_seconds")
+    if (
+        isinstance(retry_base, int)
+        and not isinstance(retry_base, bool)
+        and isinstance(retry_max, int)
+        and not isinstance(retry_max, bool)
+        and retry_max < retry_base
+    ):
+        findings.append(
+            _nested_error(
+                section,
+                "retry_max_seconds",
+                f"{section}.retry_max_seconds must be greater than or equal "
+                "to retry_base_seconds",
+            )
+        )
+    return findings
+
+
+def _lint_trust_root_keys(value: dict) -> list[Finding]:
+    findings: list[Finding] = []
+    section = "ai_benchmark_exchange.trust_roots"
+    version = value.get("version", _MISSING)
+    if version is not _MISSING and (
+        isinstance(version, bool) or not isinstance(version, int) or version < 1
+    ):
+        findings.append(
+            _nested_error(
+                section,
+                "version",
+                f"{section}.version must be a positive integer",
+            )
+        )
+    schema = value.get("schema", _MISSING)
+    if schema is not _MISSING and not isinstance(schema, str):
+        findings.append(
+            _nested_error(
+                section,
+                "schema",
+                f"{section}.schema must be a string",
+            )
+        )
+    keys = value.get("keys", _MISSING)
+    if keys is _MISSING:
+        return findings
+    if not isinstance(keys, list):
+        findings.append(
+            _nested_error(
+                section,
+                "keys",
+                f"{section}.keys must be an array of tables",
+            )
+        )
+        return findings
+    allowed = {"key_id", "public_key_hex", "introduced_in", "revoked_in"}
+    required = {"key_id", "public_key_hex", "introduced_in"}
+    for index, item in enumerate(keys):
+        item_section = f"{section}.keys[{index}]"
+        if not isinstance(item, dict):
+            findings.append(
+                _nested_error(
+                    section,
+                    "keys",
+                    f"{item_section} must be a table",
+                )
+            )
+            continue
+        for key in item:
+            if isinstance(key, str) and key not in allowed:
+                findings.append(
+                    _nested_error(
+                        item_section,
+                        key,
+                        f'unknown key "{key}" in [{item_section}]'
+                        + _suggest(key, sorted(allowed)),
+                        severity="warning",
+                    )
+                )
+        missing = sorted(required - set(item))
+        for key in missing:
+            findings.append(
+                _nested_error(
+                    item_section,
+                    key,
+                    f"{item_section}.{key} is required",
+                )
+            )
+        for key in ("key_id", "public_key_hex"):
+            item_value = item.get(key, _MISSING)
+            if item_value is not _MISSING and not isinstance(item_value, str):
+                findings.append(
+                    _nested_error(
+                        item_section,
+                        key,
+                        f"{item_section}.{key} must be a string",
+                    )
+                )
+        for key in ("introduced_in", "revoked_in"):
+            item_value = item.get(key, _MISSING)
+            if item_value is not _MISSING and (
+                isinstance(item_value, bool)
+                or not isinstance(item_value, int)
+                or item_value < 1
+            ):
+                findings.append(
+                    _nested_error(
+                        item_section,
+                        key,
+                        f"{item_section}.{key} must be a positive integer",
+                    )
+                )
+    return findings
+
+
+def _lint_governance_nested_tables(cfg: dict) -> list[Finding]:
+    """Validate the few security-sensitive nested governance tables we own."""
+
+    findings: list[Finding] = []
+    for path, allowed in _NESTED_GOVERNANCE_SCHEMA.items():
+        value = _at_path(cfg, path)
+        if value is _MISSING:
+            continue
+        section = ".".join(path)
+        if not isinstance(value, dict):
+            findings.append(
+                _nested_error(
+                    ".".join(path[:-1]),
+                    path[-1],
+                    f"{section} must be a table, got {type(value).__name__}",
+                )
+            )
+            continue
+        for key in value:
+            if isinstance(key, str) and key not in allowed:
+                findings.append(
+                    _nested_error(
+                        section,
+                        key,
+                        f'unknown key "{key}" in [{section}]'
+                        + _suggest(key, sorted(allowed)),
+                        severity="warning",
+                    )
+                )
+        if len(path) == 4 and path[:3] == (
+            "ai_identity_governance_connectors",
+            "scheduler",
+            "providers",
+        ):
+            findings.extend(_lint_identity_schedule_table(path, value))
+
+    scheduler = _at_path(cfg, ("ai_identity_governance_connectors", "scheduler"))
+    if isinstance(scheduler, dict):
+        enabled = scheduler.get("enable", _MISSING)
+        if enabled is not _MISSING and not isinstance(enabled, bool):
+            findings.append(
+                _nested_error(
+                    "ai_identity_governance_connectors.scheduler",
+                    "enable",
+                    "ai_identity_governance_connectors.scheduler.enable must be "
+                    f"true or false, got {type(enabled).__name__}",
+                )
+            )
+        poll = scheduler.get("poll_seconds", _MISSING)
+        if poll is not _MISSING and not _number_between(poll, 5, 3_600):
+            findings.append(
+                _nested_error(
+                    "ai_identity_governance_connectors.scheduler",
+                    "poll_seconds",
+                    "ai_identity_governance_connectors.scheduler.poll_seconds "
+                    f"must be between 5 and 3600, got {poll!r}",
+                )
+            )
+
+    trust_roots = _at_path(cfg, ("ai_benchmark_exchange", "trust_roots"))
+    if isinstance(trust_roots, dict):
+        findings.extend(_lint_trust_root_keys(trust_roots))
+
+    coordinator = _at_path(cfg, ("ai_benchmark_exchange", "coordinator"))
+    if isinstance(coordinator, dict):
+        section = "ai_benchmark_exchange.coordinator"
+        enabled = coordinator.get("enable", _MISSING)
+        if enabled is not _MISSING and not isinstance(enabled, bool):
+            findings.append(
+                _nested_error(
+                    section,
+                    "enable",
+                    f"{section}.enable must be true or false, got "
+                    f"{type(enabled).__name__}",
+                )
+            )
+        origin = coordinator.get("origin", _MISSING)
+        if origin is not _MISSING and not isinstance(origin, str):
+            findings.append(
+                _nested_error(
+                    section,
+                    "origin",
+                    f"{section}.origin must be a string",
+                )
+            )
+        if enabled is True and (not isinstance(origin, str) or not origin.strip()):
+            findings.append(
+                _nested_error(
+                    section,
+                    "origin",
+                    f"enabled {section} requires an explicit origin",
+                )
+            )
+        timeout = coordinator.get("timeout_seconds", _MISSING)
+        if timeout is not _MISSING and not _number_between(timeout, 1, 60):
+            findings.append(
+                _nested_error(
+                    section,
+                    "timeout_seconds",
+                    f"{section}.timeout_seconds must be between 1 and 60",
+                )
+            )
+        for key, upper in (
+            ("max_request_bytes", 256 * 1_024),
+            ("max_response_bytes", 1_024 * 1_024),
+        ):
+            item = coordinator.get(key, _MISSING)
+            if item is not _MISSING and (
+                isinstance(item, bool)
+                or not isinstance(item, int)
+                or not 1_024 <= item <= upper
+            ):
+                findings.append(
+                    _nested_error(
+                        section,
+                        key,
+                        f"{section}.{key} must be an integer between 1024 "
+                        f"and {upper}",
+                    )
+                )
+    return findings
 
 
 def lint_config(cfg: dict) -> list[Finding]:
@@ -556,6 +910,22 @@ def lint_config(cfg: dict) -> list[Finding]:
                     )
                 )
             elif (
+                section == "ai_media_provenance"
+                and key == "verification_adapter"
+                and kval != "c2patool"
+            ):
+                findings.append(
+                    Finding(
+                        section=section,
+                        key=key,
+                        severity="error",
+                        message=(
+                            "ai_media_provenance.verification_adapter must be "
+                            'exactly "c2patool"'
+                        ),
+                    )
+                )
+            elif (
                 section == "model_improvement"
                 and key == "allow_cross_tenant"
                 and kval is True
@@ -595,6 +965,7 @@ def lint_config(cfg: dict) -> list[Finding]:
                     ),
                 ))
 
+    findings.extend(_lint_governance_nested_tables(cfg))
     findings.extend(_lint_inline_secrets(cfg))
     findings.extend(_lint_group_mappings(cfg))
     return findings

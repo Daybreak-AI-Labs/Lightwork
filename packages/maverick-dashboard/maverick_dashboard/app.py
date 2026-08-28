@@ -433,6 +433,14 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_ai_cost_scheduler)
     except Exception:  # pragma: no cover - never block startup
         log.exception("AI cost scheduler not started")
+    try:
+        from maverick_dashboard.identity_governance_scheduler import (
+            start_identity_governance_scheduler,
+        )
+
+        await run_in_threadpool(start_identity_governance_scheduler)
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("identity-governance scheduler not started")
     # Connected-entitlement auto-refresh: a deployment with [license] api_url
     # configured polls the vendor console so an upgrade/downgrade issued there
     # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
@@ -493,6 +501,14 @@ async def _lifespan(app: FastAPI):
         from maverick_dashboard.ai_cost_scheduler import stop_ai_cost_scheduler
 
         await run_in_threadpool(stop_ai_cost_scheduler)
+    except Exception:  # pragma: no cover - shutdown must never raise
+        pass
+    try:
+        from maverick_dashboard.identity_governance_scheduler import (
+            stop_identity_governance_scheduler,
+        )
+
+        await run_in_threadpool(stop_identity_governance_scheduler)
     except Exception:  # pragma: no cover - shutdown must never raise
         pass
     await _stop_automation_scheduler()
@@ -590,10 +606,10 @@ app.include_router(scim_router)
 from .saml import router as saml_router  # noqa: E402
 
 app.include_router(saml_router)
-# Bring-your-own-agent gateway (/api/v1/external/...): agents on OTHER
-# platforms report runs and ask for action screening with their per-agent
-# rest bearer. Self-gates on [external_agents] enable (404 off) and the Gold
-# entitlement, so including it unconditionally is inert. The prefix is
+# Self-authenticating external integrations (/api/v1/external/...): agents on
+# other platforms, signed discovery sensors, and invited vendor respondents use
+# route-specific credentials instead of a dashboard session. Individual route
+# families self-gate on their own configuration. The prefix is
 # self-authenticating (see _AUTH_EXEMPT rationale for /a2a/v1).
 from .external_gateway import router as external_gateway_router  # noqa: E402
 
@@ -1101,9 +1117,9 @@ async def bearer_auth(request: Request, call_next):
             or request.url.path.startswith("/form/")
             or request.url.path.startswith("/saml/")
             or request.url.path.startswith("/auth/invite/")
-            # BYOA gateway: per-agent rest bearer from the trust registry is
-            # the credential (external_gateway.py); the trailing slash keeps
-            # the ADMIN surface /api/v1/external-agents under dashboard auth.
+            # External integrations authenticate inside their route family
+            # using agent, signed-sensor, or vendor-invitation credentials. The
+            # trailing slash keeps /api/v1/external-agents under dashboard auth.
             or request.url.path.startswith("/api/v1/external/")):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --

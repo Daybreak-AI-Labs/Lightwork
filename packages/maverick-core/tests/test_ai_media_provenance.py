@@ -272,11 +272,14 @@ def test_default_is_off_and_never_pretends_c2pa_support(_isolate):
     assert status["enabled"] is False
     assert status["verification"]["status"] == "unsupported"
     assert status["signing"]["status"] == "unsupported"
+    assert status["verification"]["adapter_id"] is None
+    assert status["signing"]["adapter_id"] is None
 
     (_isolate / "config.toml").write_text(
         "[ai_media_provenance]\nenable = true\n", encoding="utf-8"
     )
     config.reset_config_cache()
+    assert provenance.configured_media_provenance() is provenance.default_service
     service, *_ = _service("unsupported")
     with tenant_scope(tenant="acme"):
         with pytest.raises(provenance.MediaProvenanceUnavailable, match="unsupported"):
@@ -288,9 +291,133 @@ def test_configured_but_unavailable_adapter_is_reported_not_simulated():
         "unavailable", adapter=FakeC2PAAdapter(available=False)
     )
     assert service.capability_status()["verification"]["status"] == "unavailable"
+    assert service.capability_status()["verification"]["adapter_id"] == (
+        "test.c2pa.adapter"
+    )
+    assert service.capability_status()["verification"]["adapter_version"] is None
     with tenant_scope(tenant="acme"):
         with pytest.raises(provenance.MediaProvenanceUnavailable, match="unavailable"):
             _verify(service)
+
+
+def test_factory_requires_explicit_c2patool_verification_selection(
+    _isolate, monkeypatch
+):
+    from maverick import ai_media_provenance_c2pa, config
+
+    adapter = FakeC2PAAdapter()
+    constructed = 0
+
+    def factory():
+        nonlocal constructed
+        constructed += 1
+        return adapter
+
+    monkeypatch.setattr(ai_media_provenance_c2pa, "C2PAToolVerifier", factory)
+    (_isolate / "config.toml").write_text(
+        "[ai_media_provenance]\n"
+        "enable = true\n"
+        'verification_adapter = "c2patool"\n',
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+
+    service = provenance.configured_media_provenance()
+    status = service.capability_status()
+
+    assert constructed == 1
+    assert service is not provenance.default_service
+    assert status["verification"] == {
+        "configured": True,
+        "available": True,
+        "status": "available",
+        "adapter_id": "test.c2pa.adapter",
+        "adapter_version": "1.0-test",
+    }
+    assert status["signing"] == {
+        "configured": False,
+        "available": False,
+        "status": "unsupported",
+        "adapter_id": None,
+        "adapter_version": None,
+    }
+
+
+def test_factory_reports_selected_but_missing_c2patool_as_unavailable(
+    _isolate, monkeypatch
+):
+    from maverick import ai_media_provenance_c2pa, config
+
+    monkeypatch.setattr(
+        ai_media_provenance_c2pa,
+        "C2PAToolVerifier",
+        lambda: FakeC2PAAdapter(available=False),
+    )
+    (_isolate / "config.toml").write_text(
+        "[ai_media_provenance]\n"
+        "enable = true\n"
+        'verification_adapter = "c2patool"\n',
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+
+    status = provenance.configured_media_provenance().capability_status()
+
+    assert status["verification"]["configured"] is True
+    assert status["verification"]["available"] is False
+    assert status["verification"]["status"] == "unavailable"
+    assert status["verification"]["adapter_id"] == "test.c2pa.adapter"
+    assert status["verification"]["adapter_version"] is None
+    assert status["signing"]["status"] == "unsupported"
+
+
+@pytest.mark.parametrize(
+    "selection",
+    ['"other"', '"C2PATool"', "true", "17"],
+)
+def test_factory_rejects_unknown_or_untyped_verification_adapter(
+    _isolate, selection
+):
+    from maverick import config
+
+    (_isolate / "config.toml").write_text(
+        "[ai_media_provenance]\n"
+        "enable = true\n"
+        f"verification_adapter = {selection}\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+
+    with pytest.raises(
+        provenance.MediaProvenanceConfigError,
+        match="verification_adapter must be exactly c2patool",
+    ):
+        provenance.configured_media_provenance()
+
+
+def test_factory_does_not_autodiscover_c2patool_without_selector(
+    _isolate, monkeypatch
+):
+    from maverick import ai_media_provenance_c2pa, config
+
+    def forbidden_factory():
+        raise AssertionError("c2patool must not be auto-selected")
+
+    monkeypatch.setattr(
+        ai_media_provenance_c2pa,
+        "C2PAToolVerifier",
+        forbidden_factory,
+    )
+    (_isolate / "config.toml").write_text(
+        "[ai_media_provenance]\nenable = true\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+
+    service = provenance.configured_media_provenance()
+
+    assert service is provenance.default_service
+    assert service.capability_status()["verification"]["status"] == "unsupported"
 
 
 @pytest.mark.parametrize("media_kind", ["image", "audio", "video"])

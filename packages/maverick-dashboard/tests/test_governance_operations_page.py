@@ -85,6 +85,8 @@ def test_assurance_page_renders_all_governance_operator_contracts():
         '"/ai-discovery-sensors/sensors"',
         '"/ai-discovery-sensors/findings"',
         '"/identity-governance/connectors"',
+        '"/identity-governance/scheduler/status"',
+        '"/identity-governance/scheduler/run"',
         '"/ai-media-provenance/capabilities"',
         '"/ai-media-provenance/verify"',
         '"/grc-outbound/events?limit=100"',
@@ -104,22 +106,23 @@ def test_assurance_page_renders_all_governance_operator_contracts():
     assert "compliance certification" in page
     assert "does not discover, poll, or stream live telemetry" in page
     assert "This was not a live telemetry query" in page
-    assert "has no exchange network or cohort coordinator" in page
-    assert "not an independently verified differential-privacy claim" in page
+    assert "versioned Ed25519 report trust roots and an HTTPS coordinator" in page
+    assert "transmission remains a separate human action" in page
+    assert "independently verified differential privacy" in page
     assert "control plane only" in page
     assert "deploys no live browser, network, OAuth, SaaS" in page
     assert "makes no completeness" in page
-    assert "one-shot, read-only bounded" in page
-    assert "performs no provider writes" in page
-    assert "Raw IDs, names" in page
-    assert "emails, and tokens are discarded" in page
-    assert "does not verify live provider" in page
-    assert "claim a complete identity, grant, classification, or AI" in page
-    assert "configured external C2PA adapter" in page
+    assert "one-shot or opt-in scheduled" in page
+    assert "Scheduler history retains bounded digests" in page
+    assert "provider writes and makes no live-acceptance" in page
+    assert "not raw provider rows" in page
+    assert "complete-inventory" in page
+    assert "automatic-risk claim" in page
+    assert "selected local <code>c2patool</code> verifier" in page
+    assert "signing still requires" in page
     assert "default verification and signing" in page
-    assert "Media bytes are not persisted" in page
-    assert "not Lightwork certification" in page
-    assert "authorship or truth" in page
+    assert "persisted. Adapter-reported validation" in page
+    assert "Lightwork certification, proof of authorship or truth" in page
     assert "regulatory acceptance" in page
     assert "No backend detail was displayed" in page
 

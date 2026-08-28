@@ -95,6 +95,57 @@ def test_questionnaire_covers_every_required_ai_vendor_domain():
     assert avr.AI_VENDOR_TEMPLATE.type == "ai_vendor_risk"
 
 
+def test_public_questionnaire_is_exactly_template_bound():
+    with tenant_scope(tenant="acme"):
+        questionnaire = avr.questionnaire()
+
+    assert questionnaire["schema"] == "lightwork.ai-vendor-questionnaire.v1"
+    assert questionnaire["template_revision"] == 1
+    assert len(questionnaire["template_digest"]) == 64
+    assert [row["id"] for row in questionnaire["questions"]] == [
+        question.id for question in avr.AI_VENDOR_QUESTIONS
+    ]
+    assert "certification" in questionnaire["notice"]
+
+
+def test_vendor_attestation_is_distinct_review_required_provenance():
+    attestation_sha = _hex("vendor-portal-submission")
+    with tenant_scope(tenant="acme"):
+        draft = avr.draft_vendor_assessment(
+            "Acme AI",
+            answers={"aiv_provenance": "no"},
+            attested_answers=_safe_answers(),
+            attestation_sha256=attestation_sha,
+            actor="user:risk-owner",
+            use_prior=False,
+        )
+
+    assert draft["answers"]["aiv_provenance"]["answer"] == "no"
+    assert draft["answer_sources"]["aiv_provenance"] == {
+        "kind": "manual",
+        "confidence": 1.0,
+    }
+    for question_id, source in draft["answer_sources"].items():
+        if question_id == "aiv_provenance":
+            continue
+        assert source == {
+            "kind": "vendor_attested",
+            "confidence": 0.75,
+            "review_required": True,
+            "submission_sha256": attestation_sha,
+        }
+    assert draft["status"] == "pending_review"
+
+    with tenant_scope(tenant="acme"):
+        with pytest.raises(ValueError, match="attestation_sha256"):
+            avr.draft_vendor_assessment(
+                "No Digest",
+                attested_answers={"aiv_provenance": "yes"},
+                actor="user:risk-owner",
+                use_prior=False,
+            )
+
+
 def test_every_operation_requires_explicit_tenant_authority():
     with pytest.raises(avr.AIVendorRiskStateError, match="explicit tenant"):
         avr.draft_vendor_assessment("Acme", actor="risk-owner")
