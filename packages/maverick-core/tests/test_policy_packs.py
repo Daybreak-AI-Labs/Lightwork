@@ -383,6 +383,20 @@ def test_changed_requirements_stale_exact_attestation_unchanged_remains_current(
         )
         assert refreshed["requirements"]["CTRL-2"]["status"] == "current"
         assert refreshed["last_diff"]["requirements_changed"] == ["CTRL-1"]
+        change_detail = service.get_subscription_change_detail(
+            "example-ai-policy"
+        )
+        assert change_detail is not None
+        assert change_detail["last_diff"]["requirements_changed"] == ["CTRL-1"]
+        by_control = {
+            row["control_id"]: row for row in change_detail["controls"]
+        }
+        assert by_control["CTRL-1"]["status"] == "stale"
+        assert by_control["CTRL-1"]["attestation_present"] is True
+        assert by_control["CTRL-2"]["status"] == "current"
+        assert change_detail["certification"] is False
+        assert "attestation_id" not in json.dumps(change_detail)
+        assert "ev-one" not in json.dumps(change_detail)
 
         evidence_3 = _evidence("ev-three", revision=2)
         evidence[evidence_3["id"]] = evidence_3
@@ -398,6 +412,13 @@ def test_changed_requirements_stale_exact_attestation_unchanged_remains_current(
         assert reattested["subscription"]["requirements"]["CTRL-1"]["status"] == "current"
         assert reattested["attestation"]["id"] != old_first_attestation
         assert service.attestations.get(old_first_attestation) is not None
+        current_detail = service.get_subscription_change_detail(
+            "example-ai-policy"
+        )
+        assert current_detail is not None
+        assert all(
+            row["status"] == "current" for row in current_detail["controls"]
+        )
 
         wrong = _binding("REQ-1", evidence_3)
         wrong["evidence_revision"] = 1
@@ -569,6 +590,20 @@ def test_read_pages_fail_closed_on_malformed_records_including_sentinel():
     assert corrupted is not None
     with pytest.raises(policy_packs.PolicyPackStateError, match="identity"):
         service.list_catalog(limit=1)
+
+
+@pytest.mark.parametrize(
+    "stored",
+    ["not-an-object", {"unexpected": "field"}],
+)
+def test_stored_semantic_diff_shape_corruption_is_a_state_error(stored):
+    with pytest.raises(policy_packs.PolicyPackStateError, match="malformed"):
+        policy_packs._safe_diff_projection(
+            stored,
+            pack_id="example-ai-policy",
+            pack_version="1.0.0",
+            pack_sha256="0" * 64,
+        )
 
 
 def test_enabled_is_default_off_and_requires_literal_true(tmp_path):

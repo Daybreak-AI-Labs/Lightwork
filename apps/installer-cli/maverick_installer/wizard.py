@@ -1482,8 +1482,8 @@ def pick_security_suite() -> dict[str, Any]:
             default=False,
         )
     ai_inventory = _q_confirm(
-        "Enable read-only discovery of customer-owned AI assets in Bedrock, "
-        "Azure AI Foundry, Vertex AI, Databricks, or Copilot Studio? "
+        "Enable read-only discovery of customer-owned AI assets across cloud AI, "
+        "model registries, data platforms, agent builders, and model hubs? "
         "Credentials are configured separately and are never stored in the "
         "inventory ledger.",
         default=False,
@@ -1494,10 +1494,15 @@ def pick_security_suite() -> dict[str, Any]:
         model_risk_assurance = True
         connector_labels = {
             "AWS Bedrock": "bedrock",
+            "AWS SageMaker": "aws_sagemaker",
             "Azure AI Foundry": "azure_ai_foundry",
             "Google Vertex AI": "vertex_ai",
             "Databricks Unity Catalog": "databricks_unity_catalog",
             "Microsoft Copilot Studio": "copilot_studio",
+            "MLflow Model Registry": "mlflow",
+            "Snowflake Cortex": "snowflake_cortex",
+            "Salesforce Agentforce": "salesforce_agentforce",
+            "Hugging Face Hub": "hugging_face",
         }
         selected = _q_checkbox(
             "Prepare which read-only AI inventory connectors?",
@@ -1507,6 +1512,14 @@ def pick_security_suite() -> dict[str, Any]:
         inventory_connectors = [
             connector_labels[label] for label in selected if label in connector_labels
         ]
+    ai_vendor_risk = _q_confirm(
+        "Enable governed AI-specific vendor assessments with cited document "
+        "drafting and independent review before model-risk projection?",
+        default=False,
+    )
+    if ai_vendor_risk:
+        evidence_graph = True
+        model_risk_assurance = True
     portfolio_risk = _q_confirm(
         "Enable transparent AI portfolio-risk rollups and immutable quarterly "
         "snapshots? Scores remain decision support, not compliance verdicts.",
@@ -1517,15 +1530,145 @@ def pick_security_suite() -> dict[str, Any]:
         "evidence-staleness tracking? Packs do not certify compliance.",
         default=False,
     )
+    ai_regulatory_feed = _q_confirm(
+        "Enable the governed AI regulatory-change bridge? It maps cited alerts "
+        "to reviewed policy/evidence impacts and requires Finance Operations plus "
+        "the AI evidence gateway.",
+        default=False,
+    )
     red_team_assurance = _q_confirm(
         "Enable governed red-team campaigns for enrolled external agents? "
         "Raw target output stays transient; only keyed commitments and bounded metrics "
         "enter review-pending evidence.",
         default=False,
     )
-    if portfolio_risk or policy_packs or red_team_assurance:
+    eu_ai_incidents = _q_confirm(
+        "Enable the human-routed EU AI Act Article 73 incident clock and report "
+        "workflow? Lightwork records decisions and receipts but does not file or "
+        "make legal determinations.",
+        default=False,
+    )
+    grc_outbound_sync = _q_confirm(
+        "Enable governed semantic writeback of findings, risk acceptances, and AI "
+        "incidents to allowlisted ServiceNow IRM or Archer targets? Credentials "
+        "remain separately configured.",
+        default=False,
+    )
+    ai_literacy = _q_confirm(
+        "Enable privacy-minimising AI-literacy requirements, completion receipts, "
+        "reviewed waivers, and evidence exports?",
+        default=False,
+    )
+    ai_business_intake = _q_confirm(
+        "Enable the bounded AI business-intake workflow that creates or links an "
+        "inventory asset and routes a proposed declaration and risk assessment "
+        "for human review?",
+        default=False,
+    )
+    ai_cost_roi = _q_confirm(
+        "Enable governed multi-provider AI cost allocation and assumption-labelled "
+        "ROI reporting? Provider billing collectors and credentials are configured "
+        "separately.",
+        default=False,
+    )
+    ai_dynamic_risk = _q_confirm(
+        "Enable explainable dynamic AI risk scoring from normalized telemetry, "
+        "policy, privacy, security, and evidence signals? Scores remain human-"
+        "reviewed decision support and never certify compliance.",
+        default=False,
+    )
+    ai_policy_management = _q_confirm(
+        "Enable governed operational AI policies with human activation, exact "
+        "applicability, strictest-wins decisions, four-eyes expiring exceptions, "
+        "and revalidation-aware attestations?",
+        default=False,
+    )
+    ai_runtime_guardrails = _q_confirm(
+        "Enable transient prompt, output, and action guardrails that compose "
+        "Shield, secret/PII redaction, operational policy, and digest-only "
+        "runtime receipts? Raw runtime content is never persisted by this plane.",
+        default=False,
+    )
+    ai_explainability = _q_confirm(
+        "Enable governed, digest-only native/SHAP/LIME/Captum/Alibi and "
+        "counterfactual explanation receipts with exact model binding and "
+        "independent human review? Raw feature values are never admitted.",
+        default=False,
+    )
+    ai_conformity_workflow = _q_confirm(
+        "Enable the EU AI Act conformity-readiness workflow for FRIA, Annex IV, "
+        "Article 43, post-market, draft declaration, and CE-readiness evidence? "
+        "It does not make legal determinations, certify, sign, or affix a CE mark.",
+        default=False,
+    )
+    ai_insurability = _q_confirm(
+        "Enable exact-evidence insurance-assurance profiles with measurements, "
+        "limitations, verifier instructions, and four-eyes export? Profiles do "
+        "not establish coverage, pricing impact, or insurer acceptance.",
+        default=False,
+    )
+    ai_regulated_verticals = _q_confirm(
+        "Enable aggregate credit, fair-lending, NYC Local Law 144, and NAIC "
+        "decision-support evidence packages? Packages do not make individual "
+        "decisions, legal conclusions, filings, audits, or certifications.",
+        default=False,
+    )
+    ai_bank_mrm = _q_confirm(
+        "Enable governed bank model-risk evidence packages with nine closed "
+        "review sections and four-eyes package-integrity approval? This does not "
+        "approve a model or establish regulatory acceptance.",
+        default=False,
+    )
+    ai_benchmark_exchange = _q_confirm(
+        "Enable voluntary, aggregate-only benchmark contribution packages and "
+        "externally signed cohort-report admission? This does not pool tenant "
+        "records, prove anonymity, or independently verify differential privacy.",
+        default=False,
+    )
+    ai_discovery_sensors = _q_confirm(
+        "Enable the privacy-safe discovery-sensor control plane for approved, "
+        "digest-bound normalized observations? This does not deploy sensors or "
+        "establish complete AI discovery.",
+        default=False,
+    )
+    ai_media_provenance = _q_confirm(
+        "Enable governed digest-only C2PA adapter receipts and four-eyes media "
+        "release review? A real verifier or signer remains separately required; "
+        "Lightwork does not simulate cryptography or certify media.",
+        default=False,
+    )
+    ai_identity_governance_connectors = _q_confirm(
+        "Enable bounded read-only Entra, Okta, and Purview identity/data-governance "
+        "snapshots? Provider tenant IDs, secret references, and endpoints remain "
+        "separately configured, and this does not claim complete discovery.",
+        default=False,
+    )
+    if (
+        portfolio_risk
+        or policy_packs
+        or red_team_assurance
+        or ai_regulatory_feed
+        or eu_ai_incidents
+        or grc_outbound_sync
+        or ai_literacy
+        or ai_business_intake
+        or ai_cost_roi
+        or ai_dynamic_risk
+        or ai_policy_management
+        or ai_runtime_guardrails
+        or ai_explainability
+        or ai_conformity_workflow
+        or ai_insurability
+        or ai_regulated_verticals
+        or ai_bank_mrm
+        or ai_benchmark_exchange
+        or ai_discovery_sensors
+        or ai_media_provenance
+    ):
         evidence_graph = True
         model_risk_assurance = True
+    if ai_regulatory_feed:
+        evidence_gateway = True
     threat_hunt = _q_confirm(
         "Enable the defensive Lightwork platform threat hunter?", default=False
     )
@@ -1608,9 +1751,28 @@ def pick_security_suite() -> dict[str, Any]:
         "allow_hosted_training": allow_hosted_training,
         "ai_inventory": ai_inventory,
         "inventory_connectors": inventory_connectors,
+        "ai_vendor_risk": ai_vendor_risk,
         "portfolio_risk": portfolio_risk,
         "policy_packs": policy_packs,
+        "ai_regulatory_feed": ai_regulatory_feed,
         "red_team_assurance": red_team_assurance,
+        "eu_ai_incidents": eu_ai_incidents,
+        "grc_outbound_sync": grc_outbound_sync,
+        "ai_literacy": ai_literacy,
+        "ai_business_intake": ai_business_intake,
+        "ai_cost_roi": ai_cost_roi,
+        "ai_dynamic_risk": ai_dynamic_risk,
+        "ai_policy_management": ai_policy_management,
+        "ai_runtime_guardrails": ai_runtime_guardrails,
+        "ai_explainability": ai_explainability,
+        "ai_conformity_workflow": ai_conformity_workflow,
+        "ai_insurability": ai_insurability,
+        "ai_regulated_verticals": ai_regulated_verticals,
+        "ai_bank_mrm": ai_bank_mrm,
+        "ai_benchmark_exchange": ai_benchmark_exchange,
+        "ai_discovery_sensors": ai_discovery_sensors,
+        "ai_media_provenance": ai_media_provenance,
+        "ai_identity_governance_connectors": ai_identity_governance_connectors,
         "threat_hunt": threat_hunt,
         "env_hunt": env_hunt,
         "response_execution": response_execution,
@@ -3704,9 +3866,14 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         return []
     allowed_inventory_connectors = {
         "azure_ai_foundry",
+        "aws_sagemaker",
         "bedrock",
         "copilot_studio",
         "databricks_unity_catalog",
+        "hugging_face",
+        "mlflow",
+        "salesforce_agentforce",
+        "snowflake_cortex",
         "vertex_ai",
     }
     inventory_connectors = list(dict.fromkeys(
@@ -3747,6 +3914,11 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "retry_attempts = 3",
         "timeout_seconds = 30",
         "missing_grace_runs = 2",
+        "poll_seconds = 900",
+        "",
+        "[ai_vendor_risk]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_vendor_risk', False) else 'false'}",
         "",
         "[portfolio_risk]",
         "enable = "
@@ -3756,6 +3928,10 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "enable = "
         f"{'true' if security_suite.get('policy_packs', False) else 'false'}",
         "",
+        "[ai_regulatory_feed]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_regulatory_feed', False) else 'false'}",
+        "",
         "[red_team_assurance]",
         "enable = "
         f"{'true' if security_suite.get('red_team_assurance', False) else 'false'}",
@@ -3764,6 +3940,128 @@ def _cfg_security_suite(security_suite: dict[str, Any] | None) -> list[str]:
         "max_response_bytes = 65536",
         "campaign_ttl_seconds = 604800",
         "evidence_validity_seconds = 7776000",
+        "scheduler_poll_seconds = 30",
+        "",
+        "[eu_ai_incidents]",
+        "enable = "
+        f"{'true' if security_suite.get('eu_ai_incidents', False) else 'false'}",
+        "authorities = []",
+        "",
+        "[grc_outbound_sync]",
+        "enable = "
+        f"{'true' if security_suite.get('grc_outbound_sync', False) else 'false'}",
+        'targets = ["servicenow_irm", "archer"]',
+        "max_attempts_per_revision = 8",
+        "",
+        "[grc_outbound_sync.servicenow_irm]",
+        'credential_secret_ref = "SERVICENOW_TOKEN"',
+        "timeout_seconds = 15",
+        "max_response_bytes = 262144",
+        "",
+        "[grc_outbound_sync.archer]",
+        'credential_secret_ref = "ARCHER_GRC_TOKEN"',
+        "timeout_seconds = 15",
+        "max_response_bytes = 262144",
+        "",
+        "[ai_literacy]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_literacy', False) else 'false'}",
+        "",
+        "[ai_business_intake]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_business_intake', False) else 'false'}",
+        "",
+        "[ai_cost_roi]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_cost_roi', False) else 'false'}",
+        "collector_poll_seconds = 86400",
+        "collector_lookback_days = 1",
+        "",
+        "[ai_cost_roi.collector_limits]",
+        "timeout_seconds = 20",
+        "page_cap = 20",
+        "record_cap = 1000",
+        "max_period_days = 93",
+        "page_size = 200",
+        "max_bytes_billed = 1000000000",
+        "",
+        "[ai_cost_roi.aws]",
+        "enable = false",
+        "",
+        "[ai_cost_roi.azure]",
+        "enable = false",
+        "",
+        "[ai_cost_roi.gcp]",
+        "enable = false",
+        "",
+        "[ai_cost_roi.openai]",
+        "enable = false",
+        "",
+        "[ai_dynamic_risk]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_dynamic_risk', False) else 'false'}",
+        "",
+        "[ai_policy_management]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_policy_management', False) else 'false'}",
+        "",
+        "[ai_runtime_guardrails]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_runtime_guardrails', False) else 'false'}",
+        "",
+        "[ai_explainability]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_explainability', False) else 'false'}",
+        "",
+        "[ai_conformity_workflow]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_conformity_workflow', False) else 'false'}",
+        "",
+        "[ai_insurability]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_insurability', False) else 'false'}",
+        "",
+        "[ai_regulated_verticals]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_regulated_verticals', False) else 'false'}",
+        "",
+        "[ai_bank_mrm]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_bank_mrm', False) else 'false'}",
+        "",
+        "[ai_benchmark_exchange]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_benchmark_exchange', False) else 'false'}",
+        "",
+        "[ai_discovery_sensors]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_discovery_sensors', False) else 'false'}",
+        "",
+        "[ai_media_provenance]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_media_provenance', False) else 'false'}",
+        "",
+        "[ai_identity_governance_connectors]",
+        "enable = "
+        f"{'true' if security_suite.get('ai_identity_governance_connectors', False) else 'false'}",
+        "",
+        "[ai_identity_governance_connectors.entra]",
+        "enable = false",
+        'tenant_id = ""',
+        'base_url = "https://graph.microsoft.com"',
+        'credential_secret_ref = "ENTRA_IDENTITY_GOVERNANCE_TOKEN"',
+        "",
+        "[ai_identity_governance_connectors.okta]",
+        "enable = false",
+        'tenant_id = ""',
+        'base_url = "https://replace-me.okta.com"',
+        'credential_secret_ref = "OKTA_IDENTITY_GOVERNANCE_TOKEN"',
+        "",
+        "[ai_identity_governance_connectors.purview]",
+        "enable = false",
+        'tenant_id = ""',
+        'base_url = "https://replace-me.purview.azure.com"',
+        'credential_secret_ref = "PURVIEW_IDENTITY_GOVERNANCE_TOKEN"',
         "",
         "[model_improvement]",
         "enable = "

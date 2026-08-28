@@ -796,12 +796,15 @@ here.
 - **External AI estate discovery** (`ai_inventory.py`, the assurance API and
   cockpit, opt-in `[ai_inventory] enable`) — tenant-scoped, read-only inventory
   synchronization for customer-owned AWS Bedrock, Azure AI Foundry, Google
-  Vertex AI, Databricks Unity Catalog, and Microsoft Copilot Studio estates.
+  Vertex AI, Databricks Unity Catalog, Microsoft Copilot Studio, MLflow,
+  SageMaker, Snowflake Cortex, Salesforce Agentforce, and Hugging Face estates.
   Connectors use fixed list operations, bounded pagination/retries/record caps,
   provider revision bindings, missing-asset grace runs, and explicit safe read
   projections. Credentials resolve from the standard provider chain or named
   environment references and are never written to discovery records. A sync is
-  global-admin initiated; reads require an explicitly selected tenant.
+  global-admin initiated or run by the bounded per-tenant inventory scheduler;
+  reads require an explicitly selected tenant. These registry adapters do not
+  discover browser use, network egress, OAuth grants, or arbitrary shadow AI.
 - **AI system hierarchy and portfolio risk** (`model_risk_assurance.py`,
   `portfolio_risk.py`, opt-in `[portfolio_risk] enable`) — declarations can
   bind components to governed parent systems with cycle/depth checks and
@@ -833,6 +836,114 @@ here.
   expose metadata-only projections; subscription operations fail without an
   active tenant. Packs are advisory control mappings, not certification,
   conformity assessment, standards-text redistribution, or legal advice.
+- **Operational AI policy management** (`ai_policy_management.py`, assurance
+  API/cockpit, opt-in `[ai_policy_management] enable`) — tenant-scoped,
+  immutable policy versions with human CAS activation; exact applicability
+  over risk, jurisdiction, data, deployment, asset and use-case context;
+  strictest-wins allow/review/restrict/prohibit decisions; four-eyes scoped
+  exceptions pinned to an exact policy version/digest; expiry and explicit
+  closeout; and evaluation attestations that become visibly stale when policy
+  or exception authority changes. No-match defaults to human review. This is
+  operational decision support, not certification or legal advice.
+- **Explainable dynamic AI risk** (`ai_dynamic_risk.py`, assurance API/cockpit,
+  opt-in `[ai_dynamic_risk] enable`) — exact Model Risk asset/version-bound
+  quality, safety, drift, performance, policy, privacy and security signals;
+  freshness and CAS resolution/supersession; deterministic category weights
+  plus strict business/regulatory context floors; attributable score/tier
+  changes; exclusions; stale-snapshot detection; and bounded trend history.
+  The store admits normalized metadata and evidence digests, never raw prompt,
+  output, feature-row, or provider telemetry payloads. Production calibration
+  and live telemetry coverage remain deployment responsibilities.
+- **Runtime AI policy enforcement** (`ai_runtime_guardrails.py`, authenticated
+  external evaluate/execute routes, opt-in `[ai_runtime_guardrails] enable`) —
+  composes operational policy, Shield, secret/PII inspection and exact approved
+  asset context into allow/review/restrict/block decisions. Raw prompt and
+  output content stays transient; durable receipts are digest-only and feed
+  normalized violations into dynamic risk. Broad third-party gateway, agent,
+  MCP and Copilot acceptance remains deployment work.
+- **AI explanation review** (`ai_explainability.py`, assurance API/cockpit,
+  opt-in `[ai_explainability] enable`) — admits closed native, SHAP, LIME,
+  Captum, Alibi and counterfactual explanation receipts with exact model/input
+  provenance, safe feature projections, revision-CAS review and independent
+  approval. Provider adapters and adverse-action or legal acceptance are not
+  implied.
+- **AI vendor diligence** (`ai_vendor_risk.py`, assurance API/cockpit, opt-in
+  `[ai_vendor_risk] enable`) — AI-specific questionnaires, bounded cited
+  document extraction, approved-prior-answer reuse, deterministic scoring,
+  independent review and approved evidence projection. Raw documents are not
+  persisted; a vendor portal and live document/vendor acceptance do not ship.
+- **AI regulatory-impact bridge and Article 73 incidents**
+  (`ai_regulatory_feed.py`, `eu_ai_incidents.py`, assurance API/cockpit,
+  opt-in feature sections) — maps reviewed regulatory changes to exact affected
+  assets and stale evidence, and provides human-owned serious-incident triage,
+  2/10/15-day clocks, four-eyes report approval and receipt recording. Current
+  licensed feeds, legal determinations, authority directories and filing
+  transmitters remain external.
+- **Business AI intake and literacy register** (`ai_business_intake.py`,
+  `ai_literacy.py`, assurance API/cockpit, opt-in feature sections) — short
+  intake creates or links governed inventory, declarations and review work;
+  role requirements, pseudonymous assignments, completion receipts, waivers,
+  gaps and evidence exports make literacy status auditable. Fresh-user timing,
+  HRIS and LMS acceptance remain deployment work.
+- **EU conformity-readiness workspace** (`ai_conformity_workflow.py`, assurance
+  API/cockpit, opt-in `[ai_conformity_workflow] enable`) — governed FRIA,
+  Annex IV, Article 43 route, post-market, declaration and CE-readiness
+  checklist/evidence lifecycle. It does not make legal determinations, certify
+  a system, sign a declaration or affix a CE mark.
+- **Governed GRC outbound synchronization** (`grc_outbound_sync.py`,
+  `grc_vendor_transports.py`, assurance API/cockpit, opt-in `[grc_outbound_sync]
+  enable`) — semantic, idempotent ServiceNow IRM and Archer preview/execute,
+  exact payload and source bindings, conflict handling and durable receipts.
+  Live vendor-sandbox acceptance and additional GRC targets remain external.
+- **Enterprise AI cost and assumption-labelled ROI** (`ai_cost_collectors.py`,
+  `ai_cost_openai.py`, `ai_cost_roi.py`, `ai_cost_scheduler.py`, assurance
+  API/cockpit, opt-in feature sections) — bounded AWS, Azure, GCP and OpenAI
+  organization-cost collection, citations, allocation/correction history and
+  owner/department reporting. Live billing credentials were not exercised;
+  model-level OpenAI cost allocation is not invented from the Costs contract.
+- **AI insurability evidence packets** (`ai_insurability.py`, assurance
+  API/cockpit, opt-in `[ai_insurability] enable`) — exact-evidence profile
+  versions, measurements, limitations, verifier guidance and four-eyes export.
+  Coverage, underwriting, pricing and insurer acceptance are external outcomes.
+- **Media provenance control plane** (`ai_media_provenance.py`, assurance
+  API/cockpit, opt-in `[ai_media_provenance] enable`) — typed external C2PA
+  verifier and signer adapter interfaces, digest-only receipts, transient media processing, exact
+  asset/deployment/context bindings and four-eyes release. No C2PA engine or
+  production key-custody implementation is bundled by default, so the stock
+  runtime reports verification and signing as unsupported.
+- **Voluntary benchmark exchange** (`ai_benchmark_exchange.py`, assurance
+  API/cockpit, opt-in `[ai_benchmark_exchange] enable`) — aggregate-only,
+  pseudonymous contribution packages, exact methodology/revision binding,
+  four-eyes export and fail-closed cohort-report admission through an injected
+  signature verifier, with minimum cohort and explicit differential-privacy
+  parameters. The stock service has no verifier or coordinator network and
+  ships no cross-tenant raw pooling, anonymity proof or privacy-budget
+  accounting.
+- **Discovery sensor control plane** (`ai_discovery_sensors.py`, assurance
+  API/cockpit, opt-in `[ai_discovery_sensors] enable`) — registers, approves,
+  configures and revokes browser-extension, network-egress, OAuth-grant,
+  SaaS-posture, identity-directory and data-catalog sensors and accepts bounded
+  normalized observations. The six deployed sensor agents are not included,
+  and the current observation route is human-principal authenticated rather
+  than a dedicated machine-sensor ingress, so this is not an
+  enterprise-discovery-completeness claim.
+- **Identity and data-governance discovery adapters**
+  (`ai_identity_governance_connectors.py`, `identity_governance_runtime.py`,
+  assurance API/cockpit, opt-in `[ai_identity_governance_connectors] enable`) — bounded,
+  read-only Entra, Okta and Purview collection through pinned-host,
+  redirect-disabled enterprise egress, with pseudonymous normalized snapshots.
+  Live tenant and continuous-collection acceptance remain unverified.
+- **Regulated-industry decision-support packages**
+  (`ai_regulated_verticals.py`, assurance API/cockpit, opt-in
+  `[ai_regulated_verticals] enable`) — governed credit-reason, aggregate
+  fair-lending interval, NYC Local Law 144 readiness and NAIC mapping packages.
+  They do not issue individual decisions, legal conclusions, audits, filings,
+  certifications or regulator approvals.
+- **Bank model-risk package** (`ai_bank_mrm.py`, assurance API/cockpit, opt-in
+  `[ai_bank_mrm] enable`) — nine closed review sections with explicit
+  missing/unverified states, exact evidence, revision-CAS lifecycle and
+  four-eyes package-integrity approval. It does not approve a model or establish
+  bank, examiner or regulator acceptance.
 - **Governed external red-team campaigns** (`red_team_assurance.py`, external
   gateway + assurance cockpit, opt-in `[red_team_assurance] enable`) — an
   actively enrolled inbound agent pulls deterministic synthetic probes for an
@@ -848,10 +959,11 @@ here.
   installer provisions `MAVERICK_RED_TEAM_COMMITMENT_KEY` in its private
   `.env`; non-wizard deployments must supply a secret of at least 32 bytes.
   This is bounded lexical assurance with a runner-attested target digest, not a
-  signed runtime receipt or certification. It does **not** yet ship the broader
-  recommendation's scheduler, bias probes, measured refusal floor,
-  remediation recommendations, cancellable per-case leases/live stop, or proof
-  against hidden runtime side effects.
+  certification. Governed schedules, due-slot leases, per-case leases,
+  cancellation, dispatcher recovery, matched-pair synthetic bias probes,
+  refusal floors, and bounded remediation recommendations are included. A live
+  enrolled-agent end-to-end and proof against hidden target-runtime side
+  effects remain deployment acceptance work.
 - **AI Evidence-Ready Gateway** (`ai_evidence_gateway.py`, the existing
   `/security/assurance` cockpit, opt-in `[evidence_gateway] enable`) -
   deterministic text-delivery disclosures, machine-readable markings,

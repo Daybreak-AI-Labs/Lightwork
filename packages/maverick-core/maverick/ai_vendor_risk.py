@@ -64,8 +64,30 @@ class AIVendorRiskError(RuntimeError):
     """Base failure for the governed AI vendor-risk authority."""
 
 
+class AIVendorRiskConfigError(AIVendorRiskError):
+    """The explicit AI vendor-risk product gate is unavailable."""
+
+
 class AIVendorRiskStateError(AIVendorRiskError):
     """Persisted or supplied AI vendor-risk evidence cannot be trusted."""
+
+
+def enabled() -> bool:
+    """Return the explicit default-off feature and model-risk dependency state."""
+
+    try:
+        from . import model_risk_assurance as mra
+        from .config import config_source_errors, load_global_config
+
+        config = load_global_config()
+        if config_source_errors(include_tenant=False) or not isinstance(config, dict):
+            return False
+        section = config.get("ai_vendor_risk")
+        if not isinstance(section, dict) or section.get("enable") is not True:
+            return False
+        return mra.enabled()
+    except Exception:
+        return False
 
 
 @dataclass(frozen=True)
@@ -1353,11 +1375,13 @@ __all__ = [
     "AI_VENDOR_SCHEMA",
     "AI_VENDOR_TEMPLATE",
     "AIVendorRiskError",
+    "AIVendorRiskConfigError",
     "AIVendorRiskStateError",
     "NON_CERTIFICATION_NOTICE",
     "draft_vendor_assessment",
     "extract_answers_from_connected_document",
     "extract_answers_from_document",
+    "enabled",
     "get_vendor_assessment",
     "list_vendor_assessments",
     "model_risk_evidence_payload",

@@ -413,6 +413,26 @@ async def _lifespan(app: FastAPI):
         await run_in_threadpool(start_finance_scheduler)
     except Exception:  # pragma: no cover - never block startup
         log.exception("finance operations scheduler not started")
+    try:
+        from maverick_dashboard.red_team_scheduler import start_red_team_scheduler
+
+        await run_in_threadpool(start_red_team_scheduler)
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("red-team schedule dispatcher not started")
+    try:
+        from maverick_dashboard.ai_inventory_scheduler import (
+            start_ai_inventory_scheduler,
+        )
+
+        await run_in_threadpool(start_ai_inventory_scheduler)
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("AI inventory scheduler not started")
+    try:
+        from maverick_dashboard.ai_cost_scheduler import start_ai_cost_scheduler
+
+        await run_in_threadpool(start_ai_cost_scheduler)
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("AI cost scheduler not started")
     # Connected-entitlement auto-refresh: a deployment with [license] api_url
     # configured polls the vendor console so an upgrade/downgrade issued there
     # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
@@ -455,6 +475,24 @@ async def _lifespan(app: FastAPI):
         from maverick_dashboard.finance_scheduler import stop_finance_scheduler
 
         await run_in_threadpool(stop_finance_scheduler)
+    except Exception:  # pragma: no cover - shutdown must never raise
+        pass
+    try:
+        from maverick_dashboard.red_team_scheduler import stop_red_team_scheduler
+
+        await run_in_threadpool(stop_red_team_scheduler)
+    except Exception:  # pragma: no cover - shutdown must never raise
+        pass
+    try:
+        from maverick_dashboard.ai_inventory_scheduler import stop_ai_inventory_scheduler
+
+        await run_in_threadpool(stop_ai_inventory_scheduler)
+    except Exception:  # pragma: no cover - shutdown must never raise
+        pass
+    try:
+        from maverick_dashboard.ai_cost_scheduler import stop_ai_cost_scheduler
+
+        await run_in_threadpool(stop_ai_cost_scheduler)
     except Exception:  # pragma: no cover - shutdown must never raise
         pass
     await _stop_automation_scheduler()

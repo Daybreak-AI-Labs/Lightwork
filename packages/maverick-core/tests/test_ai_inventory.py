@@ -806,6 +806,56 @@ def test_read_projections_reject_corrupted_governed_fields():
         service.list_asset_states()
 
 
+def test_second_wave_connectors_are_registered_and_use_the_bounded_factory(monkeypatch):
+    from maverick import ai_inventory_connectors as second_wave
+
+    limits = inventory.DiscoveryLimits(
+        page_cap=7,
+        record_cap=31,
+        retry_attempts=2,
+        timeout_seconds=4,
+    )
+    enabled = ["mlflow", "aws_sagemaker", "snowflake_cortex"]
+    monkeypatch.setattr(
+        inventory,
+        "require_enabled",
+        lambda: {
+            "enable": True,
+            "connectors": enabled,
+            "limits": limits,
+            "missing_grace_runs": 2,
+        },
+    )
+    sentinel = object()
+    captured: dict[str, Any] = {}
+
+    def build(name, **kwargs):
+        captured.update({"name": name, **kwargs})
+        return sentinel
+
+    monkeypatch.setattr(second_wave, "build_second_wave_adapter", build)
+    transport = object()
+    sagemaker_client = object()
+    adapter = inventory.build_configured_adapter(
+        "mlflow",
+        transport=transport,
+        sagemaker_client=sagemaker_client,
+        sleep=lambda _seconds: None,
+        clock=lambda: 1_780_000_800.0,
+    )
+
+    assert adapter is sentinel
+    assert captured["name"] == "mlflow"
+    assert captured["enabled_connectors"] == enabled
+    assert captured["transport"] is transport
+    assert captured["sagemaker_client"] is sagemaker_client
+    assert captured["limits"] is limits
+    assert set(second_wave.available_second_wave_connectors()).issubset(
+        inventory.available_connectors()
+    )
+    assert inventory._CONNECTOR_SOURCES["hugging_face"] == "hugging_face_hub"
+
+
 def test_config_gate_is_default_off_and_rejects_unknown_connector(tmp_path):
     from maverick import config
 

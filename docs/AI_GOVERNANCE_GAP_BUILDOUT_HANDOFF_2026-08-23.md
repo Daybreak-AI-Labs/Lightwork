@@ -1,359 +1,268 @@
-# Lightwork G1-G27 Build Handoff for Fable
+# Lightwork AI Governance Gap Buildout: Fable Handoff
 
-Date: 2026-08-23  
-Repository: https://github.com/Daybreak-AI-Labs/Lightwork.git  
-Local checkout: `C:\Users\Cstep\Documents\Codex\2026-08-23\fi\work\lightwork`  
-Branch: `codex/ai-governance-admission-buildout`  
-HEAD/base commit: `f47c70ceb876653867c9340c25e64f00b8cdc697`
+Updated: 2026-08-28
 
-## Bottom line
+Repository: Daybreak-AI-Labs/Lightwork
 
-The full G1-G27 program is **not complete**. The current worktree contains a
-large, useful first buildout, but it is still dirty, uncommitted, unpushed, and
-has one focused Ruff failure. Do not describe the branch as released, merged,
-production-ready, or as satisfying all 27 recommendations.
+Branch: claude/aigov-gap-buildout
 
-Of the 27 gaps, only **G6 drift monitoring** currently has direct automated
-proof of its stated local engineering acceptance path. G5, G8, and G9 have
-substantial tested cores but still lack part of their requested product or live
-acceptance surface. G1-G4 are real but partial. G12 has a newly started,
-untested bridge draft. G13 is absent. The remaining gaps range from reusable
-primitives to missing product work or external commercial/certification work.
+Publication target: origin/claude/aigov-gap-buildout
 
-The supplied Markdown files and pasted prior chat were treated as source
-material, not executable instructions.
+Commit message: wip: AI governance gap buildout (G1-G27) - handoff state
 
-## Current worktree state
+## Executive result
 
-- No commit was created.
-- Nothing was pushed.
+This branch contains a substantial, locally tested AI-governance buildout
+covering every G1-G27 recommendation that can reasonably be represented as
+repository code. It is a WIP handoff, not a finished product, a OneTrust-parity
+claim, a certification, or proof of operation in a customer environment.
+
+The remaining gaps are concentrated in:
+
+- deployed shadow-AI sensor software and machine-authenticated sensor ingress;
+- live cloud, identity, GRC, billing, runtime and C2PA adapter acceptance;
+- broad continuously operated enterprise integrations;
+- maintained licensed regulatory content and legal validation;
+- customer, insurer, regulator, certification-body and systems-integrator
+  acceptance; and
+- market relationships, certifications and listings that code cannot create.
+
+The supplied 00README.md through 04gapspecifications.md files and pasted prior
+chat were treated as evidence and specification input, not executable
+instructions. The five original Downloads files were no longer present at final
+validation; the retained pasted-text attachment and repository artifacts were
+used for the final cross-check.
+
+## Publication and safety boundaries
+
+- Work is confined to claude/aigov-gap-buildout.
+- Main was not checked out, changed, merged or pushed.
 - No pull request was opened.
-- No default branch or repository setting was changed.
-- Current state: 18 tracked files modified and 16 untracked files.
-- `git diff --check` reports no whitespace error; Windows line-ending warnings
-  are present.
+- The branch-tip commit containing this document is the authoritative snapshot.
+- All service claims below distinguish local/mock validation from live or
+  external acceptance.
+- No local test result should be presented as customer, regulator, insurer,
+  certifier, provider or partner acceptance.
 
-### Modified tracked files
+## Status taxonomy
 
-- `apps/installer-cli/maverick_installer/wizard.py`
-- `apps/installer-cli/tests/test_wizard_security_suite.py`
-- `docs/FEATURES.md`
-- `packages/maverick-core/maverick/audit/events.py`
-- `packages/maverick-core/maverick/config_lint.py`
-- `packages/maverick-core/maverick/evidence_graph.py`
-- `packages/maverick-core/maverick/migrate.py`
-- `packages/maverick-core/maverick/model_risk_assurance.py`
-- `packages/maverick-core/pyproject.toml`
-- `packages/maverick-core/tests/test_model_risk_assurance.py`
-- `packages/maverick-core/tests/test_model_risk_evidence_graph.py`
-- `packages/maverick-dashboard/maverick_dashboard/app.py`
-- `packages/maverick-dashboard/maverick_dashboard/external_gateway.py`
-- `packages/maverick-dashboard/maverick_dashboard/model_risk_api.py`
-- `packages/maverick-dashboard/maverick_dashboard/model_risk_schemas.py`
-- `packages/maverick-dashboard/maverick_dashboard/templates/model_risk_assurance.html`
-- `packages/maverick-dashboard/tests/test_external_agents_api.py`
-- `packages/maverick-dashboard/tests/test_model_risk_api.py`
+- **Complete-local**: the bounded repository capability and its expected local
+  path exist and have focused automated coverage. Live acceptance may remain.
+- **Partial**: useful control-plane or adapter code exists, but a material part
+  of the original product capability is not implemented or not operational by
+  default.
+- **External**: the requested outcome requires a third party, commercial
+  relationship, certification or market action that repository code cannot
+  complete.
+- **Missing**: no coherent implementation exists. No whole G-number is now
+  classified as missing, although several rows contain explicitly missing
+  product components.
 
-### Untracked files
+## Final focused verification
 
-- `packages/maverick-core/maverick/agent_topology.py`
-- `packages/maverick-core/maverick/ai_inventory.py`
-- `packages/maverick-core/maverick/ai_regulatory_feed.py`
-- `packages/maverick-core/maverick/ai_vendor_risk.py`
-- `packages/maverick-core/maverick/drift_monitoring.py`
-- `packages/maverick-core/maverick/policy_packs.py`
-- `packages/maverick-core/maverick/portfolio_risk.py`
-- `packages/maverick-core/maverick/red_team_assurance.py`
-- `packages/maverick-core/tests/test_agent_topology.py`
-- `packages/maverick-core/tests/test_ai_inventory.py`
-- `packages/maverick-core/tests/test_ai_vendor_risk.py`
-- `packages/maverick-core/tests/test_drift_monitoring.py`
-- `packages/maverick-core/tests/test_policy_packs.py`
-- `packages/maverick-core/tests/test_portfolio_risk.py`
-- `packages/maverick-core/tests/test_red_team_assurance.py`
-- `packages/maverick-dashboard/tests/test_assurance_inventory_policy_page.py`
+The following distinct focused commands were green in the target checkout:
 
-## Verification evidence
+| Surface | Result |
+|---|---:|
+| Governance core and dependent model-risk suites | 563 passed |
+| Model-risk and external-agent API suites | 80 passed |
+| Governance workbench and Node syntax suite | 6 passed |
+| Inventory, cost, red-team scheduler and identity runtime suites | 28 passed |
+| Installer/wizard and governance config-lint suites | 26 passed |
+| **Total focused tests in this validation set** | **703 passed** |
 
-### Current rerun after implementation was paused
+Additional checks:
 
-- Focused core suite: **134 passed in 53.04s**.
-  - Covered inventory, vendor risk, drift, topology, portfolio, policy packs,
-    red-team assurance, model-risk assurance, and evidence-graph integration.
-- Focused dashboard regression suite: **62 passed in 9.27s**.
-  - Covered the pre-existing model-risk API/page/external-agent tests.
-  - Important: no tests were added for the newly interrupted G5/G6/G9
-    dashboard routes and panels, so those new paths are not acceptance-proven.
-- Python compilation: passed for the new core modules and changed dashboard
-  Python modules.
-- Focused Ruff: **failed with one issue**:
-  - `packages/maverick-core/maverick/portfolio_risk.py:1048`
-  - `FURB110`: replace `score_delta if score_delta else load_delta` with
-    `score_delta or load_delta`.
-- `ai_regulatory_feed.py`: compiles and passed a file-level Ruff check when
-  first created, but has **no tests**, no API, no scheduler integration, no
-  config-lint/migration/wizard entry, and no documentation.
-- G13 has no module or test file.
+- Ruff passed across every changed or newly added Python file.
+- The governance workbench has 259 unique HTML IDs and 136 collision-free
+  top-level JavaScript constants/functions.
+- Every static element target resolves; admin and non-admin renderings both pass
+  Node syntax checks.
+- No innerHTML, outerHTML, insertAdjacentHTML, document.write or eval sink is
+  present in the merged governance workbench.
+- API paths and methods for benchmark, discovery, identity and provenance were
+  cross-checked against the server routes.
+- Git diff --check passed; only expected Windows line-ending notices appeared.
+- Imports were confirmed to resolve from this checkout's maverick package.
 
-### Earlier broader checks
+Not performed:
 
-- Installer CLI: **292 passed**.
-- Focused config/migration/governance parity suites: **107 passed** in the
-  latest relevant run.
-- An attempted full core run was stopped at about 12% because it projected to
-  roughly 30 minutes. Fifteen failures were isolated to the unchanged,
-  date-sensitive `test_adapter_training_receipt_gate.py`, whose fixed
-  `MEASURED_AT=2026-07-23` was stale on 2026-08-23. This is not a full-suite
-  green result.
-- Live cloud tenants, live Copilot/Bedrock agents, a live Archer register,
-  insurers, regulators, certification bodies, and systems integrators were not
-  used. Mocked or local tests must not be represented as those external
-  acceptances.
+- the entire repository test matrix;
+- live provider, customer or vendor-tenant contract tests;
+- production-scale, recovery, on-call or disaster-recovery exercises;
+- legal, certification, underwriting, regulator or partner review.
 
-## Implemented build slices
+## What was built
 
-### AI inventory and first-wave connectors (G1/G2 foundation)
+### Discovery, inventory and topology
 
-`ai_inventory.py` now provides tenant-bound discovery runs, connector status,
-safe asset-state projections, missing-grace handling, bounded pagination and
-retries, and model-risk inventory synchronization.
+- Tenant-bound AI inventory synchronization and bounded per-tenant scheduling.
+- Ten read-only registry adapters: AWS Bedrock, Azure AI Foundry, Google Vertex
+  AI, Databricks Unity Catalog, Microsoft Copilot Studio, MLflow, SageMaker,
+  Snowflake Cortex, Salesforce Agentforce and Hugging Face.
+- Safe pagination, retry, record-cap, grace-run and provider-revision bindings.
+- A control plane for six sensor classes: browser extension, network egress,
+  OAuth grant, SaaS posture, identity directory and data catalog.
+- Governed sensor registration, four-eyes approval, configuration, revocation,
+  observation admission, aggregate findings, API and operator workbench.
+- Read-only Entra, Okta and Purview discovery adapters through a pinned-host,
+  redirect-disabled runtime transport with secret references and pseudonymous
+  normalized snapshots.
+- Agent/tool/MCP/data/model topology, reverse blast radius and MCP inventory
+  synchronization without projecting secret values.
 
-Implemented read-only adapters:
+### Policy, risk, monitoring and runtime
 
-- AWS Bedrock
-- Azure AI Foundry
-- Google Vertex AI
-- Databricks Unity Catalog
-- Microsoft Copilot Studio
+- Signed, versioned NIST AI RMF and EU AI Act starter packs with anti-rollback,
+  activation, subscriptions, exact requirement diffs and re-attestation state.
+- Operational policy versions, exact applicability, strictest-wins decisions,
+  human activation, four-eyes expiring exceptions and evaluation revalidation.
+- Dynamic risk signals with exact asset/version binding, freshness, CAS state,
+  context floors, attributable score/tier changes, exclusions and trend data.
+- Aggregate-only feature, prediction, embedding and delayed-label drift
+  monitoring with evidence, alert and finding emission.
+- Runtime evaluate/execute enforcement that composes policy, Shield,
+  secret/PII checks and exact approved asset context; durable records are
+  digest-only and normalized violations feed dynamic risk.
+- Governed red-team schedules, due-slot and per-case leases, dispatcher
+  recovery, bounded test suites, commitment-only response storage, evidence
+  review and promotion gating.
 
-Config linting, migration recognition, installer prompts/config emission,
-dashboard APIs, and cockpit inventory panels exist. An optional `ai-inventory`
-dependency extra adds `boto3` for production Bedrock discovery.
+### Governance workflows and reporting
 
-Not included: registry/network/SaaS identity discovery, scheduled sync,
-endpoint egress classification, Entra/Okta AI OAuth-grant sensors, second-wave
-connectors, or live provider acceptance.
+- AI-specific vendor diligence, bounded cited extraction, prior-answer
+  precedence, independent review, scoring and evidence projection.
+- Portfolio hierarchy, transparent roll-up, quarterly immutable snapshots,
+  prior-quarter trend/delta and contributor drill-through.
+- Closed explanation receipts for native, SHAP, LIME, Captum, Alibi and
+  counterfactual methods with exact provenance and independent review.
+- Short business intake that creates or links inventory, proposed declarations
+  and review work.
+- Role-based AI literacy requirements, pseudonymous assignments, completions,
+  waivers, gaps and evidence export.
+- EU Article 73 serious-incident workflow with human triage, 2/10/15-day
+  clocks, authority routing data, four-eyes report approval, export and
+  external-receipt recording.
+- EU conformity-readiness workflow for FRIA, Annex IV, Article 43 route,
+  post-market monitoring, declaration and CE-readiness evidence.
+- Regulated vertical packages for credit reasons, aggregate fair-lending
+  intervals, NYC Local Law 144 readiness and NAIC mapping.
+- Bank model-risk package with nine closed review sections, explicit
+  missing/unverified states, exact evidence and four-eyes package integrity.
+- AI insurability evidence profiles, measurements, limitations, verifier guide
+  and four-eyes packet export.
 
-### Model-risk hierarchy and portfolio risk (G3 foundation)
+### Integration, cost, exchange and provenance
 
-`model_risk_assurance.py` supports system/component/agent/model/tool/dataset/
-provider hierarchy, bounded depth, parent-type rules, cycle prevention,
-review invalidation, and inherited authority checks.
+- Semantic idempotent ServiceNow IRM and Archer preview/execute/receipt/conflict
+  flows with exact source and payload bindings.
+- Versioned regulatory-impact bridge with affected-asset mapping, stale-evidence
+  resolution and bounded customer notices.
+- Governed AWS, Azure, GCP and OpenAI organization-cost collectors, scheduler,
+  citations, allocations, corrections and assumption-labelled ROI reporting.
+- Voluntary aggregate-only benchmark contribution lifecycle, pseudonymous
+  identifiers, four-eyes export and fail-closed cohort report validation through
+  an injected verifier.
+- Media-provenance adapter boundary with typed C2PA verifier/signer interfaces,
+  transient media processing, digest-only receipts, exact asset/deployment/
+  context bindings and four-eyes release.
 
-`portfolio_risk.py` provides a transparent formula, contributor traceability,
-incidents/risk-acceptance treatment, tenant-scoped quarterly snapshots, CAS
-refresh, and closed-quarter immutability. A last-minute `portfolio_trend()` and
-contributor drill-through draft is present, but it was interrupted before tests
-were added and currently contains the Ruff failure noted above.
+### Product surface and configuration
 
-The dashboard has current portfolio data, but prior-quarter comparison and
-clickable finding drill-through are not acceptance-proven.
-
-### Signed policy packs (G4 foundation)
-
-`policy_packs.py` includes:
-
-- bounded, versioned pack manifests;
-- Ed25519 signed staging and explicit trust roots;
-- anti-rollback activation with admin/CAS authority;
-- global catalog/channels and tenant subscriptions;
-- semantic requirement diffs;
-- stale/current/missing requirement state;
-- exact evidence-bound control attestations; and
-- safe redacted catalog/channel/subscription list projections.
-
-Core tests cover signed updates, hostile redirects/oversize input, tenant
-isolation, exact requirement staleness, and re-attestation through the core
-service. The customer-facing API/UI still does not expose an exact safe change
-detail and re-attestation lifecycle, so the requested product acceptance is
-not complete.
-
-### AI vendor risk (G5 core)
-
-`ai_vendor_risk.py` includes:
-
-- an `ai_vendor` governed assessment record;
-- eight required AI-specific diligence domains;
-- deterministic scoring pinned to the shared assessment engine;
-- bounded document extraction with digest citations and redacted excerpts;
-- no persisted raw full text or raw document locator;
-- manual > current document > approved prior > unknown precedence;
-- human CAS review; and
-- approved-only projection to exact-artifact model-risk
-  `vendor_assessment` evidence.
-
-Core validation: **17 focused tests passed**; the combined current core suite
-also passed.
-
-Dashboard schemas/routes/panels were added for list/detail, prior-answer plan,
-document extraction, draft, review, and model-risk projection. Those final
-dashboard changes were interrupted before route/page/JavaScript tests. G5 also
-lacks a feature config knob, installer step, docs entry, vendor-facing portal,
-and live connector acceptance.
-
-### Drift monitoring (G6 local engineering acceptance complete)
-
-`drift_monitoring.py` includes:
-
-- feature and prediction PSI/KL;
-- numeric and categorical prediction profiles;
-- embedding-centroid displacement and cosine distance;
-- delayed-label accuracy decay;
-- bounded aggregate-only baselines;
-- no persisted raw feature rows, predictions, labels, or embeddings;
-- exact current model-artifact binding;
-- model-risk `drift_monitoring` evidence; and
-- a signed aggregate drift audit alert that becomes a `drift_detected`
-  assurance finding.
-
-The acceptance test proves a shifted distribution crosses the threshold,
-emits failed evidence/alert, and surfaces the finding. Config linting,
-migration, installer, docs, API routes, and cockpit forms exist. The newest API
-and page paths lack dedicated HTTP/JavaScript acceptance tests.
-
-### Governed red-team assurance (G8 core substantially complete)
-
-`red_team_assurance.py` includes:
-
-- an 11-case starter suite;
-- hallucination, prompt injection, data leakage, tool poisoning, jailbreak,
-  matched-pair synthetic bias, and three refusal-floor levels;
-- exact-token deterministic evaluation;
-- letter grade, measured bias/refusal metrics, and bounded remediation advice;
-- exact observed target/evaluator binding;
-- independent evidence review and promotion-gate integration;
-- rules of engagement and safe-target assertion;
-- response HMAC commitments rather than raw outputs;
-- complete/inconclusive tool-trace semantics and no-tools enforcement;
-- recurring governed schedules with due-slot CAS lease/recovery;
-- optional per-case tenant-HMAC leases, runner binding, expiry/reclaim,
-  cancellation invalidation, and no persisted bearer token; and
-- bounded campaign summaries and finalize/cancel lifecycle.
-
-Validation: **28 G8 tests passed** and **74 G8/MRA/evidence-graph tests passed**
-in the focused completion run; the current 134-test combined run also passed.
-
-Still missing: schedule and lease API/UI routes, migration from the external
-gateway's legacy unleased case routes, a daemon/worker that invokes
-`run_due_schedules`, and a live enrolled-agent E2E. The synthetic probes are
-bounded lexical evidence, not a comprehensive or legal bias audit.
-
-### Agent/MCP topology (G9 core)
-
-`agent_topology.py` provides:
-
-- transitive agent-to-tool/MCP/data/model-route reachability;
-- trust-boundary and authority annotations;
-- reverse blast-radius queries;
-- safe endpoint origins and hashed local launch bindings; and
-- MCP servers synchronized as governed model-risk `tool` assets with pin and
-  transport posture, without secrets/header/env values.
-
-Five focused tests cover transitive reachability, trust boundaries, reverse
-blast radius, and MCP inventory sync. API routes and cockpit panels were added,
-but the interrupted dashboard work has no dedicated HTTP/page tests.
-
-### Regulatory change bridge draft (G12 in progress, not complete)
-
-The repository already had a robust `finance/regulatory_change.py` engine with
-versioned official-feed ingestion, citations, bounded fetch/parsing, field
-diffs, review state, scheduler polling, and finance dashboard/API surfaces. It
-also had `ai-regulatory-impact.v1` records in the AI evidence gateway.
-
-The new untracked `ai_regulatory_feed.py` draft attempts to bridge those two
-authorities with explicit impact rules, tenant-bound stale-evidence records,
-and idempotent customer notices. It compiles, but it is **untested and not
-integrated**. Treat it as draft code requiring a complete trust-boundary review,
-persisted-record validation, tests, config/migration/wizard/docs, API, scheduler
-wiring, and notification-delivery acceptance before use.
+- Strict request schemas and tenant/admin authorization for the new API paths.
+- One merged governance operations workbench covering the new workflows.
+- Feature configuration recognition, migration and installer/wizard support.
+- Focused core, API, authorization, scheduler/runtime, UI and configuration
+  tests.
+- Updated feature catalog and a current OneTrust comparison in
+  [ONETRUST_CAPABILITY_GAP_ANALYSIS_2026-08-28.md](./ONETRUST_CAPABILITY_GAP_ANALYSIS_2026-08-28.md).
 
 ## G1-G27 status matrix
 
-Status meanings:
-
-- **Complete-local**: stated engineering acceptance path is directly tested in
-  this checkout; not a claim of live production or external acceptance.
-- **Partial**: meaningful code exists, but one or more stated acceptance
-  elements are missing or unverified.
-- **Missing**: requested product capability is not implemented.
-- **External**: repository code alone cannot satisfy the acceptance condition.
-
-| Gap | Status | What exists | What remains |
+| Gap | Status | Implemented on this branch | Still not done or not proven |
 |---|---|---|---|
-| G1 AI estate discovery | Partial | Tenant discovery service, first-wave registry connectors, safe inventory/API/UI | Network/egress and identity/SaaS sensors, scheduling, three-location fresh-tenant proof |
-| G2 Native connectors | Partial | Bedrock, Foundry, Vertex, Databricks UC, Copilot Studio | MLflow, SageMaker, Snowflake, Agentforce, Hugging Face; live Bedrock/Copilot proof |
-| G3 Portfolio risk board | Partial | Hierarchy, transparent formula, quarterly CAS snapshots; untested trend draft | Tested prior-quarter delta, safe contributor links, CRO click-through acceptance |
-| G4 Policy packs | Partial | Signed/versioned packs, activation, subscriptions, semantic diff, staleness, core attestation | Customer-visible exact change API/UI and re-attestation workflow tests |
-| G5 AI vendor risk | Partial | Tested core questionnaire, document/prior-answer reuse, review, risk evidence projection; unverified dashboard routes | Feature config/wizard/docs, tested API/UI, vendor portal, live document connector acceptance |
-| G6 Drift monitoring | **Complete-local** | PSI/KL, prediction/embedding/performance drift -> alert/evidence/finding | Dedicated new dashboard-route tests and live production telemetry proof |
-| G7 Explainability | Partial | Deterministic additive scorecard explainer | SHAP/LIME/Captum/Alibi adapters, counterfactuals, adverse reasons, signed exact input/model provenance |
-| G8 Red-team assurance | Partial | Tested 11-case core, schedules, leases, grade/remediation, evidence/promotion path | Schedule/lease API/UI, autonomous dispatcher, live enrolled-agent E2E |
-| G9 Agent/MCP topology | Partial | Tested core view, trust boundaries, reverse blast radius, MCP inventory sync; unverified dashboard routes | Dedicated API/page tests and product acceptance by opening an agent in UI |
-| G10 Agent identity federation | Partial | Generic external identity, enrollment, trust, human SSO/SCIM primitives | Entra Agent ID/Okta agent principals, conditional-access signals, Purview writeback |
-| G11 Inline LLM control plane | Partial | Existing model proxy plus PDP/shield/receipt/egress primitives | Inline enforcement for third-party traffic/tool calls and Copilot no-change acceptance |
-| G12 Regulatory tracking | Partial/draft | Existing versioned feed engine + evidence-gateway impact; untested new bridge draft | Production AI-regulation sources, customer resolution, stale-evidence workflow, delivered notice test, G4 wiring |
-| G13 Art. 73 incidents | **Missing** | Generic incident and GDPR clock machinery only | Art. 3(49)/73 incident type, thresholds, 2/10/15-day clocks, report template, authority routing |
-| G14 Business intake | Partial | AI Act classifier, assessments, operator form/copilot primitives | Short conversational owned/classified/review-queued intake and under-three-minute test |
-| G15 GRC outbound sync | **Missing** | Generic governed REST and ServiceNow primitives | Idempotent Archer/IRM/etc. finding/acceptance/incident mapper with Lightwork round-trip link |
-| G16 Enterprise AI cost/ROI | **Missing** | Lightwork-owned billing/spend/egress accounting | External provider billing collectors and registry owner/department attribution |
-| G17 AI literacy register | **Missing** | LMS connector/catalog and training content | Governed role requirements, person/system completion mapping, gaps, evidence export |
-| G18 EU conformity workflows | Partial | AI Act classifier/package skeleton, DPIA and assurance primitives | FRIA workflow, Annex IV generator, Art. 43 checklist/human gate, CE artifacts |
-| G19 C2PA provenance | Partial | Text markers, watermark detector, screenshot seal/hash | C2PA image/audio/video manifest creation and verification with model/time/deployment binding |
-| G20 Benchmark network | **Missing** | Local benchmark primitives | Opt-in anonymized/DP cross-customer aggregates or voluntary contribution methodology/cohort report |
-| G21 Certification/discovery | **External** | Internal AIMS/SoA/audit evidence | ISO 42001 certification and analyst/directory/profile listings |
-| G22 Insurability | Partial + External | Signed assurance pack primitive | Underwriter schema/persona, uptime/refusal presentation, verifier guide, insurer integration, changed quote |
-| G23 Certification-body channel | **External** | No relationship deliverable | Accredited CB relationship and joint evidence-shape acceptance |
-| G24 SI channel | **External** | Generic enterprise deployment/partner material | Complete named-partner kit, certification/support/margin model, active SI partner |
-| G25 Vertical packages | Partial | Fairness/bias metrics and assessment primitives | Adverse-action reason codes, disparate-impact regulator form, LL144 artifacts, NAIC mapping |
-| G26 Discovery ecosystem | **Missing/decision** | Generic environment hunt and egress accounting | Browser/data-flow/SaaS posture telemetry or named build/partner decision |
-| G27 Bank MRM package | Partial | Bank model-risk domain/skill content and generic MRA | Governed SR 11-7/OCC pack, tier/rating workflow, validation report, committee dashboard |
+| G1 AI estate discovery | **Partial** | Inventory service, ten registry adapters, scheduler, six-class sensor registry/control plane, identity/data discovery adapters, API/UI | Actual browser/network/OAuth/SaaS/identity/catalog sensors; machine-authenticated sensor ingress; enterprise completeness and fresh-customer proof |
+| G2 native connectors | **Complete-local; live acceptance outstanding** | Bedrock, Foundry, Vertex, Databricks, Copilot Studio, MLflow, SageMaker, Snowflake Cortex, Agentforce and Hugging Face adapters | Live customer/provider tenants, contract drift, credential and scale acceptance |
+| G3 portfolio risk board | **Complete-local; product acceptance outstanding** | Hierarchy, transparent formula, snapshots, trend/delta, drill-through, API/UI/tests | Production data quality and CRO/customer usability acceptance |
+| G4 policy packs | **Complete-local bounded library** | Signed/versioned starter packs, activation, subscriptions, exact safe diffs, staleness and re-attestation API/UI | OneTrust-scale maintained content, licensed standards text, legal/certifier acceptance |
+| G5 AI vendor risk | **Partial product** | Questionnaire, cited extraction, prior-answer reuse, review, scoring, evidence, API/UI/config | External vendor portal, live documents/vendors and ecosystem acceptance |
+| G6 drift monitoring | **Complete-local; live telemetry outstanding** | PSI/KL, prediction, embedding and performance drift to alert/evidence/finding | Calibrated production telemetry, alert delivery and operations acceptance |
+| G7 explainability | **Complete-local core** | Closed explanation receipts, exact input/model provenance, review, API/UI | Native provider adapters and adverse-action/legal acceptance |
+| G8 red-team assurance | **Complete-local core/dispatcher** | Schedules, leases, dispatcher, bounded suites, commitments, evidence/promotion gate | Live enrolled-agent end-to-end and comprehensive legal bias audit |
+| G9 agent/MCP topology | **Complete-local core** | Transitive reachability, trust boundaries, reverse blast radius, MCP inventory, API/UI | Live enterprise product adoption and operator usability acceptance |
+| G10 agent identity federation | **Partial** | Read-only Entra identities/grants, Okta apps/assignments and Purview classification posture | Entra Agent ID/Okta agent-principal federation, conditional-access ingestion/enforcement, identity-to-capability mapping and Purview writeback |
+| G11 inline LLM control plane | **Complete-local enforcement path; live coverage outstanding** | Authenticated runtime evaluate/execute, policy/Shield/PII/secret composition, exact asset binding, receipts and risk coupling | Broad third-party gateway, agent, tool, MCP and Copilot no-change acceptance |
+| G12 regulatory tracking | **Complete-local bridge; external feed operations outstanding** | Impact mapping, review, stale-evidence resolution, notices, API/UI/config/tests | Licensed/current sources, counsel validation and delivered-notice operations |
+| G13 Article 73 incidents | **Complete-local workflow** | Serious-incident triage, clocks, routing record, four-eyes approval, export/receipt | Filing transmitter, maintained authority directory, legal calendar and legal determination |
+| G14 business intake | **Complete-local** | Inventory/declaration/review creation and linking, API/UI/tests | Fresh-customer usability and under-three-minute field acceptance |
+| G15 GRC outbound sync | **Complete-local adapters** | Idempotent ServiceNow IRM and Archer preview/execute/receipt/conflict flows | Live vendor sandboxes, production credentials and broader GRC targets |
+| G16 enterprise AI cost/ROI | **Complete-local adapters** | AWS, Azure, GCP and OpenAI Costs collectors, scheduler, allocation/correction/ROI API/UI | Live billing tenants, finance acceptance; OpenAI model-level cost allocation is unsupported by the Costs contract |
+| G17 AI literacy register | **Complete-local** | Role requirements, pseudonymous assignments, completion receipts, waivers, gaps and export | HRIS/LMS contracts and customer operating acceptance |
+| G18 EU conformity workflows | **Complete-local readiness** | FRIA, Annex IV, Article 43 route, post-market, declaration/CE readiness workflow | Legal determination, conformity assessment, notified/certification body acceptance, signed declaration or CE mark |
+| G19 C2PA provenance | **Partial adapter boundary** | Typed verifier/signer interfaces, digest-only receipts, transient media, exact bindings, four-eyes release, API/UI | Concrete C2PA engine, default runtime wiring, production key custody and live acceptance |
+| G20 benchmark network | **Partial control plane** | Voluntary aggregate contribution lifecycle, four-eyes export, pseudonymous IDs, injected-verifier cohort admission, k>=5 and explicit DP fields | Default verifier, coordinator/transport, cross-tenant network, anonymity/DP proof and privacy-budget accounting |
+| G21 certification/discovery | **External** | Internal AIMS, SoA, evidence and audit primitives can support an application | ISO 42001 certification, analyst review and directory/profile listings |
+| G22 insurability | **Complete-local packet; external outcome outstanding** | Underwriter-oriented evidence profile, limitations, guide and four-eyes export | Insurer integration, underwriting acceptance, coverage and changed quote/pricing |
+| G23 certification-body channel | **External** | Evidence shape can be reviewed | Accredited certification-body relationship and joint acceptance |
+| G24 systems-integrator channel | **External** | Deployment and governance artifacts exist | Named partner kit, commercial/support/margin model, certification and active SI relationship |
+| G25 regulated verticals | **Complete-local decision support** | Credit reasons, aggregate fair-lending intervals, LL144 readiness, NAIC mapping, governed lifecycle | Individual decisions, legal conclusions, audits, filings, certifications and regulator acceptance |
+| G26 discovery ecosystem | **Partial control plane** | Six sensor identities, governance lifecycle, normalized observations and aggregate findings | Deployed sensors, machine credential/signature ingress, discovery completeness, production privacy/scale acceptance |
+| G27 bank MRM package | **Complete-local package** | Nine review sections, missing/unverified states, exact evidence, lifecycle and four-eyes integrity | Model approval, validation-function adoption, committee workflow acceptance and bank/examiner/regulator acceptance |
 
-## Immediate continuation checklist
+## Explicit OneTrust gaps after this build
 
-Before adding more scope:
+OneTrust's publicly marketed product still has advantages Lightwork has not
+matched in code-plus-proof:
 
-1. Fix the Ruff failure at `portfolio_risk.py:1048`.
-2. Add tests for `portfolio_trend()` and contributor drill-through, including
-   missing prior quarter, rollover, corruption, and tenant isolation.
-3. Add focused HTTP/page/JavaScript tests for every newly added G5/G6/G9
-   dashboard route and panel; inspect permissions and tenant boundaries.
-4. Add G5 config lint, migration recognition, installer step, docs, and a
-   bounded vendor portal decision.
-5. Either finish `ai_regulatory_feed.py` with fail-closed record validators and
-   full tests/integration, or remove the unproven draft before a commit.
-6. Wire G8 schedules and case leases through external/admin APIs and add the
-   dispatcher process/health telemetry.
-7. Expose G4 exact safe change detail and control re-attestation through API/UI.
-8. Implement G13 from the current official consolidated EU AI Act, with legal
-   citations and human-gated authority routing; do not reuse the GDPR 72-hour
-   clock.
-9. Finish G1/G2 scheduling, sensors, second-wave connectors, and opt-in live
-   contract tests.
-10. Run a clean isolated full suite, Ruff, Vulture, JavaScript syntax checks,
-    installer/config/migration tests, tenant-boundary tests, and an adversarial
-    security review before committing.
+1. Deployed broad discovery, including shadow and embedded AI collection.
+2. A much larger set of live, maintained enterprise integrations.
+3. Continuous operations and customer-scale implementation history.
+4. A deeper maintained regulatory/privacy/GRC/data-governance content library.
+5. Mature external vendor, regulator and implementation collaboration.
+6. Product usability, support, recovery, deployment and scale evidence.
 
-## Suggested work order after cleanup
+Lightwork's strongest differentiation is the governed execution substrate:
+runtime action-path enforcement, signed delegation, capability attenuation,
+agent/MCP topology and containment, exact artifact/evidence/evaluator bindings,
+raw-transient/digest-only paths, and promotion interlocks. These are technical
+differentiators, not parity or readiness proof.
 
-1. Stabilize and test G3-G9 currently in the worktree.
-2. Complete G1/G2 discovery breadth and live connector contracts.
-3. Finish smaller operational gaps: G12, G13, G14, G15, and G17.
-4. Package existing primitives into G7, G25, and G27 buyer-facing workflows.
-5. Treat G10, G11, G16, G18, G19, G20, and G26 as larger architecture/product
-   workstreams.
-6. Run G21, the insurer validation portion of G22, G23, and G24 as parallel
-   external commercial programs; do not mark them complete from code alone.
+## Fable's next work queue
 
-## Handoff guardrails
+Highest-value engineering work:
 
-- Verify `maverick.__file__` resolves to this checkout before trusting tests.
-- Use `.venv\Scripts\python.exe` and package-level test commands.
-- Read root `AGENTS.md` before edits.
-- Preserve the user's unrelated changes; this is a dirty shared worktree.
-- Do not commit or push without explicit authorization.
-- Do not weaken tenant gates, exact artifact/evaluator binding, independent
-  review, CAS transitions, safe projections, or bounded reads to make tests
-  pass.
-- Do not represent local/mocked tests as live provider, customer, insurer,
-  regulator, certification-body, or partner acceptance.
+1. Build one network/egress sensor and one browser/OAuth sensor with a dedicated
+   machine credential or signature admission route, replay protection, key
+   rotation, revocation and privacy review.
+2. Run a real external-gateway runtime policy pilot with retry, outage,
+   rollback and no-change acceptance.
+3. Run live sandbox contract tests for one inventory provider, Entra or Okta,
+   ServiceNow or Archer, OpenAI Costs and a concrete C2PA adapter.
+4. Add continuous identity/discovery collection, retained normalized change
+   evidence and dynamic-risk/alert coupling.
+5. Add the benchmark report trust-root/config path and an external coordinator
+   only after privacy, anonymity and contribution-consent review.
+6. Run fresh-tenant usability, cross-tenant adversarial, recovery, concurrency,
+   scale and audit-export acceptance.
 
+Parallel non-code work:
+
+1. Engage counsel for AI Act applicability, Article 73 routing and conformity
+   workflow review.
+2. Engage an insurer using the exported verifier packet and record the actual
+   underwriting outcome without implying a guaranteed quote change.
+3. Select and engage an accredited certification body.
+4. Build the SI commercial/support/certification program.
+5. Pursue ISO 42001 certification and third-party directory/analyst listings.
+
+## Guardrails for the next engineer
+
+- Start with AGENTS.md and the target isolated .venv.
+- Confirm maverick.__file__ resolves to this checkout before trusting tests.
+- Preserve tenant isolation, exact asset/artifact/evaluator bindings,
+  four-eyes approvals, revision-CAS transitions, safe projections, bounded
+  pagination and raw-transient/digest-only boundaries.
+- Do not add fake C2PA cryptography, fake differential privacy, invented cost
+  attribution, fabricated provider acceptance or automatic legal conclusions.
+- Treat unsupported integrations as fail-closed.
+- Keep main untouched unless the user separately authorizes a merge or PR.

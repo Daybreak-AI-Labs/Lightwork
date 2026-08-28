@@ -42,9 +42,14 @@ _BINDING_STRENGTHS = frozenset(
 _ASSET_TYPES = frozenset({"model", "agent", "tool", "dataset", "provider"})
 _CONNECTORS = (
     "azure_ai_foundry",
+    "aws_sagemaker",
     "bedrock",
     "copilot_studio",
     "databricks_unity_catalog",
+    "hugging_face",
+    "mlflow",
+    "salesforce_agentforce",
+    "snowflake_cortex",
     "vertex_ai",
 )
 _RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
@@ -1733,9 +1738,14 @@ _PENDING_TO_PUBLIC = {
 }
 _CONNECTOR_SOURCES = {
     "azure_ai_foundry": "azure_ai_foundry",
+    "aws_sagemaker": "aws_sagemaker",
     "bedrock": "aws_bedrock",
     "copilot_studio": "microsoft_copilot_studio",
     "databricks_unity_catalog": "databricks_unity_catalog",
+    "hugging_face": "hugging_face_hub",
+    "mlflow": "mlflow_model_registry",
+    "salesforce_agentforce": "salesforce_agentforce",
+    "snowflake_cortex": "snowflake_cortex",
     "vertex_ai": "google_vertex_ai",
 }
 _STATUS_STATES = frozenset({"running", "complete", "partial", "failed"})
@@ -2227,6 +2237,7 @@ def build_configured_adapter(
     transport: HttpTransport | None = None,
     control_client: BedrockControlClient | None = None,
     agent_client: BedrockAgentClient | None = None,
+    sagemaker_client: Any | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.time,
 ) -> InventoryAdapter:
@@ -2252,9 +2263,19 @@ def build_configured_adapter(
         "vertex_ai": VertexAIInventoryAdapter,
     }
     factory = factories.get(connector)
-    if factory is None:
-        raise AIInventoryConfigError(f"unsupported AI inventory connector: {connector}")
-    return factory(transport=transport, limits=limits, sleep=sleep, clock=clock)
+    if factory is not None:
+        return factory(transport=transport, limits=limits, sleep=sleep, clock=clock)
+    from .ai_inventory_connectors import build_second_wave_adapter
+
+    return build_second_wave_adapter(
+        connector,
+        enabled_connectors=config["connectors"],
+        transport=transport,
+        sagemaker_client=sagemaker_client,
+        limits=limits,
+        sleep=sleep,
+        clock=clock,
+    )
 
 
 def _status_id(connector: str) -> str:
@@ -2912,12 +2933,14 @@ def sync_connector(
     transport: HttpTransport | None = None,
     control_client: BedrockControlClient | None = None,
     agent_client: BedrockAgentClient | None = None,
+    sagemaker_client: Any | None = None,
 ) -> dict[str, Any]:
     adapter = build_configured_adapter(
         name,
         transport=transport,
         control_client=control_client,
         agent_client=agent_client,
+        sagemaker_client=sagemaker_client,
     )
     return _DEFAULT.sync(adapter, actor=actor)
 

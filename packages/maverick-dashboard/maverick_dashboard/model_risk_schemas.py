@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime
 from typing import Literal
@@ -233,6 +234,37 @@ class RedTeamFinalizeIn(BaseModel):
     force_incomplete: bool = False
 
 
+class RedTeamScheduleIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    external_agent_id: str = Field(..., min_length=1, max_length=128)
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+    safe_target_environment: bool
+    cadence_seconds: int = Field(..., ge=300, le=31_536_000)
+    first_run_at: float | None = Field(None, gt=0)
+    case_keys: list[str] | None = Field(None, min_length=1, max_length=32)
+    campaign_ttl_seconds: int | None = Field(None, ge=300, le=2_592_000)
+
+    @model_validator(mode="after")
+    def bound_schedule_case_keys(self):
+        if self.case_keys is not None:
+            _validate_string_items(
+                self.case_keys,
+                label="red-team schedule case key",
+                max_length=64,
+            )
+            if len(set(self.case_keys)) != len(self.case_keys):
+                raise ValueError("red-team schedule case keys must be unique")
+        return self
+
+
+class RedTeamRunDueIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    limit: int = Field(20, ge=1, le=100)
+
+
 class PortfolioSnapshotRefreshIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -250,6 +282,36 @@ class PolicyPackRefreshIn(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     expected_revision: int = Field(..., ge=1)
+
+
+class PolicyPackEvidenceBindingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    requirement_id: str = Field(
+        ...,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+    )
+    evidence_id: str = Field(
+        ...,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+    )
+    evidence_revision: int = Field(..., ge=1, le=2_147_483_647)
+    evidence_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+
+
+class PolicyPackAttestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    idempotency_key: str = Field(
+        ...,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+    )
+    evidence_bindings: list[PolicyPackEvidenceBindingIn] = Field(
+        ...,
+        min_length=1,
+        max_length=512,
+    )
 
 
 class ModelRiskDeclarationReviewIn(BaseModel):
@@ -726,6 +788,1575 @@ class EvidenceGatewayImpactReviewIn(BaseModel):
     decision: str = Field(..., pattern="^(accepted|dismissed)$")
     rationale: str = Field(..., min_length=1, max_length=4000)
     expected_revision: int = Field(..., ge=0)
+
+
+_AI_REGULATORY_ID = r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$"
+
+
+class AIRegulatoryImpactRuleIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    rule_id: str = Field(..., pattern=_AI_REGULATORY_ID)
+    regimes: list[str] = Field(default_factory=list, max_length=256)
+    domains: list[str] = Field(default_factory=list, max_length=256)
+    policy_ids: list[str] = Field(
+        default_factory=lambda: ["default"],
+        min_length=1,
+        max_length=256,
+    )
+    control_ids: list[str] = Field(default_factory=list, max_length=256)
+    asset_ids: list[str] = Field(default_factory=list, max_length=256)
+    evidence_kinds: list[str] = Field(default_factory=list, max_length=256)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=256)
+
+    @model_validator(mode="after")
+    def validate_rule_scope(self):
+        if not self.regimes and not self.domains:
+            raise ValueError("an impact rule requires a regime or domain")
+        for field_name in (
+            "regimes",
+            "domains",
+            "policy_ids",
+            "control_ids",
+            "asset_ids",
+            "evidence_kinds",
+            "evidence_ids",
+        ):
+            values = getattr(self, field_name)
+            _validate_string_items(values, label=field_name, max_length=128)
+            if len(set(values)) != len(values):
+                raise ValueError(f"{field_name} must not contain duplicates")
+        return self
+
+
+class AIRegulatorySyncIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    rules: list[AIRegulatoryImpactRuleIn] = Field(
+        ...,
+        min_length=1,
+        max_length=256,
+    )
+    deliver: bool = False
+
+    @model_validator(mode="after")
+    def unique_rule_ids(self):
+        identifiers = [rule.rule_id for rule in self.rules]
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("impact rule ids must be unique")
+        return self
+
+
+class AIRegulatoryNoticeDeliveryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=0)
+
+
+class AIRegulatoryStalenessResolveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=0)
+    resolution: str = Field(..., min_length=1, max_length=4000)
+
+
+_GOVERNANCE_TOKEN = r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}$"
+_SHA256 = r"^(?:sha256:)?[0-9a-f]{64}$"
+
+
+class AILiteracyRequirementIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str = Field(..., min_length=1, max_length=300)
+    role_ids: list[str] = Field(default_factory=list, max_length=256)
+    system_ids: list[str] = Field(default_factory=list, max_length=256)
+    provider_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    content_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    content_version: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    validity_days: int = Field(..., ge=1, le=1830)
+    due_within_days: int = Field(..., ge=0, le=366)
+    status: Literal["active", "retired"] = "active"
+    expected_revision: int = Field(..., ge=0)
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def validate_scopes(self):
+        if not self.role_ids and not self.system_ids:
+            raise ValueError("a literacy requirement needs a role or system scope")
+        for values, label in (
+            (self.role_ids, "role id"),
+            (self.system_ids, "system id"),
+        ):
+            _validate_string_items(values, label=label, max_length=128)
+            if len(set(values)) != len(values):
+                raise ValueError(f"{label}s must not contain duplicates")
+        return self
+
+
+class AILiteracyAssignmentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    role_ids: list[str] = Field(default_factory=list, max_length=256)
+    system_ids: list[str] = Field(default_factory=list, max_length=256)
+    expected_revision: int = Field(..., ge=0)
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def validate_scopes(self):
+        for values, label in (
+            (self.role_ids, "role id"),
+            (self.system_ids, "system id"),
+        ):
+            _validate_string_items(values, label=label, max_length=128)
+            if len(set(values)) != len(values):
+                raise ValueError(f"{label}s must not contain duplicates")
+        return self
+
+
+class AILiteracyCompletionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    provider_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    content_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    content_version: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    completed_at: float = Field(..., gt=0)
+    expires_at: float = Field(..., gt=0)
+    provider_evidence_sha256: str = Field(..., pattern=_SHA256)
+    provider_record_id: str = Field(..., min_length=1, max_length=512)
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+
+class AILiteracyWaiverGrantIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["exemption", "waiver"]
+    reviewer_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    reason_code: Literal[
+        "accessibility_accommodation",
+        "equivalent_training",
+        "leave_or_absence",
+        "contractual_exception",
+        "role_transition",
+        "other_reviewed_basis",
+    ]
+    decision_basis_sha256: str = Field(..., pattern=_SHA256)
+    starts_at: float = Field(..., gt=0)
+    expires_at: float = Field(..., gt=0)
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+
+class AILiteracyWaiverRevokeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    reviewer_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    expected_revision: int = Field(..., ge=1)
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+
+class AILiteracyEvidenceExportIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    person_ids: list[str] | None = Field(None, max_length=1000)
+    as_of: float | None = Field(None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_people(self):
+        if self.person_ids is not None:
+            _validate_string_items(
+                self.person_ids,
+                label="person id",
+                max_length=128,
+            )
+            if len(set(self.person_ids)) != len(self.person_ids):
+                raise ValueError("person ids must not contain duplicates")
+        return self
+
+
+class Article73EvidenceRefIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+
+
+class Article73IncidentOpenIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str = Field(..., min_length=1, max_length=300)
+    asset_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    asset_version: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    awareness_at: float = Field(..., gt=0)
+    summary: str = Field(..., min_length=1, max_length=8000)
+    occurred_at: float | None = Field(None, gt=0)
+    operator_role: Literal["provider", "deployer", "unknown"] = "unknown"
+    asserted_high_risk: Literal["yes", "no", "unknown"] = "unknown"
+    asserted_union_market: Literal["yes", "no", "unknown"] = "unknown"
+    incident_member_states: list[str] = Field(default_factory=list, max_length=27)
+    outcomes: list[
+        Literal[
+            "death",
+            "serious_harm_to_health",
+            "critical_infrastructure_irreversible_disruption",
+            "fundamental_rights_obligations_infringement",
+            "serious_property_or_environment_harm",
+        ]
+    ] = Field(default_factory=list, max_length=5)
+    widespread_infringement: bool = False
+    causality: Literal[
+        "not_assessed",
+        "suspected",
+        "reasonable_likelihood",
+        "established",
+        "not_supported",
+    ] = "not_assessed"
+    evidence_refs: list[Article73EvidenceRefIn] = Field(
+        default_factory=list,
+        max_length=128,
+    )
+    calendar_timezone: str = Field(default="UTC", min_length=1, max_length=128)
+
+
+class Article73RoutingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    decision: Literal[
+        "report_to_authority",
+        "do_not_report",
+        "legal_review_required",
+    ]
+    threshold_determination: Literal["met", "not_met", "uncertain"]
+    applicability_determination: Literal["applies", "does_not_apply", "uncertain"]
+    rationale: str = Field(..., min_length=1, max_length=8000)
+    expected_revision: int = Field(..., ge=1)
+
+
+class Article73ReportDraftIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["initial", "update", "final"]
+    details: dict
+    expected_revision: int = Field(..., ge=1)
+
+    @model_validator(mode="after")
+    def bound_details(self):
+        _validate_assurance_json(
+            self.details,
+            label="Article 73 report details",
+            max_bytes=256 * 1024,
+            max_depth=8,
+            max_nodes=2000,
+            max_object_items=64,
+            max_array_items=128,
+            max_string_chars=8000,
+            max_key_chars=128,
+        )
+        return self
+
+
+class Article73AuthorityIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+
+
+class Article73SubmissionIn(Article73AuthorityIn):
+    submission_reference: str = Field(..., min_length=1, max_length=512)
+    receipt_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    submitted_at: float | None = Field(None, gt=0)
+
+
+class GRCOutboundSourceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_kind: Literal["finding", "risk_acceptance", "ai_incident"]
+    source_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    asset_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    severity: Literal["low", "medium", "high", "critical"]
+    summary: str = Field(..., min_length=1, max_length=8000)
+    source_revision: int = Field(..., ge=1)
+    source_digest: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    finding_type: str | None = Field(None, pattern=_GOVERNANCE_TOKEN)
+    finding_id: str | None = Field(None, pattern=_GOVERNANCE_TOKEN)
+    rationale: str | None = Field(None, min_length=1, max_length=8000)
+    reviewer: str | None = Field(None, min_length=1, max_length=256)
+    decided_at: float | None = Field(None, gt=0)
+    expires_at: float | None = Field(None, gt=0)
+    acceptance_status: Literal["accepted", "expired", "revoked"] | None = None
+    incident_source_id: str | None = Field(None, pattern=_GOVERNANCE_TOKEN)
+    incident_status: Literal["open", "contained", "resolved", "dismissed"] | None = None
+    occurred_at: float | None = Field(None, gt=0)
+    resolution: str = Field(default="", max_length=8000)
+
+    @model_validator(mode="after")
+    def require_kind_fields(self):
+        required = {
+            "finding": ("finding_type",),
+            "risk_acceptance": (
+                "finding_id",
+                "rationale",
+                "reviewer",
+                "decided_at",
+                "expires_at",
+                "acceptance_status",
+            ),
+            "ai_incident": (
+                "incident_source_id",
+                "incident_status",
+                "occurred_at",
+            ),
+        }[self.source_kind]
+        missing = [name for name in required if getattr(self, name) is None]
+        if missing:
+            raise ValueError(
+                f"{self.source_kind} requires: {', '.join(missing)}"
+            )
+        return self
+
+
+class AIBusinessIntakeStartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    idempotency_key: str = Field(..., min_length=1, max_length=128)
+    initial: dict | None = None
+
+    @model_validator(mode="after")
+    def bound_initial(self):
+        if self.initial is not None:
+            _validate_assurance_json(
+                self.initial,
+                label="AI business intake initial answers",
+                max_bytes=16 * 1024,
+                max_depth=8,
+                max_nodes=512,
+                max_object_items=64,
+                max_array_items=64,
+                max_string_chars=4000,
+                max_key_chars=128,
+            )
+        return self
+
+
+class AIBusinessIntakeSaveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    patch: dict
+    operation_id: str = Field(..., min_length=1, max_length=128)
+    expected_revision: int = Field(..., ge=1)
+
+    @model_validator(mode="after")
+    def bound_patch(self):
+        _validate_assurance_json(
+            self.patch,
+            label="AI business intake answer patch",
+            max_bytes=16 * 1024,
+            max_depth=8,
+            max_nodes=512,
+            max_object_items=64,
+            max_array_items=64,
+            max_string_chars=4000,
+            max_key_chars=128,
+        )
+        return self
+
+
+class AIBusinessIntakeSubmitIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    operation_id: str = Field(..., min_length=1, max_length=128)
+    expected_revision: int = Field(..., ge=1)
+
+
+class AICostCitationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    uri: str = Field(..., min_length=1, max_length=2048)
+    sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    row_ref: str = Field(default="", max_length=256)
+
+
+class AICostUsageIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    metric: str = Field(..., min_length=1, max_length=256)
+    quantity: str = Field(..., min_length=1, max_length=128)
+    unit: str = Field(..., min_length=1, max_length=128)
+
+
+class AICostObservationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_record_id: str = Field(..., min_length=1, max_length=512)
+    period_start: str = Field(..., min_length=1, max_length=64)
+    period_end: str = Field(..., min_length=1, max_length=64)
+    currency: str = Field(..., pattern=r"^[A-Za-z]{3}$")
+    cost: str = Field(..., min_length=1, max_length=128)
+    usage: list[AICostUsageIn] = Field(..., min_length=1, max_length=32)
+    service: str = Field(..., min_length=1, max_length=512)
+    resource_id: str = Field(..., min_length=1, max_length=1024)
+    citation: AICostCitationIn
+    region: str = Field(default="", max_length=256)
+    registry_asset_id: str = Field(
+        default="",
+        pattern=r"^(?:|MAA-[0-9a-f]{32})$",
+    )
+    correction_of_source_record_id: str = Field(default="", max_length=512)
+    correction_reason: str = Field(default="", max_length=2000)
+
+
+class AICostBatchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    provider: Literal["aws", "azure", "gcp", "openai"]
+    collector_id: str = Field(..., pattern=_GOVERNANCE_TOKEN)
+    source_account_id: str = Field(..., min_length=1, max_length=256)
+    batch_id: str = Field(..., min_length=1, max_length=512)
+    period_start: str = Field(..., min_length=1, max_length=64)
+    period_end: str = Field(..., min_length=1, max_length=64)
+    collected_at: float = Field(..., gt=0)
+    complete: Literal[True]
+    manifest_citation: AICostCitationIn
+    records: list[AICostObservationIn] = Field(..., min_length=1, max_length=1000)
+
+
+class AICostCollectIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    period_start: str = Field(..., min_length=1, max_length=64)
+    period_end: str = Field(..., min_length=1, max_length=64)
+    max_records: int = Field(default=1000, ge=1, le=1000)
+
+
+class AICostROIAssumptionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    scope_kind: Literal["portfolio", "department", "asset"]
+    scope_id: str = Field(default="", max_length=256)
+    period_start: str = Field(..., min_length=1, max_length=64)
+    period_end: str = Field(..., min_length=1, max_length=64)
+    currency: str = Field(..., pattern=r"^[A-Za-z]{3}$")
+    assumed_benefit: str = Field(..., min_length=1, max_length=128)
+    methodology: str = Field(..., min_length=1, max_length=2000)
+    rationale: str = Field(..., min_length=1, max_length=4000)
+    citations: list[AICostCitationIn] = Field(..., min_length=1, max_length=16)
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+    expected_revision: int = Field(..., ge=0)
+
+
+# Explainable dynamic AI risk ----------------------------------------------
+
+
+class AIDynamicRiskSignalIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    category: str = Field(
+        ...,
+        pattern="^(quality|safety|drift|performance|policy|privacy|security)$",
+    )
+    severity: float = Field(..., ge=0, le=100)
+    confidence: float = Field(..., ge=0, le=1)
+    observed_at: float = Field(..., gt=0)
+    expires_at: float = Field(..., gt=0)
+    source_type: str = Field(
+        ...,
+        pattern="^(drift_receipt|policy_receipt|runtime_receipt|telemetry|evidence)$",
+    )
+    source_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}$",
+    )
+    source_digest: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    signal_code: str = Field(
+        ...,
+        pattern=r"^[a-z0-9][a-z0-9_.:-]{0,127}$",
+    )
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def valid_window(self):
+        if self.expires_at <= self.observed_at:
+            raise ValueError("expires_at must be later than observed_at")
+        return self
+
+
+class AIDynamicRiskResolveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    resolution_code: str = Field(
+        ...,
+        pattern=r"^[a-z0-9][a-z0-9_.:-]{0,127}$",
+    )
+    resolution_evidence_digest: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+
+
+class AIDynamicRiskSupersedeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    superseding_signal_id: str = Field(
+        ...,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,63}$",
+    )
+
+
+class AIDynamicRiskScoreIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(0, ge=0)
+    asset_criticality: str = Field(
+        ...,
+        pattern="^(low|medium|high|critical)$",
+    )
+    eu_risk_tier: str = Field(
+        ...,
+        pattern="^(minimal|limited|high|unacceptable)$",
+    )
+    sensitive_data: str = Field(
+        ...,
+        pattern="^(none|internal|personal|special_category)$",
+    )
+    external_exposure: str = Field(
+        ...,
+        pattern="^(internal|restricted|partner|public)$",
+    )
+
+
+# Operational AI policy management ----------------------------------------
+
+
+_AI_POLICY_TOKEN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+
+
+class AIPolicyApplicabilityIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    risk_tiers: list[str] = Field(default_factory=list, max_length=64)
+    jurisdictions: list[str] = Field(default_factory=list, max_length=64)
+    data_classes: list[str] = Field(default_factory=list, max_length=64)
+    deployment_types: list[str] = Field(default_factory=list, max_length=64)
+    asset_types: list[str] = Field(default_factory=list, max_length=64)
+    tags: list[str] = Field(default_factory=list, max_length=64)
+    use_case_tags: list[str] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def bound_tokens(self):
+        for name in (
+            "risk_tiers",
+            "jurisdictions",
+            "data_classes",
+            "deployment_types",
+            "asset_types",
+            "tags",
+            "use_case_tags",
+        ):
+            values = getattr(self, name)
+            _validate_string_items(
+                values,
+                label=f"AI policy {name}",
+                max_length=128,
+            )
+        return self
+
+
+class AIPolicyStatementIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    statement_id: str = Field(..., pattern=_AI_POLICY_TOKEN)
+    text: str = Field(..., min_length=1, max_length=4000)
+    effect: Literal["allow", "review", "restrict", "prohibit"]
+    applicability: AIPolicyApplicabilityIn = Field(
+        default_factory=AIPolicyApplicabilityIn
+    )
+    required_control_ids: list[str] = Field(default_factory=list, max_length=128)
+
+    @model_validator(mode="after")
+    def bound_controls(self):
+        _validate_string_items(
+            self.required_control_ids,
+            label="AI policy required control",
+            max_length=128,
+        )
+        return self
+
+
+class AIPolicyCreateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    policy_id: str = Field(..., pattern=_AI_POLICY_TOKEN)
+    title: str = Field(..., min_length=1, max_length=256)
+    description: str = Field(default="", max_length=4000)
+    statements: list[AIPolicyStatementIn] = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+    )
+
+
+class AIPolicyVersionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str = Field(..., min_length=1, max_length=256)
+    description: str = Field(default="", max_length=4000)
+    statements: list[AIPolicyStatementIn] = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+    )
+    expected_revision: int = Field(..., ge=1)
+
+
+class AIPolicyActivateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: int = Field(..., ge=1, le=100)
+    expected_revision: int = Field(..., ge=1)
+
+
+class AIPolicyScopeIn(AIPolicyApplicabilityIn):
+    asset_ids: list[str] = Field(default_factory=list, max_length=64)
+    statement_ids: list[str] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def bound_scope_tokens(self):
+        for name in ("asset_ids", "statement_ids"):
+            _validate_string_items(
+                getattr(self, name),
+                label=f"AI policy exception {name}",
+                max_length=128,
+            )
+        return self
+
+
+class AIPolicyExceptionRequestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    exception_key: str = Field(..., pattern=_AI_POLICY_TOKEN)
+    policy_id: str = Field(..., pattern=_AI_POLICY_TOKEN)
+    policy_version: int = Field(..., ge=1, le=100)
+    scope: AIPolicyScopeIn
+    reason: str = Field(..., min_length=1, max_length=2000)
+    compensating_control_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+    )
+    expires_at: float = Field(..., gt=0)
+
+    @model_validator(mode="after")
+    def bound_compensating_controls(self):
+        _validate_string_items(
+            self.compensating_control_ids,
+            label="AI policy compensating control",
+            max_length=128,
+        )
+        return self
+
+
+class AIPolicyExceptionApproveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+
+
+class AIPolicyExceptionCloseIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    reason: str = Field(..., min_length=1, max_length=1000)
+
+
+class AIPolicyContextIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_AI_POLICY_TOKEN)
+    risk_tier: Literal["unclassified", "low", "medium", "high", "critical"] = (
+        "unclassified"
+    )
+    jurisdictions: list[str] = Field(default_factory=list, max_length=64)
+    data_classes: list[str] = Field(default_factory=list, max_length=64)
+    deployment_types: list[str] = Field(default_factory=list, max_length=64)
+    asset_types: list[str] = Field(default_factory=list, max_length=64)
+    tags: list[str] = Field(default_factory=list, max_length=64)
+    use_case_tags: list[str] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def bound_context_tokens(self):
+        for name in (
+            "jurisdictions",
+            "data_classes",
+            "deployment_types",
+            "asset_types",
+            "tags",
+            "use_case_tags",
+        ):
+            _validate_string_items(
+                getattr(self, name),
+                label=f"AI policy context {name}",
+                max_length=128,
+            )
+        return self
+
+
+class AIRuntimeGuardrailIn(BaseModel):
+    """One transient runtime evaluation; content is never a stored record."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    stage: Literal["prompt", "output", "action"]
+    content: str = Field(default="", max_length=65_536)
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    asset_revision: int = Field(..., ge=1)
+    asset_version_digest: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    action_name: str | None = Field(
+        None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}$",
+    )
+    action_arguments: dict | None = None
+    known_prompt: str | None = Field(None, max_length=65_536)
+
+    @model_validator(mode="after")
+    def validate_stage_and_transient_body(self):
+        if self.stage == "action":
+            if self.action_name is None:
+                raise ValueError("action_name is required for the action stage")
+        elif self.action_name is not None or self.action_arguments is not None:
+            raise ValueError("action metadata is valid only for the action stage")
+        if self.known_prompt is not None and self.stage != "output":
+            raise ValueError("known_prompt is valid only for the output stage")
+        if self.action_arguments is not None:
+            _validate_assurance_json(
+                self.action_arguments,
+                label="runtime action arguments",
+                max_bytes=64 * 1024,
+                max_depth=8,
+                max_nodes=2000,
+                max_object_items=128,
+                max_array_items=256,
+                max_string_chars=16_384,
+                max_key_chars=256,
+            )
+        return self
+
+
+# Governed digest-only AI explainability ----------------------------------
+
+
+_AI_EXPLANATION_METHODS = (
+    "native_additive",
+    "shap",
+    "lime",
+    "captum",
+    "alibi",
+    "counterfactual",
+)
+_AI_EXPLANATION_SCHEMAS = {
+    "native_additive": (
+        "lightwork.ai-explainability-normalized-native-additive-receipt.v1"
+    ),
+    "shap": "lightwork.ai-explainability-normalized-shap-receipt.v1",
+    "lime": "lightwork.ai-explainability-normalized-lime-receipt.v1",
+    "captum": "lightwork.ai-explainability-normalized-captum-receipt.v1",
+    "alibi": "lightwork.ai-explainability-normalized-alibi-receipt.v1",
+    "counterfactual": (
+        "lightwork.ai-explainability-normalized-counterfactual-receipt.v1"
+    ),
+}
+
+
+class AIExplanationContributionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    factor_code: str = Field(..., pattern=r"^[a-z0-9][a-z0-9_.:-]{0,127}$")
+    direction: Literal["negative", "neutral", "positive"]
+    magnitude: float = Field(..., ge=0, le=1)
+
+
+class AIExplanationCounterfactualIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    change_code: str = Field(..., pattern=r"^[a-z0-9][a-z0-9_.:-]{0,127}$")
+    outcome_code: str = Field(..., pattern=r"^[a-z0-9][a-z0-9_.:-]{0,127}$")
+    distance: float = Field(..., ge=0, le=1)
+    feasible: bool
+
+
+class AIExplanationReceiptIn(BaseModel):
+    """Closed normalized receipt; provider payloads and raw values are forbidden."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    receipt_schema: Literal[
+        "lightwork.ai-explainability-normalized-native-additive-receipt.v1",
+        "lightwork.ai-explainability-normalized-shap-receipt.v1",
+        "lightwork.ai-explainability-normalized-lime-receipt.v1",
+        "lightwork.ai-explainability-normalized-captum-receipt.v1",
+        "lightwork.ai-explainability-normalized-alibi-receipt.v1",
+        "lightwork.ai-explainability-normalized-counterfactual-receipt.v1",
+    ] = Field(..., alias="schema")
+    method: Literal[
+        "native_additive",
+        "shap",
+        "lime",
+        "captum",
+        "alibi",
+        "counterfactual",
+    ]
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    asset_revision: int = Field(..., ge=1)
+    asset_version_digest: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    receipt_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=256,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,255}$",
+    )
+    observed_at: float = Field(..., gt=0)
+    input_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    output_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    explainer_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    source_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    contributions: list[AIExplanationContributionIn] = Field(
+        default_factory=list,
+        max_length=64,
+    )
+    counterfactuals: list[AIExplanationCounterfactualIn] = Field(
+        default_factory=list,
+        max_length=16,
+    )
+    receipt_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+
+    @model_validator(mode="after")
+    def exact_method_schema_pair(self):
+        if self.method not in _AI_EXPLANATION_METHODS:
+            raise ValueError("unsupported AI explanation method")
+        if self.receipt_schema != _AI_EXPLANATION_SCHEMAS[self.method]:
+            raise ValueError("AI explanation schema does not match its method")
+        if self.method == "counterfactual":
+            if not self.counterfactuals:
+                raise ValueError(
+                    "counterfactual explanations require a counterfactual"
+                )
+        elif not self.contributions:
+            raise ValueError("attribution explanations require a contribution")
+        return self
+
+
+class AIExplanationReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    outcome: Literal["accepted", "needs_remediation", "rejected"]
+    evidence_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+
+
+# Independent insurance-assurance evidence profiles -----------------------
+
+
+class AIInsurabilityEvidenceBindingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    evidence_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$",
+    )
+    digest: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+
+
+class AIInsurabilityCreateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    profile_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$",
+    )
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    content: dict
+    evidence_bindings: list[AIInsurabilityEvidenceBindingIn] = Field(
+        default_factory=list,
+        max_length=128,
+    )
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def bound_profile_content(self):
+        _validate_assurance_json(
+            self.content,
+            label="AI assurance profile content",
+            max_bytes=256 * 1024,
+            max_depth=12,
+            max_nodes=10_000,
+            max_object_items=256,
+            max_array_items=1000,
+            max_string_chars=4000,
+            max_key_chars=128,
+        )
+        return self
+
+
+class AIInsurabilityVersionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    content: dict
+    evidence_bindings: list[AIInsurabilityEvidenceBindingIn] = Field(
+        default_factory=list,
+        max_length=128,
+    )
+    expected_revision: int = Field(..., ge=1)
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def bound_profile_content(self):
+        _validate_assurance_json(
+            self.content,
+            label="AI assurance profile content",
+            max_bytes=256 * 1024,
+            max_depth=12,
+            max_nodes=10_000,
+            max_object_items=256,
+            max_array_items=1000,
+            max_string_chars=4000,
+            max_key_chars=128,
+        )
+        return self
+
+
+class AIInsurabilityApproveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: int = Field(..., ge=1, le=50)
+    expected_revision: int = Field(..., ge=1)
+
+
+# EU AI Act conformity-readiness workflow ---------------------------------
+
+
+class AIConformityCitationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    provision: str = Field(..., min_length=1, max_length=128)
+    official_url: str = Field(..., min_length=1, max_length=2048)
+
+
+class AIConformityCreateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    economic_operator_role: Literal[
+        "provider",
+        "deployer",
+        "importer",
+        "distributor",
+        "product_manufacturer",
+        "authorised_representative",
+        "other",
+    ]
+    risk_tier: Literal[
+        "prohibited",
+        "high_risk",
+        "limited",
+        "minimal",
+        "general_purpose",
+        "undetermined",
+    ]
+    act_applicability: Literal["applicable", "not_applicable", "undetermined"]
+    legal_basis: list[AIConformityCitationIn] = Field(
+        ...,
+        min_length=1,
+        max_length=16,
+    )
+    operation_id: str = Field(..., min_length=1, max_length=256)
+
+
+class AIConformityEvidenceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    evidence_type: Literal[
+        "fria",
+        "annex_iv",
+        "article_43",
+        "post_market",
+        "declaration_draft",
+        "ce_marking",
+    ]
+    source_ref: str = Field(..., min_length=1, max_length=256)
+    sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    operation_id: str = Field(..., min_length=1, max_length=256)
+
+
+class AIConformityDeterminationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    outcome: Literal["required", "not_required", "undetermined"]
+    rationale_sha256: str | None = Field(None, pattern=_MODEL_RISK_DIGEST)
+    citations: list[AIConformityCitationIn] = Field(
+        default_factory=list,
+        max_length=16,
+    )
+    expected_revision: int = Field(..., ge=1)
+    operation_id: str = Field(..., min_length=1, max_length=256)
+
+
+class AIConformityArticle43RouteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    route: Literal[
+        "internal_control_annex_vi",
+        "notified_body_annex_vii",
+        "union_harmonisation_law",
+        "not_applicable",
+        "undetermined",
+    ]
+    rationale_sha256: str | None = Field(None, pattern=_MODEL_RISK_DIGEST)
+    citations: list[AIConformityCitationIn] = Field(
+        default_factory=list,
+        max_length=16,
+    )
+    expected_revision: int = Field(..., ge=1)
+    operation_id: str = Field(..., min_length=1, max_length=256)
+
+
+class AIConformityChecklistEntryIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    domain: Literal[
+        "fria",
+        "annex_iv",
+        "article_43",
+        "post_market",
+        "declaration_draft",
+        "ce_marking",
+    ]
+    section: str = Field(..., min_length=1, max_length=128)
+    status: Literal["pending", "complete", "not_applicable"]
+    evidence_binding_ids: list[str] = Field(default_factory=list, max_length=16)
+    rationale_sha256: str | None = Field(None, pattern=_MODEL_RISK_DIGEST)
+    citations: list[AIConformityCitationIn] = Field(
+        default_factory=list,
+        max_length=16,
+    )
+    expected_revision: int = Field(..., ge=1)
+    operation_id: str = Field(..., min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def bound_binding_ids(self):
+        _validate_string_items(
+            self.evidence_binding_ids,
+            label="conformity evidence binding",
+            max_length=36,
+        )
+        return self
+
+
+class AIConformityActionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    operation_id: str = Field(..., min_length=1, max_length=256)
+
+
+# Regulated-vertical evidence packages ------------------------------------
+
+
+class AIRegulatedVerticalCreateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    package_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$",
+    )
+    package_type: Literal[
+        "credit_adverse_action",
+        "fair_lending_aggregate",
+        "nyc_ll144",
+        "naic_insurance",
+    ]
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    content: dict
+    evidence_bindings: list[AIInsurabilityEvidenceBindingIn] = Field(
+        default_factory=list,
+        max_length=128,
+    )
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def bound_package_content(self):
+        _validate_assurance_json(
+            self.content,
+            label="regulated-vertical package content",
+            max_bytes=256 * 1024,
+            max_depth=12,
+            max_nodes=10_000,
+            max_object_items=256,
+            max_array_items=1000,
+            max_string_chars=4000,
+            max_key_chars=128,
+        )
+        return self
+
+
+class AIRegulatedVerticalVersionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    content: dict
+    evidence_bindings: list[AIInsurabilityEvidenceBindingIn] = Field(
+        default_factory=list,
+        max_length=128,
+    )
+    expected_revision: int = Field(..., ge=1)
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def bound_package_content(self):
+        _validate_assurance_json(
+            self.content,
+            label="regulated-vertical package content",
+            max_bytes=256 * 1024,
+            max_depth=12,
+            max_nodes=10_000,
+            max_object_items=256,
+            max_array_items=1000,
+            max_string_chars=4000,
+            max_key_chars=128,
+        )
+        return self
+
+
+class AIRegulatedVerticalApproveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: int = Field(..., ge=1, le=50)
+    expected_revision: int = Field(..., ge=1)
+
+
+# Bank model-risk-management evidence packages ----------------------------
+
+
+class AIBankMRMCreateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    package_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$",
+    )
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    content: dict
+    evidence_bindings: list[AIInsurabilityEvidenceBindingIn] = Field(
+        default_factory=list,
+        max_length=128,
+    )
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def bound_package_content(self):
+        _validate_assurance_json(
+            self.content,
+            label="bank MRM package content",
+            max_bytes=256 * 1024,
+            max_depth=12,
+            max_nodes=10_000,
+            max_object_items=256,
+            max_array_items=1000,
+            max_string_chars=4000,
+            max_key_chars=128,
+        )
+        return self
+
+
+class AIBankMRMVersionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    content: dict
+    evidence_bindings: list[AIInsurabilityEvidenceBindingIn] = Field(
+        default_factory=list,
+        max_length=128,
+    )
+    expected_revision: int = Field(..., ge=1)
+    idempotency_key: str = Field(..., min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def bound_package_content(self):
+        _validate_assurance_json(
+            self.content,
+            label="bank MRM package content",
+            max_bytes=256 * 1024,
+            max_depth=12,
+            max_nodes=10_000,
+            max_object_items=256,
+            max_array_items=1000,
+            max_string_chars=4000,
+            max_key_chars=128,
+        )
+        return self
+
+
+class AIBankMRMApproveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: int = Field(..., ge=1, le=50)
+    expected_revision: int = Field(..., ge=1)
+
+
+# Privacy-bounded benchmark exchange --------------------------------------
+
+
+_AI_BENCHMARK_METRIC = (
+    "control_coverage_rate|eval_pass_rate|human_review_rate|incident_free_rate|"
+    "model_drift_free_rate|policy_exception_free_rate|red_team_pass_rate|"
+    "runtime_allow_rate"
+)
+
+
+class AIBenchmarkPeriodIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    start: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    end: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class AIBenchmarkCohortIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    industry_code: Literal[
+        "financial_services",
+        "healthcare",
+        "manufacturing",
+        "public_sector",
+        "retail",
+        "technology",
+        "other",
+        "undisclosed",
+    ]
+    geography_code: Literal[
+        "asia_pacific",
+        "europe",
+        "global",
+        "latin_america",
+        "middle_east_africa",
+        "north_america",
+        "undisclosed",
+    ]
+    organization_size_code: Literal[
+        "small",
+        "midsize",
+        "enterprise",
+        "undisclosed",
+    ]
+    model_modality_code: Literal[
+        "audio",
+        "image",
+        "multimodal",
+        "tabular",
+        "text",
+        "video",
+        "other",
+    ]
+
+
+class AIBenchmarkContributionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    contribution_id: str = Field(..., pattern=r"^BCI-[0-9a-f]{32}$")
+    metric_code: str = Field(..., pattern=f"^({_AI_BENCHMARK_METRIC})$")
+    numerator: int = Field(..., ge=0, le=1_000_000_000_000)
+    denominator: int = Field(..., ge=1, le=1_000_000_000_000)
+    period: AIBenchmarkPeriodIn
+    cohort: AIBenchmarkCohortIn
+    evidence_bindings: list[AIInsurabilityEvidenceBindingIn] = Field(
+        ...,
+        min_length=1,
+        max_length=32,
+    )
+    voluntary_opt_in: Literal[True]
+    idempotency_key: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$",
+    )
+
+    @model_validator(mode="after")
+    def bounded_ratio(self):
+        if self.numerator > self.denominator:
+            raise ValueError("benchmark numerator cannot exceed denominator")
+        return self
+
+
+class AIBenchmarkContributionVersionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    metric_code: str = Field(..., pattern=f"^({_AI_BENCHMARK_METRIC})$")
+    numerator: int = Field(..., ge=0, le=1_000_000_000_000)
+    denominator: int = Field(..., ge=1, le=1_000_000_000_000)
+    period: AIBenchmarkPeriodIn
+    cohort: AIBenchmarkCohortIn
+    evidence_bindings: list[AIInsurabilityEvidenceBindingIn] = Field(
+        ...,
+        min_length=1,
+        max_length=32,
+    )
+    voluntary_opt_in: Literal[True]
+    idempotency_key: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,127}$",
+    )
+    expected_revision: int = Field(..., ge=1)
+
+    @model_validator(mode="after")
+    def bounded_ratio(self):
+        if self.numerator > self.denominator:
+            raise ValueError("benchmark numerator cannot exceed denominator")
+        return self
+
+
+class AIBenchmarkContributionApproveIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: int = Field(..., ge=1, le=50)
+    expected_revision: int = Field(..., ge=1)
+
+
+class AIBenchmarkPrivacyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    state: Literal["not_dp", "differential_privacy"]
+    epsilon: float | None = Field(None, gt=0)
+    delta: float | None = Field(None, ge=0, lt=1)
+    noise_mechanism: Literal["discrete_gaussian", "gaussian", "laplace"] | None = None
+
+    @model_validator(mode="after")
+    def complete_or_explicitly_not_dp(self):
+        values = (self.epsilon, self.delta, self.noise_mechanism)
+        if self.state == "not_dp" and any(value is not None for value in values):
+            raise ValueError("not_dp reports cannot carry DP parameters")
+        if self.state == "differential_privacy" and any(
+            value is None for value in values
+        ):
+            raise ValueError("differential_privacy reports require complete parameters")
+        return self
+
+
+class AIBenchmarkSignatureIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    algorithm: Literal["ECDSA-P256-SHA256", "Ed25519", "RSA-PSS-SHA256"]
+    key_id: str = Field(..., pattern=r"^KEY-[0-9a-f]{32}$")
+    value: str = Field(..., min_length=32, max_length=2048)
+
+
+class AIBenchmarkCohortReportIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    report_schema: Literal["lightwork.ai-benchmark-cohort-report.v1"] = Field(
+        ...,
+        alias="schema",
+    )
+    report_id: str = Field(..., pattern=r"^BXR-[0-9a-f]{32}$")
+    issued_at: float = Field(..., gt=0)
+    metric_code: str = Field(..., pattern=f"^({_AI_BENCHMARK_METRIC})$")
+    numerator: int = Field(..., ge=0, le=1_000_000_000_000)
+    denominator: int = Field(..., ge=1, le=1_000_000_000_000)
+    period: AIBenchmarkPeriodIn
+    cohort: AIBenchmarkCohortIn
+    contributor_count: int = Field(..., ge=5, le=1_000_000_000_000)
+    k_anonymity_min: int = Field(..., ge=5, le=1_000_000_000_000)
+    aggregation_method: Literal[
+        "pooled_ratio",
+        "weighted_mean_ratio",
+        "unweighted_mean_ratio",
+    ]
+    privacy: AIBenchmarkPrivacyIn
+    methodology_version: Literal["benchmark-aggregate-v1"]
+    report_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    signature: AIBenchmarkSignatureIn
+
+    @model_validator(mode="after")
+    def bounded_report(self):
+        if self.numerator > self.denominator:
+            raise ValueError("benchmark numerator cannot exceed denominator")
+        if self.contributor_count < self.k_anonymity_min:
+            raise ValueError("contributor_count must satisfy k_anonymity_min")
+        return self
+
+
+# Privacy-safe discovery sensor control plane ------------------------------
+
+
+class AIDiscoverySensorRegisterIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    sensor_name: str = Field(..., pattern=r"^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$")
+    sensor_type: Literal[
+        "browser_extension",
+        "network_egress",
+        "oauth_grant",
+        "saas_posture",
+        "identity_directory",
+        "data_catalog",
+    ]
+    config_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+
+
+class AIDiscoverySensorApprovalIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+
+
+class AIDiscoverySensorConfigurationIn(AIDiscoverySensorApprovalIn):
+    config_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+
+
+class AIDiscoverySensorRevocationIn(AIDiscoverySensorApprovalIn):
+    reason_code: str = Field(
+        ...,
+        pattern=r"^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$",
+    )
+
+
+class AIDiscoveryObservationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    sensor_revision: int = Field(..., ge=1)
+    config_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    event_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    observed_at: float = Field(..., ge=0)
+    ai_service_code: str = Field(..., pattern=r"^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$")
+    ai_product_code: str = Field(..., pattern=r"^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$")
+    provider_code: str = Field(..., pattern=r"^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$")
+    domain_category: str = Field(..., pattern=r"^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$")
+    deployment_type: Literal[
+        "embedded",
+        "hosted_api",
+        "managed_cloud",
+        "saas",
+        "self_hosted",
+        "unknown",
+    ]
+    environment_code: str = Field(..., pattern=r"^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$")
+    context_codes: list[str] = Field(default_factory=list, max_length=16)
+
+    @model_validator(mode="after")
+    def bounded_context_codes(self):
+        for index, value in enumerate(self.context_codes):
+            if not re.fullmatch(r"[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?", value):
+                raise ValueError(f"context code {index} is invalid")
+        return self
+
+
+# Digest-only C2PA media provenance ---------------------------------------
+
+
+_AI_MEDIA_IDENTITY = r"^[A-Za-z0-9][A-Za-z0-9_.:@/+\-=]{0,255}$"
+_AI_MEDIA_TOKEN = r"^[a-z0-9][a-z0-9_.:/-]{0,127}$"
+
+
+class AIMediaProvenanceReceiptIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    receipt_schema: Literal["lightwork.c2pa-adapter-receipt.v1"] = Field(
+        ...,
+        alias="schema",
+    )
+    operation: Literal["verification", "signing"]
+    adapter_id: str = Field(..., pattern=_AI_MEDIA_TOKEN)
+    adapter_version: str = Field(..., pattern=_AI_MEDIA_IDENTITY)
+    standard: str = Field(..., pattern=r"^c2pa(?:/[0-9]+(?:\.[0-9]+)*)?$")
+    receipt_id: str = Field(..., pattern=_AI_MEDIA_IDENTITY)
+    observed_at: float = Field(..., gt=0, le=100_000_000_000.0)
+    media_kind: Literal["image", "audio", "video"]
+    source_content_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    content_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    asset_id: str = Field(..., pattern=_MODEL_RISK_ASSET_ID)
+    asset_revision: int = Field(..., ge=1)
+    asset_version_digest: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    deployment_id: str = Field(..., pattern=_AI_MEDIA_IDENTITY)
+    deployment_revision: int = Field(..., ge=1)
+    deployment_artifact_digest: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    context_id: str = Field(..., pattern=_AI_MEDIA_IDENTITY)
+    context_revision: int = Field(..., ge=1)
+    context_digest: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    manifest_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+    claim_generator: str = Field(..., min_length=1, max_length=256)
+    signing_time: float = Field(..., gt=0, le=100_000_000_000.0)
+    validation_state: Literal[
+        "valid",
+        "invalid",
+        "indeterminate",
+        "unsupported",
+        "error",
+    ]
+    assertion_codes: list[str] = Field(..., min_length=1, max_length=64)
+    trust_chain_state: Literal[
+        "trusted",
+        "untrusted",
+        "unknown",
+        "not_applicable",
+        "error",
+    ]
+    receipt_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+
+    @model_validator(mode="after")
+    def closed_receipt_contract(self):
+        if self.operation == "verification" and (
+            self.source_content_sha256.lower().removeprefix("sha256:")
+            != self.content_sha256.lower().removeprefix("sha256:")
+        ):
+            raise ValueError("verification receipt content digests must match")
+        if len(set(self.assertion_codes)) != len(self.assertion_codes):
+            raise ValueError("assertion_codes must be unique")
+        for index, value in enumerate(self.assertion_codes):
+            if not re.fullmatch(_AI_MEDIA_TOKEN.removeprefix("^").removesuffix("$"), value):
+                raise ValueError(f"assertion code {index} is invalid")
+        return self
+
+
+class AIMediaProvenanceReleasePrepareIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    purpose_code: str = Field(..., pattern=_AI_MEDIA_TOKEN)
+    evidence_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+
+
+class AIMediaProvenanceReleaseReviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
+    outcome: Literal["approved", "rejected", "needs_remediation"]
+    evidence_sha256: str = Field(..., pattern=_MODEL_RISK_DIGEST)
+
+
+class AIPolicyPreviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    context: AIPolicyContextIn
+
+
+class AIPolicyEvaluateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    evaluation_key: str = Field(..., pattern=_AI_POLICY_TOKEN)
+    context: AIPolicyContextIn
+    expected_revision: int = Field(0, ge=0)
+
+
+class AIPolicyAttestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(..., ge=1)
 
 
 class EvidenceGatewayPacketVerifyIn(BaseModel):

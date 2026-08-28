@@ -186,6 +186,7 @@ def test_openapi_artifact_describes_every_gateway_operation():
     assert spec["openapi"].startswith("3.")
     assert set(spec["paths"]) == {
         "/api/v1/external/screen", "/api/v1/external/runs",
+        "/api/v1/external/runtime/evaluate",
         "/api/v1/external/runs/start",
         "/api/v1/external/runs/{goal_id}/heartbeat",
         "/api/v1/external/runs/{goal_id}/finish",
@@ -195,6 +196,211 @@ def test_openapi_artifact_describes_every_gateway_operation():
         "/api/v1/external/execute",
         "/api/v1/external/executions/{execution_id}",
         "/api/v1/external/executions/{execution_id}/commit"}
+
+
+def test_external_runtime_guardrail_is_authenticated_exact_bound_and_transient(
+    monkeypatch,
+):
+    from maverick import ai_runtime_guardrails as runtime
+    from maverick import model_risk_assurance as assurance
+
+    _enroll()
+    token = _mint()
+    bare = TestClient(app)
+    headers = {"Authorization": f"Bearer {token}"}
+    asset_id = "MAA-" + ("a" * 32)
+    digest = "b" * 64
+    captured = []
+
+    class Service:
+        def evaluate(self, request):
+            captured.append(request)
+            return runtime.RuntimeGuardrailResult(
+                decision="redact",
+                redacted_content="email [REDACTED]",
+                receipt={
+                    "stage": "output",
+                    "decision": "redact",
+                    "categories": ["privacy"],
+                    "rule_ids": ["pii/email"],
+                    "control_ids": [],
+                    "input_sha256": "c" * 64,
+                    "output_sha256": "d" * 64,
+                    "policy_sha256": "e" * 64,
+                    "evaluated_at": 1_800_000_000.0,
+                    "asset_binding": {
+                        "tenant_ref": "TEN-" + ("f" * 24),
+                        "asset_id": asset_id,
+                        "asset_revision": 3,
+                        "asset_version_digest": digest,
+                    },
+                },
+            )
+
+    monkeypatch.setattr(runtime, "enabled", lambda: True)
+    monkeypatch.setattr(runtime, "default_service", Service())
+    monkeypatch.setattr(
+        runtime,
+        "dynamic_risk_receipt",
+        lambda _result: {"schema": "normalized-runtime-risk"},
+    )
+    monkeypatch.setattr(assurance, "enabled", lambda: True)
+    monkeypatch.setattr(
+        assurance,
+        "get_observation",
+        lambda _asset_id: {
+            "asset_id": asset_id,
+            "revision": 3,
+            "version_digest": digest,
+            "identity": {"asset_type": "agent"},
+        },
+    )
+    monkeypatch.setattr(
+        assurance,
+        "get_declaration",
+        lambda _asset_id: {
+            "asset_id": asset_id,
+            "status": "approved",
+            "observed_version_digest": digest,
+            "risk_tier": "high",
+            "risk_context": {
+                "jurisdictions": ["us"],
+                "data_classes": ["personal"],
+                "deployment_types": ["production"],
+                "tags": ["external"],
+                "use_case_tags": ["support"],
+            },
+        },
+    )
+    raw = "email person@example.test"
+    payload = {
+        "stage": "output",
+        "content": raw,
+        "known_prompt": "answer the customer",
+        "asset_id": asset_id,
+        "asset_revision": 3,
+        "asset_version_digest": digest,
+    }
+    response = bare.post(
+        "/api/v1/external/runtime/evaluate",
+        headers=headers,
+        json=payload,
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["decision"] == "redact"
+    assert result["redacted_content"] == "email [REDACTED]"
+    assert result["raw_content_persisted"] is False
+    assert result["dynamic_risk_signal_recorded"] is False
+    assert raw not in response.text
+    assert captured[0].policy_context.risk_tier == "high"
+    assert captured[0].policy_context.asset_types == ("agent",)
+
+    stale = dict(payload, asset_revision=2)
+    assert bare.post(
+        "/api/v1/external/runtime/evaluate",
+        headers=headers,
+        json=stale,
+    ).status_code == 409
+    assert bare.post(
+        "/api/v1/external/runtime/evaluate",
+        json=payload,
+    ).status_code == 401
+
+
+def test_external_execute_runtime_gate_cannot_be_bypassed_when_enabled(monkeypatch):
+    from maverick import ai_runtime_guardrails as runtime
+    from maverick import external_agents
+    from maverick import model_risk_assurance as assurance
+
+    _enroll()
+    token = _mint()
+    headers = {"Authorization": f"Bearer {token}"}
+    bare = TestClient(app)
+    asset_id = "MAA-" + ("6" * 32)
+    digest = "7" * 64
+    executed = []
+
+    class Service:
+        @staticmethod
+        def evaluate(request):
+            assert request.stage == "action"
+            assert request.action_name == "servicenow.post"
+            return runtime.RuntimeGuardrailResult(
+                decision="block",
+                redacted_content=None,
+                receipt={
+                    "stage": "action",
+                    "decision": "block",
+                    "categories": ["policy"],
+                    "rule_ids": ["policy/external-write/prohibit"],
+                    "control_ids": [],
+                    "input_sha256": "8" * 64,
+                    "output_sha256": "9" * 64,
+                    "policy_sha256": "a" * 64,
+                    "evaluated_at": 1_800_000_000.0,
+                    "asset_binding": {
+                        "tenant_ref": "TEN-" + ("b" * 24),
+                        "asset_id": asset_id,
+                        "asset_revision": 2,
+                        "asset_version_digest": digest,
+                    },
+                },
+            )
+
+    monkeypatch.setattr(runtime, "enabled", lambda: True)
+    monkeypatch.setattr(runtime, "default_service", Service())
+    monkeypatch.setattr(assurance, "enabled", lambda: True)
+    monkeypatch.setattr(
+        assurance,
+        "get_observation",
+        lambda _asset_id: {
+            "asset_id": asset_id,
+            "revision": 2,
+            "version_digest": digest,
+            "identity": {"asset_type": "agent"},
+        },
+    )
+    monkeypatch.setattr(
+        assurance,
+        "get_declaration",
+        lambda _asset_id: {
+            "status": "approved",
+            "observed_version_digest": digest,
+            "risk_tier": "high",
+            "risk_context": {},
+        },
+    )
+    monkeypatch.setattr(
+        external_agents,
+        "execute",
+        lambda *_args, **_kwargs: executed.append(True) or {"allowed": True},
+    )
+    detail = "sensitive transient action detail"
+    payload = {
+        "connector": "servicenow",
+        "op": "post",
+        "path": "/api/now/table/risk",
+        "body": {"short_description": "governed finding"},
+        "detail": detail,
+        "runtime_asset_id": asset_id,
+        "runtime_asset_revision": 2,
+        "runtime_asset_version_digest": digest,
+    }
+    blocked = bare.post("/api/v1/external/execute", headers=headers, json=payload)
+    assert blocked.status_code == 200
+    assert blocked.json()["allowed"] is False
+    assert blocked.json()["status"] == "block"
+    assert detail not in blocked.text
+    assert executed == []
+
+    missing = dict(payload)
+    missing.pop("runtime_asset_id")
+    assert bare.post(
+        "/api/v1/external/execute",
+        headers=headers,
+        json=missing,
+    ).status_code == 409
 
 
 def test_openapi_advertises_red_team_only_when_its_plane_is_enabled(monkeypatch):
@@ -207,6 +413,15 @@ def test_openapi_advertises_red_team_only_when_its_plane_is_enabled(monkeypatch)
         "/api/v1/external/red-team/{campaign_id}/results"
     ]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert "target_artifact_sha256" in result["required"]
+    assert "runner_instance_id" in result["required"]
+    assert "lease_token" in result["required"]
+    pull_parameters = spec["paths"][
+        "/api/v1/external/red-team/{campaign_id}/cases"
+    ]["get"]["parameters"]
+    assert any(
+        item["name"] == "runner_instance_id" and item["required"]
+        for item in pull_parameters
+    )
     assert spec["security"] == [{"bearer": []}]
 
 
@@ -219,11 +434,29 @@ def test_red_team_routes_preserve_agent_binding_and_do_not_echo_raw(monkeypatch)
     headers = {"Authorization": f"Bearer {token}"}
     observed: dict = {}
 
-    def cases(campaign_id, *, external_agent_id):
-        observed["pull"] = (campaign_id, external_agent_id)
+    def cases(
+        campaign_id,
+        *,
+        external_agent_id,
+        runner_instance_id,
+        limit,
+        lease_seconds,
+    ):
+        observed["pull"] = (
+            campaign_id,
+            external_agent_id,
+            runner_instance_id,
+            limit,
+            lease_seconds,
+        )
         return {
             "campaign_id": campaign_id,
-            "cases": [{"case_id": "RTCASE-one", "prompt": "synthetic probe"}],
+            "cases": [{
+                "case_id": "RTCASE-one",
+                "prompt": "synthetic probe",
+                "runner_instance_id": runner_instance_id,
+                "lease_token": f"rtl1.{'b' * 64}",
+            }],
         }
 
     def submit(campaign_id, **kwargs):
@@ -235,15 +468,18 @@ def test_red_team_routes_preserve_agent_binding_and_do_not_echo_raw(monkeypatch)
             "response_commitment": "a" * 64,
         }
 
-    monkeypatch.setattr(rta, "cases_for_agent", cases)
+    monkeypatch.setattr(rta, "lease_cases_for_agent", cases)
     monkeypatch.setattr(rta, "submit_result", submit)
 
     pulled = bare.get(
-        "/api/v1/external/red-team/RTC-one/cases",
+        "/api/v1/external/red-team/RTC-one/cases"
+        "?runner_instance_id=runner-one&limit=2&lease_seconds=180",
         headers=headers,
     )
     assert pulled.status_code == 200
-    assert observed["pull"] == ("RTC-one", "sf-quotebot")
+    assert observed["pull"] == (
+        "RTC-one", "sf-quotebot", "runner-one", 2, 180,
+    )
 
     raw = "transient model output"
     submitted = bare.post(
@@ -252,6 +488,8 @@ def test_red_team_routes_preserve_agent_binding_and_do_not_echo_raw(monkeypatch)
         json={
             "case_id": "RTCASE-one",
             "target_artifact_sha256": "a" * 64,
+            "runner_instance_id": "runner-one",
+            "lease_token": f"rtl1.{'b' * 64}",
             "response": raw,
             "tool_calls": [],
             "tool_trace_status": "complete",
@@ -259,6 +497,8 @@ def test_red_team_routes_preserve_agent_binding_and_do_not_echo_raw(monkeypatch)
     )
     assert submitted.status_code == 201
     assert observed["submit"][1]["external_agent_id"] == "sf-quotebot"
+    assert observed["submit"][1]["runner_instance_id"] == "runner-one"
+    assert observed["submit"][1]["lease_token"] == f"rtl1.{'b' * 64}"
     assert observed["submit"][1]["response"] == raw
     assert raw not in submitted.text
 

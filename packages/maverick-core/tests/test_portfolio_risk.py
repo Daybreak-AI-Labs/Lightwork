@@ -411,3 +411,104 @@ def test_snapshot_cas_has_one_winner_and_tenant_storage_isolated():
         assert len(portfolio_risk.PortfolioRiskService().list_snapshots()) == 1
     with tenant_scope(tenant="beta"):
         assert portfolio_risk.PortfolioRiskService().list_snapshots() == []
+
+
+def test_portfolio_trend_handles_first_quarter_and_consecutive_drillthrough():
+    clock = [datetime(2026, 6, 30, 12, tzinfo=timezone.utc).timestamp()]
+    officer = mra.ModelRiskAssuranceOfficer(clock=lambda: clock[0])
+    service = portfolio_risk.PortfolioRiskService(
+        officer=officer,
+        clock=lambda: clock[0],
+    )
+
+    with tenant_scope(tenant="alpha"):
+        first_asset = _observe(officer, "q2-model", asset_type="model")
+        first = service.refresh_current_snapshot(actor="risk-officer")
+        first_trend = service.portfolio_trend(contributor_limit=10)
+
+        assert first["period_id"] == "2026-Q2"
+        assert first_trend["comparison_available"] is False
+        assert first_trend["expected_prior_period_id"] == "2026-Q1"
+        assert first_trend["direction"] == "not_available"
+
+        clock[0] = datetime(2026, 8, 23, 12, tzinfo=timezone.utc).timestamp()
+        second_asset = _observe(officer, "q3-model", asset_type="model")
+        second = service.refresh_current_snapshot(actor="risk-officer")
+        trend = service.portfolio_trend(contributor_limit=10)
+
+        assert second["period_id"] == "2026-Q3"
+        assert trend["comparison_available"] is True
+        assert trend["prior_period_id"] == "2026-Q2"
+        assert trend["expected_prior_period_id"] == "2026-Q2"
+        assert trend["is_consecutive"] is True
+        assert trend["trend_sha256"]
+        assert trend["contributor_delta_count"] >= 1
+
+        current_refs = [
+            row for row in trend["contributor_deltas"] if row["current_present"]
+        ]
+        assert current_refs
+        selected = current_refs[0]
+        detail = service.get_contributor_drillthrough(
+            "2026-Q3",
+            selected["contributor_id"],
+        )
+        assert detail is not None
+        assert detail["period_id"] == "2026-Q3"
+        assert detail["contributor_id"] == selected["contributor_id"]
+        assert detail["asset_id"] in {first_asset["asset_id"], second_asset["asset_id"]}
+        assert "description" not in detail
+        assert "rationale" not in detail
+
+
+def test_portfolio_trend_reports_skipped_quarter_and_preserves_tenant_boundary():
+    clock = [datetime(2026, 3, 31, 12, tzinfo=timezone.utc).timestamp()]
+    officer = mra.ModelRiskAssuranceOfficer(clock=lambda: clock[0])
+    service = portfolio_risk.PortfolioRiskService(
+        officer=officer,
+        clock=lambda: clock[0],
+    )
+
+    with tenant_scope(tenant="alpha"):
+        _observe(officer, "q1-model", asset_type="model")
+        service.refresh_current_snapshot(actor="risk-officer")
+        clock[0] = datetime(2026, 8, 23, 12, tzinfo=timezone.utc).timestamp()
+        service.refresh_current_snapshot(actor="risk-officer")
+        trend = service.portfolio_trend()
+        assert trend["prior_period_id"] == "2026-Q1"
+        assert trend["expected_prior_period_id"] == "2026-Q2"
+        assert trend["is_consecutive"] is False
+
+    with tenant_scope(tenant="beta"):
+        _observe(officer, "beta-model", asset_type="model")
+        service.refresh_current_snapshot(actor="risk-officer")
+        isolated = service.portfolio_trend()
+        assert isolated["comparison_available"] is False
+        assert isolated["prior_period_id"] is None
+
+
+def test_portfolio_trend_rejects_corrupted_contributor_projection():
+    clock = [datetime(2026, 6, 30, 12, tzinfo=timezone.utc).timestamp()]
+    officer = mra.ModelRiskAssuranceOfficer(clock=lambda: clock[0])
+    service = portfolio_risk.PortfolioRiskService(
+        officer=officer,
+        clock=lambda: clock[0],
+    )
+    with tenant_scope(tenant="alpha"):
+        _observe(officer, "model", asset_type="model")
+        service.refresh_current_snapshot(actor="risk-officer")
+        clock[0] = datetime(2026, 8, 23, 12, tzinfo=timezone.utc).timestamp()
+        current = service.refresh_current_snapshot(actor="risk-officer")
+
+        def corrupt(row):
+            row["report"]["counts"]["contributors"] += 1
+
+        service._snapshots.update(  # noqa: SLF001 - persisted corruption test
+            current["id"],
+            corrupt,
+            expected_revision=current["revision"],
+            action="test_corruption",
+            actor="test",
+        )
+        with pytest.raises(portfolio_risk.PortfolioRiskStateError):
+            service.portfolio_trend()

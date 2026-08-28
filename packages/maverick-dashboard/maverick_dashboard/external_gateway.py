@@ -34,8 +34,10 @@ import threading
 import time
 from collections import deque
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+
+from . import model_risk_schemas as schemas
 
 log = logging.getLogger("maverick.dashboard.external_gateway")
 
@@ -47,9 +49,10 @@ router = APIRouter(prefix="/api/v1/external", tags=["external-agents"])
 # which keys by client address.
 _RATE_LIMITS = {"screen": 120, "runs": 60, "approvals": 120, "openapi": 30,
                 "heartbeat": 240, "memory": 60, "execute": 30,
-                "executions": 120, "red_team": 120}
+                "executions": 120, "red_team": 120, "runtime": 120}
 _RATE_BUCKET_CAP = 10_000
 _MAX_RED_TEAM_HTTP_BODY_BYTES = 2 * 1024 * 1024
+_MAX_RUNTIME_HTTP_BODY_BYTES = 512 * 1024
 _rate_times: dict[tuple[str, str], deque[float]] = {}
 _rate_lock = threading.Lock()
 
@@ -147,6 +150,18 @@ class ExternalExecuteIn(BaseModel):
     preview: bool = False
     detail: str = ""
     goal_id: int | None = None
+    # When the runtime plane is on, the enforced connector path requires this
+    # exact current Model Risk binding. Legacy deployments (plane off) remain
+    # byte-for-byte compatible.
+    runtime_asset_id: str | None = Field(
+        None,
+        pattern=r"^MAA-[0-9a-f]{32}$",
+    )
+    runtime_asset_revision: int | None = Field(None, ge=1)
+    runtime_asset_version_digest: str | None = Field(
+        None,
+        pattern=r"^(?:sha256:)?[0-9a-f]{64}$",
+    )
 
 
 class ExternalExecuteCommitIn(BaseModel):
@@ -161,6 +176,12 @@ class ExternalRedTeamResultIn(BaseModel):
 
     case_id: str = Field(min_length=1, max_length=64)
     target_artifact_sha256: str = Field(pattern=r"^(?:sha256:)?[0-9a-f]{64}$")
+    runner_instance_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$",
+    )
+    lease_token: str = Field(pattern=r"^rtl1\.[0-9a-f]{64}$")
     response: str = ""
     tool_calls: list[str | dict] = Field(default_factory=list, max_length=64)
     tool_trace_status: str = Field(
@@ -301,6 +322,29 @@ async def _require_red_team_agent(request: Request) -> str:
     return await _require_agent(request)
 
 
+async def _require_runtime_agent(request: Request) -> str:
+    """Bound transient runtime bodies before verifying signed agent auth."""
+
+    _gate()
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            declared = int(content_length)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid Content-Length") from None
+        if declared < 0:
+            raise HTTPException(status_code=400, detail="invalid Content-Length")
+        if declared > _MAX_RUNTIME_HTTP_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="request body too large")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > _MAX_RUNTIME_HTTP_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="request body too large")
+    request._body = bytes(body)  # noqa: SLF001 - cache for auth and model parsing
+    return await _require_agent(request)
+
+
 def _shield():
     """The deployment's Shield instance for input scanning, or ``None``.
 
@@ -382,6 +426,52 @@ async def external_screen(
                      risk=payload.risk or None, shield=_shield())
 
 
+@router.post("/runtime/evaluate")
+async def external_runtime_evaluate(
+    payload: schemas.AIRuntimeGuardrailIn,
+    agent_id: str = Depends(_require_runtime_agent),
+) -> dict:
+    """Apply policy, Shield, and redaction before third-party content is released."""
+
+    _rate_limit(agent_id, "runtime")
+    from maverick import ai_runtime_guardrails as runtime
+
+    if not runtime.enabled():
+        raise HTTPException(status_code=404, detail="not found")
+    # Reuse the dashboard authority resolver: callers cannot self-assert policy
+    # facts.  It verifies the exact current observation and derives context from
+    # a current approved declaration.
+    from .model_risk_api import _runtime_authority
+
+    binding, policy_context = await _runtime_authority(runtime, payload)
+    try:
+        result = runtime.default_service.evaluate(runtime.RuntimeGuardrailInput(
+            stage=payload.stage,
+            content=payload.content,
+            asset=binding,
+            policy_context=policy_context,
+            action_name=payload.action_name,
+            action_arguments=payload.action_arguments,
+            known_prompt=payload.known_prompt,
+        ))
+        normalized_risk = runtime.dynamic_risk_receipt(result)
+    except runtime.RuntimeGuardrailsInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except runtime.RuntimeGuardrailsError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="runtime guardrail evaluation is unavailable",
+        ) from exc
+    return {
+        "decision": result.decision,
+        "receipt": result.receipt,
+        "redacted_content": result.redacted_content,
+        "dynamic_risk_receipt": normalized_risk,
+        "dynamic_risk_signal_recorded": False,
+        "raw_content_persisted": False,
+    }
+
+
 @router.post("/memory/ingest", status_code=201)
 async def external_memory_ingest(
     payload: ExternalMemoryIngestIn, agent_id: str = Depends(_require_agent),
@@ -431,6 +521,87 @@ async def external_approval_status(
     return out
 
 
+async def _external_execute_runtime_gate(payload: ExternalExecuteIn):
+    """Enforce the runtime plane on the connector effect chokepoint when on."""
+
+    from maverick import ai_runtime_guardrails as runtime
+
+    if not runtime.enabled():
+        try:
+            from maverick.config import config_source_errors, load_config
+
+            errors = config_source_errors()
+            config = load_config()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="runtime guardrail configuration is unavailable",
+            ) from exc
+        if errors or not isinstance(config, dict):
+            raise HTTPException(
+                status_code=503,
+                detail="runtime guardrail configuration is unreadable",
+            )
+        section = config.get("ai_runtime_guardrails")
+        if isinstance(section, dict) and section.get("enable") is True:
+            raise HTTPException(
+                status_code=503,
+                detail="runtime guardrails are enabled but unavailable",
+            )
+        return None
+    if (
+        payload.runtime_asset_id is None
+        or payload.runtime_asset_revision is None
+        or payload.runtime_asset_version_digest is None
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "runtime_asset_id, runtime_asset_revision, and "
+                "runtime_asset_version_digest are required while runtime "
+                "guardrails are enabled"
+            ),
+        )
+    try:
+        runtime_input = schemas.AIRuntimeGuardrailIn(
+            stage="action",
+            content=payload.detail,
+            asset_id=payload.runtime_asset_id,
+            asset_revision=payload.runtime_asset_revision,
+            asset_version_digest=payload.runtime_asset_version_digest,
+            action_name=f"{payload.connector}.{payload.op}",
+            action_arguments={
+                "connector": payload.connector,
+                "op": payload.op,
+                "path": payload.path,
+                "body": payload.body,
+                "preview": payload.preview,
+                "goal_id": payload.goal_id,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="runtime action is malformed") from exc
+    from .model_risk_api import _runtime_authority
+
+    binding, policy_context = await _runtime_authority(runtime, runtime_input)
+    try:
+        return runtime.default_service.evaluate(runtime.RuntimeGuardrailInput(
+            stage="action",
+            content=payload.detail,
+            asset=binding,
+            policy_context=policy_context,
+            action_name=f"{payload.connector}.{payload.op}",
+            action_arguments=runtime_input.action_arguments,
+        ))
+    except runtime.RuntimeGuardrailsInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except runtime.RuntimeGuardrailsError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="runtime guardrail evaluation is unavailable",
+        ) from exc
+
+
 @router.post("/execute")
 async def external_execute(
     payload: ExternalExecuteIn, agent_id: str = Depends(_require_agent),
@@ -441,7 +612,37 @@ async def external_execute(
     comes back as a typed verdict, never an exception."""
     _rate_limit(agent_id, "execute")
     from maverick import external_agents as xa
-    return xa.execute(agent_id, payload.model_dump(), shield=_shield())
+    request_body = payload.model_dump(exclude={
+        "runtime_asset_id",
+        "runtime_asset_revision",
+        "runtime_asset_version_digest",
+    })
+    runtime_result = await _external_execute_runtime_gate(payload)
+    if runtime_result is not None and runtime_result.decision != "allow":
+        return {
+            "allowed": False,
+            "rule": "runtime_guardrail",
+            "reason": (
+                "runtime policy or content controls did not authorize this "
+                "connector action; no external effect occurred"
+            ),
+            "status": runtime_result.decision,
+            "requires_approval": runtime_result.decision in {"review", "restrict"},
+            "runtime_guardrail": {
+                "decision": runtime_result.decision,
+                "receipt": runtime_result.receipt,
+            },
+        }
+    outcome = xa.execute(agent_id, request_body, shield=_shield())
+    if runtime_result is not None:
+        outcome = {
+            **outcome,
+            "runtime_guardrail": {
+                "decision": runtime_result.decision,
+                "receipt": runtime_result.receipt,
+            },
+        }
+    return outcome
 
 
 @router.get("/executions/{execution_id}")
@@ -473,16 +674,28 @@ async def external_execution_commit(
 
 @router.get("/red-team/{campaign_id}/cases")
 async def external_red_team_cases(
-    campaign_id: str, agent_id: str = Depends(_require_red_team_agent),
+    campaign_id: str,
+    runner_instance_id: str = Query(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$",
+    ),
+    limit: int = Query(1, ge=1, le=12),
+    lease_seconds: int = Query(120, ge=30, le=900),
+    agent_id: str = Depends(_require_red_team_agent),
 ) -> dict:
-    """Pull pending synthetic probes for this exact enrolled-agent binding."""
+    """Atomically lease probes to one instance of the enrolled agent."""
 
     _rate_limit(agent_id, "red_team")
     from maverick import red_team_assurance as rta
     try:
-        return rta.cases_for_agent(
+        return rta.lease_cases_for_agent(
             campaign_id,
             external_agent_id=agent_id,
+            runner_instance_id=runner_instance_id,
+            limit=limit,
+            lease_seconds=lease_seconds,
         )
     except rta.RedTeamDisabled as exc:
         raise HTTPException(status_code=404, detail="not found") from exc
@@ -778,6 +991,16 @@ _OPENAPI: dict = {
                                 "type": "integer",
                                 "description": "Bind the effect to one of "
                                                "this agent's live runs."},
+                            "runtime_asset_id": {
+                                "type": "string",
+                                "pattern": "^MAA-[0-9a-f]{32}$",
+                                "description": "Required when the runtime "
+                                               "guardrail plane is enabled."},
+                            "runtime_asset_revision": {
+                                "type": "integer", "minimum": 1},
+                            "runtime_asset_version_digest": {
+                                "type": "string",
+                                "pattern": "^(?:sha256:)?[0-9a-f]{64}$"},
                         }}}}},
                 "responses": {"200": {"description": "Verdict", "content": {
                     "application/json": {"schema": {
@@ -852,14 +1075,61 @@ _OPENAPI: dict = {
                         }}}}}},
             },
         },
+        "/api/v1/external/runtime/evaluate": {
+            "post": {
+                "operationId": "evaluateRuntimeContent",
+                "summary": "Evaluate transient prompt, output, or action content "
+                           "against current governed policy and local guardrails",
+                "requestBody": {"required": True, "content": {
+                    "application/json": {"schema": {
+                        "type": "object",
+                        "required": [
+                            "stage", "asset_id", "asset_revision",
+                            "asset_version_digest",
+                        ],
+                        "properties": {
+                            "stage": {"type": "string",
+                                      "enum": ["prompt", "output", "action"]},
+                            "content": {"type": "string", "maxLength": 65536},
+                            "asset_id": {"type": "string",
+                                         "pattern": "^MAA-[0-9a-f]{32}$"},
+                            "asset_revision": {"type": "integer", "minimum": 1},
+                            "asset_version_digest": {
+                                "type": "string",
+                                "pattern": "^(?:sha256:)?[0-9a-f]{64}$",
+                            },
+                            "action_name": {"type": "string"},
+                            "action_arguments": {"type": "object"},
+                            "known_prompt": {"type": "string"},
+                        }}}}},
+                "responses": {"200": {"description": "Guardrail decision and "
+                                                     "digest-only receipts",
+                                        "content": {"application/json": {
+                                            "schema": {"type": "object"}}}}},
+            },
+        },
         "/api/v1/external/red-team/{campaign_id}/cases": {
             "get": {
                 "operationId": "pullRedTeamCases",
-                "summary": "Pull pending synthetic assurance probes bound "
-                           "to this enrolled agent",
-                "parameters": [{"name": "campaign_id", "in": "path",
-                                "required": True,
-                                "schema": {"type": "string"}}],
+                "summary": "Atomically lease synthetic assurance probes to "
+                           "one enrolled-agent runner",
+                "parameters": [
+                    {"name": "campaign_id", "in": "path", "required": True,
+                     "schema": {"type": "string"}},
+                    {"name": "runner_instance_id", "in": "query",
+                     "required": True, "schema": {
+                         "type": "string", "minLength": 1, "maxLength": 128,
+                         "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}$",
+                     }},
+                    {"name": "limit", "in": "query", "required": False,
+                     "schema": {"type": "integer", "minimum": 1,
+                                "maximum": 12, "default": 1}},
+                    {"name": "lease_seconds", "in": "query",
+                     "required": False, "schema": {
+                         "type": "integer", "minimum": 30, "maximum": 900,
+                         "default": 120,
+                     }},
+                ],
                 "responses": {"200": {"description": "Pending probes",
                                         "content": {"application/json": {
                                             "schema": {"type": "object"}}}}},
@@ -877,12 +1147,22 @@ _OPENAPI: dict = {
                     "application/json": {"schema": {
                         "type": "object", "required": [
                             "case_id", "target_artifact_sha256",
+                            "runner_instance_id", "lease_token",
                         ],
                         "properties": {
                             "case_id": {"type": "string"},
                             "target_artifact_sha256": {
                                 "type": "string",
                                 "pattern": "^(?:sha256:)?[0-9a-f]{64}$",
+                            },
+                            "runner_instance_id": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z0-9]"
+                                           "[A-Za-z0-9_.:@/-]{0,127}$",
+                            },
+                            "lease_token": {
+                                "type": "string",
+                                "pattern": "^rtl1\\.[0-9a-f]{64}$",
                             },
                             "response": {"type": "string"},
                             "tool_calls": {"type": "array",

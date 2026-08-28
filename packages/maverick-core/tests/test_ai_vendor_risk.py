@@ -53,6 +53,20 @@ def _safe_answers() -> dict[str, str]:
     }
 
 
+def test_feature_gate_is_explicit_and_depends_on_model_risk(tmp_path):
+    from maverick import config
+
+    assert avr.enabled() is False
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[ai_vendor_risk]\nenable = true\n",
+        encoding="utf-8",
+    )
+    config.reset_config_cache()
+    assert avr.enabled() is True
+
+
 def _full_vendor_document() -> bytes:
     return (
         b"Model provenance is documented with the foundation model provider and version. "
