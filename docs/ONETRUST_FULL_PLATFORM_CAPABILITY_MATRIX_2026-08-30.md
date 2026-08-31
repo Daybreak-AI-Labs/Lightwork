@@ -17,8 +17,10 @@ tracker scanning, governed consent experiments, identity-bound OTT/CTV rights
 intake, Data Use Governance policy compilation and native Snowflake and
 Databricks enforcement/audit adapters, privacy-preserving personal-data
 discovery, licensed-source regulatory research, third-party intelligence/due-
-diligence controls, and evergreen public/private policy links. None of those
-local paths is proof of live provider
+diligence controls, evergreen public/private policy links, five packaged
+governance agents, multimodal AI Evidence Analysis, named cloud-agent
+governance contracts, assessment-question comments, and a California DROP
+request/status control plane. None of those local paths is proof of live provider
 interoperability, customer-scale operation, regulatory acceptance, or literal
 OneTrust parity. The largest remaining product gaps are full mobile and OTT/CTV
 consent SDKs, accepted branded/native cross-channel trust centers, named
@@ -27,13 +29,15 @@ end-to-end DSR automation, a hosted full-product customer sandbox/tenant-copy
 service, and curated compliance-content and continuous-evidence breadth.
 The refreshed public catalog also names packaged privacy/third-party agents,
 multimodal AI evidence analysis, provider-specific Bedrock/Azure/Vertex agent
-detection and a Databricks AI Security Framework outcome that Lightwork has not
-matched as accepted packaged products.
+detection and a Databricks AI Security Framework outcome. Lightwork now has
+coherent local product paths for those outcomes, but provider writes, durable
+production cloud authority, licensed content, off-host token custody and live
+customer/provider acceptance remain materially incomplete.
 
 This is a public-claims inventory and an implementation map, not a source-code
 comparison. OneTrust is not open source, its marketing claims were not tested
 here, and contract-specific or customer-only features may not be visible on its
-public site. The 135 rows normalize public product outcomes and sometimes group
+public site. The 138 rows normalize public product outcomes and sometimes group
 multiple UI-level features; they are not proof that every toggle, workflow
 variant, API, integration contract, or customer-only module was enumerated.
 Conversely, a Lightwork module is not counted as parity merely because it has a
@@ -65,16 +69,16 @@ weighted product score.
 
 | Scope | Total | Implemented | Partial | Missing | External / unverifiable |
 |---|---:|---:|---:|---:|---:|
-| Shared platform | 15 | 4 | 10 | 0 | 1 |
+| Shared platform | 15 | 5 | 9 | 0 | 1 |
 | AI Governance | 26 | 11 | 14 | 0 | 1 |
 | Consent & Preferences | 20 | 4 | 14 | 0 | 2 |
 | Data Use Governance (early access) | 10 | 8 | 2 | 0 | 0 |
-| Privacy Automation | 19 | 4 | 14 | 0 | 1 |
-| Tech Risk & Compliance | 24 | 14 | 9 | 0 | 1 |
-| Third-Party Management | 21 | 7 | 13 | 0 | 1 |
-| **Total** | **135** | **52** | **76** | **0** | **7** |
+| Privacy Automation | 21 | 7 | 13 | 0 | 1 |
+| Tech Risk & Compliance | 25 | 16 | 8 | 0 | 1 |
+| Third-Party Management | 21 | 8 | 12 | 0 | 1 |
+| **Total** | **138** | **59** | **72** | **0** | **7** |
 
-Zero rows remain classified **Missing**, but that is not parity: 76 rows are
+Zero rows remain classified **Missing**, but that is not parity: 72 rows are
 still **Partial** and seven depend on external/licensed/commercial evidence.
 “No missing code path” must not be reported as “every marketed product outcome
 is complete.”
@@ -116,7 +120,16 @@ The 2026-08-30 refresh also checked the official
 [Winter '26 release](https://www.onetrust.com/blog/evolving-privacy-programs-with-ai-whats-new-in-the-onetrust-winter-26-release/),
 the official [OneTrust demos](https://www.onetrust.com/resources/onetrust-demos/),
 and the [Third-Party Risk Agent early-access material](https://www.onetrust.com/resources/highlights-of-the-fall-onetrust-release-for-risk-solutions-webinar/).
-Those sources add the six explicitly named rows below. Several pages mix
+Those sources add six explicitly named rows below. The official
+[2026-07-10 OneTrust release changelog](https://developer.onetrust.com/onetrust/changelog/onetrust-20260710-released)
+adds three more tracked API outcomes: assessment-question comments via the
+[create-comment](https://developer.onetrust.com/onetrust/reference/createcommentusingpost.md)
+and [paginated get-comments](https://developer.onetrust.com/onetrust/reference/getcommentsforassessmentusingget.md)
+contracts; California DROP request creation and status updates via the
+[create-DROP-request](https://developer.onetrust.com/onetrust/reference/createdroprequestusingpost.md)
+and [update-DROP-status](https://developer.onetrust.com/onetrust/reference/updatedropusingput.md)
+contracts; and the `aiEvidenceAnalysisResult` evidence-task result object.
+Several pages mix
 private preview, public preview, early access and generally available claims
 without mapping maturity per feature, so the matrix does not infer entitlement
 or general availability from a marketing mention.
@@ -142,7 +155,7 @@ solution family.
 | PX-12 | Sandbox environments | `customer_sandbox_lifecycle.py` plus its global-admin API/composition now provide a default-off production-source-to-isolated-workspace lifecycle across safe projections of all six suites. Immutable revision/digest/module/expiry/quota/plan snapshots, independent creation/destruction or failure-abandon approval, suspend/resume/resync/expiry, exact retry and crash-window recovery, target-collision checks, a path-confined local provisioner, retention tombstones and SQLite-authority integrity are focused-test-covered. | **Partial** — this is a bounded local managed sandbox-workspace path, not a registered Lightwork tenant or execution sandbox, and it intentionally copies neither arbitrary configuration nor tenant data. Workspace integrity is not attested end to end, the audit chain is unkeyed, two Windows reparse tests were skipped where junction creation was unavailable, and no hosted full-product tenant copy, live customer operation, production recovery, concurrency, scale, usability or SLA acceptance has been proven. |
 | PX-13 | Executive reporting on risk posture, maturity, and control effectiveness | Privacy board, security program insights, AI portfolio risk, audit binder, assurance cockpit, and reporting APIs. | **Implemented** — local reporting is evidence-backed; executive/customer acceptance and complete cross-domain data quality remain external. |
 | PX-14 | Broad pre-built integration catalog and partner ecosystem | Lightwork has a large generic connector catalog and selected governed adapters. | **External / unverifiable** — equivalent product-contract breadth, maintained vendor certification, support, and live interoperability cannot be established from connector names. |
-| PX-15 | Packaged OneTrust AI Agents operating out of the box over the shared data model with common context and authentication | Lightwork has an agent runtime, signed delegation, tenant/principal/capability boundaries, domain workflows and human approval controls. | **Partial** — those are strong agent-platform primitives, not an accepted suite of packaged cross-product privacy, evidence and third-party agents over one authoritative six-domain data model; common deployment authentication, customer usability and operating acceptance remain unverified. |
+| PX-15 | Packaged OneTrust AI Agents operating out of the box over the shared data model with common context and authentication | `governance_agents.py` plus its strict API/workbench package breach-response, privacy-risk-assessment, program-Copilot, knowledgebase-governance and third-party-risk agents over independently resolved tenant/principal/context, adapter and dispatcher authority. Immutable policy versions, bounded analysis reservations, closed findings/actions, human review, execution receipts, replay/recovery/revocation, quotas, retention and integrity are focused-test-covered. | **Implemented** — the coherent local packaged-agent path exists. Deployment still requires a durable encrypted execution-token vault with accepted HSM/KMS custody, independently operated adapters/dispatchers, a licensed knowledge corpus, one authoritative live six-suite data plane and customer usability/operations acceptance. |
 
 ## AI Governance
 
@@ -179,8 +192,8 @@ and [EU AI Act Compliance](https://www.onetrust.com/solutions/eu-ai-act-complian
 | AG-22 | Automated model documentation, bills of materials, lineage and reusable audit evidence | Model cards, deployment lineage, evidence graph, exact artifact/evaluator bindings, BOM/SBOM and assurance packets. | **Partial** — primitives are strong but are not yet one fully accepted end-to-end customer workspace. |
 | AG-23 | Enterprise-scale integrations across models, applications, agents, third-party AI and jurisdictions | Governed adapters, tenant stores, Postgres option, CAS, schedulers and APIs. | **External / unverifiable** — live integration breadth, deployment scale, support, regulatory operations and customer history cannot be proven from local code. |
 | AG-24 | Closed-loop production governance: visibility, risk, control, monitoring, escalation and evidence | Local modules cover each stage and the platform acceptance runner exercises selected suites. | **Partial** — the loop is not continuously operated across a real production estate. |
-| AG-25 | Named agent detection and governance for AWS Bedrock, Azure AI Foundry and Google Vertex AI, plus demonstrated live-agent observability/policy enforcement for Bedrock | Generic AWS, Azure and Google inventory adapters, the signed sensor plane, agent topology, runtime telemetry and guardrails provide provider-neutral local building blocks. | **Partial** — Lightwork does not ship or operate the three named agent-discovery contracts or a credentialed Bedrock observability/enforcement integration, and no provider tenant has accepted completeness or policy effects. |
-| AG-26 | Databricks AI Security Framework support in AI governance | Lightwork has signed policy packs, framework/control mapping, Databricks Data Use control/audit adapters and AI risk/evidence workflows. | **Partial** — no maintained, versioned Databricks AI Security Framework content pack or accepted end-to-end mapping is present; the native data-control work must not be treated as framework parity. |
+| AG-25 | Named agent detection and governance for AWS Bedrock, Azure AI Foundry and Google Vertex AI, plus demonstrated live-agent observability/policy enforcement for Bedrock | `ai_cloud_agent_governance.py` normalizes version-pinned Bedrock, Azure AI Foundry and Vertex inventory into opaque tenant/scope-bound records, accepts closed observability events, evaluates policies, creates exact enforcement intents and requires signed provider receipts plus later inventory reconciliation. Azure has an exact hosted-agent disable mapping; unsafe/unresolved Bedrock operations and generic Vertex mutations fail closed. | **Partial** — canonical product state is still process-local, credentials and production transports are not bundled, Bedrock write breadth is incomplete, Vertex writes deliberately reject, and no provider tenant has accepted discovery completeness, observability or policy effects. |
+| AG-26 | Databricks AI Security Framework support in AI governance | `ai_cloud_agent_governance.py` adds an immutable, versioned, content-free Databricks framework mapping with independent review, evidence linkage, attestation and activation, alongside existing Databricks Data Use control/audit adapters. | **Partial** — the local control plane is coherent, but no licensed/maintained framework prose, vendor-certified mapping, credentialed end-to-end provider operation, certification or customer acceptance is present. |
 
 ## Consent & Preferences
 
@@ -311,7 +324,9 @@ document parsing, provider scale and legal/completeness acceptance are not.
 | PA-16 | Unified consumer experience connecting DSR intake with CMP and Trust Center | The exact-origin web Trust Center joins active consent publication, receipt history, volunteered profile data and explicitly authorized rights-case summaries; the same capability-bound SDK can create and check privacy-rights requests after the server-side context preparation and independent grant approvals, and it exposes the separately governed one-time package-download path. | **Partial** — this is a connected local web journey, but production identity/assurance/signing custody, cross-estate fulfillment, native/cross-channel UX, accessibility/recovery/scale operation and customer acceptance remain outstanding. |
 | PA-17 | Privacy dashboards, posture, SLA aging, transfers, risk, incidents and audit-ready exports | Privacy command center, board, report, audit binder, SLA heatmap and transfer map. | **Implemented** — local values derive from operating records rather than fabricated scores. |
 | PA-18 | Cross-product privacy foundation feeding AI Governance, Third-Party Risk and Data Use Governance | Entity graph/shared evidence, consent authorities, privacy records/discovery, vendor assessments and the Data Use Governance authority now provide local foundations across all named domains. | **Partial** — they are not one continuously synchronized, live-source-complete customer data model with accepted cross-suite operations. |
-| PA-19 | Privacy AI suite: Breach Response Agent, Risk Assessment Agent, Copilot/Copilot Analytics over program data and a OneTrust Knowledgebase, with constrained APIs, default-off workflows, human-review thresholds and annotated decisions | Lightwork has evidence-bound privacy/security incident workflows, assessments, regulatory research, domain agents, approval gates, capability attenuation and signed audit trails. | **Partial** — these are adjacent governed primitives, not the named packaged agent/Copilot/Knowledgebase suite over a live accepted privacy program. OneTrust's source mixes private preview, public preview and GA without assigning maturity per item, and Lightwork has no equivalent licensed knowledge corpus or customer operation. |
+| PA-19 | Privacy AI suite: Breach Response Agent, Risk Assessment Agent, Copilot/Copilot Analytics over program data and a OneTrust Knowledgebase, with constrained APIs, default-off workflows, human-review thresholds and annotated decisions | The packaged governance-agent authority exposes breach-response, privacy-risk-assessment, program-Copilot and knowledgebase-governance agent kinds with immutable default-off policies, server-resolved bounded context, closed annotated findings/actions, independent human review, signed execution receipts, recovery/revocation, quotas, retention and strict APIs. | **Implemented** — the coherent local privacy-agent suite is focused-test-covered. It does not include OneTrust's licensed knowledge corpus, a production token vault/HSM, independently operated adapters or live privacy-program/customer acceptance; OneTrust's source also mixes preview and GA maturity. |
+| PA-20 | Assessment Comments APIs to create a comment on an assessment question and retrieve paginated comments sorted by section and question | `assessment.py` and the strict assessment-session API create audited, bounded comments only on questions pinned to the saved questionnaire, preserve follow-up workflow state, and return deterministic bounded pages ordered by section, question and time. | **Implemented** — the coherent local question-comment API is focused-test-covered; OneTrust wire compatibility, migration of customer assessment histories and live operator usability have not been accepted. |
+| PA-21 | California Delete Request and Opt-out Platform (DROP) APIs to create deletion/permanent-opt-out requests for registered data brokers and update DROP status | `privacy_drop_management.py` plus its strict API provide tenant/principal-bound `DataDeletion` and `OptOut` request creation through an existing DSAR-intake callback and evidence-bound `PENDING`, `EXEMPTED`, `DELETED`, `OPTED_OUT` or `NOT_FOUND` status updates. The store retains only opaque references/digests and enforces independent broker/subject/request authority, replay controls, retention and integrity. | **Implemented** — the coherent local control plane is focused-test-covered. No live California DROP authority or registered-broker interoperability, subject matching, production delivery, legal determination, regulator acceptance or customer operation has occurred. |
 
 ## Tech Risk & Compliance
 
@@ -363,7 +378,8 @@ is implied.
 | TRC-21 | KRI and exposure dashboards across critical assets, providers and processes | Risk/KRI domain packs and evidence-backed security/program reporting. | **Implemented** — production feed breadth and executive acceptance remain external. |
 | TRC-22 | Audit engagements, evidence requests, findings and complete audit history | `security_ops.py`, audit binder and signed audit implement governed engagements/workpapers. | **Implemented**. |
 | TRC-23 | Certification/readiness outcomes supported by maintained content | Readiness packs and evidence artifacts exist. | **External / unverifiable** — actual certifications, external auditor acceptance and equivalent licensed/current content cannot be created or proven by repository code alone. |
-| TRC-24 | AI Evidence Analysis across PDF, JPEG, Excel and text with dynamic validation criteria, summaries, justification score, identified gaps and remediation guidance | Evidence gateway/binder, document extraction, assessment rules, findings, remediation and human review provide bounded local analysis paths for selected document and structured evidence types. | **Partial** — Lightwork does not provide one accepted multimodal evidence-analysis product with the named file breadth, dynamic criteria and calibrated justification scoring; image/Excel coverage, detection quality, customer workflow and preview/GA entitlement remain unverified. |
+| TRC-24 | AI Evidence Analysis across PDF, JPEG, Excel and text with dynamic validation criteria, summaries, justification score, identified gaps and remediation guidance | `ai_evidence_analysis.py` plus its strict API/workbench provide bounded PDF, JPEG, Excel and text intake, independently attested extraction/analysis adapters, immutable criteria authority, closed cited facts, deterministic summaries and transparent justification components, identified gaps/remediation, provenance, distinct human release, revocation, retention and integrity. Raw bytes/text remain transient. | **Implemented** — the coherent local multimodal analysis product is focused-test-covered. Parser/detector quality, score calibration, production adapter operation, adversarial/customer workflow acceptance and OneTrust preview/GA entitlement remain unverified. |
+| TRC-25 | Evidence-task implementations expose an `aiEvidenceAnalysisResult` object | The evidence-analysis API projects a durable, schema-bound analysis record/result with artifact and criteria pins, adapter-output digests, summary, justification score, criterion assessments, gaps, remediation, provenance and review state while excluding raw artifact content. | **Implemented** — a coherent local result object and lifecycle exist; exact OneTrust wire-schema compatibility, cross-product migration and live relying-workflow acceptance have not been established. |
 
 ## Third-Party Management
 
@@ -394,7 +410,7 @@ and [Third-Party Due Diligence](https://www.onetrust.com/products/third-party-du
 | TPM-18 | Role-aware dashboards, metrics, audit-ready records and brandable PDF reporting | Vendor/privacy/security dashboards, reports, audit binder and CSV/print exports exist. | **Partial** — no equivalent branded executive PDF product and live portfolio data acceptance. |
 | TPM-19 | Due-diligence programs for FCPA, UK Bribery Act, Sapin II and LkSG | General EDD cases now provide governed tasks, assignees, due dates, cited evidence, four-eyes decisions and escalation alongside compliance-domain primitives. | **Partial** — maintained jurisdiction-specific content/program templates for all four laws, legal validation and operating acceptance are absent. |
 | TPM-20 | Live vendor intelligence, ecosystem and scale | The local AI-vendor pilot used synthetic consent/documents and explicitly did not enroll live vendors. | **External / unverifiable** — commercial feeds, vendor participation, live documents, customer acceptance and scaled operations require external systems and parties. |
-| TPM-21 | Third-Party Risk Agent for intake/inherent-risk acceleration, document summaries and key-finding extraction, plus real-time critical-risk-event monitoring | Third-party lifecycle intake, deterministic risk rules, `ai_vendor_risk.py` cited extraction, intelligence snapshots and the durable monitor/alert scheduler cover the component workflows locally. | **Partial** — they are not one packaged agent, the document path is AI-vendor focused, feeds are not live, and the official source describes early access rather than established GA or entitlement. |
+| TPM-21 | Third-Party Risk Agent for intake/inherent-risk acceleration, document summaries and key-finding extraction, plus real-time critical-risk-event monitoring | The packaged `third_party_risk` governance agent joins server-resolved context, closed cited findings/actions, human review and signed execution receipts to the existing lifecycle intake, deterministic risk rules, document extraction, intelligence snapshots and durable monitor/alert scheduler. | **Implemented** — the coherent local packaged-agent path is focused-test-covered. Commercial feeds are not live, the knowledge corpus and production token vault/HSM are not bundled, independently operated adapters and vendor/customer acceptance are absent, and OneTrust describes the source outcome as early access. |
 
 ## What must be true before claiming complete parity
 
@@ -447,12 +463,20 @@ required:
 8. Re-run a requirement-by-requirement audit after implementation and require
    authoritative evidence for every row; absence of a detected gap is not proof
    of parity.
-9. Build and accept the newly explicit packaged Privacy AI and Third-Party Risk
-   agents, Copilot/program-analytics and governed Knowledgebase outcome,
-   multimodal AI Evidence Analysis, named Bedrock/Azure/Vertex agent discovery
-   and enforcement, and a maintained Databricks AI Security Framework pack.
-   Preview or early-access marketing, adjacent local primitives and generic
-   provider adapters are not substitutes for those named product outcomes.
+9. Operate the local packaged Privacy AI and Third-Party Risk agents and AI
+   Evidence Analysis with separately controlled adapters/dispatchers, a durable
+   encrypted token vault with accepted HSM/KMS custody, a governed licensed
+   knowledge corpus, adversarial evaluation and representative customer users.
+   Run Bedrock/Azure/Vertex inventory, observability and enforcement against
+   credentialed test tenants from durable canonical production storage; extend
+   safe provider writes and accept completeness, recovery and policy effects.
+   License/maintain and externally review the Databricks framework content.
+10. Operate California DROP with a registered broker and the external
+    authority using consenting test subjects, independently validate subject
+    matching, deletion/permanent-opt-out status semantics, retry/revocation,
+    privacy, legal and regulator boundaries, and customer workflows. Validate
+    the local assessment-comment and evidence-result contracts in their real
+    relying workflows; local API tests do not prove OneTrust wire compatibility.
 
 Until those conditions are satisfied, the accurate statement is: Lightwork has
 substantial locally implemented AI-governance, consent, data-use, privacy,

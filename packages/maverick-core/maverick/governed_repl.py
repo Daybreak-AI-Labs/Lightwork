@@ -48,6 +48,7 @@ import json
 import logging
 import re
 import shlex
+import subprocess
 import sys
 import time
 import uuid
@@ -337,17 +338,39 @@ def _sandbox_for(session_dir: Path):
         raise ReplError(f"no sandbox available for the repl kernel: {exc}") from exc
 
 
+def _driver_command(sandbox: object, argv: list[str]) -> str:
+    """Serialize trusted driver argv for the target sandbox's command shell.
+
+    A host-visible backend executes through the host shell.  On Windows that
+    is ``cmd.exe``, where the single quotes emitted by :func:`shlex.join` are
+    literal characters rather than quoting syntax.  Container and remote
+    backends retain POSIX quoting even when their client runs on Windows.
+    """
+    from .sandbox import fs_is_host_visible
+
+    if sys.platform == "win32" and fs_is_host_visible(sandbox):
+        return subprocess.list2cmdline(argv)
+    return shlex.join(argv)
+
+
 def _run_statement(sandbox, session_dir: Path, index: int, source: str,
                    policy: dict) -> tuple[dict, int, float]:
     """Run one statement through ``sandbox.exec`` and read its result file."""
     from .file_lock import atomic_read_text, atomic_write_text
     code_name, result_name = f"stmt_{index}.py", f"res_{index}.json"
     atomic_write_text(session_dir / code_name, source, mode=0o600)
-    cmd = shlex.join([
-        _interpreter(sandbox), _DRIVER_NAME, _STATE_NAME, code_name, result_name,
-        str(int(policy["max_state_bytes"])),
-        str(int(policy["max_output_chars"]) + _SCAN_SLACK_CHARS),
-    ])
+    cmd = _driver_command(
+        sandbox,
+        [
+            _interpreter(sandbox),
+            _DRIVER_NAME,
+            _STATE_NAME,
+            code_name,
+            result_name,
+            str(int(policy["max_state_bytes"])),
+            str(int(policy["max_output_chars"]) + _SCAN_SLACK_CHARS),
+        ],
+    )
     started = time.monotonic()
     try:
         res = sandbox.exec(cmd, timeout=float(policy["max_seconds"]))

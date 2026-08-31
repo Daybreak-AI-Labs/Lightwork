@@ -16,23 +16,41 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-
 EXPECTED_FAMILIES = {
     "PX": 15,
     "AG": 26,
     "CP": 20,
     "DUG": 10,
-    "PA": 19,
-    "TRC": 24,
+    "PA": 21,
+    "TRC": 25,
     "TPM": 21,
 }
 EXPECTED_STATUSES = {
-    "Implemented": 52,
-    "Partial": 76,
+    "Implemented": 59,
+    "Partial": 72,
     "Missing": 0,
     "External / unverifiable": 7,
 }
-REQUIRED_NAMED_DELTAS = {"PX-15", "AG-25", "AG-26", "PA-19", "TRC-24", "TPM-21"}
+EXPECTED_FAMILY_STATUSES = {
+    "PX": {"Implemented": 5, "Partial": 9, "Missing": 0, "External / unverifiable": 1},
+    "AG": {"Implemented": 11, "Partial": 14, "Missing": 0, "External / unverifiable": 1},
+    "CP": {"Implemented": 4, "Partial": 14, "Missing": 0, "External / unverifiable": 2},
+    "DUG": {"Implemented": 8, "Partial": 2, "Missing": 0, "External / unverifiable": 0},
+    "PA": {"Implemented": 7, "Partial": 13, "Missing": 0, "External / unverifiable": 1},
+    "TRC": {"Implemented": 16, "Partial": 8, "Missing": 0, "External / unverifiable": 1},
+    "TPM": {"Implemented": 8, "Partial": 12, "Missing": 0, "External / unverifiable": 1},
+}
+REQUIRED_NAMED_DELTAS = {
+    "PX-15",
+    "AG-25",
+    "AG-26",
+    "PA-19",
+    "PA-20",
+    "PA-21",
+    "TRC-24",
+    "TRC-25",
+    "TPM-21",
+}
 REQUIRED_OFFICIAL_SOURCES = {
     "https://www.onetrust.com/products/",
     "https://www.onetrust.com/platform/",
@@ -42,12 +60,15 @@ REQUIRED_OFFICIAL_SOURCES = {
     "https://www.onetrust.com/solutions/privacy-automation/",
     "https://www.onetrust.com/solutions/tech-risk-and-compliance/",
     "https://www.onetrust.com/solutions/third-party-management/",
+    "https://developer.onetrust.com/onetrust/changelog/onetrust-20260710-released",
+    "https://developer.onetrust.com/onetrust/reference/createcommentusingpost.md",
+    "https://developer.onetrust.com/onetrust/reference/getcommentsforassessmentusingget.md",
+    "https://developer.onetrust.com/onetrust/reference/createdroprequestusingpost.md",
+    "https://developer.onetrust.com/onetrust/reference/updatedropusingput.md",
 }
 
 _ROW_RE = re.compile(r"^\| (?P<identifier>(?:PX|AG|CP|DUG|PA|TRC|TPM)-\d{2}) \|")
-_STATUS_RE = re.compile(
-    r"\*\*(Implemented|Partial|Missing|External / unverifiable)\*\*"
-)
+_STATUS_RE = re.compile(r"\*\*(Implemented|Partial|Missing|External / unverifiable)\*\*")
 _RESIDUAL_MARKERS = (
     " no ",
     " not ",
@@ -85,9 +106,7 @@ def _parse_row(line: str, line_number: int) -> MatrixRow:
         raise ValueError(f"line {line_number}: invalid capability-row identifier")
     parts = [part.strip() for part in line.split("|")]
     if len(parts) != 6:
-        raise ValueError(
-            f"line {line_number}: capability rows must contain exactly four columns"
-        )
+        raise ValueError(f"line {line_number}: capability rows must contain exactly four columns")
     outcome, evidence, status_cell = parts[2], parts[3], parts[4]
     status_match = _STATUS_RE.search(status_cell)
     if status_match is None:
@@ -139,6 +158,18 @@ def verify_matrix(path: Path) -> dict[str, object]:
             f"status drift: expected={EXPECTED_STATUSES}, actual={dict(status_counts)}"
         )
 
+    family_statuses: dict[str, dict[str, int]] = {}
+    for family, expected in EXPECTED_FAMILY_STATUSES.items():
+        actual_counts = Counter(
+            row.status for row in rows if row.identifier.startswith(f"{family}-")
+        )
+        actual = {status: actual_counts.get(status, 0) for status in EXPECTED_STATUSES}
+        if actual != expected:
+            raise ValueError(
+                f"family status drift for {family}: expected={expected}, actual={actual}"
+            )
+        family_statuses[family] = actual
+
     missing_sources = sorted(source for source in REQUIRED_OFFICIAL_SOURCES if source not in text)
     if missing_sources:
         raise ValueError(f"official source set drift: missing={missing_sources}")
@@ -148,6 +179,7 @@ def verify_matrix(path: Path) -> dict[str, object]:
         "matrix": str(path),
         "rows": len(rows),
         "families": EXPECTED_FAMILIES,
+        "family_statuses": family_statuses,
         "statuses": EXPECTED_STATUSES,
         "named_delta_ids": sorted(REQUIRED_NAMED_DELTAS),
         "official_sources": len(REQUIRED_OFFICIAL_SOURCES),

@@ -1,0 +1,257 @@
+:root {
+  color-scheme: light dark;
+  --surface: #ffffff;
+  --surface-muted: #f4f7f8;
+  --text: #182129;
+  --muted: #56636d;
+  --line: #cbd5dc;
+  --accent: #126b61;
+  --accent-strong: #0b4f48;
+  --danger: #a33030;
+  --focus: #ef9f21;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-muted);
+  color: var(--text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+.evidence-shell {
+  width: min(1180px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2.5rem 0 4rem;
+}
+
+.hero,
+.boundary,
+.panel,
+.status-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  box-shadow: 0 0.2rem 1rem rgb(24 33 41 / 7%);
+}
+
+.hero,
+.boundary,
+.status-card,
+.panel {
+  padding: clamp(1.1rem, 3vw, 2rem);
+}
+
+.hero {
+  border-top: 0.35rem solid var(--accent);
+}
+
+.hero h1,
+.panel h2,
+.status-card h2,
+.boundary h2 {
+  margin: 0.15rem 0 0.65rem;
+  line-height: 1.15;
+}
+
+.lede,
+.help,
+.status {
+  color: var(--muted);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.boundary,
+.status-card {
+  margin-top: 1rem;
+}
+
+.boundary {
+  border-left: 0.35rem solid var(--focus);
+}
+
+.boundary li + li {
+  margin-top: 0.35rem;
+}
+
+.status-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem 1rem;
+  align-items: start;
+}
+
+.status-card .status,
+.status-card .output {
+  grid-column: 1 / -1;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+form + form {
+  border-top: 1px solid var(--line);
+  margin-top: 1.4rem;
+  padding-top: 1.4rem;
+}
+
+label {
+  display: block;
+  margin-top: 0.9rem;
+  font-weight: 680;
+}
+
+input,
+select,
+button {
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  font: inherit;
+}
+
+input,
+select {
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.65rem 0.7rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.confirmation {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.65rem;
+  align-items: start;
+  font-weight: 560;
+}
+
+.confirmation input {
+  width: auto;
+  margin-top: 0.25rem;
+}
+
+.digest,
+.output {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+button {
+  margin-top: 1rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 720;
+}
+
+button:hover {
+  background: var(--accent-strong);
+}
+
+button.danger {
+  background: var(--danger);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+.output:focus-visible {
+  outline: 0.2rem solid var(--focus);
+  outline-offset: 0.15rem;
+}
+
+.two-column,
+.actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.actions button {
+  width: 100%;
+}
+
+.status[data-state="failed"] {
+  color: var(--danger);
+  font-weight: 680;
+}
+
+.output {
+  min-height: 5rem;
+  max-height: 32rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: #101820;
+  color: #eaf2f4;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .grid,
+  .two-column,
+  .actions,
+  .status-card {
+    grid-template-columns: 1fr;
+  }
+
+  .status-card .status,
+  .status-card .output {
+    grid-column: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  button,
+  input,
+  select,
+  .panel,
+  .boundary,
+  .hero,
+  .status-card {
+    border: 1px solid CanvasText;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #151c21;
+    --surface-muted: #0f1418;
+    --text: #edf3f5;
+    --muted: #b7c3ca;
+    --line: #3d4a52;
+    --accent: #5bc2b5;
+    --accent-strong: #287e73;
+    --danger: #bd5959;
+  }
+}

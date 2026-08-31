@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.testclient import TestClient
 from fastapi.templating import Jinja2Templates
+from fastapi.testclient import TestClient
 
 
 def _client(*, enabled: bool) -> TestClient:

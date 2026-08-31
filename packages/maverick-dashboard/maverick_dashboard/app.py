@@ -4,6 +4,7 @@ v0.1.6: BackgroundTask runner moved to maverick.runner; this file just
 imports it. Eliminates the duplicate that lived in app.py + api.py +
 mcp/server.py.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -103,6 +104,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 def _format_datetime(ts) -> str:
     """Jinja filter: float epoch -> 'HH:MM:SS'."""
     import datetime as _dt
+
     try:
         return _dt.datetime.fromtimestamp(float(ts)).strftime("%H:%M:%S")
     except (TypeError, ValueError):
@@ -135,7 +137,12 @@ def _valid_theme_names() -> set[str]:
 
 
 def _resolve_pref(
-    request: Request, *, param: str, cookie: str, valid, default: str,
+    request: Request,
+    *,
+    param: str,
+    cookie: str,
+    valid,
+    default: str,
     config_key: str | None = None,
 ) -> str:
     """Resolve a UI preference via the shared query-param → cookie →
@@ -150,6 +157,7 @@ def _resolve_pref(
     if config_key is not None:
         try:
             from maverick.config import load_config
+
             cfg = (load_config() or {}).get("dashboard") or {}
             v = (cfg.get(config_key) or "").strip().lower()
             if v in valid:
@@ -162,8 +170,12 @@ def _resolve_pref(
 def _resolve_theme(request: Request) -> str:
     """Pick the theme from ``?theme=`` query param, cookie, config, then dark."""
     return _resolve_pref(
-        request, param="theme", cookie="mvk_theme", valid=_valid_theme_names(),
-        config_key="theme", default="dark",
+        request,
+        param="theme",
+        cookie="mvk_theme",
+        valid=_valid_theme_names(),
+        config_key="theme",
+        default="dark",
     )
 
 
@@ -172,8 +184,12 @@ def resolve_density(request: Request) -> str:
     density`` config → comfortable. Default-off: ``comfortable`` is the
     existing layout; ``compact`` opts in to the denser one."""
     return _resolve_pref(
-        request, param="density", cookie="mvk_density", valid=_VALID_DENSITIES,
-        config_key="density", default="comfortable",
+        request,
+        param="density",
+        cookie="mvk_density",
+        valid=_VALID_DENSITIES,
+        config_key="density",
+        default="comfortable",
     )
 
 
@@ -181,7 +197,10 @@ def _resolve_font(request: Request) -> str:
     """Font preference: ``?font=`` → cookie → default. Independent axis from
     the theme so high-contrast + dyslexia-friendly compose."""
     return _resolve_pref(
-        request, param="font", cookie="mvk_font", valid=_VALID_FONTS,
+        request,
+        param="font",
+        cookie="mvk_font",
+        valid=_VALID_FONTS,
         default="default",
     )
 
@@ -192,6 +211,7 @@ def _resolve_font(request: Request) -> str:
 def _theme_context(request: Request) -> dict:
     from .i18n import dir_for, resolve_lang
     from .i18n import t as _t
+
     lang = resolve_lang(request)
     custom = custom_themes()
     return {
@@ -217,15 +237,14 @@ templates.context_processors.append(_theme_context)
 # exactly as before.
 def _nav_context(request: Request) -> dict:
     from . import ui_visibility
+
     try:
         role = caller_role(request)
     except Exception:  # pragma: no cover -- nav must never break a render
         role = None
     groups = ui_visibility.nav_groups(role)
     # The topbar's Settings gear follows the same policy as the sidebar entry.
-    show_settings = any(
-        link["href"] == "/settings" for g in groups for link in g["links"]
-    )
+    show_settings = any(link["href"] == "/settings" for g in groups for link in g["links"])
     return {"nav_groups": groups, "show_settings_link": show_settings}
 
 
@@ -240,7 +259,8 @@ def _set_theme_cookie(response, theme: str) -> None:
     """Persist the theme choice as a cookie so it sticks across page loads."""
     if theme in _valid_theme_names():
         response.set_cookie(
-            "mvk_theme", theme,
+            "mvk_theme",
+            theme,
             max_age=30 * 24 * 3600,  # 30 days
             samesite="lax",
             httponly=False,  # the switcher links are visible to JS anyway
@@ -293,12 +313,14 @@ def _assert_dashboard_auth_configured() -> None:
         return
     try:
         from maverick.oidc import oidc_enabled
+
         if oidc_enabled():
             return
     except Exception:  # pragma: no cover
         pass
     try:
         from maverick.proxy_auth import proxy_auth_enabled
+
         if proxy_auth_enabled():
             return
     except Exception:  # pragma: no cover
@@ -308,6 +330,7 @@ def _assert_dashboard_auth_configured() -> None:
         # require_auth on, only a verified invite-minted session (or one of the
         # modes above) passes the middleware — everything else 401s.
         from .invites import invites_enabled
+
         if invites_enabled():
             return
     except Exception:  # pragma: no cover
@@ -316,6 +339,7 @@ def _assert_dashboard_auth_configured() -> None:
         # SAML uses the same signed browser session as OIDC, so a complete SAML
         # configuration is a first-class authentication mechanism too.
         from .saml import _session_secret, saml_enabled
+
         if saml_enabled() and _session_secret():
             return
     except Exception:  # pragma: no cover
@@ -344,6 +368,7 @@ async def _install_automation_scheduler() -> None:
     dreaming is enabled. No-op under TestClient and when both are off."""
     try:
         from maverick_dashboard import automation_queue
+
         await run_in_threadpool(automation_queue.start)
     except Exception:  # pragma: no cover - never block startup
         log.exception("automation worker not started")
@@ -352,6 +377,7 @@ async def _install_automation_scheduler() -> None:
 async def _stop_automation_scheduler() -> None:
     try:
         from maverick_dashboard import automation_queue
+
         await run_in_threadpool(automation_queue.stop)
     except Exception:  # pragma: no cover
         pass
@@ -377,8 +403,10 @@ async def _lifespan(app: FastAPI):
     otherwise, so the default fail-open posture is unchanged (kernel rule 1).
     """
     from maverick.deployment import require_enterprise_or_die
+
     require_enterprise_or_die()
     from maverick.residency import require_residency_or_die
+
     require_residency_or_die()  # strict region pin (#41); no-op unless opted in
     # Exactly one control plane may write a data root. Until now that was
     # enforced only by a `helm template` guard, which a raw kubectl apply,
@@ -388,6 +416,7 @@ async def _lifespan(app: FastAPI):
     # a replica that refuses to start is a visible outage, while a corrupted
     # audit chain is discovered months later by whoever needs it most.
     from maverick.control_plane_lease import acquire as _acquire_control_plane
+
     _acquire_control_plane(role="dashboard")
     _assert_dashboard_auth_configured()
     # Loud warning if reverse-proxy SSO is on but no upstream is trusted
@@ -395,6 +424,7 @@ async def _lifespan(app: FastAPI):
     # the forwarded identity header is then refused from every peer.
     try:
         from maverick.proxy_auth import warn_if_untrusted_proxy_config
+
         warn_if_untrusted_proxy_config()
     except Exception:  # pragma: no cover -- a warning must never block startup
         pass
@@ -449,6 +479,7 @@ async def _lifespan(app: FastAPI):
     # the loop never raises and a failed poll leaves the license file in charge.
     try:
         from maverick.entitlements import start_refresher
+
         await run_in_threadpool(start_refresher)
     except Exception:  # pragma: no cover - never block startup
         log.exception("license auto-refresh not started")
@@ -461,15 +492,19 @@ async def _lifespan(app: FastAPI):
         from maverick.tools.voice import warm_up_local_stt
 
         from .api import _voice_commands_enabled
+
         if _voice_commands_enabled():
             threading.Thread(
-                target=warm_up_local_stt, name="voice-stt-warmup", daemon=True,
+                target=warm_up_local_stt,
+                name="voice-stt-warmup",
+                daemon=True,
             ).start()
     except Exception:  # pragma: no cover - never block startup
         log.exception("voice STT warm-up not started")
     yield
     try:
         from maverick.entitlements import stop_refresher
+
         await run_in_threadpool(stop_refresher)
     except Exception:  # pragma: no cover - shutdown must never raise
         pass
@@ -519,6 +554,7 @@ async def _lifespan(app: FastAPI):
     # never raise on the way down.
     try:
         from maverick.runner import drain_inflight
+
         timeout = float(os.environ.get("MAVERICK_DRAIN_TIMEOUT", "25") or 25)
         left = await run_in_threadpool(drain_inflight, timeout)
         if left:
@@ -545,6 +581,7 @@ def enforce_page_visibility(
     if request is None:  # WebSocket connection -- page policy doesn't apply
         return
     from . import ui_visibility
+
     page = ui_visibility.page_for(request.url.path)
     if page is None:
         return
@@ -613,6 +650,15 @@ attach_third_party_collaboration_composition(app)
 attach_unified_audit_composition(app)
 attach_unified_audit_scheduler(app)
 app.include_router(api_router)
+from .ai_cloud_agent_governance_workbench import (  # noqa: E402
+    create_ai_cloud_agent_governance_workbench_router,
+)
+from .ai_evidence_analysis_page import (  # noqa: E402
+    create_ai_evidence_analysis_page_router,
+)
+
+app.include_router(create_ai_cloud_agent_governance_workbench_router(templates))
+app.include_router(create_ai_evidence_analysis_page_router())
 from .customer_sandbox_api import router as customer_sandbox_router  # noqa: E402
 from .unified_audit_api import router as unified_audit_router  # noqa: E402
 
@@ -630,11 +676,11 @@ from .consent_public_api import (  # noqa: E402
 )
 
 _public_consent_dependencies = default_public_consent_dependencies()
-app.state.privacy_rights_intake_public_dependencies_factory = (
-    lambda *, request: _public_consent_dependencies
+app.state.privacy_rights_intake_public_dependencies_factory = lambda *, request: (
+    _public_consent_dependencies
 )
-app.state.public_consent_error_origin_resolver = (
-    lambda request: public_consent_error_origin(request, _public_consent_dependencies)
+app.state.public_consent_error_origin_resolver = lambda request: public_consent_error_origin(
+    request, _public_consent_dependencies
 )
 app.include_router(create_consent_public_router(_public_consent_dependencies))
 from .consent_identity_federation_api import (  # noqa: E402
@@ -750,8 +796,7 @@ def _persist_pref_cookie(request, response, *, param, cookie, valid, max_age) ->
     font/density/lang persistence (the theme uses its own _set_theme_cookie)."""
     v = request.query_params.get(param)
     if v and v.lower() in valid:
-        response.set_cookie(cookie, v.lower(), max_age=max_age,
-                            samesite="lax", httponly=False)
+        response.set_cookie(cookie, v.lower(), max_age=max_age, samesite="lax", httponly=False)
 
 
 @app.middleware("http")
@@ -762,12 +807,26 @@ async def persist_theme(request: Request, call_next):
     if q and q.lower() in _valid_theme_names():
         _set_theme_cookie(response, q.lower())
     from .i18n import LANGS
-    _persist_pref_cookie(request, response, param="font", cookie="mvk_font",
-                         valid=_VALID_FONTS, max_age=30 * 24 * 3600)
-    _persist_pref_cookie(request, response, param="density", cookie="mvk_density",
-                         valid=_VALID_DENSITIES, max_age=30 * 24 * 3600)
-    _persist_pref_cookie(request, response, param="lang", cookie="mvk_lang",
-                         valid=LANGS, max_age=365 * 24 * 3600)
+
+    _persist_pref_cookie(
+        request,
+        response,
+        param="font",
+        cookie="mvk_font",
+        valid=_VALID_FONTS,
+        max_age=30 * 24 * 3600,
+    )
+    _persist_pref_cookie(
+        request,
+        response,
+        param="density",
+        cookie="mvk_density",
+        valid=_VALID_DENSITIES,
+        max_age=30 * 24 * 3600,
+    )
+    _persist_pref_cookie(
+        request, response, param="lang", cookie="mvk_lang", valid=LANGS, max_age=365 * 24 * 3600
+    )
     return response
 
 
@@ -797,6 +856,7 @@ async def _install_queue_dispatcher() -> None:
     No-op for the default in-process install."""
     try:
         from maverick.queue_dispatcher import install_from_config
+
         if install_from_config():
             log.info("queue dispatcher installed: goals run out-of-process")
             return
@@ -810,15 +870,23 @@ async def _install_queue_dispatcher() -> None:
     # in-process. Wire it in as the fallback out-of-process path.
     try:
         from maverick.grpc_dispatcher import install_from_config as install_grpc
+
         if install_grpc():
             log.info("gRPC dispatcher installed: goals run on a remote worker")
     except Exception:
         log.exception("gRPC dispatcher install failed (running in-process)")
 
+
 _AUTH_EXEMPT = {
-    "/healthz", "/livez", "/readyz",
-    "/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect",
-    "/.well-known/agent-card.json", "/.well-known/agent.json",
+    "/healthz",
+    "/livez",
+    "/readyz",
+    "/openapi.json",
+    "/docs",
+    "/redoc",
+    "/docs/oauth2-redirect",
+    "/.well-known/agent-card.json",
+    "/.well-known/agent.json",
     # The A2A task endpoint enforces its own shared/per-agent bearer and trust
     # plane. Requiring the unrelated dashboard bearer here would either block
     # valid A2A identities or pressure operators to reuse one credential across
@@ -867,9 +935,7 @@ _SECURITY_HUNTER_BODY_PATHS = {
     "/api/v1/security/soc/ingest",
 }
 _FINANCE_LARGE_BODY_LIMITS = {
-    "/api/v1/finance-operations/regulatory/feeds/ingest": (
-        _MAX_FINANCE_REGULATORY_BODY_BYTES
-    ),
+    "/api/v1/finance-operations/regulatory/feeds/ingest": (_MAX_FINANCE_REGULATORY_BODY_BYTES),
     "/api/v1/finance-operations/aml/lists/ingest": _MAX_FINANCE_AML_LIST_BODY_BYTES,
     "/api/v1/finance-operations/anomalies/scan": _MAX_FINANCE_ANOMALY_BODY_BYTES,
 }
@@ -948,10 +1014,7 @@ async def protect_public_consent_error_responses(request: Request, call_next):
     """Keep public errors private and expose them only to an enrolled origin."""
 
     response = await call_next(request)
-    if (
-        response.status_code < 400
-        or not request.url.path.startswith("/api/v1/public/consent/")
-    ):
+    if response.status_code < 400 or not request.url.path.startswith("/api/v1/public/consent/"):
         return response
     response.headers["Cache-Control"] = "no-store, private"
     response.headers["Pragma"] = "no-cache"
@@ -971,9 +1034,7 @@ async def protect_public_consent_error_responses(request: Request, call_next):
     if isinstance(origin, str):
         response.headers["Access-Control-Allow-Origin"] = origin
         vary = {
-            item.strip()
-            for item in response.headers.get("Vary", "").split(",")
-            if item.strip()
+            item.strip() for item in response.headers.get("Vary", "").split(",") if item.strip()
         }
         vary.add("Origin")
         response.headers["Vary"] = ", ".join(sorted(vary))
@@ -1016,10 +1077,7 @@ async def bound_security_hunter_body(request: Request, call_next):
 async def bound_finance_operations_body(request: Request, call_next):
     """Cap finance JSON before Starlette/Pydantic buffers nested records."""
     path = request.url.path
-    if (
-        request.method != "POST"
-        or not path.startswith("/api/v1/finance-operations/")
-    ):
+    if request.method != "POST" or not path.startswith("/api/v1/finance-operations/"):
         return await call_next(request)
     maximum = _FINANCE_LARGE_BODY_LIMITS.get(path, _MAX_FINANCE_DEFAULT_BODY_BYTES)
     try:
@@ -1050,10 +1108,7 @@ async def bound_evidence_gateway_body(request: Request, call_next):
     """Bound gateway JSON before Starlette/Pydantic buffers evidence inputs."""
 
     path = request.url.path
-    if (
-        request.method not in {"POST", "PUT"}
-        or not path.startswith(_EVIDENCE_GATEWAY_PREFIX)
-    ):
+    if request.method not in {"POST", "PUT"} or not path.startswith(_EVIDENCE_GATEWAY_PREFIX):
         return await call_next(request)
     maximum = (
         _MAX_EVIDENCE_GATEWAY_DELIVERY_BODY_BYTES
@@ -1156,7 +1211,9 @@ def _webhook_duplicate_delivery(route: str, payload: dict) -> bool:
     if not delivery_id:
         return False
     from maverick.webhooks import _default_max_age
+
     return _issue_webhook_replay_seen(f"webhook-{route}:{delivery_id}", _default_max_age())
+
 
 # Safe methods skip the CSRF check (browsers send Origin/Referer
 # inconsistently on GETs from address bars and bookmarks).
@@ -1194,8 +1251,8 @@ def _require_same_origin(request: Request) -> None:
         raise HTTPException(
             status_code=403,
             detail="cross-site form post blocked — for your security, changes "
-                   "must be made from the Lightwork page itself. Reload the "
-                   "dashboard and try again.",
+            "must be made from the Lightwork page itself. Reload the "
+            "dashboard and try again.",
         )
 
 
@@ -1274,22 +1331,25 @@ def _configured_oidc_bearer_present(request: Request) -> bool:
 @app.middleware("http")
 async def bearer_auth(request: Request, call_next):
     expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN")
-    if (request.url.path in _AUTH_EXEMPT or request.url.path.startswith("/share/")
-            or request.url.path.startswith("/scim/")
-            or request.url.path.startswith("/form/")
-            or request.url.path.startswith("/saml/")
-            or request.url.path.startswith("/auth/invite/")
-            # External integrations authenticate inside their route family
-            # using agent, signed-sensor, or vendor-invitation credentials. The
-            # trailing slash keeps /api/v1/external-agents under dashboard auth.
-            or request.url.path.startswith("/api/v1/external/")
-            # Public consent uses its own client and profile capabilities. Keep
-            # the exact administration prefix under dashboard authentication.
-            or request.url.path.startswith("/api/v1/public/consent/")
-            # Public policy links resolve an opaque stable link and optionally
-            # a private bearer. The admin policy-publication prefix remains
-            # under normal dashboard authentication.
-            or request.url.path.startswith("/api/v1/public/policies/")):
+    if (
+        request.url.path in _AUTH_EXEMPT
+        or request.url.path.startswith("/share/")
+        or request.url.path.startswith("/scim/")
+        or request.url.path.startswith("/form/")
+        or request.url.path.startswith("/saml/")
+        or request.url.path.startswith("/auth/invite/")
+        # External integrations authenticate inside their route family
+        # using agent, signed-sensor, or vendor-invitation credentials. The
+        # trailing slash keeps /api/v1/external-agents under dashboard auth.
+        or request.url.path.startswith("/api/v1/external/")
+        # Public consent uses its own client and profile capabilities. Keep
+        # the exact administration prefix under dashboard authentication.
+        or request.url.path.startswith("/api/v1/public/consent/")
+        # Public policy links resolve an opaque stable link and optionally
+        # a private bearer. The admin policy-publication prefix remains
+        # under normal dashboard authentication.
+        or request.url.path.startswith("/api/v1/public/policies/")
+    ):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
         # an external recipient has no dashboard bearer, like the webhook paths.
@@ -1316,9 +1376,11 @@ async def bearer_auth(request: Request, call_next):
                 and _allowed_extension_origin(request) is None
             ):
                 return JSONResponse(
-                    {"detail": "cross-site request blocked - for your security, "
-                               "changes must be made from the Lightwork page "
-                               "itself. Reload the dashboard and try again."},
+                    {
+                        "detail": "cross-site request blocked - for your security, "
+                        "changes must be made from the Lightwork page "
+                        "itself. Reload the dashboard and try again."
+                    },
                     status_code=403,
                 )
             return await call_next(request)
@@ -1329,14 +1391,17 @@ async def bearer_auth(request: Request, call_next):
         # token (or OIDC) explicitly.
         try:
             from maverick.client import client_binding_enforced
+
             if client_binding_enforced():
                 _auth_metrics.record_auth_failure("client_binding")
                 return JSONResponse(
-                    {"detail": "Sign-in is required on this deployment — an "
-                               "administrator must configure dashboard "
-                               "authentication for enterprise / client-binding "
-                               "mode (set MAVERICK_DASHBOARD_TOKEN, or enable "
-                               "OIDC)."},
+                    {
+                        "detail": "Sign-in is required on this deployment — an "
+                        "administrator must configure dashboard "
+                        "authentication for enterprise / client-binding "
+                        "mode (set MAVERICK_DASHBOARD_TOKEN, or enable "
+                        "OIDC)."
+                    },
                     status_code=401,
                 )
         except Exception:  # pragma: no cover - never break auth on a read error
@@ -1364,9 +1429,11 @@ async def bearer_auth(request: Request, call_next):
             # only behind the operator's explicit opt-in (see extension_cors).
             if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
                 return JSONResponse(
-                    {"detail": "cross-site request blocked — for your security, "
-                               "changes must be made from the Lightwork page "
-                               "itself. Reload the dashboard and try again."},
+                    {
+                        "detail": "cross-site request blocked — for your security, "
+                        "changes must be made from the Lightwork page "
+                        "itself. Reload the dashboard and try again."
+                    },
                     status_code=403,
                 )
             return await call_next(request)
@@ -1376,13 +1443,16 @@ async def bearer_auth(request: Request, call_next):
         # without extra config. Anonymous remote requests still 401 below.
         try:
             from .invites import invites_enabled, local_session_principal
+
             if invites_enabled() and local_session_principal(request) is not None:
                 if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
                     return JSONResponse(
-                        {"detail": "cross-site request blocked — for your "
-                                   "security, changes must be made from the "
-                                   "Lightwork page itself. Reload the "
-                                   "dashboard and try again."},
+                        {
+                            "detail": "cross-site request blocked — for your "
+                            "security, changes must be made from the "
+                            "Lightwork page itself. Reload the "
+                            "dashboard and try again."
+                        },
                         status_code=403,
                     )
                 return await call_next(request)
@@ -1390,10 +1460,12 @@ async def bearer_auth(request: Request, call_next):
             pass
         _auth_metrics.record_auth_failure("remote_no_token")
         return JSONResponse(
-            {"detail": "Remote access to this dashboard requires an access "
-                       "token — an administrator must configure one for "
-                       "non-loopback or proxied access (set "
-                       "MAVERICK_DASHBOARD_TOKEN)."},
+            {
+                "detail": "Remote access to this dashboard requires an access "
+                "token — an administrator must configure one for "
+                "non-loopback or proxied access (set "
+                "MAVERICK_DASHBOARD_TOKEN)."
+            },
             status_code=401,
         )
     auth = request.headers.get("authorization", "")
@@ -1416,14 +1488,13 @@ async def bearer_auth(request: Request, call_next):
         # The static operator token composes with proxy/OIDC/SAML/invite browser
         # identities. Ambient authority remains CSRF-gated; the dependency then
         # verifies the actual identity and rejects a missing/invalid session.
-        if (
-            not _is_same_origin(request)
-            and _allowed_extension_origin(request) is None
-        ):
+        if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
             return JSONResponse(
-                {"detail": "cross-site request blocked - for your security, "
-                           "changes must be made from the Lightwork page "
-                           "itself. Reload the dashboard and try again."},
+                {
+                    "detail": "cross-site request blocked - for your security, "
+                    "changes must be made from the Lightwork page "
+                    "itself. Reload the dashboard and try again."
+                },
                 status_code=403,
             )
         return await call_next(request)
@@ -1436,7 +1507,9 @@ async def bearer_auth(request: Request, call_next):
 def _wants_html(request: Request) -> bool:
     """True when the client prefers HTML (browser nav) over JSON (API)."""
     accept = (request.headers.get("accept") or "").lower()
-    if request.url.path.startswith(("/api/", "/openapi", "/healthz", "/livez", "/readyz", "/metrics")):
+    if request.url.path.startswith(
+        ("/api/", "/openapi", "/healthz", "/livez", "/readyz", "/metrics")
+    ):
         return False
     return "text/html" in accept or "*/*" in accept
 
@@ -1446,12 +1519,15 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Branded HTML for browser 404s; JSON for API callers."""
     if exc.status_code == 404 and _wants_html(request):
         return templates.TemplateResponse(
-            request, "404.html",
+            request,
+            "404.html",
             {"path": request.url.path},
             status_code=404,
         )
     return JSONResponse(
-        {"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers,
+        {"detail": exc.detail},
+        status_code=exc.status_code,
+        headers=exc.headers,
     )
 
 
@@ -1460,7 +1536,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """422 for browser nav becomes 400 with the branded error page."""
     if _wants_html(request):
         return templates.TemplateResponse(
-            request, "500.html",
+            request,
+            "500.html",
             {"path": request.url.path},
             status_code=400,
         )
@@ -1468,6 +1545,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     # client sent a wrong/garbage Content-Type; json.dumps can't serialize bytes,
     # so a 422 turned into an opaque 500. jsonable_encoder coerces bytes -> str.
     from fastapi.encoders import jsonable_encoder
+
     errors = jsonable_encoder(exc.errors())
     if request.url.path.startswith(_EVIDENCE_GATEWAY_PREFIX):
         for error in errors:
@@ -1483,7 +1561,10 @@ async def overflow_exception_handler(request: Request, exc: OverflowError):
     than letting it fall through to a 500 (user-testing finding)."""
     if _wants_html(request):
         return templates.TemplateResponse(
-            request, "404.html", {"path": request.url.path}, status_code=404,
+            request,
+            "404.html",
+            {"path": request.url.path},
+            status_code=404,
         )
     return JSONResponse({"detail": "not found"}, status_code=404)
 
@@ -1524,7 +1605,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     log.exception("unhandled dashboard exception on %s", request.url.path)
     if _wants_html(request):
         return templates.TemplateResponse(
-            request, "500.html",
+            request,
+            "500.html",
             {"path": request.url.path},
             status_code=500,
         )
@@ -1552,7 +1634,8 @@ async def security_headers(request: Request, call_next):
     # first-party requests.
     response.headers.setdefault("Referrer-Policy", "same-origin")
     response.headers.setdefault(
-        "Cross-Origin-Opener-Policy", "same-origin",
+        "Cross-Origin-Opener-Policy",
+        "same-origin",
     )
     # Drop the ambient-capability attack surface. microphone=(self) because
     # the chat pages capture voice in-browser (getUserMedia); camera,
@@ -1574,7 +1657,8 @@ async def security_headers(request: Request, call_next):
         or request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
     ):
         response.headers.setdefault(
-            "Strict-Transport-Security", "max-age=31536000; includeSubDomains",
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
         )
     # Content-Security-Policy. The templates use first-party inline
     # <style>, <script>, and style="" attributes, so script/style-src
@@ -1620,6 +1704,7 @@ def _extension_cors_enabled() -> bool:
         return True
     try:
         from maverick.config import load_config
+
         return bool(((load_config() or {}).get("dashboard") or {}).get("allow_extension"))
     except Exception:
         return False
@@ -1651,13 +1736,17 @@ async def extension_cors(request: Request, call_next):
     if origin is None:
         return await call_next(request)
     if request.method == "OPTIONS" and request.headers.get("access-control-request-method"):
-        return PlainTextResponse("", status_code=204, headers={
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Authorization, Content-Type",
-            "Access-Control-Max-Age": "600",
-            "Vary": "Origin",
-        })
+        return PlainTextResponse(
+            "",
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                "Access-Control-Max-Age": "600",
+                "Vary": "Origin",
+            },
+        )
     response = await call_next(request)
     response.headers["Access-Control-Allow-Origin"] = origin
     vary = response.headers.get("Vary")
@@ -1683,6 +1772,7 @@ async def tenant_pinning(request: Request, call_next):
         if token is not None:
             try:
                 from maverick.paths import reset_tenant
+
                 reset_tenant(token)
             except Exception:  # pragma: no cover
                 pass
@@ -1718,10 +1808,15 @@ def _max_goals_global_per_min() -> int:
     # cap so one client can't starve others yet a distributed flood is still
     # bounded.
     try:
-        return max(1, int(os.environ.get(
-            "MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN",
-            str(_max_goals_per_min() * 10),
-        )))
+        return max(
+            1,
+            int(
+                os.environ.get(
+                    "MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN",
+                    str(_max_goals_per_min() * 10),
+                )
+            ),
+        )
     except ValueError:
         return _max_goals_per_min() * 10
 
@@ -1762,6 +1857,7 @@ def _shared_rate_limit_check(key: str, cap: int, global_cap: int) -> bool:
     security boundary."""
     try:
         from maverick.world_model_backends import is_postgres_configured
+
         if not is_postgres_configured():
             return False
         w = _world()
@@ -1786,9 +1882,7 @@ def _shared_rate_limit_check(key: str, cap: int, global_cap: int) -> bool:
         return False
 
 
-def check_goal_rate_limit(
-    request: Request | None = None, *, source: str | None = None
-) -> None:
+def check_goal_rate_limit(request: Request | None = None, *, source: str | None = None) -> None:
     """Raise HTTPException(429) if the goal-creation rate exceeds a cap.
 
     Two 60-second sliding windows are enforced: a per-client window keyed
@@ -1813,8 +1907,7 @@ def check_goal_rate_limit(
             retry = int(60 - (now - _goal_times_global[0])) + 1
             raise HTTPException(
                 status_code=429,
-                detail=f"goal rate limit reached ({global_cap}/min total). "
-                       f"Try again in {retry}s.",
+                detail=f"goal rate limit reached ({global_cap}/min total). Try again in {retry}s.",
                 headers={"Retry-After": str(max(1, retry))},
             )
 
@@ -1861,6 +1954,7 @@ def check_goal_rate_limit(
 
 def _load_skills():
     from maverick.skills import load_skills
+
     return load_skills()
 
 
@@ -1925,9 +2019,7 @@ async def overview(request: Request) -> HTMLResponse:
     # the rollup to the caller (auth-off/admin -> all; see goal_owner_filter).
     owner = goal_owner_filter(request)
     if owner is None:
-        rows = w.conn.execute(
-            "SELECT status, COUNT(*) FROM goals GROUP BY status"
-        ).fetchall()
+        rows = w.conn.execute("SELECT status, COUNT(*) FROM goals GROUP BY status").fetchall()
     else:
         rows = w.conn.execute(
             "SELECT status, COUNT(*) FROM goals WHERE owner = ? GROUP BY status",
@@ -1935,9 +2027,9 @@ async def overview(request: Request) -> HTMLResponse:
         ).fetchall()
     by_status = {r[0]: int(r[1]) for r in rows}
     counts = {
-        "total":   sum(by_status.values()),
-        "active":  by_status.get("active", 0),
-        "done":    by_status.get("done", 0),
+        "total": sum(by_status.values()),
+        "active": by_status.get("active", 0),
+        "done": by_status.get("done", 0),
         "blocked": by_status.get("blocked", 0),
     }
     # The executive board (charts, KPI deltas, recent list) renders client-side
@@ -1945,7 +2037,8 @@ async def overview(request: Request) -> HTMLResponse:
     facts = w.get_facts()
     skills = _load_skills()
     return templates.TemplateResponse(
-        request, "index.html",
+        request,
+        "index.html",
         {"counts": counts, "facts": facts, "skills": skills[:10]},
     )
 
@@ -1974,14 +2067,14 @@ async def workforce_page(request: Request) -> HTMLResponse:
     w = _world()
     # Job-function scoping: mirror GET /api/v1/departments — a caller with a
     # department grant sees only their departments.
-    depts = scope_to_suites(request, list_departments(),
-                            suite_of=lambda d: d.key, keep_none=False)
+    depts = scope_to_suites(request, list_departments(), suite_of=lambda d: d.key, keep_none=False)
     owner = goal_owner_filter(request)
     firm = firm_totals(assemble(w, owner=owner)).to_dict()
     # The delivery/spend/leader charts render client-side from
     # GET /api/v1/dashboards/workforce.
     return templates.TemplateResponse(
-        request, "workforce.html",
+        request,
+        "workforce.html",
         {
             "departments": depts,
             "entitlements": {d.key: department_entitled(d.key) for d in depts},
@@ -1999,8 +2092,11 @@ async def learning_page(request: Request) -> HTMLResponse:
     grounded outcomes + self-taught capabilities). Read-only; same numbers as
     /api/v1/learning."""
     from .api import _learning_snapshot
+
     return templates.TemplateResponse(
-        request, "learning.html", {"snap": _learning_snapshot(request)},
+        request,
+        "learning.html",
+        {"snap": _learning_snapshot(request)},
     )
 
 
@@ -2024,15 +2120,19 @@ async def projects_page(request: Request) -> HTMLResponse:
 
 
 @app.post("/projects")
-async def projects_create(request: Request, name: str = Form(...),
-                          description: str = Form(""), domain: str = Form("")) -> RedirectResponse:
+async def projects_create(
+    request: Request, name: str = Form(...), description: str = Form(""), domain: str = Form("")
+) -> RedirectResponse:
     """Create a project, then redirect to it. Same-origin; owned by the caller."""
     _require_same_origin(request)
     if not name.strip():
         raise HTTPException(status_code=422, detail="a project needs a name")
     pid = _world().create_project(
-        name.strip(), description=description.strip(),
-        owner=goal_owner_filter(request) or "", domain=domain.strip())
+        name.strip(),
+        description=description.strip(),
+        owner=goal_owner_filter(request) or "",
+        domain=domain.strip(),
+    )
     return RedirectResponse(f"/projects/{pid}", status_code=303)
 
 
@@ -2048,13 +2148,16 @@ async def project_detail(request: Request, project_id: int) -> HTMLResponse:
         raise HTTPException(status_code=404, detail="no such project")
     goals = w.list_goals(project_id=project_id, order="desc")
     return templates.TemplateResponse(
-        request, "project_detail.html",
-        {"project": project, "goals": goals, "counts": w.project_status_counts(project_id)})
+        request,
+        "project_detail.html",
+        {"project": project, "goals": goals, "counts": w.project_status_counts(project_id)},
+    )
 
 
 @app.post("/chat/goal/{goal_id}/project")
-async def goal_set_project(request: Request, goal_id: int,
-                           project_id: str = Form("")) -> RedirectResponse:
+async def goal_set_project(
+    request: Request, goal_id: int, project_id: str = Form("")
+) -> RedirectResponse:
     """File a goal under a project (empty value clears it). Same-origin; the
     caller must be able to access the goal."""
     _require_same_origin(request)
@@ -2072,10 +2175,11 @@ async def goal_set_project(request: Request, goal_id: int,
 async def styles_page(request: Request) -> HTMLResponse:
     """Output styles -- the response style applied to every run."""
     from maverick.styles import active_style_name, all_styles
+
     items = [{"name": n, "guidance": g} for n, g in sorted(all_styles().items())]
     return templates.TemplateResponse(
-        request, "output_styles.html",
-        {"styles": items, "active": active_style_name()})
+        request, "output_styles.html", {"styles": items, "active": active_style_name()}
+    )
 
 
 @app.post("/styles/set")
@@ -2085,6 +2189,7 @@ async def styles_set(request: Request, name: str = Form("")) -> RedirectResponse
     _require_same_origin(request)
     require_permission(request, "operate")
     from maverick import runtime_overrides
+
     n = (name or "").strip()
     try:
         runtime_overrides.set_style(n) if n else runtime_overrides.clear_style()
@@ -2109,15 +2214,17 @@ def _deliverable_specs() -> list[dict]:
         out = prof.output
         if not (out.deliverable or out.consumers):
             continue
-        specs.append({
-            "domain": name,
-            "deliverable": out.deliverable or name,
-            "shape": out.shape,
-            "consumers": list(out.consumers),
-            "cadence": out.cadence,
-            "gate": enforced_gate(prof),
-            "suite": suite_for(name),
-        })
+        specs.append(
+            {
+                "domain": name,
+                "deliverable": out.deliverable or name,
+                "shape": out.shape,
+                "consumers": list(out.consumers),
+                "cadence": out.cadence,
+                "gate": enforced_gate(prof),
+                "suite": suite_for(name),
+            }
+        )
     return specs
 
 
@@ -2132,16 +2239,17 @@ async def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     ``?role=all`` widens to everything, ``?role=<r>`` picks a single role."""
     from .auth import scope_to_suites
     from .deliverables import build_inbox, persona_roles_for
+
     # Job-function scoping: a scoped caller's inbox lists only their
     # departments' deliverable specs (plus generic packs), matching /agents.
-    specs = scope_to_suites(request, _deliverable_specs(),
-                            suite_of=lambda s: s.get("suite"))
+    specs = scope_to_suites(request, _deliverable_specs(), suite_of=lambda s: s.get("suite"))
     owner = goal_owner_filter(request)
     runs_by_domain: dict[str, list] = {}
     for s in specs:
         try:
             runs_by_domain[s["domain"]] = _world().list_goals(
-                domain=s["domain"], owner=owner, limit=5, order="desc")
+                domain=s["domain"], owner=owner, limit=5, order="desc"
+            )
         except Exception:  # pragma: no cover -- a bad domain query never breaks the page
             runs_by_domain[s["domain"]] = []
     ids = [g.id for runs in runs_by_domain.values() for g in runs]
@@ -2170,11 +2278,14 @@ async def tenants_page(request: Request) -> HTMLResponse:
     require_permission(request, "admin")
     try:
         from maverick.tenant.registry import list_tenants
+
         tenants = list_tenants()
     except Exception:  # pragma: no cover -- never 500 the console
         tenants = []
     return templates.TemplateResponse(
-        request, "tenants.html", {"tenants": tenants, "is_admin": True},
+        request,
+        "tenants.html",
+        {"tenants": tenants, "is_admin": True},
     )
 
 
@@ -2197,6 +2308,7 @@ def _tenant_overview_rows() -> list[dict]:
         counts: dict[str, int] = {}
         try:
             from maverick.workspace import Workspace
+
             db = Workspace(t.id).db_path
             if postgres or db.exists():
                 from maverick.paths import tenant_scope
@@ -2216,17 +2328,19 @@ def _tenant_overview_rows() -> list[dict]:
             spend = float(tenant_spend_today(t.id))
         except Exception:  # pragma: no cover -- spend read never blocks the view
             spend = 0.0
-        rows.append({
-            "id": t.id,
-            "display_name": t.display_name,
-            "plan": t.plan,
-            "status": t.status,
-            "suspended": not t.active,
-            "goals": counts,
-            "total_goals": sum(counts.values()),
-            "spend_today": round(spend, 4),
-            "max_daily_dollars": t.max_daily_dollars,
-        })
+        rows.append(
+            {
+                "id": t.id,
+                "display_name": t.display_name,
+                "plan": t.plan,
+                "status": t.status,
+                "suspended": not t.active,
+                "goals": counts,
+                "total_goals": sum(counts.values()),
+                "spend_today": round(spend, 4),
+                "max_daily_dollars": t.max_daily_dollars,
+            }
+        )
     return rows
 
 
@@ -2244,7 +2358,9 @@ async def tenants_overview_page(request: Request) -> HTMLResponse:
     except Exception:  # pragma: no cover -- never 500 the console
         rows = []
     return templates.TemplateResponse(
-        request, "tenants_overview.html", {"rows": rows, "is_admin": True},
+        request,
+        "tenants_overview.html",
+        {"rows": rows, "is_admin": True},
     )
 
 
@@ -2270,8 +2386,10 @@ async def learned_page(request: Request) -> HTMLResponse:
     """Self-learning observability: the learned-capability ledger + the
     on-disk generated tools, with a remove action per generated tool (#427)."""
     from .api import _learned_snapshot
+
     return templates.TemplateResponse(
-        request, "learned.html",
+        request,
+        "learned.html",
         _learned_snapshot(include_pending_items=has_permission(request, "admin")),
     )
 
@@ -2287,21 +2405,31 @@ async def spend_page(request: Request) -> HTMLResponse:
     # GET /api/v1/dashboards/spend; the page keeps the episode table + hero.
     w = _world()
     return templates.TemplateResponse(
-        request, "spend.html",
+        request,
+        "spend.html",
         {"episodes": w.list_episodes(limit=50), "total": w.total_spend()},
     )
 
 
 # One assessment engine, one workspace chassis per department: each
 # department page filters the same records/templates to its own types.
-PRIVACY_ASSESSMENT_TYPES = frozenset(
-    {"pia", "dpia", "lia", "ccpa", "aira", "vendor_risk", "tia"})
+PRIVACY_ASSESSMENT_TYPES = frozenset({"pia", "dpia", "lia", "ccpa", "aira", "vendor_risk", "tia"})
 FINANCE_ASSESSMENT_TYPES = frozenset(
-    {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"})
-SECURITY_ASSESSMENT_TYPES = frozenset({
-    "soc2", "iso27001", "nist_csf", "nist_800_53", "cis_v8",
-    "pci_dss", "hipaa", "cmmc_l2", "fedramp_moderate",
-})
+    {"sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness"}
+)
+SECURITY_ASSESSMENT_TYPES = frozenset(
+    {
+        "soc2",
+        "iso27001",
+        "nist_csf",
+        "nist_800_53",
+        "cis_v8",
+        "pci_dss",
+        "hipaa",
+        "cmmc_l2",
+        "fedramp_moderate",
+    }
+)
 
 
 def _workspace_ctx(department: str, viewer: str = "") -> dict:
@@ -2328,8 +2456,8 @@ def _workspace_ctx(department: str, viewer: str = "") -> dict:
     }.get(department, frozenset())
     customs = custom_template_records()
     types = set(base) | {
-        t for t, rec in customs.items()
-        if rec.get("department", "privacy") == department}
+        t for t, rec in customs.items() if rec.get("department", "privacy") == department
+    }
 
     sessions = [s for s in list_saved() if s.get("type") in types]
     now = _time.time()
@@ -2339,35 +2467,29 @@ def _workspace_ctx(department: str, viewer: str = "") -> dict:
         s["age_days"] = int((now - created) // 86400) if created else None
         nra = s.get("next_review_at")
         # Days until the scheduled re-review (negative = overdue).
-        s["review_in_days"] = (int((float(nra) - now) // 86400)
-                               if nra else None)
+        s["review_in_days"] = int((float(nra) - now) // 86400) if nra else None
         # Only a real signed-in principal owns rows. In auth-off single-user
         # mode `me` is empty, and an empty assignee must NOT then read as
         # "mine" -- that would make every unassigned record look owned.
         s["mine"] = bool(me) and s.get("assignee") == me
-    open_rows = [s for s in sessions
-                 if s.get("status") in ("pending_review", "needs_more")]
+    open_rows = [s for s in sessions if s.get("status") in ("pending_review", "needs_more")]
     stats = {
         "total": len(sessions),
-        "pending": sum(1 for s in sessions
-                       if s.get("status") == "pending_review"),
-        "needs_more": sum(1 for s in sessions
-                          if s.get("status") == "needs_more"),
-        "high_residual": sum(1 for s in sessions
-                             if s.get("residual_risk") == "high"),
+        "pending": sum(1 for s in sessions if s.get("status") == "pending_review"),
+        "needs_more": sum(1 for s in sessions if s.get("status") == "needs_more"),
+        "high_residual": sum(1 for s in sessions if s.get("residual_risk") == "high"),
         "review_due": sum(1 for s in sessions if s.get("review_due")),
         "mine": sum(1 for s in sessions if s.get("mine")),
         "unassigned": sum(1 for s in sessions if not s.get("assignee")),
-        "oldest_open_days": (max((s["age_days"] or 0) for s in open_rows)
-                            if open_rows else None),
+        "oldest_open_days": (max((s["age_days"] or 0) for s in open_rows) if open_rows else None),
     }
+
     # At program volume (hundreds of records a year) the worklist stays
     # sharp: actionable rows first (open work + anything due for
     # re-review), then settled records by recency, capped — the hero stats
     # always count everything.
     def _rank(s: dict) -> tuple:
-        actionable = (s.get("status") in ("pending_review", "needs_more")
-                      or s.get("review_due"))
+        actionable = s.get("status") in ("pending_review", "needs_more") or s.get("review_due")
         return (0 if actionable else 1, -(s.get("created_at") or 0))
 
     worklist = sorted(sessions, key=_rank)[:250]
@@ -2378,11 +2500,17 @@ def _workspace_ctx(department: str, viewer: str = "") -> dict:
         "department": department,
         # Precedents: what the memory recalls from — recent completions.
         "precedents": sessions[:8],
-        "templates": [{"type": t.type, "title": t.title,
-                       "framework": t.framework,
-                       "questions": len(t.questions),
-                       "custom": t.type in customs}
-                      for t in list_templates() if t.type in types],
+        "templates": [
+            {
+                "type": t.type,
+                "title": t.title,
+                "framework": t.framework,
+                "questions": len(t.questions),
+                "custom": t.type in customs,
+            }
+            for t in list_templates()
+            if t.type in types
+        ],
     }
 
 
@@ -2403,9 +2531,17 @@ async def privacy_page(request: Request) -> HTMLResponse:
     # The record types — the data plane behind the [privacy_ops] knob. The
     # page still works without them.
     from maverick import privacy_ops
-    records = {"enabled": privacy_ops.enabled(), "kind": "privacy",
-               "dpa": [], "ai": [], "ropa": [], "dsar": [], "incidents": [],
-               "paper": []}
+
+    records = {
+        "enabled": privacy_ops.enabled(),
+        "kind": "privacy",
+        "dpa": [],
+        "ai": [],
+        "ropa": [],
+        "dsar": [],
+        "incidents": [],
+        "paper": [],
+    }
     if records["enabled"]:
         records["dpa"] = privacy_ops.list_dpa_reviews()
         records["ai"] = privacy_ops.list_ai_systems()
@@ -2413,24 +2549,29 @@ async def privacy_page(request: Request) -> HTMLResponse:
         records["dsar"] = privacy_ops.list_dsars()
         records["incidents"] = privacy_ops.list_incidents()
         records["paper"] = privacy_ops.list_paper_reviews()
-        for rows in (records["dpa"], records["ai"], records["ropa"],
-                     records["dsar"], records["incidents"],
-                     records["paper"]):
+        for rows in (
+            records["dpa"],
+            records["ai"],
+            records["ropa"],
+            records["dsar"],
+            records["incidents"],
+            records["paper"],
+        ):
             for r in rows:
                 created = float(r.get("created_at") or 0)
-                r["created"] = (_time.strftime("%Y-%m-%d",
-                                               _time.localtime(created))
-                                if created else "—")
+                r["created"] = (
+                    _time.strftime("%Y-%m-%d", _time.localtime(created)) if created else "—"
+                )
         records["dsar_open"] = sum(
-            1 for r in records["dsar"]
-            if r.get("status") in ("open", "awaiting_erasure"))
-        records["dsar_overdue"] = sum(
-            1 for r in records["dsar"] if r.get("overdue"))
+            1 for r in records["dsar"] if r.get("status") in ("open", "awaiting_erasure")
+        )
+        records["dsar_overdue"] = sum(1 for r in records["dsar"] if r.get("overdue"))
         records["incidents_open"] = sum(
-            1 for r in records["incidents"]
-            if r.get("status") in ("open", "notify"))
+            1 for r in records["incidents"] if r.get("status") in ("open", "notify")
+        )
         records["incidents_breached"] = sum(
-            1 for r in records["incidents"] if r.get("clock_breached"))
+            1 for r in records["incidents"] if r.get("clock_breached")
+        )
     ctx["records"] = records
     return templates.TemplateResponse(request, "privacy.html", ctx)
 
@@ -2557,11 +2698,7 @@ async def consent_scan_notice_proposals_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "consent_scan_notice_proposals.html",
-        {
-            "consent_scan_notice_proposals_enabled": (
-                scan_notice_proposals_enabled_for_page()
-            )
-        },
+        {"consent_scan_notice_proposals_enabled": (scan_notice_proposals_enabled_for_page())},
     )
 
 
@@ -2602,9 +2739,7 @@ async def data_use_governance_page(request: Request) -> HTMLResponse:
         request,
         "data_use_governance.html",
         {
-            "data_use_enabled": (
-                isinstance(section, Mapping) and section.get("enable") is True
-            ),
+            "data_use_enabled": (isinstance(section, Mapping) and section.get("enable") is True),
             "data_use_compiler_enabled": (
                 isinstance(compiler, Mapping) and compiler.get("enable") is True
             ),
@@ -2637,8 +2772,7 @@ async def data_use_providers_page(request: Request) -> HTMLResponse:
         "data_use_providers.html",
         {
             "data_use_enforcement_enabled": bool(
-                isinstance(enforcement, Mapping)
-                and enforcement.get("enable") is True
+                isinstance(enforcement, Mapping) and enforcement.get("enable") is True
             ),
             "data_use_snowflake_enabled": provider_enabled("snowflake"),
             "data_use_databricks_enabled": provider_enabled("databricks"),
@@ -2670,11 +2804,7 @@ async def privacy_regulatory_intelligence_page(request: Request) -> HTMLResponse
     return templates.TemplateResponse(
         request,
         "privacy_regulatory_intelligence.html",
-        {
-            "privacy_regulatory_intelligence_enabled": (
-                privacy_regulatory_intelligence.enabled()
-            )
-        },
+        {"privacy_regulatory_intelligence_enabled": (privacy_regulatory_intelligence.enabled())},
     )
 
 
@@ -2690,11 +2820,7 @@ async def privacy_rights_orchestration_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "privacy_rights_orchestration.html",
-        {
-            "privacy_rights_orchestration_enabled": (
-                privacy_rights_orchestration_enabled_for_page()
-            )
-        },
+        {"privacy_rights_orchestration_enabled": (privacy_rights_orchestration_enabled_for_page())},
     )
 
 
@@ -2730,11 +2856,7 @@ async def privacy_notice_governance_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "privacy_notice_governance.html",
-        {
-            "privacy_notice_governance_enabled": (
-                privacy_notice_governance_enabled_for_page()
-            )
-        },
+        {"privacy_notice_governance_enabled": (privacy_notice_governance_enabled_for_page())},
     )
 
 
@@ -2757,14 +2879,12 @@ async def privacy_report_page(request: Request) -> HTMLResponse:
     import time as _time
 
     from maverick import privacy_ops
+
     if not privacy_ops.enabled():
-        raise HTTPException(status_code=404,
-                            detail="privacy ops are disabled")
+        raise HTTPException(status_code=404, detail="privacy ops are disabled")
     report = privacy_ops.program_report()
-    report["generated"] = _time.strftime(
-        "%Y-%m-%d %H:%M", _time.localtime(report["generated_at"]))
-    return templates.TemplateResponse(request, "privacy_report.html",
-                                      {"r": report})
+    report["generated"] = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(report["generated_at"]))
+    return templates.TemplateResponse(request, "privacy_report.html", {"r": report})
 
 
 @app.get("/third-party/intelligence", response_class=HTMLResponse)
@@ -2779,11 +2899,21 @@ async def third_party_intelligence_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "third_party_intelligence.html",
-        {
-            "third_party_intelligence_enabled": (
-                third_party_intelligence_enabled_for_page()
-            )
-        },
+        {"third_party_intelligence_enabled": (third_party_intelligence_enabled_for_page())},
+    )
+
+
+@app.get("/governance-agents", response_class=HTMLResponse)
+async def governance_agents_page(request: Request) -> HTMLResponse:
+    """Closed packaged agents over server-resolved governance evidence."""
+
+    require_permission(request, "operate")
+    from .governance_agents_api import governance_agents_enabled_for_page
+
+    return templates.TemplateResponse(
+        request,
+        "governance_agents.html",
+        {"governance_agents_enabled": governance_agents_enabled_for_page()},
     )
 
 
@@ -2797,11 +2927,7 @@ async def third_party_lifecycle_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "third_party_lifecycle.html",
-        {
-            "third_party_lifecycle_enabled": (
-                third_party_lifecycle_enabled_for_page()
-            )
-        },
+        {"third_party_lifecycle_enabled": (third_party_lifecycle_enabled_for_page())},
     )
 
 
@@ -2817,11 +2943,7 @@ async def third_party_collaboration_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "third_party_collaboration.html",
-        {
-            "third_party_collaboration_enabled": (
-                third_party_collaboration_enabled_for_page()
-            )
-        },
+        {"third_party_collaboration_enabled": (third_party_collaboration_enabled_for_page())},
     )
 
 
@@ -2864,32 +2986,30 @@ async def security_page(request: Request) -> HTMLResponse:
         "open_poams": [],
         "exceptions_due": [],
         "crosswalk_links": 0,
-        "crosswalk_frameworks": [
-            {"key": key, "label": label} for key, label in framework_labels
-        ],
+        "crosswalk_frameworks": [{"key": key, "label": label} for key, label in framework_labels],
         "crosswalk_matrix": [],
     }
     if records["enabled"]:
-        records.update({
-            "controls": security_ops.list_controls(),
-            "evidence": security_ops.list_evidence(),
-            "risks": security_ops.list_risks(),
-            "poams": security_ops.list_poams(),
-            "vendors": security_ops.list_vendor_assessments(),
-            "policies": security_ops.list_policies(),
-            "incidents": security_ops.list_incidents(),
-            "audits": security_ops.list_audit_engagements(),
-        })
+        records.update(
+            {
+                "controls": security_ops.list_controls(),
+                "evidence": security_ops.list_evidence(),
+                "risks": security_ops.list_risks(),
+                "poams": security_ops.list_poams(),
+                "vendors": security_ops.list_vendor_assessments(),
+                "policies": security_ops.list_policies(),
+                "incidents": security_ops.list_incidents(),
+                "audits": security_ops.list_audit_engagements(),
+            }
+        )
         report = security_ops.program_report()
         for control in records["controls"]:
             status = str(control.get("implementation_status") or "unknown")
-            insights["control_status"][status] = (
-                insights["control_status"].get(status, 0) + 1
-            )
+            insights["control_status"][status] = insights["control_status"].get(status, 0) + 1
             mappings = control.get("crosswalk") or control.get("mappings") or []
-            insights["crosswalk_links"] += len(mappings) if isinstance(
-                mappings, (list, tuple, dict)
-            ) else 0
+            insights["crosswalk_links"] += (
+                len(mappings) if isinstance(mappings, (list, tuple, dict)) else 0
+            )
         overall_readiness = security_ops.readiness_report()
         insights["coverage_percent"] = overall_readiness["coverage_percent"]
         insights["framework_coverage"] = [
@@ -2901,11 +3021,13 @@ async def security_page(request: Request) -> HTMLResponse:
         ]
         insights["crosswalk_matrix"] = security_ops.control_crosswalk()
         insights["open_poams"] = [
-            row for row in records["poams"]
+            row
+            for row in records["poams"]
             if row.get("status") not in {"closed", "complete", "accepted"}
         ][:10]
         insights["exceptions_due"] = [
-            row for row in records["risks"]
+            row
+            for row in records["risks"]
             if row.get("exception_due") or row.get("exception_expired")
         ][:10]
     ctx.update({"records": records, "program": report, "insights": insights})
@@ -2923,17 +3045,13 @@ async def security_report_page(request: Request) -> HTMLResponse:
     report = security_ops.program_report()
     generated_at = report.get("generated_at")
     if isinstance(generated_at, (int, float)):
-        report["generated"] = time.strftime(
-            "%Y-%m-%d %H:%M %Z", time.localtime(generated_at)
-        )
+        report["generated"] = time.strftime("%Y-%m-%d %H:%M %Z", time.localtime(generated_at))
     else:
         report["generated"] = "unknown"
     # The click-through must carry substance: each control with what it does,
     # its governed status, scope decision, owner, and the reviewed evidence
     # cited behind that status (joined here so the template stays dumb).
-    evidence_index = {
-        str(row.get("id")): row for row in security_ops.list_evidence()
-    }
+    evidence_index = {str(row.get("id")): row for row in security_ops.list_evidence()}
     control_rows = []
     for row in sorted(
         security_ops.list_controls(),
@@ -2945,12 +3063,14 @@ async def security_report_page(request: Request) -> HTMLResponse:
         cited = []
         for evidence_id in row.get("evidence_ids") or []:
             evidence = evidence_index.get(str(evidence_id)) or {}
-            cited.append({
-                "id": evidence_id,
-                "title": evidence.get("title") or evidence_id,
-                "status": evidence.get("status") or "unknown",
-                "source": evidence.get("source") or "",
-            })
+            cited.append(
+                {
+                    "id": evidence_id,
+                    "title": evidence.get("title") or evidence_id,
+                    "status": evidence.get("status") or "unknown",
+                    "source": evidence.get("source") or "",
+                }
+            )
         control_rows.append({**row, "cited_evidence": cited})
     return templates.TemplateResponse(
         request,
@@ -3030,8 +3150,7 @@ async def _governance_extensions_page_data(
         try:
             evidence = await run_in_threadpool(officer.list_evidence)
             data["drift_items"] = [
-                row for row in evidence
-                if row.get("evidence_kind") == "drift_monitoring"
+                row for row in evidence if row.get("evidence_kind") == "drift_monitoring"
             ][:20]
         except Exception:
             data["drift_error"] = "Drift evidence is temporarily unavailable."
@@ -3124,9 +3243,7 @@ async def _ai_inventory_page_data(
             asset_result, run_result, *status_results = results
             if isinstance(asset_result, Exception) or isinstance(run_result, Exception):
                 raise RuntimeError("inventory governed records unavailable")
-            observation_index = {
-                row.get("asset_id"): row for row in model_risk_assets
-            }
+            observation_index = {row.get("asset_id"): row for row in model_risk_assets}
             for state_row in asset_result:
                 row = dict(state_row)
                 observation = observation_index.get(row.get("asset_id")) or {}
@@ -3135,9 +3252,7 @@ async def _ai_inventory_page_data(
                 assets.append(row)
             runs = run_result
             for connector, result in zip(connectors, status_results, strict=True):
-                statuses[connector] = (
-                    None if isinstance(result, Exception) else result
-                )
+                statuses[connector] = None if isinstance(result, Exception) else result
         except Exception as exc:
             if "active tenant" in str(exc).lower():
                 error = (
@@ -3233,10 +3348,7 @@ async def _evidence_gateway_page_data(module: Any) -> dict[str, Any]:
                 and str(summary_result)
                 == "AI evidence gateway records require an explicit tenant scope"
             ):
-                error = (
-                    "Select a company or tenant before loading evidence. "
-                    "No records were read."
-                )
+                error = "Select a company or tenant before loading evidence. No records were read."
                 error_action = (
                     "Set [client] id in the Lightwork configuration or set "
                     "MAVERICK_TENANT, then restart the dashboard."
@@ -3254,21 +3366,15 @@ async def _evidence_gateway_page_data(module: Any) -> dict[str, Any]:
         else:
             summary = summary_result
         if isinstance(policy_result, Exception):
-            panel_errors["policies"] = (
-                "Policy and model bindings are temporarily unavailable."
-            )
+            panel_errors["policies"] = "Policy and model bindings are temporarily unavailable."
         else:
             policies = policy_result
         if isinstance(receipt_result, Exception):
-            panel_errors["receipts"] = (
-                "Interaction receipts are temporarily unavailable."
-            )
+            panel_errors["receipts"] = "Interaction receipts are temporarily unavailable."
         else:
             receipts = receipt_result
         if isinstance(impact_result, Exception):
-            panel_errors["impacts"] = (
-                "Regulatory impacts are temporarily unavailable."
-            )
+            panel_errors["impacts"] = "Regulatory impacts are temporarily unavailable."
         else:
             impact_page = impact_result
             impacts = list(impact_page["items"])
@@ -3277,9 +3383,7 @@ async def _evidence_gateway_page_data(module: Any) -> dict[str, Any]:
     receipt_rows = []
     for receipt in receipts[:100]:
         row = dict(receipt)
-        row["issued_display"] = display_timestamp(
-            row.get("issued_at") or row.get("created_at")
-        )
+        row["issued_display"] = display_timestamp(row.get("issued_at") or row.get("created_at"))
         receipt_rows.append(row)
     view = gateway_view(summary, policies, receipts, impacts)
     if "maverick" in str(view["next_action"].get("code", "")).lower():
@@ -3499,9 +3603,7 @@ async def finance_page(request: Request) -> HTMLResponse:
             engine = RegulatoryChangeEngine(
                 data_dir("finance_operations", "regulatory_change.sqlite3")
             )
-            operations["regulatory_alerts"] = [
-                asdict(row) for row in engine.list_alerts(limit=20)
-            ]
+            operations["regulatory_alerts"] = [asdict(row) for row in engine.list_alerts(limit=20)]
             operations["licensing_packs"] = [
                 {
                     "vertical": pack.vertical,
@@ -3510,8 +3612,7 @@ async def finance_page(request: Request) -> HTMLResponse:
                     "as_of": pack.as_of,
                     "jurisdictions": len(pack.requirements),
                     "source_check_required": sum(
-                        row.determination == "source_check_required"
-                        for row in pack.requirements
+                        row.determination == "source_check_required" for row in pack.requirements
                     ),
                     "content_sha256": pack.content_sha256,
                 }
@@ -3541,9 +3642,7 @@ async def finance_page(request: Request) -> HTMLResponse:
                 }
                 for row in aml_cases
             ]
-            operations["aml_list_versions"] = len(
-                aml_screening.list_versions(limit=10_001)
-            )
+            operations["aml_list_versions"] = len(aml_screening.list_versions(limit=10_001))
             operations["control_cycles"] = [
                 {
                     "id": row.get("id"),
@@ -3559,8 +3658,7 @@ async def finance_page(request: Request) -> HTMLResponse:
         log.warning("finance workspace operations summary degraded: %s", type(exc).__name__)
     context = _workspace_ctx("finance", viewer=caller_principal(request) or "")
     context["operations"] = operations
-    return templates.TemplateResponse(
-        request, "finance.html", context)
+    return templates.TemplateResponse(request, "finance.html", context)
 
 
 @app.get("/savings", response_class=HTMLResponse)
@@ -3570,14 +3668,19 @@ async def savings_page(request: Request, days: int = 90) -> HTMLResponse:
     hourly rate + human hours per task, editable right on the page)."""
     from maverick import savings as savings_mod
     from maverick.config import get_value
+
     days = max(1, min(days, 730))
     cfg = get_value()
     report = savings_mod.compute(_world(), window_days=days, cfg=cfg)
-    return templates.TemplateResponse(request, "savings.html", {
-        "days": days,
-        "cfg": cfg,
-        "report": savings_mod.to_dict(report),
-    })
+    return templates.TemplateResponse(
+        request,
+        "savings.html",
+        {
+            "days": days,
+            "cfg": cfg,
+            "report": savings_mod.to_dict(report),
+        },
+    )
 
 
 @app.get("/billing")
@@ -3598,8 +3701,9 @@ async def billing_page(request: Request, format: str = "", period: str = ""):
         if not e.ended_at:
             continue
         m = datetime.fromtimestamp(e.started_at, timezone.utc).strftime("%Y-%m")
-        b = months.setdefault(m, {"period": m, "cost": 0.0, "input_tokens": 0,
-                                  "output_tokens": 0, "runs": 0})
+        b = months.setdefault(
+            m, {"period": m, "cost": 0.0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
+        )
         b["cost"] += e.cost_dollars
         b["input_tokens"] += e.input_tokens
         b["output_tokens"] += e.output_tokens
@@ -3610,14 +3714,17 @@ async def billing_page(request: Request, format: str = "", period: str = ""):
     try:
         from maverick.client import client_id
         from maverick.paths import current_tenant
+
         tenant = current_tenant() or client_id() or "default"
     except Exception:
         tenant = "default"
 
     if format == "csv":
         sel = period or datetime.now(timezone.utc).strftime("%Y-%m")
-        rows = ["episode_id,goal_id,started_at,ended_at,outcome,"
-                "cost_dollars,input_tokens,output_tokens,tool_calls"]
+        rows = [
+            "episode_id,goal_id,started_at,ended_at,outcome,"
+            "cost_dollars,input_tokens,output_tokens,tool_calls"
+        ]
         for e in episodes:
             if not e.ended_at:
                 continue
@@ -3628,33 +3735,45 @@ async def billing_page(request: Request, format: str = "", period: str = ""):
             rows.append(
                 f"{e.id},{e.goal_id},{started.isoformat()},{ended},"
                 f"{e.outcome or ''},{e.cost_dollars:.6f},"
-                f"{e.input_tokens},{e.output_tokens},{e.tool_calls}")
+                f"{e.input_tokens},{e.output_tokens},{e.tool_calls}"
+            )
         return PlainTextResponse(
-            "\n".join(rows) + "\n", media_type="text/csv",
-            headers={"Content-Disposition":
-                     f'attachment; filename="invoice-{tenant}-{sel}.csv"'})
+            "\n".join(rows) + "\n",
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="invoice-{tenant}-{sel}.csv"'},
+        )
 
     cur = datetime.now(timezone.utc).strftime("%Y-%m")
-    current = months.get(cur, {"period": cur, "cost": 0.0, "input_tokens": 0,
-                               "output_tokens": 0, "runs": 0})
+    current = months.get(
+        cur, {"period": cur, "cost": 0.0, "input_tokens": 0, "output_tokens": 0, "runs": 0}
+    )
     prev_keys = sorted([m for m in months if m < cur], reverse=True)
     previous = months.get(prev_keys[0]) if prev_keys else None
     delta_pct = None
     if previous and previous["cost"] > 0:
-        delta_pct = round(
-            (current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
+        delta_pct = round((current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
     series = [months[k] for k in sorted(months, reverse=True)][:12]
-    return templates.TemplateResponse(request, "billing.html", {
-        "tenant": tenant, "current": current, "previous": previous,
-        "delta_pct": delta_pct, "series": series,
-    })
+    return templates.TemplateResponse(
+        request,
+        "billing.html",
+        {
+            "tenant": tenant,
+            "current": current,
+            "previous": previous,
+            "delta_pct": delta_pct,
+            "series": series,
+        },
+    )
 
 
 @app.get("/providers", response_class=HTMLResponse)
 async def providers_page(request: Request) -> HTMLResponse:
     from maverick.provider_health import get as _health
+
     return templates.TemplateResponse(
-        request, "providers.html", {"rows": _health().snapshot()},
+        request,
+        "providers.html",
+        {"rows": _health().snapshot()},
     )
 
 
@@ -3675,6 +3794,7 @@ def safe_audit_day(day: str | None) -> str | None:
     # real calendar date, so a typo like 2026-13-99 falls back to today rather
     # than resolving to a nonexistent day-file.
     from maverick.audit.events import is_valid_day
+
     if is_valid_day(day):
         return day
     return None
@@ -3688,6 +3808,7 @@ async def audit_page(request: Request) -> HTMLResponse:
     # API denying them.
     require_permission(request, "audit")
     from maverick.audit import default_audit_log
+
     try:
         n = max(1, min(int(request.query_params.get("n") or 200), 1000))
     except (TypeError, ValueError):
@@ -3702,7 +3823,8 @@ async def audit_page(request: Request) -> HTMLResponse:
     if kind:
         events = [e for e in events if e.get("kind") == kind]
     return templates.TemplateResponse(
-        request, "audit.html",
+        request,
+        "audit.html",
         {"events": events, "n": n, "day": day, "kind": kind, "kinds": kinds},
     )
 
@@ -3730,11 +3852,12 @@ async def audit_binder_page(request: Request, days: int = 90) -> HTMLResponse:
     from starlette.concurrency import run_in_threadpool as _rit
 
     from .api import _binder_payload
+
     b = await _rit(_binder_payload, max(1, min(days, 730)))
-    b["generated"] = _time.strftime("%Y-%m-%d %H:%M UTC",
-                                    _time.gmtime(b["generated_at"]))
-    return templates.TemplateResponse(request, "audit_binder.html",
-                                      {"b": b, "days": b["window_days"]})
+    b["generated"] = _time.strftime("%Y-%m-%d %H:%M UTC", _time.gmtime(b["generated_at"]))
+    return templates.TemplateResponse(
+        request, "audit_binder.html", {"b": b, "days": b["window_days"]}
+    )
 
 
 @app.get("/replay", response_class=HTMLResponse)
@@ -3747,14 +3870,13 @@ async def replay_page(request: Request) -> HTMLResponse:
     from maverick.world_model import close_world_if_owned, open_world
 
     from .control_plane import build_replay
+
     raw = (request.query_params.get("goal") or "").strip()
     goal_id = int(raw) if raw.isdigit() else None
     w = open_world()
     try:
         if goal_id is None:
-            goals = w.list_goals(
-                limit=50, order="desc", owner=goal_owner_filter(request)
-            )
+            goals = w.list_goals(limit=50, order="desc", owner=goal_owner_filter(request))
             return templates.TemplateResponse(
                 request,
                 "replay.html",
@@ -3766,7 +3888,9 @@ async def replay_page(request: Request) -> HTMLResponse:
         assert_goal_access(request, goal)
         replay = build_replay(goal_id, window=(goal.created_at, goal.updated_at))
         return templates.TemplateResponse(
-            request, "replay.html", {"goal": goal, "goals": None, "replay": replay},
+            request,
+            "replay.html",
+            {"goal": goal, "goals": None, "replay": replay},
         )
     finally:
         try:
@@ -3780,6 +3904,7 @@ async def trust_page(request: Request) -> HTMLResponse:
     """Agent Trust Plane: the cross-agent permission graph -- every external
     agent allowed to interact, with its tool/risk/budget ceilings + lifecycle."""
     from .control_plane import trust_overview
+
     return templates.TemplateResponse(request, "trust.html", trust_overview())
 
 
@@ -3789,28 +3914,32 @@ async def external_agents_page(request: Request) -> HTMLResponse:
     (Agentforce, Bedrock, Copilot Studio, custom), mint their credentials,
     and watch their governed runs/spend land on the Operating Record."""
     from maverick import external_agents as xa
-    return templates.TemplateResponse(request, "external_agents.html", {
-        "enabled": xa.enabled(),
-        "status": xa.status(),
-        "agents": xa.roster(),
-        "platforms": xa.PLATFORMS,
-        "surfaces": xa.TOKEN_SURFACES,
-    })
+
+    return templates.TemplateResponse(
+        request,
+        "external_agents.html",
+        {
+            "enabled": xa.enabled(),
+            "status": xa.status(),
+            "agents": xa.roster(),
+            "platforms": xa.PLATFORMS,
+            "surfaces": xa.TOKEN_SURFACES,
+        },
+    )
 
 
 @app.get("/external-agents/{agent_id}", response_class=HTMLResponse)
-async def external_agent_scorecard(request: Request,
-                                   agent_id: str) -> HTMLResponse:
+async def external_agent_scorecard(request: Request, agent_id: str) -> HTMLResponse:
     """One external agent's scorecard: ceilings, spend vs budget, run
     history on the Operating Record, and governance state (containment,
     wall violations, credentials)."""
     from maverick import external_agents as xa
+
     try:
         detail = xa.agent_detail(agent_id)
     except xa.ExternalAgentsError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    return templates.TemplateResponse(request, "external_agent_detail.html",
-                                      {"a": detail})
+    return templates.TemplateResponse(request, "external_agent_detail.html", {"a": detail})
 
 
 @app.get("/discovery", response_class=HTMLResponse)
@@ -3818,20 +3947,31 @@ async def discovery_page(request: Request) -> HTMLResponse:
     """Inventory every governable surface the deployment exposes (tools, MCP
     servers, providers, channels, external agents)."""
     from .control_plane import discovery_overview
-    return templates.TemplateResponse(request, "discovery.html", {"discovery": discovery_overview()})
+
+    return templates.TemplateResponse(
+        request, "discovery.html", {"discovery": discovery_overview()}
+    )
 
 
 @app.get("/simulate", response_class=HTMLResponse)
 async def simulate_page(request: Request) -> HTMLResponse:
     """Dry-run a proposed action: its risk + whether it would be gated, no run."""
     from .control_plane import simulate_action
+
     surface = request.query_params.get("surface") or ""
     action = request.query_params.get("action") or ""
     target = request.query_params.get("target") or ""
     result = simulate_action(surface, action, target) if surface else None
-    return templates.TemplateResponse(request, "simulate.html", {
-        "surface": surface, "action": action, "target": target, "result": result,
-    })
+    return templates.TemplateResponse(
+        request,
+        "simulate.html",
+        {
+            "surface": surface,
+            "action": action,
+            "target": target,
+            "result": result,
+        },
+    )
 
 
 @app.get("/compartments", response_class=HTMLResponse)
@@ -3845,12 +3985,15 @@ async def compartments_page(request: Request) -> HTMLResponse:
         from maverick.domain import available_domains, suite_for
 
         from .auth import scope_to_suites
+
         # Job-function scoping: a scoped caller sees only their departments'
         # sealed agents and capability envelopes, matching /agents (this page
         # otherwise leaks every department's pack config).
         domains = scope_to_suites(
-            request, sorted(available_domains().values(), key=lambda d: d.name),
-            suite_of=lambda d: suite_for(d.name))
+            request,
+            sorted(available_domains().values(), key=lambda d: d.name),
+            suite_of=lambda d: suite_for(d.name),
+        )
     except Exception:  # never 500 the page if the factory layer is unavailable
         domains = []
     return templates.TemplateResponse(request, "compartments.html", {"domains": domains})
@@ -3878,12 +4021,12 @@ async def agents_page(request: Request) -> HTMLResponse:
         from maverick.domain_edit import list_agents, resolved_view
 
         from .auth import scope_to_suites, suite_allowed
+
         editable = bool(get_features().get("pack_editing", True))
         # Job-function scoping: mirror GET /api/v1/agents — a caller with a
         # department grant browses their departments' specialists plus generic
         # packs; a non-granted selection renders nothing rather than its config.
-        agents = scope_to_suites(request, list_agents(),
-                                 suite_of=lambda a: a.get("suite"))
+        agents = scope_to_suites(request, list_agents(), suite_of=lambda a: a.get("suite"))
         name = request.query_params.get("name")
         if name and suite_allowed(request, suite_for(name)):
             selected = resolved_view(name)
@@ -3891,9 +4034,9 @@ async def agents_page(request: Request) -> HTMLResponse:
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
     return templates.TemplateResponse(
-        request, "agents.html",
-        {"agents": agents, "selected": selected, "editable": editable,
-         "creating": creating},
+        request,
+        "agents.html",
+        {"agents": agents, "selected": selected, "editable": editable, "creating": creating},
     )
 
 
@@ -3910,25 +4053,33 @@ async def assessments_page(request: Request) -> HTMLResponse:
         from maverick.domain_edit import list_agents
 
         from .auth import scope_to_suites
+
         # Job-function scoping: the subject picker offers only the caller's
         # departments' specialists, matching the scoped /agents roster (else a
         # picked-but-403'd pack drives mixed failures mid-assessment).
         agents = scope_to_suites(
             request,
             [{"name": a["name"], "suite": a.get("suite")} for a in list_agents()],
-            suite_of=lambda a: a.get("suite"))
+            suite_of=lambda a: a.get("suite"),
+        )
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
     try:
         from maverick import flow as _flow
+
         if _flow.enabled():
             from maverick.flow import store as _flow_store
-            flows = [{"id": f.get("id"), "name": f.get("name") or f.get("id")}
-                     for f in _flow_store.list_flow_summaries()]
+
+            flows = [
+                {"id": f.get("id"), "name": f.get("name") or f.get("id")}
+                for f in _flow_store.list_flow_summaries()
+            ]
     except Exception:  # pragma: no cover -- flow engine optional
         flows = []
     return templates.TemplateResponse(
-        request, "assessments.html", {"agents": agents, "flows": flows},
+        request,
+        "assessments.html",
+        {"agents": agents, "flows": flows},
     )
 
 
@@ -3941,10 +4092,12 @@ def model_picker_options() -> list[tuple[str, str]]:
 
     from maverick.llm import catalog_specs
     from maverick.runtime_overrides import allowed_models
+
     options = list(catalog_specs())
     seen = {s for s, _ in options}
     try:  # admins extend the picker via [models] catalog in config.toml
         from maverick.config import load_config
+
         for spec in (load_config().get("models", {}) or {}).get("catalog") or []:
             s = str(spec).strip()
             if s and s not in seen and _re.fullmatch(r"[A-Za-z0-9_.:/-]{1,128}", s):
@@ -3973,6 +4126,7 @@ async def roles_page(request: Request) -> HTMLResponse:
     try:
         from maverick.config import get_features
         from maverick.role_edit import list_roles, resolved_role
+
         editable = bool(get_features().get("role_editing", True))
         roles = list_roles()
         role = request.query_params.get("role")
@@ -3984,16 +4138,27 @@ async def roles_page(request: Request) -> HTMLResponse:
     except Exception:  # never 500 the page if the role layer is unavailable
         roles = []
     return templates.TemplateResponse(
-        request, "roles.html",
-        {"roles": roles, "selected": selected, "editable": editable,
-         "model_options": model_options},
+        request,
+        "roles.html",
+        {
+            "roles": roles,
+            "selected": selected,
+            "editable": editable,
+            "model_options": model_options,
+        },
     )
 
 
-_OVERSIGHT_KINDS = frozenset({
-    "governance_denied", "shield_block", "capability_denied",
-    "egress_blocked", "consent_result", "halt",
-})
+_OVERSIGHT_KINDS = frozenset(
+    {
+        "governance_denied",
+        "shield_block",
+        "capability_denied",
+        "egress_blocked",
+        "consent_result",
+        "halt",
+    }
+)
 
 
 def _is_intervention(e: dict) -> bool:
@@ -4083,6 +4248,7 @@ async def oversight_page(request: Request) -> HTMLResponse:
     from collections import Counter, deque
 
     from maverick.audit import default_audit_log
+
     try:
         n = max(1, min(int(request.query_params.get("n") or 1000), 5000))
     except (TypeError, ValueError):
@@ -4106,6 +4272,7 @@ async def oversight_page(request: Request) -> HTMLResponse:
         # reusing the export reader's lexical date filter (open-ended if one
         # bound is unset). Bound the file scan on a very wide window.
         from maverick.audit.export import iter_audit_events
+
         scanned = 0
         try:
             for e in iter_audit_events(since=since, until=until):
@@ -4113,8 +4280,11 @@ async def oversight_page(request: Request) -> HTMLResponse:
                 if scanned > 200_000:
                     break
                 if _is_intervention(e) and _audit_event_visible_to_caller(
-                    e, principal=principal, owner_filter=owner_filter,
-                    world=w, goal_owner_cache=goal_owner_cache,
+                    e,
+                    principal=principal,
+                    owner_filter=owner_filter,
+                    world=w,
+                    goal_owner_cache=goal_owner_cache,
                 ):
                     by_kind[str(e.get("kind"))] += 1
                     total += 1
@@ -4128,8 +4298,11 @@ async def oversight_page(request: Request) -> HTMLResponse:
             raw = []
         for e in raw:
             if _is_intervention(e) and _audit_event_visible_to_caller(
-                e, principal=principal, owner_filter=owner_filter,
-                world=w, goal_owner_cache=goal_owner_cache,
+                e,
+                principal=principal,
+                owner_filter=owner_filter,
+                world=w,
+                goal_owner_cache=goal_owner_cache,
             ):
                 by_kind[str(e.get("kind"))] += 1
                 total += 1
@@ -4148,6 +4321,7 @@ async def oversight_page(request: Request) -> HTMLResponse:
 
     try:
         from maverick.killswitch import is_active
+
         halted = bool(is_active())
     except Exception:
         halted = False
@@ -4163,7 +4337,8 @@ async def oversight_page(request: Request) -> HTMLResponse:
         active = 0
 
     return templates.TemplateResponse(
-        request, "oversight.html",
+        request,
+        "oversight.html",
         {
             "events": rows,
             "by_kind": dict(by_kind),
@@ -4192,6 +4367,7 @@ async def run_tree_page(request: Request) -> HTMLResponse:
     lineage sidecar renders the empty state, never a 500.
     """
     from maverick import session_tree
+
     owner_filter = goal_owner_filter(request)
     rows = session_tree.roots(limit=200)
     if owner_filter is not None:
@@ -4206,13 +4382,19 @@ async def run_tree_page(request: Request) -> HTMLResponse:
         tree = {}
     try:
         from maverick.config import get_session_tree
+
         cfg = get_session_tree()
     except Exception:  # pragma: no cover - unreadable config => documented defaults
         cfg = {"enable": False, "max_depth": 10}
     return templates.TemplateResponse(
-        request, "run_tree.html",
-        {"enabled": bool(cfg.get("enable")), "max_depth": cfg.get("max_depth"),
-         "roots": rows, "tree": tree},
+        request,
+        "run_tree.html",
+        {
+            "enabled": bool(cfg.get("enable")),
+            "max_depth": cfg.get("max_depth"),
+            "roots": rows,
+            "tree": tree,
+        },
     )
 
 
@@ -4222,20 +4404,19 @@ async def safety_page(request: Request) -> HTMLResponse:
     from collections import Counter
 
     from maverick.audit import default_audit_log
+
     try:
         n = max(1, min(int(request.query_params.get("n") or 1000), 5000))
     except (TypeError, ValueError):
         n = 1000
     day = safe_audit_day(request.query_params.get("day"))
-    blocks = [
-        e for e in default_audit_log().tail(n, day=day)
-        if e.get("kind") == "shield_block"
-    ]
+    blocks = [e for e in default_audit_log().tail(n, day=day) if e.get("kind") == "shield_block"]
     by_stage = Counter((e.get("stage") or "unknown") for e in blocks)
     top_reasons = Counter((e.get("reason") or "unknown") for e in blocks).most_common(10)
     recent = list(reversed(blocks))[:100]
     return templates.TemplateResponse(
-        request, "safety.html",
+        request,
+        "safety.html",
         {
             "total": len(blocks),
             "by_stage": dict(by_stage),
@@ -4260,6 +4441,7 @@ def _compliance_view(framework: str) -> dict:
     framework = framework if framework in {"eu", "us", "all"} else "all"
     try:
         from maverick.compliance import COMPLIANCE_DISCLAIMER, compliance_report
+
         checks = compliance_report()
     except Exception:  # pragma: no cover - never 500 the console if core is absent
         return {"framework": framework, "groups": {}, "summary": {}, "disclaimer": ""}
@@ -4339,11 +4521,7 @@ async def compliance_scope_actions_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "compliance_scope_actions.html",
-        {
-            "compliance_scope_actions_enabled": (
-                compliance_scope_actions_enabled_for_page()
-            )
-        },
+        {"compliance_scope_actions_enabled": (compliance_scope_actions_enabled_for_page())},
     )
 
 
@@ -4355,46 +4533,61 @@ async def plugins_page(request: Request) -> HTMLResponse:
         from maverick.runtime_overrides import plugin_overlay
     except Exception:
         return templates.TemplateResponse(
-            request, "plugins.html",
+            request,
+            "plugins.html",
             {"groups": {}, "allowlist_active": False, "error": "plugin discovery failed"},
         )
     allow = _allowed_plugin_names()
     on, off = plugin_overlay()
     groups: dict[str, list[dict]] = {}
     for label, group in (
-        ("tools",    "maverick.tools"),
+        ("tools", "maverick.tools"),
         ("channels", "maverick.channels"),
-        ("skills",   "maverick.skills"),
+        ("skills", "maverick.skills"),
         ("personas", "maverick.personas"),
     ):
         items: list[dict] = []
         try:
             for ep in _entry_points(group):
-                items.append({
-                    "name": ep.name,
-                    "module": getattr(ep, "value", str(ep)),
-                    "enabled": allow is None or ep.name in allow,
-                    "forced": "on" if ep.name in on else "off" if ep.name in off else None,
-                })
+                items.append(
+                    {
+                        "name": ep.name,
+                        "module": getattr(ep, "value", str(ep)),
+                        "enabled": allow is None or ep.name in allow,
+                        "forced": "on" if ep.name in on else "off" if ep.name in off else None,
+                    }
+                )
         except Exception:
             pass
         groups[label] = items
     try:
         from maverick.plugins import installable_plugins
+
         installable = installable_plugins()
     except Exception:  # pragma: no cover -- never break the page
         installable = []
-    install_enabled = os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").lower() in {"1", "true", "yes"}
+    install_enabled = os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     return templates.TemplateResponse(
-        request, "plugins.html",
-        {"groups": groups, "allowlist_active": allow is not None, "error": None,
-         "installable": installable, "install_enabled": install_enabled},
+        request,
+        "plugins.html",
+        {
+            "groups": groups,
+            "allowlist_active": allow is not None,
+            "error": None,
+            "installable": installable,
+            "install_enabled": install_enabled,
+        },
     )
 
 
 @app.post("/plugins/toggle")
-async def plugins_toggle(request: Request, name: str = Form(...),
-                         action: str = Form(...)) -> RedirectResponse:
+async def plugins_toggle(
+    request: Request, name: str = Form(...), action: str = Form(...)
+) -> RedirectResponse:
     """Enable / disable / reset a plugin from the dashboard. Writes the runtime
     overlay, never config.toml. Enabling loads the plugin's code on the next goal."""
     _require_same_origin(request)
@@ -4407,8 +4600,8 @@ async def plugins_toggle(request: Request, name: str = Form(...),
         enable_plugin,
         reset_plugin,
     )
-    fn = {"enable": enable_plugin, "disable": disable_plugin,
-          "reset": reset_plugin}.get(action)
+
+    fn = {"enable": enable_plugin, "disable": disable_plugin, "reset": reset_plugin}.get(action)
     if fn is None:
         raise HTTPException(status_code=400, detail="unknown action")
     try:
@@ -4431,12 +4624,15 @@ async def plugins_install(request: Request, name: str = Form(...)) -> RedirectRe
     if os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").lower() not in {"1", "true", "yes"}:
         raise HTTPException(
             status_code=403,
-            detail=("Installing plugins from the dashboard is disabled on this "
-                    "server — an administrator can opt in (set "
-                    "MAVERICK_ALLOW_PLUGIN_INSTALL=1)."),
+            detail=(
+                "Installing plugins from the dashboard is disabled on this "
+                "server — an administrator can opt in (set "
+                "MAVERICK_ALLOW_PLUGIN_INSTALL=1)."
+            ),
         )
     require_permission(request, "admin")
     from maverick.plugins import install_plugin
+
     try:
         install_plugin(name)
     except ValueError as exc:
@@ -4452,11 +4648,13 @@ async def mcp_page(request: Request, saved: str = "") -> HTMLResponse:
     require_permission(request, "admin")
     try:
         from maverick.config import load_config
+
         cfg_servers = (load_config() or {}).get("mcp_servers") or {}
     except Exception:
         cfg_servers = {}
     try:
         from maverick.runtime_overrides import mcp_overlay
+
         overlay = mcp_overlay()
     except RuntimeOverridesSecurityError:
         raise
@@ -4473,14 +4671,15 @@ async def mcp_page(request: Request, saved: str = "") -> HTMLResponse:
             "source": source,
             "removable": source == "dashboard",
         }
-    rows = [_row(n, s, "config") for n, s in cfg_servers.items()
-            if isinstance(s, dict)]
+
+    rows = [_row(n, s, "config") for n, s in cfg_servers.items() if isinstance(s, dict)]
     # overlay servers not shadowed by config (config wins, matching the kernel)
-    rows += [_row(n, s, "dashboard") for n, s in overlay.items()
-             if n not in cfg_servers]
+    rows += [_row(n, s, "dashboard") for n, s in overlay.items() if n not in cfg_servers]
     saved_msg = {"add": "MCP server added.", "remove": "MCP server removed."}.get(saved, "")
     return templates.TemplateResponse(
-        request, "mcp.html", {"servers": rows, "saved": saved_msg},
+        request,
+        "mcp.html",
+        {"servers": rows, "saved": saved_msg},
     )
 
 
@@ -4506,6 +4705,7 @@ async def mcp_add(request: Request) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "admin")
     from maverick.runtime_overrides import add_mcp_server
+
     form = await request.form()
     name = (form.get("name") or "").strip()
     transport = (form.get("transport") or "stdio").strip()
@@ -4545,6 +4745,7 @@ async def mcp_remove(request: Request, name: str = Form(...)) -> RedirectRespons
     _require_same_origin(request)
     require_permission(request, "admin")
     from maverick.runtime_overrides import remove_mcp_server
+
     remove_mcp_server((name or "").strip())
     return RedirectResponse("/mcp?saved=remove", status_code=303)
 
@@ -4557,17 +4758,22 @@ async def tools_page(request: Request) -> HTMLResponse:
     try:
         from maverick.sandbox import build_sandbox
         from maverick.tools import base_registry
+
         wm = _world()  # honor the configured backend (SQLite or Postgres)
         sb = build_sandbox()
         reg = base_registry(world=wm, sandbox=sb)
-        tools = [{"name": t.name, "description": (t.description or "")[:240]}
-                 for t in sorted(reg.all(), key=lambda x: x.name)]
+        tools = [
+            {"name": t.name, "description": (t.description or "")[:240]}
+            for t in sorted(reg.all(), key=lambda x: x.name)
+        ]
     except RuntimeOverridesSecurityError:
         raise
     except Exception as e:
         error = f"{type(e).__name__}: {e}"
     return templates.TemplateResponse(
-        request, "tools.html", {"tools": tools, "error": error},
+        request,
+        "tools.html",
+        {"tools": tools, "error": error},
     )
 
 
@@ -4579,13 +4785,22 @@ def _permissions_snapshot() -> dict:
     GET /api/v1/permissions.
     """
     snap: dict = {
-        "tools": [], "capabilities": {}, "channels": [], "sandbox": {},
-        "budget": {}, "network": "open", "plugins": [], "providers": [],
-        "retention": {}, "overlay_denied": [], "error": None,
+        "tools": [],
+        "capabilities": {},
+        "channels": [],
+        "sandbox": {},
+        "budget": {},
+        "network": "open",
+        "plugins": [],
+        "providers": [],
+        "retention": {},
+        "overlay_denied": [],
+        "error": None,
         "sandbox_warning": None,
     }
     try:
         from maverick.config import load_config
+
         cfg = load_config() or {}
     except Exception as e:
         snap["error"] = f"config read failed: {type(e).__name__}: {e}"
@@ -4612,10 +4827,11 @@ def _permissions_snapshot() -> dict:
         for n, c in (cfg.get("channels") or {}).items()
     ]
     sec = cfg.get("security") or {}
-    snap["network"] = (sec.get("network_policy") or "open")
+    snap["network"] = sec.get("network_policy") or "open"
 
     try:
         from maverick.runtime_overrides import denied_tools as _overlay
+
         snap["overlay_denied"] = sorted(_overlay())
     except RuntimeOverridesSecurityError:
         raise
@@ -4627,6 +4843,7 @@ def _permissions_snapshot() -> dict:
     try:
         from maverick.sandbox import build_sandbox
         from maverick.tools import base_registry
+
         wm = _world()  # honor the configured backend (SQLite or Postgres)
         reg = base_registry(world=wm, sandbox=build_sandbox())
         enabled = {t.name for t in reg.all()}
@@ -4637,12 +4854,11 @@ def _permissions_snapshot() -> dict:
         enabled = set()
     # Show enabled tools + the overlay-denied ones (so the user can re-enable).
     names = sorted(enabled | set(snap["overlay_denied"]))
-    snap["tools"] = [
-        {"name": n, "enabled": n in enabled} for n in names
-    ]
+    snap["tools"] = [{"name": n, "enabled": n in enabled} for n in names]
 
     try:
         from maverick.plugins import installed_plugins
+
         snap["plugins"] = installed_plugins()
     except RuntimeOverridesSecurityError:
         raise
@@ -4655,7 +4871,9 @@ def _permissions_snapshot() -> dict:
 async def permissions_page(request: Request) -> HTMLResponse:
     """What Lightwork can do — tools, capabilities, channels, data flow."""
     return templates.TemplateResponse(
-        request, "permissions.html", {"perm": _permissions_snapshot()},
+        request,
+        "permissions.html",
+        {"perm": _permissions_snapshot()},
     )
 
 
@@ -4666,6 +4884,7 @@ async def permissions_page(request: Request) -> HTMLResponse:
 def _governance_event_kind() -> str:
     try:
         from maverick.audit import EventKind
+
         return getattr(EventKind, "GOVERNANCE_DENIED", "governance_denied")
     except Exception:  # pragma: no cover - audit module always importable
         return "governance_denied"
@@ -4689,6 +4908,7 @@ def _approval_source(provenance: str | None) -> str | None:
         return "self-refinement · changes the agent's instructions"
     return None
 
+
 @app.get("/approvals", response_class=HTMLResponse)
 async def approvals_page(request: Request) -> HTMLResponse:
     """Pending high-risk actions awaiting approve/deny.
@@ -4708,7 +4928,8 @@ async def approvals_page(request: Request) -> HTMLResponse:
     approvals = _world().pending_approvals()
     sources = {a.id: _approval_source(a.provenance) for a in approvals}
     return templates.TemplateResponse(
-        request, "approvals.html",
+        request,
+        "approvals.html",
         {"approvals": approvals, "sources": sources},
     )
 
@@ -4723,19 +4944,15 @@ def _recent_governance_holds(limit: int = 10) -> list[dict]:
     """
     try:
         from maverick.audit import default_audit_log
+
         kind = _governance_event_kind()
-        events = [
-            e for e in default_audit_log().tail(500)
-            if e.get("kind") == kind
-        ]
+        events = [e for e in default_audit_log().tail(500) if e.get("kind") == kind]
     except Exception:  # pragma: no cover - never 500 the console on a log error
         return []
     return list(reversed(events))[:limit]
 
 
-def _fleet_recent_runs(
-    fleet_name: str, *, owner: str | None = None, limit: int = 12
-) -> list[dict]:
+def _fleet_recent_runs(fleet_name: str, *, owner: str | None = None, limit: int = 12) -> list[dict]:
     """A fleet's recent agent runs for the operator console (newest-first).
 
     Mirrors ``maverick fleet status``: reads the per-fleet run index
@@ -4749,6 +4966,7 @@ def _fleet_recent_runs(
     """
     try:
         from maverick.fleet import load_runs
+
         runs = load_runs(fleet_name)
     except Exception:  # pragma: no cover - never 500 the console on a read error
         return []
@@ -4767,13 +4985,15 @@ def _fleet_recent_runs(
             goal = None
         if owner is not None and (goal is None or getattr(goal, "owner", "") != owner):
             continue
-        rows.append({
-            "agent": r.get("agent") or "—",
-            "goal_id": gid,
-            "title": goal.title if goal else "",
-            "status": goal.status if goal else "missing",
-            "ts": r.get("ts"),
-        })
+        rows.append(
+            {
+                "agent": r.get("agent") or "—",
+                "goal_id": gid,
+                "title": goal.title if goal else "",
+                "status": goal.status if goal else "missing",
+                "ts": r.get("ts"),
+            }
+        )
     return rows
 
 
@@ -4788,6 +5008,7 @@ async def fleets_page(request: Request) -> HTMLResponse:
     """
     try:
         from maverick.fleet import list_fleets
+
         fleets = list_fleets()
     except Exception:  # pragma: no cover - never 500 the console if the registry errors
         fleets = []
@@ -4798,7 +5019,8 @@ async def fleets_page(request: Request) -> HTMLResponse:
     # Per-fleet recent runs (newest-first), scoped to the fleets already shown.
     runs_by_fleet = {f.name: _fleet_recent_runs(f.name, owner=owner) for f in fleets}
     return templates.TemplateResponse(
-        request, "fleets.html",
+        request,
+        "fleets.html",
         {
             "fleets": fleets,
             "runs_by_fleet": runs_by_fleet,
@@ -4812,8 +5034,11 @@ async def fleets_page(request: Request) -> HTMLResponse:
 async def cache_page(request: Request) -> HTMLResponse:
     """In-process cache stats + purge buttons."""
     from maverick.cache import stats
+
     return templates.TemplateResponse(
-        request, "cache.html", {"stats": stats()},
+        request,
+        "cache.html",
+        {"stats": stats()},
     )
 
 
@@ -4821,13 +5046,16 @@ async def cache_page(request: Request) -> HTMLResponse:
 async def store_page(request: Request) -> HTMLResponse:
     """Skill Store: browse + install catalog skills without a terminal."""
     from maverick.catalog import load_catalog
+
     try:
         entries = [e.to_dict() for e in load_catalog("skills")]
     except Exception:
         entries = []
     installed = {s.name for s in _load_skills()}
     return templates.TemplateResponse(
-        request, "store.html", {"entries": entries, "installed": installed},
+        request,
+        "store.html",
+        {"entries": entries, "installed": installed},
     )
 
 
@@ -4841,6 +5069,7 @@ def template_market_entries() -> list[dict]:
     """
     from maverick.marketplace.ratings import RatingsLedger, stars_bar
     from maverick.templates import list_templates, load_template
+
     try:
         ratings = RatingsLedger().all_ratings("templates")
     except Exception:  # pragma: no cover -- ratings never block the catalog
@@ -4853,14 +5082,16 @@ def template_market_entries() -> list[dict]:
             continue
         mine = ratings.get(name) or {}
         stars = mine.get("stars")
-        entries.append({
-            "name": name,
-            "title": tpl.title,
-            "params": list(tpl.params),
-            "body": tpl.body[:2000],
-            "stars": stars,
-            "rating_bar": stars_bar(float(stars), 0) if stars else "unrated",
-        })
+        entries.append(
+            {
+                "name": name,
+                "title": tpl.title,
+                "params": list(tpl.params),
+                "body": tpl.body[:2000],
+                "stars": stars,
+                "rating_bar": stars_bar(float(stars), 0) if stars else "unrated",
+            }
+        )
     return entries
 
 
@@ -4870,9 +5101,11 @@ async def templates_market_page(request: Request) -> HTMLResponse:
     one-click "use template" (prefills the chat form via query params — the
     goal never auto-starts)."""
     from maverick.config import get_features
+
     feats = get_features()
     return templates.TemplateResponse(
-        request, "templates_market.html",
+        request,
+        "templates_market.html",
         {
             "entries": template_market_entries(),
             "scheduling_enabled": feats.get("scheduling", True),
@@ -4889,8 +5122,16 @@ async def channels_page(request: Request, saved: str = "") -> HTMLResponse:
     `maverick serve`."""
     require_permission(request, "admin")
     sensitive_markers = (
-        "token", "secret", "password", "passwd", "api_key", "apikey", "auth",
-        "credential", "cookie", "session",
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "api_key",
+        "apikey",
+        "auth",
+        "credential",
+        "cookie",
+        "session",
     )
 
     def _display_channels(channels: dict) -> dict:
@@ -4911,14 +5152,17 @@ async def channels_page(request: Request, saved: str = "") -> HTMLResponse:
 
     try:
         from maverick.config import load_config
+
         channels = _display_channels((load_config() or {}).get("channels") or {})
     except Exception:
         channels = {}
     from maverick_dashboard import settings_store
+
     managed = settings_store.channels_state()
     saved_msg = {"save": "Channel updated.", "clear": "Channel reset."}.get(saved, "")
     return templates.TemplateResponse(
-        request, "channels.html",
+        request,
+        "channels.html",
         {"channels": channels, "managed": managed, "saved": saved_msg},
     )
 
@@ -4931,6 +5175,7 @@ async def channels_save(request: Request) -> RedirectResponse:
     _require_same_origin(request)
     require_permission(request, "admin")
     from maverick_dashboard import settings_store
+
     form = await request.form()
     name = (form.get("channel") or "").strip()
     enabled = form.get("enabled") is not None  # checkbox present == on
@@ -4948,6 +5193,7 @@ async def channels_clear(request: Request, channel: str = Form(...)) -> Redirect
     _require_same_origin(request)
     require_permission(request, "admin")
     from maverick_dashboard import settings_store
+
     try:
         settings_store.clear_channel((channel or "").strip())
     except ValueError as exc:
@@ -4958,6 +5204,7 @@ async def channels_clear(request: Request, channel: str = Form(...)) -> Redirect
 @app.get("/api/v1/providers")
 async def providers_api() -> JSONResponse:
     from maverick.provider_health import get as _health
+
     return JSONResponse({"providers": _health().snapshot()})
 
 
@@ -4979,6 +5226,7 @@ async def run_events_firehose(
     from fastapi import WebSocketDisconnect
 
     from .auth import websocket_authorized
+
     if not websocket_authorized(websocket, principal):
         await websocket.close(code=4401)
         return
@@ -5013,26 +5261,39 @@ async def run_events_firehose(
         last = since
         while True:
             # Offload the blocking, lock-held SQLite reads off the event loop.
-            for e in await run_in_threadpool(
-                    w.goal_events, goal_id, since_id=last, limit=500):
+            for e in await run_in_threadpool(w.goal_events, goal_id, since_id=last, limit=500):
                 last = e.id
-                await websocket.send_json({
-                    "id": e.id, "agent": e.agent, "kind": e.kind,
-                    "content": e.content, "ts": e.ts,
-                })
+                await websocket.send_json(
+                    {
+                        "id": e.id,
+                        "agent": e.agent,
+                        "kind": e.kind,
+                        "content": e.content,
+                        "ts": e.ts,
+                    }
+                )
             g = await run_in_threadpool(w.get_goal, goal_id)
             if g is None or g.status in terminal:
-                await websocket.send_json({
-                    "id": last + 1, "agent": "system", "kind": "status",
-                    "content": (g.status if g else "deleted"), "ts": time.time(),
-                })
+                await websocket.send_json(
+                    {
+                        "id": last + 1,
+                        "agent": "system",
+                        "kind": "status",
+                        "content": (g.status if g else "deleted"),
+                        "ts": time.time(),
+                    }
+                )
                 break
             if (_asyncio.get_running_loop().time() - started) >= MAX_STREAM_SECONDS:
-                await websocket.send_json({
-                    "id": last + 1, "agent": "system", "kind": "status",
-                    "content": "stream lifetime exceeded; reconnect to resume",
-                    "ts": time.time(),
-                })
+                await websocket.send_json(
+                    {
+                        "id": last + 1,
+                        "agent": "system",
+                        "kind": "status",
+                        "content": "stream lifetime exceeded; reconnect to resume",
+                        "ts": time.time(),
+                    }
+                )
                 break
             await _asyncio.sleep(0.5)
     except WebSocketDisconnect:
@@ -5060,21 +5321,24 @@ async def goal_cost_preview(request: Request, goal_id: int, iterations: int = 1)
     assert_goal_access(request, g)
     from maverick.budget import Budget
     from maverick.cost.projection import compare_against_budget, project_plan
+
     text = (g.description or g.title or "").strip()
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     steps = [{"text": ln} for ln in (lines or [text])]
     projection = project_plan(steps, iterations=max(1, min(int(iterations), 10)))
     budget_dollars = Budget().max_dollars
     verdict = compare_against_budget(projection, budget_dollars)
-    return JSONResponse({
-        "goal_id": goal_id,
-        "steps": len(steps),
-        "total_tokens": projection.total_tokens,
-        "total_dollars": round(projection.total_dollars, 4),
-        "budget_dollars": budget_dollars,
-        "verdict": verdict.verdict,
-        "recommendation": verdict.recommendation,
-    })
+    return JSONResponse(
+        {
+            "goal_id": goal_id,
+            "steps": len(steps),
+            "total_tokens": projection.total_tokens,
+            "total_dollars": round(projection.total_dollars, 4),
+            "budget_dollars": budget_dollars,
+            "verdict": verdict.verdict,
+            "recommendation": verdict.recommendation,
+        }
+    )
 
 
 @app.get("/api/v1/goals/{goal_id}/cost-breakdown")
@@ -5092,24 +5356,27 @@ async def goal_cost_breakdown(request: Request, goal_id: int) -> JSONResponse:
     total = 0.0
     for ep in w.list_episodes(limit=10_000, goal_id=goal_id):
         key = str(getattr(ep, "outcome", "") or "episode")
-        b = buckets.setdefault(key, {"episodes": 0, "dollars": 0.0,
-                                     "in_tokens": 0, "out_tokens": 0})
+        b = buckets.setdefault(
+            key, {"episodes": 0, "dollars": 0.0, "in_tokens": 0, "out_tokens": 0}
+        )
         cost = float(getattr(ep, "cost_dollars", 0) or 0)
         b["episodes"] += 1
         b["dollars"] += cost
         b["in_tokens"] += int(getattr(ep, "input_tokens", 0) or 0)
         b["out_tokens"] += int(getattr(ep, "output_tokens", 0) or 0)
         total += cost
-    rows = [{"bucket": k, **{kk: (round(vv, 4) if kk == "dollars" else vv)
-                             for kk, vv in v.items()}}
-            for k, v in sorted(buckets.items(), key=lambda kv: -kv[1]["dollars"])]
-    return JSONResponse({"goal_id": goal_id, "total_dollars": round(total, 4),
-                         "buckets": rows})
+    rows = [
+        {"bucket": k, **{kk: (round(vv, 4) if kk == "dollars" else vv) for kk, vv in v.items()}}
+        for k, v in sorted(buckets.items(), key=lambda kv: -kv[1]["dollars"])
+    ]
+    return JSONResponse({"goal_id": goal_id, "total_dollars": round(total, 4), "buckets": rows})
 
 
 @app.get("/api/v1/cost/anomalies")
 async def cost_anomalies(
-    request: Request, threshold_sigma: float = 3.0, limit: int = 500,
+    request: Request,
+    threshold_sigma: float = 3.0,
+    limit: int = 500,
 ) -> JSONResponse:
     """Cost anomaly alerts: goals whose spend is a statistical outlier.
 
@@ -5138,21 +5405,29 @@ async def cost_anomalies(
         by_goal[gid] = by_goal.get(gid, 0.0) + float(getattr(ep, "cost_dollars", 0) or 0)
     spends = [s for s in by_goal.values() if s > 0]
     if len(spends) < 3:
-        return JSONResponse({"anomalies": [], "goals_considered": len(by_goal),
-                             "note": "need >=3 priced goals to baseline"})
+        return JSONResponse(
+            {
+                "anomalies": [],
+                "goals_considered": len(by_goal),
+                "note": "need >=3 priced goals to baseline",
+            }
+        )
     mean = statistics.fmean(spends)
     stdev = statistics.pstdev(spends)
     cut = mean + max(0.5, float(threshold_sigma)) * stdev
     anomalies = [
-        {"goal_id": gid, "dollars": round(s, 4),
-         "x_mean": round(s / mean, 1) if mean else None}
+        {"goal_id": gid, "dollars": round(s, 4), "x_mean": round(s / mean, 1) if mean else None}
         for gid, s in sorted(by_goal.items(), key=lambda kv: -kv[1])
         if s > cut and stdev > 0
     ]
-    return JSONResponse({
-        "anomalies": anomalies, "goals_considered": len(by_goal),
-        "mean_dollars": round(mean, 4), "cutoff_dollars": round(cut, 4),
-    })
+    return JSONResponse(
+        {
+            "anomalies": anomalies,
+            "goals_considered": len(by_goal),
+            "mean_dollars": round(mean, 4),
+            "cutoff_dollars": round(cut, 4),
+        }
+    )
 
 
 @app.post("/api/v1/skills/validate")
@@ -5175,15 +5450,20 @@ async def skills_validate(request: Request) -> JSONResponse:
         p = _Path(td) / "SKILL.md"
         p.write_bytes(body)
         result = validate_skill_file(p)
-    return JSONResponse({
-        "ok": result.ok, "errors": result.errors, "warnings": result.warnings,
-    })
+    return JSONResponse(
+        {
+            "ok": result.ok,
+            "errors": result.errors,
+            "warnings": result.warnings,
+        }
+    )
 
 
 @app.get("/api/v1/pins")
 async def pins_list(request: Request) -> JSONResponse:
     """Pinned watch list for the calling principal (most-recently-pinned first)."""
     from maverick.ux_store import shared as _ux
+
     return JSONResponse({"pins": _ux().pins(caller_principal(request))})
 
 
@@ -5194,12 +5474,14 @@ async def pins_add(request: Request, goal_id: int) -> JSONResponse:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from maverick.ux_store import shared as _ux
+
     return JSONResponse({"pins": _ux().pin(caller_principal(request), goal_id)})
 
 
 @app.delete("/api/v1/pins/{goal_id}")
 async def pins_remove(request: Request, goal_id: int) -> JSONResponse:
     from maverick.ux_store import shared as _ux
+
     return JSONResponse({"pins": _ux().unpin(caller_principal(request), goal_id)})
 
 
@@ -5207,12 +5489,14 @@ async def pins_remove(request: Request, goal_id: int) -> JSONResponse:
 async def views_list(request: Request) -> JSONResponse:
     """Saved dashboard views (named filter/query-param sets) for the caller."""
     from maverick.ux_store import shared as _ux
+
     return JSONResponse({"views": _ux().views(caller_principal(request))})
 
 
 @app.post("/api/v1/views/{name}")
 async def views_save(request: Request, name: str) -> JSONResponse:
     from maverick.ux_store import shared as _ux
+
     try:
         raw_body = await _read_limited_request_body(
             request,
@@ -5221,7 +5505,9 @@ async def views_save(request: Request, name: str) -> JSONResponse:
         )
         body = json.loads(raw_body or b"{}")
     except ValueError:
-        raise HTTPException(status_code=400, detail="body must be a JSON object of params") from None
+        raise HTTPException(
+            status_code=400, detail="body must be a JSON object of params"
+        ) from None
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="body must be a JSON object of params")
     try:
@@ -5234,6 +5520,7 @@ async def views_save(request: Request, name: str) -> JSONResponse:
 @app.delete("/api/v1/views/{name}")
 async def views_delete(request: Request, name: str) -> JSONResponse:
     from maverick.ux_store import shared as _ux
+
     if not _ux().delete_view(caller_principal(request), name):
         raise HTTPException(status_code=404, detail="no such view")
     return JSONResponse({"deleted": name})
@@ -5244,19 +5531,22 @@ async def gallery_list(request: Request) -> JSONResponse:
     """Run gallery: the deployment's featured runs, enriched with live goal
     state and links to the tutorial/explain exports."""
     from maverick.ux_store import shared as _ux
+
     w = _world()
     runs = []
     for entry in _ux().gallery():
         g = w.get_goal(entry["goal_id"])
         if g is None or not can_access_goal(request, g):
             continue
-        runs.append({
-            **entry,
-            "title": (g.title or "")[:120],
-            "status": g.status,
-            "tutorial": f"/api/v1/goals/{entry['goal_id']}/tutorial.md",
-            "explain": f"/api/v1/goals/{entry['goal_id']}/explain",
-        })
+        runs.append(
+            {
+                **entry,
+                "title": (g.title or "")[:120],
+                "status": g.status,
+                "tutorial": f"/api/v1/goals/{entry['goal_id']}/tutorial.md",
+                "explain": f"/api/v1/goals/{entry['goal_id']}/explain",
+            }
+        )
     return JSONResponse({"gallery": runs})
 
 
@@ -5275,9 +5565,9 @@ async def gallery_add(request: Request, goal_id: int) -> JSONResponse:
         body = {}
     blurb = str((body or {}).get("blurb") or "")
     from maverick.ux_store import shared as _ux
+
     try:
-        entry = _ux().gallery_add(goal_id, blurb=blurb,
-                                  curator=caller_principal(request))
+        entry = _ux().gallery_add(goal_id, blurb=blurb, curator=caller_principal(request))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return JSONResponse(entry, status_code=201)
@@ -5291,6 +5581,7 @@ async def gallery_remove(request: Request, goal_id: int) -> JSONResponse:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from maverick.ux_store import shared as _ux
+
     if not _ux().gallery_remove(goal_id):
         raise HTTPException(status_code=404, detail="not in the gallery")
     return JSONResponse({"removed": goal_id})
@@ -5304,6 +5595,7 @@ async def annotations_list(request: Request, goal_id: int) -> JSONResponse:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from maverick.ux_store import shared as _ux
+
     return JSONResponse({"annotations": _ux().annotations(goal_id)})
 
 
@@ -5320,9 +5612,11 @@ async def annotations_add(request: Request, goal_id: int) -> JSONResponse:
     if not isinstance(body, dict) or "seq" not in body or not body.get("note"):
         raise HTTPException(status_code=400, detail="body must be JSON {seq, note}")
     from maverick.ux_store import shared as _ux
+
     try:
-        entry = _ux().annotate(goal_id, int(body["seq"]), str(body["note"]),
-                               author=caller_principal(request))
+        entry = _ux().annotate(
+            goal_id, int(body["seq"]), str(body["note"]), author=caller_principal(request)
+        )
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return JSONResponse(entry, status_code=201)
@@ -5337,15 +5631,21 @@ async def goal_anomalies(request: Request, goal_id: int, history: int = 50) -> J
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from maverick.cross_run_anomaly import MIN_BASELINE_RUNS, detect
-    anomalies = detect(w, goal_id, history=max(5, min(int(history), 500)),
-                       owner=goal_owner_filter(request))
-    return JSONResponse({
-        "goal_id": goal_id,
-        "anomalies": [{"kind": a.kind, "severity": a.severity, "detail": a.detail}
-                      for a in anomalies],
-        "note": (f"baseline needs >= {MIN_BASELINE_RUNS} terminal runs before "
-                 "anything can flag"),
-    })
+
+    anomalies = detect(
+        w, goal_id, history=max(5, min(int(history), 500)), owner=goal_owner_filter(request)
+    )
+    return JSONResponse(
+        {
+            "goal_id": goal_id,
+            "anomalies": [
+                {"kind": a.kind, "severity": a.severity, "detail": a.detail} for a in anomalies
+            ],
+            "note": (
+                f"baseline needs >= {MIN_BASELINE_RUNS} terminal runs before anything can flag"
+            ),
+        }
+    )
 
 
 @app.get("/api/v1/goals/{goal_id}/tutorial.md")
@@ -5357,6 +5657,7 @@ async def goal_tutorial(request: Request, goal_id: int) -> PlainTextResponse:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from maverick.tutorial_export import tutorial_markdown
+
     events = w.goal_events(goal_id, limit=5000)
     md = tutorial_markdown(g, events)
     return PlainTextResponse(content=md, media_type="text/markdown; charset=utf-8")
@@ -5377,19 +5678,26 @@ async def goal_replay_storyboard(request: Request, goal_id: int) -> JSONResponse
     from pathlib import Path as _Path
 
     from maverick.replay.video import ffmpeg_command, storyboard
+
     # Feed the world's goal events (the live trail) rather than the audit-log
     # files replay_video reads by default, so the storyboard reflects this run.
-    events = [{"kind": e.kind, "ts": e.ts, "agent": e.agent, "content": e.content}
-              for e in w.goal_events(goal_id, limit=5000)]
+    events = [
+        {"kind": e.kind, "ts": e.ts, "agent": e.agent, "content": e.content}
+        for e in w.goal_events(goal_id, limit=5000)
+    ]
     frames = storyboard(goal_id, events=events)
     cmd = ffmpeg_command(_Path("frames.ffconcat"), _Path(f"replay-{goal_id}.mp4"))
-    return JSONResponse({
-        "goal_id": goal_id,
-        "frames": [{"index": f.index, "kind": f.kind, "caption": f.caption,
-                    "seconds": f.seconds} for f in frames],
-        "total_seconds": round(sum(f.seconds for f in frames), 2),
-        "ffmpeg_command": cmd,
-    })
+    return JSONResponse(
+        {
+            "goal_id": goal_id,
+            "frames": [
+                {"index": f.index, "kind": f.kind, "caption": f.caption, "seconds": f.seconds}
+                for f in frames
+            ],
+            "total_seconds": round(sum(f.seconds for f in frames), 2),
+            "ffmpeg_command": cmd,
+        }
+    )
 
 
 @app.get("/api/v1/goals/{goal_id}/explain")
@@ -5401,6 +5709,7 @@ async def goal_explain(request: Request, goal_id: int) -> JSONResponse:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from maverick.plain_language import explain
+
     events = w.goal_events(goal_id, limit=2000)
     return JSONResponse({"goal_id": goal_id, "explanation": explain(g, events)})
 
@@ -5411,7 +5720,9 @@ async def runs_compare(request: Request, ids: str) -> JSONResponse:
     try:
         goal_ids = [int(x) for x in ids.split(",") if x.strip()][:8]
     except ValueError:
-        raise HTTPException(status_code=400, detail="ids must be comma-separated integers") from None
+        raise HTTPException(
+            status_code=400, detail="ids must be comma-separated integers"
+        ) from None
     if not goal_ids:
         raise HTTPException(status_code=400, detail="ids is required")
     w = _world()
@@ -5426,14 +5737,16 @@ async def runs_compare(request: Request, ids: str) -> JSONResponse:
         assert_goal_access(request, g)
         events = w.goal_events(gid, limit=10_000)
         errors = sum(1 for e in events if e.kind == "error")
-        runs.append({
-            "goal_id": gid,
-            "title": (g.title or "")[:120],
-            "status": g.status,
-            "events": len(events),
-            "errors": errors,
-            "created_at": getattr(g, "created_at", None),
-        })
+        runs.append(
+            {
+                "goal_id": gid,
+                "title": (g.title or "")[:120],
+                "status": g.status,
+                "events": len(events),
+                "errors": errors,
+                "created_at": getattr(g, "created_at", None),
+            }
+        )
     return JSONResponse({"runs": runs})
 
 
@@ -5456,12 +5769,8 @@ async def cost_by_tag_api(
     owner = goal_owner_filter(request)
     goal_ids = None
     if owner is not None:
-        goal_ids = [
-            g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")
-        ]
-    buckets = split_by_tag(
-        gather(w, tag_field=tag_field, limit=limit, goal_ids=goal_ids)
-    )
+        goal_ids = [g.id for g in w.list_goals(owner=owner, limit=10_000, order="desc")]
+    buckets = split_by_tag(gather(w, tag_field=tag_field, limit=limit, goal_ids=goal_ids))
     return JSONResponse({"tag_field": tag_field, "buckets": buckets})
 
 
@@ -5496,9 +5805,13 @@ async def chat_page(request: Request) -> HTMLResponse:
     prefill_title = (request.query_params.get("title") or "")[:200]
     prefill_description = (request.query_params.get("description") or "")[:8000]
     return templates.TemplateResponse(
-        request, "chat.html",
-        {"recent": recent, "prefill_title": prefill_title,
-         "prefill_description": prefill_description},
+        request,
+        "chat.html",
+        {
+            "recent": recent,
+            "prefill_title": prefill_title,
+            "prefill_description": prefill_description,
+        },
     )
 
 
@@ -5531,7 +5844,8 @@ async def chat_send(
     # back to the title when empty (prior behavior was description == title).
     description = (description or "").strip()
     goal_id = w.create_goal(
-        title[:200], (description or title)[:8000],
+        title[:200],
+        (description or title)[:8000],
         owner=caller_principal(request) or "",
     )
     # Persist any uploaded files as goal attachments. The agent reaches them
@@ -5541,6 +5855,7 @@ async def chat_send(
     real_files = [f for f in files if f and (f.filename or "").strip()]
     if real_files:
         from maverick import attachments as _att
+
         total = 0
         for f in real_files:
             data = await f.read()
@@ -5548,17 +5863,20 @@ async def chat_send(
                 continue  # an unfilled file input still posts an empty part
             try:
                 rec = _att.store(
-                    goal_id, f.filename,
+                    goal_id,
+                    f.filename,
                     f.content_type or "application/octet-stream",
-                    data, existing_total=total,
+                    data,
+                    existing_total=total,
                 )
             except _att.AttachmentRejected as exc:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Attachment '{f.filename}': {exc}",
                 ) from exc
-            w.add_attachment(goal_id, rec.filename, rec.mime, rec.size_bytes,
-                             rec.sha256, str(rec.path))
+            w.add_attachment(
+                goal_id, rec.filename, rec.mime, rec.size_bytes, rec.sha256, str(rec.path)
+            )
             total += rec.size_bytes
         # Text companions (audio/video transcripts, extracted Office-doc
         # text) BEFORE the goal runs, so they embed on the agent's first
@@ -5568,12 +5886,16 @@ async def chat_send(
     # Use the shared runner so this path gets the same concurrency cap,
     # budget defaults, and error handling as the REST API and MCP server.
     from maverick.runner import run_goal_in_background_async
+
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
         bg.add_task(
-            run_goal_in_background_async, goal_id,
-            channel="dashboard", user_id=user_id, allowed_suites=allowed_suites,
+            run_goal_in_background_async,
+            goal_id,
+            channel="dashboard",
+            user_id=user_id,
+            allowed_suites=allowed_suites,
         )
     else:
         bg.add_task(
@@ -5621,10 +5943,13 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
     # HMAC webhooks carry no OIDC principal, so this resolves to "" (unowned):
     # reachable only by no-auth/admin callers, never another tenant.
     goal_id = w.create_goal(
-        title[:200], description[:8000], owner=caller_principal(request) or "",
+        title[:200],
+        description[:8000],
+        owner=caller_principal(request) or "",
     )
 
     from maverick.runner import DEFAULT_MAX_DOLLARS, run_goal_in_background_async
+
     budget = payload.get("budget")
     max_dollars = None
     if budget is not None:
@@ -5659,7 +5984,8 @@ def _stored_trigger_tenant(trigger: dict):
             raise HTTPException(status_code=404, detail="trigger unavailable") from exc
         except TenantRegistryError as exc:
             raise HTTPException(
-                status_code=503, detail="trigger authorization unavailable") from exc
+                status_code=503, detail="trigger authorization unavailable"
+            ) from exc
     from maverick.paths import reset_tenant, set_tenant
 
     token = set_tenant(tenant or None)
@@ -5674,9 +6000,7 @@ def _stored_trigger_identity(trigger: dict) -> tuple[str, str | None, frozenset[
     try:
         return stored_automation_identity(str(trigger.get("owner") or ""))
     except AutomationAuthorizationError as exc:
-        raise HTTPException(
-            status_code=409, detail="trigger owner is unavailable"
-        ) from exc
+        raise HTTPException(status_code=409, detail="trigger owner is unavailable") from exc
 
 
 async def _run_trigger_goal_in_tenant(
@@ -5738,9 +6062,7 @@ def _fire_stored_trigger(
             try:
                 published = flow_store.load_published_bundle(trigger["flow"])
             except flow_store.FlowSnapshotError as exc:
-                raise HTTPException(
-                    status_code=409, detail="trigger flow unavailable"
-                ) from exc
+                raise HTTPException(status_code=409, detail="trigger flow unavailable") from exc
             if published is None:
                 raise HTTPException(status_code=409, detail="trigger flow unavailable")
             flow, release = published
@@ -5809,8 +6131,7 @@ def _fire_stored_trigger(
 
         check_goal_rate_limit(request, source="webhook")
         world = _world()
-        goal_id = world.create_goal(
-            title[:200], description[:8000], owner=owner)
+        goal_id = world.create_goal(title[:200], description[:8000], owner=owner)
         world.record_goal_origin(goal_id, "trigger", name)
         max_dollars = min(float(tpl.budget_dollars), 100.0)
         max_wall = min(float(tpl.budget_wall_seconds), 86400.0)
@@ -5823,8 +6144,7 @@ def _fire_stored_trigger(
             owner=owner,
             allowed_suites=allowed_suites,
         )
-        return JSONResponse(
-            {"goal_id": goal_id, "trigger": name}, status_code=201)
+        return JSONResponse({"goal_id": goal_id, "trigger": name}, status_code=201)
 
 
 @app.post("/webhook/run")
@@ -5852,6 +6172,7 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
     payload = await _verify_maverick_webhook(request)
 
     from maverick.config import get_features
+
     if not get_features().get("triggers", True):
         raise HTTPException(status_code=404, detail="triggers are disabled")
 
@@ -5866,9 +6187,11 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
         if _webhook_duplicate_delivery("run", payload):
             raise HTTPException(status_code=409, detail="duplicate delivery id (already processed)")
         from maverick import flow as flow_mod
+
         if not flow_mod.enabled():
             raise HTTPException(status_code=409, detail="the flow engine is off")
         from maverick.flow import store as flow_store
+
         # The webhook HMAC covers the full payload, so an explicit tenant claim
         # is authenticated.  Scope lookup and the queued continuation to that
         # same tenant; without it a tenant run must never fall through to a
@@ -5877,29 +6200,34 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
         tenant_token = None
         if resume_tenant:
             from maverick.tenant.registry import assert_tenant_active
+
             try:
                 assert_tenant_active(resume_tenant)
             except (KeyError, PermissionError) as exc:
                 raise HTTPException(status_code=404, detail="tenant unavailable") from exc
             from maverick.paths import set_tenant
+
             tenant_token = set_tenant(resume_tenant)
         try:
             run = flow_store.load_run(resume_id)
         finally:
             if tenant_token is not None:
                 from maverick.paths import reset_tenant
+
                 reset_tenant(tenant_token)
         if run is None:
             raise HTTPException(status_code=404, detail="no such run")
         if run.status != "paused_event":
             raise HTTPException(
-                status_code=409,
-                detail=f"run is not waiting for an event (status {run.status})")
+                status_code=409, detail=f"run is not waiting for an event (status {run.status})"
+            )
         check_goal_rate_limit(request, source="webhook")
         inbound_evt = payload.get("data")
-        inputs = ({str(k): v for k, v in inbound_evt.items()}
-                  if isinstance(inbound_evt, dict) else {})
+        inputs = (
+            {str(k): v for k, v in inbound_evt.items()} if isinstance(inbound_evt, dict) else {}
+        )
         from maverick_dashboard import automation_queue as aq
+
         try:
             aq.enqueue_flow_resume(
                 run.flow_id,
@@ -5909,11 +6237,8 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
                 tenant=resume_tenant,
             )
         except flow_store.FlowSnapshotError as exc:
-            raise HTTPException(
-                status_code=409, detail="run release is no longer active"
-            ) from exc
-        return JSONResponse({"run_id": run.run_id, "status": "resuming"},
-                            status_code=202)
+            raise HTTPException(status_code=409, detail="run release is no longer active") from exc
+        return JSONResponse({"run_id": run.run_id, "status": "resuming"}, status_code=202)
 
     name = str(payload.get("trigger") or "").strip()
     if not name:
@@ -5927,6 +6252,7 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
         raise HTTPException(status_code=409, detail="duplicate delivery id (already processed)")
 
     from maverick_dashboard import triggers_store
+
     trig = triggers_store.get_trigger(name)
     if trig is None:
         raise HTTPException(status_code=404, detail="unknown trigger")
@@ -5934,25 +6260,31 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  #
     return _fire_stored_trigger(request, bg, payload, name, trig)
 
 
-def _flow_approve_page(title: str, message: str, *, status: int = 200,
-                       form_token: str = "") -> HTMLResponse:
+def _flow_approve_page(
+    title: str, message: str, *, status: int = 200, form_token: str = ""
+) -> HTMLResponse:
     """A minimal self-contained confirmation/result page for the signed approval
     link. When ``form_token`` is set it renders a confirm button that POSTs back
     (so a link-prefetcher that merely GETs the URL never actuates the decision)."""
     from html import escape
+
     form = ""
     if form_token:
-        form = (f'<form method="post" action="/flow/approve">'
-                f'<input type="hidden" name="token" value="{escape(form_token)}">'
-                f'<button type="submit" style="font-size:16px;padding:10px 22px;'
-                f'border-radius:8px;border:1px solid #888;cursor:pointer;">Confirm</button>'
-                f'</form>')
-    html = (f"<!doctype html><meta charset=utf-8><meta name=viewport "
-            f'content="width=device-width,initial-scale=1">'
-            f"<title>{escape(title)}</title>"
-            f'<div style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;'
-            f'padding:0 20px;text-align:center;">'
-            f"<h2>{escape(title)}</h2><p>{escape(message)}</p>{form}</div>")
+        form = (
+            f'<form method="post" action="/flow/approve">'
+            f'<input type="hidden" name="token" value="{escape(form_token)}">'
+            f'<button type="submit" style="font-size:16px;padding:10px 22px;'
+            f'border-radius:8px;border:1px solid #888;cursor:pointer;">Confirm</button>'
+            f"</form>"
+        )
+    html = (
+        f"<!doctype html><meta charset=utf-8><meta name=viewport "
+        f'content="width=device-width,initial-scale=1">'
+        f"<title>{escape(title)}</title>"
+        f'<div style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;'
+        f'padding:0 20px;text-align:center;">'
+        f"<h2>{escape(title)}</h2><p>{escape(message)}</p>{form}</div>"
+    )
     return HTMLResponse(html, status_code=status)
 
 
@@ -5961,6 +6293,7 @@ def _load_paused_approval_run(token: str):
     points at a run currently paused on an approval; else ``(None, reason)``."""
     from maverick.flow import store
     from maverick.flow.approvals import verify_token
+
     claim = verify_token(token)
     if not claim:
         return None, "This approval link is invalid or has expired.", ""
@@ -5969,27 +6302,33 @@ def _load_paused_approval_run(token: str):
     if tenant:
         try:
             from maverick.tenant.registry import assert_tenant_active
+
             assert_tenant_active(tenant)
         except Exception:
             return None, "That tenant is not active.", tenant
         from maverick.paths import set_tenant
+
         tenant_token = set_tenant(tenant)
     try:
         run = store.load_run(claim["run_id"])
     finally:
         if tenant_token is not None:
             from maverick.paths import reset_tenant
+
             reset_tenant(tenant_token)
     if run is None:
         return None, "That flow run no longer exists.", tenant
     if run.status != "paused_approval":
         return None, f"This run is no longer awaiting approval (status: {run.status}).", tenant
-    if (str(run.cursor or "") != claim.get("cursor")
-            or str(run.prompt or "") != claim.get("prompt")
-            or float(run.updated or 0.0) != float(claim.get("updated", -1.0))):
+    if (
+        str(run.cursor or "") != claim.get("cursor")
+        or str(run.prompt or "") != claim.get("prompt")
+        or float(run.updated or 0.0) != float(claim.get("updated", -1.0))
+    ):
         return None, "This approval link is for an older approval step.", tenant
-    if (str((run.human or {}).get("assignee") or "") != claim.get("assignee", "")
-            or str(run.owner or "") != claim.get("owner", "")):
+    if str((run.human or {}).get("assignee") or "") != claim.get("assignee", "") or str(
+        run.owner or ""
+    ) != claim.get("owner", ""):
         return None, "This approval link is for a different approver scope.", tenant
     return run, claim["decision"], tenant
 
@@ -6022,6 +6361,7 @@ async def flow_approve_confirm(request: Request, token: str = "") -> HTMLRespons
     that pre-fetches the URL cannot silently actuate a decision. The token binds
     the pause while dashboard authentication proves the approver identity."""
     from maverick import flow
+
     if not flow.enabled():
         raise HTTPException(status_code=404, detail="the flow engine is off")
     run, decision, _tenant = _load_paused_approval_run(token)
@@ -6031,7 +6371,9 @@ async def flow_approve_confirm(request: Request, token: str = "") -> HTMLRespons
         _approval_link_actor(request, run)
     except HTTPException as exc:
         return _flow_approve_page(
-            "Approval unavailable", str(exc.detail), status=exc.status_code,
+            "Approval unavailable",
+            str(exc.detail),
+            status=exc.status_code,
         )
     verb = "approve" if decision == "approved" else "reject"
     name = run.flow_id
@@ -6039,7 +6381,8 @@ async def flow_approve_confirm(request: Request, token: str = "") -> HTMLRespons
         f"Confirm: {verb} this flow?",
         f"“{name}” is paused: {run.prompt or 'awaiting your decision'}. "
         f"Click Confirm to {verb} and resume it.",
-        form_token=token)
+        form_token=token,
+    )
 
 
 @app.post("/flow/approve", response_class=HTMLResponse)
@@ -6048,6 +6391,7 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
     decision the token carries. Idempotent -- a second click finds the run no
     longer paused and reports that instead of re-resuming."""
     from maverick import flow
+
     if not flow.enabled():
         raise HTTPException(status_code=404, detail="the flow engine is off")
     run, decision, tenant = _load_paused_approval_run(token)
@@ -6057,14 +6401,21 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
         decided_by = _approval_link_actor(request, run)
     except HTTPException as exc:
         return _flow_approve_page(
-            "Approval unavailable", str(exc.detail), status=exc.status_code,
+            "Approval unavailable",
+            str(exc.detail),
+            status=exc.status_code,
         )
     from maverick.flow import store as flow_store
 
     from maverick_dashboard import automation_queue as aq
+
     try:
         aq.enqueue_flow_resume(
-            run.flow_id, run.run_id, decision, run.owner, tenant=tenant,
+            run.flow_id,
+            run.run_id,
+            decision,
+            run.owner,
+            tenant=tenant,
             decided_by=decided_by,
         )
     except flow_store.FlowSnapshotError:
@@ -6074,9 +6425,10 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
             status=410,
         )
     verb = "approved" if decision == "approved" else "rejected"
-    return _flow_approve_page("Thanks — recorded",
-                              f"You {verb} “{run.flow_id}”. It is resuming now; "
-                              f"you can close this page.")
+    return _flow_approve_page(
+        "Thanks — recorded",
+        f"You {verb} “{run.flow_id}”. It is resuming now; you can close this page.",
+    )
 
 
 @app.post("/form/{token}")
@@ -6087,13 +6439,15 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
     path is the addressing secret, the body is size/field-bounded, and firing is
     rate-limited. Gated on event triggers being enabled (404 otherwise)."""
     from maverick import automation_events
+
     if not automation_events.enabled():
         raise HTTPException(status_code=404, detail="event triggers are disabled")
     fields: dict = {}
     ctype = request.headers.get("content-type", "")
     if "application/json" in ctype:
-        body = await _read_limited_webhook_body(request)   # bounded read (shared cap)
+        body = await _read_limited_webhook_body(request)  # bounded read (shared cap)
         import json as _json
+
         try:
             parsed = _json.loads(body or b"{}")
         except ValueError as e:
@@ -6107,6 +6461,7 @@ async def form_submit(request: Request, token: str) -> JSONResponse:
         fields = {k: str(v) for k, v in form.items()}
     check_goal_rate_limit(request, source="form")
     from maverick import form_store
+
     seq = form_store.append(token, fields)
     return JSONResponse({"ok": True, "seq": seq}, status_code=201)
 
@@ -6193,9 +6548,11 @@ async def webhook_gitlab(request: Request, bg: BackgroundTasks) -> JSONResponse:
     if not secret:
         raise HTTPException(
             status_code=401,
-            detail=("GitLab webhooks aren't set up yet — an administrator must "
-                    "configure the shared webhook token (the "
-                    "MAVERICK_GITLAB_WEBHOOK_TOKEN environment variable)."),
+            detail=(
+                "GitLab webhooks aren't set up yet — an administrator must "
+                "configure the shared webhook token (the "
+                "MAVERICK_GITLAB_WEBHOOK_TOKEN environment variable)."
+            ),
         )
     if not verify_gitlab_token(request.headers.get("X-Gitlab-Token"), secret):
         raise HTTPException(status_code=403, detail="bad webhook token")
@@ -6224,6 +6581,7 @@ async def webhook_gitlab(request: Request, bg: BackgroundTasks) -> JSONResponse:
     title = f"{event.issue_id}: {event.title}".strip()
     goal_id = w.create_goal(title[:200], build_brief(event)[:8000], owner="")
     from maverick.runner import run_goal_in_background_async
+
     bg.add_task(run_goal_in_background_async, goal_id, None)
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
@@ -6249,6 +6607,7 @@ def _shared_issue_webhook_seen(signature: str) -> bool | None:
     drop webhooks; the HMAC + freshness checks still hold."""
     try:
         from maverick.world_model_backends import is_postgres_configured
+
         if not is_postgres_configured():
             return None
         # True == first writer (not previously seen) -> NOT a replay.
@@ -6288,7 +6647,10 @@ def _issue_webhook_replay_seen(signature: str, ttl_seconds: int) -> bool:
 
 
 async def _handle_issue_webhook(
-    provider: str, sig_header: str, request: Request, bg: BackgroundTasks,
+    provider: str,
+    sig_header: str,
+    request: Request,
+    bg: BackgroundTasks,
 ) -> JSONResponse:
     """Shared handler for inbound issue-assigned webhooks (Linear/Jira).
 
@@ -6359,6 +6721,7 @@ async def _handle_issue_webhook(
     # Webhook-driven goal: no authenticated principal -> unowned ("").
     goal_id = w.create_goal(title[:200], build_brief(event)[:8000], owner="")
     from maverick.runner import run_goal_in_background_async
+
     bg.add_task(run_goal_in_background_async, goal_id, None)
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
@@ -6375,6 +6738,7 @@ def _goal_deliverable(g):
     try:
         from maverick.deliverable import render_deliverable
         from maverick.domain import available_domains, enforced_gate
+
         prof = available_domains().get(g.domain) if g.domain else None
         if prof is None:
             return None, None
@@ -6383,9 +6747,13 @@ def _goal_deliverable(g):
         if not rendered.structured and not gate:
             return None, None
         out = prof.output
-        contract = {"shape": out.shape, "deliverable": out.deliverable,
-                    "consumers": list(out.consumers), "cadence": out.cadence,
-                    "gate": gate}
+        contract = {
+            "shape": out.shape,
+            "deliverable": out.deliverable,
+            "consumers": list(out.consumers),
+            "cadence": out.cadence,
+            "gate": gate,
+        }
         return contract, rendered
     except Exception:  # never 500 the goal page if the factory layer is unavailable
         return None, None
@@ -6417,10 +6785,17 @@ async def chat_goal(request: Request, goal_id: int) -> HTMLResponse:
     except Exception:  # pragma: no cover -- never 500 the goal page
         share_links = []
     return templates.TemplateResponse(
-        request, "chat_goal.html",
-        {"goal": g, "deliverable": contract, "rendered": rendered,
-         "signoff": signoff, "artifacts": artifacts, "projects": projects,
-         "share_links": share_links},
+        request,
+        "chat_goal.html",
+        {
+            "goal": g,
+            "deliverable": contract,
+            "rendered": rendered,
+            "signoff": signoff,
+            "artifacts": artifacts,
+            "projects": projects,
+            "share_links": share_links,
+        },
     )
 
 
@@ -6430,6 +6805,7 @@ def _goal_artifacts(w, goal_id: int) -> list[dict]:
     back to text. ``[]`` if the goal has none (the panel then doesn't render)."""
     try:
         from maverick.deliverable import render_deliverable
+
         out: list[dict] = []
         for a in w.latest_artifacts(goal_id):
             shape = "table" if a.get("kind") == "table" else "prose"
@@ -6450,7 +6826,9 @@ async def shared_goal(request: Request, token: str) -> HTMLResponse:
     w = _world()
     goal_id = w.resolve_share_link(token)
     if goal_id is None:
-        raise HTTPException(status_code=404, detail="this share link is invalid, revoked, or expired")
+        raise HTTPException(
+            status_code=404, detail="this share link is invalid, revoked, or expired"
+        )
     g = w.get_goal(goal_id)
     if g is None:  # pragma: no cover -- link resolved but goal gone
         raise HTTPException(status_code=404, detail="not found")
@@ -6464,13 +6842,15 @@ async def shared_goal(request: Request, token: str) -> HTMLResponse:
             available_domains,
             deliverable_release_allowed,
         )
+
         prof = available_domains().get(g.domain) if g.domain else None
         if g.domain and prof is None:
             # A removed/renamed pack is unavailable policy, not an ungated
             # pack. Existing copied tokens must fail closed.
             raise HTTPException(status_code=404, detail="not found")
         if prof is not None and not deliverable_release_allowed(
-            prof, w.signoff_for(goal_id),
+            prof,
+            w.signoff_for(goal_id),
         ):
             raise HTTPException(status_code=404, detail="not found")
     except HTTPException:
@@ -6495,8 +6875,10 @@ async def shared_goal(request: Request, token: str) -> HTMLResponse:
         except Exception as exc:
             raise HTTPException(status_code=404, detail="not found") from exc
     return templates.TemplateResponse(
-        request, "shared_goal.html",
-        {"goal": g, "deliverable": contract, "rendered": rendered, "artifacts": artifacts})
+        request,
+        "shared_goal.html",
+        {"goal": g, "deliverable": contract, "rendered": rendered, "artifacts": artifacts},
+    )
 
 
 @app.get("/api/goal/{goal_id}")
@@ -6562,12 +6944,12 @@ def _build_plan_tree(world, goal_id: int, depth_cap: int = 6) -> dict:
     nodes: dict[int, dict] = {}
     for r in rows:
         nodes[r["id"]] = {
-            "id":        r["id"],
+            "id": r["id"],
             "parent_id": r["parent_id"],
-            "title":     _dec_field(r["title"]),
-            "status":    r["status"],
-            "dollars":   float(r["dollars"] or 0.0),
-            "children":  [],
+            "title": _dec_field(r["title"]),
+            "status": r["status"],
+            "dollars": float(r["dollars"] or 0.0),
+            "children": [],
         }
     # Assemble children lists. Per-parent fan-out cap stays at 50 to
     # match the prior LIMIT (truncates noisy fan-outs in the UI).
@@ -6579,9 +6961,12 @@ def _build_plan_tree(world, goal_id: int, depth_cap: int = 6) -> dict:
     root_node = nodes.get(goal_id)
     if root_node is None:
         return {
-            "id": root.id, "parent_id": root.parent_id,
-            "title": root.title, "status": root.status,
-            "dollars": 0.0, "children": [],
+            "id": root.id,
+            "parent_id": root.parent_id,
+            "title": root.title,
+            "status": root.status,
+            "dollars": 0.0,
+            "children": [],
         }
     return root_node
 
@@ -6610,6 +6995,7 @@ async def goal_minimap(request: Request, goal_id: int, depth: int = 3) -> PlainT
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from maverick.plan_minimap import render_minimap
+
     try:
         depth = max(0, min(int(depth), 8))
     except (TypeError, ValueError):
@@ -6635,10 +7021,7 @@ def _render_tree_html(node: dict) -> str:
         return _html.escape(str(s), quote=True) if s is not None else ""
 
     def _render(n: dict) -> str:
-        dollars_html = (
-            f' <span class="cost">${n["dollars"]:.4f}</span>'
-            if n.get("dollars") else ""
-        )
+        dollars_html = f' <span class="cost">${n["dollars"]:.4f}</span>' if n.get("dollars") else ""
         node_html = (
             f'<a class="node" href="/goals#{n["id"]}">'
             f'<span class="nid">#{_esc(n["id"])}</span> '
@@ -6667,7 +7050,8 @@ async def plan_tree_page(request: Request, goal_id: int) -> HTMLResponse:
     root = _build_plan_tree(w, goal_id)
     tree_html = _render_tree_html(root)
     return templates.TemplateResponse(
-        request, "plan_tree.html",
+        request,
+        "plan_tree.html",
         {"goal": g, "root": root, "tree_html": tree_html},
     )
 
@@ -6682,7 +7066,8 @@ async def trajectory_page(request: Request, goal_id: int) -> HTMLResponse:
     assert_goal_access(request, g)
     events = w.goal_events(goal_id, limit=10_000)
     return templates.TemplateResponse(
-        request, "trajectory.html",
+        request,
+        "trajectory.html",
         {"goal": g, "events": events},
     )
 
@@ -6697,7 +7082,8 @@ async def errors_page(request: Request, goal_id: int) -> HTMLResponse:
     assert_goal_access(request, g)
     errors = [e for e in w.goal_events(goal_id, limit=10_000) if e.kind == "error"]
     return templates.TemplateResponse(
-        request, "errors.html",
+        request,
+        "errors.html",
         {"goal": g, "errors": errors},
     )
 
@@ -6729,9 +7115,7 @@ async def cost_csv(request: Request, month: str | None = None) -> StreamingRespo
     end_ts: float | None = None
     if month:
         try:
-            start = _dt.datetime.strptime(month, "%Y-%m").replace(
-                tzinfo=_dt.timezone.utc
-            )
+            start = _dt.datetime.strptime(month, "%Y-%m").replace(tzinfo=_dt.timezone.utc)
             # episodes.started_at is a UTC epoch, so build the window in UTC --
             # a naive strptime().timestamp() interprets midnight in the server's
             # LOCAL zone, shifting the month boundary by the UTC offset (the CSV
@@ -6744,17 +7128,28 @@ async def cost_csv(request: Request, month: str | None = None) -> StreamingRespo
                 nxt = start.replace(month=start.month + 1)
         except ValueError:
             # Don't echo strptime's internals (e.g. "unconverted data remains").
-            raise HTTPException(status_code=400, detail="month must be YYYY-MM (e.g. 2026-04)") from None
+            raise HTTPException(
+                status_code=400, detail="month must be YYYY-MM (e.g. 2026-04)"
+            ) from None
         start_ts = start.timestamp()
         end_ts = nxt.timestamp()
 
     def generate():
         buf = _io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow([
-            "episode_id", "goal_id", "started_at", "ended_at", "outcome",
-            "dollars", "input_tokens", "output_tokens", "tool_calls",
-        ])
+        writer.writerow(
+            [
+                "episode_id",
+                "goal_id",
+                "started_at",
+                "ended_at",
+                "outcome",
+                "dollars",
+                "input_tokens",
+                "output_tokens",
+                "tool_calls",
+            ]
+        )
         yield buf.getvalue()
         buf.seek(0)
         buf.truncate(0)
@@ -6782,28 +7177,39 @@ async def cost_csv(request: Request, month: str | None = None) -> StreamingRespo
         # outcome is a sealed column when at-rest encryption is on; this CSV reads
         # it via raw SQL, so decrypt it like the WorldModel accessors do.
         from maverick.world_model import _dec_field
+
         for row in w.conn.execute(sql, params):
-            writer.writerow([
-                row["id"], row["goal_id"],
-                row["started_at"], row["ended_at"] or "",
-                _dec_field(row["outcome"]) or "",
-                f"{(row['cost_dollars'] or 0):.6f}",
-                row["input_tokens"], row["output_tokens"], row["tool_calls"],
-            ])
+            writer.writerow(
+                [
+                    row["id"],
+                    row["goal_id"],
+                    row["started_at"],
+                    row["ended_at"] or "",
+                    _dec_field(row["outcome"]) or "",
+                    f"{(row['cost_dollars'] or 0):.6f}",
+                    row["input_tokens"],
+                    row["output_tokens"],
+                    row["tool_calls"],
+                ]
+            )
             yield buf.getvalue()
             buf.seek(0)
             buf.truncate(0)
 
     fname = f"maverick-cost-{month}.csv" if month else "maverick-cost-all.csv"
     return StreamingResponse(
-        generate(), media_type="text/csv",
+        generate(),
+        media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 
 
 @app.get("/api/goal/{goal_id}/events")
 async def api_goal_events_legacy(
-    request: Request, goal_id: int, since: int = 0, limit: int = 200,
+    request: Request,
+    goal_id: int,
+    since: int = 0,
+    limit: int = 200,
 ) -> dict:
     w = _world()
     g = w.get_goal(goal_id)
@@ -6817,8 +7223,7 @@ async def api_goal_events_legacy(
         "result": g.result or "",
         "next_id": events[-1].id if events else since,
         "events": [
-            {"id": e.id, "agent": e.agent, "kind": e.kind,
-             "content": e.content, "ts": e.ts}
+            {"id": e.id, "agent": e.agent, "kind": e.kind, "content": e.content, "ts": e.ts}
             for e in events
         ],
     }
@@ -6828,7 +7233,9 @@ _SSE_MAX_BATCH = 200  # events per poll read (module-level so tests can shrink i
 
 
 @app.get("/api/goal/{goal_id}/events/stream")
-async def api_goal_events_stream(request: Request, goal_id: int, since: int = 0) -> StreamingResponse:
+async def api_goal_events_stream(
+    request: Request, goal_id: int, since: int = 0
+) -> StreamingResponse:
     """Server-Sent Events stream of new goal events.
 
     Council perf-seat fix: client polled this route every 2s (visible
@@ -6865,10 +7272,10 @@ async def api_goal_events_stream(request: Request, goal_id: int, since: int = 0)
     await sem.acquire()
 
     TERMINAL = ("done", "cancelled", "failed")
-    POLL_INTERVAL = 0.5            # server-side cadence
-    MAX_POLL_INTERVAL = 5.0        # cap idle backoff to reduce DB churn
-    IDLE_HEARTBEAT_EVERY = 30      # send a comment line so proxies don't time out
-    MAX_STREAM_SECONDS = 300       # lifetime cap per SSE stream
+    POLL_INTERVAL = 0.5  # server-side cadence
+    MAX_POLL_INTERVAL = 5.0  # cap idle backoff to reduce DB churn
+    IDLE_HEARTBEAT_EVERY = 30  # send a comment line so proxies don't time out
+    MAX_STREAM_SECONDS = 300  # lifetime cap per SSE stream
     MAX_BATCH = _SSE_MAX_BATCH
 
     # EventSource reconnects on its own (a network blip, a proxy timeout,
@@ -6894,17 +7301,18 @@ async def api_goal_events_stream(request: Request, goal_id: int, since: int = 0)
         try:
             while True:
                 if (_asyncio.get_running_loop().time() - started) >= MAX_STREAM_SECONDS:
-                    yield "event: timeout\ndata: {\"detail\": \"stream lifetime exceeded\"}\n\n"
+                    yield 'event: timeout\ndata: {"detail": "stream lifetime exceeded"}\n\n'
                     return
                 # Offload the blocking, lock-held SQLite reads so this 0.5s
                 # poll loop doesn't run them on the event loop (which would
                 # stall every other request/stream while the query holds the
                 # world-DB lock).
                 events = await run_in_threadpool(
-                    w.goal_events, goal_id, since_id=sid, limit=MAX_BATCH)
+                    w.goal_events, goal_id, since_id=sid, limit=MAX_BATCH
+                )
                 g = await run_in_threadpool(w.get_goal, goal_id)
                 if g is None:
-                    yield "event: error\ndata: {\"detail\": \"goal vanished\"}\n\n"
+                    yield 'event: error\ndata: {"detail": "goal vanished"}\n\n'
                     return
                 if events:
                     sid = events[-1].id
@@ -6913,8 +7321,13 @@ async def api_goal_events_stream(request: Request, goal_id: int, since: int = 0)
                         "result": g.result or "",
                         "next_id": sid,
                         "events": [
-                            {"id": e.id, "agent": e.agent, "kind": e.kind,
-                             "content": e.content, "ts": e.ts}
+                            {
+                                "id": e.id,
+                                "agent": e.agent,
+                                "kind": e.kind,
+                                "content": e.content,
+                                "ts": e.ts,
+                            }
                             for e in events
                         ],
                     }
@@ -7055,9 +7468,11 @@ async def graph_editor_page(request: Request) -> HTMLResponse:
     Layout comes from the server (GET /api/v1/goal-tree); the page JS only
     draws and posts edits (retitle / re-parent / add child)."""
     from .goal_tree import forest_html, goal_nodes
+
     nodes = goal_nodes(_world(), owner=goal_owner_filter(request))
     return templates.TemplateResponse(
-        request, "graph_editor.html",
+        request,
+        "graph_editor.html",
         {"node_count": len(nodes), "fallback_html": forest_html(nodes)},
     )
 
@@ -7069,9 +7484,12 @@ async def goal_builder_page(request: Request) -> HTMLResponse:
 
 
 @app.get("/workflow-builder", response_class=HTMLResponse)
-async def workflow_builder_page(request: Request, template: str | None = None,
-                                edit: str | None = None,
-                                edit_agent: str | None = None) -> HTMLResponse:
+async def workflow_builder_page(
+    request: Request,
+    template: str | None = None,
+    edit: str | None = None,
+    edit_agent: str | None = None,
+) -> HTMLResponse:
     """AI workflow builder: draft a reusable workflow from a brief or an
     uploaded document, edit it, then save it as a runnable template.
 
@@ -7082,6 +7500,7 @@ async def workflow_builder_page(request: Request, template: str | None = None,
     existing agent (round-tripping override fields the builder can't show, so
     editing can't silently clear them). An unknown name yields no prefill."""
     from maverick.config import get_features
+
     feats = get_features()
     prefill = None
     edit_prefill = None
@@ -7091,10 +7510,12 @@ async def workflow_builder_page(request: Request, template: str | None = None,
     # this before loading the requested agent so a non-admin deep-link cannot
     # receive pack internals embedded in page JavaScript.
     from .api import pack_editing_denial
+
     pack_editing_allowed = pack_editing_denial(request) is None
     edit_agent_denied = str(edit_agent or "") if edit_agent and not pack_editing_allowed else ""
     if edit_agent and pack_editing_allowed:
         from maverick.domain_edit import read_override, resolved_view
+
         try:
             view = resolved_view(edit_agent)
         except Exception:
@@ -7106,8 +7527,11 @@ async def workflow_builder_page(request: Request, template: str | None = None,
                 raw = {}
             # Preserve the explicitly-overridden fields the builder doesn't
             # expose, so a save (which replaces the override) can't drop them.
-            preserve = {k: raw[k] for k in ("knowledge_sources", "models",
-                                            "compartment", "extends") if k in raw}
+            preserve = {
+                k: raw[k]
+                for k in ("knowledge_sources", "models", "compartment", "extends")
+                if k in raw
+            }
             edit_agent_prefill = {
                 "name": view.get("name", edit_agent),
                 "description": view.get("description", ""),
@@ -7120,25 +7544,33 @@ async def workflow_builder_page(request: Request, template: str | None = None,
             }
     elif edit:
         from maverick.templates import load_template
+
         try:
             t = load_template(edit)
-            edit_prefill = {"name": t.name, "title": t.title, "body": t.body,
-                            "params": list(t.params), "budget_dollars": t.budget_dollars,
-                            # Carry the wall-seconds cap so a save round-trip can't
-                            # silently reset it to the schema default (3600).
-                            "budget_wall_seconds": t.budget_wall_seconds,
-                            "generation": t.generation}
+            edit_prefill = {
+                "name": t.name,
+                "title": t.title,
+                "body": t.body,
+                "params": list(t.params),
+                "budget_dollars": t.budget_dollars,
+                # Carry the wall-seconds cap so a save round-trip can't
+                # silently reset it to the schema default (3600).
+                "budget_wall_seconds": t.budget_wall_seconds,
+                "generation": t.generation,
+            }
         except (ValueError, FileNotFoundError):
             edit_prefill = None
     elif template:
         from maverick.templates import load_template
+
         try:
             tpl = load_template(template)
             prefill = {"name": tpl.name, "params": list(tpl.params), "title": tpl.title}
         except (ValueError, FileNotFoundError):
             prefill = None
     return templates.TemplateResponse(
-        request, "workflow_builder.html",
+        request,
+        "workflow_builder.html",
         {
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
@@ -7160,7 +7592,8 @@ async def get_started_page(request: Request) -> HTMLResponse:
 
     state = build(_world())
     return templates.TemplateResponse(
-        request, "get_started.html",
+        request,
+        "get_started.html",
         state,
     )
 
@@ -7172,6 +7605,7 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
     is the management index; /templates remains the browse-the-catalog page.)"""
     from maverick.config import get_features
     from maverick.templates import load_template, user_templates_dir
+
     feats = get_features()
     tpls: list[dict] = []
     try:
@@ -7186,8 +7620,8 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
             continue
     try:
         from maverick.domain_edit import list_agents
-        playbooks = [a for a in list_agents()
-                     if a.get("is_override") and a.get("has_workflow")]
+
+        playbooks = [a for a in list_agents() if a.get("is_override") and a.get("has_workflow")]
     except Exception:
         playbooks = []
     # Unify the surface: saved flow graphs live here too, not on a separate page.
@@ -7195,14 +7629,17 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
     flows_enabled = False
     try:
         from maverick import flow as _flow
+
         flows_enabled = _flow.enabled()
         if flows_enabled:
             from maverick.flow import store as _flow_store
+
             flows = _flow_store.list_flow_summaries()
     except Exception:  # pragma: no cover -- never block the page on the flow engine
         flows = []
     return templates.TemplateResponse(
-        request, "workflows_index.html",
+        request,
+        "workflows_index.html",
         {
             "templates": tpls,
             "playbooks": playbooks,
@@ -7231,8 +7668,9 @@ async def connections_page(request: Request) -> HTMLResponse:
 
 @app.get("/flows/designer", response_class=HTMLResponse)
 @app.get("/flows/designer/{flow_id}", response_class=HTMLResponse)
-async def flow_designer_page(request: Request, flow_id: str = "",
-                             from_template: str = "") -> HTMLResponse:
+async def flow_designer_page(
+    request: Request, flow_id: str = "", from_template: str = ""
+) -> HTMLResponse:
     """The visual flow designer -- a canvas node editor + the natural-language
     drafter + the copilot chat. Talks to the /api/v1/flows endpoints; the
     flow-engine gate is enforced there, so the page renders even when flows are
@@ -7246,16 +7684,18 @@ async def flow_designer_page(request: Request, flow_id: str = "",
     if from_template:
         try:
             from maverick.templates import load_template
+
             tpl = load_template(from_template)
             from maverick.flow.ir import single_agent_flow
+
             body = getattr(tpl, "body", "") or getattr(tpl, "title", "") or from_template
             seed = single_agent_flow("", tpl.title or from_template, str(body)[:8000])
             seed_flow = seed.to_dict()
         except (ValueError, FileNotFoundError):
-            seed_flow = None    # unknown template -> a blank canvas, not a 500
+            seed_flow = None  # unknown template -> a blank canvas, not a 500
     return templates.TemplateResponse(
-        request, "flow_designer.html",
-        {"flow_id": flow_id, "seed_flow": seed_flow})
+        request, "flow_designer.html", {"flow_id": flow_id, "seed_flow": seed_flow}
+    )
 
 
 @app.get("/flows/{flow_id}/runs/{run_id}", response_class=HTMLResponse)
@@ -7265,7 +7705,8 @@ async def flow_run_page(request: Request, flow_id: str, run_id: str) -> HTMLResp
     failed step). Data comes from /api/v1/flows/runs/{run_id} client-side, so
     owner-scoping and the flow-engine gate are enforced by the API."""
     return templates.TemplateResponse(
-        request, "flow_run.html", {"flow_id": flow_id, "run_id": run_id})
+        request, "flow_run.html", {"flow_id": flow_id, "run_id": run_id}
+    )
 
 
 @app.get("/automations", response_class=HTMLResponse)
@@ -7274,14 +7715,17 @@ async def automations_page(request: Request) -> HTMLResponse:
     webhook triggers. The page lists the existing /api/v1/schedules and
     /api/v1/triggers; each section is hidden when its [features] knob is off."""
     from maverick.config import get_features
+
     feats = get_features()
     try:
         from maverick.automation_import import enabled as _import_enabled
+
         import_enabled = _import_enabled()
     except Exception:  # pragma: no cover -- never block the page on the feature
         import_enabled = False
     try:
         from maverick.automation_events import enabled as _events_enabled
+
         event_triggers_enabled = _events_enabled()
     except Exception:  # pragma: no cover
         event_triggers_enabled = False
@@ -7292,32 +7736,41 @@ async def automations_page(request: Request) -> HTMLResponse:
     schedule_count = trigger_count = event_trigger_count = 0
     try:
         from maverick.job_queue import JobQueue
+
         schedule_count = sum(
-            1 for j in JobQueue().list(status="pending")
+            1
+            for j in JobQueue().list(status="pending")
             if (j.payload or {}).get("__cron__")
-            and (owner is None or (j.payload or {}).get("owner") == owner))
+            and (owner is None or (j.payload or {}).get("owner") == owner)
+        )
     except Exception:  # pragma: no cover - the hero count is best-effort
         pass
     try:
         from . import triggers_store
+
         trigger_count = sum(
-            1 for t in triggers_store.list_triggers()
-            if owner is None or t.get("owner", "") == owner)
+            1
+            for t in triggers_store.list_triggers()
+            if owner is None or t.get("owner", "") == owner
+        )
     except Exception:  # pragma: no cover - the hero count is best-effort
         pass
     try:
         from maverick.paths import current_tenant_id
 
         from . import event_triggers_store
+
         tenant = current_tenant_id() or ""
         event_trigger_count = sum(
-            1 for t in event_triggers_store.list_triggers()
-            if t.get("tenant", "") == tenant
-            and (owner is None or t.get("owner", "") == owner))
+            1
+            for t in event_triggers_store.list_triggers()
+            if t.get("tenant", "") == tenant and (owner is None or t.get("owner", "") == owner)
+        )
     except Exception:  # pragma: no cover - the hero count is best-effort
         pass
     return templates.TemplateResponse(
-        request, "automations.html",
+        request,
+        "automations.html",
         {
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
@@ -7336,8 +7789,7 @@ async def embed_demo_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "embed_demo.html", {})
 
 
-def _sparkline_points(values: list[float], width: int = 160, height: int = 36,
-                      pad: int = 3) -> str:
+def _sparkline_points(values: list[float], width: int = 160, height: int = 36, pad: int = 3) -> str:
     """SVG polyline ``points`` for a score series (server-side sparkline)."""
     if not values:
         return ""
@@ -7361,6 +7813,7 @@ async def benchmarks_page(request: Request) -> HTMLResponse:
     shown or invented here — see docs/comparison.md for the qualitative
     comparison."""
     from .api import _benchmark_snapshot
+
     snap = _benchmark_snapshot()
     for s in snap["suites"]:
         s["spark"] = _sparkline_points([e["score"] for e in s["entries"]])
@@ -7375,11 +7828,11 @@ async def walkthroughs_page(request: Request) -> HTMLResponse:
     a captions track when the export produced one. The export itself is
     POST /api/v1/goals/{id}/walkthrough (replay-to-MP4 machinery)."""
     from .api import _walkthroughs_dir
+
     d = _walkthroughs_dir()
     items = []
     if d.is_dir():
-        for p in sorted(d.glob("*.mp4"), key=lambda q: q.stat().st_mtime,
-                        reverse=True):
+        for p in sorted(d.glob("*.mp4"), key=lambda q: q.stat().st_mtime, reverse=True):
             try:
                 goal_id = _walkthrough_goal_id(p.name)
             except HTTPException:
@@ -7388,17 +7841,21 @@ async def walkthroughs_page(request: Request) -> HTMLResponse:
             if g is None or not can_access_goal(request, g):
                 continue
             captions = p.with_suffix(".vtt")
-            items.append({
-                "name": p.name,
-                "size_mb": round(p.stat().st_size / 1_048_576, 2),
-                "mtime": p.stat().st_mtime,
-                "captions": captions.name if captions.exists() else None,
-                "goal_id": goal_id,
-            })
+            items.append(
+                {
+                    "name": p.name,
+                    "size_mb": round(p.stat().st_size / 1_048_576, 2),
+                    "mtime": p.stat().st_mtime,
+                    "captions": captions.name if captions.exists() else None,
+                    "goal_id": goal_id,
+                }
+            )
     # NB: not named "dir" — the context processor injects the page's text
     # direction under that key (RTL support) and would shadow it.
     return templates.TemplateResponse(
-        request, "walkthroughs.html", {"items": items, "artifact_dir": str(d)},
+        request,
+        "walkthroughs.html",
+        {"items": items, "artifact_dir": str(d)},
     )
 
 
@@ -7427,6 +7884,7 @@ def _assert_walkthrough_access(request: Request, name: str) -> int:
 async def walkthrough_media(request: Request, name: str) -> FileResponse:
     """Serve one exported walkthrough artifact after checking goal access."""
     from .api import _walkthroughs_dir
+
     _assert_walkthrough_access(request, name)
     path = _walkthroughs_dir() / name
     if not path.is_file():
@@ -7444,9 +7902,11 @@ async def plan_tree_3d_page(request: Request) -> HTMLResponse:
     readers. WebXR shows an "Enter VR" button only when the browser reports
     support."""
     from .goal_tree import forest_html, goal_nodes
+
     nodes = goal_nodes(_world(), owner=goal_owner_filter(request))
     return templates.TemplateResponse(
-        request, "plan_tree_3d.html",
+        request,
+        "plan_tree_3d.html",
         {"node_count": len(nodes), "fallback_html": forest_html(nodes)},
     )
 
@@ -7528,6 +7988,7 @@ def main() -> None:
     # inherited raw uvicorn logging with none of the CLI's hygiene.
     try:
         from maverick.logging_config import configure_logging
+
         configure_logging()
     except Exception:  # pragma: no cover - logging setup never blocks startup
         pass
@@ -7537,6 +7998,7 @@ def main() -> None:
     # `maverick config-lint`. Warn-only unless MAVERICK_CONFIG_STRICT=1.
     try:
         from maverick.config_lint import warn_config_at_startup
+
         warn_config_at_startup()
     except SystemExit:
         raise
@@ -7544,6 +8006,7 @@ def main() -> None:
         pass
 
     import uvicorn
+
     # JSON logging consistency: uvicorn installs its OWN plaintext access/error
     # formatters by default, so even after configure_logging() switches the root
     # handler to JSON the access lines stayed plaintext -- a mixed JSON+text
@@ -7553,8 +8016,7 @@ def main() -> None:
     # uvicorn keeps its colored default for the local-dev experience.
     _json_logs = os.environ.get("MAVERICK_LOG_FORMAT", "text").strip().lower() == "json"
     if _json_logs:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info",
-                    log_config=None)
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info", log_config=None)
     else:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 

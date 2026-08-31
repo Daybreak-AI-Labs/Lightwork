@@ -1654,6 +1654,13 @@ def pick_assessments() -> dict[str, Any]:
             default=False,
         )
     )
+    privacy_drop_management = privacy_rights_orchestration and _q_confirm(
+        "Enable California DROP deletion and permanent opt-out management? "
+        "DROP records, subject bindings, DSAR submission and terminal outcome "
+        "evidence must be independently enrolled; this does not enable a live "
+        "California provider connection or make a legal-compliance claim.",
+        default=False,
+    )
     privacy_notice_governance = _q_confirm(
         "Enable governed Privacy Automation notice approvals and publication "
         "intents? Notice content stays external and publication remains local "
@@ -1775,6 +1782,7 @@ def pick_assessments() -> dict[str, Any]:
         or privacy_rights_consumer_delivery
         or privacy_rights_consumer_intake
         or privacy_ott_ctv_rights
+        or privacy_drop_management
         or privacy_notice_governance
     ):
         out["privacy_automation"] = {
@@ -1798,6 +1806,10 @@ def pick_assessments() -> dict[str, Any]:
             },
             "ott_ctv_rights": {
                 "enable": privacy_ott_ctv_rights,
+            },
+            "drop_management": {
+                "enable": privacy_drop_management,
+                "retention_seconds": 31_536_000,
             },
             "notice_governance": {
                 "enable": privacy_notice_governance,

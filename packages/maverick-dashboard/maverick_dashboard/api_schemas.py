@@ -817,6 +817,21 @@ class FollowupsIn(BaseModel):
     expected_revision: int = Field(..., ge=0)
 
 
+class AssessmentCommentIn(BaseModel):
+    """A discussion comment bound to one pinned assessment question."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    section_id: str = Field(..., min_length=1, max_length=80)
+    question_id: str = Field(..., min_length=1, max_length=60)
+    comment: str = Field(..., min_length=1, max_length=4000)
+    expected_revision: int = Field(..., ge=0)
+    idempotency_key: str = Field(
+        ...,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,191}$",
+    )
+
+
 class TemplateQuestionIn(BaseModel):
     """One questionnaire question in a custom template."""
     id: str = Field("", max_length=60)

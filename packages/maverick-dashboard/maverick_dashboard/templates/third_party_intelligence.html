@@ -82,7 +82,7 @@
 
     <section class="tpi-card"><h2>8. Retention and integrity</h2><form class="tpi-form tpi-workbench" data-domain="governance">
       <label class="tpi-wide">Operation<select class="input" name="operation"><option value="integrity">Verify tenant records and audit chain</option><option value="retention-purge">Purge only expired retained evidence</option></select></label>
-      <input name="primary_id" type="hidden" value="unused"><input name="secondary_id" type="hidden" value="unused"><input name="tertiary_id" type="hidden" value="unused"><input name="version" type="hidden" value="1"><textarea name="payload" hidden>{}</textarea>
+      <input name="primary_id" type="hidden" value="unused"><input name="secondary_id" type="hidden" value="unused"><input name="tertiary_id" type="hidden" value="unused"><input name="version" type="hidden" value="1"><textarea name="payload" aria-label="Closed governance request JSON" hidden>{}</textarea>
       <div class="tpi-actions"><button class="btn btn--primary" type="submit">Run governance operation</button></div>
     </form><p class="tpi-note">Purge uses the authority clock and preserves the append-only governance audit. Integrity failure is returned as an unavailable capability rather than a trusted partial result.</p>
     <h2>Operator result</h2><pre id="tpi-output" class="tpi-output">No operation run. Responses are rendered as inert text.</pre></section>

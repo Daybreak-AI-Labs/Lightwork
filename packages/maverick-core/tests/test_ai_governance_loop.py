@@ -947,6 +947,15 @@ def test_history_payload_is_closed_safe_json(
         assert "principal" not in canonical
 
 
+@pytest.mark.parametrize("limit", [True, 0, 10_001, 1.5, "10"])
+def test_history_limit_is_a_closed_bounded_integer(
+    store: loop.AIGovernanceLoopStore,
+    limit: object,
+) -> None:
+    with pytest.raises(loop.AIGovernanceLoopValidationError, match="integer bound"):
+        store.history(ASSET, limit=limit)  # type: ignore[arg-type]
+
+
 def test_cas_and_authorization_idempotency_are_exact(
     store: loop.AIGovernanceLoopStore,
     clock: Clock,

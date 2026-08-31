@@ -160,9 +160,9 @@ Additional concrete evidence:
   digests and boundaries are recorded in
   `AI_GOVERNANCE_OPERATIONAL_ACCEPTANCE_2026-08-28.md`.
 
-Not performed:
+Not performed in that 2026-08-28 acceptance batch:
 
-- the entire repository test matrix;
+- the entire repository test matrix (a later current-tree run is recorded below);
 - live provider, external-gateway, customer, vendor or identity-tenant contract
   tests;
 - production-scale, on-call or disaster-recovery exercises;
@@ -172,17 +172,17 @@ Not performed:
 
 The new
 [OneTrust full-platform public capability matrix](./ONETRUST_FULL_PLATFORM_CAPABILITY_MATRIX_2026-08-30.md)
-maps 135 publicly advertised outcomes across shared platform capabilities, AI
+maps 138 publicly advertised outcomes across shared platform capabilities, AI
 Governance, Consent & Preferences, Data Use Governance, Privacy Automation,
 Tech Risk & Compliance and Third-Party Management.
 
 | Matrix status | Count |
 |---|---:|
-| Implemented | 52 |
-| Partial | 76 |
+| Implemented | 59 |
+| Partial | 72 |
 | Missing | 0 |
 | External / unverifiable | 7 |
-| **Total** | **135** |
+| **Total** | **138** |
 
 Zero rows classified **Missing** does not mean OneTrust parity. A **Partial**
 row may contain substantial local code while still lacking a material part of
@@ -196,10 +196,59 @@ A same-day official-site refresh added six previously implicit named outcomes:
 packaged shared-platform AI Agents; AWS Bedrock, Azure AI Foundry and Google
 Vertex agent detection; the Databricks AI Security Framework; the Privacy AI
 agent/Copilot/Knowledgebase suite; multimodal AI Evidence Analysis; and the
-early-access Third-Party Risk Agent. All six are **Partial** in Lightwork. The
-source pages mix preview, early-access and GA language without a feature-level
-entitlement map, so this handoff does not promote a marketing mention to a
-generally available baseline.
+early-access Third-Party Risk Agent. The official
+[2026-07-10 changelog](https://developer.onetrust.com/onetrust/changelog/onetrust-20260710-released)
+adds Assessment Comments APIs, California DROP request/status APIs and the
+`aiEvidenceAnalysisResult` evidence-task result. Seven of these nine named
+outcomes now have coherent local paths classified **Implemented**; the named
+cloud-provider enforcement and Databricks framework outcomes remain
+**Partial**. The sources mix preview, early-access and GA language without a
+feature-level entitlement map, so this handoff does not promote a marketing
+mention to a generally available baseline.
+
+### Current continuation addendum
+
+The current tree adds the following locally coherent, product-mounted paths:
+
+- `governance_agents.py` and the strict workbench/API package five closed agent
+  kinds: breach response, privacy risk assessment, program Copilot,
+  knowledgebase governance and third-party risk. Policies are immutable and
+  default-off; context, adapters, dispatchers and execution credentials are
+  server-resolved; findings/actions are closed and bounded; consequential
+  execution requires human approval and verified receipts; quotas, replay,
+  recovery, revocation, retention and integrity are explicit.
+- `ai_evidence_analysis.py` and its workbench/API implement bounded PDF, JPEG,
+  Excel and text analysis against immutable criteria with independently
+  attested adapters, transient raw content, closed cited facts, deterministic
+  summaries, transparent justification components, gaps/remediation,
+  provenance, distinct human release and a durable result object corresponding
+  to the newly public `aiEvidenceAnalysisResult` outcome.
+- `ai_cloud_agent_governance.py` and its workbench/API normalize Bedrock, Azure
+  AI Foundry and Vertex agent inventories, ingest closed observability,
+  evaluate policy, create exact enforcement intents, verify adapter receipts
+  and reconcile later inventory. It also provides a versioned, content-free
+  Databricks framework review/attestation/activation control plane.
+- Assessment sessions now create audited comments bound only to questions in
+  the saved questionnaire and return deterministic bounded pages by section,
+  question and time.
+- `privacy_drop_management.py` and its strict API create independently bound
+  `DataDeletion`/`OptOut` requests through the existing rights-intake callback
+  and record evidence-bound DROP status updates without persisting raw subject
+  data.
+
+This addendum does **not** claim literal OneTrust parity. Final integrated
+repository verification against this checkout passed **23,145 tests**, with
+**292 skipped**, **3 expected xfails** and **0 failures** in **43m45s**. The run
+removed live LLM-provider variables so the credential-gated real-provider
+self-learning benchmark was skipped instead of spending or making external
+inference calls. This is strong local repository evidence, not external
+acceptance. Exact external residuals are: live
+California DROP authority/registered-broker and legal/regulator acceptance;
+credentialed Bedrock/Azure/Vertex operation, durable canonical production
+storage and broader safe provider writes; licensed Databricks and knowledge
+content; an encrypted execution-token vault with accepted HSM/KMS custody;
+independently operated adapters/dispatchers; and live provider, customer,
+adversarial, recovery, scale and certification acceptance.
 
 ### Local product additions
 
@@ -494,6 +543,7 @@ generally available baseline.
 
 | Surface | Result | Boundary |
 |---|---:|---|
+| Entire repository, clean-provider current-tree matrix | 23,145 passed, 292 skipped, 3 expected xfails, 0 failed in 43m45s | `maverick.__file__` resolved to this checkout. Live LLM-provider variables were removed, so the credential-gated real-provider self-learning benchmark skipped; this is local repository coverage, not provider/customer/legal/scale acceptance. |
 | Consent-experiment core, API and page | 30 passed | Local deterministic fixtures; no live traffic, distributed runtime or legal/privacy acceptance |
 | Privacy-intelligence core, delivery, API and page | 32 passed | Local fixtures and injected transport behavior; no licensed corpus or live SMTP operation |
 | Third-party-intelligence core | 21 passed | Provider-neutral local fixtures; no commercial feed or provider acceptance |
@@ -537,16 +587,24 @@ and configuration set (the first six rows) passed together as **127 tests**.
 The later lifecycle, public-runtime, privacy-rights, compliance-scoping,
 privacy-notice and profile-data rows were rerun as separately focused sets and
 overlap some core files, so their counts must not be arithmetically summed into
-a unique-test total. These are
-focused increment results, not a repository-wide pass count; they do not
-replace the full test matrix or the older validation sets above.
+a unique-test total. These are focused increment results and should not be
+presented as an additional sum on top of the separate 23,145-pass repository
+matrix recorded above.
 Before the later bridge, withdrawal, scope-actions, profile-admin and inventory-
 adapter increments, the broader affected consent, privacy, Data Use Governance,
 policy-publication and third-party test families passed **732 tests with two
-skips** in one combined run. The full repository matrix still was not run. The
-continuation rows above were run on 2026-08-30; the final **248-passed** row is
-the current consent/Trust Center/discovery/Data Use combined focused invocation. Other rows overlap and are evidence sets,
-not a sum or a full-suite result.
+skips** in one combined run. The continuation rows above were run on
+2026-08-30; the **248-passed** row is the consent/Trust Center/discovery/Data
+Use combined focused invocation. Other rows overlap and are evidence sets, not
+a sum or a replacement for the later full-suite result.
+
+For the final current-tree gate, `python -m ruff check .`,
+`python -m vulture`, package `compileall`, JavaScript syntax checking, the
+138-row OneTrust matrix verifier and `git diff --check` all passed. The first
+repository-wide attempt exposed dated test evidence, Windows command quoting,
+UTC/local-day bucketing and host-provider isolation defects; those were repaired
+without weakening production freshness, sandbox, tenancy or audit controls.
+The complete clean-provider matrix was then rerun from zero and passed.
 
 For the current continuation, Ruff passed across 21 targeted Python files;
 `py_compile` passed eight runtime/integration modules; Vulture at 80% confidence
@@ -719,7 +777,7 @@ so would mix broad unrelated formatting churn with the functional increment.
   tests.
 - Updated feature catalog, the earlier focused comparison in
   [ONETRUST_CAPABILITY_GAP_ANALYSIS_2026-08-28.md](./ONETRUST_CAPABILITY_GAP_ANALYSIS_2026-08-28.md),
-  and the broader 135-outcome
+  and the broader 138-outcome
   [OneTrust full-platform public capability matrix](./ONETRUST_FULL_PLATFORM_CAPABILITY_MATRIX_2026-08-30.md).
 
 ## G1-G27 status matrix
@@ -756,7 +814,7 @@ so would mix broad unrelated formatting churn with the functional increment.
 
 ## Explicit OneTrust gaps after this build
 
-The 135-outcome matrix has no rows classified Missing, but 76 are Partial and
+The 138-outcome matrix has no rows classified Missing, but 72 are Partial and
 seven are External / unverifiable. OneTrust's publicly marketed product still
 has advantages Lightwork has not matched in code-plus-proof:
 
@@ -772,11 +830,15 @@ has advantages Lightwork has not matched in code-plus-proof:
 8. A hosted full-product customer sandbox/tenant-copy service; the new bounded
    local isolated-workspace lifecycle is not that outcome.
 9. Product usability, support, recovery, deployment and scale evidence.
-10. OneTrust's named packaged Privacy AI/Third-Party Risk agents, Copilot over
-    program data, Knowledgebase and multimodal AI Evidence Analysis experience.
-11. Accepted named agent detection/enforcement for AWS Bedrock, Azure AI
-    Foundry and Google Vertex plus a maintained Databricks AI Security
-    Framework pack.
+10. Live/customer-accepted operation of the local packaged Privacy AI and
+    Third-Party Risk agents, Copilot, knowledgebase and multimodal AI Evidence
+    Analysis, including licensed content and off-host token/signing custody.
+11. Credentialed, durable and accepted named agent detection/enforcement for
+    AWS Bedrock, Azure AI Foundry and Google Vertex, plus maintained/licensed
+    Databricks AI Security Framework content and externally reviewed mappings.
+12. Live California DROP authority/registered-broker interoperability, subject
+    matching, deletion/permanent-opt-out semantics and legal/regulator/customer
+    acceptance. The local control plane cannot prove any of those outcomes.
 
 Lightwork's strongest differentiation is the governed execution substrate:
 runtime action-path enforcement, signed delegation, capability attenuation,
@@ -855,17 +917,23 @@ infrastructure:
     and production scale; add external WORM/cross-day anchors and whole-database
     rollback protections; then obtain customer and SIEM completeness/operations
     acceptance. Do not infer any of those results from the local 89-test run.
-15. Define and build closed packaged-agent contracts for breach response,
-    privacy risk assessment, privacy-program analytics and third-party risk.
-    Bind each to the existing capability/approval/audit substrate, add explicit
-    human-review thresholds and annotated evidence decisions, and keep every
-    workflow default-off. Separately license or create a governed knowledge
-    corpus; local agent plumbing is not equivalent to OneTrust's named suite.
-16. Add exact AWS Bedrock, Azure AI Foundry and Google Vertex agent-discovery
-    and policy-enforcement contracts plus a versioned Databricks AI Security
-    Framework pack. Then run credentialed provider and maintained-content drift
-    acceptance; generic cloud connectors and Databricks data controls do not
-    prove those named outcomes.
+15. Deploy the closed packaged-agent contracts with independently operated
+    analysis/dispatch adapters and a durable encrypted one-time execution-token
+    vault. Complete HSM/KMS custody, rotation/revocation, ambiguous-outcome
+    recovery, adversarial evaluation, licensed knowledge content and customer
+    usability/operations acceptance. Do not infer those results from local
+    policy, receipt and recovery tests.
+16. Replace the cloud-agent control plane's process-local canonical authority
+    with durable tenant storage, install credentialed transports, broaden only
+    independently verified safe provider writes, and run Bedrock/Azure/Vertex
+    completeness, outage, retry, reconciliation, recovery and scale acceptance.
+    License/maintain the Databricks framework content and obtain external
+    mapping review; the content-free local pack is not certification.
+17. Operate the California DROP path with a consenting registered broker and
+    external authority, independently validate subject/request bindings and
+    all status transitions, and complete retry, revocation, privacy, legal,
+    regulator and customer acceptance. Separately contract-test assessment
+    comments and the evidence-result object in their real relying workflows.
 
 Parallel non-code work:
 

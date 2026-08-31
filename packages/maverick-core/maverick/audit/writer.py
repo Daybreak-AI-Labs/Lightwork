@@ -585,6 +585,7 @@ class AuditLog:
                 signer = self._signer_for(path)
             except AuditRefused:
                 raise
+            # failure-policy: fail_closed
             except Exception as error:
                 raise AuditWriteRefused(
                     "audit: strict signed writer could not initialize"

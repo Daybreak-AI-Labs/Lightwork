@@ -23,6 +23,7 @@ Safety invariants (mirror ``maverick_dashboard.rbac``):
     ``{path: {role: bool}}`` and holding only differences from the defaults,
     so un-overridden cells follow default changes across releases.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,249 +41,787 @@ from . import rbac
 # primary page's own links, so the nav stays one entry per job.
 PAGES: tuple[dict, ...] = (
     # -- Operate --------------------------------------------------------------
-    {"path": "/start", "label": "Get started", "group": "Operate", "icon": "check",
-     "floor": "view", "default": "operate"},
-    {"path": "/chat", "label": "Chat", "group": "Operate", "icon": "chat",
-     "floor": "view", "default": "operate"},
-    {"path": "/goals", "label": "Goals", "group": "Operate", "icon": "target",
-     "floor": "view", "default": "view"},
+    {
+        "path": "/start",
+        "label": "Get started",
+        "group": "Operate",
+        "icon": "check",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/chat",
+        "label": "Chat",
+        "group": "Operate",
+        "icon": "chat",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/goals",
+        "label": "Goals",
+        "group": "Operate",
+        "icon": "target",
+        "floor": "view",
+        "default": "view",
+    },
     # Alternate goal composers, linked from the Goals page toolbar.
-    {"path": "/goal-builder", "label": "Quick Goal", "group": "Operate", "icon": "builder",
-     "floor": "view", "default": "operate", "in_nav": False},
-    {"path": "/graph-editor", "label": "Goal Map", "group": "Operate", "icon": "graph",
-     "floor": "view", "default": "operate", "in_nav": False},
-    {"path": "/projects", "label": "Projects", "group": "Operate", "icon": "fleets",
-     "floor": "view", "default": "view"},
-    {"path": "/deliverables", "label": "Deliverables", "group": "Operate", "icon": "templates",
-     "floor": "view", "default": "view"},
-    {"path": "/agents", "label": "Agent Factory", "group": "Operate", "icon": "agents",
-     "floor": "view", "default": "operate"},
-    {"path": "/roles", "label": "Roles", "group": "Operate", "icon": "roles",
-     "floor": "view", "default": "operate"},
-    {"path": "/workforce", "label": "Workforce", "group": "Operate", "icon": "agents",
-     "floor": "view", "default": "view"},
+    {
+        "path": "/goal-builder",
+        "label": "Quick Goal",
+        "group": "Operate",
+        "icon": "builder",
+        "floor": "view",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/graph-editor",
+        "label": "Goal Map",
+        "group": "Operate",
+        "icon": "graph",
+        "floor": "view",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/projects",
+        "label": "Projects",
+        "group": "Operate",
+        "icon": "fleets",
+        "floor": "view",
+        "default": "view",
+    },
+    {
+        "path": "/deliverables",
+        "label": "Deliverables",
+        "group": "Operate",
+        "icon": "templates",
+        "floor": "view",
+        "default": "view",
+    },
+    {
+        "path": "/agents",
+        "label": "Agent Factory",
+        "group": "Operate",
+        "icon": "agents",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/roles",
+        "label": "Roles",
+        "group": "Operate",
+        "icon": "roles",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/workforce",
+        "label": "Workforce",
+        "group": "Operate",
+        "icon": "agents",
+        "floor": "view",
+        "default": "view",
+    },
     # Flows: the redesigned builder (/flows/designer) is the primary sidebar
     # entry. The saved-workflows index and the older NL builder are reached from
     # the Flows builder / Automations / Agents pages rather than the sidebar, so
     # the nav shows one clear "Flows" job instead of three near-duplicates.
-    {"path": "/flows/designer", "label": "Flows", "group": "Operate", "icon": "workflow",
-     "floor": "view", "default": "operate"},
-    {"path": "/workflows", "label": "Workflows", "group": "Operate", "icon": "workflow",
-     "floor": "view", "default": "operate", "in_nav": False},
-    {"path": "/workflow-builder", "label": "Workflow Builder", "group": "Operate",
-     "icon": "workflow", "floor": "view", "default": "operate", "in_nav": False},
-    {"path": "/automations", "label": "Automations", "group": "Operate", "icon": "clock",
-     "floor": "view", "default": "operate"},
-    {"path": "/fleets", "label": "Fleets", "group": "Operate", "icon": "fleets",
-     "floor": "view", "default": "operate"},
+    {
+        "path": "/flows/designer",
+        "label": "Flows",
+        "group": "Operate",
+        "icon": "workflow",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/workflows",
+        "label": "Workflows",
+        "group": "Operate",
+        "icon": "workflow",
+        "floor": "view",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/workflow-builder",
+        "label": "Workflow Builder",
+        "group": "Operate",
+        "icon": "workflow",
+        "floor": "view",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/automations",
+        "label": "Automations",
+        "group": "Operate",
+        "icon": "clock",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/fleets",
+        "label": "Fleets",
+        "group": "Operate",
+        "icon": "fleets",
+        "floor": "view",
+        "default": "operate",
+    },
     # -- Observe --------------------------------------------------------------
-    {"path": "/overview", "label": "Overview", "group": "Observe", "icon": "overview",
-     "floor": "view", "default": "view"},
-    {"path": "/ekko", "label": "Ekko", "group": "Observe", "icon": "eye",
-     "floor": "operate", "default": "operate"},
-    {"path": "/oversight", "label": "Oversight", "group": "Observe", "icon": "eye",
-     "floor": "view", "default": "view"},
-    {"path": "/discovery", "label": "Discovery", "group": "Observe", "icon": "overview",
-     "floor": "view", "default": "view"},
+    {
+        "path": "/overview",
+        "label": "Overview",
+        "group": "Observe",
+        "icon": "overview",
+        "floor": "view",
+        "default": "view",
+    },
+    {
+        "path": "/ekko",
+        "label": "Ekko",
+        "group": "Observe",
+        "icon": "eye",
+        "floor": "operate",
+        "default": "operate",
+    },
+    {
+        "path": "/oversight",
+        "label": "Oversight",
+        "group": "Observe",
+        "icon": "eye",
+        "floor": "view",
+        "default": "view",
+    },
+    {
+        "path": "/discovery",
+        "label": "Discovery",
+        "group": "Observe",
+        "icon": "overview",
+        "floor": "view",
+        "default": "view",
+    },
     # Counterfactual review: forked runs and their branches under one root.
-    {"path": "/run-tree", "label": "Run Tree", "group": "Observe", "icon": "eye",
-     "floor": "view", "default": "view"},
-    {"path": "/spend", "label": "Spend", "group": "Observe", "icon": "spend",
-     "floor": "view", "default": "view"},
+    {
+        "path": "/run-tree",
+        "label": "Run Tree",
+        "group": "Observe",
+        "icon": "eye",
+        "floor": "view",
+        "default": "view",
+    },
+    {
+        "path": "/spend",
+        "label": "Spend",
+        "group": "Observe",
+        "icon": "spend",
+        "floor": "view",
+        "default": "view",
+    },
     # ROI: money saved vs the client's own human-cost assumptions.
-    {"path": "/savings", "label": "Savings", "group": "Observe", "icon": "spend",
-     "floor": "view", "default": "view"},
+    {
+        "path": "/savings",
+        "label": "Savings",
+        "group": "Observe",
+        "icon": "spend",
+        "floor": "view",
+        "default": "view",
+    },
     # The monthly statement behind Spend's "Billing statement" link.
-    {"path": "/billing", "label": "Billing", "group": "Observe", "icon": "spend",
-     "floor": "view", "default": "view", "in_nav": False},
-    {"path": "/providers", "label": "Providers", "group": "Observe", "icon": "providers",
-     "floor": "view", "default": "view"},
-    {"path": "/benchmarks", "label": "Benchmarks", "group": "Observe", "icon": "bench",
-     "floor": "view", "default": "view"},
-    {"path": "/flows/analytics", "label": "Flow Analytics", "group": "Observe", "icon": "bench",
-     "floor": "view", "default": "view"},
-    {"path": "/learning", "label": "Learning", "group": "Observe", "icon": "learned",
-     "floor": "view", "default": "view"},
+    {
+        "path": "/billing",
+        "label": "Billing",
+        "group": "Observe",
+        "icon": "spend",
+        "floor": "view",
+        "default": "view",
+        "in_nav": False,
+    },
+    {
+        "path": "/providers",
+        "label": "Providers",
+        "group": "Observe",
+        "icon": "providers",
+        "floor": "view",
+        "default": "view",
+    },
+    {
+        "path": "/benchmarks",
+        "label": "Benchmarks",
+        "group": "Observe",
+        "icon": "bench",
+        "floor": "view",
+        "default": "view",
+    },
+    {
+        "path": "/flows/analytics",
+        "label": "Flow Analytics",
+        "group": "Observe",
+        "icon": "bench",
+        "floor": "view",
+        "default": "view",
+    },
+    {
+        "path": "/learning",
+        "label": "Learning",
+        "group": "Observe",
+        "icon": "learned",
+        "floor": "view",
+        "default": "view",
+    },
     # The acquired-capabilities record, linked from the Learning page.
-    {"path": "/learned", "label": "Learned", "group": "Observe", "icon": "learned",
-     "floor": "view", "default": "view", "in_nav": False},
+    {
+        "path": "/learned",
+        "label": "Learned",
+        "group": "Observe",
+        "icon": "learned",
+        "floor": "view",
+        "default": "view",
+        "in_nav": False,
+    },
     # Per-user goal recordings (owner-scoped) -- an operator review surface.
-    {"path": "/walkthroughs", "label": "Walkthroughs", "group": "Observe",
-     "icon": "walkthroughs", "floor": "view", "default": "operate"},
-    {"path": "/facts", "label": "Facts", "group": "Observe", "icon": "facts",
-     "floor": "view", "default": "view"},
-    {"path": "/plan-tree-3d", "label": "3D Plan View", "group": "Observe", "icon": "cube",
-     "floor": "view", "default": "view"},
+    {
+        "path": "/walkthroughs",
+        "label": "Walkthroughs",
+        "group": "Observe",
+        "icon": "walkthroughs",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/facts",
+        "label": "Facts",
+        "group": "Observe",
+        "icon": "facts",
+        "floor": "view",
+        "default": "view",
+    },
+    {
+        "path": "/plan-tree-3d",
+        "label": "3D Plan View",
+        "group": "Observe",
+        "icon": "cube",
+        "floor": "view",
+        "default": "view",
+    },
     # -- Govern ---------------------------------------------------------------
-    {"path": "/approvals", "label": "Approvals", "group": "Govern", "icon": "check",
-     "floor": "operate", "default": "operate"},
+    {
+        "path": "/approvals",
+        "label": "Approvals",
+        "group": "Govern",
+        "icon": "check",
+        "floor": "operate",
+        "default": "operate",
+    },
     # The Privacy workspace: the module view over assessment records (PIA /
     # AIRA / vendor risk / framework readiness). Operate floor — records carry
     # answer bodies and reviewer threads, a tier above viewer summaries.
-    {"path": "/privacy", "label": "Privacy", "group": "Govern", "icon": "shield",
-     "floor": "operate", "default": "operate"},
-    {"path": "/privacy/data-discovery", "label": "Privacy Data Discovery",
-     "group": "Govern", "icon": "eye", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/privacy/regulatory-intelligence",
-     "label": "Privacy Regulatory Intelligence", "group": "Govern",
-     "icon": "facts", "floor": "operate", "default": "operate",
-     "in_nav": False},
-    {"path": "/privacy/rights-orchestration",
-     "label": "Privacy Rights Orchestration", "group": "Govern",
-     "icon": "shield", "floor": "operate", "default": "operate",
-     "in_nav": False},
-    {"path": "/privacy/rights-consumer-delivery",
-     "label": "Privacy Rights Consumer Delivery", "group": "Govern",
-     "icon": "key", "floor": "operate", "default": "operate",
-     "in_nav": False},
-    {"path": "/privacy/notice-governance",
-     "label": "Privacy Notice Governance", "group": "Govern",
-     "icon": "check", "floor": "operate", "default": "operate",
-     "in_nav": False},
+    {
+        "path": "/privacy",
+        "label": "Privacy",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+    },
+    {
+        "path": "/privacy/data-discovery",
+        "label": "Privacy Data Discovery",
+        "group": "Govern",
+        "icon": "eye",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/privacy/regulatory-intelligence",
+        "label": "Privacy Regulatory Intelligence",
+        "group": "Govern",
+        "icon": "facts",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/privacy/rights-orchestration",
+        "label": "Privacy Rights Orchestration",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/privacy/rights-consumer-delivery",
+        "label": "Privacy Rights Consumer Delivery",
+        "group": "Govern",
+        "icon": "key",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/privacy/notice-governance",
+        "label": "Privacy Notice Governance",
+        "group": "Govern",
+        "icon": "check",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
     # Consumer consent is its own operating surface: unlike the agent-action
     # approval gate it carries pseudonymous profiles, immutable receipts,
     # tracker observations, and downstream preference synchronization.
-    {"path": "/consent", "label": "Consent & Preferences", "group": "Govern",
-     "icon": "check", "floor": "operate", "default": "operate"},
-    {"path": "/consent/publishing", "label": "Consent Publishing",
-     "group": "Govern", "icon": "check", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/consent/experiments", "label": "Consent Experiments",
-     "group": "Govern", "icon": "bench", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/consent/delivery", "label": "Consent Delivery",
-     "group": "Govern", "icon": "check", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/consent/public-clients", "label": "Public Consent Clients",
-     "group": "Govern", "icon": "key", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/consent/profile-data", "label": "Consent Profile Data",
-     "group": "Govern", "icon": "check", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/consent/scan-inventory", "label": "Consent Scan Inventory",
-     "group": "Govern", "icon": "eye", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/consent/scan-notice-proposals",
-     "label": "Scan Disclosure Proposals", "group": "Govern",
-     "icon": "check", "floor": "operate", "default": "operate",
-     "in_nav": False},
-    {"path": "/consent/trust-center-authority",
-     "label": "Trust Center Authority", "group": "Govern",
-     "icon": "key", "floor": "operate", "default": "operate",
-     "in_nav": False},
-    {"path": "/data-use", "label": "Data Use Governance", "group": "Govern",
-     "icon": "shield", "floor": "operate", "default": "operate"},
-    {"path": "/data-use/providers", "label": "Native Data Controls",
-     "group": "Govern", "icon": "shield", "floor": "operate",
-     "default": "operate", "in_nav": False},
+    {
+        "path": "/consent",
+        "label": "Consent & Preferences",
+        "group": "Govern",
+        "icon": "check",
+        "floor": "operate",
+        "default": "operate",
+    },
+    {
+        "path": "/consent/publishing",
+        "label": "Consent Publishing",
+        "group": "Govern",
+        "icon": "check",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/consent/experiments",
+        "label": "Consent Experiments",
+        "group": "Govern",
+        "icon": "bench",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/consent/delivery",
+        "label": "Consent Delivery",
+        "group": "Govern",
+        "icon": "check",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/consent/public-clients",
+        "label": "Public Consent Clients",
+        "group": "Govern",
+        "icon": "key",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/consent/profile-data",
+        "label": "Consent Profile Data",
+        "group": "Govern",
+        "icon": "check",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/consent/scan-inventory",
+        "label": "Consent Scan Inventory",
+        "group": "Govern",
+        "icon": "eye",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/consent/scan-notice-proposals",
+        "label": "Scan Disclosure Proposals",
+        "group": "Govern",
+        "icon": "check",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/consent/trust-center-authority",
+        "label": "Trust Center Authority",
+        "group": "Govern",
+        "icon": "key",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/data-use",
+        "label": "Data Use Governance",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+    },
+    {
+        "path": "/data-use/providers",
+        "label": "Native Data Controls",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/governance-agents",
+        "label": "Governance Agents",
+        "group": "Govern",
+        "icon": "agents",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/ai-evidence-analysis",
+        "label": "AI Evidence Analysis",
+        "group": "Govern",
+        "icon": "check",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/assurance/cloud-agents",
+        "label": "Cloud Agent Governance",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
     # Security is the department workspace. The two hunter consoles are
     # governed child surfaces linked from it, so the sidebar keeps one clear
     # entry while role visibility still protects every direct URL.
-    {"path": "/security", "label": "Security & GRC", "group": "Govern",
-     "icon": "shield", "floor": "operate", "default": "operate"},
-    {"path": "/third-party/intelligence", "label": "Third-Party Intelligence",
-     "group": "Govern", "icon": "shield", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/third-party/lifecycle", "label": "Third-Party Lifecycle",
-     "group": "Govern", "icon": "shield", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/third-party/collaboration", "label": "Third-Party Collaboration",
-     "group": "Govern", "icon": "shield", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/security/threats", "label": "Platform Threat Hunter",
-     "group": "Govern", "icon": "shield", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/security/soc", "label": "Environment Threat Hunter",
-     "group": "Govern", "icon": "shield", "floor": "operate",
-     "default": "operate", "in_nav": False},
+    {
+        "path": "/security",
+        "label": "Security & GRC",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+    },
+    {
+        "path": "/third-party/intelligence",
+        "label": "Third-Party Intelligence",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/third-party/lifecycle",
+        "label": "Third-Party Lifecycle",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/third-party/collaboration",
+        "label": "Third-Party Collaboration",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/security/threats",
+        "label": "Platform Threat Hunter",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/security/soc",
+        "label": "Environment Threat Hunter",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
     # The Finance workspace: the same chassis over the finance assessment
     # types (SOX control / fraud risk / ITGC / credit risk / close readiness).
     # "Financial Risk", not "Finance": this workspace is the SOX / fraud /
     # ITGC / credit-risk control record, not day-to-day finance operations.
-    {"path": "/finance", "label": "Financial Risk", "group": "Govern",
-     "icon": "spend", "floor": "operate", "default": "operate"},
+    {
+        "path": "/finance",
+        "label": "Financial Risk",
+        "group": "Govern",
+        "icon": "spend",
+        "floor": "operate",
+        "default": "operate",
+    },
     # The partner fleet console: client deployments a partner operates.
     # Operate floor -- rows carry probe endpoints; mutations are admin (API).
-    {"path": "/partner", "label": "Partner fleet", "group": "Govern",
-     "icon": "graph", "floor": "operate", "default": "operate"},
+    {
+        "path": "/partner",
+        "label": "Partner fleet",
+        "group": "Govern",
+        "icon": "graph",
+        "floor": "operate",
+        "default": "operate",
+    },
     # Permissions is deployment plumbing, not day-to-day governance work --
     # it lives with the rest of administration.
-    {"path": "/permissions", "label": "Permissions", "group": "Admin",
-     "icon": "key", "floor": "view", "default": "operate"},
-    {"path": "/simulate", "label": "Simulate", "group": "Govern", "icon": "graph",
-     "floor": "view", "default": "operate"},
+    {
+        "path": "/permissions",
+        "label": "Permissions",
+        "group": "Admin",
+        "icon": "key",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/simulate",
+        "label": "Simulate",
+        "group": "Govern",
+        "icon": "graph",
+        "floor": "view",
+        "default": "operate",
+    },
     # Redaction workbench (its preview API requires operate); reached from
     # goal/trajectory surfaces rather than the sidebar.
-    {"path": "/redact", "label": "Redaction", "group": "Govern", "icon": "shield",
-     "floor": "view", "default": "operate", "in_nav": False},
-    {"path": "/safety", "label": "Safety", "group": "Govern", "icon": "shield",
-     "floor": "view", "default": "view"},
+    {
+        "path": "/redact",
+        "label": "Redaction",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "view",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/safety",
+        "label": "Safety",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "view",
+        "default": "view",
+    },
     # Privacy / security / AI-risk assessments of every agent & flow: auto-drafted
     # from the declared capability surface, reviewed + signed off, re-assessed on
     # change. Reading is audit-level; drafting/reviewing is admin (mutation API).
-    {"path": "/assessments", "label": "Assessments", "group": "Govern", "icon": "shield",
-     "floor": "audit", "default": "audit"},
-    {"path": "/compliance", "label": "Compliance", "group": "Govern", "icon": "compliance",
-     "floor": "view", "default": "audit"},
-    {"path": "/compliance/policy-links", "label": "Policy Publication Links",
-     "group": "Govern", "icon": "compliance", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/compliance/scoping", "label": "Compliance Scoping",
-     "group": "Govern", "icon": "compliance", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/compliance/scope-actions", "label": "Compliance Scope Actions",
-     "group": "Govern", "icon": "compliance", "floor": "operate",
-     "default": "operate", "in_nav": False},
-    {"path": "/compartments", "label": "Compartments", "group": "Govern", "icon": "compartments",
-     "floor": "view", "default": "view"},
-    {"path": "/audit", "label": "Audit", "group": "Govern", "icon": "audit",
-     "floor": "audit", "default": "audit"},
-    {"path": "/replay", "label": "Replay", "group": "Govern", "icon": "audit",
-     "floor": "view", "default": "audit"},
-    {"path": "/trust", "label": "Agent Trust", "group": "Govern", "icon": "agents",
-     "floor": "view", "default": "view"},
+    {
+        "path": "/assessments",
+        "label": "Assessments",
+        "group": "Govern",
+        "icon": "shield",
+        "floor": "audit",
+        "default": "audit",
+    },
+    {
+        "path": "/compliance",
+        "label": "Compliance",
+        "group": "Govern",
+        "icon": "compliance",
+        "floor": "view",
+        "default": "audit",
+    },
+    {
+        "path": "/compliance/policy-links",
+        "label": "Policy Publication Links",
+        "group": "Govern",
+        "icon": "compliance",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/compliance/scoping",
+        "label": "Compliance Scoping",
+        "group": "Govern",
+        "icon": "compliance",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/compliance/scope-actions",
+        "label": "Compliance Scope Actions",
+        "group": "Govern",
+        "icon": "compliance",
+        "floor": "operate",
+        "default": "operate",
+        "in_nav": False,
+    },
+    {
+        "path": "/compartments",
+        "label": "Compartments",
+        "group": "Govern",
+        "icon": "compartments",
+        "floor": "view",
+        "default": "view",
+    },
+    {
+        "path": "/audit",
+        "label": "Audit",
+        "group": "Govern",
+        "icon": "audit",
+        "floor": "audit",
+        "default": "audit",
+    },
+    {
+        "path": "/replay",
+        "label": "Replay",
+        "group": "Govern",
+        "icon": "audit",
+        "floor": "view",
+        "default": "audit",
+    },
+    {
+        "path": "/trust",
+        "label": "Agent Trust",
+        "group": "Govern",
+        "icon": "agents",
+        "floor": "view",
+        "default": "view",
+    },
     # Bring-your-own-agent console: enroll + credential + govern agents built
     # on other platforms. Reading the roster is a governance view; every
     # mutation (enroll / mint / revoke) is admin-gated at the API.
-    {"path": "/external-agents", "label": "External Agents", "group": "Govern",
-     "icon": "agents", "floor": "view", "default": "view"},
+    {
+        "path": "/external-agents",
+        "label": "External Agents",
+        "group": "Govern",
+        "icon": "agents",
+        "floor": "view",
+        "default": "view",
+    },
     # -- Extend ---------------------------------------------------------------
-    {"path": "/skills", "label": "Skills", "group": "Extend", "icon": "skills",
-     "floor": "view", "default": "operate"},
-    {"path": "/store", "label": "Store", "group": "Extend", "icon": "store",
-     "floor": "view", "default": "operate"},
-    {"path": "/templates", "label": "Templates", "group": "Extend", "icon": "templates",
-     "floor": "view", "default": "operate"},
-    {"path": "/tools", "label": "Tools", "group": "Extend", "icon": "tools",
-     "floor": "view", "default": "operate"},
+    {
+        "path": "/skills",
+        "label": "Skills",
+        "group": "Extend",
+        "icon": "skills",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/store",
+        "label": "Store",
+        "group": "Extend",
+        "icon": "store",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/templates",
+        "label": "Templates",
+        "group": "Extend",
+        "icon": "templates",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/tools",
+        "label": "Tools",
+        "group": "Extend",
+        "icon": "tools",
+        "floor": "view",
+        "default": "operate",
+    },
     # Connections hold live SaaS credentials/tokens, so managing them is admin
     # plumbing, not an everyday operator surface. Builders still *reference* an
     # existing connection by name in a flow (GET /api/v1/connections stays
     # operate-readable); only create/rotate/delete/test are admin-gated.
-    {"path": "/connections", "label": "Connections", "group": "Admin", "icon": "key",
-     "floor": "admin", "default": "admin"},
-    {"path": "/plugins", "label": "Plugins", "group": "Extend", "icon": "plugins",
-     "floor": "view", "default": "operate"},
+    {
+        "path": "/connections",
+        "label": "Connections",
+        "group": "Admin",
+        "icon": "key",
+        "floor": "admin",
+        "default": "admin",
+    },
+    {
+        "path": "/plugins",
+        "label": "Plugins",
+        "group": "Extend",
+        "icon": "plugins",
+        "floor": "view",
+        "default": "operate",
+    },
     # Output-style customization: mutations are operate-gated, so it lives with
     # the other operator-facing extension surfaces, not admin plumbing.
-    {"path": "/styles", "label": "Response Styles", "group": "Extend", "icon": "roles",
-     "floor": "view", "default": "operate"},
-    {"path": "/mcp", "label": "Tool Servers", "group": "Extend", "icon": "mcp",
-     "floor": "admin", "default": "admin"},
-    {"path": "/channels", "label": "Channels", "group": "Extend", "icon": "channels",
-     "floor": "admin", "default": "admin"},
+    {
+        "path": "/styles",
+        "label": "Response Styles",
+        "group": "Extend",
+        "icon": "roles",
+        "floor": "view",
+        "default": "operate",
+    },
+    {
+        "path": "/mcp",
+        "label": "Tool Servers",
+        "group": "Extend",
+        "icon": "mcp",
+        "floor": "admin",
+        "default": "admin",
+    },
+    {
+        "path": "/channels",
+        "label": "Channels",
+        "group": "Extend",
+        "icon": "channels",
+        "floor": "admin",
+        "default": "admin",
+    },
     # -- Admin ----------------------------------------------------------------
-    {"path": "/settings", "label": "Settings", "group": "Admin", "icon": "settings",
-     "floor": "admin", "default": "admin"},
-    {"path": "/users", "label": "Users", "group": "Admin", "icon": "users",
-     "floor": "admin", "default": "admin"},
-    {"path": "/tenants", "label": "Tenants", "group": "Admin", "icon": "tenants",
-     "floor": "admin", "default": "admin"},
-    {"path": "/cache", "label": "Cache", "group": "Admin", "icon": "cache",
-     "floor": "view", "default": "admin"},
-    {"path": "/embed-demo", "label": "Embed Analytics", "group": "Admin", "icon": "embed",
-     "floor": "view", "default": "admin"},
+    {
+        "path": "/settings",
+        "label": "Settings",
+        "group": "Admin",
+        "icon": "settings",
+        "floor": "admin",
+        "default": "admin",
+    },
+    {
+        "path": "/users",
+        "label": "Users",
+        "group": "Admin",
+        "icon": "users",
+        "floor": "admin",
+        "default": "admin",
+    },
+    {
+        "path": "/tenants",
+        "label": "Tenants",
+        "group": "Admin",
+        "icon": "tenants",
+        "floor": "admin",
+        "default": "admin",
+    },
+    {
+        "path": "/cache",
+        "label": "Cache",
+        "group": "Admin",
+        "icon": "cache",
+        "floor": "view",
+        "default": "admin",
+    },
+    {
+        "path": "/embed-demo",
+        "label": "Embed Analytics",
+        "group": "Admin",
+        "icon": "embed",
+        "floor": "view",
+        "default": "admin",
+    },
 )
 
 # Moderate sidebar declutter: keep a focused set of everyday destinations in the
@@ -290,19 +829,36 @@ PAGES: tuple[dict, ...] = (
 # reachable in-page and by URL. One place to adjust the balance — move a path
 # out of this set to bring its tab back. (Pages already in_nav=False in the
 # registry above, e.g. builders reached from a parent page, are unaffected.)
-_NAV_FOLD: frozenset[str] = frozenset({
-    # Operate — reached from Goals / Agent Factory / Workforce
-    "/start", "/projects", "/roles", "/fleets",
-    # Observe — analytical/advanced views reached from Overview & friends
-    "/discovery", "/providers", "/benchmarks", "/flows/analytics",
-    "/walkthroughs", "/facts", "/plan-tree-3d",
-    # Govern — advanced governance surfaces
-    "/simulate", "/compartments", "/replay", "/trust",
-    # Extend — secondary catalogs
-    "/store", "/templates", "/tools", "/styles",
-    # Admin — rarely-touched plumbing
-    "/cache", "/embed-demo",
-})
+_NAV_FOLD: frozenset[str] = frozenset(
+    {
+        # Operate — reached from Goals / Agent Factory / Workforce
+        "/start",
+        "/projects",
+        "/roles",
+        "/fleets",
+        # Observe — analytical/advanced views reached from Overview & friends
+        "/discovery",
+        "/providers",
+        "/benchmarks",
+        "/flows/analytics",
+        "/walkthroughs",
+        "/facts",
+        "/plan-tree-3d",
+        # Govern — advanced governance surfaces
+        "/simulate",
+        "/compartments",
+        "/replay",
+        "/trust",
+        # Extend — secondary catalogs
+        "/store",
+        "/templates",
+        "/tools",
+        "/styles",
+        # Admin — rarely-touched plumbing
+        "/cache",
+        "/embed-demo",
+    }
+)
 for _pg in PAGES:
     if _pg["path"] in _NAV_FOLD:
         _pg["in_nav"] = False
@@ -322,6 +878,7 @@ def _locked(path: Path):
     from contextlib import ExitStack
 
     from maverick.file_lock import cross_process_lock
+
     stack = ExitStack()
     stack.enter_context(_VIS_LOCK)
     stack.enter_context(cross_process_lock(path))
@@ -353,10 +910,7 @@ def overrides() -> dict[str, dict[str, bool]]:
     for path, cells in data.items():
         if path not in _PAGES_BY_PATH or not isinstance(cells, dict):
             continue
-        clean = {
-            role: v for role, v in cells.items()
-            if role in rbac.ROLES and isinstance(v, bool)
-        }
+        clean = {role: v for role, v in cells.items() if role in rbac.ROLES and isinstance(v, bool)}
         if clean:
             out[path] = clean
     return out
@@ -364,6 +918,7 @@ def overrides() -> dict[str, dict[str, bool]]:
 
 def _write(data: dict[str, dict[str, bool]]) -> None:
     from maverick.file_lock import atomic_write_text
+
     atomic_write_text(store_path(), json.dumps(data, indent=2, sort_keys=True))
 
 
@@ -492,9 +1047,7 @@ def nav_groups(role: str | None) -> list[dict]:
         else:
             g = {"label": page["group"], "links": []}
             groups.append(g)
-        g["links"].append(
-            {"href": page["path"], "label": page["label"], "icon": page["icon"]}
-        )
+        g["links"].append({"href": page["path"], "label": page["label"], "icon": page["icon"]})
     return groups
 
 
@@ -513,8 +1066,10 @@ def matrix() -> list[dict]:
             locked = (page["path"], role) in LOCKED
             el = eligible(page, role)
             cell = ov.get(page["path"], {}).get(role)
-            visible = True if locked else (
-                el and (cell if cell is not None else default_visible(page, role))
+            visible = (
+                True
+                if locked
+                else (el and (cell if cell is not None else default_visible(page, role)))
             )
             cells.append({"role": role, "eligible": el, "visible": visible, "locked": locked})
         # Merge by group label like nav_groups (see comment there).
@@ -524,16 +1079,30 @@ def matrix() -> list[dict]:
         else:
             g = {"label": page["group"], "pages": []}
             groups.append(g)
-        g["pages"].append({
-            "path": page["path"], "label": page["label"],
-            "floor": page["floor"], "in_nav": page.get("in_nav", True),
-            "cells": cells,
-        })
+        g["pages"].append(
+            {
+                "path": page["path"],
+                "label": page["label"],
+                "floor": page["floor"],
+                "in_nav": page.get("in_nav", True),
+                "cells": cells,
+            }
+        )
     return groups
 
 
 __all__ = [
-    "PAGES", "LOCKED", "store_path", "overrides", "clear_overrides",
-    "eligible", "default_visible", "is_visible", "set_visibility",
-    "apply_selection", "page_for", "nav_groups", "matrix",
+    "PAGES",
+    "LOCKED",
+    "store_path",
+    "overrides",
+    "clear_overrides",
+    "eligible",
+    "default_visible",
+    "is_visible",
+    "set_visibility",
+    "apply_selection",
+    "page_for",
+    "nav_groups",
+    "matrix",
 ]

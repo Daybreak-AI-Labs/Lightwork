@@ -254,6 +254,17 @@ def _revision(value: object, label: str, *, allow_zero: bool = False) -> int:
     return value
 
 
+def _integer(value: object, label: str, minimum: int, maximum: int) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < minimum
+        or value > maximum
+    ):
+        raise AIGovernanceLoopValidationError(f"{label} is outside its integer bound")
+    return value
+
+
 def _timestamp(value: object, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise AIGovernanceLoopValidationError(f"{label} must be a finite timestamp")

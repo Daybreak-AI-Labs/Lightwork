@@ -2,6 +2,7 @@
 
 v0.1.6: BackgroundTask runner moved to maverick.runner.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -49,6 +50,7 @@ from .api_schemas import (
     AiSystemIn,
     AnswerIn,
     AssessmentAssignIn,
+    AssessmentCommentIn,
     AssessmentDecideIn,
     AssessmentEvidenceIn,
     AssessmentRefreshIn,
@@ -188,6 +190,7 @@ def _deliverable_edit_similarity(original: str, revised: str) -> float:
         revised = _sample_deliverable_text(revised)
     return difflib.SequenceMatcher(None, original, revised).ratio()
 
+
 # Shared-store channel for Idempotency-Key dedup on goal creation (see
 # create_goal). Distinct from the channel/webhook idempotency namespaces.
 _IDEMPOTENCY_CHANNEL = "idempotency:api:goals"
@@ -200,6 +203,7 @@ def _shared_halt_backend() -> bool:
     leaves it untouched (keeps single-host behavior unchanged)."""
     try:
         from maverick.world_model_backends import is_postgres_configured
+
         return bool(is_postgres_configured())
     except Exception:
         return False
@@ -224,26 +228,13 @@ _COMPLIANCE_PACKET_LOCK = asyncio.Lock()
 _COMPLIANCE_PACKET_CACHE: tuple[float, str] | None = None
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _to_goal_out(g) -> GoalOut:
     return GoalOut(
-        id=g.id, status=g.status, title=g.title,
-        description=g.description, result=g.result,
+        id=g.id,
+        status=g.status,
+        title=g.title,
+        description=g.description,
+        result=g.result,
     )
 
 
@@ -253,21 +244,28 @@ def _to_goal_out(g) -> GoalOut:
 # permission; auth-off (single-operator) deployments treat the local caller as
 # admin, matching the rest of the API.
 
+
 def _to_tenant_out(rec) -> TenantOut:
     from maverick.workspace import Workspace
+
     # API paths use a stable slash representation on every server OS; clients
     # should not need to understand Windows path separators.
     config_path = (Workspace(rec.id).root / "config.toml").as_posix()
     return TenantOut(
-        id=rec.id, status=rec.status, plan=rec.plan,
-        display_name=rec.display_name, max_daily_dollars=rec.max_daily_dollars,
-        created_at=rec.created_at, updated_at=rec.updated_at,
+        id=rec.id,
+        status=rec.status,
+        plan=rec.plan,
+        display_name=rec.display_name,
+        max_daily_dollars=rec.max_daily_dollars,
+        created_at=rec.created_at,
+        updated_at=rec.updated_at,
         config_path=config_path,
     )
 
 
 def _get_tenant_or_404(tenant_id: str):
     from maverick.tenant import registry as tenant_registry
+
     rec = tenant_registry.get_tenant(tenant_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="no such tenant")
@@ -278,6 +276,7 @@ def _get_tenant_or_404(tenant_id: str):
 async def list_tenants(request: Request) -> list[TenantOut]:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
+
     return [_to_tenant_out(r) for r in tenant_registry.list_tenants()]
 
 
@@ -293,6 +292,7 @@ async def workforce_posture(request: Request) -> dict:
     require_permission(request, "view")
     from maverick.agent_autonomy import graduation_candidates, levels_enabled
     from maverick.domain_audit import audit_roster, summarize
+
     s = summarize(audit_roster())
     out: dict = {
         "levels_enabled": levels_enabled(),
@@ -302,11 +302,17 @@ async def workforce_posture(request: Request) -> dict:
     }
     try:
         from maverick.domain import available_domains
+
         wm = _world()
         cands = graduation_candidates(wm.list_approvals(limit=5000), sorted(available_domains()))
         out["graduation_candidates"] = [
-            {"name": c.name, "sample": c.sample, "approve_rate": c.approve_rate,
-             "confidence": c.confidence, "reason": c.reason}
+            {
+                "name": c.name,
+                "sample": c.sample,
+                "approve_rate": c.approve_rate,
+                "confidence": c.confidence,
+                "reason": c.reason,
+            }
             for c in cands
         ]
     except Exception:  # pragma: no cover -- no DB / empty install -> empty list
@@ -329,10 +335,14 @@ def _board_days(days: int | None) -> int:
 
 
 def _board_day_list(days: int):
-    from datetime import date, timedelta
-    today = date.today()
+    from datetime import datetime, timedelta, timezone
+
+    # SQLite's date(..., 'unixepoch') buckets timestamps in UTC. Use the same
+    # clock here so late-evening requests west of UTC do not build a local-day
+    # key set that drops today's UTC rows.
+    today = datetime.now(timezone.utc).date()
     day_list = [today - timedelta(days=i) for i in range(days - 1, -1, -1)]
-    since = time.mktime(day_list[0].timetuple())
+    since = datetime.combine(day_list[0], datetime.min.time(), tzinfo=timezone.utc).timestamp()
     return day_list, since, since - days * 86400
 
 
@@ -344,48 +354,59 @@ def _owner_sql(owner, column: str = "owner"):
 def _board_overview(w, owner, days: int) -> dict:
     day_list, since, prev_since = _board_day_list(days)
     own, params = _owner_sql(owner)
-    by_status = {r[0]: int(r[1]) for r in w.conn.execute(
-        "SELECT status, COUNT(*) FROM goals WHERE 1=1" + own + " GROUP BY status",
-        params).fetchall()}
-    daily = {d.isoformat(): {"d": d.isoformat(), "started": 0, "delivered": 0}
-             for d in day_list}
-    for col, key, extra in (("created_at", "started", ""),
-                            ("updated_at", "delivered", " AND status = 'done'")):
+    by_status = {
+        r[0]: int(r[1])
+        for r in w.conn.execute(
+            "SELECT status, COUNT(*) FROM goals WHERE 1=1" + own + " GROUP BY status", params
+        ).fetchall()
+    }
+    daily = {d.isoformat(): {"d": d.isoformat(), "started": 0, "delivered": 0} for d in day_list}
+    for col, key, extra in (
+        ("created_at", "started", ""),
+        ("updated_at", "delivered", " AND status = 'done'"),
+    ):
         rows = w.conn.execute(
             f"SELECT date({col}, 'unixepoch') AS day, COUNT(*) FROM goals "
             f"WHERE {col} >= ?" + extra + own + " GROUP BY day",
-            (since, *params)).fetchall()
+            (since, *params),
+        ).fetchall()
         for day, n in rows:
             if day in daily:
                 daily[day][key] += int(n)
 
     def _count(col: str, lo: float, hi: float, extra: str = "") -> int:
-        return int(w.conn.execute(
-            f"SELECT COUNT(*) FROM goals WHERE {col} >= ? AND {col} < ?"
-            + extra + own, (lo, hi, *params)).fetchone()[0])
+        return int(
+            w.conn.execute(
+                f"SELECT COUNT(*) FROM goals WHERE {col} >= ? AND {col} < ?" + extra + own,
+                (lo, hi, *params),
+            ).fetchone()[0]
+        )
 
     now = time.time()
     window = {
         "started": _count("created_at", since, now),
         "delivered": _count("updated_at", since, now, " AND status = 'done'"),
         "started_prev": _count("created_at", prev_since, since),
-        "delivered_prev": _count("updated_at", prev_since, since,
-                                 " AND status = 'done'"),
+        "delivered_prev": _count("updated_at", prev_since, since, " AND status = 'done'"),
     }
     from maverick.departments import department_title
     from maverick.domain import suite_for
+
     domains: dict[str, dict] = {}
     for dom, total, done in w.conn.execute(
-            "SELECT domain, COUNT(*), SUM(status = 'done') FROM goals "
-            "WHERE 1=1" + own + " GROUP BY domain", params).fetchall():
+        "SELECT domain, COUNT(*), SUM(status = 'done') FROM goals "
+        "WHERE 1=1" + own + " GROUP BY domain",
+        params,
+    ).fetchall():
         suite = suite_for(dom or "") if dom else None
         label = department_title(suite) if suite else "General"
         row = domains.setdefault(label, {"label": label, "total": 0, "done": 0})
         row["total"] += int(total)
         row["done"] += int(done or 0)
-    recent = [{"id": g.id, "title": g.title, "status": g.status,
-               "updated_at": g.updated_at}
-              for g in w.list_goals(owner=owner, limit=12, order="desc")]
+    recent = [
+        {"id": g.id, "title": g.title, "status": g.status, "updated_at": g.updated_at}
+        for g in w.list_goals(owner=owner, limit=12, order="desc")
+    ]
     return {
         "totals": {
             "total": sum(by_status.values()),
@@ -395,26 +416,32 @@ def _board_overview(w, owner, days: int) -> dict:
         },
         "window": window,
         "daily": list(daily.values()),
-        "domains": sorted(domains.values(),
-                          key=lambda r: r["total"], reverse=True)[:8],
+        "domains": sorted(domains.values(), key=lambda r: r["total"], reverse=True)[:8],
         "recent": recent,
     }
 
 
 def _board_spend(w, owner, days: int) -> dict:
     day_list, since, prev_since = _board_day_list(days)
-    join = ("FROM episodes e JOIN goals g ON e.goal_id = g.id"
-            if owner is not None else "FROM episodes e")
+    join = (
+        "FROM episodes e JOIN goals g ON e.goal_id = g.id"
+        if owner is not None
+        else "FROM episodes e"
+    )
     own, params = ("", ()) if owner is None else (" AND g.owner = ?", (owner,))
     ended = " WHERE e.ended_at IS NOT NULL"
 
-    daily = {d.isoformat(): {"d": d.isoformat(), "cost": 0.0, "runs": 0}
-             for d in day_list}
+    daily = {d.isoformat(): {"d": d.isoformat(), "cost": 0.0, "runs": 0} for d in day_list}
     for day, cost, runs in w.conn.execute(
-            "SELECT date(e.started_at, 'unixepoch') AS day, "
-            "SUM(COALESCE(e.cost_dollars, 0)), COUNT(*) " + join + ended +
-            " AND e.started_at >= ?" + own + " GROUP BY day",
-            (since, *params)).fetchall():
+        "SELECT date(e.started_at, 'unixepoch') AS day, "
+        "SUM(COALESCE(e.cost_dollars, 0)), COUNT(*) "
+        + join
+        + ended
+        + " AND e.started_at >= ?"
+        + own
+        + " GROUP BY day",
+        (since, *params),
+    ).fetchall():
         if day in daily:
             daily[day] = {"d": day, "cost": float(cost or 0), "runs": int(runs)}
 
@@ -422,12 +449,20 @@ def _board_spend(w, owner, days: int) -> dict:
         r = w.conn.execute(
             "SELECT COALESCE(SUM(e.cost_dollars), 0), COUNT(*), "
             "COALESCE(SUM(e.input_tokens), 0), COALESCE(SUM(e.output_tokens), 0), "
-            "COALESCE(SUM(e.tool_calls), 0) " + join + ended +
-            " AND e.started_at >= ? AND e.started_at < ?" + own,
-            (lo, lo + days * 86400 + 1, *params)).fetchone()
-        return {"dollars": float(r[0]), "runs": int(r[1]),
-                "input_tokens": int(r[2]), "output_tokens": int(r[3]),
-                "tool_calls": int(r[4])}
+            "COALESCE(SUM(e.tool_calls), 0) "
+            + join
+            + ended
+            + " AND e.started_at >= ? AND e.started_at < ?"
+            + own,
+            (lo, lo + days * 86400 + 1, *params),
+        ).fetchone()
+        return {
+            "dollars": float(r[0]),
+            "runs": int(r[1]),
+            "input_tokens": int(r[2]),
+            "output_tokens": int(r[3]),
+            "tool_calls": int(r[4]),
+        }
 
     totals, prev = _tot(since), _tot(prev_since)
     episodes = w.list_episodes(limit=200, owner=owner)
@@ -441,21 +476,38 @@ def _board_spend(w, owner, days: int) -> dict:
             outcomes["success"] += 1
         else:
             outcomes["failed"] += 1
-    per_run = [{"id": e.id, "goal_id": e.goal_id,
-                "cost": float(e.cost_dollars or 0)}
-               for e in episodes[:60]]
+    per_run = [
+        {"id": e.id, "goal_id": e.goal_id, "cost": float(e.cost_dollars or 0)}
+        for e in episodes[:60]
+    ]
     top_goals = []
     for gid, cost, runs in w.conn.execute(
-            "SELECT e.goal_id, SUM(COALESCE(e.cost_dollars, 0)) AS c, COUNT(*) "
-            + join + ended + " AND e.started_at >= ?" + own +
-            " GROUP BY e.goal_id ORDER BY c DESC LIMIT 8",
-            (since, *params)).fetchall():
+        "SELECT e.goal_id, SUM(COALESCE(e.cost_dollars, 0)) AS c, COUNT(*) "
+        + join
+        + ended
+        + " AND e.started_at >= ?"
+        + own
+        + " GROUP BY e.goal_id ORDER BY c DESC LIMIT 8",
+        (since, *params),
+    ).fetchall():
         g = w.get_goal(int(gid)) if gid is not None else None
-        top_goals.append({"goal_id": gid, "title": g.title if g else f"#{gid}",
-                          "cost": float(cost or 0), "runs": int(runs)})
-    return {"totals": totals, "prev": prev, "daily": list(daily.values()),
-            "outcomes": outcomes, "per_run": per_run, "top_goals": top_goals,
-            "by_platform": _external_platform_spend(w, owner, since)}
+        top_goals.append(
+            {
+                "goal_id": gid,
+                "title": g.title if g else f"#{gid}",
+                "cost": float(cost or 0),
+                "runs": int(runs),
+            }
+        )
+    return {
+        "totals": totals,
+        "prev": prev,
+        "daily": list(daily.values()),
+        "outcomes": outcomes,
+        "per_run": per_run,
+        "top_goals": top_goals,
+        "by_platform": _external_platform_spend(w, owner, since),
+    }
 
 
 def _external_platform_spend(w, owner, since: float) -> list[dict]:
@@ -468,22 +520,24 @@ def _external_platform_spend(w, owner, since: float) -> list[dict]:
     if owner is not None:
         return []
     from maverick.external_agents import PLATFORMS, roster
+
     platform_of = {f"agent:{r['id']}": r["platform"] for r in roster()}
     if not platform_of:
         return []
     agg: dict[str, dict] = {}
     for own_id, cost, runs in w.conn.execute(
-            "SELECT g.owner, SUM(COALESCE(e.cost_dollars, 0)), COUNT(*) "
-            "FROM episodes e JOIN goals g ON e.goal_id = g.id "
-            "WHERE e.ended_at IS NOT NULL AND e.started_at >= ? "
-            "AND g.owner LIKE 'agent:%' GROUP BY g.owner",
-            (since,)).fetchall():
+        "SELECT g.owner, SUM(COALESCE(e.cost_dollars, 0)), COUNT(*) "
+        "FROM episodes e JOIN goals g ON e.goal_id = g.id "
+        "WHERE e.ended_at IS NOT NULL AND e.started_at >= ? "
+        "AND g.owner LIKE 'agent:%' GROUP BY g.owner",
+        (since,),
+    ).fetchall():
         platform = platform_of.get(str(own_id))
         if platform is None:
             continue
-        row = agg.setdefault(platform, {
-            "label": PLATFORMS.get(platform, platform),
-            "cost": 0.0, "runs": 0})
+        row = agg.setdefault(
+            platform, {"label": PLATFORMS.get(platform, platform), "cost": 0.0, "runs": 0}
+        )
         row["cost"] += float(cost or 0)
         row["runs"] += int(runs)
     return sorted(agg.values(), key=lambda r: r["cost"], reverse=True)[:8]
@@ -494,24 +548,29 @@ def _board_workforce(w, owner, days: int) -> dict:
     from maverick.marketplace.storefront import connector_marketplace
     from maverick.operating_record import assemble
     from maverick.outcomes import firm_totals, worker_cards
+
     _, since, prev_since = _board_day_list(days)
     own, params = _owner_sql(owner)
     firm = firm_totals(assemble(w, owner=owner)).to_dict()
     cards = worker_cards(w, owner=owner)
     depts: dict[str, dict] = {}
     for c in cards:
-        row = depts.setdefault(c.suite_title or "General",
-                               {"label": c.suite_title or "General",
-                                "completed": 0, "total": 0, "spend": 0.0})
+        row = depts.setdefault(
+            c.suite_title or "General",
+            {"label": c.suite_title or "General", "completed": 0, "total": 0, "spend": 0.0},
+        )
         row["completed"] += c.goals_completed
         row["total"] += c.goals_total
         row["spend"] += c.spend_dollars
 
     def _delivered(lo: float, hi: float) -> int:
-        return int(w.conn.execute(
-            "SELECT COUNT(*) FROM goals WHERE status = 'done' "
-            "AND updated_at >= ? AND updated_at < ?" + own,
-            (lo, hi, *params)).fetchone()[0])
+        return int(
+            w.conn.execute(
+                "SELECT COUNT(*) FROM goals WHERE status = 'done' "
+                "AND updated_at >= ? AND updated_at < ?" + own,
+                (lo, hi, *params),
+            ).fetchone()[0]
+        )
 
     return {
         "kpis": {
@@ -524,9 +583,9 @@ def _board_workforce(w, owner, days: int) -> dict:
             "delivered_window": _delivered(since, time.time()),
             "delivered_prev": _delivered(prev_since, since),
         },
-        "depts": sorted(depts.values(),
-                        key=lambda r: (r["completed"], r["total"]),
-                        reverse=True)[:8],
+        "depts": sorted(depts.values(), key=lambda r: (r["completed"], r["total"]), reverse=True)[
+            :8
+        ],
         "leaders": [c.to_dict() for c in cards[:6]],
         "platforms": _external_platform_workforce(w, owner),
     }
@@ -539,28 +598,29 @@ def _external_platform_workforce(w, owner) -> list[dict]:
     if owner is not None:
         return []
     from maverick.external_agents import PLATFORMS, roster
+
     platform_of = {f"agent:{r['id']}": r["platform"] for r in roster()}
     if not platform_of:
         return []
     agg: dict[str, dict] = {}
     for own_id, completed, total, spend in w.conn.execute(
-            "SELECT g.owner, "
-            "SUM(CASE WHEN g.status = 'done' THEN 1 ELSE 0 END), COUNT(*), "
-            "(SELECT COALESCE(SUM(e.cost_dollars), 0) FROM episodes e "
-            " JOIN goals g2 ON e.goal_id = g2.id WHERE g2.owner = g.owner) "
-            "FROM goals g WHERE g.owner LIKE 'agent:%' GROUP BY g.owner"
-            ).fetchall():
+        "SELECT g.owner, "
+        "SUM(CASE WHEN g.status = 'done' THEN 1 ELSE 0 END), COUNT(*), "
+        "(SELECT COALESCE(SUM(e.cost_dollars), 0) FROM episodes e "
+        " JOIN goals g2 ON e.goal_id = g2.id WHERE g2.owner = g.owner) "
+        "FROM goals g WHERE g.owner LIKE 'agent:%' GROUP BY g.owner"
+    ).fetchall():
         platform = platform_of.get(str(own_id))
         if platform is None:
             continue
-        row = agg.setdefault(platform, {
-            "label": PLATFORMS.get(platform, platform),
-            "completed": 0, "total": 0, "spend": 0.0})
+        row = agg.setdefault(
+            platform,
+            {"label": PLATFORMS.get(platform, platform), "completed": 0, "total": 0, "spend": 0.0},
+        )
         row["completed"] += int(completed or 0)
         row["total"] += int(total or 0)
         row["spend"] += float(spend or 0)
-    return sorted(agg.values(), key=lambda r: (r["completed"], r["total"]),
-                  reverse=True)[:8]
+    return sorted(agg.values(), key=lambda r: (r["completed"], r["total"]), reverse=True)[:8]
 
 
 def _board_workspace(department: str) -> dict:
@@ -577,16 +637,27 @@ def _board_workspace(department: str) -> dict:
         PRIVACY_ASSESSMENT_TYPES,
         SECURITY_ASSESSMENT_TYPES,
     )
-    base = {"privacy": PRIVACY_ASSESSMENT_TYPES,
-            "finance": FINANCE_ASSESSMENT_TYPES,
-            "security": SECURITY_ASSESSMENT_TYPES}[department]
+
+    base = {
+        "privacy": PRIVACY_ASSESSMENT_TYPES,
+        "finance": FINANCE_ASSESSMENT_TYPES,
+        "security": SECURITY_ASSESSMENT_TYPES,
+    }[department]
     types = set(base) | {
-        t for t, rec in custom_template_records().items()
-        if rec.get("department", "privacy") == department}
+        t
+        for t, rec in custom_template_records().items()
+        if rec.get("department", "privacy") == department
+    }
     sessions = [x for x in list_saved() if x.get("type") in types]
 
-    kpis = {"total": len(sessions), "open": 0, "needs_more": 0,
-            "approved": 0, "rejected": 0, "due_review": 0}
+    kpis = {
+        "total": len(sessions),
+        "open": 0,
+        "needs_more": 0,
+        "approved": 0,
+        "rejected": 0,
+        "due_review": 0,
+    }
     for x in sessions:
         st = x.get("status")
         if st == "pending_review":
@@ -600,8 +671,7 @@ def _board_workspace(department: str) -> dict:
 
     risk = {"high": 0, "medium": 0, "low": 0, "minimal": 0, "unrated": 0}
     for x in sessions:
-        risk[x.get("residual_risk") if x.get("residual_risk") in risk
-             else "unrated"] += 1
+        risk[x.get("residual_risk") if x.get("residual_risk") in risk else "unrated"] += 1
 
     def _month(ts: float) -> str:
         d = datetime.fromtimestamp(ts, tz=timezone.utc)
@@ -624,15 +694,19 @@ def _board_workspace(department: str) -> dict:
 
     by_type: dict[str, dict] = {}
     for x in sessions:
-        row = by_type.setdefault(x.get("type") or "?", {
-            "label": (x.get("type") or "?").replace("_", " "),
-            "total": 0, "approved": 0})
+        row = by_type.setdefault(
+            x.get("type") or "?",
+            {"label": (x.get("type") or "?").replace("_", " "), "total": 0, "approved": 0},
+        )
         row["total"] += 1
         if x.get("status") == "approved":
             row["approved"] += 1
-    return {"kpis": kpis, "risk": risk, "monthly": list(monthly.values()),
-            "types": sorted(by_type.values(), key=lambda r: r["total"],
-                            reverse=True)[:6]}
+    return {
+        "kpis": kpis,
+        "risk": risk,
+        "monthly": list(monthly.values()),
+        "types": sorted(by_type.values(), key=lambda r: r["total"], reverse=True)[:6],
+    }
 
 
 def _board_savings(w, owner, days: int) -> dict:
@@ -641,17 +715,18 @@ def _board_savings(w, owner, days: int) -> dict:
     series so the page can show work over time."""
     from maverick import savings as savings_mod
     from maverick.config import get_value
+
     day_list, since, _prev = _board_day_list(days)
     own, params = _owner_sql(owner)
     daily = {d.isoformat(): {"d": d.isoformat(), "n": 0} for d in day_list}
     for day, n in w.conn.execute(
-            "SELECT date(updated_at, 'unixepoch') AS day, COUNT(*) FROM goals "
-            "WHERE status = 'done' AND updated_at >= ?" + own + " GROUP BY day",
-            (since, *params)).fetchall():
+        "SELECT date(updated_at, 'unixepoch') AS day, COUNT(*) FROM goals "
+        "WHERE status = 'done' AND updated_at >= ?" + own + " GROUP BY day",
+        (since, *params),
+    ).fetchall():
         if day in daily:
             daily[day]["n"] = int(n)
-    report = savings_mod.to_dict(
-        savings_mod.compute(w, window_days=days, cfg=get_value()))
+    report = savings_mod.to_dict(savings_mod.compute(w, window_days=days, cfg=get_value()))
     return {"report": report, "daily_done": list(daily.values())}
 
 
@@ -659,14 +734,16 @@ def _board_oversight(w, owner, days: int) -> dict:
     """Mission-control rollup: guardrail interventions from the audit log
     (fail-soft: unreadable log yields an empty board, never a 500), the
     pending human queue, and the halt state."""
-    from datetime import date, timedelta
+    from datetime import datetime, timedelta, timezone
+
     day_list, since, _prev = _board_day_list(days)
     daily = {d.isoformat(): {"d": d.isoformat(), "n": 0} for d in day_list}
     by_kind: dict[str, int] = {}
     total = 0
     try:
         from maverick.audit.export import iter_audit_events
-        since_day = (date.today() - timedelta(days=days)).isoformat()
+
+        since_day = (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
         scanned = 0
         for e in iter_audit_events(since=since_day):
             scanned += 1
@@ -677,31 +754,37 @@ def _board_oversight(w, owner, days: int) -> dict:
             by_kind[kind] = by_kind.get(kind, 0) + 1
             ts = e.get("ts")
             if ts:
-                day = date.fromtimestamp(float(ts)).isoformat()
+                day = datetime.fromtimestamp(float(ts), tz=timezone.utc).date().isoformat()
                 if day in daily:
                     daily[day]["n"] += 1
     except Exception:  # pragma: no cover -- fail-soft like the page
         pass
     try:
-        pending = sum(1 for a in w.list_approvals(limit=500)
-                      if getattr(a, "status", "") == "pending")
+        pending = sum(
+            1 for a in w.list_approvals(limit=500) if getattr(a, "status", "") == "pending"
+        )
     except Exception:  # pragma: no cover
         pending = 0
     try:
         halted = bool(w.active_halt())
     except Exception:  # pragma: no cover
         halted = False
-    kinds = sorted(({"kind": k.replace("_", " "), "n": n}
-                    for k, n in by_kind.items()),
-                   key=lambda r: r["n"], reverse=True)[:8]
-    return {"interventions": total, "by_kind": kinds,
-            "daily": list(daily.values()),
-            "pending_approvals": pending, "halted": halted}
+    kinds = sorted(
+        ({"kind": k.replace("_", " "), "n": n} for k, n in by_kind.items()),
+        key=lambda r: r["n"],
+        reverse=True,
+    )[:8]
+    return {
+        "interventions": total,
+        "by_kind": kinds,
+        "daily": list(daily.values()),
+        "pending_approvals": pending,
+        "halted": halted,
+    }
 
 
 @router.get("/dashboards/{board}")
-async def dashboard_board(request: Request, board: str,
-                          days: int | None = None) -> dict:
+async def dashboard_board(request: Request, board: str, days: int | None = None) -> dict:
     """Executive-board payload for the Overview / Spend / Workforce pages."""
     require_permission(request, "view")
     w = _world()
@@ -710,9 +793,13 @@ async def dashboard_board(request: Request, board: str,
     if board in ("privacy", "finance", "security"):
         payload = _board_workspace(board)
     elif board in ("overview", "spend", "workforce", "savings", "oversight"):
-        build = {"overview": _board_overview, "spend": _board_spend,
-                 "workforce": _board_workforce, "savings": _board_savings,
-                 "oversight": _board_oversight}[board]
+        build = {
+            "overview": _board_overview,
+            "spend": _board_spend,
+            "workforce": _board_workforce,
+            "savings": _board_savings,
+            "oversight": _board_oversight,
+        }[board]
         payload = build(w, owner, d)
     else:
         raise HTTPException(status_code=404, detail="unknown board")
@@ -724,9 +811,12 @@ async def dashboard_board(request: Request, board: str,
 async def create_tenant(request: Request, body: TenantCreateIn) -> TenantOut:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
+
     try:
         rec = tenant_registry.create_tenant(
-            body.id, plan=body.plan, display_name=body.display_name,
+            body.id,
+            plan=body.plan,
+            display_name=body.display_name,
             max_daily_dollars=body.max_daily_dollars,
         )
     except ValueError as e:
@@ -745,6 +835,7 @@ async def get_tenant(request: Request, tenant_id: str) -> TenantOut:
 async def suspend_tenant(request: Request, tenant_id: str) -> TenantOut:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
+
     _get_tenant_or_404(tenant_id)
     return _to_tenant_out(tenant_registry.suspend_tenant(tenant_id))
 
@@ -753,38 +844,46 @@ async def suspend_tenant(request: Request, tenant_id: str) -> TenantOut:
 async def resume_tenant(request: Request, tenant_id: str) -> TenantOut:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
+
     _get_tenant_or_404(tenant_id)
     return _to_tenant_out(tenant_registry.resume_tenant(tenant_id))
 
 
 @router.post("/admin/tenants/{tenant_id}/plan", response_model=TenantOut)
 async def set_tenant_plan(
-    request: Request, tenant_id: str, body: TenantPlanIn,
+    request: Request,
+    tenant_id: str,
+    body: TenantPlanIn,
 ) -> TenantOut:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
+
     _get_tenant_or_404(tenant_id)
     return _to_tenant_out(tenant_registry.set_plan(tenant_id, body.plan))
 
 
 @router.post("/admin/tenants/{tenant_id}/quota", response_model=TenantOut)
 async def set_tenant_quota(
-    request: Request, tenant_id: str, body: TenantQuotaIn,
+    request: Request,
+    tenant_id: str,
+    body: TenantQuotaIn,
 ) -> TenantOut:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
+
     _get_tenant_or_404(tenant_id)
-    return _to_tenant_out(
-        tenant_registry.set_quota(tenant_id, body.max_daily_dollars)
-    )
+    return _to_tenant_out(tenant_registry.set_quota(tenant_id, body.max_daily_dollars))
 
 
 @router.delete("/admin/tenants/{tenant_id}", status_code=204)
 async def delete_tenant(
-    request: Request, tenant_id: str, purge: bool = False,
+    request: Request,
+    tenant_id: str,
+    purge: bool = False,
 ) -> Response:
     require_global_permission(request, "admin")
     from maverick.tenant import registry as tenant_registry
+
     _get_tenant_or_404(tenant_id)
     tenant_registry.delete_tenant(tenant_id, purge=purge)
     return Response(status_code=204)
@@ -793,6 +892,7 @@ async def delete_tenant(
 # Per-tenant RBAC: a principal can hold a different role in each tenant. These
 # memberships override the global role for that tenant only (bootstrap admins
 # stay globally admin). Managed admin-only.
+
 
 def _reject_tenant_role_assignment_under_per_user_tenancy() -> None:
     """Per-tenant RBAC keys on the request's active tenant, but per-user tenancy
@@ -807,13 +907,14 @@ def _reject_tenant_role_assignment_under_per_user_tenancy() -> None:
     tenants can still be active under the read path and must be revocable.
     """
     from maverick.paths import tenant_by_user_enabled
+
     if tenant_by_user_enabled():
         raise HTTPException(
             status_code=409,
             detail="Tenant-level roles aren't available on this deployment — "
-                   "per-user tenancy is enabled, so each user already works in "
-                   "their own isolated tenant (MAVERICK_TENANT_BY_USER). Assign "
-                   "the user a global role instead (POST /users/set).",
+            "per-user tenancy is enabled, so each user already works in "
+            "their own isolated tenant (MAVERICK_TENANT_BY_USER). Assign "
+            "the user a global role instead (POST /users/set).",
         )
 
 
@@ -821,32 +922,40 @@ def _reject_tenant_role_assignment_under_per_user_tenancy() -> None:
 async def list_tenant_roles(request: Request, tenant_id: str) -> dict[str, str]:
     require_global_permission(request, "admin")
     from maverick_dashboard import rbac
+
     _get_tenant_or_404(tenant_id)
     return rbac.list_tenant_roles(tenant_id)
 
 
 @router.put("/admin/tenants/{tenant_id}/roles/{principal}", status_code=204)
 async def set_tenant_role(
-    request: Request, tenant_id: str, principal: str, body: TenantRoleIn,
+    request: Request,
+    tenant_id: str,
+    principal: str,
+    body: TenantRoleIn,
 ) -> Response:
     require_global_permission(request, "admin")
     _reject_tenant_role_assignment_under_per_user_tenancy()
     from maverick_dashboard import rbac
+
     _get_tenant_or_404(tenant_id)
-    rbac.set_tenant_role(tenant_id, principal, body.role,
-                         actor=caller_principal(request) or "local")
+    rbac.set_tenant_role(
+        tenant_id, principal, body.role, actor=caller_principal(request) or "local"
+    )
     return Response(status_code=204)
 
 
 @router.delete("/admin/tenants/{tenant_id}/roles/{principal}", status_code=204)
 async def remove_tenant_role(
-    request: Request, tenant_id: str, principal: str,
+    request: Request,
+    tenant_id: str,
+    principal: str,
 ) -> Response:
     require_global_permission(request, "admin")
     from maverick_dashboard import rbac
+
     _get_tenant_or_404(tenant_id)
-    rbac.remove_tenant_role(tenant_id, principal,
-                            actor=caller_principal(request) or "local")
+    rbac.remove_tenant_role(tenant_id, principal, actor=caller_principal(request) or "local")
     return Response(status_code=204)
 
 
@@ -856,11 +965,13 @@ async def remove_tenant_role(
 # admin role. Enforcement lives in auth.caller_suites/require_suite and the
 # departments/fleets routes.
 
+
 @router.get("/users/suites")
 async def list_user_suites(request: Request) -> dict:
     """Every explicit department grant, plus the grantable suite catalog."""
     require_global_permission(request, "admin")
     from maverick_dashboard import suite_grants
+
     default = suite_grants.default_suites()
     return {
         "grants": suite_grants.list_grants(),
@@ -871,14 +982,16 @@ async def list_user_suites(request: Request) -> dict:
 
 @router.put("/users/{principal}/suites", status_code=204)
 async def set_user_suites(
-    request: Request, principal: str, body: UserSuitesIn,
+    request: Request,
+    principal: str,
+    body: UserSuitesIn,
 ) -> Response:
     """Scope a user to exactly these departments (empty list = none)."""
     require_global_permission(request, "admin")
     from maverick_dashboard import suite_grants
+
     try:
-        suite_grants.set_suites(principal, body.suites,
-                                actor=caller_principal(request) or "local")
+        suite_grants.set_suites(principal, body.suites, actor=caller_principal(request) or "local")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(status_code=204)
@@ -889,8 +1002,8 @@ async def remove_user_suites(request: Request, principal: str) -> Response:
     """Lift a user's department scoping (back to unrestricted/default)."""
     require_global_permission(request, "admin")
     from maverick_dashboard import suite_grants
-    suite_grants.remove_grant(principal,
-                              actor=caller_principal(request) or "local")
+
+    suite_grants.remove_grant(principal, actor=caller_principal(request) or "local")
     return Response(status_code=204)
 
 
@@ -925,11 +1038,13 @@ async def create_goal(
     # Shared sliding-window cap across /chat/send + this route, so a
     # runaway loop can't spawn unbounded (paid) goals.
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request)
     title = payload.title
     description = payload.description
     if payload.template:
         from maverick.templates import load_template
+
         try:
             tpl = load_template(payload.template)
         except ValueError as e:
@@ -955,6 +1070,7 @@ async def create_goal(
     domain = (payload.domain or "").strip() or None
     if domain:
         from maverick.domain import enabled_domains, suite_for
+
         if domain not in enabled_domains():
             raise HTTPException(status_code=400, detail=f"unknown specialist: {domain!r}")
         require_suite(request, suite_for(domain))
@@ -982,9 +1098,7 @@ async def create_goal(
     goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
     if domain:
         w.set_goal_domain(goal_id, domain)
-    if idem_key and not w.mark_message_processed(
-        _IDEMPOTENCY_CHANNEL, idem_ext, goal_id=goal_id
-    ):
+    if idem_key and not w.mark_message_processed(_IDEMPOTENCY_CHANNEL, idem_ext, goal_id=goal_id):
         # Lost a concurrent race on the same key: return the winner's goal and do
         # NOT dispatch a run for this never-run goal row. Mark the loser
         # terminal so it cannot remain a permanently-pending ghost in the
@@ -1028,6 +1142,7 @@ async def create_goal(
             headers={"Retry-After": "1"},
         )
     from maverick.runner import run_goal_in_background_async
+
     # Enforce server-side execution caps even when callers request larger values.
     max_dollars = min(payload.max_dollars, DEFAULT_MAX_DOLLARS)
     max_wall_seconds = min(payload.max_wall_seconds, DEFAULT_MAX_WALL_SECONDS)
@@ -1037,14 +1152,22 @@ async def create_goal(
     user_id = execution_user_id_from_request(request)
     if user_id:
         bg.add_task(
-            run_goal_in_background_async, goal_id,
-            max_dollars, max_wall_seconds, max_depth,
-            channel="api", user_id=user_id, allowed_suites=allowed_suites,
+            run_goal_in_background_async,
+            goal_id,
+            max_dollars,
+            max_wall_seconds,
+            max_depth,
+            channel="api",
+            user_id=user_id,
+            allowed_suites=allowed_suites,
         )
     else:
         bg.add_task(
-            run_goal_in_background_async, goal_id,
-            max_dollars, max_wall_seconds, max_depth,
+            run_goal_in_background_async,
+            goal_id,
+            max_dollars,
+            max_wall_seconds,
+            max_depth,
             allowed_suites=allowed_suites,
         )
     g = w.get_goal(goal_id)
@@ -1090,8 +1213,11 @@ async def list_goals(
     limit = max(1, min(int(limit or 50), 500))
     offset = max(0, int(offset or 0))
     goals = w.list_goals(
-        status=status, owner=goal_owner_filter(request),
-        limit=limit + 1, offset=offset, order="desc",
+        status=status,
+        owner=goal_owner_filter(request),
+        limit=limit + 1,
+        offset=offset,
+        order="desc",
     )
     has_more = len(goals) > limit
     goals = goals[:limit]
@@ -1130,7 +1256,10 @@ async def get_goal(request: Request, goal_id: int) -> GoalOut:
 
 @router.get("/goals/{goal_id}/events", response_model=GoalEventsResponse)
 async def goal_events(
-    request: Request, goal_id: int, since: int = 0, limit: int = 200,
+    request: Request,
+    goal_id: int,
+    since: int = 0,
+    limit: int = 200,
 ) -> GoalEventsResponse:
     w = _world()
     g = w.get_goal(goal_id)
@@ -1143,8 +1272,7 @@ async def goal_events(
         result=g.result,
         next_id=events[-1].id if events else since,
         events=[
-            GoalEventOut(id=e.id, agent=e.agent, kind=e.kind,
-                         content=e.content, ts=e.ts)
+            GoalEventOut(id=e.id, agent=e.agent, kind=e.kind, content=e.content, ts=e.ts)
             for e in events
         ],
     )
@@ -1152,8 +1280,9 @@ async def goal_events(
 
 def _sse_event(e) -> str:
     """Format one goal event as a Server-Sent Event frame."""
-    data = json.dumps({"id": e.id, "agent": e.agent, "kind": e.kind,
-                       "content": e.content, "ts": e.ts})
+    data = json.dumps(
+        {"id": e.id, "agent": e.agent, "kind": e.kind, "content": e.content, "ts": e.ts}
+    )
     kind = str(e.kind or "message").replace("\n", " ").replace("\r", " ")
     return f"id: {e.id}\nevent: {kind}\ndata: {data}\n\n"
 
@@ -1175,9 +1304,13 @@ _SSE_IDLE_HEARTBEAT_EVERY = 30.0
 _SSE_MAX_STREAM_SECONDS = 300.0
 _SSE_MAX_BATCH = 200
 
+
 @router.get("/goals/{goal_id}/events/stream")
 async def goal_events_stream(
-    request: Request, goal_id: int, since: int = 0, limit: int = 0,
+    request: Request,
+    goal_id: int,
+    since: int = 0,
+    limit: int = 0,
     poll: float = 1.0,
 ) -> StreamingResponse:
     """Real-time **SSE** stream of a goal's events (`text/event-stream`).
@@ -1212,15 +1345,14 @@ async def goal_events_stream(
         idle_for = 0.0
         poll_interval = _SSE_POLL_INTERVAL
         try:
-            yield ": connected\n\n"   # open the stream immediately
+            yield ": connected\n\n"  # open the stream immediately
             while True:
                 if await request.is_disconnected():
                     break
                 if (asyncio.get_running_loop().time() - started) >= _SSE_MAX_STREAM_SECONDS:
-                    yield "event: timeout\ndata: {\"detail\": \"stream lifetime exceeded\"}\n\n"
+                    yield 'event: timeout\ndata: {"detail": "stream lifetime exceeded"}\n\n'
                     return
-                events = await run_in_threadpool(
-                    w.goal_events, goal_id, last, _SSE_MAX_BATCH)
+                events = await run_in_threadpool(w.goal_events, goal_id, last, _SSE_MAX_BATCH)
                 for e in events:
                     yield _sse_event(e)
                     last = e.id
@@ -1270,15 +1402,15 @@ async def answer_question(request: Request, goal_id: int, payload: AnswerIn) -> 
     w.answer(payload.question_id, answer)
 
 
-
-
 @router.post(
     "/goals/{goal_id}/attachments",
     response_model=AttachmentOut,
     status_code=201,
 )
 async def upload_attachment(
-    request: Request, goal_id: int, bg: BackgroundTasks,
+    request: Request,
+    goal_id: int,
+    bg: BackgroundTasks,
     file: UploadFile = File(...),
 ) -> AttachmentOut:
     """Upload a file of any supported kind and attach it to a goal.
@@ -1307,9 +1439,7 @@ async def upload_attachment(
     if len(data) > MAX_FILE_BYTES:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"file too large: {len(data)} bytes (limit {MAX_FILE_BYTES})"
-            ),
+            detail=(f"file too large: {len(data)} bytes (limit {MAX_FILE_BYTES})"),
         )
 
     mime = file.content_type or "application/octet-stream"
@@ -1338,6 +1468,7 @@ async def upload_attachment(
     # Companion generation (transcripts / extracted text) off the request
     # path; best-effort, never raises.
     from maverick.attachments import generate_companions
+
     bg.add_task(generate_companions, w, goal_id)
     return AttachmentOut(
         id=aid,
@@ -1472,10 +1603,11 @@ async def discover_documents(request: Request, body: DocDiscoverIn) -> dict:
     """
     require_permission(request, "operate")
     from maverick import doc_discovery
+
     if not doc_discovery.enabled():
-        raise HTTPException(status_code=403,
-                            detail="doc discovery is disabled ([assessments] "
-                                   "doc_discovery)")
+        raise HTTPException(
+            status_code=403, detail="doc discovery is disabled ([assessments] doc_discovery)"
+        )
     principal = _document_source_principal(request)
     allow_ambient = principal is None
     configured = await run_in_threadpool(
@@ -1484,9 +1616,9 @@ async def discover_documents(request: Request, body: DocDiscoverIn) -> dict:
         allow_ambient_credentials=allow_ambient,
     )
     hits = await run_in_threadpool(
-        doc_discovery.discover, body.subject,
-        sources=(body.sources if body.sources is not None
-                 else configured or None),
+        doc_discovery.discover,
+        body.subject,
+        sources=(body.sources if body.sources is not None else configured or None),
         limit=body.limit,
         principal=principal,
         allow_ambient_credentials=allow_ambient,
@@ -1503,7 +1635,10 @@ async def discover_documents(request: Request, body: DocDiscoverIn) -> dict:
     status_code=201,
 )
 async def attach_from_source(
-    request: Request, goal_id: int, body: SourceAttachIn, bg: BackgroundTasks,
+    request: Request,
+    goal_id: int,
+    body: SourceAttachIn,
+    bg: BackgroundTasks,
 ) -> AttachmentOut:
     """Fetch one discovered document from its source and attach it to a goal
     as evidence -- the one-click 'found it, attach it for me'.
@@ -1521,6 +1656,7 @@ async def attach_from_source(
 
     from maverick import doc_discovery
     from maverick.attachments import AttachmentRejected, store
+
     principal = _document_source_principal(request)
     try:
         data, mime = await run_in_threadpool(
@@ -1534,28 +1670,33 @@ async def attach_from_source(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001 -- a source outage is a 502, not a 500
-        raise HTTPException(status_code=502,
-                            detail=f"fetch from {body.source} failed") from e
+        raise HTTPException(status_code=502, detail=f"fetch from {body.source} failed") from e
 
     filename = body.name.strip() or f"{body.source}-{body.doc_id[:24]}"
     mime = doc_discovery.resolve_mime(filename, mime)
     existing = sum(a.size_bytes for a in w.list_attachments(goal_id))
     try:
-        stored = store(goal_id, filename=filename, mime=mime, data=data,
-                       existing_total=existing)
+        stored = store(goal_id, filename=filename, mime=mime, data=data, existing_total=existing)
     except AttachmentRejected as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     aid = w.add_attachment(
-        goal_id=goal_id, filename=stored.filename, mime=stored.mime,
-        size_bytes=stored.size_bytes, sha256=stored.sha256,
+        goal_id=goal_id,
+        filename=stored.filename,
+        mime=stored.mime,
+        size_bytes=stored.size_bytes,
+        sha256=stored.sha256,
         path=str(stored.path),
     )
     from maverick.attachments import generate_companions
+
     bg.add_task(generate_companions, w, goal_id)
-    return AttachmentOut(id=aid, filename=stored.filename, mime=stored.mime,
-                         size_bytes=stored.size_bytes, sha256=stored.sha256)
-
-
+    return AttachmentOut(
+        id=aid,
+        filename=stored.filename,
+        mime=stored.mime,
+        size_bytes=stored.size_bytes,
+        sha256=stored.sha256,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1563,12 +1704,14 @@ async def attach_from_source(
 # these records carry vendor terms, system inventories, and subject requests.
 # --------------------------------------------------------------------------- #
 
+
 def _entity_graph_or_403():
     from maverick import entity_graph
+
     if not entity_graph.enabled():
-        raise HTTPException(status_code=403,
-                            detail="the entity graph is disabled "
-                                   "([entity_graph] enable)")
+        raise HTTPException(
+            status_code=403, detail="the entity graph is disabled ([entity_graph] enable)"
+        )
     return entity_graph
 
 
@@ -1583,25 +1726,22 @@ def _parse_as_of(value: str) -> float | None:
     except ValueError:
         pass
     try:
-        day = _dt.datetime.strptime(text, "%Y-%m-%d").replace(
-            tzinfo=_dt.timezone.utc)
+        day = _dt.datetime.strptime(text, "%Y-%m-%d").replace(tzinfo=_dt.timezone.utc)
         return (day + _dt.timedelta(days=1)).timestamp()
     except ValueError:
         raise HTTPException(
-            status_code=400,
-            detail="as_of must be an epoch timestamp or YYYY-MM-DD") from None
+            status_code=400, detail="as_of must be an epoch timestamp or YYYY-MM-DD"
+        ) from None
 
 
 @router.get("/graph/dossier")
-async def graph_dossier(request: Request, vendor: str,
-                        as_of: str = "") -> dict:
+async def graph_dossier(request: Request, vendor: str, as_of: str = "") -> dict:
     """Everything the graph knows about one vendor -- reviews in force,
     decisions, open clause gaps, documents, people -- each item citing the
     governed record it derives from. ``as_of`` reconstructs a past date."""
     require_permission(request, "operate")
     graph = _entity_graph_or_403()
-    return await run_in_threadpool(
-        graph.dossier, vendor[:200], as_of=_parse_as_of(as_of))
+    return await run_in_threadpool(graph.dossier, vendor[:200], as_of=_parse_as_of(as_of))
 
 
 @router.get("/graph/why")
@@ -1615,28 +1755,31 @@ async def graph_why(request: Request, vendor: str) -> dict:
 
 
 @router.get("/graph/blast-radius")
-async def graph_blast_radius(request: Request, kind: str,
-                             name: str) -> dict:
+async def graph_blast_radius(request: Request, kind: str, name: str) -> dict:
     """Reverse reachability: this clause/document/person turned out to be a
     problem -- which records, vendors, and decisions relied on it?"""
     require_permission(request, "operate")
-    if kind not in ("clause", "document", "person", "vendor", "system",
-                    "goal", "skill"):
+    if kind not in ("clause", "document", "person", "vendor", "system", "goal", "skill"):
         raise HTTPException(status_code=400, detail="unsupported entity kind")
     graph = _entity_graph_or_403()
     return await run_in_threadpool(graph.blast_radius, kind, name[:300])
 
 
 @router.get("/graph/entity")
-async def graph_entity(request: Request, kind: str, name: str,
-                       depth: int = 2, as_of: str = "") -> dict:
+async def graph_entity(
+    request: Request, kind: str, name: str, depth: int = 2, as_of: str = ""
+) -> dict:
     require_permission(request, "operate")
     graph = _entity_graph_or_403()
     if kind not in graph.CONCEPT_KINDS + graph.RECORD_KINDS:
         raise HTTPException(status_code=400, detail="unsupported entity kind")
     return await run_in_threadpool(
-        graph.neighborhood, kind, name[:300],
-        depth=max(1, min(int(depth), 4)), as_of=_parse_as_of(as_of))
+        graph.neighborhood,
+        kind,
+        name[:300],
+        depth=max(1, min(int(depth), 4)),
+        as_of=_parse_as_of(as_of),
+    )
 
 
 @router.post("/graph/rebuild")
@@ -1650,10 +1793,11 @@ async def graph_rebuild(request: Request) -> dict:
 
 def _privacy_ops_or_403():
     from maverick import privacy_ops
+
     if not privacy_ops.enabled():
-        raise HTTPException(status_code=403,
-                            detail="privacy ops are disabled ([privacy_ops] "
-                                   "enable)")
+        raise HTTPException(
+            status_code=403, detail="privacy ops are disabled ([privacy_ops] enable)"
+        )
     return privacy_ops
 
 
@@ -1671,7 +1815,9 @@ async def create_dpa_review(request: Request, body: DpaReviewIn) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     return await run_in_threadpool(
-        ops.review_dpa, body.vendor, body.text,
+        ops.review_dpa,
+        body.vendor,
+        body.text,
         document_name=body.document_name,
         reviewed_by=_request_actor(request),
     )
@@ -1687,16 +1833,14 @@ async def get_dpa_review(request: Request, review_id: str) -> dict:
     return record
 
 
-_PAPER_DOCX_MIME = ("application/vnd.openxmlformats-officedocument"
-                    ".wordprocessingml.document")
+_PAPER_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 _PAPER_MAX_BYTES = 16 * 1024 * 1024
 
 
 def _safe_filename(name: str) -> str:
     """A Content-Disposition-safe name: no quotes, no path separators, no
     control characters that could forge a second header."""
-    cleaned = "".join(ch if (ch.isalnum() or ch in "-_. ") else "-"
-                      for ch in (name or ""))
+    cleaned = "".join(ch if (ch.isalnum() or ch in "-_. ") else "-" for ch in (name or ""))
     return cleaned.strip(" .-")[:120] or "document"
 
 
@@ -1727,30 +1871,36 @@ async def create_paper_review(
 
     filename = (file.filename or "vendor-paper")[:300]
     mime = file.content_type or "application/octet-stream"
-    if not (mime in (_PAPER_DOCX_MIME, "application/pdf")
-            or filename.lower().endswith((".docx", ".pdf"))):
+    if not (
+        mime in (_PAPER_DOCX_MIME, "application/pdf")
+        or filename.lower().endswith((".docx", ".pdf"))
+    ):
         raise HTTPException(
-            status_code=400,
-            detail="only Word (.docx) and PDF documents can be reviewed")
+            status_code=400, detail="only Word (.docx) and PDF documents can be reviewed"
+        )
     data = await file.read(_PAPER_MAX_BYTES + 1)
     if len(data) > _PAPER_MAX_BYTES:
         raise HTTPException(
-            status_code=413,
-            detail=f"document too large (limit {_PAPER_MAX_BYTES} bytes)")
+            status_code=413, detail=f"document too large (limit {_PAPER_MAX_BYTES} bytes)"
+        )
 
     extraction: dict = {}
-    text = await run_in_threadpool(
-        ops._document_text, data, mime, _metadata=extraction)
+    text = await run_in_threadpool(ops._document_text, data, mime, _metadata=extraction)
     if not (text or "").strip():
         raise HTTPException(
             status_code=422,
             detail="no text could be read from that file — a scanned PDF "
-                   "needs OCR before it can be reviewed")
+            "needs OCR before it can be reviewed",
+        )
 
     who = _request_actor(request)
     review = await run_in_threadpool(
-        paper_review.review_paper, text, vendor=vendor.strip()[:200],
-        instrument=instrument.strip().lower(), document_name=filename)
+        paper_review.review_paper,
+        text,
+        vendor=vendor.strip()[:200],
+        instrument=instrument.strip().lower(),
+        document_name=filename,
+    )
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def _redline():
@@ -1759,21 +1909,27 @@ async def create_paper_review(
             try:
                 return docx_redline.redline_docx(data, edits, date=stamp)
             except docx_redline.RedlineError:
-                pass   # fall back to a reconstruction rather than failing
+                pass  # fall back to a reconstruction rather than failing
         return docx_redline.build_redlined_docx(
-            review.source_paragraphs, edits, date=stamp,
+            review.source_paragraphs,
+            edits,
+            date=stamp,
             title=f"{review.vendor or 'Vendor'} — "
-                  f"{review.to_dict()['instrument_label']} (Lightwork redline)")
+            f"{review.to_dict()['instrument_label']} (Lightwork redline)",
+        )
 
     result = await run_in_threadpool(_redline)
     stem = _safe_filename(review.vendor or "vendor")[:60] or "vendor"
     record = await run_in_threadpool(
-        ops.save_paper_review, review, redline=result.content,
-        redline_result=result, reviewed_by=who,
+        ops.save_paper_review,
+        review,
+        redline=result.content,
+        redline_result=result,
+        reviewed_by=who,
         assessment_id=assessment_id.strip()[:128],
-        redline_filename=f"{stem}-{review.instrument}-redline.docx")
-    return {**record, "extraction": extraction,
-            "redline": result.to_dict()}
+        redline_filename=f"{stem}-{review.instrument}-redline.docx",
+    )
+    return {**record, "extraction": extraction, "redline": result.to_dict()}
 
 
 @router.get("/privacy/paper-reviews/{review_id}")
@@ -1797,13 +1953,13 @@ async def download_paper_redline(request: Request, review_id: str) -> Response:
         raise HTTPException(status_code=404, detail="no such review")
     body = await run_in_threadpool(ops.paper_redline_bytes, rid)
     if not body:
-        raise HTTPException(status_code=404,
-                            detail="this review has no redline document")
+        raise HTTPException(status_code=404, detail="this review has no redline document")
     name = record.get("redline_filename") or f"{rid}-redline.docx"
     return Response(
-        content=body, media_type=_PAPER_DOCX_MIME,
-        headers={"Content-Disposition":
-                 f'attachment; filename="{_safe_filename(name)}"'})
+        content=body,
+        media_type=_PAPER_DOCX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{_safe_filename(name)}"'},
+    )
 
 
 @router.get("/privacy/paper-reviews/{review_id}/memo")
@@ -1817,8 +1973,9 @@ async def get_paper_memo(request: Request, review_id: str) -> Response:
 
 
 @router.get("/privacy/our-paper")
-async def draft_our_paper_docx(request: Request, vendor: str = "",
-                               instrument: str = "dpa") -> Response:
+async def draft_our_paper_docx(
+    request: Request, vendor: str = "", instrument: str = "dpa"
+) -> Response:
     """OUR template instrument for a vendor, as a Word document with every
     vendor-specific value filled in red for counsel to verify.
 
@@ -1828,18 +1985,20 @@ async def draft_our_paper_docx(request: Request, vendor: str = "",
     require_permission(request, "operate")
     _privacy_ops_or_403()
     from maverick import paper_review
+
     inst = (instrument or "dpa").strip().lower()
     try:
         draft = await run_in_threadpool(
-            paper_review.draft_our_paper, vendor.strip()[:200],
-            instrument=inst)
+            paper_review.draft_our_paper, vendor.strip()[:200], instrument=inst
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     stem = _safe_filename(vendor.strip() or "vendor")[:60] or "vendor"
     return Response(
-        content=draft.content, media_type=_PAPER_DOCX_MIME,
-        headers={"Content-Disposition":
-                 f'attachment; filename="{stem}-{inst}-our-paper.docx"'})
+        content=draft.content,
+        media_type=_PAPER_DOCX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{stem}-{inst}-our-paper.docx"'},
+    )
 
 
 @router.get("/privacy/clause-playbook")
@@ -1851,20 +2010,19 @@ async def get_clause_playbook(request: Request) -> dict:
     their own."""
     require_permission(request, "operate")
     from maverick import paper_review
+
     shipped = paper_review.default_playbook()
     active = await run_in_threadpool(paper_review.load_playbook)
     return {
         "path": str(paper_review.playbook_path()),
         "positions": active,
         "shipped": shipped,
-        "customised": sorted(k for k, v in active.items()
-                             if shipped.get(k) != v),
+        "customised": sorted(k for k, v in active.items() if shipped.get(k) != v),
     }
 
 
 @router.post("/privacy/clause-playbook")
-async def set_clause_playbook(request: Request,
-                              body: ClausePlaybookIn) -> dict:
+async def set_clause_playbook(request: Request, body: ClausePlaybookIn) -> dict:
     """Write this deployment's own clause positions.
 
     A customer's standard positions are theirs, not ours -- this is the setup
@@ -1872,21 +2030,23 @@ async def set_clause_playbook(request: Request,
     the shipped position."""
     require_permission(request, "admin")
     from maverick import paper_review
+
     known = set(paper_review.default_playbook())
     unknown = sorted(set(body.positions) - known)
     if unknown:
         raise HTTPException(
-            status_code=400,
-            detail=f"unknown clause id(s): {', '.join(unknown[:8])}")
+            status_code=400, detail=f"unknown clause id(s): {', '.join(unknown[:8])}"
+        )
     merged = paper_review.default_playbook()
-    merged.update({k: v.strip() for k, v in body.positions.items()
-                   if v and v.strip()})
+    merged.update({k: v.strip() for k, v in body.positions.items() if v and v.strip()})
     path = await run_in_threadpool(paper_review.write_playbook, merged)
     active = await run_in_threadpool(paper_review.load_playbook)
     shipped = paper_review.default_playbook()
-    return {"ok": True, "path": str(path),
-            "customised": sorted(k for k, v in active.items()
-                                 if shipped.get(k) != v)}
+    return {
+        "ok": True,
+        "path": str(path),
+        "customised": sorted(k for k, v in active.items() if shipped.get(k) != v),
+    }
 
 
 @router.get("/privacy/dpa-documents")
@@ -1896,6 +2056,7 @@ async def search_dpa_documents(request: Request, vendor: str = "") -> dict:
     require_permission(request, "operate")
     _privacy_ops_or_403()
     from maverick import doc_discovery
+
     # "enabled" means it can actually search: feature on AND >=1 source
     # holds credentials — otherwise the UI says "connect a source", not
     # "no matching documents".
@@ -1909,7 +2070,8 @@ async def search_dpa_documents(request: Request, vendor: str = "") -> dict:
     if not doc_discovery.enabled() or not configured:
         return {"enabled": False, "hits": []}
     hits = await run_in_threadpool(
-        doc_discovery.discover, vendor[:200],
+        doc_discovery.discover,
+        vendor[:200],
         keywords=("dpa", "data processing", "agreement", "contract"),
         sources=configured,
         principal=principal,
@@ -1919,14 +2081,15 @@ async def search_dpa_documents(request: Request, vendor: str = "") -> dict:
 
 
 @router.post("/privacy/dpa-reviews/from-document", status_code=201)
-async def create_dpa_review_from_document(request: Request,
-                                          body: DpaFromDocumentIn) -> dict:
+async def create_dpa_review_from_document(request: Request, body: DpaFromDocumentIn) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     principal = _document_source_principal(request)
     try:
         return await run_in_threadpool(
-            ops.review_dpa_from_document, body.vendor, body.source,
+            ops.review_dpa_from_document,
+            body.vendor,
+            body.source,
             body.doc_id,
             ref=body.ref,
             document_name=body.document_name,
@@ -1957,17 +2120,18 @@ async def register_ai_system(request: Request, body: AiSystemIn) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     return await run_in_threadpool(
-        ops.register_ai_system, body.name, body.purpose,
-        provider=body.provider, owner=body.owner,
+        ops.register_ai_system,
+        body.name,
+        body.purpose,
+        provider=body.provider,
+        owner=body.owner,
         assessment_id=body.assessment_id,
         registered_by=_request_actor(request),
     )
 
 
-@router.post("/privacy/ai-systems/from-assessment/{assessment_id}",
-             status_code=201)
-async def register_ai_system_from_assessment(request: Request,
-                                             assessment_id: str) -> dict:
+@router.post("/privacy/ai-systems/from-assessment/{assessment_id}", status_code=201)
+async def register_ai_system_from_assessment(request: Request, assessment_id: str) -> dict:
     """A completed AIRA feeds the registry the way a PIA feeds the RoPA;
     the assessment's attestations only ever ratchet the tier upward."""
     require_permission(request, "operate")
@@ -2038,8 +2202,7 @@ async def import_onetrust(request: Request, body: OneTrustImportIn) -> dict:
         body.csv_text,
         imported_by=_request_actor(request),
     )
-    return {"imported": len(imported),
-            "activities": [e["activity"] for e in imported]}
+    return {"imported": len(imported), "activities": [e["activity"] for e in imported]}
 
 
 def _csv_formula_safe(value: object) -> object:
@@ -2057,6 +2220,7 @@ async def export_ropa_csv(request: Request) -> Response:
     rows = await run_in_threadpool(ops.export_ropa_art30)
     import csv
     import io
+
     buf = io.StringIO()
     fields = ["id", *ops.ROPA_FIELDS, "assessment_id", "source"]
     w = csv.DictWriter(buf, fieldnames=fields)
@@ -2064,9 +2228,10 @@ async def export_ropa_csv(request: Request) -> Response:
     for r in rows:
         w.writerow({field: _csv_formula_safe(r.get(field, "")) for field in fields})
     return Response(
-        content=buf.getvalue(), media_type="text/csv",
-        headers={"Content-Disposition":
-                 'attachment; filename="ropa-art30.csv"'})
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="ropa-art30.csv"'},
+    )
 
 
 @router.get("/privacy/dsar")
@@ -2084,18 +2249,31 @@ def _dsar_aging_payload(rows: list[dict]) -> dict:
     open_rows = [r for r in rows if r.get("status") == "open"]
     for r in open_rows:
         dl = int(r.get("days_left", 0))
-        band = ("overdue" if dl < 0 else "d0_7" if dl <= 7
-                else "d8_14" if dl <= 14 else "d15_30" if dl <= 30
-                else "d30_plus")
+        band = (
+            "overdue"
+            if dl < 0
+            else "d0_7"
+            if dl <= 7
+            else "d8_14"
+            if dl <= 14
+            else "d15_30"
+            if dl <= 30
+            else "d30_plus"
+        )
         bands[band] += 1
         k = str(r.get("kind", "other"))
-        kb = by_kind.setdefault(k, {"overdue": 0, "d0_7": 0, "d8_14": 0,
-                                    "d15_30": 0, "d30_plus": 0, "total": 0})
+        kb = by_kind.setdefault(
+            k, {"overdue": 0, "d0_7": 0, "d8_14": 0, "d15_30": 0, "d30_plus": 0, "total": 0}
+        )
         kb[band] += 1
         kb["total"] += 1
-    return {"open": len(open_rows), "bands": bands, "by_kind": by_kind,
-            "overdue": bands["overdue"],
-            "closing_soon": bands["overdue"] + bands["d0_7"]}
+    return {
+        "open": len(open_rows),
+        "bands": bands,
+        "by_kind": by_kind,
+        "overdue": bands["overdue"],
+        "closing_soon": bands["overdue"] + bands["d0_7"],
+    }
 
 
 @router.get("/privacy/dsar/aging")
@@ -2110,9 +2288,16 @@ async def dsar_aging(request: Request) -> dict:
 
 
 # Chapter V safeguard markers recognised in a RoPA transfer description.
-_SAFEGUARD_MARKERS = ("scc", "standard contractual", "adequacy", "bcr",
-                      "binding corporate", "chapter v", "art. 46",
-                      "article 46")
+_SAFEGUARD_MARKERS = (
+    "scc",
+    "standard contractual",
+    "adequacy",
+    "bcr",
+    "binding corporate",
+    "chapter v",
+    "art. 46",
+    "article 46",
+)
 
 
 def _transfer_flow_rows(ropa: list[dict], saved: list[dict]) -> list[dict]:
@@ -2124,27 +2309,31 @@ def _transfer_flow_rows(ropa: list[dict], saved: list[dict]) -> list[dict]:
         if not transfers or transfers.lower() in ("none", "n/a", "no"):
             continue
         low = transfers.lower()
-        flows.append({
-            "source": "RoPA",
-            "activity": r.get("activity", "") or r.get("controller", ""),
-            "destination": transfers[:300],
-            "recipients": str(r.get("recipients", ""))[:300],
-            "safeguarded": any(s in low for s in _SAFEGUARD_MARKERS),
-            "ref": r.get("id", ""),
-        })
+        flows.append(
+            {
+                "source": "RoPA",
+                "activity": r.get("activity", "") or r.get("controller", ""),
+                "destination": transfers[:300],
+                "recipients": str(r.get("recipients", ""))[:300],
+                "safeguarded": any(s in low for s in _SAFEGUARD_MARKERS),
+                "ref": r.get("id", ""),
+            }
+        )
     # TIAs are, by definition, cross-border transfer assessments.
     for s in saved:
         if s.get("type") != "tia":
             continue
-        flows.append({
-            "source": "TIA",
-            "activity": s.get("subject", ""),
-            "destination": s.get("subject", ""),
-            "recipients": "",
-            "safeguarded": s.get("residual_risk") in ("minimal", "low"),
-            "residual_risk": s.get("residual_risk", "?"),
-            "ref": s.get("id", ""),
-        })
+        flows.append(
+            {
+                "source": "TIA",
+                "activity": s.get("subject", ""),
+                "destination": s.get("subject", ""),
+                "recipients": "",
+                "safeguarded": s.get("residual_risk") in ("minimal", "low"),
+                "residual_risk": s.get("residual_risk", "?"),
+                "ref": s.get("id", ""),
+            }
+        )
     return flows
 
 
@@ -2159,6 +2348,7 @@ async def transfer_map(request: Request) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     from maverick.assessment import list_saved
+
     ropa = await run_in_threadpool(ops.list_ropa)
     saved = await run_in_threadpool(list_saved)
     flows = _transfer_flow_rows(ropa, saved)
@@ -2183,14 +2373,16 @@ def _privacy_session_rows() -> list[dict]:
     from maverick.assessment import custom_template_records, list_saved
 
     from .app import PRIVACY_ASSESSMENT_TYPES
+
     types = set(PRIVACY_ASSESSMENT_TYPES) | {
-        t for t, rec in custom_template_records().items()
-        if rec.get("department", "privacy") == "privacy"}
+        t
+        for t, rec in custom_template_records().items()
+        if rec.get("department", "privacy") == "privacy"
+    }
     return [s for s in list_saved() if s.get("type") in types]
 
 
-def _board_month_series(sessions: list[dict], now: float,
-                        months: int = 12) -> list[dict]:
+def _board_month_series(sessions: list[dict], now: float, months: int = 12) -> list[dict]:
     """Opened/decided counts per calendar month (UTC), oldest first."""
     t = time.gmtime(now)
     y, m = t.tm_year, t.tm_mon
@@ -2204,27 +2396,25 @@ def _board_month_series(sessions: list[dict], now: float,
     opened = dict.fromkeys(keys, 0)
     decided = dict.fromkeys(keys, 0)
     for s in sessions:
-        ck = time.strftime("%Y-%m", time.gmtime(float(s.get("created_at")
-                                                      or 0)))
+        ck = time.strftime("%Y-%m", time.gmtime(float(s.get("created_at") or 0)))
         if ck in opened:
             opened[ck] += 1
         if s.get("decided_at"):
-            dk = time.strftime("%Y-%m",
-                               time.gmtime(float(s["decided_at"])))
+            dk = time.strftime("%Y-%m", time.gmtime(float(s["decided_at"])))
             if dk in decided:
                 decided[dk] += 1
-    return [{"month": k, "opened": opened[k], "decided": decided[k]}
-            for k in keys]
+    return [{"month": k, "opened": opened[k], "decided": decided[k]} for k in keys]
 
 
-def _board_deltas(sessions: list[dict], now: float,
-                  days: int = 30) -> dict:
+def _board_deltas(sessions: list[dict], now: float, days: int = 30) -> dict:
     """This window vs the prior window -- the KPI delta chips."""
     cur_lo, prev_lo = now - days * 86400, now - 2 * days * 86400
-    d = {"window_days": days,
-         "opened": {"cur": 0, "prev": 0},
-         "decided": {"cur": 0, "prev": 0},
-         "high_residual": {"cur": 0, "prev": 0}}
+    d = {
+        "window_days": days,
+        "opened": {"cur": 0, "prev": 0},
+        "decided": {"cur": 0, "prev": 0},
+        "high_residual": {"cur": 0, "prev": 0},
+    }
     for s in sessions:
         c = float(s.get("created_at") or 0)
         bucket = "cur" if c >= cur_lo else "prev" if c >= prev_lo else ""
@@ -2243,8 +2433,7 @@ def _board_deltas(sessions: list[dict], now: float,
 def _board_assessment_plane(sessions: list[dict], now: float) -> dict:
     """KPIs, the inherent->residual risk mix, per-type volumes, and the
     12-month throughput series over the privacy assessment records."""
-    mix = {"inherent": dict.fromkeys(_RISK_LEVELS, 0),
-           "residual": dict.fromkeys(_RISK_LEVELS, 0)}
+    mix = {"inherent": dict.fromkeys(_RISK_LEVELS, 0), "residual": dict.fromkeys(_RISK_LEVELS, 0)}
     by_type: dict[str, dict] = {}
     for s in sessions:
         for side in ("inherent", "residual"):
@@ -2253,8 +2442,8 @@ def _board_assessment_plane(sessions: list[dict], now: float) -> dict:
                 mix[side][lvl] += 1
         row = by_type.setdefault(
             str(s.get("type", "?")),
-            {"type": str(s.get("type", "?")), "total": 0, "open": 0,
-             "high": 0})
+            {"type": str(s.get("type", "?")), "total": 0, "open": 0, "high": 0},
+        )
         row["total"] += 1
         if s.get("status") in _OPEN_ASSESSMENT_STATUSES:
             row["open"] += 1
@@ -2262,68 +2451,102 @@ def _board_assessment_plane(sessions: list[dict], now: float) -> dict:
             row["high"] += 1
     kpis = {
         "assessments": len(sessions),
-        "open_work": sum(1 for s in sessions
-                         if s.get("status") in _OPEN_ASSESSMENT_STATUSES),
+        "open_work": sum(1 for s in sessions if s.get("status") in _OPEN_ASSESSMENT_STATUSES),
         "high_residual": mix["residual"]["high"],
         "review_due": sum(1 for s in sessions if s.get("review_due")),
         "risk_accepted": sum(1 for s in sessions if s.get("risk_accepted")),
     }
-    return {"kpis": kpis, "risk_mix": mix,
-            "by_type": sorted(by_type.values(),
-                              key=lambda r: -r["total"]),
-            "throughput": _board_month_series(sessions, now),
-            "deltas": _board_deltas(sessions, now)}
+    return {
+        "kpis": kpis,
+        "risk_mix": mix,
+        "by_type": sorted(by_type.values(), key=lambda r: -r["total"]),
+        "throughput": _board_month_series(sessions, now),
+        "deltas": _board_deltas(sessions, now),
+    }
 
 
 def _board_session_rows(sessions: list[dict]) -> list[dict]:
     """The bounded summary rows the board cross-filters client-side."""
-    return [{"id": s.get("id"), "type": s.get("type"),
-             "subject": s.get("subject"), "status": s.get("status"),
-             "inherent": s.get("inherent_risk"),
-             "residual": s.get("residual_risk"),
-             "created_at": s.get("created_at"),
-             "decided_at": s.get("decided_at"),
-             "review_due": bool(s.get("review_due")),
-             "review_due_reason": s.get("review_due_reason", ""),
-             "risk_accepted": bool(s.get("risk_accepted")),
-             "open_followups": s.get("open_followups", 0)}
-            for s in sessions[:_BOARD_SESSION_CAP]]
+    return [
+        {
+            "id": s.get("id"),
+            "type": s.get("type"),
+            "subject": s.get("subject"),
+            "status": s.get("status"),
+            "inherent": s.get("inherent_risk"),
+            "residual": s.get("residual_risk"),
+            "created_at": s.get("created_at"),
+            "decided_at": s.get("decided_at"),
+            "review_due": bool(s.get("review_due")),
+            "review_due_reason": s.get("review_due_reason", ""),
+            "risk_accepted": bool(s.get("risk_accepted")),
+            "open_followups": s.get("open_followups", 0),
+        }
+        for s in sessions[:_BOARD_SESSION_CAP]
+    ]
 
 
-def _board_posture(sessions: list[dict], dsar_rows: list[dict],
-                   incidents: list[dict], dpa: list[dict],
-                   flows: list[dict]) -> list[dict]:
+def _board_posture(
+    sessions: list[dict],
+    dsar_rows: list[dict],
+    incidents: list[dict],
+    dpa: list[dict],
+    flows: list[dict],
+) -> list[dict]:
     """The posture gauges: each one a real ratio out of the registers, never
     a synthetic score. ``pct`` is None when a register is empty."""
+
     def item(key: str, label: str, ok: int, total: int, note: str) -> dict:
-        return {"key": key, "label": label, "ok": ok, "total": total,
-                "pct": round(100.0 * ok / total, 1) if total else None,
-                "note": note}
+        return {
+            "key": key,
+            "label": label,
+            "ok": ok,
+            "total": total,
+            "pct": round(100.0 * ok / total, 1) if total else None,
+            "note": note,
+        }
 
     open_dsar = [r for r in dsar_rows if r.get("status") == "open"]
     approved = [s for s in sessions if s.get("status") == "approved"]
-    inc_ok = sum(1 for r in incidents
-                 if r.get("notification") or not r.get("clock_breached"))
+    inc_ok = sum(1 for r in incidents if r.get("notification") or not r.get("clock_breached"))
     clauses_total = sum(int(r.get("clauses_total") or 0) for r in dpa)
     clauses_present = sum(int(r.get("clauses_present") or 0) for r in dpa)
     return [
-        item("dsar_sla", "DSAR SLA health",
-             sum(1 for r in open_dsar if not r.get("overdue")),
-             len(open_dsar),
-             "open requests still inside the statutory clock"),
-        item("review_cadence", "Review cadence",
-             sum(1 for s in approved if not s.get("review_due")),
-             len(approved),
-             "approved assessments not overdue for re-review"),
-        item("transfer_safeguards", "Transfer safeguards",
-             sum(1 for f in flows if f.get("safeguarded")), len(flows),
-             "cross-border flows with a Chapter V safeguard on file"),
-        item("incident_clock", "Incident 72h clock",
-             inc_ok, len(incidents),
-             "incidents decided or still inside the Art. 33 window"),
-        item("dpa_coverage", "DPA clause coverage",
-             clauses_present, clauses_total,
-             "Art. 28(3) clauses found across reviewed DPAs"),
+        item(
+            "dsar_sla",
+            "DSAR SLA health",
+            sum(1 for r in open_dsar if not r.get("overdue")),
+            len(open_dsar),
+            "open requests still inside the statutory clock",
+        ),
+        item(
+            "review_cadence",
+            "Review cadence",
+            sum(1 for s in approved if not s.get("review_due")),
+            len(approved),
+            "approved assessments not overdue for re-review",
+        ),
+        item(
+            "transfer_safeguards",
+            "Transfer safeguards",
+            sum(1 for f in flows if f.get("safeguarded")),
+            len(flows),
+            "cross-border flows with a Chapter V safeguard on file",
+        ),
+        item(
+            "incident_clock",
+            "Incident 72h clock",
+            inc_ok,
+            len(incidents),
+            "incidents decided or still inside the Art. 33 window",
+        ),
+        item(
+            "dpa_coverage",
+            "DPA clause coverage",
+            clauses_present,
+            clauses_total,
+            "Art. 28(3) clauses found across reviewed DPAs",
+        ),
     ]
 
 
@@ -2337,6 +2560,7 @@ async def privacy_board(request: Request) -> dict:
     [privacy_ops] is disabled."""
     require_permission(request, "operate")
     from maverick import privacy_ops
+
     now = time.time()
     sessions = await run_in_threadpool(_privacy_session_rows)
     payload = _board_assessment_plane(sessions, now)
@@ -2360,30 +2584,39 @@ async def privacy_board(request: Request) -> dict:
     payload["records_enabled"] = enabled
     payload["dsar"] = _dsar_aging_payload(dsar_rows)
     payload["transfers"] = {
-        "flows": flows[:40], "total": len(flows),
-        "unsafeguarded": sum(1 for f in flows
-                             if not f.get("safeguarded"))}
+        "flows": flows[:40],
+        "total": len(flows),
+        "unsafeguarded": sum(1 for f in flows if not f.get("safeguarded")),
+    }
     payload["incidents"] = {
         "total": len(incidents),
-        "on_clock": sum(1 for r in incidents
-                        if not r.get("notification")
-                        and r.get("status") in ("open", "notify")),
-        "breached": sum(1 for r in incidents if r.get("clock_breached"))}
+        "on_clock": sum(
+            1
+            for r in incidents
+            if not r.get("notification") and r.get("status") in ("open", "notify")
+        ),
+        "breached": sum(1 for r in incidents if r.get("clock_breached")),
+    }
     tiers = {"prohibited": 0, "high": 0, "limited": 0, "minimal": 0}
     for r in ai_rows:
         t = str(r.get("tier", ""))
         if t in tiers:
             tiers[t] += 1
     payload["ai_tiers"] = tiers
-    payload["registers"] = {"ropa": len(ropa), "dpa": len(dpa),
-                            "ai": len(ai_rows), "dsar": len(dsar_rows)}
-    payload["posture"] = _board_posture(sessions, dsar_rows, incidents,
-                                        dpa, flows)
+    payload["registers"] = {
+        "ropa": len(ropa),
+        "dpa": len(dpa),
+        "ai": len(ai_rows),
+        "dsar": len(dsar_rows),
+    }
+    payload["posture"] = _board_posture(sessions, dsar_rows, incidents, dpa, flows)
     from maverick.assessment import acceptance_metrics
 
     from .app import PRIVACY_ASSESSMENT_TYPES
+
     payload["learning"] = await run_in_threadpool(
-        acceptance_metrics, types=set(PRIVACY_ASSESSMENT_TYPES))
+        acceptance_metrics, types=set(PRIVACY_ASSESSMENT_TYPES)
+    )
     payload["generated_at"] = now
     return payload
 
@@ -2394,9 +2627,10 @@ def _finance_session_rows() -> list[dict]:
     from maverick.assessment import custom_template_records, list_saved
 
     from .app import FINANCE_ASSESSMENT_TYPES
+
     types = set(FINANCE_ASSESSMENT_TYPES) | {
-        t for t, rec in custom_template_records().items()
-        if rec.get("department") == "finance"}
+        t for t, rec in custom_template_records().items() if rec.get("department") == "finance"
+    }
     return [s for s in list_saved() if s.get("type") in types]
 
 
@@ -2404,11 +2638,17 @@ def _decision_rate(sessions: list[dict], kinds: tuple[str, ...]) -> dict:
     """Approved-vs-rejected pass rate over decided records of the given
     types -- control tests and close readiness read straight off the
     register, never estimated."""
-    rows = [s for s in sessions if s.get("type") in kinds
-            and s.get("status") in ("approved", "rejected")]
+    rows = [
+        s
+        for s in sessions
+        if s.get("type") in kinds and s.get("status") in ("approved", "rejected")
+    ]
     ok = sum(1 for s in rows if s.get("status") == "approved")
-    return {"passed": ok, "total": len(rows),
-            "pct": round(100.0 * ok / len(rows), 1) if rows else None}
+    return {
+        "passed": ok,
+        "total": len(rows),
+        "pct": round(100.0 * ok / len(rows), 1) if rows else None,
+    }
 
 
 def _finance_sod() -> dict:
@@ -2417,11 +2657,18 @@ def _finance_sod() -> dict:
     try:
         from maverick.domain import builtin_dir, load_domains
         from maverick.finance.sod_linter import lint_roster
-        packs = {n: d for n, d in load_domains(builtin_dir()).items()
-                 if n.startswith(("finance", "bank"))}
+
+        packs = {
+            n: d
+            for n, d in load_domains(builtin_dir()).items()
+            if n.startswith(("finance", "bank"))
+        }
         conflicts = lint_roster(packs)
-        return {"packs": len(packs), "conflicts": len(conflicts),
-                "detail": [str(c) for c in conflicts[:5]]}
+        return {
+            "packs": len(packs),
+            "conflicts": len(conflicts),
+            "detail": [str(c) for c in conflicts[:5]],
+        }
     except Exception as exc:  # pragma: no cover -- packs dir varies by install
         return {"packs": 0, "conflicts": None, "error": str(exc)[:200]}
 
@@ -2432,11 +2679,14 @@ def _finance_posture() -> dict:
     from dataclasses import asdict
 
     from maverick.finance.status import FINANCE_DISCLAIMER, finance_status
+
     checks = [asdict(c) for c in finance_status()]
-    return {"controls": checks,
-            "active": sum(1 for c in checks if c.get("status") == "active"),
-            "total": len(checks),
-            "disclaimer": FINANCE_DISCLAIMER}
+    return {
+        "controls": checks,
+        "active": sum(1 for c in checks if c.get("status") == "active"),
+        "total": len(checks),
+        "disclaimer": FINANCE_DISCLAIMER,
+    }
 
 
 @router.get("/finance/board")
@@ -2452,74 +2702,92 @@ async def finance_board(request: Request) -> dict:
     sessions = await run_in_threadpool(_finance_session_rows)
     payload = _board_assessment_plane(sessions, now)
     payload["sessions"] = _board_session_rows(sessions)
-    payload["control_tests"] = _decision_rate(sessions,
-                                              ("sox_control", "itgc"))
-    payload["close_readiness"] = _decision_rate(sessions,
-                                                ("close_readiness",))
+    payload["control_tests"] = _decision_rate(sessions, ("sox_control", "itgc"))
+    payload["close_readiness"] = _decision_rate(sessions, ("close_readiness",))
     payload["fraud_open"] = sum(
-        1 for s in sessions if s.get("type") == "fraud_risk"
-        and s.get("status") in ("pending_review", "needs_more"))
+        1
+        for s in sessions
+        if s.get("type") == "fraud_risk" and s.get("status") in ("pending_review", "needs_more")
+    )
     payload["sod"] = await run_in_threadpool(_finance_sod)
     payload["finance_posture"] = await run_in_threadpool(_finance_posture)
     from maverick.license_registry import runway
+
     payload["licenses"] = await run_in_threadpool(runway)
     from maverick.assessment import acceptance_metrics
 
     from .app import FINANCE_ASSESSMENT_TYPES
+
     payload["learning"] = await run_in_threadpool(
-        acceptance_metrics, types=set(FINANCE_ASSESSMENT_TYPES))
+        acceptance_metrics, types=set(FINANCE_ASSESSMENT_TYPES)
+    )
     payload["generated_at"] = now
     return payload
 
 
 # ---- regulatory license register (state-by-state renewals) -----------------
 
+
 @router.get("/licenses")
 async def list_regulatory_licenses(request: Request) -> dict:
     """The license inventory with computed renewal runway, soonest first."""
     require_permission(request, "operate")
     from maverick.license_registry import list_licenses, runway
-    return {"licenses": await run_in_threadpool(list_licenses),
-            "runway": await run_in_threadpool(runway)}
+
+    return {
+        "licenses": await run_in_threadpool(list_licenses),
+        "runway": await run_in_threadpool(runway),
+    }
 
 
 @router.post("/licenses", status_code=201)
 async def add_regulatory_license(request: Request, body: LicenseIn) -> dict:
     require_permission(request, "operate")
     from maverick.license_registry import add_license
+
     return await run_in_threadpool(
         lambda: add_license(
-            name=body.name, jurisdiction=body.jurisdiction,
-            authority=body.authority, license_number=body.license_number,
-            holder=body.holder or "", status=body.status,
-            renewal_at=body.renewal_at, cadence_days=body.cadence_days,
-            added_by=_request_actor(request)))
+            name=body.name,
+            jurisdiction=body.jurisdiction,
+            authority=body.authority,
+            license_number=body.license_number,
+            holder=body.holder or "",
+            status=body.status,
+            renewal_at=body.renewal_at,
+            cadence_days=body.cadence_days,
+            added_by=_request_actor(request),
+        )
+    )
 
 
 @router.post("/licenses/{license_id}/renew")
-async def renew_regulatory_license(request: Request, license_id: str,
-                                   body: LicenseNoteIn) -> dict:
+async def renew_regulatory_license(request: Request, license_id: str, body: LicenseNoteIn) -> dict:
     """Record a completed renewal (clock advances FROM the deadline).
     Humans file with the authority; the register only records that."""
     require_permission(request, "operate")
     from maverick.license_registry import renew
+
     rec = await run_in_threadpool(
-        lambda: renew(license_id[:40], note=body.note or "",
-                      by=_request_actor(request)))
+        lambda: renew(license_id[:40], note=body.note or "", by=_request_actor(request))
+    )
     if rec is None:
         raise HTTPException(status_code=404, detail="no such license")
     return rec
 
 
 @router.post("/licenses/{license_id}/evidence")
-async def license_evidence(request: Request, license_id: str,
-                           body: LicenseNoteIn) -> dict:
+async def license_evidence(request: Request, license_id: str, body: LicenseNoteIn) -> dict:
     require_permission(request, "operate")
     from maverick.license_registry import attach_evidence
+
     rec = await run_in_threadpool(
-        lambda: attach_evidence(license_id[:40], note=body.note or "",
-                                filename=body.filename or "",
-                                by=_request_actor(request)))
+        lambda: attach_evidence(
+            license_id[:40],
+            note=body.note or "",
+            filename=body.filename or "",
+            by=_request_actor(request),
+        )
+    )
     if rec is None:
         raise HTTPException(status_code=404, detail="no such license")
     return rec
@@ -2527,16 +2795,24 @@ async def license_evidence(request: Request, license_id: str,
 
 # ---- partner fleet (multi-tenant console) ----------------------------------
 
+
 def _probe_tenant(t: dict) -> dict:
     """One synchronous probe of a client deployment: /health for liveness
     and latency, /value.json (best-effort) for the agent's own counted value
     ledger. Never raises -- the fleet view shows the error instead."""
     import httpx
+
     base = t["base_url"].rstrip("/")
-    headers = ({"Authorization": f"Bearer {t['token']}"}
-               if t.get("token") else {})
-    out: dict = {"checked_at": time.time(), "ok": False, "latency_ms": None,
-                 "agent": "", "version": "", "value": None, "error": ""}
+    headers = {"Authorization": f"Bearer {t['token']}"} if t.get("token") else {}
+    out: dict = {
+        "checked_at": time.time(),
+        "ok": False,
+        "latency_ms": None,
+        "agent": "",
+        "version": "",
+        "value": None,
+        "error": "",
+    }
     t0 = time.monotonic()
     try:
         r = httpx.get(f"{base}/health", headers=headers, timeout=4)
@@ -2554,14 +2830,15 @@ def _probe_tenant(t: dict) -> dict:
             d = v.json()
             out["agent"] = str(d.get("agent", ""))[:60]
             out["version"] = str(d.get("version", ""))[:20]
-            out["value"] = {"cases": int(d.get("cases") or 0),
-                            "hours": round(float(d.get("hours") or 0), 1),
-                            "dollars": round(float(d.get("dollars") or 0), 2)}
+            out["value"] = {
+                "cases": int(d.get("cases") or 0),
+                "hours": round(float(d.get("hours") or 0), 1),
+                "dollars": round(float(d.get("dollars") or 0), 2),
+            }
     except Exception:  # value ledger is optional on older agents
         pass
     try:
-        x = httpx.get(f"{base}/api/v1/external-agents", headers=headers,
-                      timeout=4)
+        x = httpx.get(f"{base}/api/v1/external-agents", headers=headers, timeout=4)
         if x.status_code == 200:
             st = (x.json() or {}).get("status") or {}
             out["external"] = {
@@ -2580,21 +2857,27 @@ async def partner_list_tenants(request: Request) -> dict:
     """The partner fleet registry (tokens never echoed)."""
     require_permission(request, "operate")
     from . import partner_store
+
     rows = await run_in_threadpool(partner_store.list_tenants)
     return {"tenants": [partner_store.public_row(r) for r in rows]}
 
 
 @router.post("/partner/tenants", status_code=201)
-async def partner_add_tenant(request: Request,
-                             body: PartnerTenantIn) -> dict:
+async def partner_add_tenant(request: Request, body: PartnerTenantIn) -> dict:
     """Register a client deployment. Admin-gated: the row can carry a
     bearer token and the console probes the URL server-side."""
     require_permission(request, "admin")
     from . import partner_store
+
     row = await run_in_threadpool(
         lambda: partner_store.upsert_tenant(
-            name=body.name, base_url=body.base_url, token=body.token,
-            theme=body.theme, notes=body.notes))
+            name=body.name,
+            base_url=body.base_url,
+            token=body.token,
+            theme=body.theme,
+            notes=body.notes,
+        )
+    )
     return partner_store.public_row(row)
 
 
@@ -2602,8 +2885,8 @@ async def partner_add_tenant(request: Request,
 async def partner_delete_tenant(request: Request, tenant_id: str) -> dict:
     require_permission(request, "admin")
     from . import partner_store
-    ok = await run_in_threadpool(partner_store.delete_tenant,
-                                 tenant_id[:20])
+
+    ok = await run_in_threadpool(partner_store.delete_tenant, tenant_id[:20])
     if not ok:
         raise HTTPException(status_code=404, detail="no such tenant")
     return {"deleted": tenant_id[:20]}
@@ -2613,14 +2896,20 @@ async def partner_delete_tenant(request: Request, tenant_id: str) -> dict:
 async def partner_check_tenant(request: Request, tenant_id: str) -> dict:
     require_permission(request, "operate")
     from . import partner_store
-    row = next((r for r in await run_in_threadpool(
-        partner_store.list_tenants) if r["id"] == tenant_id[:20]), None)
+
+    row = next(
+        (
+            r
+            for r in await run_in_threadpool(partner_store.list_tenants)
+            if r["id"] == tenant_id[:20]
+        ),
+        None,
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="no such tenant")
     result = await run_in_threadpool(_probe_tenant, row)
     await run_in_threadpool(partner_store.record_check, row["id"], result)
-    return {"tenant": partner_store.public_row({**row,
-                                                "last_check": result})}
+    return {"tenant": partner_store.public_row({**row, "last_check": result})}
 
 
 @router.get("/partner/fleet")
@@ -2630,38 +2919,40 @@ async def partner_fleet(request: Request, check: int = 0) -> dict:
     and the summed value ledgers of every reachable agent."""
     require_permission(request, "operate")
     from . import partner_store
+
     rows = await run_in_threadpool(partner_store.list_tenants)
     if check:
         for row in rows:
             result = await run_in_threadpool(_probe_tenant, row)
-            await run_in_threadpool(partner_store.record_check,
-                                    row["id"], result)
+            await run_in_threadpool(partner_store.record_check, row["id"], result)
             row["last_check"] = result
     tenants = [partner_store.public_row(r) for r in rows]
     checks = [t.get("last_check") or {} for t in tenants]
     values = [c.get("value") for c in checks if c.get("value")]
     externals = [c.get("external") for c in checks if c.get("external")]
-    return {"tenants": tenants,
-            "fleet": {
-                "total": len(tenants),
-                "healthy": sum(1 for c in checks if c.get("ok")),
-                "cases": sum(v["cases"] for v in values),
-                "hours": round(sum(v["hours"] for v in values), 1),
-                "dollars": round(sum(v["dollars"] for v in values), 2),
-                "external_agents": sum(x["enrolled"] for x in externals),
-                "external_attention": sum(
-                    x["over_budget"] + x["contained"] for x in externals),
-            }}
+    return {
+        "tenants": tenants,
+        "fleet": {
+            "total": len(tenants),
+            "healthy": sum(1 for c in checks if c.get("ok")),
+            "cases": sum(v["cases"] for v in values),
+            "hours": round(sum(v["hours"] for v in values), 1),
+            "dollars": round(sum(v["dollars"] for v in values), 2),
+            "external_agents": sum(x["enrolled"] for x in externals),
+            "external_attention": sum(x["over_budget"] + x["contained"] for x in externals),
+        },
+    }
 
 
 # ---- audit binder (the regulator-grade evidence pack) ----------------------
+
 
 def _binder_finance_section() -> dict:
     """Finance evidence for the binder: posture (with its disclaimer), the
     structural SoD lint, and the license renewal runway."""
     from maverick.license_registry import runway
-    return {"posture": _finance_posture(), "sod": _finance_sod(),
-            "licenses": runway()}
+
+    return {"posture": _finance_posture(), "sod": _finance_sod(), "licenses": runway()}
 
 
 def _binder_payload(days: int = 90) -> dict:
@@ -2684,16 +2975,19 @@ def _binder_payload(days: int = 90) -> dict:
     events_seen = 0
     for path in sorted(log.audit_dir.glob("*.ndjson")):
         try:
-            day_ts = _dt.datetime.strptime(
-                path.stem, "%Y-%m-%d").replace(
-                tzinfo=_dt.timezone.utc).timestamp()
+            day_ts = (
+                _dt.datetime.strptime(path.stem, "%Y-%m-%d")
+                .replace(tzinfo=_dt.timezone.utc)
+                .timestamp()
+            )
         except ValueError:
             continue
         if day_ts < cutoff - 86400:
             continue
-        breaks = [{"line": b.line_no, "reason": b.reason,
-                   "detail": str(getattr(b, "detail", ""))[:200]}
-                  for b in verify_chain(path)]
+        breaks = [
+            {"line": b.line_no, "reason": b.reason, "detail": str(getattr(b, "detail", ""))[:200]}
+            for b in verify_chain(path)
+        ]
         rows = 0
         try:
             for line in path.read_text(encoding="utf-8").splitlines():
@@ -2705,58 +2999,78 @@ def _binder_payload(days: int = 90) -> dict:
                 except ValueError:
                     continue
                 events_seen += 1
-                kinds[str(e.get("kind", "?"))] = \
-                    kinds.get(str(e.get("kind", "?")), 0) + 1
+                kinds[str(e.get("kind", "?"))] = kinds.get(str(e.get("kind", "?")), 0) + 1
                 ts = float(e.get("ts") or 0)
                 if ts:
                     first_ts = ts if first_ts is None else min(first_ts, ts)
                     last_ts = ts if last_ts is None else max(last_ts, ts)
         except OSError:
             pass
-        chain.append({"day": path.stem, "events": rows,
-                      "intact": not breaks, "breaks": breaks[:20]})
+        chain.append(
+            {"day": path.stem, "events": rows, "intact": not breaks, "breaks": breaks[:20]}
+        )
 
     w = _world()
-    approvals = [{
-        "id": a.id, "action": a.action, "risk": a.risk, "status": a.status,
-        "requested_by": a.requested_by, "requested_at": a.requested_at,
-        "decided_by": a.decided_by, "decided_at": a.decided_at,
-        "approvals_required": a.approvals_required,
-    } for a in w.list_approvals(limit=300)
-        if float(a.requested_at or 0) >= cutoff]
+    approvals = [
+        {
+            "id": a.id,
+            "action": a.action,
+            "risk": a.risk,
+            "status": a.status,
+            "requested_by": a.requested_by,
+            "requested_at": a.requested_at,
+            "decided_by": a.decided_by,
+            "decided_at": a.decided_at,
+            "approvals_required": a.approvals_required,
+        }
+        for a in w.list_approvals(limit=300)
+        if float(a.requested_at or 0) >= cutoff
+    ]
 
-    assessments = [{
-        "id": s["id"], "type": s["type"], "subject": s["subject"],
-        "inherent": s["inherent_risk"], "residual": s["residual_risk"],
-        "status": s["status"], "revision": s["revision"],
-        "template_digest": (s.get("template_digest") or "")[:16],
-        "created_at": s["created_at"], "decided_at": s.get("decided_at"),
-        "review_due": s.get("review_due"),
-    } for s in list_saved()[:300]]
+    assessments = [
+        {
+            "id": s["id"],
+            "type": s["type"],
+            "subject": s["subject"],
+            "inherent": s["inherent_risk"],
+            "residual": s["residual_risk"],
+            "status": s["status"],
+            "revision": s["revision"],
+            "template_digest": (s.get("template_digest") or "")[:16],
+            "created_at": s["created_at"],
+            "decided_at": s.get("decided_at"),
+            "review_due": s.get("review_due"),
+        }
+        for s in list_saved()[:300]
+    ]
 
     from maverick import privacy_ops
+
     registers: dict = {"enabled": privacy_ops.enabled()}
     if registers["enabled"]:
         dsar_rows = privacy_ops.list_dsars()
-        registers.update({
-            "ropa": len(privacy_ops.list_ropa()),
-            "dpa": len(privacy_ops.list_dpa_reviews()),
-            "ai": len(privacy_ops.list_ai_systems()),
-            "dsar": len(dsar_rows),
-            "incidents": len(privacy_ops.list_incidents()),
-            "dsar_aging": _dsar_aging_payload(dsar_rows),
-        })
+        registers.update(
+            {
+                "ropa": len(privacy_ops.list_ropa()),
+                "dpa": len(privacy_ops.list_dpa_reviews()),
+                "ai": len(privacy_ops.list_ai_systems()),
+                "dsar": len(dsar_rows),
+                "incidents": len(privacy_ops.list_incidents()),
+                "dsar_aging": _dsar_aging_payload(dsar_rows),
+            }
+        )
 
     return {
         "window_days": days,
         "generated_at": now,
-        "chain": {"files": chain,
-                  "intact": all(c["intact"] for c in chain) if chain
-                  else None,
-                  "events": events_seen,
-                  "first_ts": first_ts, "last_ts": last_ts,
-                  "kinds": dict(sorted(kinds.items(),
-                                       key=lambda kv: -kv[1]))},
+        "chain": {
+            "files": chain,
+            "intact": all(c["intact"] for c in chain) if chain else None,
+            "events": events_seen,
+            "first_ts": first_ts,
+            "last_ts": last_ts,
+            "kinds": dict(sorted(kinds.items(), key=lambda kv: -kv[1])),
+        },
         "approvals": approvals,
         "assessments": assessments,
         "registers": registers,
@@ -2773,8 +3087,7 @@ async def audit_binder(request: Request, days: int = 90) -> dict:
     """The evidence pack as JSON -- the machine-readable twin of the
     /audit/binder page. Audit-gated like the log it summarizes."""
     require_permission(request, "audit")
-    return await run_in_threadpool(_binder_payload,
-                                   max(1, min(days, 730)))
+    return await run_in_threadpool(_binder_payload, max(1, min(days, 730)))
 
 
 @router.get("/assess/question-roi")
@@ -2784,6 +3097,7 @@ async def assessment_question_roi(request: Request, type: str) -> dict:
     data behind pruning a questionnaire without losing signal."""
     require_permission(request, "operate")
     from maverick.assessment import question_roi
+
     return await run_in_threadpool(question_roi, type[:40])
 
 
@@ -2801,8 +3115,7 @@ async def open_dsar_request(request: Request, body: DsarIn) -> dict:
 
 
 @router.post("/privacy/dsar/from-message", status_code=201)
-async def open_dsar_from_message(request: Request,
-                                 body: DsarFromMessageIn) -> dict:
+async def open_dsar_from_message(request: Request, body: DsarFromMessageIn) -> dict:
     """Triage an inbound message into a tracked request. The record keeps
     the matched phrases and an excerpt as provenance; a message that does
     not read as a data-subject request (or names no subject) is a 422, not
@@ -2810,13 +3123,18 @@ async def open_dsar_from_message(request: Request,
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     record = await run_in_threadpool(
-        ops.open_dsar_from_message, body.text, channel=body.channel,
-        sender=body.sender, opened_by=_request_actor(request))
+        ops.open_dsar_from_message,
+        body.text,
+        channel=body.channel,
+        sender=body.sender,
+        opened_by=_request_actor(request),
+    )
     if record is None:
         raise HTTPException(
             status_code=422,
             detail="no data-subject request detected (or no subject "
-                   "address found) — open it manually if you disagree")
+            "address found) — open it manually if you disagree",
+        )
     return record
 
 
@@ -2833,8 +3151,7 @@ async def fulfill_dsar_request(request: Request, request_id: str) -> dict:
         fulfilled_by=_request_actor(request),
     )
     if record is None:
-        raise HTTPException(status_code=404,
-                            detail="no such open request")
+        raise HTTPException(status_code=404, detail="no such open request")
     return record
 
 
@@ -2875,16 +3192,21 @@ async def open_privacy_incident(request: Request, body: IncidentIn) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     record = await run_in_threadpool(
-        ops.open_incident, body.title, severity=body.severity,
-        description=body.description, categories=body.categories,
+        ops.open_incident,
+        body.title,
+        severity=body.severity,
+        description=body.description,
+        categories=body.categories,
         affected_estimate=body.affected_estimate,
-        reported_by=_request_actor(request))
+        reported_by=_request_actor(request),
+    )
     return record
 
 
 @router.post("/privacy/incidents/{incident_id}/notification")
-async def decide_privacy_incident(request: Request, incident_id: str,
-                                  body: IncidentNotifyIn) -> dict:
+async def decide_privacy_incident(
+    request: Request, incident_id: str, body: IncidentNotifyIn
+) -> dict:
     """Record the human Art. 33/34 call -- notifiable or documented-why-not.
     Audited either way."""
     require_permission(request, "operate")
@@ -2905,8 +3227,7 @@ async def decide_privacy_incident(request: Request, incident_id: str,
 
 
 @router.post("/privacy/incidents/{incident_id}/close")
-async def close_privacy_incident(request: Request,
-                                 incident_id: str) -> dict:
+async def close_privacy_incident(request: Request, incident_id: str) -> dict:
     require_permission(request, "operate")
     ops = _privacy_ops_or_403()
     record = await run_in_threadpool(
@@ -2925,20 +3246,29 @@ async def list_assessment_templates(request: Request) -> dict:
     vendor risk, HIPAA, SOC 2, PCI DSS, ...) with its question count."""
     require_permission(request, "view")
     from maverick.assessment import list_templates
-    return {"templates": [
-        {"type": t.type, "title": t.title, "framework": t.framework,
-         "questions": len(t.questions), "revision": t.revision,
-         "digest": t.digest, "custom": t.custom}
-        for t in list_templates()
-    ]}
+
+    return {
+        "templates": [
+            {
+                "type": t.type,
+                "title": t.title,
+                "framework": t.framework,
+                "questions": len(t.questions),
+                "revision": t.revision,
+                "digest": t.digest,
+                "custom": t.custom,
+            }
+            for t in list_templates()
+        ]
+    }
 
 
 @router.get("/assess/template-state/{assessment_type}")
-async def get_assessment_template_state(request: Request,
-                                        assessment_type: str) -> dict:
+async def get_assessment_template_state(request: Request, assessment_type: str) -> dict:
     """CAS identity, including a deleted custom-only questionnaire tombstone."""
     require_permission(request, "view")
     from maverick.assessment import template_state
+
     try:
         return await run_in_threadpool(template_state, assessment_type[:64])
     except ValueError as exc:
@@ -2946,30 +3276,39 @@ async def get_assessment_template_state(request: Request,
 
 
 @router.get("/assess/templates/{assessment_type}")
-async def get_assessment_template(request: Request,
-                                  assessment_type: str) -> dict:
+async def get_assessment_template(request: Request, assessment_type: str) -> dict:
     """One template in full (questions included) for the catalog editor."""
     require_permission(request, "view")
     from maverick.assessment import get_template, template_department
+
     tpl = get_template(assessment_type[:64])
     if tpl is None:
         raise HTTPException(status_code=404, detail="no such template")
     return {
-        "type": tpl.type, "title": tpl.title, "framework": tpl.framework,
+        "type": tpl.type,
+        "title": tpl.title,
+        "framework": tpl.framework,
         "description": tpl.description,
         "department": template_department(tpl.type),
         "custom": tpl.custom,
         "revision": tpl.revision,
         "digest": tpl.digest,
-        "questions": [{"id": q.id, "section": q.section, "text": q.text,
-                       "risk_answer": q.risk_answer, "severity": q.severity,
-                       "guidance": q.guidance} for q in tpl.questions],
+        "questions": [
+            {
+                "id": q.id,
+                "section": q.section,
+                "text": q.text,
+                "risk_answer": q.risk_answer,
+                "severity": q.severity,
+                "guidance": q.guidance,
+            }
+            for q in tpl.questions
+        ],
     }
 
 
 @router.put("/assess/templates/{assessment_type}")
-async def put_assessment_template(request: Request, assessment_type: str,
-                                  body: TemplateIn) -> dict:
+async def put_assessment_template(request: Request, assessment_type: str, body: TemplateIn) -> dict:
     """Admin-publish one immutable questionnaire release with pointer CAS."""
     require_permission(request, "admin")
     from maverick.assessment import (
@@ -2977,6 +3316,7 @@ async def put_assessment_template(request: Request, assessment_type: str,
         AssessmentStateError,
         save_custom_template,
     )
+
     values = body.model_dump()
     expected_revision = values.pop("expected_revision")
     expected_digest = values.pop("expected_digest")
@@ -2994,16 +3334,20 @@ async def put_assessment_template(request: Request, assessment_type: str,
         raise HTTPException(status_code=503, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    return {"type": tpl.type, "title": tpl.title,
-            "questions": len(tpl.questions), "custom": True,
-            "revision": tpl.revision, "digest": tpl.digest}
+    return {
+        "type": tpl.type,
+        "title": tpl.title,
+        "questions": len(tpl.questions),
+        "custom": True,
+        "revision": tpl.revision,
+        "digest": tpl.digest,
+    }
 
 
 @router.delete("/assess/templates/{assessment_type}")
-async def delete_assessment_template(request: Request,
-                                     assessment_type: str,
-                                     expected_revision: int,
-                                     expected_digest: str) -> dict:
+async def delete_assessment_template(
+    request: Request, assessment_type: str, expected_revision: int, expected_digest: str
+) -> dict:
     """Admin-unpublish a custom release; immutable history is retained."""
     require_permission(request, "admin")
     from maverick.assessment import (
@@ -3013,9 +3357,11 @@ async def delete_assessment_template(request: Request,
         delete_custom_template,
         template_state,
     )
+
     try:
         removed = await run_in_threadpool(
-            delete_custom_template, assessment_type[:64],
+            delete_custom_template,
+            assessment_type[:64],
             expected_revision=expected_revision,
             expected_digest=expected_digest,
             actor=_request_actor(request),
@@ -3027,9 +3373,12 @@ async def delete_assessment_template(request: Request,
     if not removed:
         raise HTTPException(status_code=404, detail="no custom template")
     state = await run_in_threadpool(template_state, assessment_type[:64])
-    return {"deleted": assessment_type[:64],
-            "builtin_restored": assessment_type[:64] in TEMPLATES,
-            "revision": state["revision"], "digest": state["digest"]}
+    return {
+        "deleted": assessment_type[:64],
+        "builtin_restored": assessment_type[:64] in TEMPLATES,
+        "revision": state["revision"],
+        "digest": state["digest"],
+    }
 
 
 @router.get("/assess/sessions")
@@ -3039,6 +3388,7 @@ async def list_assessment_sessions(request: Request) -> dict:
     ``pending_review`` or ``needs_more`` (open follow-ups outstanding)."""
     require_permission(request, "operate")
     from maverick.assessment import list_saved
+
     return {"sessions": await run_in_threadpool(list_saved)}
 
 
@@ -3049,6 +3399,7 @@ async def get_assessment_session(request: Request, assessment_id: str) -> dict:
     This is what the review pop-out renders."""
     require_permission(request, "operate")
     from maverick.assessment import load_saved, template_for_saved_record
+
     record = await run_in_threadpool(load_saved, assessment_id[:64])
     if record is None:
         raise HTTPException(status_code=404, detail="no such assessment")
@@ -3064,7 +3415,9 @@ async def get_assessment_session(request: Request, assessment_id: str) -> dict:
 
 @router.post("/assess/sessions/{assessment_id}/followups")
 async def add_assessment_followups(
-    request: Request, assessment_id: str, body: FollowupsIn,
+    request: Request,
+    assessment_id: str,
+    body: FollowupsIn,
 ) -> dict:
     """Send follow-up questions back to the respondent. The record flips to
     ``needs_more`` until every follow-up is answered; the respondent-facing
@@ -3075,10 +3428,14 @@ async def add_assessment_followups(
         AssessmentStateError,
         add_followups,
     )
+
     who = _request_actor(request)
     try:
         record = await run_in_threadpool(
-            add_followups, assessment_id[:64], body.questions, who,
+            add_followups,
+            assessment_id[:64],
+            body.questions,
+            who,
             expected_revision=body.expected_revision,
         )
     except AssessmentConflict as e:
@@ -3086,14 +3443,97 @@ async def add_assessment_followups(
     except AssessmentStateError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     if record is None:
-        raise HTTPException(status_code=404,
-                            detail="no such assessment (or empty questions)")
+        raise HTTPException(status_code=404, detail="no such assessment (or empty questions)")
     return record
+
+
+@router.post("/assess/sessions/{assessment_id}/comments", status_code=201)
+async def create_assessment_comment(
+    request: Request,
+    assessment_id: str,
+    body: AssessmentCommentIn,
+) -> dict:
+    """Create an audited comment on a pinned assessment question."""
+
+    require_permission(request, "operate")
+    from maverick.assessment import (
+        AssessmentConflict,
+        AssessmentStateError,
+        AssessmentTransitionError,
+        add_assessment_comment,
+        assessment_comment_id,
+    )
+
+    comment_id = assessment_comment_id(assessment_id, body.idempotency_key)
+    try:
+        record = await run_in_threadpool(
+            add_assessment_comment,
+            assessment_id,
+            section_id=body.section_id,
+            question_id=body.question_id,
+            comment=body.comment,
+            commented_by=_request_actor(request),
+            expected_revision=body.expected_revision,
+            idempotency_key=body.idempotency_key,
+        )
+    except (AssessmentConflict, AssessmentTransitionError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AssessmentStateError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    comments = record.get("comments") or []
+    created = next(
+        (item for item in comments if isinstance(item, dict) and item.get("id") == comment_id),
+        None,
+    )
+    if created is None:
+        raise HTTPException(status_code=503, detail="assessment comment result is unavailable")
+    return {
+        "comment": created,
+        "assessment_revision": record["revision"],
+    }
+
+
+@router.get("/assess/sessions/{assessment_id}/comments")
+async def get_assessment_comments(
+    request: Request,
+    assessment_id: str,
+    offset: int = 0,
+    limit: int = 100,
+    expected_revision: int | None = None,
+) -> dict:
+    """Retrieve a bounded comment page in section/question sequence."""
+
+    require_permission(request, "operate")
+    from maverick.assessment import AssessmentConflict, AssessmentStateError, assessment_comments
+
+    try:
+        page = await run_in_threadpool(
+            assessment_comments,
+            assessment_id,
+            offset=offset,
+            limit=limit,
+            expected_revision=expected_revision,
+        )
+    except AssessmentConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AssessmentStateError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if page is None:
+        raise HTTPException(status_code=404, detail="no such assessment")
+    return page
 
 
 @router.post("/assess/sessions/{assessment_id}/decide")
 async def decide_assessment_session(
-    request: Request, assessment_id: str, body: AssessmentDecideIn,
+    request: Request,
+    assessment_id: str,
+    body: AssessmentDecideIn,
 ) -> dict:
     """Record the reviewer's decision. Approval with a cadence schedules the
     next review -- the workspace surfaces the record again when it comes due,
@@ -3105,11 +3545,15 @@ async def decide_assessment_session(
         AssessmentTransitionError,
         decide_assessment,
     )
+
     who = _request_actor(request)
     try:
         record = await run_in_threadpool(
-            decide_assessment, assessment_id[:64], body.decision,
-            decided_by=who, note=body.note,
+            decide_assessment,
+            assessment_id[:64],
+            body.decision,
+            decided_by=who,
+            note=body.note,
             cadence_days=body.cadence_days,
             expected_revision=body.expected_revision,
         )
@@ -3124,7 +3568,9 @@ async def decide_assessment_session(
 
 @router.post("/assess/sessions/{assessment_id}/assign")
 async def assign_assessment_session(
-    request: Request, assessment_id: str, body: AssessmentAssignIn,
+    request: Request,
+    assessment_id: str,
+    body: AssessmentAssignIn,
 ) -> dict:
     """Put an assessment on a named reviewer's desk (empty name unassigns).
 
@@ -3138,11 +3584,15 @@ async def assign_assessment_session(
         AssessmentStateError,
         assign_assessment,
     )
+
     who = _request_actor(request)
     try:
         record = await run_in_threadpool(
-            assign_assessment, assessment_id[:64], body.assignee,
-            assigned_by=who, expected_revision=body.expected_revision,
+            assign_assessment,
+            assessment_id[:64],
+            body.assignee,
+            assigned_by=who,
+            expected_revision=body.expected_revision,
         )
     except AssessmentConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
@@ -3155,7 +3605,9 @@ async def assign_assessment_session(
 
 @router.post("/assess/sessions/{assessment_id}/accept-risk")
 async def accept_assessment_risk(
-    request: Request, assessment_id: str, body: RiskAcceptIn,
+    request: Request,
+    assessment_id: str,
+    body: RiskAcceptIn,
 ) -> dict:
     """Formally accept the residual risk with a named owner, rationale, and
     expiry. A dated decision, not a permanent waiver -- it comes due again
@@ -3167,11 +3619,15 @@ async def accept_assessment_risk(
         AssessmentTransitionError,
         accept_risk,
     )
+
     who = _request_actor(request)
     try:
         record = await run_in_threadpool(
-            accept_risk, assessment_id[:64], accepted_by=who,
-            rationale=body.rationale, expires_days=body.expires_days,
+            accept_risk,
+            assessment_id[:64],
+            accepted_by=who,
+            rationale=body.rationale,
+            expires_days=body.expires_days,
             expected_revision=body.expected_revision,
         )
     except (AssessmentConflict, AssessmentTransitionError) as e:
@@ -3187,7 +3643,9 @@ async def accept_assessment_risk(
 
 @router.post("/assess/sessions/{assessment_id}/trigger-review")
 async def trigger_assessment_review(
-    request: Request, assessment_id: str, body: ReviewTriggerIn,
+    request: Request,
+    assessment_id: str,
+    body: ReviewTriggerIn,
 ) -> dict:
     """Force a re-review now (or set a renewal date that flips it due). The
     external-event hook: a contract renewal, a new sub-processor, a material
@@ -3199,17 +3657,24 @@ async def trigger_assessment_review(
         set_renewal,
         trigger_review,
     )
+
     who = _request_actor(request)
     try:
         if body.renewal_at is not None:
             record = await run_in_threadpool(
-                set_renewal, assessment_id[:64], renewal_at=body.renewal_at,
-                by=who, expected_revision=body.expected_revision,
+                set_renewal,
+                assessment_id[:64],
+                renewal_at=body.renewal_at,
+                by=who,
+                expected_revision=body.expected_revision,
             )
         else:
             record = await run_in_threadpool(
-                trigger_review, assessment_id[:64], reason=body.reason,
-                by=who, expected_revision=body.expected_revision,
+                trigger_review,
+                assessment_id[:64],
+                reason=body.reason,
+                by=who,
+                expected_revision=body.expected_revision,
             )
     except AssessmentConflict as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
@@ -3222,12 +3687,15 @@ async def trigger_assessment_review(
 
 @router.get("/assess/trend")
 async def assessment_risk_trend(
-    request: Request, subject: str, type: str = "",
+    request: Request,
+    subject: str,
+    type: str = "",
 ) -> dict:
     """A subject's residual-risk history across successive assessments -- the
     re-review delta (risk moving up or down over time), oldest first."""
     require_permission(request, "view")
     from maverick.assessment import risk_trend
+
     rows = await run_in_threadpool(risk_trend, subject[:300], type[:40])
     direction = ""
     if len(rows) >= 2:
@@ -3235,8 +3703,7 @@ async def assessment_risk_trend(
         a = rank.get(rows[-2]["residual_risk"], 0)
         b = rank.get(rows[-1]["residual_risk"], 0)
         direction = "up" if b > a else "down" if b < a else "flat"
-    return {"subject": subject, "type": type, "trend": rows,
-            "direction": direction}
+    return {"subject": subject, "type": type, "trend": rows, "direction": direction}
 
 
 _BULK_IMPORT_MAX_ROWS = 500
@@ -3244,7 +3711,8 @@ _BULK_IMPORT_MAX_ROWS = 500
 
 @router.post("/assess/bulk-import")
 async def bulk_import_assessments(
-    request: Request, body: BulkAssessmentImportIn,
+    request: Request,
+    body: BulkAssessmentImportIn,
 ) -> dict:
     """Queue a batch of assessments from a pasted CSV (subject,type[,note]).
     Onboards a whole vendor list without one-by-one intake: each row becomes a
@@ -3259,6 +3727,7 @@ async def bulk_import_assessments(
         AssessmentSession,
         save_session,
     )
+
     who = _request_actor(request)
     rows = list(_csv.reader(io.StringIO(body.csv)))
     created: list[dict] = []
@@ -3269,7 +3738,7 @@ async def bulk_import_assessments(
         if not cells or not any(cells):
             continue
         subject = cells[0]
-        atype = (cells[1].lower() if len(cells) > 1 and cells[1] else "vendor_risk")
+        atype = cells[1].lower() if len(cells) > 1 and cells[1] else "vendor_risk"
         # Tolerate a single header row -- only ever the first line, so a real
         # vendor literally named "Vendor" on a later row is not dropped.
         if i == 0 and subject.lower() in ("subject", "vendor", "name"):
@@ -3281,30 +3750,39 @@ async def bulk_import_assessments(
             skipped_over_cap += 1
             continue
         if atype not in TEMPLATES:
-            errors.append({"row": i + 1, "subject": subject,
-                           "error": f"unknown template type '{atype}'"})
+            errors.append(
+                {"row": i + 1, "subject": subject, "error": f"unknown template type '{atype}'"}
+            )
             continue
         try:
             session = AssessmentSession(type=atype, subject=subject[:300])
             await run_in_threadpool(save_session, session)
-            created.append({"id": session.id, "subject": subject,
-                            "type": atype})
+            created.append({"id": session.id, "subject": subject, "type": atype})
         except Exception as e:  # noqa: BLE001 -- report the row, keep going
             errors.append({"row": i + 1, "subject": subject, "error": str(e)})
     try:  # best-effort: the import already committed each session atomically
         from maverick.audit import record as _audit_record
-        _audit_record("ASSESSMENTS_BULK_IMPORTED", agent=who,
-                      created=len(created), errors=len(errors))
+
+        _audit_record(
+            "ASSESSMENTS_BULK_IMPORTED", agent=who, created=len(created), errors=len(errors)
+        )
     except Exception:  # pragma: no cover -- audit write never blocks the import
         pass
-    return {"created": created, "errors": errors,
-            "created_count": len(created), "error_count": len(errors),
-            "skipped_over_cap": skipped_over_cap}
+    return {
+        "created": created,
+        "errors": errors,
+        "created_count": len(created),
+        "error_count": len(errors),
+        "skipped_over_cap": skipped_over_cap,
+    }
 
 
 @router.get("/assessment-memory/similar")
 async def assessment_memory_similar(
-    request: Request, subject: str, type: str = "", k: int = 3,
+    request: Request,
+    subject: str,
+    type: str = "",
+    k: int = 3,
 ) -> dict:
     """What the org already knows about subjects like this one: similar past
     assessments (with ratings), advisory per-question answer suggestions from
@@ -3314,20 +3792,24 @@ async def assessment_memory_similar(
     a tier above the summary rows the assessments register shows viewers."""
     require_permission(request, "operate")
     from maverick import assessment_memory
+
     subject = subject.strip()[:300]
     k = max(1, min(k, 10))
     if not subject:
         raise HTTPException(status_code=422, detail="subject is required")
     sim = await run_in_threadpool(
-        assessment_memory.similar, subject,
-        assessment_type=(type or None), k=k)
+        assessment_memory.similar, subject, assessment_type=(type or None), k=k
+    )
     suggestions = {}
     if type:
-        suggestions = await run_in_threadpool(
-            assessment_memory.suggest_answers, type, subject, k=k)
+        suggestions = await run_in_threadpool(assessment_memory.suggest_answers, type, subject, k=k)
     lessons = await run_in_threadpool(assessment_memory.lessons, subject, k=k)
-    return {"enabled": assessment_memory.enabled(), "similar": sim,
-            "suggestions": suggestions, "lessons": lessons}
+    return {
+        "enabled": assessment_memory.enabled(),
+        "similar": sim,
+        "suggestions": suggestions,
+        "lessons": lessons,
+    }
 
 
 @router.get("/goals/{goal_id}/attachments", response_model=list[AttachmentOut])
@@ -3339,8 +3821,11 @@ async def list_goal_attachments(request: Request, goal_id: int) -> list[Attachme
     assert_goal_access(request, g)
     return [
         AttachmentOut(
-            id=a.id, filename=a.filename, mime=a.mime,
-            size_bytes=a.size_bytes, sha256=a.sha256,
+            id=a.id,
+            filename=a.filename,
+            mime=a.mime,
+            size_bytes=a.size_bytes,
+            sha256=a.sha256,
         )
         for a in w.list_attachments(goal_id)
     ]
@@ -3348,7 +3833,9 @@ async def list_goal_attachments(request: Request, goal_id: int) -> list[Attachme
 
 @router.get("/goals/{goal_id}/attachments/{attachment_id}/download")
 async def download_goal_attachment(
-    request: Request, goal_id: int, attachment_id: int,
+    request: Request,
+    goal_id: int,
+    attachment_id: int,
 ) -> Response:
     """Serve one stored attachment back to the browser (goal-page panel).
 
@@ -3362,19 +3849,19 @@ async def download_goal_attachment(
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    match = next(
-        (a for a in w.list_attachments(goal_id) if a.id == attachment_id), None)
+    match = next((a for a in w.list_attachments(goal_id) if a.id == attachment_id), None)
     if match is None:
         raise HTTPException(status_code=404, detail="no such attachment")
     from pathlib import Path as _Path
+
     path = _Path(match.path)
     if not path.is_file():
         # Uploaded on another worker host: try the S3 mirror.
         from maverick.attachments import s3_fetch
+
         fetched = await run_in_threadpool(s3_fetch, goal_id, path.name)
         if fetched is None:
-            raise HTTPException(
-                status_code=410, detail="attachment bytes not on this host")
+            raise HTTPException(status_code=410, detail="attachment bytes not on this host")
         path = fetched
     safe_name = match.filename.replace('"', "_")
     return FileResponse(
@@ -3422,6 +3909,7 @@ async def record_outcome(request: Request, payload: OutcomeIn) -> None:
     if not w.episode_exists(goal_id, episode_id):
         raise HTTPException(status_code=404, detail="no such episode")
     from maverick.consequence import record_outcome as _rec
+
     _rec(goal_id, episode_id, float(payload.value), kind=(payload.kind or ""))
 
 
@@ -3445,6 +3933,7 @@ async def link_outcome(request: Request, payload: OutcomeLinkIn) -> None:
     if not w.episode_exists(goal_id, episode_id):
         raise HTTPException(status_code=404, detail="no such episode")
     from maverick.consequence import link_outcome_key
+
     link_outcome_key(payload.key, goal_id, episode_id)
 
 
@@ -3460,6 +3949,7 @@ async def record_outcome_by_key(request: Request, payload: OutcomeByKeyIn) -> di
     """
     require_permission(request, "operate")
     from maverick import consequence
+
     w = _world()
 
     def _authorize(goal_id: int, _episode_id: int) -> bool:
@@ -3470,8 +3960,8 @@ async def record_outcome_by_key(request: Request, payload: OutcomeByKeyIn) -> di
         return g is not None and can_access_goal(request, g)
 
     matched = consequence.record_outcome_for_key(
-        payload.key, float(payload.value), kind=(payload.kind or ""),
-        authorize=_authorize)
+        payload.key, float(payload.value), kind=(payload.kind or ""), authorize=_authorize
+    )
     return {"matched": bool(matched)}
 
 
@@ -3486,12 +3976,15 @@ async def record_outcome_by_key(request: Request, payload: OutcomeByKeyIn) -> di
 
 def _require_oauth_vault() -> None:
     from maverick import oauth_vault
+
     if not oauth_vault.enabled():
         raise HTTPException(
             status_code=403,
-            detail=("Account connections aren't enabled yet — an administrator "
-                    "must turn on the OAuth vault first (enable [oauth] vault "
-                    "in the server configuration, or set MAVERICK_OAUTH_VAULT=1)."),
+            detail=(
+                "Account connections aren't enabled yet — an administrator "
+                "must turn on the OAuth vault first (enable [oauth] vault "
+                "in the server configuration, or set MAVERICK_OAUTH_VAULT=1)."
+            ),
         )
 
 
@@ -3500,6 +3993,7 @@ async def oauth_providers_endpoint(request: Request) -> dict:
     """The connectable provider presets + which are already connected (view)."""
     require_permission(request, "view")
     from maverick import oauth_providers, oauth_vault
+
     connected: list[str] = []
     status: dict[str, dict] = {}
     if oauth_vault.enabled():
@@ -3524,43 +4018,51 @@ async def oauth_providers_endpoint(request: Request) -> dict:
 
 
 @router.post("/oauth/{provider}/authorize-url")
-async def oauth_authorize_url(request: Request, provider: str,
-                              payload: OAuthAuthorizeIn) -> dict:
+async def oauth_authorize_url(request: Request, provider: str, payload: OAuthAuthorizeIn) -> dict:
     """Build the consent URL for a preset provider (admin). Returns the URL to
     open and the PKCE verifier to keep -- pass the verifier back to /exchange.
     Stateless: the verifier round-trips through the (trusted) operator."""
     require_permission(request, "admin")
     _require_oauth_vault()
     from maverick import oauth_providers
+
     built = oauth_providers.build_authorize_url(
-        provider, redirect_uri=payload.redirect_uri,
-        client_id=payload.client_id or "", scopes=payload.scopes)
+        provider,
+        redirect_uri=payload.redirect_uri,
+        client_id=payload.client_id or "",
+        scopes=payload.scopes,
+    )
     if built is None:
         prov = oauth_providers.get_provider(provider)
         if prov is None:
             raise HTTPException(status_code=404, detail=f"unknown provider {provider!r}")
         raise HTTPException(
             status_code=400,
-            detail=f"set {prov.default_client_id_env()} (the OAuth app client id) first")
+            detail=f"set {prov.default_client_id_env()} (the OAuth app client id) first",
+        )
     url, verifier = built
     return {"authorize_url": url, "verifier": verifier}
 
 
 @router.post("/oauth/{provider}/exchange")
-async def oauth_exchange(request: Request, provider: str,
-                         payload: OAuthExchangeIn) -> dict:
+async def oauth_exchange(request: Request, provider: str, payload: OAuthExchangeIn) -> dict:
     """Swap the authorization code for tokens and seal them in the per-tenant
     vault under the provider name (admin). The provider preset supplies the token
     endpoint; the client secret is read from the operator's env."""
     require_permission(request, "admin")
     _require_oauth_vault()
     from maverick import oauth_providers
+
     if oauth_providers.get_provider(provider) is None:
         raise HTTPException(status_code=404, detail=f"unknown provider {provider!r}")
     try:
         summary = oauth_providers.exchange_code(
-            provider, code=payload.code, redirect_uri=payload.redirect_uri,
-            verifier=payload.verifier or "", client_id=payload.client_id or "")
+            provider,
+            code=payload.code,
+            redirect_uri=payload.redirect_uri,
+            verifier=payload.verifier or "",
+            client_id=payload.client_id or "",
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # a provider/network failure -> 502, not a 500
@@ -3578,6 +4080,7 @@ async def oauth_test(request: Request, provider: str) -> dict:
     require_permission(request, "admin")
     _require_oauth_vault()
     from maverick import oauth_providers, oauth_vault
+
     if oauth_providers.get_provider(provider) is None:
         raise HTTPException(status_code=404, detail=f"unknown provider {provider!r}")
     vault = oauth_vault.get_vault()
@@ -3597,6 +4100,7 @@ async def oauth_disconnect(request: Request, provider: str) -> None:
     require_permission(request, "admin")
     _require_oauth_vault()
     from maverick import oauth_vault
+
     oauth_vault.get_vault().delete(provider)
 
 
@@ -3605,12 +4109,15 @@ async def oauth_disconnect(request: Request, provider: str) -> None:
 
 def _require_connections() -> None:
     from maverick import connections
+
     if not connections.enabled():
         raise HTTPException(
             status_code=403,
-            detail=("Connections aren't enabled on this server yet — an "
-                    "administrator can switch them on (enable [connections] in "
-                    "the server configuration, or set MAVERICK_CONNECTIONS=1)."),
+            detail=(
+                "Connections aren't enabled on this server yet — an "
+                "administrator can switch them on (enable [connections] in "
+                "the server configuration, or set MAVERICK_CONNECTIONS=1)."
+            ),
         )
 
 
@@ -3621,6 +4128,7 @@ async def list_connections_endpoint(request: Request) -> dict:
     require_permission(request, "operate")
     _require_connections()
     from maverick import connections
+
     return {"connections": connections.list_connections(owner=_request_identity(request))}
 
 
@@ -3633,16 +4141,22 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
     require_permission(request, "admin")
     _require_connections()
     from maverick import connections
+
     try:
         # Owner-scope like triggers: a non-admin can't overwrite another
         # tenant's connection by reusing its name. Enforced INSIDE the store
         # lock (expected_owner) so the check and the write are atomic.
         owner = _request_identity(request)
         rec = connections.set_connection(
-            payload.name, connector=payload.connector, base_url=payload.base_url,
-            token=payload.token, owner=owner or "",
-            expected_owner=owner, access=payload.access,
-            allowed_principals=payload.allowed_principals)
+            payload.name,
+            connector=payload.connector,
+            base_url=payload.base_url,
+            token=payload.token,
+            owner=owner or "",
+            expected_owner=owner,
+            access=payload.access,
+            allowed_principals=payload.allowed_principals,
+        )
     except PermissionError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
@@ -3659,6 +4173,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     require_permission(request, "admin")
     _require_connections()
     from maverick import connections
+
     rec = connections.get_connection(name)
     # Owner-scope like list/delete/create: a non-admin can only test their own
     # connection (else a name-guess is a cross-owner reachability oracle AND
@@ -3686,8 +4201,12 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
 
     base = str(rec.get("base_url") or "").rstrip("/")
     if not base:
-        result = {"ok": False, "reachable": False, "authenticated": False,
-                  "detail": "no base URL set"}
+        result = {
+            "ok": False,
+            "reachable": False,
+            "authenticated": False,
+            "detail": "no base URL set",
+        }
         _persist_probe(result)
         return result
 
@@ -3698,11 +4217,13 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
 
         try:
             from maverick.tools.enterprise_connectors import auth_headers_for
+
             # Speak the connector's saved-token auth dialect (basic / custom
             # scheme), but do not include operator environment-backed auxiliary
             # headers: saved connection tests use a caller-controlled base_url.
             headers = auth_headers_for(
-                str(rec.get("connector") or ""), str(rec.get("token") or ""),
+                str(rec.get("connector") or ""),
+                str(rec.get("token") or ""),
                 include_extra_headers_env=False,
             )
             # This request carries the sealed token, so it MUST go through the
@@ -3731,7 +4252,9 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
                 )
                 try:
                     control = _ssrf.safe_get(
-                        base, headers=invalid_headers, timeout=10.0,
+                        base,
+                        headers=invalid_headers,
+                        timeout=10.0,
                     )
                 except Exception as exc:  # token worked; control evidence did not
                     return {
@@ -3756,14 +4279,28 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
                 )
             else:
                 detail = f"reachable but readiness probe returned {r.status_code}"
-            return {"ok": ready, "reachable": True, "authenticated": ready,
-                    "status": r.status_code, "detail": detail}
+            return {
+                "ok": ready,
+                "reachable": True,
+                "authenticated": ready,
+                "status": r.status_code,
+                "detail": detail,
+            }
         except _ssrf.BlockedHost:
-            return {"ok": False, "reachable": False, "authenticated": False,
-                    "detail": "base URL host is not permitted"}
+            return {
+                "ok": False,
+                "reachable": False,
+                "authenticated": False,
+                "detail": "base URL host is not permitted",
+            }
         except Exception as e:  # pragma: no cover -- network varies
-            return {"ok": False, "reachable": False, "authenticated": False,
-                    "detail": f"could not reach host: {type(e).__name__}"}
+            return {
+                "ok": False,
+                "reachable": False,
+                "authenticated": False,
+                "detail": f"could not reach host: {type(e).__name__}",
+            }
+
     result = await run_in_threadpool(_probe)
     _persist_probe(result)
     return result
@@ -3774,6 +4311,7 @@ async def delete_connection_endpoint(request: Request, name: str) -> dict:
     require_permission(request, "admin")  # managing credentials is admin-only
     _require_connections()
     from maverick import connections
+
     if not connections.delete_connection(name, owner=_request_identity(request)):
         raise HTTPException(status_code=404, detail="no connection with that name")
     return {"deleted": connections.normalize_name(name)}
@@ -3783,6 +4321,7 @@ async def delete_connection_endpoint(request: Request, name: str) -> dict:
 # Reading the register is audit-level; drafting and reviewing (which record a
 # governance decision) require admin. Auto-draft heuristics live in
 # maverick.assessments; this is thin plumbing over that engine.
+
 
 def _assess_kind(kind: str) -> str:
     if kind not in ("agent", "flow"):
@@ -3794,9 +4333,12 @@ def _assess_kind(kind: str) -> str:
 async def list_assessments_endpoint(request: Request) -> dict:
     require_permission(request, "audit")
     from maverick import assessments
-    return {"assessments": assessments.list_assessments(),
-            "due": assessments.due_assessments(),
-            "templates": assessments.list_templates()}
+
+    return {
+        "assessments": assessments.list_assessments(),
+        "due": assessments.due_assessments(),
+        "templates": assessments.list_templates(),
+    }
 
 
 @router.get("/assessments/export")
@@ -3804,20 +4346,37 @@ async def export_assessments_endpoint(request: Request, format: str = "json") ->
     """Audit export of every finding. ``?format=csv`` for a spreadsheet."""
     require_permission(request, "audit")
     from maverick import assessments
+
     rows = assessments.export_rows()
     if format == "csv":
         import csv
         import io
-        cols = ["kind", "subject", "assessment_status", "lens", "lens_status",
-                "control", "severity", "finding_status", "note", "mitigation",
-                "evidence", "reviewer", "reviewed_at"]
+
+        cols = [
+            "kind",
+            "subject",
+            "assessment_status",
+            "lens",
+            "lens_status",
+            "control",
+            "severity",
+            "finding_status",
+            "note",
+            "mitigation",
+            "evidence",
+            "reviewer",
+            "reviewed_at",
+        ]
         buf = io.StringIO()
         w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
         for r in rows:
             w.writerow({col: _csv_formula_safe(r.get(col, "")) for col in cols})
-        return Response(content=buf.getvalue(), media_type="text/csv",
-                        headers={"Content-Disposition": "attachment; filename=assessments.csv"})
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=assessments.csv"},
+        )
     return JSONResponse({"rows": rows})
 
 
@@ -3827,6 +4386,7 @@ async def sweep_assessments_endpoint(request: Request) -> dict:
     The same sweep the automation scheduler runs daily, on demand."""
     require_permission(request, "admin")
     from maverick import assessments
+
     return assessments.sweep_due()
 
 
@@ -3834,6 +4394,7 @@ async def sweep_assessments_endpoint(request: Request) -> dict:
 async def get_assessment_endpoint(request: Request, kind: str, name: str) -> dict:
     require_permission(request, "audit")
     from maverick import assessments
+
     a = assessments.get_assessment(_assess_kind(kind), name)
     if a is None:
         raise HTTPException(status_code=404, detail="no assessment for that subject")
@@ -3847,6 +4408,7 @@ async def refresh_assessment_endpoint(
     """Auto-draft (or re-draft, detecting drift) the assessment for a subject."""
     require_permission(request, "admin")
     from maverick import assessments
+
     a = assessments.refresh(_assess_kind(kind), name, template=payload.template)
     if a is None:
         raise HTTPException(status_code=404, detail=f"unknown {kind}: {name!r}")
@@ -3860,11 +4422,17 @@ async def review_assessment_endpoint(
     """Record a reviewer's accept / needs-work decision on one lens."""
     require_permission(request, "admin")
     from maverick import assessments
+
     try:
         a = assessments.record_review(
-            _assess_kind(kind), name, payload.lens, payload.decision,
-            reviewer=caller_principal(request) or "", note=payload.note or "",
-            cadence_days=payload.cadence_days)
+            _assess_kind(kind),
+            name,
+            payload.lens,
+            payload.decision,
+            reviewer=caller_principal(request) or "",
+            note=payload.note or "",
+            cadence_days=payload.cadence_days,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if a is None:
@@ -3878,8 +4446,10 @@ async def add_assessment_evidence_endpoint(
 ) -> dict:
     require_permission(request, "admin")
     from maverick import assessments
-    a = assessments.add_evidence(_assess_kind(kind), name, payload.lens,
-                                 payload.control, payload.evidence)
+
+    a = assessments.add_evidence(
+        _assess_kind(kind), name, payload.lens, payload.control, payload.evidence
+    )
     if a is None:
         raise HTTPException(status_code=404, detail="no such finding")
     return a
@@ -3889,6 +4459,7 @@ async def add_assessment_evidence_endpoint(
 async def delete_assessment_endpoint(request: Request, kind: str, name: str) -> Response:
     require_permission(request, "admin")
     from maverick import assessments
+
     assessments.delete_assessment(_assess_kind(kind), name)
     return Response(status_code=204)
 
@@ -3898,12 +4469,15 @@ async def delete_assessment_endpoint(request: Request, kind: str, name: str) -> 
 
 def _require_flows() -> None:
     from maverick import flow
+
     if not flow.enabled():
         raise HTTPException(
             status_code=403,
-            detail=("Flows aren't enabled on this server yet — an administrator "
-                    "can switch on the flow engine (enable [flows] in the "
-                    "server configuration, or set MAVERICK_FLOWS=1)."),
+            detail=(
+                "Flows aren't enabled on this server yet — an administrator "
+                "can switch on the flow engine (enable [flows] in the "
+                "server configuration, or set MAVERICK_FLOWS=1)."
+            ),
         )
 
 
@@ -3955,13 +4529,22 @@ async def list_flows_endpoint(request: Request) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
-    return {"flows": [
-        {"id": f.id, "name": f.name, "nodes": len(f.nodes),
-         "single_agent": f.is_single_agent(), "schedule": f.schedule,
-         "inputs": f.inputs, **_flow_publication_fields(f.id)}
-        for f in store.list_flows()
-        if _can_access_flow(request, f)
-    ]}
+
+    return {
+        "flows": [
+            {
+                "id": f.id,
+                "name": f.name,
+                "nodes": len(f.nodes),
+                "single_agent": f.is_single_agent(),
+                "schedule": f.schedule,
+                "inputs": f.inputs,
+                **_flow_publication_fields(f.id),
+            }
+            for f in store.list_flows()
+            if _can_access_flow(request, f)
+        ]
+    }
 
 
 @router.post("/flows", status_code=201)
@@ -3970,6 +4553,7 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import Flow, store
+
     try:
         flow = Flow.from_dict(payload.flow)
     except Exception as e:  # a malformed graph
@@ -4014,7 +4598,9 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
 
 @router.post("/flows/{flow_id}/publish")
 async def publish_flow_endpoint(
-    request: Request, flow_id: str, payload: FlowPublishIn,
+    request: Request,
+    flow_id: str,
+    payload: FlowPublishIn,
 ) -> dict:
     """Activate one immutable draft revision for real runs/triggers/schedules."""
     require_permission(request, "operate")
@@ -4056,7 +4642,9 @@ async def publish_flow_endpoint(
 
 @router.post("/flows/{flow_id}/unpublish")
 async def unpublish_flow_endpoint(
-    request: Request, flow_id: str, payload: FlowPublishIn,
+    request: Request,
+    flow_id: str,
+    payload: FlowPublishIn,
 ) -> dict:
     """Deactivate a release while retaining its draft and immutable history."""
     require_permission(request, "operate")
@@ -4089,10 +4677,30 @@ async def unpublish_flow_endpoint(
 # Common connector tools to bias the NL drafter toward real action nodes; the
 # operator edits the result in the designer, and unknown tools fail gracefully.
 _FLOW_DRAFT_TOOLS = (
-    "slack_bot", "discord_bot", "teams", "email", "gmail", "twilio",
-    "github_issues", "github_actions", "jira", "linear", "gitlab_issues",
-    "salesforce", "hubspot", "stripe", "shopify", "servicenow", "zendesk",
-    "notion", "confluence", "trello", "calendar", "dropbox", "s3", "http_fetch",
+    "slack_bot",
+    "discord_bot",
+    "teams",
+    "email",
+    "gmail",
+    "twilio",
+    "github_issues",
+    "github_actions",
+    "jira",
+    "linear",
+    "gitlab_issues",
+    "salesforce",
+    "hubspot",
+    "stripe",
+    "shopify",
+    "servicenow",
+    "zendesk",
+    "notion",
+    "confluence",
+    "trello",
+    "calendar",
+    "dropbox",
+    "s3",
+    "http_fetch",
 )
 
 
@@ -4104,19 +4712,26 @@ _TOOL_INDEX_LOCK = threading.Lock()
 
 
 def _tool_catalog_scope(
-    *, channel: str | None = None, user_id: str | None = None,
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
 ) -> str:
     """Tenant/home + execution-identity namespace for authoring metadata."""
     from maverick.paths import data_dir
-    return "\0".join((
-        str(data_dir().resolve(strict=False)),
-        str(channel or ""),
-        str(user_id or ""),
-    ))
+
+    return "\0".join(
+        (
+            str(data_dir().resolve(strict=False)),
+            str(channel or ""),
+            str(user_id or ""),
+        )
+    )
 
 
 def _live_tool_index(
-    *, channel: str | None = None, user_id: str | None = None,
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict]:
     """Tenant-scoped, short-lived flattened registry metadata.
 
@@ -4140,6 +4755,7 @@ def _live_tool_index(
     try:
         from maverick.sandbox import build_sandbox
         from maverick.tools import base_registry
+
         live = base_registry(
             _world(),
             build_sandbox(),
@@ -4163,15 +4779,23 @@ def _live_tool_index(
             params = list((t.input_schema.get("properties") or {}).keys())[:12]
             schemas[t.name] = dict(t.input_schema)
         desc = (t.description or "")[:200]
-        idx.append({"name": t.name, "description": desc, "params": params,
-                    "category": categorize(t.name, desc)})
+        idx.append(
+            {
+                "name": t.name,
+                "description": desc,
+                "params": params,
+                "category": categorize(t.name, desc),
+            }
+        )
     with _TOOL_INDEX_LOCK:
         _TOOL_CATALOG_CACHE[scope] = (time.monotonic(), idx, schemas)
     return idx
 
 
 def _live_tool_schemas(
-    *, channel: str | None = None, user_id: str | None = None,
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, dict]:
     """Full input contracts, kept out of the public picker response."""
     if _TOOL_SCHEMA_CACHE is not None:
@@ -4184,16 +4808,15 @@ def _live_tool_schemas(
 
 
 def _flow_tool_catalog(
-    *, channel: str | None = None, user_id: str | None = None,
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict]:
     """The curated connector catalog for the designer's action picker + the NL
     drafter's grounding: each tool's name, one-line description, and param names
     (from its input schema). Best-effort -- a tool absent from the live registry
     still appears by name so the picker/drafter can offer it."""
-    by_name = {
-        t["name"]: t
-        for t in _live_tool_index(channel=channel, user_id=user_id)
-    }
+    by_name = {t["name"]: t for t in _live_tool_index(channel=channel, user_id=user_id)}
     out = []
     for name in _FLOW_DRAFT_TOOLS:
         t = by_name.get(name)
@@ -4216,6 +4839,7 @@ def _flow_authoring_catalog(
     stale/hallucinated legacy action remains fail-closed.
     """
     from maverick.flow.draft import rank_tool_catalog
+
     live = _live_tool_index(channel=channel, user_id=user_id)
     ranked = rank_tool_catalog(query, live, limit=24)
     by_name = {t["name"]: t for t in live}
@@ -4226,10 +4850,7 @@ def _flow_authoring_catalog(
             ranked.append(item)
             present.add(name)
     schemas = _live_tool_schemas(channel=channel, user_id=user_id)
-    return [
-        {**item, "input_schema": dict(schemas.get(item["name"]) or {})}
-        for item in ranked
-    ]
+    return [{**item, "input_schema": dict(schemas.get(item["name"]) or {})} for item in ranked]
 
 
 @router.post("/flows/draft")
@@ -4241,16 +4862,18 @@ async def draft_flow_endpoint(request: Request, payload: FlowDraftIn) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick_dashboard._shared import require_provider_or_400
+
     require_provider_or_400(role="orchestrator")
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request, source="flow-authoring")
     from maverick.flow.draft import draft_flow
+
     user_id = execution_user_id_from_request(request)
     channel = "api" if user_id else None
 
     def _draft():
-        catalog = _flow_authoring_catalog(
-            payload.description, channel=channel, user_id=user_id)
+        catalog = _flow_authoring_catalog(payload.description, channel=channel, user_id=user_id)
         tool_docs = {t["name"]: t["description"] for t in catalog if t["description"]}
         tool_schemas = {t["name"]: t["input_schema"] for t in catalog}
         return draft_flow(
@@ -4260,6 +4883,7 @@ async def draft_flow_endpoint(request: Request, payload: FlowDraftIn) -> dict:
             tool_schemas=tool_schemas,
             flow_id=payload.flow_id,
         )
+
     flow, notes = await run_in_threadpool(_draft)
     return {"flow": flow.to_dict(), "notes": notes}
 
@@ -4274,12 +4898,15 @@ async def flow_chat_endpoint(request: Request, payload: FlowChatIn) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick_dashboard._shared import require_provider_or_400
+
     require_provider_or_400(role="orchestrator")
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request, source="flow-authoring")
     from maverick.flow import Flow
     from maverick.flow.chat import chat_flow
     from maverick.flow.draft import action_tool_names
+
     try:
         current = Flow.from_dict(payload.flow) if payload.flow else None
     except Exception as e:
@@ -4297,9 +4924,16 @@ async def flow_chat_endpoint(request: Request, payload: FlowChatIn) -> dict:
         )
         tool_docs = {t["name"]: t["description"] for t in catalog if t["description"]}
         tool_schemas = {t["name"]: t["input_schema"] for t in catalog}
-        return chat_flow(payload.message, flow=current, history=payload.history,
-                         run=run, tools=tuple(t["name"] for t in catalog),
-                         tool_docs=tool_docs, tool_schemas=tool_schemas)
+        return chat_flow(
+            payload.message,
+            flow=current,
+            history=payload.history,
+            run=run,
+            tools=tuple(t["name"] for t in catalog),
+            tool_docs=tool_docs,
+            tool_schemas=tool_schemas,
+        )
+
     res = await run_in_threadpool(_turn)
     return {
         "reply": res.reply,
@@ -4310,16 +4944,15 @@ async def flow_chat_endpoint(request: Request, payload: FlowChatIn) -> dict:
 
 
 @router.get("/flows/runs")
-async def list_flow_runs_endpoint(request: Request, flow_id: str = "",
-                                  limit: int = 50) -> dict:
+async def list_flow_runs_endpoint(request: Request, flow_id: str = "", limit: int = 50) -> dict:
     """Recent flow runs (owner-scoped). Defined before ``/flows/{flow_id}`` so the
     literal ``runs`` path isn't captured as a flow id."""
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
+
     owner = goal_owner_filter(request)
-    runs = store.list_runs(flow_id=flow_id or None, owner=owner,
-                           limit=max(1, min(500, limit)))
+    runs = store.list_runs(flow_id=flow_id or None, owner=owner, limit=max(1, min(500, limit)))
     return {"runs": [_run_out(r) for r in runs]}
 
 
@@ -4332,6 +4965,7 @@ async def flow_schema_endpoint(request: Request, flow_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
+
     flow = store.load_flow(flow_id)
     if flow is None:
         raise HTTPException(status_code=404, detail="no such flow")
@@ -4343,6 +4977,7 @@ def _run_out(run) -> dict:
     """A flow run for the API with secret-looking values in its payloads masked,
     so a token a connector put into the run never leaves over HTTP."""
     from maverick.flow.redact import redact
+
     d = run.to_dict()
     d["data"] = redact(d.get("data") or {})
     d["input_data"] = redact(d.get("input_data") or {})
@@ -4361,6 +4996,7 @@ def _load_owned_run(request: Request, run_id: str):
     """A flow run the caller may see, or a 404 (indistinguishable from missing,
     so a run's existence isn't leaked across owners)."""
     from maverick.flow import store
+
     run = store.load_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="no such run")
@@ -4390,23 +5026,30 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
 
     require_permission(request, "operate")
     _require_flows()
-    _load_owned_run(request, run_id)     # 404 before holding a stream slot
+    _load_owned_run(request, run_id)  # 404 before holding a stream slot
     from maverick.flow import store as flow_store
 
     from maverick_dashboard._shared import _get_sse_semaphore
+
     sem = _get_sse_semaphore()
     if sem.locked():
-        raise HTTPException(status_code=503,
-                            detail="too many concurrent event streams; retry shortly",
-                            headers={"Retry-After": "5"})
+        raise HTTPException(
+            status_code=503,
+            detail="too many concurrent event streams; retry shortly",
+            headers={"Retry-After": "5"},
+        )
     await sem.acquire()
 
     # completed/failed/rejected are final; a run parked on a human or an
     # external event won't change until someone acts -- close the stream and
     # let the page's actions (approve / resume) drive the next one.
     end_states = (
-        "completed", "failed", "rejected", "indeterminate",
-        "paused_approval", "paused_event",
+        "completed",
+        "failed",
+        "rejected",
+        "indeterminate",
+        "paused_approval",
+        "paused_event",
     )
     poll, max_poll, max_seconds, heartbeat_every = 0.5, 5.0, 300.0, 30.0
 
@@ -4418,7 +5061,7 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
         try:
             while True:
                 if (_asyncio.get_running_loop().time() - started) >= max_seconds:
-                    yield "event: timeout\ndata: {\"detail\": \"stream lifetime exceeded\"}\n\n"
+                    yield 'event: timeout\ndata: {"detail": "stream lifetime exceeded"}\n\n'
                     return
                 # Stop re-reading the run file the moment the client goes away
                 # (a closed tab) instead of leaning solely on CancelledError
@@ -4427,7 +5070,7 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
                     return
                 run = await run_in_threadpool(flow_store.load_run, run_id)
                 if run is None:
-                    yield "event: error\ndata: {\"detail\": \"run vanished\"}\n\n"
+                    yield 'event: error\ndata: {"detail": "run vanished"}\n\n'
                     return
                 if run.updated != last_stamp:
                     last_stamp = run.updated
@@ -4450,13 +5093,14 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
             sem.release()
 
     return StreamingResponse(
-        generate(), media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/flows/runs/{run_id}/resume")
-async def resume_flow_run_endpoint(request: Request, run_id: str,
-                                   payload: FlowResumeIn) -> dict:
+async def resume_flow_run_endpoint(request: Request, run_id: str, payload: FlowResumeIn) -> dict:
     """Resume a paused flow run with a human decision (approve/reject)."""
     require_permission(request, "operate")
     _require_flows()
@@ -4464,9 +5108,9 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     # Only a paused run may be resumed -- resuming a completed/rejected run would
     # re-run the flow or run a rejected node (409, not a silent no-op).
     from maverick.flow.runner import PAUSED_STATUSES
+
     if run.status not in PAUSED_STATUSES:
-        raise HTTPException(status_code=409,
-                            detail=f"run is not paused (status {run.status})")
+        raise HTTPException(status_code=409, detail=f"run is not paused (status {run.status})")
     decided_by = ""
     if run.status == "paused_approval":
         if not str(payload.decision or "").strip():
@@ -4485,6 +5129,7 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     from maverick.flow import store
 
     from maverick_dashboard import automation_queue as aq
+
     try:
         aq.enqueue_flow_resume(
             run.flow_id,
@@ -4505,8 +5150,9 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
 
 
 @router.post("/flows/runs/{run_id}/retry")
-async def retry_flow_run_endpoint(request: Request, run_id: str,
-                                  from_failure: bool = False) -> dict:
+async def retry_flow_run_endpoint(
+    request: Request, run_id: str, from_failure: bool = False
+) -> dict:
     """Re-run a finished/failed run from scratch with its ORIGINAL trigger inputs
     (a fresh run, so any partial side effects aren't re-driven mid-flow). This is
     the recovery path a dead-lettered run needs -- the run's input_data was kept
@@ -4524,9 +5170,11 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
     # duplicate run alongside the live one. from_failure below is the only path
     # that acts on a failed run.
     from maverick.flow.runner import ACTIVE_STATUSES, QUARANTINED_STATUSES
+
     if run.status in ACTIVE_STATUSES:
-        raise HTTPException(status_code=409,
-                            detail=f"run is still active (status {run.status}); nothing to retry")
+        raise HTTPException(
+            status_code=409, detail=f"run is still active (status {run.status}); nothing to retry"
+        )
     if run.status in QUARANTINED_STATUSES:
         raise HTTPException(
             status_code=409,
@@ -4536,17 +5184,20 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
             ),
         )
     from maverick.flow import store
+
     current_flow = store.load_flow(run.flow_id)
     if current_flow is None:
         raise HTTPException(status_code=404, detail="flow no longer exists")
     _assert_flow_access(request, current_flow)
     from maverick_dashboard import automation_queue as aq
+
     if from_failure:
         if run.status != "failed" or not run.cursor:
             raise HTTPException(
                 status_code=409,
                 detail="only a failed run with a recorded failure node can be "
-                       "resumed from its failure; use a plain retry instead")
+                "resumed from its failure; use a plain retry instead",
+            )
         try:
             aq.enqueue_flow_resume(
                 run.flow_id,
@@ -4650,6 +5301,7 @@ async def flow_tools_endpoint(request: Request, q: str = "", category: str = "")
     require_permission(request, "operate")
     _require_flows()
     from .tool_categories import categories as _cat_names
+
     q = q.strip().lower()[:80]
     category = category.strip()[:40]
     cats = _cat_names()
@@ -4657,9 +5309,12 @@ async def flow_tools_endpoint(request: Request, q: str = "", category: str = "")
     channel = "api" if user_id else None
 
     if not q and not category:
-        return {"tools": await run_in_threadpool(
-                    lambda: _flow_tool_catalog(channel=channel, user_id=user_id)),
-                "categories": cats}
+        return {
+            "tools": await run_in_threadpool(
+                lambda: _flow_tool_catalog(channel=channel, user_id=user_id)
+            ),
+            "categories": cats,
+        }
 
     def _filter():
         out = _live_tool_index(channel=channel, user_id=user_id)
@@ -4668,11 +5323,18 @@ async def flow_tools_endpoint(request: Request, q: str = "", category: str = "")
         if q:
             out = [t for t in out if q in f"{t['name']} {t['description']}".lower()]
             # name-prefix matches first, then name matches, then description-only
-            out = sorted(out, key=lambda t: (not t["name"].lower().startswith(q),
-                                             q not in t["name"].lower(), t["name"]))
+            out = sorted(
+                out,
+                key=lambda t: (
+                    not t["name"].lower().startswith(q),
+                    q not in t["name"].lower(),
+                    t["name"],
+                ),
+            )
         else:
             out = sorted(out, key=lambda t: t["name"])
         return out[:50]
+
     return {"tools": await run_in_threadpool(_filter), "categories": cats}
 
 
@@ -4682,43 +5344,108 @@ async def flow_tools_endpoint(request: Request, q: str = "", category: str = "")
 # hand-built graph when the user saves it.
 _FLOW_GALLERY: tuple[dict, ...] = (
     {
-        "id": "", "name": "Triage inbound issues", "start": "n0",
+        "id": "",
+        "name": "Triage inbound issues",
+        "start": "n0",
         "description": "Summarize a new issue, escalate urgent ones, ask before posting.",
         "nodes": [
-            {"id": "n0", "kind": "agent", "brief": "Summarize this issue and rate its urgency high/normal: {{title}} — {{body}}", "output": "summary", "next": "n1"},
+            {
+                "id": "n0",
+                "kind": "agent",
+                "brief": "Summarize this issue and rate its urgency high/normal: {{title}} — {{body}}",
+                "output": "summary",
+                "next": "n1",
+            },
             {"id": "n1", "kind": "branch", "condition": "urgency == high", "if_true": "n2"},
-            {"id": "n2", "kind": "approval", "prompt": "Escalate this to the on-call channel?", "next": "n3"},
+            {
+                "id": "n2",
+                "kind": "approval",
+                "prompt": "Escalate this to the on-call channel?",
+                "next": "n3",
+            },
             {"id": "n3", "kind": "action", "tool": "slack_bot", "params": {"text": "{{summary}}"}},
         ],
     },
     {
-        "id": "", "name": "Daily digest", "start": "n0",
+        "id": "",
+        "name": "Daily digest",
+        "start": "n0",
         "description": "On a schedule, gather updates and email a one-paragraph digest.",
         "schedule": "0 9 * * *",
         "nodes": [
-            {"id": "n0", "kind": "agent", "brief": "Gather yesterday's notable updates and write a one-paragraph digest.", "output": "digest", "next": "n1_gate"},
-            {"id": "n1_gate", "kind": "approval", "prompt": "Send this daily digest?", "next": "n1"},
+            {
+                "id": "n0",
+                "kind": "agent",
+                "brief": "Gather yesterday's notable updates and write a one-paragraph digest.",
+                "output": "digest",
+                "next": "n1_gate",
+            },
+            {
+                "id": "n1_gate",
+                "kind": "approval",
+                "prompt": "Send this daily digest?",
+                "next": "n1",
+            },
             {"id": "n1", "kind": "action", "tool": "email", "params": {"body": "{{digest}}"}},
         ],
     },
     {
-        "id": "", "name": "Process a list with review", "start": "n0",
+        "id": "",
+        "name": "Process a list with review",
+        "start": "n0",
         "description": "Loop items concurrently, then a human signs off on the batch.",
         "nodes": [
-            {"id": "n0", "kind": "foreach", "items": "rows", "var": "row", "concurrent": True, "output": "results", "next": "n1",
-             "body": {"id": "", "name": "per row", "start": "b0",
-                      "nodes": [{"id": "b0", "kind": "agent", "brief": "Handle {{row}}", "output": "r"}]}},
-            {"id": "n1", "kind": "approval", "prompt": "Batch processed — publish the results?", "next": "n2"},
+            {
+                "id": "n0",
+                "kind": "foreach",
+                "items": "rows",
+                "var": "row",
+                "concurrent": True,
+                "output": "results",
+                "next": "n1",
+                "body": {
+                    "id": "",
+                    "name": "per row",
+                    "start": "b0",
+                    "nodes": [
+                        {"id": "b0", "kind": "agent", "brief": "Handle {{row}}", "output": "r"}
+                    ],
+                },
+            },
+            {
+                "id": "n1",
+                "kind": "approval",
+                "prompt": "Batch processed — publish the results?",
+                "next": "n2",
+            },
             {"id": "n2", "kind": "agent", "brief": "Publish the approved results: {{results}}"},
         ],
     },
     {
-        "id": "", "name": "Wait for a callback", "start": "n0",
+        "id": "",
+        "name": "Wait for a callback",
+        "start": "n0",
         "description": "Kick off work, wait for an external system to call back, then finish.",
         "nodes": [
-            {"id": "n0", "kind": "agent", "brief": "Submit the request described in {{request}}", "output": "submitted", "next": "n1"},
-            {"id": "n1", "kind": "wait_event", "prompt": "Waiting for the provider callback", "next": "n2"},
-            {"id": "n2", "kind": "agent", "brief": "Reconcile the callback payload {{payload}} with {{submitted}}", "output": "done"},
+            {
+                "id": "n0",
+                "kind": "agent",
+                "brief": "Submit the request described in {{request}}",
+                "output": "submitted",
+                "next": "n1",
+            },
+            {
+                "id": "n1",
+                "kind": "wait_event",
+                "prompt": "Waiting for the provider callback",
+                "next": "n2",
+            },
+            {
+                "id": "n2",
+                "kind": "agent",
+                "brief": "Reconcile the callback payload {{payload}} with {{submitted}}",
+                "output": "done",
+            },
         ],
     },
 )
@@ -4742,11 +5469,11 @@ async def flow_analytics_endpoint(request: Request, limit: int = 500) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import analytics
+
     owner = goal_owner_filter(request)
     # The aggregation reads + parses every run file in the window: keep that
     # off the event loop.
-    return await run_in_threadpool(
-        analytics.aggregate, owner=owner, limit=max(1, min(2000, limit)))
+    return await run_in_threadpool(analytics.aggregate, owner=owner, limit=max(1, min(2000, limit)))
 
 
 @router.get("/flows/insights")
@@ -4759,6 +5486,7 @@ async def flow_insights_endpoint(request: Request) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import evolution_log, evolve, store
+
     flows_out = []
     proposal_count = 0
     for f in store.list_flows():
@@ -4770,26 +5498,32 @@ async def flow_insights_endpoint(request: Request) -> dict:
             last = evolution_log.last_apply(f.id, node_id)
             if not last:
                 continue
-            changes.append({
-                "node_id": node_id, "to_kind": last.get("to_kind"),
-                "source": last.get("source"),
-                "impact": evolve.measure(
-                    f.id,
-                    node_id,
-                    float(last.get("ts") or 0.0),
-                    before_revision=str(last.get("before_revision") or ""),
-                    after_revision=str(last.get("after_revision") or ""),
-                )})
+            changes.append(
+                {
+                    "node_id": node_id,
+                    "to_kind": last.get("to_kind"),
+                    "source": last.get("source"),
+                    "impact": evolve.measure(
+                        f.id,
+                        node_id,
+                        float(last.get("ts") or 0.0),
+                        before_revision=str(last.get("before_revision") or ""),
+                        after_revision=str(last.get("after_revision") or ""),
+                    ),
+                }
+            )
         if proposals or changes:
-            flows_out.append({"flow_id": f.id, "name": f.name,
-                              "proposals": proposals, "changes": changes})
+            flows_out.append(
+                {"flow_id": f.id, "name": f.name, "proposals": proposals, "changes": changes}
+            )
         proposal_count += len(proposals)
     return {"flows": flows_out, "proposal_count": proposal_count}
 
 
 @router.post("/flows/dry-run")
 async def dry_run_flow_draft_endpoint(
-    request: Request, payload: FlowDryRunIn,
+    request: Request,
+    payload: FlowDryRunIn,
 ) -> dict:
     """Run exactly the submitted unsaved graph with side-effect-free executors.
 
@@ -4823,9 +5557,7 @@ async def dry_run_flow_draft_endpoint(
         draft.revision = uuid4().hex
     errors = draft.validate()
     if errors:
-        raise HTTPException(
-            status_code=400, detail="invalid flow: " + "; ".join(errors[:5])
-        )
+        raise HTTPException(status_code=400, detail="invalid flow: " + "; ".join(errors[:5]))
     data, input_errors = coerce_inputs(draft, dict(payload.data or {}))
     if input_errors:
         raise HTTPException(status_code=400, detail="; ".join(input_errors))
@@ -4867,6 +5599,7 @@ async def get_flow_endpoint(request: Request, flow_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
+
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
@@ -4879,6 +5612,7 @@ async def delete_flow_endpoint(request: Request, flow_id: str) -> None:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
+
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
@@ -4907,6 +5641,7 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
     _require_flows()
     from maverick.flow import store
     from maverick.flow.ir import coerce_inputs
+
     draft = store.load_flow(flow_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="no such flow")
@@ -4941,9 +5676,13 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
     # to the same run instead of firing a second one.
     idem = (payload.idempotency_key or "").strip()
     from maverick_dashboard import automation_queue as aq
+
     try:
         run_id, deduplicated = aq.enqueue_published_flow_run_once(
-            flow_id, data, owner, idem,
+            flow_id,
+            data,
+            owner,
+            idem,
             origin="manual",
             channel="api" if execution_user_id_from_request(request) else None,
             user_id=execution_user_id_from_request(request),
@@ -4958,8 +5697,12 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
             detail="flow changed or its immutable execution plan is unavailable",
         ) from exc
     run = store.load_run(run_id)
-    return {"run_id": run_id, "status": run.status if run else "queued",
-            "dry_run": False, "deduplicated": deduplicated}
+    return {
+        "run_id": run_id,
+        "status": run.status if run else "queued",
+        "dry_run": False,
+        "deduplicated": deduplicated,
+    }
 
 
 @router.get("/flows/{flow_id}/proposals")
@@ -4970,6 +5713,7 @@ async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import evolve, store
+
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
@@ -4987,6 +5731,7 @@ async def flow_signals_endpoint(request: Request, flow_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import execution, node_outcomes, store
+
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
@@ -4998,15 +5743,22 @@ async def flow_signals_endpoint(request: Request, flow_id: str) -> dict:
         if nid == execution.TRIGGER_NODE:
             continue
         node = f.nodes.get(nid)
-        nodes[nid] = {"n": s["n"], "mean": s["mean"], "kind": s.get("kind"),
-                      "label": (node.label if node else "") or nid}
-    return {"nodes": nodes,
-            "trigger": ({"n": trigger["n"], "mean": trigger["mean"]} if trigger else None)}
+        nodes[nid] = {
+            "n": s["n"],
+            "mean": s["mean"],
+            "kind": s.get("kind"),
+            "label": (node.label if node else "") or nid,
+        }
+    return {
+        "nodes": nodes,
+        "trigger": ({"n": trigger["n"], "mean": trigger["mean"]} if trigger else None),
+    }
 
 
 @router.post("/flows/{flow_id}/apply")
-async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
-                                       payload: FlowApplyIn) -> dict:
+async def apply_flow_proposal_endpoint(
+    request: Request, flow_id: str, payload: FlowApplyIn
+) -> dict:
     """Apply a self-rewrite: swap a node between agent and action, producing a new
     flow version. This is the step that lets a flow *change itself* -- the applied
     definition is validated before it is saved, the prior version is retained (so
@@ -5014,6 +5766,7 @@ async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import evolution_log, evolve, store
+
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
@@ -5027,8 +5780,7 @@ async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
     if node is None:
         raise HTTPException(status_code=404, detail="no such node")
     if node.kind == payload.to_kind:
-        raise HTTPException(status_code=400,
-                            detail=f"node is already a {payload.to_kind}")
+        raise HTTPException(status_code=400, detail=f"node is already a {payload.to_kind}")
     from_kind = node.kind
     try:
         new_flow = evolve.apply_proposal(
@@ -5043,8 +5795,9 @@ async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
         raise HTTPException(status_code=400, detail=str(e)) from e
     errs = new_flow.validate()
     if errs:
-        raise HTTPException(status_code=400,
-                            detail="resulting flow invalid: " + "; ".join(errs[:5]))
+        raise HTTPException(
+            status_code=400, detail="resulting flow invalid: " + "; ".join(errs[:5])
+        )
     try:
         saved = store.save_flow(
             new_flow,
@@ -5053,12 +5806,23 @@ async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
         )
     except store.FlowVersionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    evolution_log.record_apply(flow_id, payload.node_id, from_kind,
-                               payload.to_kind, saved.version, source="manual",
-                               before_revision=store.flow_cohort(f),
-                               after_revision=store.flow_cohort(saved))
-    return {"id": flow_id, "version": saved.version, "node_id": payload.node_id,
-            "from_kind": from_kind, "to_kind": payload.to_kind}
+    evolution_log.record_apply(
+        flow_id,
+        payload.node_id,
+        from_kind,
+        payload.to_kind,
+        saved.version,
+        source="manual",
+        before_revision=store.flow_cohort(f),
+        after_revision=store.flow_cohort(saved),
+    )
+    return {
+        "id": flow_id,
+        "version": saved.version,
+        "node_id": payload.node_id,
+        "from_kind": from_kind,
+        "to_kind": payload.to_kind,
+    }
 
 
 @router.get("/flows/{flow_id}/versions")
@@ -5068,6 +5832,7 @@ async def flow_versions_endpoint(request: Request, flow_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
+
     current = store.load_flow(flow_id)
     if current is None:
         raise HTTPException(status_code=404, detail="no such flow")
@@ -5078,20 +5843,25 @@ async def flow_versions_endpoint(request: Request, flow_id: str) -> dict:
         for n in f.nodes.values():
             c[n.kind] = c.get(n.kind, 0) + 1
         return c
+
     versions = store.list_versions(flow_id)
     versions.reverse()  # newest first
-    return {"versions": [{"version": v.version, "name": v.name,
-                          "nodes": len(v.nodes), "kinds": _kinds(v)} for v in versions]}
+    return {
+        "versions": [
+            {"version": v.version, "name": v.name, "nodes": len(v.nodes), "kinds": _kinds(v)}
+            for v in versions
+        ]
+    }
 
 
 @router.post("/flows/{flow_id}/rollback")
-async def rollback_flow_endpoint(request: Request, flow_id: str,
-                                 payload: FlowRollbackIn) -> dict:
+async def rollback_flow_endpoint(request: Request, flow_id: str, payload: FlowRollbackIn) -> dict:
     """Roll a flow back to a prior version (default: the immediately previous),
     non-destructively -- the restore is itself a new version."""
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
+
     current = store.load_flow(flow_id)
     if current is None:
         raise HTTPException(status_code=404, detail="no such flow")
@@ -5116,13 +5886,13 @@ async def rollback_flow_endpoint(request: Request, flow_id: str,
 
 
 @router.get("/flows/{flow_id}/nodes/{node_id}/impact")
-async def flow_node_impact_endpoint(request: Request, flow_id: str,
-                                    node_id: str) -> dict:
+async def flow_node_impact_endpoint(request: Request, flow_id: str, node_id: str) -> dict:
     """Whether a node was rewritten and, if so, how its grounded outcomes compare
     before vs. after the change -- the proof that a self-rewrite actually helped."""
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import evolution_log, evolve, store
+
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
@@ -5139,16 +5909,24 @@ async def flow_node_impact_endpoint(request: Request, flow_id: str,
         before_revision=str(last.get("before_revision") or ""),
         after_revision=str(last.get("after_revision") or ""),
     )
-    return {"node_id": node_id, "changed": True,
-            "applied": {"from_kind": last.get("from_kind"), "to_kind": last.get("to_kind"),
-                        "version": last.get("version"), "ts": last.get("ts"),
-                        "source": last.get("source")},
-            "impact": impact}
+    return {
+        "node_id": node_id,
+        "changed": True,
+        "applied": {
+            "from_kind": last.get("from_kind"),
+            "to_kind": last.get("to_kind"),
+            "version": last.get("version"),
+            "ts": last.get("ts"),
+            "source": last.get("source"),
+        },
+        "impact": impact,
+    }
 
 
 @router.get("/skills", response_model=list[SkillOut])
 async def list_installed_skills() -> list[SkillOut]:
     from maverick.skills import load_skills
+
     return [
         SkillOut(name=s.name, triggers=s.triggers, tools_needed=s.tools_needed)
         for s in load_skills()
@@ -5167,11 +5945,13 @@ async def get_flywheel_state() -> dict:
     out: dict = {"guardrails": [], "habits": [], "signal": {}}
     try:
         from maverick.negative_knowledge import shared as _guardrails
+
         out["guardrails"] = [g.to_dict() for g in _guardrails().all()]
     except Exception:  # pragma: no cover -- observability never errors the API
         pass
     try:
         from maverick.procedural_memory import shared as _memory
+
         out["habits"] = [m.to_dict() for m in _memory().recall(top_k=20)]
     except Exception:  # pragma: no cover
         pass
@@ -5182,6 +5962,7 @@ async def get_flywheel_state() -> dict:
         from maverick import consequence
 
         from maverick_dashboard import goal_feedback_store
+
         out["signal"] = {
             "grounded_outcomes": consequence.count(),
             "human_feedback": goal_feedback_store.count(),
@@ -5203,6 +5984,7 @@ async def get_codec_telemetry() -> dict:
     Read-only; never mutates."""
     try:
         from maverick.codec_telemetry import snapshot
+
         return snapshot().to_dict()
     except Exception:  # pragma: no cover -- observability never errors the API
         return {"n_blocks": 0, "tokens_measured": False}
@@ -5240,6 +6022,7 @@ async def install_skill_endpoint(request: Request, payload: SkillInstallIn) -> S
     require_permission(request, "admin")
     _require_skill_install_opt_in()
     from maverick.skills import install_skill
+
     try:
         s = install_skill(payload.source, trusted_local=False)
     except ValueError as e:
@@ -5260,14 +6043,17 @@ async def create_skill_endpoint(request: Request, payload: SkillCreateIn) -> Ski
     require_permission(request, "admin")
     _require_skill_install_opt_in()
     from maverick.skills import create_skill
+
     try:
-        s = create_skill(payload.name, payload.instructions,
-                         triggers=payload.triggers, tools_needed=payload.tools_needed)
+        s = create_skill(
+            payload.name,
+            payload.instructions,
+            triggers=payload.triggers,
+            tools_needed=payload.tools_needed,
+        )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     return SkillOut(name=s.name, triggers=s.triggers, tools_needed=s.tools_needed)
-
-
 
 
 @router.get("/diag/tail-latency")
@@ -5277,6 +6063,7 @@ async def diag_tail_latency(ratio: float = 3.0, min_count: int = 20) -> dict:
     Reads this serving process's in-memory per-tool latency samples, so it's
     meaningful on a long-lived dashboard/worker, not a fresh CLI invocation."""
     from maverick.tail_latency import hunt
+
     return {"flagged": hunt(ratio_threshold=ratio, min_count=min_count)}
 
 
@@ -5287,6 +6074,7 @@ async def marketplace_stats() -> dict:
     ratings, the JSON face of the marketplace stats view."""
     from maverick.marketplace.ratings import RatingsLedger
     from maverick.marketplace.stats import summarize
+
     return summarize(RatingsLedger())
 
 
@@ -5295,6 +6083,7 @@ async def templates_catalog() -> dict:
     """The goal-template catalog with the operator's own ratings — the JSON
     face of the /templates marketplace page."""
     from maverick_dashboard.app import template_market_entries
+
     return {"templates": template_market_entries()}
 
 
@@ -5305,6 +6094,7 @@ async def templates_suggested(request: Request, k: int = 5) -> dict:
     Owner-scoped history: an authenticated non-admin is ranked on their own
     goals only."""
     from maverick.starter_templates import suggest
+
     k = max(1, min(int(k or 5), 20))
     return {
         "suggested": suggest(_world(), k=k, owner=goal_owner_filter(request)),
@@ -5315,11 +6105,13 @@ def _voice_commands_enabled() -> bool:
     """Dashboard voice-command input. ON by default; off via
     MAVERICK_VOICE_COMMANDS=0 / [voice] dashboard_commands = false."""
     import os as _os
+
     raw = (_os.environ.get("MAVERICK_VOICE_COMMANDS") or "").strip().lower()
     if raw:
         return raw not in {"0", "false", "no", "off"}
     try:
         from maverick.config import load_config
+
         return bool((load_config().get("voice") or {}).get("dashboard_commands", True))
     except Exception:  # pragma: no cover -- config never blocks the endpoint
         return True
@@ -5327,8 +6119,14 @@ def _voice_commands_enabled() -> bool:
 
 # Audio container suffixes the STT backends accept; browsers record webm/ogg.
 _VOICE_SUFFIXES = {
-    ".webm": ".webm", ".ogg": ".ogg", ".oga": ".ogg", ".mp3": ".mp3",
-    ".wav": ".wav", ".m4a": ".m4a", ".mp4": ".mp4", ".flac": ".flac",
+    ".webm": ".webm",
+    ".ogg": ".ogg",
+    ".oga": ".ogg",
+    ".mp3": ".mp3",
+    ".wav": ".wav",
+    ".m4a": ".m4a",
+    ".mp4": ".mp4",
+    ".flac": ".flac",
 }
 _VOICE_MAX_BYTES = 25 * 1024 * 1024
 
@@ -5376,16 +6174,20 @@ async def voice_transcribe(
     # Apply the same dashboard spend backstop used by paid goal creation before
     # reading/writing the upload or dispatching to the backend.
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request)
     # First-run warm-up still downloading/loading the local model: tell the
     # client to retry shortly (Retry-After distinguishes "almost ready" from
     # the terminal "no backend" 503, which triggers browser fallback).
     from maverick.tools.voice import stt_warming
+
     if stt_warming():
         raise HTTPException(
             status_code=503,
-            detail=("local speech-to-text is still warming up "
-                    "(first-run model download) — retry in a few seconds."),
+            detail=(
+                "local speech-to-text is still warming up "
+                "(first-run model download) — retry in a few seconds."
+            ),
             headers={"Retry-After": "5"},
         )
 
@@ -5406,11 +6208,11 @@ async def voice_transcribe(
             detail=f"audio too large: {len(data)} bytes (limit {max_bytes})",
         )
 
-    suffix = _VOICE_SUFFIXES.get(
-        _os.path.splitext(file.filename or "")[1].lower(), ".webm")
+    suffix = _VOICE_SUFFIXES.get(_os.path.splitext(file.filename or "")[1].lower(), ".webm")
     lang = (language or "").strip()[:8] or None
 
     from maverick.tools.voice import _run_transcribe
+
     tmp = _tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     try:
         tmp.write(data)
@@ -5464,6 +6266,7 @@ async def voice_speak(request: Request, payload: SpeakIn) -> Response:
     text = text[:4096]
     try:
         from maverick.safety.voice_safety import redact_for_speech
+
         text, _redactions = redact_for_speech(text)
     except Exception:  # pragma: no cover -- redaction is fail-open by design
         pass
@@ -5479,8 +6282,7 @@ async def voice_speak(request: Request, payload: SpeakIn) -> Response:
         tmp.close()
         out = _Path(tmp.name)
         try:
-            if _tts_openai(text, payload.voice, out) or _tts_elevenlabs(
-                    text, payload.voice, out):
+            if _tts_openai(text, payload.voice, out) or _tts_elevenlabs(text, payload.voice, out):
                 return out.read_bytes()
             return None
         finally:
@@ -5494,8 +6296,7 @@ async def voice_speak(request: Request, payload: SpeakIn) -> Response:
         raise HTTPException(
             status_code=503,
             detail=(
-                "no text-to-speech backend available. Set OPENAI_API_KEY or "
-                "ELEVENLABS_API_KEY."
+                "no text-to-speech backend available. Set OPENAI_API_KEY or ELEVENLABS_API_KEY."
             ),
         )
     return Response(content=audio, media_type="audio/mpeg")
@@ -5503,7 +6304,9 @@ async def voice_speak(request: Request, payload: SpeakIn) -> Response:
 
 @router.get("/voice/captions")
 async def voice_captions(
-    request: Request, source: str = "default", max_chars: int = 160,
+    request: Request,
+    source: str = "default",
+    max_chars: int = 160,
 ) -> StreamingResponse:
     """Live captions (SSE) over the voice transcript seam.
 
@@ -5519,12 +6322,13 @@ async def voice_captions(
         raise HTTPException(status_code=404, detail="no such caption source")
 
     from maverick.live_captions import caption_stream, get_source
+
     factory = get_source(source)
     if factory is None:
         raise HTTPException(
             status_code=404,
             detail=f"no caption source registered as {source!r}; "
-                   "register one via maverick.live_captions.register_source",
+            "register one via maverick.live_captions.register_source",
         )
     try:
         max_chars = max(16, min(int(max_chars), 500))
@@ -5569,6 +6373,7 @@ async def catalog_list(kind: str) -> dict:
     fresh install shows "no catalog entries" rather than 500ing.
     """
     from maverick.catalog import VALID_KINDS, load_catalog
+
     if kind not in VALID_KINDS:
         raise HTTPException(
             status_code=400,
@@ -5589,6 +6394,7 @@ async def catalog_install_skill(request: Request, payload: CatalogInstallIn) -> 
     require_permission(request, "admin")
     _require_skill_install_opt_in()
     from maverick.skills import install_from_catalog
+
     try:
         s = install_from_catalog(payload.name)
     except ValueError as e:
@@ -5602,6 +6408,7 @@ async def remove_skill_endpoint(request: Request, name: str) -> None:
     # code; require admin (a view-only principal must not pull skills).
     require_permission(request, "admin")
     from maverick.skills import remove_skill
+
     if not remove_skill(name):
         raise HTTPException(status_code=404, detail="no such skill")
 
@@ -5623,28 +6430,29 @@ def _learned_snapshot(limit: int = 50, *, include_pending_items: bool = False) -
     tools: list[str] = []
     try:
         from maverick import self_learning
+
         # Pass the path explicitly: history()'s default arg is bound at
         # import time, so reading the module global here lets the live
         # LEARNED_PATH (and tests) take effect.
         learned = [
             e.to_dict()
             for e in self_learning.history(
-                limit=limit, path=self_learning.LEARNED_PATH,
+                limit=limit,
+                path=self_learning.LEARNED_PATH,
             )
         ]
         d = self_learning.GENERATED_TOOLS_DIR
         if d.exists():
-            tools = sorted(
-                p.name for p in d.glob("*.py")
-                if not p.name.startswith((".", "_"))
-            )
+            tools = sorted(p.name for p in d.glob("*.py") if not p.name.startswith((".", "_")))
     except Exception as e:  # pragma: no cover -- never block the page
         log.debug("learned snapshot failed: %s", e)
     harness, harness_enabled = _harness_guidance()
     pending = _pending_corpus_items()
     return {
-        "learned": learned, "generated_tools": tools,
-        "harness": harness, "harness_enabled": harness_enabled,
+        "learned": learned,
+        "generated_tools": tools,
+        "harness": harness,
+        "harness_enabled": harness_enabled,
         "pending_corpus": {k: len(v) for k, v in pending.items()},
         "pending_items": pending if include_pending_items else {},
         "transfer_memory": _transfer_memory(),
@@ -5661,6 +6469,7 @@ def _pending_corpus_items() -> dict[str, list[dict]]:
     try:
         from maverick.self_harness import settings
         from maverick.self_harness_eval import load_pending
+
         cpath = settings().get("eval_corpus")
         if cpath:
             return {k: v for k, v in load_pending(cpath).items() if v}
@@ -5674,6 +6483,7 @@ def _transfer_memory() -> dict:
     for the /learned page -- how caught-up the nightly sweep is."""
     try:
         from maverick.self_harness import transfer_memory_stats
+
         return transfer_memory_stats()
     except Exception as e:  # pragma: no cover -- advisory
         log.debug("transfer memory snapshot failed: %s", e)
@@ -5700,6 +6510,7 @@ def _harness_guidance() -> tuple[list[dict], bool]:
             list_canaries,
             list_learned,
         )
+
         conflicts_by_model: dict[str, list] = {}
         try:
             for m, a, b in detect_store_conflicts():
@@ -5732,10 +6543,15 @@ def _harness_guidance() -> tuple[list[dict], bool]:
                 rec["canary"] = rec["text"] in canaries
             return prov
 
-        rows = [{"model_id": m, "lines": lines,
-                 "provenance": _enriched_provenance(m),
-                 "conflicts": conflicts_by_model.get(m, [])}
-                for m, lines in sorted(list_learned().items())]
+        rows = [
+            {
+                "model_id": m,
+                "lines": lines,
+                "provenance": _enriched_provenance(m),
+                "conflicts": conflicts_by_model.get(m, []),
+            }
+            for m, lines in sorted(list_learned().items())
+        ]
         return rows, bool(enabled())
     except Exception as e:  # pragma: no cover -- never block the page
         log.debug("harness guidance snapshot failed: %s", e)
@@ -5752,6 +6568,7 @@ def _resolve_generated_tool(name: str):
     Path or raises HTTPException(400).
     """
     from maverick import self_learning
+
     d = self_learning.GENERATED_TOOLS_DIR
     # A legitimate generated-tool filename is a bare ``<name>.py`` with no
     # separators; reject anything with a path separator or traversal token
@@ -5832,6 +6649,7 @@ async def review_harness_corpus(request: Request, payload: dict) -> dict:
     require_permission(request, "admin")
     from maverick import self_harness_eval as ev
     from maverick.self_harness import settings
+
     corpus_path = settings().get("eval_corpus")
     if not corpus_path:
         raise HTTPException(status_code=409, detail="no eval corpus configured")
@@ -5842,9 +6660,9 @@ async def review_harness_corpus(request: Request, payload: dict) -> dict:
     def _indexes(name: str) -> list[int]:
         v = payload.get(name) or []
         if not isinstance(v, list) or not all(
-                isinstance(i, int) and not isinstance(i, bool) for i in v):
-            raise HTTPException(status_code=400,
-                                detail=f"{name} must be a list of 1-based indexes")
+            isinstance(i, int) and not isinstance(i, bool) for i in v
+        ):
+            raise HTTPException(status_code=400, detail=f"{name} must be a list of 1-based indexes")
         return v
 
     accept, reject = _indexes("accept"), _indexes("reject")
@@ -5856,8 +6674,7 @@ async def review_harness_corpus(request: Request, payload: dict) -> dict:
         # Indexes rebased under the caller (another review/harvest landed):
         # a conflict, not a bad request -- the page reloads and re-lists.
         raise HTTPException(status_code=409, detail=str(e)) from e
-    return {"merged": res["merged"], "duplicates": res["duplicates"],
-            "rejected": res["rejected"]}
+    return {"merged": res["merged"], "duplicates": res["duplicates"], "rejected": res["rejected"]}
 
 
 @router.get("/spend")
@@ -5877,8 +6694,11 @@ async def get_spend(request: Request) -> dict:
         "total": total,
         "episodes": [
             {
-                "id": e.id, "goal_id": e.goal_id, "started_at": e.started_at,
-                "ended_at": e.ended_at, "outcome": e.outcome,
+                "id": e.id,
+                "goal_id": e.goal_id,
+                "started_at": e.started_at,
+                "ended_at": e.ended_at,
+                "outcome": e.outcome,
                 "cost_dollars": e.cost_dollars,
                 "input_tokens": e.input_tokens,
                 "output_tokens": e.output_tokens,
@@ -5902,10 +6722,10 @@ async def get_savings(request: Request, days: int = 90) -> dict:
     require_permission(request, "view")
     from maverick import savings as savings_mod
     from maverick.config import get_value
+
     days = max(1, min(int(days), 730))
     cfg = get_value()
-    report = await run_in_threadpool(
-        savings_mod.compute, _world(), window_days=days, cfg=cfg)
+    report = await run_in_threadpool(savings_mod.compute, _world(), window_days=days, cfg=cfg)
     return {
         "enabled": cfg["enable"],
         "report": savings_mod.to_dict(report),
@@ -5919,8 +6739,7 @@ async def get_savings(request: Request, days: int = 90) -> dict:
 
 
 @router.put("/savings/assumptions")
-async def put_savings_assumptions(request: Request,
-                                  body: ValueAssumptionsIn) -> dict:
+async def put_savings_assumptions(request: Request, body: ValueAssumptionsIn) -> dict:
     """Persist the client's cost/value inputs (their hourly rate and human
     hours per task, plus per-department overrides) to the dashboard overlay --
     the same [value] section config.toml carries, so the wizard and the UI
@@ -5930,11 +6749,17 @@ async def put_savings_assumptions(request: Request,
     from maverick.config import get_value, reset_config_cache
 
     from . import settings_store
+
     deps = {
-        name: (None if ov is None else
-               {k: v for k, v in (("hourly_rate", ov.hourly_rate),
-                                  ("hours_per_task", ov.hours_per_task))
-                if v is not None})
+        name: (
+            None
+            if ov is None
+            else {
+                k: v
+                for k, v in (("hourly_rate", ov.hourly_rate), ("hours_per_task", ov.hours_per_task))
+                if v is not None
+            }
+        )
         for name, ov in (body.departments or {}).items()
     }
     try:
@@ -5975,9 +6800,15 @@ def _security_register_snapshot_uncached() -> dict:
     controls: list[dict] = []
     try:
         from maverick.compliance import compliance_report
+
         controls = [
-            {"control": c.control, "status": c.status, "regulation": c.regulation,
-             "detail": c.detail, "framework": c.framework}
+            {
+                "control": c.control,
+                "status": c.status,
+                "regulation": c.regulation,
+                "detail": c.detail,
+                "framework": c.framework,
+            }
             for c in compliance_report()
         ]
     except Exception:
@@ -5987,15 +6818,22 @@ def _security_register_snapshot_uncached() -> dict:
     breaches: list[dict] = []
     try:
         from maverick.threat_hunt import hunt
+
         since, until = _security_hunt_window()
         r = hunt(all_days=False, since=since, until=until)
         findings = [
-            {"kind": f.kind, "title": f.title, "severity": f.severity,
-             "count": f.count, "agents": f.agents}
+            {
+                "kind": f.kind,
+                "title": f.title,
+                "severity": f.severity,
+                "count": f.count,
+                "agents": f.agents,
+            }
             for f in r.findings
         ]
         threat = {
-            "risk": r.risk_rating, "events_scanned": r.events_scanned,
+            "risk": r.risk_rating,
+            "events_scanned": r.events_scanned,
             "window": {"since": since, "until": until},
             "findings": findings,
         }
@@ -6009,12 +6847,12 @@ def _security_register_snapshot_uncached() -> dict:
     remediation: dict = {"auto_fix_enabled": False, "gaps": [], "breaches": breaches}
     try:
         from maverick.remediation import plan
+
         p = plan(include_breaches=False)
         remediation = {
             "auto_fix_enabled": p.auto_fix_enabled,
             "gaps": [
-                {"control": g.control, "title": g.title, "auto": g.auto,
-                 "rationale": g.rationale}
+                {"control": g.control, "title": g.title, "auto": g.auto, "rationale": g.rationale}
                 for g in p.gaps
             ],
             "breaches": breaches,
@@ -6053,7 +6891,6 @@ async def security_register() -> dict:
 # ---------- council pass: control surface ----------
 
 
-
 @router.get("/halt")
 async def halt_status() -> dict:
     """Is the killswitch armed?
@@ -6064,6 +6901,7 @@ async def halt_status() -> dict:
     so the UI can show "halted 3m ago for: <reason>".
     """
     from maverick.killswitch import _halt_file_path, is_active
+
     p = _halt_file_path()
     out: dict = {
         "active": is_active(),
@@ -6108,6 +6946,7 @@ async def halt_set(request: Request, payload: HaltIn) -> None:
     """
     _require_halt_permission(request)
     from maverick.killswitch import _halt_file_path
+
     reason = payload.reason or "manual via dashboard"
     p = _halt_file_path()
     try:
@@ -6122,11 +6961,9 @@ async def halt_set(request: Request, payload: HaltIn) -> None:
     # error must not fail the local arm, which already took effect above.
     if _shared_halt_backend():
         try:
-            _world().arm_halt(reason, source="dashboard",
-                              armed_by=caller_principal(request) or "")
+            _world().arm_halt(reason, source="dashboard", armed_by=caller_principal(request) or "")
         except Exception:
-            log.warning("cluster-wide halt arm failed (local file halt still set)",
-                        exc_info=True)
+            log.warning("cluster-wide halt arm failed (local file halt still set)", exc_info=True)
 
 
 @router.delete("/halt", status_code=204)
@@ -6134,6 +6971,7 @@ async def halt_clear(request: Request) -> None:
     """Clear the killswitch (delete ~/.maverick/HALT)."""
     _require_halt_permission(request)
     from maverick.killswitch import _halt_file_path, clear
+
     p = _halt_file_path()
     if p.exists():
         try:
@@ -6183,8 +7021,7 @@ async def goal_open_questions(request: Request, goal_id: int) -> dict:
     qs = w.open_questions(goal_id=goal_id)
     return {
         "open_questions": [
-            {"id": q.id, "question": q.question, "asked_at": q.asked_at}
-            for q in qs
+            {"id": q.id, "question": q.question, "asked_at": q.asked_at} for q in qs
         ],
     }
 
@@ -6199,6 +7036,7 @@ def _goal_gate(domain: str) -> str | None:
         return None
     try:
         from maverick.domain import available_domains, enforced_gate
+
         prof = available_domains().get(domain)
     except Exception as exc:  # pragma: no cover -- factory layer unavailable
         # A policy-read failure is not evidence that a deliverable is ungated.
@@ -6221,6 +7059,7 @@ def _goal_shape(domain: str) -> str:
         return "prose"
     try:
         from maverick.domain import available_domains
+
         prof = available_domains().get(domain)
         return prof.output.shape if prof else "prose"
     except Exception:  # pragma: no cover -- factory layer unavailable
@@ -6298,6 +7137,7 @@ def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> None:
     the shared core helper (no-op unless ``[consequence]`` is enabled; never
     raises -- grounding is best-effort and must not fail the request)."""
     from maverick import consequence
+
     consequence.record_self_outcome(w, goal_id, value, kind=kind)
 
 
@@ -6315,6 +7155,7 @@ async def get_feedback(request: Request, goal_id: int) -> dict:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from maverick_dashboard import goal_feedback_store
+
     return {"feedback": goal_feedback_store.latest_for_goal(goal_id)}
 
 
@@ -6337,15 +7178,16 @@ async def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> 
     value = 1.0 if payload.rating == "up" else 0.0
     who = _supervisor(request)
     from maverick_dashboard import goal_feedback_store
-    row = goal_feedback_store.record(goal_id, g.owner or "", payload.rating, value=value,
-                                     note=payload.note or "", by=who)
+
+    row = goal_feedback_store.record(
+        goal_id, g.owner or "", payload.rating, value=value, note=payload.note or "", by=who
+    )
     _ground_outcome(w, goal_id, value, kind="feedback")
     return {"feedback": row}
 
 
 @router.post("/goals/{goal_id}/deliverable/edit")
-async def edit_deliverable(request: Request, goal_id: int,
-                           payload: DeliverableEditIn) -> dict:
+async def edit_deliverable(request: Request, goal_id: int, payload: DeliverableEditIn) -> dict:
     """Save a human's revised deliverable and ground the edit as a learning signal.
 
     How much the human changed the agent's draft is graded ground truth: a
@@ -6361,7 +7203,7 @@ async def edit_deliverable(request: Request, goal_id: int,
     assert_goal_access(request, g)
     original = g.result or ""
     revised = payload.text or ""
-    w.set_goal_status(goal_id, g.status, result=revised)   # the edit is the deliverable now
+    w.set_goal_status(goal_id, g.status, result=revised)  # the edit is the deliverable now
     if not original:
         # Nothing to grade against: the agent produced no draft to keep or
         # rewrite. Grounding this as 0.0 would punish it for text it never wrote,
@@ -6381,22 +7223,28 @@ def _handoff_approved_deliverable(g, decided_by: str) -> None:
     try:
         from maverick import webhooks
         from maverick.deliverable import render_deliverable
+
         rendered = render_deliverable(_goal_shape(g.domain), g.result)
-        table = ({"headers": rendered.table.headers, "rows": rendered.table.rows}
-                 if rendered.table else None)
+        table = (
+            {"headers": rendered.table.headers, "rows": rendered.table.rows}
+            if rendered.table
+            else None
+        )
         # Keep the outbound payload aligned with the reviewed artifact.
         # Structured table deliverables render only the parsed cells in the
         # dashboard, so do not include surrounding raw model text that the
         # reviewer did not approve. Prose fallbacks carry the rendered prose.
-        webhooks.fire_deliverable_handoff({
-            "goal_id": g.id,
-            "domain": g.domain,
-            "title": g.title,
-            "shape": rendered.shape,
-            "decided_by": decided_by,
-            "table": table,
-            "result": rendered.prose,
-        })
+        webhooks.fire_deliverable_handoff(
+            {
+                "goal_id": g.id,
+                "domain": g.domain,
+                "title": g.title,
+                "shape": rendered.shape,
+                "decided_by": decided_by,
+                "table": table,
+                "result": rendered.prose,
+            }
+        )
     except Exception:  # pragma: no cover -- hand-off is best-effort
         log.warning("deliverable hand-off failed for goal %s", getattr(g, "id", "?"))
 
@@ -6410,6 +7258,7 @@ async def export_deliverable_csv(request: Request, goal_id: int) -> Response:
     import io as _io
 
     from maverick.deliverable import render_deliverable
+
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
@@ -6433,9 +7282,7 @@ async def export_deliverable_csv(request: Request, goal_id: int) -> Response:
     # Neutralize spreadsheet formulas so an opened CSV can't execute injected
     # formula cells (=, +, -, @) in Excel/Sheets.
     writer.writerow([_csv_formula_safe(cell) for cell in rendered.table.headers])
-    writer.writerows(
-        [_csv_formula_safe(cell) for cell in row] for row in rendered.table.rows
-    )
+    writer.writerows([_csv_formula_safe(cell) for cell in row] for row in rendered.table.rows)
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
@@ -6461,6 +7308,7 @@ async def goal_artifact_history(request: Request, goal_id: int, title: str) -> d
     """Every version of one titled artifact, oldest -> newest, each with a unified
     diff against the previous version. Powers the version/diff viewer."""
     import difflib
+
     w = _world()
     g = w.get_goal(goal_id)
     if g is None:
@@ -6472,11 +7320,23 @@ async def goal_artifact_history(request: Request, goal_id: int, title: str) -> d
     for a in versions:  # ascending by version
         diff = ""
         if prev is not None:
-            diff = "\n".join(difflib.unified_diff(
-                prev.splitlines(), (a["content"] or "").splitlines(),
-                fromfile=f"v{a['version'] - 1}", tofile=f"v{a['version']}", lineterm=""))
-        out.append({"version": a["version"], "created_at": a["created_at"],
-                    "content": a["content"], "diff": diff})
+            diff = "\n".join(
+                difflib.unified_diff(
+                    prev.splitlines(),
+                    (a["content"] or "").splitlines(),
+                    fromfile=f"v{a['version'] - 1}",
+                    tofile=f"v{a['version']}",
+                    lineterm="",
+                )
+            )
+        out.append(
+            {
+                "version": a["version"],
+                "created_at": a["created_at"],
+                "content": a["content"],
+                "diff": diff,
+            }
+        )
         prev = a["content"] or ""
     return {"title": title, "versions": out}
 
@@ -6503,15 +7363,14 @@ async def create_goal_share(request: Request, goal_id: int) -> dict:
         )
     gate = _goal_gate(g.domain)
     signoff = w.signoff_for(goal_id)
-    if gate is not None and (
-        signoff is None or signoff.get("decision") != "approved"
-    ):
+    if gate is not None and (signoff is None or signoff.get("decision") != "approved"):
         raise HTTPException(
             status_code=403,
             detail=f"{gate} sign-off is required before sharing this deliverable",
         )
     link_id, token = w.create_share_link(
-        goal_id, created_by=caller_principal(request) or "", ttl_seconds=_SHARE_TTL_SECONDS)
+        goal_id, created_by=caller_principal(request) or "", ttl_seconds=_SHARE_TTL_SECONDS
+    )
     url = str(request.base_url).rstrip("/") + "/share/" + token
     return {"id": link_id, "url": url}
 
@@ -6538,21 +7397,26 @@ async def list_plugins() -> dict:
         raise HTTPException(status_code=500, detail=f"plugin discovery failed: {e}") from e
     allow = _allowed_plugin_names()
     out: dict[str, list[dict]] = {
-        "tools": [], "channels": [], "skills": [], "personas": [],
+        "tools": [],
+        "channels": [],
+        "skills": [],
+        "personas": [],
     }
     for kind, group in (
-        ("tools",    "maverick.tools"),
+        ("tools", "maverick.tools"),
         ("channels", "maverick.channels"),
-        ("skills",   "maverick.skills"),
+        ("skills", "maverick.skills"),
         ("personas", "maverick.personas"),
     ):
         try:
             for ep in _entry_points(group):
-                out[kind].append({
-                    "name": ep.name,
-                    "module": getattr(ep, "value", str(ep)),
-                    "enabled": allow is None or ep.name in allow,
-                })
+                out[kind].append(
+                    {
+                        "name": ep.name,
+                        "module": getattr(ep, "value", str(ep)),
+                        "enabled": allow is None or ep.name in allow,
+                    }
+                )
         except Exception:
             continue
     return {"plugins": out, "allowlist_active": allow is not None}
@@ -6563,6 +7427,7 @@ async def list_mcp_servers() -> dict:
     """Configured MCP servers from ~/.maverick/config.toml."""
     try:
         from maverick.config import load_config
+
         cfg = (load_config() or {}).get("mcp_servers") or {}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"config read failed: {e}") from e
@@ -6580,18 +7445,23 @@ async def list_tools() -> dict:
     try:
         from maverick.sandbox import build_sandbox
         from maverick.tools import base_registry
+
         wm = _world()  # honor the configured backend (SQLite or Postgres)
         sb = build_sandbox()
         reg = base_registry(world=wm, sandbox=sb)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"registry build failed: {e}") from e
     from maverick.safety.tool_risk import risk_map
+
     tools = reg.all()
     risks = risk_map([t.name for t in tools])
     return {
         "tools": [
-            {"name": t.name, "description": (t.description or "")[:200],
-             "risk": risks.get(t.name, "medium")}
+            {
+                "name": t.name,
+                "description": (t.description or "")[:200],
+                "risk": risks.get(t.name, "medium"),
+            }
             for t in tools
         ],
     }
@@ -6606,11 +7476,14 @@ async def list_tools() -> dict:
 
 def _require_scheduling() -> None:
     from maverick.config import get_features
+
     if not get_features().get("scheduling", True):
         raise HTTPException(
             status_code=403,
-            detail=("scheduling is disabled ([features] scheduling = false). "
-                    "Re-enable it in config, or use `maverick schedule` on the host."),
+            detail=(
+                "scheduling is disabled ([features] scheduling = false). "
+                "Re-enable it in config, or use `maverick schedule` on the host."
+            ),
         )
 
 
@@ -6635,6 +7508,7 @@ async def list_schedules(request: Request) -> dict:
     it in ``payload['owner']``), so one tenant can't enumerate another's
     schedule titles. Admin / auth-off callers see all."""
     from maverick.job_queue import JobQueue
+
     owner = goal_owner_filter(request)
     jobs = [j for j in JobQueue().list(status="pending") if (j.payload or {}).get("__cron__")]
     if owner is not None:
@@ -6648,6 +7522,7 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     require_permission(request, "operate")
     _require_scheduling()
     from maverick.scheduler import CronError, next_run, schedule_cron
+
     cron = (payload.cron or "").strip()
     try:
         next_run(cron)  # validate up front; CronError -> 400
@@ -6657,10 +7532,11 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     title = (payload.title or "").strip()
     if payload.template:
         from maverick.templates import load_template
+
         try:
             tpl = load_template(payload.template)
             rtitle, body = tpl.render(**(payload.params or {}))
-        except ValueError as e:           # unknown template / missing params
+        except ValueError as e:  # unknown template / missing params
             raise HTTPException(status_code=400, detail=str(e)) from e
         except FileNotFoundError as e:
             # Don't echo the raw error: its str() carries the absolute on-disk
@@ -6673,16 +7549,15 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     else:
         text = (payload.text or "").strip()
         if not text:
-            raise HTTPException(
-                status_code=400, detail="provide a template or text to schedule")
+            raise HTTPException(status_code=400, detail="provide a template or text to schedule")
     title = (title or text)[:200]
     # A stable id carried in the payload across cron re-arms (each occurrence is
     # a fresh job with a new id), so the worker can stamp provenance and the
     # Automations page can group this schedule's run history.
     from uuid import uuid4
+
     schedule_id = uuid4().hex
-    job_payload = {"text": text, "title": title, "__cron__": cron,
-                   "schedule_id": schedule_id}
+    job_payload = {"text": text, "title": title, "__cron__": cron, "schedule_id": schedule_id}
     owner = caller_principal(request) or ""
     if owner:
         job_payload["owner"] = owner
@@ -6695,11 +7570,21 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
         job_payload["user_id"] = user_id
 
     from maverick.job_queue import JobQueue
+
     job_id, run_at = schedule_cron(
-        JobQueue(), cron, "start_goal", job_payload,
+        JobQueue(),
+        cron,
+        "start_goal",
+        job_payload,
     )
-    return ScheduleOut(id=job_id, cron=cron, kind="start_goal", title=title,
-                       next_run=run_at, schedule_id=schedule_id)
+    return ScheduleOut(
+        id=job_id,
+        cron=cron,
+        kind="start_goal",
+        title=title,
+        next_run=run_at,
+        schedule_id=schedule_id,
+    )
 
 
 @router.delete("/schedules/{job_id}")
@@ -6707,6 +7592,7 @@ async def delete_schedule(request: Request, job_id: int) -> dict:
     require_permission(request, "operate")
     _require_scheduling()
     from maverick.job_queue import JobQueue
+
     q = JobQueue()
     # Owner scoping, mirroring the goal routes: an authenticated non-admin may
     # cancel only schedules stamped with their own principal (create_schedule
@@ -6716,11 +7602,9 @@ async def delete_schedule(request: Request, job_id: int) -> dict:
     if owner is not None:
         job = q.get(job_id)
         if job is None or (job.payload or {}).get("owner") != owner:
-            raise HTTPException(
-                status_code=404, detail="no pending schedule with that id")
+            raise HTTPException(status_code=404, detail="no pending schedule with that id")
     if not q.cancel(job_id):
-        raise HTTPException(
-            status_code=404, detail="no pending schedule with that id")
+        raise HTTPException(status_code=404, detail="no pending schedule with that id")
     return {"cancelled": job_id}
 
 
@@ -6753,15 +7637,18 @@ def _bounded_import_definitions(raws: list[dict]) -> list[dict]:
         if size > _IMPORT_MAX_DEFINITION_BYTES:
             raise HTTPException(
                 status_code=413,
-                detail=("import definition is too large "
-                        f"(max {_IMPORT_MAX_DEFINITION_BYTES} bytes)"),
+                detail=(
+                    f"import definition is too large (max {_IMPORT_MAX_DEFINITION_BYTES} bytes)"
+                ),
             )
         total += size
         if total > _IMPORT_MAX_TOTAL_DEFINITION_BYTES:
             raise HTTPException(
                 status_code=413,
-                detail=("import definitions are too large "
-                        f"(max {_IMPORT_MAX_TOTAL_DEFINITION_BYTES} bytes total)"),
+                detail=(
+                    "import definitions are too large "
+                    f"(max {_IMPORT_MAX_TOTAL_DEFINITION_BYTES} bytes total)"
+                ),
             )
     return raws
 
@@ -6770,23 +7657,29 @@ def _ensure_import_body_size(body: str) -> None:
     if len(body) > _IMPORT_MAX_RENDERED_BODY_CHARS:
         raise HTTPException(
             status_code=413,
-            detail=("rendered import template is too large "
-                    f"(max {_IMPORT_MAX_RENDERED_BODY_CHARS} characters)"),
+            detail=(
+                "rendered import template is too large "
+                f"(max {_IMPORT_MAX_RENDERED_BODY_CHARS} characters)"
+            ),
         )
 
 
 def _require_triggers() -> None:
     from maverick.config import get_features
+
     if not get_features().get("triggers", True):
         raise HTTPException(
             status_code=403,
-            detail=("triggers are disabled ([features] triggers = false). "
-                    "Re-enable it in config to manage inbound webhook triggers."),
+            detail=(
+                "triggers are disabled ([features] triggers = false). "
+                "Re-enable it in config to manage inbound webhook triggers."
+            ),
         )
 
 
 def _inbound_secret_set() -> bool:
     from maverick.webhooks import inbound_secret
+
     return bool(inbound_secret())
 
 
@@ -6798,6 +7691,7 @@ async def list_triggers_endpoint(request: Request) -> dict:
     registered, so one tenant can't enumerate another's trigger names, bound
     templates, and default param values. Admin / auth-off callers see all."""
     from maverick_dashboard import triggers_store
+
     triggers = triggers_store.list_triggers()
     owner = goal_owner_filter(request)
     if owner is not None:
@@ -6814,8 +7708,7 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
     require_permission(request, "operate")
     _require_triggers()
     if bool(payload.template) == bool(payload.flow):
-        raise HTTPException(
-            status_code=400, detail="set exactly one of 'template' or 'flow'")
+        raise HTTPException(status_code=400, detail="set exactly one of 'template' or 'flow'")
     target_flow = None
     target_flow_release = None
     target_template = None
@@ -6824,10 +7717,10 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
         # a trigger can't be armed against a missing graph.
         _require_flows()
         from maverick.flow import store as flow_store
+
         draft = flow_store.load_flow(payload.flow)
         if draft is None:
-            raise HTTPException(
-                status_code=404, detail=f"flow not found: {payload.flow!r}")
+            raise HTTPException(status_code=404, detail=f"flow not found: {payload.flow!r}")
         _assert_flow_access(request, draft)
         try:
             published = flow_store.load_published_bundle(payload.flow)
@@ -6836,15 +7729,14 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
                 status_code=409, detail="published flow release is unavailable"
             ) from exc
         if published is None:
-            raise HTTPException(
-                status_code=409, detail="publish the flow before arming a trigger"
-            )
+            raise HTTPException(status_code=409, detail="publish the flow before arming a trigger")
         target_flow, target_flow_release = published
     else:
         # Validate now: the template must exist and render with the given
         # defaults, so a trigger can't be armed against a missing/incompatible
         # template.
         from maverick.templates import load_template
+
         try:
             target_template = load_template(payload.template)
             target_template.render(**(payload.params or {}))
@@ -6857,6 +7749,7 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
                 status_code=404, detail=f"template not found: {payload.template!r}"
             ) from e
     from maverick_dashboard import triggers_store
+
     # Owner-scope the write like list/delete: a non-admin must not overwrite
     # (hijack) a trigger registered by another tenant just by reusing its slug.
     # set_trigger keys by slugify(name), so check the same slug for a foreign
@@ -6866,19 +7759,20 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
     if owner_filter is not None:
         existing = triggers_store.get_trigger(triggers_store.slugify(default_name))
         if existing is not None and existing.get("owner", "") != owner_filter:
-            raise HTTPException(
-                status_code=409, detail="a trigger with that name already exists")
+            raise HTTPException(status_code=409, detail="a trigger with that name already exists")
     try:
         from maverick.paths import current_tenant_id
 
         rec = triggers_store.set_trigger(
-            default_name, payload.template, payload.params or {},
-            owner=durable_automation_owner(request), flow=payload.flow,
+            default_name,
+            payload.template,
+            payload.params or {},
+            owner=durable_automation_owner(request),
+            flow=payload.flow,
             tenant=current_tenant_id() or "",
             flow_owner=(target_flow.owner if target_flow is not None else ""),
             flow_revision=(
-                str(target_flow_release["release_id"])
-                if target_flow_release is not None else ""
+                str(target_flow_release["release_id"]) if target_flow_release is not None else ""
             ),
             template_snapshot=(
                 triggers_store.snapshot_from_template(target_template)
@@ -6889,9 +7783,12 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return TriggerOut(
-        name=rec["name"], template=rec["template"], flow=rec.get("flow") or "",
+        name=rec["name"],
+        template=rec["template"],
+        flow=rec.get("flow") or "",
         params=rec["params"],
-        webhook_url=_WEBHOOK_RUN_PATH, secret_configured=_inbound_secret_set(),
+        webhook_url=_WEBHOOK_RUN_PATH,
+        secret_configured=_inbound_secret_set(),
     )
 
 
@@ -6900,6 +7797,7 @@ async def delete_trigger_endpoint(request: Request, name: str) -> dict:
     require_permission(request, "operate")
     _require_triggers()
     from maverick_dashboard import triggers_store
+
     # Owner-scope like schedules: a non-admin may delete only its own triggers.
     # The ownership check happens atomically inside delete_trigger (one locked
     # read, no TOCTOU). 404 (not 403) so a cross-tenant probe can't distinguish
@@ -6917,20 +7815,26 @@ async def delete_trigger_endpoint(request: Request, name: str) -> dict:
 
 def _require_event_triggers() -> None:
     from maverick.automation_events import enabled
+
     if not enabled():
         raise HTTPException(
             status_code=403,
-            detail=("Event triggers aren't enabled on this server yet — an "
-                    "administrator can switch them on (enable [event_triggers] "
-                    "in the server configuration, or set MAVERICK_EVENT_TRIGGERS=1)."),
+            detail=(
+                "Event triggers aren't enabled on this server yet — an "
+                "administrator can switch them on (enable [event_triggers] "
+                "in the server configuration, or set MAVERICK_EVENT_TRIGGERS=1)."
+            ),
         )
 
 
 def _event_trigger_out(rec: dict) -> EventTriggerOut:
     return EventTriggerOut(
-        name=rec["name"], template=rec["template"], flow=rec.get("flow") or "",
+        name=rec["name"],
+        template=rec["template"],
+        flow=rec.get("flow") or "",
         source=rec["source"],
-        config=rec.get("config") or {}, params=rec.get("params") or {},
+        config=rec.get("config") or {},
+        params=rec.get("params") or {},
         cursor=rec.get("cursor") or "",
         interval_seconds=int(rec.get("interval_seconds") or 0),
     )
@@ -6979,28 +7883,32 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
     if cfg.get("provider") or reads_env_secret:
         require_permission(request, "admin")
     from maverick.automation_events import EventSourceError, get_source
+
     try:
-        get_source(payload.source)   # a registered source?
+        get_source(payload.source)  # a registered source?
     except EventSourceError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     # Exactly one target: a template (rendered into a goal) OR a flow (which runs
     # the graph with the event as its data).
     template, flow = (payload.template or "").strip(), (payload.flow or "").strip()
     if bool(template) == bool(flow):
-        raise HTTPException(status_code=400,
-                            detail="set exactly one of 'template' or 'flow'")
+        raise HTTPException(status_code=400, detail="set exactly one of 'template' or 'flow'")
     target_flow = None
     target_flow_release = None
     target_template = None
     if flow:
         from maverick import flow as flow_mod
         from maverick.flow import store as flow_store
+
         if not flow_mod.enabled():
             raise HTTPException(
                 status_code=403,
-                detail=("Flows aren't enabled on this server yet — an "
-                        "administrator can switch on the flow engine ([flows] "
-                        "in the server configuration, or MAVERICK_FLOWS=1)."))
+                detail=(
+                    "Flows aren't enabled on this server yet — an "
+                    "administrator can switch on the flow engine ([flows] "
+                    "in the server configuration, or MAVERICK_FLOWS=1)."
+                ),
+            )
         draft = flow_store.load_flow(flow)
         if draft is None:
             raise HTTPException(status_code=404, detail=f"flow not found: {flow!r}")
@@ -7012,20 +7920,18 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
                 status_code=409, detail="published flow release is unavailable"
             ) from exc
         if published is None:
-            raise HTTPException(
-                status_code=409, detail="publish the flow before arming a trigger"
-            )
+            raise HTTPException(status_code=409, detail="publish the flow before arming a trigger")
         target_flow, target_flow_release = published
     else:
         # The template must EXIST, but -- unlike a webhook trigger -- we don't
         # require it to render with the current defaults: each polled event fills
         # the declared params at fire time.
         from maverick.templates import load_template
+
         try:
             target_template = load_template(template)
         except FileNotFoundError as e:
-            raise HTTPException(
-                status_code=404, detail=f"template not found: {template!r}") from e
+            raise HTTPException(status_code=404, detail=f"template not found: {template!r}") from e
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
     from maverick.paths import current_tenant_id
@@ -7037,19 +7943,24 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
     owner_filter = goal_owner_filter(request)
     if owner_filter is not None:
         existing = event_triggers_store.get_trigger(
-            event_triggers_store.slugify(default_name), tenant=tenant)
+            event_triggers_store.slugify(default_name), tenant=tenant
+        )
         if existing is not None and existing.get("owner", "") != owner_filter:
             raise HTTPException(
-                status_code=409, detail="an event trigger with that name already exists")
+                status_code=409, detail="an event trigger with that name already exists"
+            )
     try:
         rec = event_triggers_store.set_trigger(
-            default_name, template, payload.source,
-            config=payload.config or {}, params=payload.params or {},
-            owner=durable_automation_owner(request), flow=flow,
+            default_name,
+            template,
+            payload.source,
+            config=payload.config or {},
+            params=payload.params or {},
+            owner=durable_automation_owner(request),
+            flow=flow,
             flow_owner=(target_flow.owner if target_flow is not None else ""),
             flow_revision=(
-                str(target_flow_release["release_id"])
-                if target_flow_release is not None else ""
+                str(target_flow_release["release_id"]) if target_flow_release is not None else ""
             ),
             template_snapshot=(
                 event_triggers_store.snapshot_from_template(target_template)
@@ -7057,7 +7968,8 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
                 else None
             ),
             interval_seconds=payload.interval_seconds,
-            tenant=tenant)   # bind OAuth vault reads to this tenant
+            tenant=tenant,
+        )  # bind OAuth vault reads to this tenant
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _event_trigger_out(rec)
@@ -7118,12 +8030,19 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
             allowed_suites=allowed_suites,
         )
 
-    def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "",
-                   origin: str = "manual", expected_revision: str = "") -> str:
+    def _fire_flow(
+        flow_id: str,
+        data: dict,
+        owner: str,
+        idem_key: str = "",
+        origin: str = "manual",
+        expected_revision: str = "",
+    ) -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
         # The idempotency key dedups a re-delivered event; origin records the trigger.
         from maverick_dashboard import automation_queue
+
         identity_owner, user_id, allowed_suites = stored_automation_identity(owner)
 
         return automation_queue.enqueue_published_flow_run(
@@ -7139,8 +8058,10 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         )
 
     results = await run_in_threadpool(
-        lambda: event_poll.poll_and_fire(_world, triggers, principal=principal,
-                                         fire=_fire, fire_flow=_fire_flow))
+        lambda: event_poll.poll_and_fire(
+            _world, triggers, principal=principal, fire=_fire, fire_flow=_fire_flow
+        )
+    )
     return {"polled": len(results), "triggers": results}
 
 
@@ -7189,12 +8110,15 @@ async def event_trigger_outcomes(request: Request) -> dict:
 
 def _require_automation_import() -> None:
     from maverick.automation_import import enabled
+
     if not enabled():
         raise HTTPException(
             status_code=403,
-            detail=("Automation import isn't enabled on this server yet — an "
-                    "administrator can switch it on (enable [automation_import] "
-                    "in the server configuration, or set MAVERICK_AUTOMATION_IMPORT=1)."),
+            detail=(
+                "Automation import isn't enabled on this server yet — an "
+                "administrator can switch it on (enable [automation_import] "
+                "in the server configuration, or set MAVERICK_AUTOMATION_IMPORT=1)."
+            ),
         )
 
 
@@ -7202,13 +8126,16 @@ def _require_automation_import() -> None:
 async def import_sources_endpoint() -> dict:
     """Automation platforms Lightwork can import from + each one's mode."""
     from maverick.automation_import import available_sources, get_importer
+
     sources = []
     for s in available_sources():
         imp = get_importer(s)
-        sources.append({
-            "source": s,
-            "mode": "definition-import" if imp.can_fetch_definitions else "connect-and-trigger",
-        })
+        sources.append(
+            {
+                "source": s,
+                "mode": "definition-import" if imp.can_fetch_definitions else "connect-and-trigger",
+            }
+        )
     return {"sources": sources}
 
 
@@ -7225,21 +8152,17 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
     except ImporterError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if payload.as_flows:
-        _require_flows()          # importing to graphs needs the flow engine
+        _require_flows()  # importing to graphs needs the flow engine
 
     # Definitions from the request (offline/connect) or a live fetch (env creds).
     if payload.definitions is not None:
-        raws = _bounded_import_definitions([
-            d for d in payload.definitions if isinstance(d, dict)
-        ])
+        raws = _bounded_import_definitions([d for d in payload.definitions if isinstance(d, dict)])
     else:
         try:
             fetched = await run_in_threadpool(get_importer(payload.source).fetch)
         except ImporterError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-        raws = _bounded_import_definitions([
-            d for d in fetched if isinstance(d, dict)
-        ])
+        raws = _bounded_import_definitions([d for d in fetched if isinstance(d, dict)])
 
     automations = translate_all(payload.source, raws)
     if not automations:
@@ -7258,16 +8181,20 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
     activate = payload.activate_schedules
     if activate is None:
         from maverick.config import get_automation_import
+
         activate = bool(get_automation_import().get("create_schedules", False))
     queue = None
     if activate and not payload.dry_run:
         from maverick.job_queue import JobQueue
+
         queue = JobQueue()
 
     from maverick.config import get_features
     from maverick.paths import current_tenant_id
+
     triggers_on = get_features().get("triggers", True)
     from maverick_dashboard import triggers_store
+
     # Prefer the authenticated request principal explicitly, then use the
     # durable fallback for auth modes (for example a static dashboard token)
     # that intentionally have no end-user subject.  Keeping the request-bound
@@ -7296,8 +8223,12 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
         # operator disabled triggers, don't silently create ones that bypass
         # that decision; import the template and say so.
         sug = res.suggested_trigger or {}
-        want_webhook = (payload.create_webhook_triggers and not payload.dry_run
-                        and res.created_template and sug.get("kind") == "webhook")
+        want_webhook = (
+            payload.create_webhook_triggers
+            and not payload.dry_run
+            and res.created_template
+            and sug.get("kind") == "webhook"
+        )
         if want_webhook and not triggers_on:
             res.notes.append("webhook trigger not created: [features] triggers is off")
         elif want_webhook:
@@ -7309,6 +8240,7 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
             if not isinstance(sug_params, dict):
                 sug_params = {}
             from maverick.templates import load_template
+
             imported_template = None
             try:
                 imported_template = load_template(res.template_name)
@@ -7316,7 +8248,8 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
             except (ValueError, FileNotFoundError) as e:
                 res.notes.append(
                     f"webhook trigger not created: template needs param values "
-                    f"the import can't supply ({e}); create it in the builder")
+                    f"the import can't supply ({e}); create it in the builder"
+                )
             else:
                 try:
                     rec = triggers_store.set_trigger(
@@ -7325,9 +8258,7 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
                         sug_params,
                         owner=owner,
                         tenant=current_tenant_id() or "",
-                        template_snapshot=triggers_store.snapshot_from_template(
-                            imported_template
-                        ),
+                        template_snapshot=triggers_store.snapshot_from_template(imported_template),
                     )
                     webhook_trigger = rec["name"]
                 except ValueError as e:
@@ -7340,14 +8271,14 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
             # never silently lossy.
             from maverick.automation_import.to_flow import to_flow_with_report
             from maverick.flow import store as flow_store
+
             flow_graph, fidelity = to_flow_with_report(a)
             if owner:
                 flow_graph.owner = owner
             flow_id = flow_graph.id
             flow_errors = flow_graph.validate()
             if flow_errors:
-                res.notes.append(
-                    "flow preview was not saved: " + "; ".join(flow_errors[:5]))
+                res.notes.append("flow preview was not saved: " + "; ".join(flow_errors[:5]))
                 if not payload.dry_run:
                     flow_id = None
             elif not payload.dry_run:
@@ -7357,17 +8288,23 @@ async def import_run_endpoint(  # noqa: C901 - staged importer intentionally exp
                     # edited since the first import.
                     flow_store.save_flow(flow_graph, expected_version=0)
                 except flow_store.FlowVersionConflict:
-                    res.notes.append(
-                        f"flow {flow_graph.id!r} already exists; left it unchanged"
-                    )
+                    res.notes.append(f"flow {flow_graph.id!r} already exists; left it unchanged")
                     flow_id = None
-        results.append({
-            "source": a.source, "name": a.name, "template": res.template_name,
-            "created": res.created_template, "trigger": a.trigger.kind,
-            "webhook_trigger": webhook_trigger, "schedule": res.schedule,
-            "tools": res.tool_hints, "notes": res.notes,
-            "flow": flow_id, "fidelity": fidelity,
-        })
+        results.append(
+            {
+                "source": a.source,
+                "name": a.name,
+                "template": res.template_name,
+                "created": res.created_template,
+                "trigger": a.trigger.kind,
+                "webhook_trigger": webhook_trigger,
+                "schedule": res.schedule,
+                "tools": res.tool_hints,
+                "notes": res.notes,
+                "flow": flow_id,
+                "fidelity": fidelity,
+            }
+        )
 
     return ImportRunOut(
         imported=results,
@@ -7389,7 +8326,8 @@ async def automation_runs(request: Request, kind: str, ref: str, limit: int = 8)
     'schedule', 'trigger', or 'event'; ``ref`` is the schedule_id or trigger name."""
     if kind not in ("schedule", "trigger", "event"):
         raise HTTPException(
-            status_code=400, detail="kind must be 'schedule', 'trigger', or 'event'")
+            status_code=400, detail="kind must be 'schedule', 'trigger', or 'event'"
+        )
     ref = (ref or "").strip()
     if not ref:
         return {"runs": [], "summary": {}}
@@ -7404,16 +8342,14 @@ async def automation_runs(request: Request, kind: str, ref: str, limit: int = 8)
         summary = w.origin_status_counts(kind, ref)
     else:
         accessible = [
-            g for g in w.goals_for_origin(kind, ref, limit=10_000)
-            if can_access_goal(request, g)
+            g for g in w.goals_for_origin(kind, ref, limit=10_000) if can_access_goal(request, g)
         ]
         summary = {}
         for g in accessible:
             summary[g.status] = summary.get(g.status, 0) + 1
         goals = accessible[:capped]
     runs = [
-        {"goal_id": g.id, "title": g.title, "status": g.status,
-         "created_at": g.created_at}
+        {"goal_id": g.id, "title": g.title, "status": g.status, "created_at": g.created_at}
         for g in goals
     ]
     return {"runs": runs, "summary": summary}
@@ -7436,9 +8372,12 @@ def pack_editing_denial(request: Request) -> str | None:
     if principal is not None and not is_dashboard_admin(principal):
         return "pack editing requires a dashboard admin"
     from maverick.config import get_features
+
     if not get_features().get("pack_editing", True):
-        return ("pack editing is disabled ([features] pack_editing = false). "
-                "Edit override TOML on the host, or re-enable it in config.")
+        return (
+            "pack editing is disabled ([features] pack_editing = false). "
+            "Edit override TOML on the host, or re-enable it in config."
+        )
     return None
 
 
@@ -7457,11 +8396,11 @@ async def list_agents_endpoint(request: Request) -> dict:
     (auth off / admin / no grant) see the full catalog — matching /departments.
     """
     from maverick.domain_edit import list_agents
+
     allowed = caller_suites(request)
     agents = list_agents()
     if allowed is not None:
-        agents = [a for a in agents
-                  if a.get("suite") is None or a.get("suite") in allowed]
+        agents = [a for a in agents if a.get("suite") is None or a.get("suite") in allowed]
     return {"agents": agents}
 
 
@@ -7471,6 +8410,7 @@ async def get_agent_endpoint(request: Request, name: str) -> dict:
     and lint findings -- the payload the editor renders."""
     from maverick.domain import suite_for
     from maverick.domain_edit import resolved_view
+
     view = resolved_view(name)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
@@ -7491,8 +8431,10 @@ def _agent_model(view: dict) -> str:
     if models:
         return str(next(iter(models.values())))
     from maverick.llm import MODEL_SONNET
+
     try:
         from maverick.config import get_role_model
+
         return get_role_model("agent") or MODEL_SONNET
     except Exception:  # pragma: no cover -- config read never breaks the card
         return MODEL_SONNET
@@ -7506,23 +8448,25 @@ async def agent_jobcard(request: Request, name: str, days: int = 90) -> dict:
     and its model's cost tier. Read-only. Suite-scoped like /agents/{name}."""
     from maverick.domain import suite_for
     from maverick.domain_edit import resolved_view
+
     view = await run_in_threadpool(resolved_view, name)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
     require_suite(request, suite_for(name))
 
     from maverick import agent_scorecard, model_cost_tier
+
     model = _agent_model(view)
     days = max(1, min(int(days), 730))
 
     def _score() -> dict:
-        return agent_scorecard.for_agent(_world(), name,
-                                         window_days=days).to_dict()
+        return agent_scorecard.for_agent(_world(), name, window_days=days).to_dict()
 
     scorecard = await run_in_threadpool(_score)
     output = view.get("output") or {}
     jd = {
-        "name": view["name"], "suite": view.get("suite"),
+        "name": view["name"],
+        "suite": view.get("suite"),
         "role": view.get("description", ""),
         "mission": view.get("persona", ""),
         "responsibilities": view.get("workflow") or [],
@@ -7535,8 +8479,11 @@ async def agent_jobcard(request: Request, name: str, days: int = 90) -> dict:
         "max_risk": view.get("max_risk", ""),
         "knowledge_sources": view.get("knowledge_sources") or [],
     }
-    return {"job_description": jd, "scorecard": scorecard,
-            "cost_tier": model_cost_tier.band_detail(model)}
+    return {
+        "job_description": jd,
+        "scorecard": scorecard,
+        "cost_tier": model_cost_tier.band_detail(model),
+    }
 
 
 @router.get("/model-cost-tiers")
@@ -7545,20 +8492,23 @@ async def list_model_cost_tiers(request: Request) -> dict:
     Medium / High / Very High) and whether it was operator-set."""
     require_permission(request, "view")
     from maverick import model_cost_tier
-    return {"bands": list(model_cost_tier.BANDS),
-            "models": await run_in_threadpool(model_cost_tier.catalog)}
+
+    return {
+        "bands": list(model_cost_tier.BANDS),
+        "models": await run_in_threadpool(model_cost_tier.catalog),
+    }
 
 
 @router.post("/model-cost-tiers")
-async def set_model_cost_tier_endpoint(
-    request: Request, body: ModelCostTierIn) -> dict:
+async def set_model_cost_tier_endpoint(request: Request, body: ModelCostTierIn) -> dict:
     """Set (or clear, with band=null) a model's cost band. Admin-gated: it
     shapes routing economics deployment-wide."""
     require_permission(request, "admin")
     from maverick_dashboard import settings_store
-    await run_in_threadpool(settings_store.set_model_cost_tier,
-                            body.model, body.band)
+
+    await run_in_threadpool(settings_store.set_model_cost_tier, body.model, body.band)
     from maverick import config, model_cost_tier
+
     config.reset_config_cache()
     return model_cost_tier.band_detail(body.model)
 
@@ -7568,25 +8518,41 @@ async def set_model_cost_tier_endpoint(
 # entry is a config section whose `enable` key settings_store can overlay;
 # the allowlist keeps the endpoint from becoming a generic config writer.
 _FEATURE_SWITCHES: dict = {
-    "dreaming": ("Dreaming", "Consolidates completed goals overnight into "
-                 "reusable lessons the fleet can recall."),
-    "self_improvement": ("Self-improvement", "Proposes and tests its own "
-                         "prompt/skill refinements; every change is gated "
-                         "and reversible."),
-    "self_harness": ("Self-harness", "Re-runs learned skills against known "
-                     "outcomes before they are trusted."),
-    "fleet_memory": ("Fleet memory", "Shares vetted lessons between agents "
-                     "so one agent's fix helps the whole workforce."),
-    "rehearsal": ("Rehearsal", "Practices risky operations in a sandbox "
-                  "before doing them for real."),
-    "flows": ("Flow engine", "Runs the visual flow designer's automations "
-              "end to end."),
-    "threat_hunt": ("Platform threat hunter", "Defensively scans "
-                    "Lightwork's own signed telemetry for anomalies."),
-    "env_hunt": ("Environment threat hunter", "Reads your configured "
-                 "telemetry sources and flags suspicious activity."),
-    "entity_graph": ("Entity graph", "Links vendors, documents, clauses, "
-                     "and decisions into one queryable lineage."),
+    "dreaming": (
+        "Dreaming",
+        "Consolidates completed goals overnight into reusable lessons the fleet can recall.",
+    ),
+    "self_improvement": (
+        "Self-improvement",
+        "Proposes and tests its own "
+        "prompt/skill refinements; every change is gated "
+        "and reversible.",
+    ),
+    "self_harness": (
+        "Self-harness",
+        "Re-runs learned skills against known outcomes before they are trusted.",
+    ),
+    "fleet_memory": (
+        "Fleet memory",
+        "Shares vetted lessons between agents so one agent's fix helps the whole workforce.",
+    ),
+    "rehearsal": (
+        "Rehearsal",
+        "Practices risky operations in a sandbox before doing them for real.",
+    ),
+    "flows": ("Flow engine", "Runs the visual flow designer's automations end to end."),
+    "threat_hunt": (
+        "Platform threat hunter",
+        "Defensively scans Lightwork's own signed telemetry for anomalies.",
+    ),
+    "env_hunt": (
+        "Environment threat hunter",
+        "Reads your configured telemetry sources and flags suspicious activity.",
+    ),
+    "entity_graph": (
+        "Entity graph",
+        "Links vendors, documents, clauses, and decisions into one queryable lineage.",
+    ),
 }
 
 
@@ -7602,23 +8568,22 @@ async def list_feature_switches(request: Request) -> dict:
         out = []
         for section, (label, description) in _FEATURE_SWITCHES.items():
             enabled = bool((loaded.get(section) or {}).get("enable", False))
-            out.append({"section": section, "label": label,
-                        "description": description, "enabled": enabled})
+            out.append(
+                {"section": section, "label": label, "description": description, "enabled": enabled}
+            )
         return out
 
     return {"switches": await run_in_threadpool(_read)}
 
 
 @router.post("/features/switches")
-async def set_feature_switch(request: Request,
-                             body: FeatureSwitchIn) -> dict:
+async def set_feature_switch(request: Request, body: FeatureSwitchIn) -> dict:
     """Flip one system on or off from inside the app. Admin-gated and
     allowlisted; persists through the same settings overlay the rest of the
     in-app configuration uses -- no server files, no restart."""
     require_global_permission(request, "admin")
     if body.section not in _FEATURE_SWITCHES:
-        raise HTTPException(status_code=400,
-                            detail=f"unknown system {body.section!r}")
+        raise HTTPException(status_code=400, detail=f"unknown system {body.section!r}")
     if body.section in {"threat_hunt", "env_hunt"}:
         from . import security_api
         from .api_schemas import SecuritySuiteConfigIn
@@ -7626,19 +8591,20 @@ async def set_feature_switch(request: Request,
         current = await security_api.security_config(request)
         update = SecuritySuiteConfigIn(
             security_ops=current["security_ops"],
-            threat_hunt=(bool(body.enabled) if body.section == "threat_hunt"
-                         else current["threat_hunt"]),
-            env_hunt=(bool(body.enabled) if body.section == "env_hunt"
-                      else current["env_hunt"]),
+            threat_hunt=(
+                bool(body.enabled) if body.section == "threat_hunt" else current["threat_hunt"]
+            ),
+            env_hunt=(bool(body.enabled) if body.section == "env_hunt" else current["env_hunt"]),
             response_execution=current["response_execution"],
             expected_revision=current["revision"],
         )
         await security_api.update_security_config(request, update)
         return {"section": body.section, "enabled": bool(body.enabled)}
     from maverick_dashboard import settings_store
-    await run_in_threadpool(settings_store.set_section_enable, body.section,
-                            bool(body.enabled))
+
+    await run_in_threadpool(settings_store.set_section_enable, body.section, bool(body.enabled))
     from maverick import config as _cfg
+
     _cfg.reset_config_cache()
     return {"section": body.section, "enabled": bool(body.enabled)}
 
@@ -7652,6 +8618,7 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
     require_permission(request, "view")
     require_provider_or_400(role="orchestrator")
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request, source="copilot")
     msg = (payload.message or "").strip()[:2000]
     if not msg:
@@ -7660,16 +8627,15 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
     history = [
         {"role": h["role"], "content": str(h["content"])[:2000]}
         for h in (payload.history or [])[-6:]
-        if isinstance(h, dict) and h.get("role") in ("user", "assistant")
-        and h.get("content")
+        if isinstance(h, dict) and h.get("role") in ("user", "assistant") and h.get("content")
     ]
 
     def _turn() -> str:
         from maverick.budget import Budget
         from maverick.llm import LLM, model_for_role
+
         llm = LLM(model_for_role("orchestrator"))
-        budget = Budget(max_dollars=0.25, max_output_tokens=1500,
-                        max_tool_calls=0)
+        budget = Budget(max_dollars=0.25, max_output_tokens=1500, max_tool_calls=0)
         system = (
             "You are the Lightwork copilot -- a concise in-app guide for a "
             "governed AI-workforce platform. The user is on the page "
@@ -7694,21 +8660,22 @@ async def copilot_endpoint(request: Request, payload: CopilotIn) -> dict:
         raise
     except Exception as exc:
         raise HTTPException(
-            status_code=503,
-            detail="the copilot's model is unavailable right now") from exc
-    return {"reply": reply or "I could not produce an answer -- try the "
-                              "chat page for a full conversation."}
+            status_code=503, detail="the copilot's model is unavailable right now"
+        ) from exc
+    return {
+        "reply": reply
+        or "I could not produce an answer -- try the chat page for a full conversation."
+    }
 
 
 @router.post("/agents/{name}/validate")
-async def validate_agent_override(
-    request: Request, name: str, payload: AgentOverrideIn
-) -> dict:
+async def validate_agent_override(request: Request, name: str, payload: AgentOverrideIn) -> dict:
     """Lint the merged result of a proposed override without persisting it."""
     # Same gate as save/delete override: pack editing is admin-only, so the
     # lint helper that previews a pack edit must not be reachable unauthenticated.
     _require_pack_editing(request)
     from maverick.domain_edit import validate_override
+
     errors, warnings = validate_override(name, payload.model_dump(exclude_unset=True))
     return {"ok": not errors, "errors": errors, "warnings": warnings}
 
@@ -7719,6 +8686,7 @@ async def save_agent_override(request: Request, name: str, payload: AgentOverrid
     422 if the merged pack fails lint (the override is rejected, not written)."""
     _require_pack_editing(request)
     from maverick.domain_edit import resolved_view, write_override
+
     try:
         write_override(name, payload.model_dump(exclude_unset=True))
     except ValueError as e:
@@ -7731,6 +8699,7 @@ async def delete_agent_override(request: Request, name: str) -> dict:
     """Drop a tenant override, reverting the agent to its built-in pack."""
     _require_pack_editing(request)
     from maverick.domain_edit import remove_override, resolved_view
+
     try:
         removed = remove_override(name)
     except ValueError as e:
@@ -7747,17 +8716,20 @@ async def delete_agent_override(request: Request, name: str) -> dict:
 # `maverick onboard` (clamped envelope, generated deny-floor), and persisting
 # stays the pack editor's existing human-approved save.
 
+
 def _require_jd_hiring() -> None:
     from maverick.jd_hiring import jd_hiring_enabled
+
     if not jd_hiring_enabled():
         raise HTTPException(
-            status_code=403,
-            detail="JD hiring is disabled ([agent_factory] jd_hiring = false)")
+            status_code=403, detail="JD hiring is disabled ([agent_factory] jd_hiring = false)"
+        )
 
 
 def _scoped_jd_matches(request: Request, jd_text: str, k: int) -> dict:
     from maverick.domain import available_domains, suite_for
     from maverick.jd_hiring import match_jd
+
     # Job-function scoping, mirroring /agents: a department-scoped caller only
     # ranks their departments' specialists plus generic (suite-less) packs.
     # Filter before routing so unauthorized profile text never enters the
@@ -7801,18 +8773,18 @@ async def match_agents_to_jd_upload(
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        text = await run_in_threadpool(
-            _extract_binary_doc_text, raw, file.filename or "upload")
+        text = await run_in_threadpool(_extract_binary_doc_text, raw, file.filename or "upload")
         if text is None:
             raise HTTPException(
                 status_code=400,
-                detail=("could not read this file as text — upload a .txt / .md / "
-                        ".pdf / .docx job description, or paste it instead"),
+                detail=(
+                    "could not read this file as text — upload a .txt / .md / "
+                    ".pdf / .docx job description, or paste it instead"
+                ),
             ) from None
     if not text.strip():
         raise HTTPException(status_code=400, detail="the uploaded file was empty")
-    return await run_in_threadpool(
-        _scoped_jd_matches, request, text, max(1, min(int(k), 20)))
+    return await run_in_threadpool(_scoped_jd_matches, request, text, max(1, min(int(k), 20)))
 
 
 @router.post("/agents/jd/draft")
@@ -7827,6 +8799,7 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
     # Same gate as the editor this feeds: drafting reveals pack-editing surface.
     _require_pack_editing(request)
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request, source="agent-factory-draft")
     from maverick.jd_hiring import draft_from_jd
 
@@ -7852,9 +8825,15 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
             budget = None
     try:
         profile = await run_in_threadpool(
-            lambda: draft_from_jd(payload.role_title, payload.jd_text,
-                                  industry=payload.industry, llm=llm,
-                                  model=llm_model, budget=budget))
+            lambda: draft_from_jd(
+                payload.role_title,
+                payload.jd_text,
+                industry=payload.industry,
+                llm=llm,
+                model=llm_model,
+                budget=budget,
+            )
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -7867,8 +8846,12 @@ async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
             "max_risk": profile.max_risk,
             "refuse": list(profile.refuse),
             "workflow": [
-                {"name": s.name, "instruction": s.instruction,
-                 "tools": list(s.tools), "gate": s.gate}
+                {
+                    "name": s.name,
+                    "instruction": s.instruction,
+                    "tools": list(s.tools),
+                    "gate": s.gate,
+                }
                 for s in profile.workflow
             ],
         },
@@ -7888,11 +8871,14 @@ def _require_role_editing(request: Request) -> None:
         raise HTTPException(status_code=403, detail="role editing requires dashboard admin")
 
     from maverick.config import get_features
+
     if not get_features().get("role_editing", True):
         raise HTTPException(
             status_code=403,
-            detail=("role editing is disabled ([features] role_editing = false). "
-                    "Edit roles.toml on the host, or re-enable it in config."),
+            detail=(
+                "role editing is disabled ([features] role_editing = false). "
+                "Edit roles.toml on the host, or re-enable it in config."
+            ),
         )
 
 
@@ -7900,6 +8886,7 @@ def _require_role_editing(request: Request) -> None:
 async def list_roles_endpoint() -> dict:
     """The core-role roster, flagged by override status."""
     from maverick.role_edit import list_roles
+
     return {"roles": list_roles()}
 
 
@@ -7907,6 +8894,7 @@ async def list_roles_endpoint() -> dict:
 async def get_role_endpoint(role: str) -> dict:
     """A role's merged view: resolved model/effort, addendum, and provenance."""
     from maverick.role_edit import resolved_role
+
     view = resolved_role(role)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such role: {role!r}")
@@ -7920,6 +8908,7 @@ async def save_role_override(role: str, payload: RoleOverrideIn, request: Reques
     422 if validation fails (unknown role, over-long addendum)."""
     _require_role_editing(request)
     from maverick.role_edit import resolved_role, write_role_override
+
     try:
         write_role_override(role, payload.model_dump(exclude_unset=True))
     except ValueError as e:
@@ -7932,6 +8921,7 @@ async def delete_role_override(role: str, request: Request) -> dict:
     """Drop a role's override, reverting it to the built-in template."""
     _require_role_editing(request)
     from maverick.role_edit import remove_role_override, resolved_role
+
     removed = remove_role_override(role)
     view = resolved_role(role)
     if view is None:
@@ -7944,13 +8934,13 @@ async def list_channels() -> dict:
     """Enabled channels from ~/.maverick/config.toml."""
     try:
         from maverick.config import load_config
+
         cfg = (load_config() or {}).get("channels") or {}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"config read failed: {e}") from e
     return {
         "channels": [
-            {"name": name, "enabled": bool(c.get("enabled", True))}
-            for name, c in cfg.items()
+            {"name": name, "enabled": bool(c.get("enabled", True))} for name, c in cfg.items()
         ],
     }
 
@@ -7968,6 +8958,7 @@ async def audit_tail(request: Request, n: int = 100, day: str | None = None) -> 
     from maverick.audit import default_audit_log
 
     from maverick_dashboard.app import safe_audit_day
+
     n = max(1, min(int(n or 100), 1000))
     return {"events": default_audit_log().tail(n, day=safe_audit_day(day))}
 
@@ -7990,12 +8981,10 @@ async def audit_grep(request: Request, pattern: str, day: str | None = None) -> 
     from maverick.audit import default_audit_log
 
     from maverick_dashboard.app import safe_audit_day
+
     events = default_audit_log().tail(1000, day=safe_audit_day(day))
     needle = pattern.lower()
-    matches = [
-        e for e in events
-        if needle in json.dumps(e, ensure_ascii=False).lower()
-    ]
+    matches = [e for e in events if needle in json.dumps(e, ensure_ascii=False).lower()]
     return {"events": matches[:200]}
 
 
@@ -8008,6 +8997,7 @@ async def replay_json(request: Request, goal_id: int) -> dict:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from .control_plane import build_replay, evidence_packet
+
     replay = build_replay(goal_id, window=(g.created_at, g.updated_at))
     return evidence_packet(g, replay)
 
@@ -8021,9 +9011,13 @@ async def replay_evidence(request: Request, goal_id: int) -> Response:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from .control_plane import build_replay, evidence_packet
+
     replay = build_replay(goal_id, window=(g.created_at, g.updated_at))
     body = json.dumps(
-        evidence_packet(g, replay), indent=2, ensure_ascii=False, default=str,
+        evidence_packet(g, replay),
+        indent=2,
+        ensure_ascii=False,
+        default=str,
     )
     return Response(
         content=body,
@@ -8039,6 +9033,7 @@ async def trust_agents(request: Request) -> dict:
     """The Agent Trust Plane registry: external agents + their tool/risk/budget
     ceilings and lifecycle status (the cross-agent permission graph as JSON)."""
     from .control_plane import trust_overview
+
     return trust_overview()
 
 
@@ -8051,6 +9046,7 @@ async def trust_agent_register(request: Request, payload: TrustAgentIn) -> dict:
     config-file one, so admins can also amend hand-edited entries here."""
     require_permission(request, "admin")
     from maverick.agent_trust import AgentTrustError, put_agent
+
     try:
         agent = put_agent(payload.model_dump())
     except AgentTrustError as e:
@@ -8059,19 +9055,19 @@ async def trust_agent_register(request: Request, payload: TrustAgentIn) -> dict:
 
 
 @router.post("/trust/agents/{agent_id}/revoke")
-async def trust_agent_revoke(request: Request, agent_id: str,
-                             payload: TrustRevokeIn) -> dict:
+async def trust_agent_revoke(request: Request, agent_id: str, payload: TrustRevokeIn) -> dict:
     """Revoke (or restore) a managed external agent (admin). Entries defined in
     the operator's config file can't be flipped here -- register the same id
     from the app first to take it under management."""
     require_permission(request, "admin")
     from maverick.agent_trust import set_revoked
+
     if not set_revoked(agent_id, payload.revoked):
         raise HTTPException(
             status_code=404,
             detail="this agent is defined in the server's config file, not in "
-                   "the app-managed registry. Register the same id here to "
-                   "override it, or ask your administrator to edit the config.",
+            "the app-managed registry. Register the same id here to "
+            "override it, or ask your administrator to edit the config.",
         )
     return {"ok": True, "id": agent_id, "revoked": payload.revoked}
 
@@ -8082,11 +9078,12 @@ async def trust_agent_remove(request: Request, agent_id: str) -> None:
     after their managed override is deleted; the same 404 rule applies."""
     require_permission(request, "admin")
     from maverick.agent_trust import remove_agent
+
     if not remove_agent(agent_id):
         raise HTTPException(
             status_code=404,
             detail="this agent is not in the app-managed registry (it may be "
-                   "defined in the server's config file).",
+            "defined in the server's config file).",
         )
 
 
@@ -8096,33 +9093,39 @@ async def external_agents_list(request: Request) -> dict:
     ceilings, lifecycle, reported spend, and which credential surfaces each
     agent holds (never token values)."""
     from maverick import external_agents as xa
-    return {"enabled": xa.enabled(), "status": xa.status(),
-            "agents": xa.roster()}
+
+    return {"enabled": xa.enabled(), "status": xa.status(), "agents": xa.roster()}
 
 
 @router.post("/external-agents", status_code=201)
-async def external_agent_enroll(request: Request,
-                                payload: ExternalAgentIn) -> dict:
+async def external_agent_enroll(request: Request, payload: ExternalAgentIn) -> dict:
     """Enroll an agent built on another platform (admin): trust entry +
     fleet-memory roster + platform metadata in one call."""
     require_permission(request, "admin")
     from maverick import external_agents as xa
+
     if not xa.entitled():
         raise HTTPException(
             status_code=403,
-            detail="external-agent governance is a paid (Gold) add-on not "
-                   "included in this license")
+            detail="external-agent governance is a paid (Gold) add-on not included in this license",
+        )
     try:
         out = xa.enroll(
-            payload.id, payload.platform, description=payload.description,
-            owner=payload.owner, department=payload.department,
-            allow_tools=payload.allow_tools, deny_tools=payload.deny_tools,
-            max_risk=payload.max_risk, max_dollars=payload.max_dollars,
+            payload.id,
+            payload.platform,
+            description=payload.description,
+            owner=payload.owner,
+            department=payload.department,
+            allow_tools=payload.allow_tools,
+            deny_tools=payload.deny_tools,
+            max_risk=payload.max_risk,
+            max_dollars=payload.max_dollars,
             max_wall_seconds=payload.max_wall_seconds,
             data_scopes=payload.data_scopes,
             expires_days=payload.expires_days,
             budget_period=payload.budget_period,
-            enrolled_by=caller_principal(request) or "admin")
+            enrolled_by=caller_principal(request) or "admin",
+        )
     except xa.ExternalAgentsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return out
@@ -8133,25 +9136,22 @@ async def external_agent_release(request: Request, agent_id: str) -> dict:
     """Lift an auto-containment and clear the denial window (admin)."""
     require_permission(request, "admin")
     from maverick import external_agents as xa
-    if not xa.release(agent_id,
-                      released_by=caller_principal(request) or "admin"):
-        raise HTTPException(status_code=404,
-                            detail=f"agent {agent_id!r} is not enrolled")
+
+    if not xa.release(agent_id, released_by=caller_principal(request) or "admin"):
+        raise HTTPException(status_code=404, detail=f"agent {agent_id!r} is not enrolled")
     return {"ok": True, "id": agent_id}
 
 
 @router.post("/external-agents/{agent_id}/reset-budget")
-async def external_agent_reset_budget(request: Request,
-                                      agent_id: str) -> dict:
+async def external_agent_reset_budget(request: Request, agent_id: str) -> dict:
     """Zero the active budget meter and clear the over-budget flag (admin).
     Lifetime totals are preserved — this changes what counts against the
     cap, never what was historically reported."""
     require_permission(request, "admin")
     from maverick import external_agents as xa
-    if not xa.reset_budget(agent_id,
-                           reset_by=caller_principal(request) or "admin"):
-        raise HTTPException(status_code=404,
-                            detail=f"agent {agent_id!r} is not enrolled")
+
+    if not xa.reset_budget(agent_id, reset_by=caller_principal(request) or "admin"):
+        raise HTTPException(status_code=404, detail=f"agent {agent_id!r} is not enrolled")
     return {"ok": True, "id": agent_id}
 
 
@@ -8160,6 +9160,7 @@ async def external_agent_detail(request: Request, agent_id: str) -> dict:
     """One enrolled agent: roster row + its Operating Record footprint
     (spend, recent episodes)."""
     from maverick import external_agents as xa
+
     try:
         return xa.agent_detail(agent_id)
     except xa.ExternalAgentsError as e:
@@ -8167,8 +9168,9 @@ async def external_agent_detail(request: Request, agent_id: str) -> dict:
 
 
 @router.post("/external-agents/{agent_id}/credentials")
-async def external_agent_mint(request: Request, agent_id: str,
-                              payload: ExternalCredentialIn) -> dict:
+async def external_agent_mint(
+    request: Request, agent_id: str, payload: ExternalCredentialIn
+) -> dict:
     """Mint or rotate one per-surface bearer (admin). The token appears in
     THIS response only — it is stored for verification, never for reading.
     With ``[external_agents] mint_approval`` on, the first call parks a
@@ -8176,19 +9178,22 @@ async def external_agent_mint(request: Request, agent_id: str,
     ``approval_id`` once a decision-maker approves."""
     require_permission(request, "admin")
     from maverick import external_agents as xa
+
     try:
         token = xa.mint_token(
-            agent_id, payload.surface,
+            agent_id,
+            payload.surface,
             minted_by=caller_principal(request) or "admin",
-            mint_approval_id=payload.approval_id)
+            mint_approval_id=payload.approval_id,
+        )
     except xa.MintApprovalPending as e:
-        return JSONResponse(status_code=409, content={
-            "detail": str(e), "status": "approval_required",
-            "approval_id": e.approval_id})
+        return JSONResponse(
+            status_code=409,
+            content={"detail": str(e), "status": "approval_required", "approval_id": e.approval_id},
+        )
     except xa.ExternalAgentsError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"ok": True, "id": agent_id, "surface": payload.surface,
-            "token": token}
+    return {"ok": True, "id": agent_id, "surface": payload.surface, "token": token}
 
 
 @router.delete("/external-agents/{agent_id}", status_code=204)
@@ -8198,9 +9203,9 @@ async def external_agent_unenroll(request: Request, agent_id: str) -> None:
     Prefer revoking (POST /trust/agents/{id}/revoke) to keep the entry."""
     require_permission(request, "admin")
     from maverick import external_agents as xa
+
     if not xa.unenroll(agent_id):
-        raise HTTPException(status_code=404,
-                            detail=f"agent {agent_id!r} is not enrolled")
+        raise HTTPException(status_code=404, detail=f"agent {agent_id!r} is not enrolled")
 
 
 @router.get("/discovery")
@@ -8208,6 +9213,7 @@ async def discovery(request: Request) -> dict:
     """Inventory of governable surfaces: tools (by risk), MCP servers (with
     supply-chain pins), configured providers, channels, and external agents."""
     from .control_plane import discovery_overview
+
     return discovery_overview()
 
 
@@ -8216,6 +9222,7 @@ async def simulate(request: Request, surface: str, action: str, target: str = ""
     """Dry-run a proposed action: classify its risk + report whether it would be
     gated, without executing it. surface = computer | browser | tool."""
     from .control_plane import simulate_action
+
     return simulate_action(surface, action, target)
 
 
@@ -8261,6 +9268,7 @@ async def compliance_packet_download(request: Request) -> Response:
 async def permissions() -> dict:
     """Everything the agent is currently allowed to do (read-only)."""
     from maverick_dashboard.app import _permissions_snapshot
+
     return _permissions_snapshot()
 
 
@@ -8274,6 +9282,7 @@ async def disable_tool(request: Request, name: str) -> None:
     """
     require_permission(request, "operate")
     from maverick.runtime_overrides import disable_tool as _disable
+
     try:
         _disable(name)
     except ValueError as e:
@@ -8290,6 +9299,7 @@ async def enable_tool(request: Request, name: str) -> None:
     """
     require_permission(request, "operate")
     from maverick.runtime_overrides import enable_tool as _enable
+
     try:
         _enable(name)
     except ValueError as e:
@@ -8311,8 +9321,11 @@ async def list_approvals(request: Request) -> dict:
     return {
         "approvals": [
             {
-                "id": a.id, "action": a.action, "risk": a.risk,
-                "scope": a.scope, "detail": a.detail,
+                "id": a.id,
+                "action": a.action,
+                "risk": a.risk,
+                "scope": a.scope,
+                "detail": a.detail,
                 "requested_at": a.requested_at,
                 # Collaborative supervision: who is handling this review.
                 "claimed_by": getattr(a, "claimed_by", None),
@@ -8330,6 +9343,7 @@ def _supervisor(request: Request) -> str:
     identity in single-user/no-auth deployments (claims still prevent
     double-handling across that operator's browser tabs)."""
     from .auth import caller_principal
+
     return caller_principal(request) or "operator"
 
 
@@ -8354,16 +9368,14 @@ def _deliver_approval_audit_event(world, event) -> bool:
         # exact event remains in the durable outbox for a policy/key repair and
         # idempotent retry.
         log.error(
-            "approval audit refused; decision remains non-effective "
-            "(event_id=%s): %s",
+            "approval audit refused; decision remains non-effective (event_id=%s): %s",
             event.event_id,
             exc,
         )
         return False
     if not written:
         log.error(
-            "approval audit write failed; decision remains non-effective "
-            "(event_id=%s)",
+            "approval audit write failed; decision remains non-effective (event_id=%s)",
             event.event_id,
         )
         return False
@@ -8376,8 +9388,7 @@ def _deliver_approval_audit_event(world, event) -> bool:
     # failure-policy: fail_soft_with_audit
     except Exception:
         log.exception(
-            "approval audit was written but delivery finalization failed "
-            "(event_id=%s)",
+            "approval audit was written but delivery finalization failed (event_id=%s)",
             event.event_id,
         )
         try:
@@ -8459,8 +9470,7 @@ def _record_vote_or_raise(world, approval_id: int, status: str, who: str):
             ) from reconcile_error
         if event is not None and not event.matches(approval_id, status, who):
             log.critical(
-                "approval outbox identity mismatch during commit reconciliation "
-                "(event_id=%s)",
+                "approval outbox identity mismatch during commit reconciliation (event_id=%s)",
                 event_id,
             )
             raise HTTPException(
@@ -8491,8 +9501,8 @@ def _record_vote_or_raise(world, approval_id: int, status: str, who: str):
     raise HTTPException(
         status_code=403,
         detail="vote not accepted: the requester can't approve their own request "
-               "(segregation of duties), or an approver identity is required for "
-               "multi-party approval",
+        "(segregation of duties), or an approver identity is required for "
+        "multi-party approval",
     )
 
 
@@ -8511,16 +9521,12 @@ def _approval_decision_response(world, event, audit_delivered: bool) -> Response
         )
         state = {}
     fallback_status = (
-        event.final_status
-        if audit_delivered and event.final_status is not None
-        else "pending"
+        event.final_status if audit_delivered and event.final_status is not None else "pending"
     )
     approval_status = str(state.get("status") or fallback_status)
     common_headers = {
         "X-Lightwork-Decision-Id": event.event_id,
-        "X-Lightwork-Approval-Audit": (
-            "delivered" if audit_delivered else "pending"
-        ),
+        "X-Lightwork-Approval-Audit": ("delivered" if audit_delivered else "pending"),
         "X-Lightwork-Approval-State": approval_status,
     }
     if audit_delivered:
@@ -8632,8 +9638,7 @@ async def claim_approval(request: Request, approval_id: int) -> dict:
     a = _world().get_approval(approval_id)
     if a is None or a.status != "pending":
         raise HTTPException(status_code=404, detail="no such pending approval")
-    raise HTTPException(status_code=409,
-                        detail=f"already claimed by {a.claimed_by}")
+    raise HTTPException(status_code=409, detail=f"already claimed by {a.claimed_by}")
 
 
 @router.post("/approvals/{approval_id}/release")
@@ -8657,7 +9662,10 @@ async def oversight_active(request: Request) -> dict:
     """
     w = _world()
     goals = w.list_goals(
-        status="active", owner=goal_owner_filter(request), limit=50, order="desc",
+        status="active",
+        owner=goal_owner_filter(request),
+        limit=50,
+        order="desc",
     )
     out = []
     for g in goals:
@@ -8676,10 +9684,15 @@ async def oversight_active(request: Request) -> dict:
         except Exception:
             activity = ""
             updated_at = g.updated_at
-        out.append({
-            "id": g.id, "title": g.title, "status": g.status,
-            "updated_at": updated_at, "activity": activity,
-        })
+        out.append(
+            {
+                "id": g.id,
+                "title": g.title,
+                "status": g.status,
+                "updated_at": updated_at,
+                "activity": activity,
+            }
+        )
     return {"goals": out}
 
 
@@ -8717,8 +9730,13 @@ async def oversight_why(request: Request, goal_id: int, limit: int = 40) -> dict
         "cost_dollars": round(cost, 4),
         "summary": dict(by_kind),
         "events": [
-            {"id": e.id, "agent": e.agent, "kind": e.kind,
-             "content": (e.content or "")[:400], "ts": e.ts}
+            {
+                "id": e.id,
+                "agent": e.agent,
+                "kind": e.kind,
+                "content": (e.content or "")[:400],
+                "ts": e.ts,
+            }
             for e in events
         ],
     }
@@ -8736,6 +9754,7 @@ async def list_fleets_api(request: Request) -> dict:
     """
     try:
         from maverick.fleet import list_fleets
+
         fleets = list_fleets()
     except Exception:
         fleets = []
@@ -8745,11 +9764,12 @@ async def list_fleets_api(request: Request) -> dict:
     return {"fleets": [f.to_dict() for f in fleets]}
 
 
-
-
 @router.post("/fleets/{fleet_name}/run", status_code=201)
 async def run_fleet_agent(
-    request: Request, fleet_name: str, payload: FleetRunIn, bg: BackgroundTasks,
+    request: Request,
+    fleet_name: str,
+    payload: FleetRunIn,
+    bg: BackgroundTasks,
 ) -> dict:
     """Dispatch a governed goal AS a fleet agent, from the operator console.
 
@@ -8767,6 +9787,7 @@ async def run_fleet_agent(
     # viewer can own a fleet yet must never run one).
     require_permission(request, "operate")
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request)
 
     from maverick.capability import (
@@ -8780,11 +9801,7 @@ async def run_fleet_agent(
     fleet = load_fleet(fleet_name)
     principal = caller_principal(request)
     is_admin = principal is not None and is_dashboard_admin(principal)
-    if fleet is None or (
-        principal is not None
-        and not is_admin
-        and fleet.owner != principal
-    ):
+    if fleet is None or (principal is not None and not is_admin and fleet.owner != principal):
         raise HTTPException(status_code=404, detail="no such fleet")
     agent = next((a for a in fleet.agents if a.name == payload.agent), None)
     if agent is None:
@@ -8797,12 +9814,13 @@ async def run_fleet_agent(
     # the fleet (e.g. a grant narrowed after deploy).
     from maverick.fleet import ensure_dispatch_allowed
     from maverick.suite_grants import DepartmentAccessError
+
     try:
         ensure_dispatch_allowed(principal, agent)
     except DepartmentAccessError as exc:
         raise HTTPException(
-            status_code=403,
-            detail="insufficient department access for this action") from exc
+            status_code=403, detail="insufficient department access for this action"
+        ) from exc
     # Provider readiness is an operational precondition, not authorization.
     # Keep it behind owner and department gates so an incomplete deployment
     # cannot mask their 404/403 responses or disclose configuration state to a
@@ -8815,7 +9833,8 @@ async def run_fleet_agent(
     if not governance_enabled():
         raise HTTPException(
             status_code=403,
-            detail="fleet governance is a paid (Gold) add-on not included in this license")
+            detail="fleet governance is a paid (Gold) add-on not included in this license",
+        )
     prompt = (payload.prompt or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
@@ -8847,12 +9866,14 @@ async def run_fleet_agent(
     # and an unknown/disabled pack leaves the grant unchanged.
     if agent.domain:
         from maverick.domain import available_domains, domain_capability
+
         prof = available_domains().get(agent.domain)
         if prof is not None:
             cap = domain_capability(prof, cap, agent_principal)
     max_dollars = (
         min(payload.max_dollars, DEFAULT_MAX_DOLLARS)
-        if payload.max_dollars is not None else DEFAULT_MAX_DOLLARS
+        if payload.max_dollars is not None
+        else DEFAULT_MAX_DOLLARS
     )
 
     w = _world()
@@ -8863,15 +9884,15 @@ async def run_fleet_agent(
     # user-created, so using them as scheduler principals lets one caller mint
     # many lanes and bypass MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL.
     bg.add_task(
-        run_goal_in_background_async, goal_id, max_dollars,
-        channel="fleet", user_id=agent_principal, capability=cap,
+        run_goal_in_background_async,
+        goal_id,
+        max_dollars,
+        channel="fleet",
+        user_id=agent_principal,
+        capability=cap,
         concurrency_principal=principal,
     )
     return {"goal_id": goal_id, "principal": agent_principal, "role": agent.role}
-
-
-
-
 
 
 @router.post("/fleets", status_code=201)
@@ -8894,9 +9915,12 @@ async def create_fleet(request: Request, payload: FleetCreateIn) -> dict:
         raise HTTPException(status_code=400, detail="invalid fleet name")
     agents = tuple(
         FleetAgent(
-            name=a.name.strip(), role=a.role.strip(), description=a.description.strip(),
+            name=a.name.strip(),
+            role=a.role.strip(),
+            description=a.description.strip(),
         )
-        for a in payload.agents if a.name.strip()
+        for a in payload.agents
+        if a.name.strip()
     )
     configured = configured_roles()
     for a in agents:
@@ -8911,8 +9935,10 @@ async def create_fleet(request: Request, payload: FleetCreateIn) -> dict:
     owner = principal or ""
     existing = load_fleet(payload.name)
     if (
-        existing is not None and existing.owner != owner
-        and principal is not None and not is_dashboard_admin(principal)
+        existing is not None
+        and existing.owner != owner
+        and principal is not None
+        and not is_dashboard_admin(principal)
     ):
         raise HTTPException(status_code=404, detail="no such fleet")
 
@@ -8924,8 +9950,7 @@ async def create_fleet(request: Request, payload: FleetCreateIn) -> dict:
 
 
 @router.post("/fleets/{fleet_name}/agents", status_code=201)
-async def add_fleet_agent(request: Request, fleet_name: str,
-                          payload: FleetAgentAddIn) -> dict:
+async def add_fleet_agent(request: Request, fleet_name: str, payload: FleetAgentAddIn) -> dict:
     """Add one specialist pack to a fleet roster (the JD-hire deploy step).
 
     Creates the fleet (owned by the caller) if it doesn't exist; owner-scoped
@@ -8944,8 +9969,10 @@ async def add_fleet_agent(request: Request, fleet_name: str,
     principal = caller_principal(request)
     existing = load_fleet(fleet_name)
     if (
-        existing is not None and existing.owner != (principal or "")
-        and principal is not None and not is_dashboard_admin(principal)
+        existing is not None
+        and existing.owner != (principal or "")
+        and principal is not None
+        and not is_dashboard_admin(principal)
     ):
         raise HTTPException(status_code=404, detail="no such fleet")
     try:
@@ -8955,8 +9982,8 @@ async def add_fleet_agent(request: Request, fleet_name: str,
     owner = existing.owner if existing is not None else (principal or "")
     try:
         fleet = await run_in_threadpool(
-            lambda: add_pack_to_fleet(payload.pack, fleet_name, owner,
-                                      role=payload.role))
+            lambda: add_pack_to_fleet(payload.pack, fleet_name, owner, role=payload.role)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"fleet": fleet.to_dict()}
@@ -8972,11 +9999,7 @@ async def delete_fleet(request: Request, fleet_name: str) -> None:
     fleet = load_fleet(fleet_name)
     principal = caller_principal(request)
     is_admin = principal is not None and is_dashboard_admin(principal)
-    if fleet is None or (
-        principal is not None
-        and not is_admin
-        and fleet.owner != principal
-    ):
+    if fleet is None or (principal is not None and not is_admin and fleet.owner != principal):
         raise HTTPException(status_code=404, detail="no such fleet")
     remove_fleet(fleet_name)
 
@@ -8993,6 +10016,7 @@ def _compliance_checks(framework: str):
     framework = framework if framework in {"eu", "us", "all"} else "all"
     try:
         from maverick.compliance import compliance_report
+
         checks = compliance_report()
     except Exception:  # pragma: no cover - never 500 the export if core is absent
         return framework, []
@@ -9010,6 +10034,7 @@ async def compliance_report_md(framework: str = "all") -> Response:
     an attachment so an operator can hand the file to an auditor.
     """
     from maverick.compliance import render_report_text
+
     framework, checks = _compliance_checks(framework)
     body = render_report_text(checks)
     fname = f"lightwork-compliance-{framework}.md"
@@ -9031,28 +10056,31 @@ async def compliance_report_csv(framework: str = "all") -> Response:
     import io as _io
 
     from maverick.compliance import COMPLIANCE_DISCLAIMER
+
     framework, checks = _compliance_checks(framework)
     buf = _io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["framework", "control", "regulation", "status", "detail"])
     for c in checks:
-        writer.writerow([
-            _csv_formula_safe(value)
-            for value in (c.framework, c.control, c.regulation, c.status, c.detail)
-        ])
+        writer.writerow(
+            [
+                _csv_formula_safe(value)
+                for value in (c.framework, c.control, c.regulation, c.status, c.detail)
+            ]
+        )
     writer.writerow([])
-    writer.writerow([
-        _csv_formula_safe("disclaimer"),
-        _csv_formula_safe(COMPLIANCE_DISCLAIMER),
-    ])
+    writer.writerow(
+        [
+            _csv_formula_safe("disclaimer"),
+            _csv_formula_safe(COMPLIANCE_DISCLAIMER),
+        ]
+    )
     fname = f"lightwork-compliance-{framework}.csv"
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
-
-
 
 
 @router.post("/redact/preview")
@@ -9103,6 +10131,7 @@ async def watch_glance(request: Request) -> dict:
     """The Apple Watch glance payload (tiny fixed shape; see maverick.glance)."""
     from maverick.glance import build_glance
     from maverick.world_model import close_world_if_owned, open_world
+
     world = open_world()
     try:
         return build_glance(world, owner=goal_owner_filter(request))
@@ -9118,8 +10147,11 @@ async def offline_bundle(request: Request) -> dict:
     """Bounded, versioned snapshot (``maverick-offline/1``) for the mobile
     companion's offline cache. Read-only; owner-scoped like ``/goals``."""
     from maverick.offline_bundle import build_bundle
+
     return await run_in_threadpool(
-        build_bundle, _world(), owner=goal_owner_filter(request),
+        build_bundle,
+        _world(),
+        owner=goal_owner_filter(request),
     )
 
 
@@ -9147,6 +10179,7 @@ async def perf_dashboard() -> dict:
 
         from maverick.benchmark_retrospective import analyze, coverage
         from maverick.continuous_benchmark import _store_path, detect_regression, load_history
+
         store = _store_path()
         history: list[dict] = []
         if store.is_dir():
@@ -9182,9 +10215,10 @@ async def perf_dashboard() -> dict:
             retros = analyze(history)
             out["retrospective"] = {
                 "coverage": list(span),
-                "trends": {n: {"trend": r.trend,
-                               "net_change": round(r.net_change, 4)}
-                           for n, r in retros.items()},
+                "trends": {
+                    n: {"trend": r.trend, "net_change": round(r.net_change, 4)}
+                    for n, r in retros.items()
+                },
             }
     except Exception as e:
         out["benchmarks_error"] = f"{type(e).__name__}: {e}"
@@ -9246,9 +10280,8 @@ async def cache_stats() -> dict:
     Cache page can render without shelling out.
     """
     from maverick.cache import stats
+
     return stats()
-
-
 
 
 @router.post("/cache/purge")
@@ -9260,6 +10293,7 @@ async def cache_purge(request: Request, payload: CachePurgeIn) -> dict:
     """
     require_permission(request, "operate")
     from maverick.cache import purge
+
     return purge(payload.scopes or ["all"])
 
 
@@ -9275,10 +10309,9 @@ async def goal_tree_api(request: Request, limit: int = 300) -> dict:
     GET /goals (auth-off/admin see all).
     """
     from .goal_tree import forest_view, goal_nodes
+
     nodes = goal_nodes(_world(), owner=goal_owner_filter(request), limit=limit)
     return forest_view(nodes)
-
-
 
 
 @router.post("/goals/{goal_id}/retitle", status_code=204)
@@ -9299,8 +10332,6 @@ async def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> No
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
     w.set_goal_title(goal_id, title[:200])
-
-
 
 
 @router.post("/goals/{goal_id}/reparent", status_code=204)
@@ -9325,14 +10356,13 @@ async def reparent_goal(request: Request, goal_id: int, payload: ReparentIn) -> 
             raise HTTPException(status_code=404, detail="no such parent goal")
         assert_goal_access(request, p)
         from .goal_tree import descendant_ids
+
         if new_parent in descendant_ids(w.goal_parent_pairs(), goal_id):
             raise HTTPException(
                 status_code=400,
                 detail="cannot re-parent a goal under its own descendant",
             )
     w.set_goal_parent(goal_id, new_parent)
-
-
 
 
 @router.post("/goals/{goal_id}/children", response_model=GoalOut, status_code=201)
@@ -9350,13 +10380,16 @@ async def create_child_goal(request: Request, goal_id: int, payload: ChildIn) ->
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request)
     title = (payload.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
     child_id = w.create_goal(
-        title[:200], (payload.description or "")[:8000],
-        parent_id=goal_id, owner=g.owner or (caller_principal(request) or ""),
+        title[:200],
+        (payload.description or "")[:8000],
+        parent_id=goal_id,
+        owner=g.owner or (caller_principal(request) or ""),
     )
     c = w.get_goal(child_id)
     if c is None:
@@ -9367,8 +10400,6 @@ async def create_child_goal(request: Request, goal_id: int, payload: ChildIn) ->
 # ---------- goal builder: compose a goal from blocks ----------
 
 _COMPOSE_PRIORITIES = ("low", "normal", "high")
-
-
 
 
 @router.post("/goals/compose", response_model=GoalOut, status_code=201)
@@ -9383,6 +10414,7 @@ async def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks
     require_permission(request, "operate")
     require_provider_or_400()
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request)
     title = (payload.title or "").strip()
     if not title:
@@ -9404,8 +10436,7 @@ async def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks
     meta: list[str] = []
     if payload.budget_dollars is not None:
         meta.append(
-            f"Budget cap: ${payload.budget_dollars:.2f} "
-            "(also enforced as the run's max_dollars)"
+            f"Budget cap: ${payload.budget_dollars:.2f} (also enforced as the run's max_dollars)"
         )
     if channel:
         meta.append(f"Announce progress on: {channel}")
@@ -9417,19 +10448,27 @@ async def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks
 
     w = _world()
     goal_id = w.create_goal(
-        title[:200], description[:8000], owner=caller_principal(request) or "",
+        title[:200],
+        description[:8000],
+        owner=caller_principal(request) or "",
     )
     from maverick.runner import run_goal_in_background_async
+
     max_dollars = (
         min(payload.budget_dollars, DEFAULT_MAX_DOLLARS)
-        if payload.budget_dollars is not None else DEFAULT_MAX_DOLLARS
+        if payload.budget_dollars is not None
+        else DEFAULT_MAX_DOLLARS
     )
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
         bg.add_task(
-            run_goal_in_background_async, goal_id, max_dollars,
-            channel="api", user_id=user_id, allowed_suites=allowed_suites,
+            run_goal_in_background_async,
+            goal_id,
+            max_dollars,
+            channel="api",
+            user_id=user_id,
+            allowed_suites=allowed_suites,
         )
     else:
         bg.add_task(
@@ -9463,6 +10502,7 @@ def _extract_binary_doc_text(raw: bytes, filename: str) -> str | None:
     Blocking — call through run_in_threadpool."""
     import tempfile as _tempfile
     from pathlib import Path as _Path
+
     suffix = _Path(filename).suffix.lower() or ".bin"
     if suffix not in {".pdf", ".docx", ".odt", ".rtf", ".html", ".htm"}:
         return None
@@ -9492,6 +10532,7 @@ def _require_provider_for_drafting() -> None:
 def _drafter_for(form: str):
     """The drafting function for the requested form (default: template)."""
     from .workflow_ai import draft_playbook, draft_workflow
+
     return draft_playbook if form == "playbook" else draft_workflow
 
 
@@ -9512,7 +10553,9 @@ def _workflow_authoring_identity(request: Request) -> tuple[str | None, str | No
 
 
 def _playbook_available_tools(
-    *, channel: str | None, user_id: str | None,
+    *,
+    channel: str | None,
+    user_id: str | None,
 ) -> frozenset[str]:
     """Caller/tenant-scoped live names used to ground one Agent Factory draft."""
     return frozenset(
@@ -9543,6 +10586,7 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
     # Drafting is a paid LLM call; throttle it under the same ceiling as goal
     # creation so it can't be spammed into a cost amplifier.
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request, source="workflow-draft")
     brief = (payload.description or "").strip()
     if not brief:
@@ -9557,8 +10601,7 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
             if form == "playbook":
                 return drafter(
                     brief,
-                    available_tools=_playbook_available_tools(
-                        channel=channel, user_id=user_id),
+                    available_tools=_playbook_available_tools(channel=channel, user_id=user_id),
                 )
             return drafter(brief)
 
@@ -9568,8 +10611,7 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
         # errors are NOT ValueError -- surface any of them as an upstream 502
         # rather than an unhandled 500.
         detail = _safe_workflow_drafting_error(e)
-        raise HTTPException(
-            status_code=502, detail=f"workflow drafting failed: {detail}") from e
+        raise HTTPException(status_code=502, detail=f"workflow drafting failed: {detail}") from e
 
 
 @router.post("/workflows/draft-from-file")
@@ -9585,6 +10627,7 @@ async def draft_workflow_from_upload(
     form = _workflow_form(form)
     _require_provider_for_drafting()
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request, source="workflow-draft")
     raw = await file.read(_WORKFLOW_DOC_MAX_BYTES + 1)
     if len(raw) > _WORKFLOW_DOC_MAX_BYTES:
@@ -9595,27 +10638,28 @@ async def draft_workflow_from_upload(
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        text = await run_in_threadpool(
-            _extract_binary_doc_text, raw, file.filename or "upload")
+        text = await run_in_threadpool(_extract_binary_doc_text, raw, file.filename or "upload")
         if text is None:
             raise HTTPException(
                 status_code=400,
-                detail=("could not read this file as text — upload a .txt / .md / "
-                        ".json / .pdf / .docx document, or describe the workflow "
-                        "in the brief"),
+                detail=(
+                    "could not read this file as text — upload a .txt / .md / "
+                    ".json / .pdf / .docx document, or describe the workflow "
+                    "in the brief"
+                ),
             ) from None
     if not text.strip():
         raise HTTPException(status_code=400, detail="the uploaded file was empty")
     channel, user_id = _workflow_authoring_identity(request)
     try:
         drafter = _drafter_for(form)
+
         def _draft():
             if form == "playbook":
                 return drafter(
                     "",
                     source_text=text,
-                    available_tools=_playbook_available_tools(
-                        channel=channel, user_id=user_id),
+                    available_tools=_playbook_available_tools(channel=channel, user_id=user_id),
                 )
             return drafter("", source_text=text)
 
@@ -9623,8 +10667,7 @@ async def draft_workflow_from_upload(
     except Exception as e:
         # See draft_workflow_from_brief: non-ValueError LLM/budget errors -> 502.
         detail = _safe_workflow_drafting_error(e)
-        raise HTTPException(
-            status_code=502, detail=f"workflow drafting failed: {detail}") from e
+        raise HTTPException(status_code=502, detail=f"workflow drafting failed: {detail}") from e
 
 
 @router.post("/workflows/refine")
@@ -9635,29 +10678,35 @@ async def refine_workflow_draft(request: Request, payload: WorkflowRefineIn) -> 
     form = _workflow_form(payload.form)
     _require_provider_for_drafting()
     from maverick_dashboard.app import check_goal_rate_limit
+
     check_goal_rate_limit(request, source="workflow-draft")
     instruction = (payload.instruction or "").strip()
     if not instruction:
         raise HTTPException(status_code=400, detail="describe the change you want")
     try:
-        current_size = len(json.dumps(
-            payload.current or {}, ensure_ascii=False, allow_nan=False,
-        ).encode("utf-8"))
+        current_size = len(
+            json.dumps(
+                payload.current or {},
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        )
     except (TypeError, ValueError, RecursionError) as exc:
         raise HTTPException(status_code=400, detail="current draft is invalid") from exc
     if current_size > 50_000:
         raise HTTPException(status_code=400, detail="current draft is too large to refine")
     from .workflow_ai import refine_playbook, refine_workflow
+
     refiner = refine_playbook if form == "playbook" else refine_workflow
     channel, user_id = _workflow_authoring_identity(request)
     try:
+
         def _refine():
             if form == "playbook":
                 return refiner(
                     payload.current or {},
                     instruction,
-                    available_tools=_playbook_available_tools(
-                        channel=channel, user_id=user_id),
+                    available_tools=_playbook_available_tools(channel=channel, user_id=user_id),
                 )
             return refiner(payload.current or {}, instruction)
 
@@ -9665,8 +10714,7 @@ async def refine_workflow_draft(request: Request, payload: WorkflowRefineIn) -> 
     except Exception as e:
         # See draft_workflow_from_brief: non-ValueError LLM/budget errors -> 502.
         detail = _safe_workflow_drafting_error(e)
-        raise HTTPException(
-            status_code=502, detail=f"refining the draft failed: {detail}") from e
+        raise HTTPException(status_code=502, detail=f"refining the draft failed: {detail}") from e
 
 
 @router.post("/workflows", status_code=201)
@@ -9674,6 +10722,7 @@ async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
     """Persist an (AI-drafted, edited) workflow as a runnable user template."""
     require_permission(request, "operate")
     from maverick.templates import save_user_template
+
     try:
         tpl = save_user_template(
             payload.name,
@@ -9714,6 +10763,7 @@ def _benchmark_snapshot() -> dict:
     Malformed rows (hand-edited file) are skipped, not invented around.
     """
     from maverick import continuous_benchmark as cb
+
     path = cb._store_path()
     history: list[dict] = []
     for h in cb.load_history(path):
@@ -9723,8 +10773,14 @@ def _benchmark_snapshot() -> dict:
             score = float(h.get("score"))
         except (TypeError, ValueError):
             continue
-        history.append({"name": str(h["name"]), "score": score,
-                        "commit": str(h.get("commit") or ""), "t": h.get("t")})
+        history.append(
+            {
+                "name": str(h["name"]),
+                "score": score,
+                "commit": str(h.get("commit") or ""),
+                "t": h.get("t"),
+            }
+        )
     names: list[str] = []
     for h in history:
         if h["name"] not in names:
@@ -9733,16 +10789,18 @@ def _benchmark_snapshot() -> dict:
     for name in names:
         entries = [h for h in history if h["name"] == name]
         r = cb.detect_regression(history, name)
-        suites.append({
-            "name": name,
-            "runs": len(entries),
-            "entries": entries[-50:],
-            "latest": r["latest"],
-            "baseline_mean": r["baseline_mean"],
-            "delta": r["delta"],
-            "drop_pct": r["drop_pct"],
-            "regressed": r["regressed"],
-        })
+        suites.append(
+            {
+                "name": name,
+                "runs": len(entries),
+                "entries": entries[-50:],
+                "latest": r["latest"],
+                "baseline_mean": r["baseline_mean"],
+                "delta": r["delta"],
+                "drop_pct": r["drop_pct"],
+                "regressed": r["regressed"],
+            }
+        )
     return {"suites": suites, "history_path": str(path)}
 
 
@@ -9771,6 +10829,7 @@ def _walkthroughs_dir():
     lists and serves.
     """
     from maverick.paths import maverick_home
+
     return maverick_home() / "walkthroughs"
 
 
@@ -9780,6 +10839,7 @@ def _vtt_for_frames(frames) -> str:
     One cue per frame, timed by the frames' real durations; cue text is the
     frame's (already secret-scrubbed) caption, flattened to one line.
     """
+
     def ts(sec: float) -> str:
         ms = int(round(sec * 1000))
         h, rem = divmod(ms, 3_600_000)
@@ -9823,6 +10883,7 @@ async def export_walkthrough(request: Request, goal_id: int) -> dict:
             detail="no events recorded for this goal — run it first, then export",
         )
     from maverick.replay.video import render, storyboard
+
     out_dir = _walkthroughs_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     frames = storyboard(goal_id, events=events)
@@ -9830,12 +10891,17 @@ async def export_walkthrough(request: Request, goal_id: int) -> dict:
     (out_dir / vtt_name).write_text(_vtt_for_frames(frames), encoding="utf-8")
     try:
         from maverick.sandbox import build_sandbox
+
         sandbox = build_sandbox()
     except Exception:  # render falls back to the scrubbed-env runner
         sandbox = None
     out_path = out_dir / f"goal-{goal_id}.mp4"
     result = await run_in_threadpool(
-        render, goal_id, out_path, sandbox=sandbox, events=events,
+        render,
+        goal_id,
+        out_path,
+        sandbox=sandbox,
+        events=events,
     )
     return {
         "goal_id": goal_id,
@@ -9871,11 +10937,15 @@ async def resume_goal(goal_id: int, request: Request, bg: BackgroundTasks) -> No
         )
     w.set_goal_status(goal_id, "pending", result=None)
     from maverick.runner import run_goal_in_background_async
+
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
         bg.add_task(
-            run_goal_in_background_async, goal_id, channel="api", user_id=user_id,
+            run_goal_in_background_async,
+            goal_id,
+            channel="api",
+            user_id=user_id,
             allowed_suites=allowed_suites,
         )
     else:
@@ -9899,6 +10969,7 @@ def _department_request_tenant() -> str | None:
     """Tenant id for department entitlement checks in dashboard requests."""
     try:
         from maverick.paths import current_tenant_id
+
         return current_tenant_id()
     except Exception:  # pragma: no cover - tenant lookup must not break self-host
         return None
@@ -9908,6 +10979,7 @@ def _has_managed_tenant_roster() -> bool:
     """Whether this install has provisioned tenants but no request tenant."""
     try:
         from maverick.tenant import registry as tenant_registry
+
         return bool(tenant_registry.list_tenants())
     except Exception:  # pragma: no cover - registry lookup must not break self-host
         return False
@@ -9922,6 +10994,7 @@ def _department_entitled_for_request(key: str) -> bool:
     than letting the core billing gate treat it as self-hosted.
     """
     from maverick.departments import department_entitled
+
     tenant = _department_request_tenant()
     if tenant is None and _has_managed_tenant_roster():
         return False
@@ -9938,6 +11011,7 @@ async def list_departments_api(request: Request) -> list[dict]:
     their departments; unscoped callers (auth off / admin / no grant) see all.
     """
     from maverick.departments import list_departments
+
     allowed = caller_suites(request)
     out = []
     for d in list_departments():
@@ -9953,6 +11027,7 @@ async def list_departments_api(request: Request) -> list[dict]:
 async def get_department_api(request: Request, key: str) -> dict:
     """One department with its specialist roster (name + description + risk)."""
     from maverick.departments import get_department, roster
+
     dept = get_department(key)
     if dept is None:
         raise HTTPException(status_code=404, detail="no such department")
@@ -9962,8 +11037,7 @@ async def get_department_api(request: Request, key: str) -> dict:
     out = dept.to_dict()
     out["entitled"] = _department_entitled_for_request(key)
     out["roster"] = [
-        {"name": p.name, "description": p.description or "",
-         "max_risk": p.max_risk or "low"}
+        {"name": p.name, "description": p.description or "", "max_risk": p.max_risk or "low"}
         for p in roster(key)
     ]
     return out
@@ -9999,8 +11073,10 @@ async def deploy_department_api(request: Request, key: str) -> dict:
     fleet_name = fleet_name_for(key, owner)
     existing = load_fleet(fleet_name)
     if (
-        existing is not None and existing.owner != owner
-        and principal is not None and not is_dashboard_admin(principal)
+        existing is not None
+        and existing.owner != owner
+        and principal is not None
+        and not is_dashboard_admin(principal)
     ):
         raise HTTPException(status_code=404, detail="no such fleet")
 
@@ -10019,8 +11095,8 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         # Kernel backstop (maverick.departments enforces the grant for every
         # caller); the require_suite gate above normally 403s first.
         raise HTTPException(
-            status_code=403,
-            detail="insufficient department access for this action") from e
+            status_code=403, detail="insufficient department access for this action"
+        ) from e
     if fleet is None:  # suite disabled between the check and the deploy
         raise HTTPException(status_code=404, detail="no such department")
     return {"fleet": fleet.to_dict()}
@@ -10031,6 +11107,7 @@ async def department_review_api(request: Request, key: str) -> dict:
     """A governed performance review: delivery + authority + learning."""
     require_suite(request, key)
     from maverick.worker_review import review
+
     r = review(_world(), key, owner=goal_owner_filter(request))
     if r is None:
         raise HTTPException(status_code=404, detail="no such department")
@@ -10042,6 +11119,7 @@ async def outcomes_api(request: Request, top: int = 0) -> dict:
     """Per-worker delivery cards + a firm-wide rollup, from the Operating Record."""
     from maverick.operating_record import assemble
     from maverick.outcomes import firm_totals, worker_cards
+
     w = _world()
     owner = goal_owner_filter(request)
     cards = worker_cards(w, top=(max(0, int(top)) or None), owner=owner)
@@ -10084,8 +11162,7 @@ def _learning_snapshot(request: Request) -> dict:
     def _causal_promotion_on() -> bool:
         try:
             return bool(
-                self_improvement.enabled()
-                and get_self_improvement().get("causal_promotion", False)
+                self_improvement.enabled() and get_self_improvement().get("causal_promotion", False)
             )
         except Exception:  # pragma: no cover - config never blocks the view
             return False
@@ -10118,8 +11195,12 @@ def _learning_snapshot(request: Request) -> dict:
         "jit_rl": jit_rl.enabled(),
     }
     components = [
-        {"key": s["key"], "label": s["label"],
-         "on": on_by_key.get(s["key"], False), "how": s["how"]}
+        {
+            "key": s["key"],
+            "label": s["label"],
+            "on": on_by_key.get(s["key"], False),
+            "how": s["how"],
+        }
         for s in LEARNING_SUBSYSTEMS
     ]
 
@@ -10142,8 +11223,8 @@ def _learning_snapshot(request: Request) -> dict:
             # The stat is a TOTAL, so don't inherit the page's display limit
             # (the old path silently capped the count at 50).
             from maverick import self_learning
-            learned_n = len(self_learning.history(
-                limit=1_000_000, path=self_learning.LEARNED_PATH))
+
+            learned_n = len(self_learning.history(limit=1_000_000, path=self_learning.LEARNED_PATH))
         except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
             learned_n = 0
         accumulated["grounded_outcomes"] = consequence.count()
@@ -10152,6 +11233,7 @@ def _learning_snapshot(request: Request) -> dict:
         # a tangible "your automations got better on their own" moat number.
         try:
             from maverick.flow import evolution_log
+
             improvements = evolution_log.improvement_count()
         except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
             improvements = 0
@@ -10164,10 +11246,11 @@ def _learning_snapshot(request: Request) -> dict:
     if owner is None:
         try:
             from maverick import flow as _flow_mod
+
             flow_autonomy = {
                 "engine_on": _flow_mod.enabled(),
-                "auto_evolve": _flow_mod.auto_evolve_enabled(),   # revert regressions
-                "auto_apply": _flow_mod.auto_apply_enabled(),     # apply improvements
+                "auto_evolve": _flow_mod.auto_evolve_enabled(),  # revert regressions
+                "auto_apply": _flow_mod.auto_apply_enabled(),  # apply improvements
             }
         except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
             flow_autonomy = None
@@ -10175,6 +11258,7 @@ def _learning_snapshot(request: Request) -> dict:
     if owner is None:
         try:
             from maverick import self_modify
+
             dgm = self_modify.production_status()
         except Exception:  # pragma: no cover -- status is fail-closed in core
             dgm = None
@@ -10213,6 +11297,7 @@ async def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> 
     capture deployment-wide, or disable the whole learning loop)."""
     require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
+
     try:
         settings_store.set_learning(
             payload.enabled,
@@ -10221,6 +11306,7 @@ async def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> 
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     from maverick.config import reset_config_cache
+
     reset_config_cache()
     return _learning_snapshot(request)
 
@@ -10242,6 +11328,7 @@ async def set_dgm_endpoint(request: Request, payload: DgmToggleIn) -> dict:
         )
     from maverick import self_modify
     from maverick.config import reset_config_cache
+
     before = self_modify.production_status()
     blocker_codes = {item["code"] for item in before["blockers"]}
     if "config_source_error" in blocker_codes:
@@ -10264,6 +11351,7 @@ async def set_dgm_endpoint(request: Request, payload: DgmToggleIn) -> dict:
             detail="DGM enable refused until its boolean configuration is valid",
         )
     from maverick_dashboard import settings_store
+
     try:
         settings_store.set_dgm(
             payload.enabled,
@@ -10290,10 +11378,11 @@ async def set_flow_autonomy_endpoint(request: Request, payload: FlowAutonomyIn) 
     admin gate + deployment-wide overlay as the blanket toggle."""
     require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
-    settings_store.set_flow_autonomy(auto_evolve=payload.auto_evolve,
-                                     auto_apply=payload.auto_apply)
+
+    settings_store.set_flow_autonomy(auto_evolve=payload.auto_evolve, auto_apply=payload.auto_apply)
     from maverick.config import reset_config_cache
-    reset_config_cache()   # so the refreshed snapshot reflects the new overlay
+
+    reset_config_cache()  # so the refreshed snapshot reflects the new overlay
     return _learning_snapshot(request)
 
 
@@ -10305,6 +11394,7 @@ async def marketplace_packs_api(request: Request, q: str = "") -> dict:
     only their departments' shelves; unscoped callers see the full store.
     """
     from maverick.marketplace.storefront import pack_marketplace, search_packs
+
     allowed = caller_suites(request)
     query = (q or "").strip()
     if query:
@@ -10329,6 +11419,7 @@ async def run_tree_api(request: Request, goal_id: int) -> dict:
     an un-forked run answers with itself and no children.
     """
     from maverick import session_tree
+
     world = _world()
     goal = world.get_goal(goal_id)
     if goal is None:
@@ -10340,20 +11431,31 @@ async def run_tree_api(request: Request, goal_id: int) -> dict:
         root_goal = world.get_goal(root)
         if root_goal is None or not can_access_goal(request, root_goal):
             root = goal_id
-    return {"enabled": session_tree.enabled(), "goal_id": goal_id,
-            "root": root, "lineage": lineage, "tree": session_tree.tree(root)}
+    return {
+        "enabled": session_tree.enabled(),
+        "goal_id": goal_id,
+        "root": root,
+        "lineage": lineage,
+        "tree": session_tree.tree(root),
+    }
 
 
 @router.get("/marketplace/connectors")
 async def marketplace_connectors_api(request: Request, q: str = "") -> dict:
     """Connector marketplace: honest total + optional substring search."""
     from maverick.marketplace.storefront import connector_marketplace
+
     return connector_marketplace(q or None)
 
 
 # Department router: security/GRC records and both defensive hunters. Imported
 # at the end so its lazy actor resolver can call this module's strict
 # ``_request_actor`` without a circular import during module initialization.
+from .ai_cloud_agent_governance_api import (  # noqa: E402
+    router as ai_cloud_agent_governance_router,
+)
+from .ai_evidence_analysis_api import router as ai_evidence_analysis_router  # noqa: E402
+from .ai_governance_loop_api import router as ai_governance_loop_router  # noqa: E402
 from .compliance_scope_actions_api import (  # noqa: E402
     router as compliance_scope_actions_router,
 )
@@ -10371,13 +11473,13 @@ from .consent_scan_notice_proposals_api import (  # noqa: E402
 from .consumer_trust_center_authority_api import (  # noqa: E402
     router as consumer_trust_center_authority_router,
 )
-from .ai_governance_loop_api import router as ai_governance_loop_router  # noqa: E402
 from .data_use_governance_api import router as data_use_governance_router  # noqa: E402
+from .data_use_provider_api import router as data_use_provider_router  # noqa: E402
 from .data_use_provider_audit_api import (  # noqa: E402
     router as data_use_provider_audit_router,
 )
-from .data_use_provider_api import router as data_use_provider_router  # noqa: E402
 from .finance_api import router as finance_operations_router  # noqa: E402
+from .governance_agents_api import router as governance_agents_router  # noqa: E402
 from .policy_publication_links_api import (  # noqa: E402
     public_router as public_policy_publication_links_router,
 )
@@ -10385,6 +11487,9 @@ from .policy_publication_links_api import (  # noqa: E402
     router as policy_publication_links_router,
 )
 from .privacy_data_discovery_api import router as privacy_data_discovery_router  # noqa: E402
+from .privacy_drop_management_api import (  # noqa: E402
+    router as privacy_drop_management_router,
+)
 from .privacy_notice_governance_api import (  # noqa: E402
     router as privacy_notice_governance_router,
 )
@@ -10398,18 +11503,21 @@ from .privacy_rights_orchestration_api import (  # noqa: E402
     router as privacy_rights_orchestration_router,
 )
 from .security_api import router as security_router  # noqa: E402
+from .third_party_collaboration_api import (  # noqa: E402
+    router as third_party_collaboration_router,
+)
 from .third_party_intelligence_api import (  # noqa: E402
     router as third_party_intelligence_router,
 )
 from .third_party_lifecycle_api import router as third_party_lifecycle_router  # noqa: E402
-from .third_party_collaboration_api import (  # noqa: E402
-    router as third_party_collaboration_router,
-)
 from .trc_continuous_evidence_api import (  # noqa: E402
     router as trc_continuous_evidence_router,
 )
 
 router.include_router(ai_governance_loop_router)
+router.include_router(ai_cloud_agent_governance_router)
+router.include_router(ai_evidence_analysis_router)
+router.include_router(governance_agents_router)
 router.include_router(consent_preferences_router)
 router.include_router(consent_profile_data_router)
 router.include_router(consent_public_admin_router)
@@ -10425,6 +11533,7 @@ router.include_router(data_use_governance_router)
 router.include_router(data_use_provider_router)
 router.include_router(data_use_provider_audit_router)
 router.include_router(privacy_data_discovery_router)
+router.include_router(privacy_drop_management_router)
 router.include_router(privacy_regulatory_intelligence_router)
 router.include_router(privacy_notice_governance_router)
 router.include_router(privacy_rights_orchestration_router)

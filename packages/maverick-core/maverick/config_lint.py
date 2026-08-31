@@ -328,6 +328,7 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
         "rights_consumer_delivery",
         "rights_consumer_intake",
         "ott_ctv_rights",
+        "drop_management",
         "notice_governance",
     },
     "tech_risk_compliance": {
@@ -719,6 +720,10 @@ _NESTED_GOVERNANCE_SCHEMA: dict[tuple[str, ...], set[str]] = {
     ("privacy_automation", "ott_ctv_rights"): {
         "enable",
     },
+    ("privacy_automation", "drop_management"): {
+        "enable",
+        "retention_seconds",
+    },
     ("privacy_automation", "notice_governance"): {
         "enable",
     },
@@ -821,6 +826,7 @@ _NESTED_BOOL_KEYS: dict[tuple[str, ...], set[str]] = {
     ("privacy_automation", "rights_consumer_delivery"): {"enable"},
     ("privacy_automation", "rights_consumer_intake"): {"enable"},
     ("privacy_automation", "ott_ctv_rights"): {"enable"},
+    ("privacy_automation", "drop_management"): {"enable"},
     ("privacy_automation", "notice_governance"): {"enable"},
     ("tech_risk_compliance", "policy_publication_links"): {"enable"},
     ("tech_risk_compliance", "scoping"): {"enable"},
@@ -848,6 +854,10 @@ _NESTED_INTEGER_BOUNDS: dict[tuple[tuple[str, ...], str], tuple[int, int]] = {
     (("governance_agents",), "max_context_bytes"): (1_024, 10_485_760),
     (("governance_agents",), "max_output_bytes"): (1_024, 1_048_576),
     (("governance_agents",), "retention_seconds"): (3_600, 315_360_000),
+    (("privacy_automation", "drop_management"), "retention_seconds"): (
+        3_600,
+        315_360_000,
+    ),
     (("ai_evidence_analysis",), "max_artifact_bytes"): (1_024, 104_857_600),
     (("ai_evidence_analysis",), "max_artifacts_per_case"): (1, 100),
     (("ai_evidence_analysis",), "max_extracted_text_bytes"): (1_024, 10_485_760),
@@ -1789,6 +1799,17 @@ def _lint_product_governance_contracts(  # noqa: C901
                     "OTT/CTV rights require enabled authority: " + ", ".join(missing),
                 )
             )
+    drop_management = ("privacy_automation", "drop_management")
+    if _table_enabled(cfg, drop_management) and not _table_enabled(
+        cfg, ("privacy_automation", "rights_orchestration")
+    ):
+        findings.append(
+            _nested_error(
+                "privacy_automation.drop_management",
+                "enable",
+                "DROP management requires privacy rights orchestration to be enabled",
+            )
+        )
     if _table_enabled(cfg, ("consent_preferences", "edge_cache")) and not (
         _table_enabled(cfg, consent_public)
     ):

@@ -4019,6 +4019,61 @@ tested without spawning py-spy.
   and deliver immediately (flushing any pending batch first, so order holds). A
   daemon flusher drives the window; unconfigured, `notify()` is unchanged.
 
+## Packaged governance, evidence and external privacy control planes
+
+- **Packaged governance agents** (`governance_agents.py`, dashboard
+  `/governance-agents`, opt-in `[governance_agents]`) — five closed agent kinds
+  (`breach_response`, `privacy_risk_assessment`, `program_copilot`,
+  `knowledgebase_governance`, `third_party_risk`) share immutable tenant policy,
+  independently resolved principal/context and adapter/dispatcher authority,
+  bounded analysis reservations, closed cited findings/actions, distinct human
+  review, signed execution receipts, retry/recovery/revocation, tenant quotas,
+  retention and integrity. HTTP callers cannot supply raw evidence, runtime
+  identity, credentials or dispatch destinations. Consequential execution
+  requires a deployment-installed durable one-time token vault; encrypted
+  storage and HSM/KMS custody remain deployment responsibilities, and the
+  product does not bundle a licensed OneTrust-equivalent knowledge corpus.
+- **Multimodal AI Evidence Analysis** (`ai_evidence_analysis.py`, dashboard
+  `/ai-evidence-analysis`, opt-in `[ai_evidence_analysis]`) — bounded PDF, JPEG,
+  Excel and text artifacts are raw-transient adapter input. Durable records
+  contain only metadata/digests, immutable dynamic criteria, independently
+  attested extraction and analysis receipts, closed cited facts, deterministic
+  summaries, transparent justification components, criterion assessments,
+  gaps/remediation, provenance and human-review state. A distinct authorized
+  reviewer releases results; revocation, retention and integrity are explicit.
+  The schema-bound API result covers the public `aiEvidenceAnalysisResult`
+  outcome locally without claiming OneTrust wire compatibility, calibrated
+  detection quality, preview entitlement or customer acceptance.
+- **Named cloud-agent governance and Databricks framework control plane**
+  (`ai_cloud_agent_governance.py`, dashboard `/assurance/cloud-agents`, opt-in
+  `[ai_cloud_agent_governance]`) — exact
+  provider contracts normalize AWS Bedrock, Azure AI Foundry and Google Vertex
+  inventories into opaque tenant/scope references with revision manifests,
+  observability records, policy evaluations, enforcement intents, signed
+  adapter receipts and later inventory reconciliation. Azure has an exact
+  hosted-agent disable mapping; unresolved/unsafe Bedrock operations and
+  generic Vertex mutations fail closed. The Databricks path supports immutable
+  content-free control mappings, independent review, evidence links,
+  attestation and activation. Canonical state is still process-local in the
+  shipped composition; credentials, production transports, broad provider
+  writes, licensed framework prose, certification and live acceptance are not
+  included.
+- **Assessment-question comments** (`assessment.py`, assessment-session API) —
+  create audited, bounded comments only for section/question pairs pinned to
+  the saved questionnaire and retrieve deterministic bounded pages ordered by
+  section, question and time. Comments do not mutate the assessment follow-up
+  workflow. This is a local contract, not accepted OneTrust API compatibility.
+- **California DROP request/status management**
+  (`privacy_drop_management.py`, `/api/v1/privacy/drop`, opt-in
+  `[privacy_automation.drop_management]`) — independently resolves exact
+  tenant, registered-broker, subject, request, template and principal authority;
+  composes `DataDeletion` or `OptOut` through the existing privacy-rights intake
+  callback; and records evidence-bound `PENDING`, `EXEMPTED`, `DELETED`,
+  `OPTED_OUT` or `NOT_FOUND` outcomes. Only opaque references and digests are
+  durable. It does not scrape DROP, accept caller-supplied subject identity, or
+  prove live California authority/broker interoperability, subject matching,
+  legal/regulator acceptance or production delivery.
+
 ## Unified cross-suite audit projection
 
 - **Closed, signed projection plane** (`unified_audit.py`): the default-off

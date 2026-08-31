@@ -31,6 +31,23 @@ def policy(monkeypatch):
     return live
 
 
+def test_windows_host_driver_command_uses_cmd_quoting(monkeypatch):
+    class _HostVisibleSandbox:
+        host_visible_fs = True
+
+    argv = [r"C:\Program Files\Python\python.exe", "_driver.py", "state.json"]
+    monkeypatch.setattr(repl.sys, "platform", "win32")
+
+    host_command = repl._driver_command(_HostVisibleSandbox(), argv)
+    assert host_command.startswith(r'"C:\Program Files\Python\python.exe"')
+    assert "'" not in host_command
+
+    # A Windows host can still target a POSIX container/remote sandbox. Its
+    # command must retain POSIX quoting rather than inherit host cmd.exe rules.
+    remote_command = repl._driver_command(object(), argv)
+    assert remote_command.startswith("'C:\\Program Files\\Python\\python.exe'")
+
+
 def test_disabled_by_default_refuses(monkeypatch):
     monkeypatch.delenv("MAVERICK_REPL", raising=False)
     assert repl.enabled() is False

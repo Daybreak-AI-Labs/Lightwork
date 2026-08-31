@@ -342,6 +342,10 @@ _EXPORT_SCHEMAS: Mapping[str, Mapping[str, object]] = {
         "rights_orchestration": _ENABLE_ONLY,
         "rights_consumer_delivery": _ENABLE_ONLY,
         "ott_ctv_rights": _ENABLE_ONLY,
+        "drop_management": {
+            "enable": _EXPORT_LEAF,
+            "retention_seconds": _EXPORT_LEAF,
+        },
         "notice_governance": _ENABLE_ONLY,
     },
     "tech_risk_compliance": {

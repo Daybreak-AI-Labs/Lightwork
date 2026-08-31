@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Governance Agents - Lightwork{% endblock %}
+{% block content %}
+<style>
+  .ga-grid { display:grid; grid-template-columns:minmax(18rem,1fr) minmax(24rem,2fr);
+             gap:var(--space-4); }
+  .ga-stack { display:flex; flex-direction:column; gap:var(--space-3); }
+  .ga-stack label { display:flex; flex-direction:column; gap:var(--space-1); }
+  .ga-stack textarea { min-height:18rem; font-family:var(--font-mono); }
+  .ga-output { min-height:24rem; max-height:52rem; overflow:auto; white-space:pre-wrap;
+               word-break:break-word; }
+  .ga-warning { border:2px solid var(--warning); padding:var(--space-3);
+                border-radius:8px; background:var(--surface-2); }
+  .ga-confirm { display:flex; gap:var(--space-2); align-items:flex-start; }
+  .ga-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));
+              gap:var(--space-3); margin:var(--space-4) 0; }
+  @media (max-width:900px) { .ga-grid { grid-template-columns:1fr; } }
+</style>
+
+<h1>Governance Agents</h1>
+<p>Closed, evidence-cited workflows for breach response, privacy risk,
+  program analysis, knowledgebase governance, and third-party risk.</p>
+<div class="ga-warning">
+  <strong>Decision support, not autonomous authority.</strong>
+  Raw evidence, tenant selectors, adapters, credentials, and dispatch targets
+  are never accepted from this page. Every result requires an enrolled human
+  review. Execution is separately enabled, two-person approved, idempotent,
+  auditable, and default-off.
+</div>
+
+<div class="ga-cards" aria-label="Packaged governance agents">
+  <section class="panel"><h2>Breach response</h2><p>Evidence-preservation,
+    containment, notification-clock and escalation review.</p></section>
+  <section class="panel"><h2>Privacy risk</h2><p>Minimization, lawful-basis,
+    DPIA, transfer and rights-impact review.</p></section>
+  <section class="panel"><h2>Program copilot</h2><p>Cited program status,
+    control gaps, evidence requests and improvement-plan drafts.</p></section>
+  <section class="panel"><h2>Knowledgebase governance</h2><p>Citation,
+    freshness, access-scope and conflicting-guidance review.</p></section>
+  <section class="panel"><h2>Third-party risk</h2><p>Intake, inherent risk,
+    questionnaire, critical-event and remediation review.</p></section>
+</div>
+
+{% if not governance_agents_enabled %}
+<section class="panel">
+  <h2>Governance agents disabled</h2>
+  <p>This surface fails closed until
+    <code>[governance_agents] enable = true</code> is explicit and the server
+    composes independent policy, evidence, adapter and dispatch authorities.</p>
+</section>
+{% else %}
+<p><button class="btn" id="ga-load-status" type="button">Load honest status</button></p>
+<div class="ga-grid">
+  <section class="panel ga-stack">
+    <h2>Strict JSON operator workbench</h2>
+    <p>Use opaque source references for analysis. The server resolves the
+      corresponding bytes; raw document or incident content is rejected.</p>
+    <label>Operation
+      <select id="ga-operation">
+        <option value="policy-publish" data-method="PUT" data-path="/policies/{policy_id}">Policy: publish independently approved revision</option>
+        <option value="policy-revoke" data-method="POST" data-path="/policies/{policy_id}/revoke">Policy: revoke</option>
+        <option value="analysis" data-method="PUT" data-path="/runs/{run_id}/analysis">Run: analyze server-resolved evidence</option>
+        <option value="run-get" data-method="GET" data-path="/runs/{run_id}">Run: get</option>
+        <option value="run-list" data-method="GET" data-path="/runs">Run: list</option>
+        <option value="review" data-method="POST" data-path="/runs/{run_id}/review">Run: enrolled human review</option>
+        <option value="execute" data-method="POST" data-path="/runs/{run_id}/execute">Run: execute approved action</option>
+        <option value="recover" data-method="POST" data-path="/runs/{run_id}/recover">Run: recover exact idempotent execution</option>
+        <option value="run-revoke" data-method="POST" data-path="/runs/{run_id}/revoke">Run: revoke</option>
+        <option value="retention-purge" data-method="POST" data-path="/retention/purge">Retention: purge terminal runs</option>
+        <option value="integrity" data-method="GET" data-path="/integrity">Integrity: verify chain</option>
+      </select>
+    </label>
+    <label>Path values as JSON object
+      <input class="input" id="ga-path-values" value="{}" autocomplete="off">
+    </label>
+    <label>Strict request body as JSON
+      <textarea class="input" id="ga-body">{}</textarea>
+    </label>
+    <div class="ga-warning" id="ga-confirm-panel">
+      <label class="ga-confirm"><input id="ga-confirm" type="checkbox">
+        <span>I reviewed the exact tenant, policy, revision, cited evidence,
+          human authority and proposed effect. I understand that analysis does
+          not itself authorize execution.</span>
+      </label>
+    </div>
+    <button class="btn btn--primary" id="ga-submit" type="button">Run selected operation</button>
+  </section>
+  <section class="panel">
+    <h2>Result</h2>
+    <pre class="ga-output" id="ga-output" aria-live="polite">No request made.</pre>
+  </section>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/api/v1/governance-agents";
+  var operation = document.getElementById("ga-operation");
+  var paths = document.getElementById("ga-path-values");
+  var body = document.getElementById("ga-body");
+  var confirmation = document.getElementById("ga-confirm");
+  var confirmationPanel = document.getElementById("ga-confirm-panel");
+  var output = document.getElementById("ga-output");
+  var highImpact = new Set([
+    "policy-publish", "policy-revoke", "analysis", "review", "execute",
+    "recover", "run-revoke", "retention-purge"
+  ]);
+
+  function show(value) {
+    output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+  function selectedRoute() { return operation.options[operation.selectedIndex]; }
+  function updateConfirmation() {
+    confirmation.checked = false;
+    confirmationPanel.hidden = !highImpact.has(operation.value);
+  }
+  function buildPath(template, values) {
+    return template.replace(/\{([A-Za-z0-9_]+)\}/g, function (_match, key) {
+      if (typeof values[key] !== "string" || !values[key]) {
+        throw new Error("Missing string path value: " + key);
+      }
+      return encodeURIComponent(values[key]);
+    });
+  }
+  async function run(method, path, payload) {
+    var options = {method: method, headers: {"Accept": "application/json"}};
+    if (method !== "GET") {
+      options.headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(payload);
+    }
+    var response = await fetch(API + path, options);
+    var text = await response.text();
+    var result;
+    try { result = text ? JSON.parse(text) : {}; } catch (_error) { result = {detail: text}; }
+    show({status: response.status, ok: response.ok, result: result});
+  }
+
+  document.getElementById("ga-load-status").addEventListener("click", function () {
+    run("GET", "/status", {}).catch(function (error) { show(String(error)); });
+  });
+  operation.addEventListener("change", updateConfirmation);
+  document.getElementById("ga-submit").addEventListener("click", function () {
+    try {
+      if (highImpact.has(operation.value) && !confirmation.checked) {
+        throw new Error("Confirm the governed operation before continuing.");
+      }
+      var route = selectedRoute();
+      var pathValues = JSON.parse(paths.value || "{}");
+      var payload = JSON.parse(body.value || "{}");
+      ["tenant", "tenant_id", "actor", "actor_ref", "adapter_id", "content",
+       "credential", "dispatcher", "provider_url"].forEach(function (key) {
+        if (Object.prototype.hasOwnProperty.call(payload, key)) {
+          throw new Error(key + " is server-resolved and cannot be supplied here.");
+        }
+      });
+      var path = buildPath(route.dataset.path, pathValues);
+      run(route.dataset.method, path, payload).catch(function (error) { show(String(error)); });
+    } catch (error) { show(String(error)); }
+  });
+  updateConfirmation();
+}());
+</script>
+{% endif %}
+{% endblock %}

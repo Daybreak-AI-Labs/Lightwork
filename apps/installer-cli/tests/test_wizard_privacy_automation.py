@@ -47,6 +47,10 @@ def test_pick_assessments_can_enable_privacy_data_discovery(monkeypatch):
             "max_active_requests_per_subject": 25,
         },
         "ott_ctv_rights": {"enable": False},
+        "drop_management": {
+            "enable": False,
+            "retention_seconds": 31_536_000,
+        },
         "notice_governance": {"enable": True},
     }
     rendered = wizard._cfg_assessments(selected)
@@ -64,6 +68,10 @@ def test_pick_assessments_can_enable_privacy_data_discovery(monkeypatch):
         "max_active_requests_per_subject": 25,
     }
     assert parsed["privacy_automation"]["ott_ctv_rights"]["enable"] is False
+    assert parsed["privacy_automation"]["drop_management"] == {
+        "enable": False,
+        "retention_seconds": 31_536_000,
+    }
     assert parsed["privacy_automation"]["notice_governance"]["enable"] is True
     assert "privacy_automation" not in parsed.get("assessments", {})
     assert lint_config(parsed) == []
@@ -164,4 +172,27 @@ def test_ott_ctv_rights_is_reachable_only_with_consent_identity_authorities(monk
     assert selected["consent_preferences"]["trust_center"]["enable"] is True
     parsed = tomllib.loads("\n".join(wizard._cfg_assessments(selected)))
     assert parsed["privacy_automation"]["ott_ctv_rights"]["enable"] is True
+    assert lint_config(parsed) == []
+
+
+def test_drop_management_is_explicit_and_requires_rights_orchestration(monkeypatch):
+    def confirm(prompt, *, default=False, **_kwargs):
+        if prompt.startswith("Enable provider-neutral Privacy Automation rights-request"):
+            return True
+        if prompt.startswith("Enable California DROP"):
+            return True
+        if prompt.startswith("Enable the Data Use Governance"):
+            return False
+        return False
+
+    monkeypatch.setattr(wizard, "_q_confirm", confirm)
+    monkeypatch.setattr(wizard, "_q_text", lambda *args, **kwargs: "")
+
+    selected = wizard.pick_assessments()
+    assert selected["privacy_automation"]["rights_orchestration"]["enable"] is True
+    assert selected["privacy_automation"]["drop_management"] == {
+        "enable": True,
+        "retention_seconds": 31_536_000,
+    }
+    parsed = tomllib.loads("\n".join(wizard._cfg_assessments(selected)))
     assert lint_config(parsed) == []

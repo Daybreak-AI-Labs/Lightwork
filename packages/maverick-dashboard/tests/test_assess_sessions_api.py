@@ -78,3 +78,149 @@ def test_post_followups_flips_status_and_validates():
     assert client.post("/api/v1/assess/sessions/nope/followups",
                        json={"questions": ["Q?"],
                              "expected_revision": 0}).status_code == 404
+
+
+def test_question_comments_are_bound_sorted_paginated_and_strict():
+    s = _saved_session()
+    current = client.get(f"/api/v1/assess/sessions/{s.id}").json()
+    first = client.post(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        json={
+            "section_id": "Transparency",
+            "question_id": "pia_transparency",
+            "comment": "Attach the published notice.",
+            "expected_revision": current["revision"],
+            "idempotency_key": "comment-transparency-1",
+        },
+    )
+    assert first.status_code == 201, first.text
+    second = client.post(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        json={
+            "section_id": "Necessity",
+            "question_id": "pia_necessity",
+            "comment": "Show the minimization analysis.",
+            "expected_revision": first.json()["assessment_revision"],
+            "idempotency_key": "comment-necessity-1",
+        },
+    )
+    assert second.status_code == 201, second.text
+
+    page = client.get(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        params={"offset": 0, "limit": 1},
+    )
+    assert page.status_code == 200
+    assert page.json()["total"] == 2
+    assert page.json()["comments"][0]["question_id"] == "pia_necessity"
+
+    invented = client.post(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        json={
+            "section_id": "Invented",
+            "question_id": "pia_necessity",
+            "comment": "misbound",
+            "expected_revision": second.json()["assessment_revision"],
+            "idempotency_key": "comment-invented-1",
+        },
+    )
+    assert invented.status_code == 409
+    spoof = client.post(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        json={
+            "section_id": "Necessity",
+            "question_id": "pia_necessity",
+            "comment": "spoof",
+            "expected_revision": second.json()["assessment_revision"],
+            "idempotency_key": "comment-spoof-1",
+            "commented_by": "attacker",
+        },
+    )
+    assert spoof.status_code == 422
+
+
+def test_question_comment_retry_is_idempotent_and_key_reuse_is_bound():
+    s = _saved_session()
+    current = client.get(f"/api/v1/assess/sessions/{s.id}").json()
+    payload = {
+        "section_id": "Necessity",
+        "question_id": "pia_necessity",
+        "comment": "Show the minimization analysis.",
+        "expected_revision": current["revision"],
+        "idempotency_key": "comment-retry-1",
+    }
+    first = client.post(f"/api/v1/assess/sessions/{s.id}/comments", json=payload)
+    assert first.status_code == 201, first.text
+
+    # A later write advances the record, then the original stale request is
+    # retried exactly. It must return the original comment without a new write.
+    later = client.post(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        json={
+            "section_id": "Transparency",
+            "question_id": "pia_transparency",
+            "comment": "Attach the notice.",
+            "expected_revision": first.json()["assessment_revision"],
+            "idempotency_key": "comment-later-1",
+        },
+    )
+    assert later.status_code == 201, later.text
+    replay = client.post(f"/api/v1/assess/sessions/{s.id}/comments", json=payload)
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["comment"] == first.json()["comment"]
+    assert replay.json()["assessment_revision"] == later.json()["assessment_revision"]
+
+    conflict = client.post(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        json={**payload, "comment": "Different content."},
+    )
+    assert conflict.status_code == 409
+    page = client.get(f"/api/v1/assess/sessions/{s.id}/comments").json()
+    assert page["total"] == 2
+
+
+def test_question_comment_paths_validation_and_revision_pinned_pagination():
+    s = _saved_session()
+    current = client.get(f"/api/v1/assess/sessions/{s.id}").json()
+    payload = {
+        "section_id": "Necessity",
+        "question_id": "pia_necessity",
+        "comment": "Bound note.",
+        "expected_revision": current["revision"],
+        "idempotency_key": "comment-validation-1",
+    }
+    created = client.post(f"/api/v1/assess/sessions/{s.id}/comments", json=payload)
+    assert created.status_code == 201, created.text
+    revision = created.json()["assessment_revision"]
+    assert client.get(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        params={"expected_revision": revision},
+    ).status_code == 200
+
+    advanced = client.post(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        json={
+            **payload,
+            "comment": "Another note.",
+            "expected_revision": revision,
+            "idempotency_key": "comment-validation-2",
+        },
+    )
+    assert advanced.status_code == 201
+    assert client.get(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        params={"expected_revision": revision},
+    ).status_code == 409
+
+    whitespace = client.post(
+        f"/api/v1/assess/sessions/{s.id}/comments",
+        json={
+            **payload,
+            "comment": "   ",
+            "expected_revision": advanced.json()["assessment_revision"],
+            "idempotency_key": "comment-validation-3",
+        },
+    )
+    assert whitespace.status_code == 422
+    alias = f"{s.id}{'x' * 64}"
+    assert client.post(f"/api/v1/assess/sessions/{alias}/comments", json=payload).status_code == 404

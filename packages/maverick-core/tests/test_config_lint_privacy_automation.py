@@ -202,6 +202,55 @@ def test_ott_ctv_rights_requires_every_identity_and_orchestration_authority():
     )
 
 
+def test_drop_management_is_closed_and_requires_rights_orchestration():
+    valid = {
+        "privacy_automation": {
+            "enable": True,
+            "rights_orchestration": {"enable": True},
+            "drop_management": {
+                "enable": True,
+                "retention_seconds": 31_536_000,
+            },
+        }
+    }
+    assert lint_config(valid) == []
+
+    missing_parent = {
+        "privacy_automation": {
+            "enable": True,
+            "drop_management": {"enable": True, "retention_seconds": 31_536_000},
+        }
+    }
+    findings = lint_config(missing_parent)
+    assert any(
+        item.section == "privacy_automation.drop_management"
+        and "rights orchestration" in item.message
+        for item in findings
+    )
+
+    unsafe = {
+        "privacy_automation": {
+            "enable": True,
+            "rights_orchestration": {"enable": True},
+            "drop_management": {
+                "enable": True,
+                "retention_seconds": 1,
+                "raw_email": True,
+            },
+        }
+    }
+    findings = lint_config(unsafe)
+    assert any(
+        item.section == "privacy_automation.drop_management" and item.key == "raw_email"
+        for item in findings
+    )
+    assert any(
+        item.section == "privacy_automation.drop_management"
+        and item.key == "retention_seconds"
+        for item in findings
+    )
+
+
 def test_privacy_notice_governance_requires_exact_closed_boolean_gate():
     assert (
         lint_config(

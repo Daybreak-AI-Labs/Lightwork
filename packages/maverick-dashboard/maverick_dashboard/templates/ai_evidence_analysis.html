@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>AI evidence analysis | Lightwork</title>
+  <link rel="stylesheet" href="/static/lightwork-ai-evidence-analysis.css">
+  <script defer src="/static/lightwork-ai-evidence-analysis.js"></script>
+</head>
+<body data-api-base="{{ api_base }}">
+  <main class="evidence-shell" id="evidence-shell">
+    <header class="hero">
+      <p class="eyebrow">Governed evidence workbench</p>
+      <h1>AI evidence analysis</h1>
+      <p class="lede">
+        Extract bounded, criteria-pinned technical evidence and route the result
+        to an independently authorized human reviewer.
+      </p>
+    </header>
+
+    <aside class="boundary" aria-labelledby="boundary-title">
+      <h2 id="boundary-title">Evidence and authority boundary</h2>
+      <ul>
+        <li>Results are technical evidence aids, not legal advice, certification, or compliance conclusions.</li>
+        <li>Raw artifact bytes are accepted only as a bounded request body and are not persisted by the evidence store.</li>
+        <li>Extracted text is not persisted; ephemeral process-memory zeroization is not guaranteed.</li>
+        <li>Tenant, operator identity, retention policy, adapters, source authority, criteria authority, and reviewer authority are resolved by the server.</li>
+        <li>Every result stays pending until a distinct authorized human approves or rejects it.</li>
+        <li>Parser availability is deployment-specific; unsupported, unavailable, active, or unsafe content fails closed.</li>
+      </ul>
+    </aside>
+
+    <section class="status-card" aria-labelledby="status-title">
+      <div>
+        <p class="eyebrow">Runtime status</p>
+        <h2 id="status-title">Server composition</h2>
+      </div>
+      <button type="button" id="refresh-status">Refresh status</button>
+      <p id="runtime-status" class="status" role="status" aria-live="polite">
+        Checking the tenant-scoped server composition…
+      </p>
+      <pre id="status-output" class="output" tabindex="0"></pre>
+    </section>
+
+    <div class="grid">
+      <section class="panel" aria-labelledby="analyze-title">
+        <p class="eyebrow">Step 1</p>
+        <h2 id="analyze-title">Analyze an attested artifact</h2>
+        <p class="help">
+          Select a file only after its source record and exact authority digest
+          are available. The browser sends the file directly as the request body;
+          it does not use multipart temporary-file spooling.
+        </p>
+        <form id="analyze-form" autocomplete="off" novalidate>
+          <label for="artifact-file">Artifact file</label>
+          <input id="artifact-file" name="artifact_file" type="file" required>
+
+          <div class="two-column">
+            <div>
+              <label for="artifact-id">Artifact reference</label>
+              <input id="artifact-id" name="artifact_id" maxlength="128" required>
+            </div>
+            <div>
+              <label for="source-ref">Source reference</label>
+              <input id="source-ref" name="source_ref" maxlength="128" required>
+            </div>
+            <div>
+              <label for="source-revision">Source revision</label>
+              <input id="source-revision" name="source_revision" type="number" min="1" step="1" required>
+            </div>
+            <div>
+              <label for="acquired-at">Acquired at</label>
+              <input id="acquired-at" name="acquired_at" type="datetime-local" step="1" required>
+            </div>
+          </div>
+
+          <label for="artifact-authority-digest">Artifact authority SHA-256</label>
+          <input
+            id="artifact-authority-digest"
+            name="expected_artifact_authority_sha256"
+            class="digest"
+            minlength="64"
+            maxlength="64"
+            spellcheck="false"
+            required
+          >
+
+          <div class="two-column">
+            <div>
+              <label for="criteria-set-id">Criteria set reference</label>
+              <input id="criteria-set-id" name="criteria_set_id" maxlength="128" required>
+            </div>
+            <div>
+              <label for="criteria-revision">Criteria revision</label>
+              <input id="criteria-revision" name="expected_criteria_revision" type="number" min="1" step="1" required>
+            </div>
+          </div>
+
+          <label for="criteria-authority-digest">Criteria authority SHA-256</label>
+          <input
+            id="criteria-authority-digest"
+            name="expected_criteria_authority_sha256"
+            class="digest"
+            minlength="64"
+            maxlength="64"
+            spellcheck="false"
+            required
+          >
+
+          <label for="analyze-operation-id">Idempotency key</label>
+          <input id="analyze-operation-id" name="idempotency_key" maxlength="192" required>
+
+          <button type="submit" id="analyze-button">Create pending analysis</button>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="review-title">
+        <p class="eyebrow">Step 2</p>
+        <h2 id="review-title">Inspect and review</h2>
+        <p class="help">
+          The server binds review and revocation to the authenticated operator
+          and independently resolves current reviewer authority.
+        </p>
+        <form id="record-form" autocomplete="off" novalidate>
+          <label for="analysis-id">Analysis reference</label>
+          <input id="analysis-id" name="analysis_id" maxlength="128" required>
+          <div class="actions">
+            <button type="submit">Load current</button>
+            <button type="button" id="load-released">Load released</button>
+            <button type="button" id="load-history">Load history</button>
+          </div>
+        </form>
+
+        <form id="review-form" autocomplete="off" novalidate>
+          <div class="two-column">
+            <div>
+              <label for="review-revision">Expected revision</label>
+              <input id="review-revision" name="expected_revision" type="number" min="1" step="1" required>
+            </div>
+            <div>
+              <label for="review-decision">Decision</label>
+              <select id="review-decision" name="decision" required>
+                <option value="approve">Approve</option>
+                <option value="reject">Reject</option>
+              </select>
+            </div>
+          </div>
+          <label for="review-operation-id">Review idempotency key</label>
+          <input id="review-operation-id" name="idempotency_key" maxlength="192" required>
+          <button type="submit">Record human decision</button>
+        </form>
+
+        <form id="revoke-form" autocomplete="off" novalidate>
+          <div class="two-column">
+            <div>
+              <label for="revoke-revision">Expected revision</label>
+              <input id="revoke-revision" name="expected_revision" type="number" min="1" step="1" required>
+            </div>
+            <div>
+              <label for="revocation-reason">Revocation reason code</label>
+              <input id="revocation-reason" name="reason_code" maxlength="128" required>
+            </div>
+          </div>
+          <label for="revoke-operation-id">Revocation idempotency key</label>
+          <input id="revoke-operation-id" name="idempotency_key" maxlength="192" required>
+          <button class="danger" type="submit">Revoke analysis</button>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="operations-title">
+        <p class="eyebrow">Audit operations</p>
+        <h2 id="operations-title">Integrity and retention</h2>
+        <p class="help">
+          Retention cutoffs use the server clock. Purge is restricted to records
+          whose governed retention period has elapsed and verifies integrity first.
+        </p>
+        <div class="actions">
+          <button type="button" id="verify-integrity">Verify tenant integrity</button>
+          <button type="button" id="retention-due">List retention-due</button>
+        </div>
+        <form id="purge-form" autocomplete="off" novalidate>
+          <label for="purge-limit">Maximum records to purge</label>
+          <input id="purge-limit" name="limit" type="number" min="1" max="500" step="1" value="100" required>
+          <label class="confirmation" for="purge-confirmation">
+            <input id="purge-confirmation" name="purge_confirmation" type="checkbox" required>
+            I understand that retention-authorized purge removes the selected
+            records, revision history, and idempotency receipts.
+          </label>
+          <button class="danger" type="submit">Purge retention-due records</button>
+        </form>
+      </section>
+
+      <section class="panel result-panel" aria-labelledby="result-title">
+        <p class="eyebrow">Governed output</p>
+        <h2 id="result-title">Result</h2>
+        <p id="operation-status" class="status" role="status" aria-live="polite">
+          No operation has run.
+        </p>
+        <pre id="operation-output" class="output" tabindex="0"></pre>
+      </section>
+    </div>
+
+    <noscript>
+      <p class="boundary">JavaScript is required for the bounded raw-body upload workbench.</p>
+    </noscript>
+  </main>
+</body>
+</html>

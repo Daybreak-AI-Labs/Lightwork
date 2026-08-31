@@ -159,10 +159,13 @@ def governed_home(tmp_path, monkeypatch):
 
 
 def _run_pair(task, tmp_path):
+    from maverick.file_lock import ensure_private_directory
     from maverick.world_model import open_world
 
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    tmp_path.chmod(0o700)  # the lineage store refuses a world-readable parent
+    # This directory belongs exclusively to the test. On Windows chmod does
+    # not tighten its DACL, so use the same cross-platform private-directory
+    # helper as production rather than depending on the host temp ACL.
+    ensure_private_directory(tmp_path)
     governed_ws = tmp_path / "governed"
     ungoverned_ws = tmp_path / "ungoverned"
     governed_ws.mkdir(parents=True, exist_ok=True)
